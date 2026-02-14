@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - AgenticAIOps</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+        .htmx-request .htmx-indicator { opacity: 1; }
+        .htmx-request.htmx-indicator { opacity: 1; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-indigo-600 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-xl font-bold">AgenticAIOps</a>
+                    <a href="/" class="hover:text-indigo-200">Dashboard</a>
+                    <a href="/resources" class="hover:text-indigo-200">Resources</a>
+                    <a href="/anomalies" class="hover:text-indigo-200">Anomalies</a>
+                    <a href="/reports" class="hover:text-indigo-200">Reports</a>
+                </div>
+                <div class="text-sm text-indigo-200">
+                    {{ now.strftime('%Y-%m-%d %H:%M UTC') }}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-200 text-gray-600 text-center py-4 mt-8">
+        AgenticAIOps v0.1.0 - Agent-First Cloud Observability
+    </footer>
+</body>
+</html>

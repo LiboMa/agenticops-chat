@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-lg shadow">
+    <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold">Reports</h2>
+    </div>
+    <div class="divide-y">
+        {% for r in reports %}
+        <div class="p-6 hover:bg-gray-50">
+            <div class="flex items-start justify-between">
+                <div>
+                    <span class="px-2 py-1 text-xs rounded bg-gray-200 text-gray-700">{{ r.report_type }}</span>
+                    <span class="ml-2 font-semibold">{{ r.title }}</span>
+                    <p class="mt-2 text-sm text-gray-600">{{ r.summary[:200] }}{% if r.summary|length > 200 %}...{% endif %}</p>
+                    <div class="mt-2 text-sm text-gray-500">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                </div>
+                {% if r.file_path %}
+                <a href="/report/{{ r.id }}" class="px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                    View
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% if not reports %}
+        <div class="p-6 text-center text-gray-500">No reports generated yet.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

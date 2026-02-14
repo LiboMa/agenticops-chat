@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-lg shadow">
+    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+        <h2 class="text-lg font-semibold">Anomalies ({{ anomalies|length }})</h2>
+        <div class="flex space-x-2">
+            <select class="border rounded px-3 py-1 text-sm"
+                    hx-get="/anomalies" hx-target="body" name="severity">
+                <option value="">All Severities</option>
+                <option value="critical" {% if severity == 'critical' %}selected{% endif %}>Critical</option>
+                <option value="high" {% if severity == 'high' %}selected{% endif %}>High</option>
+                <option value="medium" {% if severity == 'medium' %}selected{% endif %}>Medium</option>
+                <option value="low" {% if severity == 'low' %}selected{% endif %}>Low</option>
+            </select>
+        </div>
+    </div>
+    <div class="divide-y">
+        {% for a in anomalies %}
+        <div class="p-6 hover:bg-gray-50">
+            <div class="flex items-start justify-between">
+                <div>
+                    <div class="flex items-center space-x-2">
+                        {% if a.severity == 'critical' %}
+                        <span class="px-2 py-1 text-xs rounded bg-red-600 text-white">CRITICAL</span>
+                        {% elif a.severity == 'high' %}
+                        <span class="px-2 py-1 text-xs rounded bg-orange-500 text-white">HIGH</span>
+                        {% elif a.severity == 'medium' %}
+                        <span class="px-2 py-1 text-xs rounded bg-yellow-500 text-white">MEDIUM</span>
+                        {% else %}
+                        <span class="px-2 py-1 text-xs rounded bg-blue-500 text-white">LOW</span>
+                        {% endif %}
+                        <span class="font-semibold">{{ a.title }}</span>
+                    </div>
+                    <p class="mt-2 text-gray-600">{{ a.description }}</p>
+                    <div class="mt-2 text-sm text-gray-500">
+                        {{ a.resource_type }}/{{ a.resource_id }} | {{ a.region }} | {{ a.detected_at.strftime('%Y-%m-%d %H:%M') }}
+                    </div>
+                </div>
+                <a href="/anomaly/{{ a.id }}" class="px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                    View
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+        {% if not anomalies %}
+        <div class="p-6 text-center text-gray-500">No anomalies found.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
