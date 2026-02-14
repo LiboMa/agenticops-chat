@@ -29,11 +29,16 @@ AgenticOps (`aiops`) — CLI-based AI operations assistant with multi-agent arch
 
 3. **Simplified response display** — Replaced `Panel(border_style="green")` with `Rule("Agent")` separator. No more 4-sided box borders.
 
-4. **Compact welcome banner** — Replaced 6-line `Panel` with single line: `AgenticAIOps Chat — Type /help for commands, /exit to quit`.
+4. **Welcome banner** — Kept original 6-line Panel welcome (restored after initial removal).
 
 5. **Terminal-aware threshold** — `pager_threshold` default changed from `50` to `0` (auto = terminal height - 8). `/pager` command now supports `auto` argument.
 
 6. **Updated `/less` command** — Now uses `ctx.last_full_output` first (saved by truncation), falls back to history. Renders markdown.
+
+## Git & GitHub
+
+- Repo: https://github.com/LiboMa/agenticops-chat (private)
+- Branch: `main`
 
 ## Frontend UI Reference
 
