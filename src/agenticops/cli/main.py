@@ -477,15 +477,8 @@ def render_status_line(items: List[tuple], separator: str = " │ "):
 
 
 def pager_print(content: str):
-    """Print with pager for long content."""
-    lines = content.count('\n')
-    terminal_height = console.size.height
-
-    if lines > terminal_height - 5:
-        with console.pager(styles=True):
-            console.print(content)
-    else:
-        console.print(content)
+    """Print long content directly to terminal (scrollback-friendly)."""
+    console.print(content)
 
 
 # ============================================================================
@@ -2226,13 +2219,9 @@ def _slash_scroll(ctx: ChatContext, args: list) -> str:
 
     output = "\n".join(lines)
 
-    # Use pager for long output
-    if len(lines) > 30:
-        with console.pager(styles=True):
-            console.print(output)
-        return ""
-    else:
-        return output
+    # Print directly — terminal scrollback handles long output
+    console.print(output)
+    return ""
 
 
 def print_with_truncation(console: Console, content: str, ctx: ChatContext, header: str = "Agent"):
@@ -2295,7 +2284,7 @@ def _slash_pager(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_less(ctx: ChatContext, args: list) -> str:
-    """Handle /less command - view last output in pager."""
+    """Handle /less command - view full last output."""
     content = ctx.last_full_output
     if not content:
         # Fallback to last assistant message in history
@@ -2307,9 +2296,13 @@ def _slash_less(ctx: ChatContext, args: list) -> str:
     if not content:
         return "[yellow]No output to display.[/yellow]"
 
-    with console.pager(styles=True):
-        rendered = Markdown(content) if content.startswith("#") or "```" in content else content
-        console.print(rendered)
+    # Print full content directly to terminal (no external pager).
+    # User scrolls back with terminal scrollback (mouse wheel / Shift+PageUp).
+    rendered = Markdown(content) if content.startswith("#") or "```" in content else content
+    console.print()
+    console.print(Rule("[bold]Full Output[/bold]", style="dim"))
+    console.print(rendered)
+    console.print(Rule(style="dim"))
     return ""
 
 
