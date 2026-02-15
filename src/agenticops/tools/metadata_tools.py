@@ -13,6 +13,7 @@ from agenticops.models import (
     AWSAccount,
     AWSResource,
     HealthIssue,
+    RCAResult,
     get_session,
 )
 
@@ -412,43 +413,119 @@ def save_rca_result(
     fix_plan: str = "{}",
     fix_risk_level: str = "unknown",
     sop_used: str = "",
+    similar_cases: str = "[]",
+    model_id: str = "",
 ) -> str:
-    """Save RCA analysis result to metadata.
+    """Save RCA analysis result to metadata and update HealthIssue status.
 
-    NOTE: Phase 2 stub. Currently only updates the HealthIssue status to
-    'root_cause_identified'. Full RCA data (root_cause, factors, recommendations,
-    fix_plan) is NOT persisted yet — that requires the RCA Agent and associated
-    tables from Phase 2. The parameters are accepted but not stored.
+    Creates an RCAResult record linked to the HealthIssue and sets the issue
+    status to 'root_cause_identified'.
 
     Args:
         health_issue_id: The HealthIssue ID this analysis is for
-        root_cause: Root cause description (not persisted yet)
-        confidence: Confidence score 0.0-1.0 (not persisted yet)
-        contributing_factors: JSON array of contributing factors (not persisted yet)
-        recommendations: JSON array of recommendations (not persisted yet)
-        fix_plan: JSON object with step-by-step remediation (not persisted yet)
-        fix_risk_level: Risk level: L0, L1, L2, or L3 (not persisted yet)
-        sop_used: Path to SOP used if any (not persisted yet)
+        root_cause: Root cause description
+        confidence: Confidence score 0.0-1.0
+        contributing_factors: JSON array of contributing factors
+        recommendations: JSON array of recommendations
+        fix_plan: JSON object with step-by-step remediation plan
+        fix_risk_level: Risk level: unknown, low, medium, high, critical
+        sop_used: SOP filename used during analysis, if any
+        similar_cases: JSON array of similar case references
+        model_id: LLM model ID used for analysis
 
     Returns:
-        Status update confirmation. Note: only issue status is persisted.
+        Confirmation with the new RCAResult ID.
     """
+    # Parse JSON string parameters
+    try:
+        factors_parsed = json.loads(contributing_factors) if isinstance(contributing_factors, str) else contributing_factors
+    except json.JSONDecodeError:
+        factors_parsed = [contributing_factors]
+
+    try:
+        recs_parsed = json.loads(recommendations) if isinstance(recommendations, str) else recommendations
+    except json.JSONDecodeError:
+        recs_parsed = [recommendations]
+
+    try:
+        plan_parsed = json.loads(fix_plan) if isinstance(fix_plan, str) else fix_plan
+    except json.JSONDecodeError:
+        plan_parsed = {}
+
+    try:
+        cases_parsed = json.loads(similar_cases) if isinstance(similar_cases, str) else similar_cases
+    except json.JSONDecodeError:
+        cases_parsed = []
+
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
         if not issue:
             return f"HealthIssue #{health_issue_id} not found."
 
+        rca = RCAResult(
+            health_issue_id=health_issue_id,
+            root_cause=root_cause,
+            confidence=max(0.0, min(1.0, confidence)),
+            contributing_factors=factors_parsed,
+            recommendations=recs_parsed,
+            fix_plan=plan_parsed,
+            fix_risk_level=fix_risk_level,
+            sop_used=sop_used or None,
+            similar_cases=cases_parsed,
+            model_id=model_id,
+        )
+        session.add(rca)
+
         issue.status = "root_cause_identified"
         session.commit()
 
         return (
-            f"[Phase 2 stub] HealthIssue #{health_issue_id} status updated to "
-            f"'root_cause_identified'. RCA data (root_cause, factors, recommendations) "
-            f"was NOT persisted — full RCA storage requires Phase 2 RCA Agent tables."
+            f"RCAResult #{rca.id} saved for HealthIssue #{health_issue_id}. "
+            f"Root cause: {root_cause[:100]}... Confidence: {rca.confidence:.0%}. "
+            f"Issue status updated to 'root_cause_identified'."
         )
     except Exception as e:
         session.rollback()
         return f"Error saving RCA result: {e}"
+    finally:
+        session.close()
+
+
+@tool
+def get_rca_result(health_issue_id: int) -> str:
+    """Get the latest RCA result for a health issue.
+
+    Args:
+        health_issue_id: The HealthIssue ID to look up.
+
+    Returns:
+        JSON object with the latest RCA result, or a message if none found.
+    """
+    session = get_session()
+    try:
+        rca = (
+            session.query(RCAResult)
+            .filter_by(health_issue_id=health_issue_id)
+            .order_by(RCAResult.created_at.desc())
+            .first()
+        )
+        if not rca:
+            return f"No RCA result found for HealthIssue #{health_issue_id}."
+
+        return json.dumps({
+            "id": rca.id,
+            "health_issue_id": rca.health_issue_id,
+            "root_cause": rca.root_cause,
+            "confidence": rca.confidence,
+            "contributing_factors": rca.contributing_factors,
+            "recommendations": rca.recommendations,
+            "fix_plan": rca.fix_plan,
+            "fix_risk_level": rca.fix_risk_level,
+            "sop_used": rca.sop_used,
+            "similar_cases": rca.similar_cases,
+            "model_id": rca.model_id,
+            "created_at": str(rca.created_at),
+        }, default=str)
     finally:
         session.close()

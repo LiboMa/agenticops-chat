@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -220,7 +220,6 @@ class Anomaly(Base):
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    analyses: Mapped[list["RCAResult"]] = relationship(back_populates="anomaly")
     notes: Mapped[list["AnomalyNote"]] = relationship(back_populates="anomaly")
 
 
@@ -250,25 +249,25 @@ class AnomalyNote(Base):
 
 
 class RCAResult(Base):
-    """Root Cause Analysis results."""
+    """Root Cause Analysis results linked to HealthIssue."""
 
     __tablename__ = "rca_results"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    anomaly_id: Mapped[int] = mapped_column(ForeignKey("anomalies.id"))
-    analysis_type: Mapped[str] = mapped_column(String(50))  # auto, manual, scheduled
+    health_issue_id: Mapped[int] = mapped_column(ForeignKey("health_issues.id"))
     root_cause: Mapped[str] = mapped_column(Text)
-    confidence_score: Mapped[float] = mapped_column(default=0.0)
+    confidence: Mapped[float] = mapped_column(default=0.0)
     contributing_factors: Mapped[list] = mapped_column(JSON, default=list)
     recommendations: Mapped[list] = mapped_column(JSON, default=list)
-    related_resources: Mapped[list] = mapped_column(JSON, default=list)
-    llm_model: Mapped[str] = mapped_column(String(100))
-    llm_prompt: Mapped[str] = mapped_column(Text)
-    llm_response: Mapped[str] = mapped_column(Text)
+    fix_plan: Mapped[dict] = mapped_column(JSON, default=dict)
+    fix_risk_level: Mapped[str] = mapped_column(String(20), default="unknown")
+    sop_used: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    similar_cases: Mapped[list] = mapped_column(JSON, default=list)
+    model_id: Mapped[str] = mapped_column(String(100), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    anomaly: Mapped["Anomaly"] = relationship(back_populates="analyses")
+    health_issue: Mapped["HealthIssue"] = relationship(back_populates="rca_results")
 
 
 # ============================================================================
@@ -301,6 +300,9 @@ class HealthIssue(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     detected_by: Mapped[str] = mapped_column(String(50), default="detect_agent")
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
 
 
 # ============================================================================
@@ -354,8 +356,21 @@ class Report(Base):
 
 
 def init_db():
-    """Initialize database and create all tables."""
+    """Initialize database and create all tables.
+
+    Includes migration: if rca_results table has the old anomaly_id column
+    (from the deprecated Anomaly FK), drop and recreate it with the new schema.
+    """
     engine = get_engine()
+
+    # Migration: detect old rca_results schema and recreate
+    insp = inspect(engine)
+    if insp.has_table("rca_results"):
+        columns = {col["name"] for col in insp.get_columns("rca_results")}
+        if "anomaly_id" in columns and "health_issue_id" not in columns:
+            # Old schema — drop and let create_all rebuild
+            RCAResult.__table__.drop(engine, checkfirst=True)
+
     Base.metadata.create_all(engine)
     return engine
 

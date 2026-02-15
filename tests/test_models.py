@@ -7,6 +7,8 @@ from agenticops.models import (
     AWSAccount,
     AWSResource,
     Anomaly,
+    HealthIssue,
+    RCAResult,
     MonitoringConfig,
     init_db,
     get_session,
@@ -17,20 +19,22 @@ from agenticops.models import (
 @pytest.fixture
 def db_session(tmp_path):
     """Create a temporary database for testing."""
+    import agenticops.models as models_mod
     from agenticops.config import settings
 
+    # Reset singleton engine so each test gets a fresh DB
+    models_mod._engine = None
+
     db_url = f"sqlite:///{tmp_path}/test.db"
-    # Update the settings instance directly
     settings.database_url = db_url
 
-    from agenticops.models import get_engine
-
-    engine = get_engine()
+    engine = models_mod.get_engine()
     Base.metadata.create_all(engine)
 
     session = get_session()
     yield session
     session.close()
+    models_mod._engine = None
 
 
 class TestAWSAccount:
@@ -129,3 +133,89 @@ class TestAnomaly:
         assert anomaly.id is not None
         assert anomaly.status == "open"
         assert anomaly.detected_at is not None
+
+
+class TestHealthIssue:
+    """Tests for HealthIssue model."""
+
+    def test_create_health_issue(self, db_session):
+        """Test creating a health issue."""
+        issue = HealthIssue(
+            resource_id="i-abc123",
+            severity="high",
+            source="cloudwatch_alarm",
+            title="High CPU on i-abc123",
+            description="CPU utilization exceeded 90% for 10 minutes",
+        )
+        db_session.add(issue)
+        db_session.commit()
+
+        assert issue.id is not None
+        assert issue.status == "open"
+        assert issue.detected_by == "detect_agent"
+
+    def test_health_issue_rca_relationship(self, db_session):
+        """Test HealthIssue -> RCAResult relationship."""
+        issue = HealthIssue(
+            resource_id="i-abc123",
+            severity="high",
+            source="metric_anomaly",
+            title="Memory pressure",
+            description="Memory usage > 95%",
+        )
+        db_session.add(issue)
+        db_session.commit()
+
+        rca = RCAResult(
+            health_issue_id=issue.id,
+            root_cause="Memory leak in application process",
+            confidence=0.85,
+            contributing_factors=["No memory limits set", "Long-running process"],
+            recommendations=["Set memory limits", "Restart process"],
+            fix_plan={"steps": ["SSH to instance", "restart app"]},
+            fix_risk_level="medium",
+            model_id="test-model",
+        )
+        db_session.add(rca)
+        db_session.commit()
+
+        assert rca.id is not None
+        assert rca.health_issue_id == issue.id
+        assert rca.confidence == 0.85
+        assert len(rca.contributing_factors) == 2
+        assert rca.fix_risk_level == "medium"
+
+        # Test reverse relationship
+        db_session.refresh(issue)
+        assert len(issue.rca_results) == 1
+        assert issue.rca_results[0].root_cause == "Memory leak in application process"
+
+    def test_multiple_rca_results(self, db_session):
+        """Test that a HealthIssue can have multiple RCA results."""
+        issue = HealthIssue(
+            resource_id="i-xyz789",
+            severity="critical",
+            source="cloudwatch_alarm",
+            title="Service down",
+            description="Health check failing",
+        )
+        db_session.add(issue)
+        db_session.commit()
+
+        rca1 = RCAResult(
+            health_issue_id=issue.id,
+            root_cause="Initial analysis: network issue",
+            confidence=0.4,
+            model_id="test-model",
+        )
+        rca2 = RCAResult(
+            health_issue_id=issue.id,
+            root_cause="Updated: disk full causing service crash",
+            confidence=0.9,
+            model_id="test-model",
+        )
+        db_session.add_all([rca1, rca2])
+        db_session.commit()
+
+        db_session.refresh(issue)
+        assert len(issue.rca_results) == 2
