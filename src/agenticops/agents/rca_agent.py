@@ -35,7 +35,8 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 3. SET STATUS: Call update_health_issue_status to set status to 'investigating'.
 4. SEARCH KNOWLEDGE BASE:
    a. Call search_sops with the resource type and issue keywords to find relevant SOPs.
-   b. Call search_similar_cases with resource type and issue keywords for historical context.
+   b. Call search_similar_cases with resource type and a full symptom description
+      (not just keywords) for better vector-based semantic matching.
 5. INVESTIGATE CHANGES (80% of issues are caused by recent changes):
    a. Call lookup_cloudtrail_events for the affected resource (last 24 hours).
    b. Look for deployment, config change, security group, IAM, or scaling events.

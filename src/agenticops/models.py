@@ -334,6 +334,33 @@ class AgentLog(Base):
 # ============================================================================
 
 
+class CaseStudyRecord(Base):
+    """Metadata record for distilled case studies.
+
+    Tracks case study lifecycle and links to the markdown file + vector store.
+    """
+
+    __tablename__ = "case_study_records"
+    __table_args__ = (
+        Index("idx_csr_resource_type", "resource_type"),
+        Index("idx_csr_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(100), unique=True)
+    resource_type: Mapped[str] = mapped_column(String(50), default="")
+    severity: Mapped[str] = mapped_column(String(20), default="medium")
+    status: Mapped[str] = mapped_column(String(30), default="pending_review")
+    verified: Mapped[bool] = mapped_column(default=False)
+    reuse_count: Mapped[int] = mapped_column(default=0)
+    source_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    source_rca_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    efficiency_score: Mapped[float] = mapped_column(default=0.5)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class Report(Base):
     """Generated reports."""
 
@@ -382,6 +409,28 @@ def init_db():
                 conn.commit()
 
     Base.metadata.create_all(engine)
+
+    # Ensure case_vectors table exists (used by SQLiteVectorStore,
+    # created via raw SQL to keep vector storage decoupled from ORM)
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS case_vectors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id TEXT NOT NULL,
+                field_name TEXT NOT NULL,
+                vector BLOB NOT NULL,
+                resource_type TEXT DEFAULT '',
+                metadata_json TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(case_id, field_name)
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_cv_field_resource
+            ON case_vectors(field_name, resource_type)
+        """))
+        conn.commit()
+
     return engine
 
 

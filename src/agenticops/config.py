@@ -35,6 +35,20 @@ class Settings(BaseSettings):
         description="Bedrock model ID for LLM (Claude Ops 4.6)",
     )
 
+    # Embedding (Titan V2)
+    embedding_model_id: str = Field(
+        default="amazon.titan-embed-text-v2:0",
+        description="Bedrock model ID for text embeddings",
+    )
+    embedding_dimension: int = Field(
+        default=1024,
+        description="Embedding vector dimension (Titan V2 = 1024)",
+    )
+    embedding_enabled: bool = Field(
+        default=True,
+        description="Enable vector embeddings (set AIOPS_EMBEDDING_ENABLED=false to disable)",
+    )
+
     # Monitoring
     default_metrics_period: int = Field(
         default=300,

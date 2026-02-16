@@ -19,7 +19,7 @@ from agenticops.tools.metadata_tools import (
     list_health_issues,
 )
 from agenticops.tools.report_tools import save_report, list_reports
-from agenticops.tools.kb_tools import search_similar_cases, write_kb_case
+from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,11 @@ REPORT GENERATION PROTOCOL:
 4. SAVE: Call save_report with the full markdown content.
 5. KNOWLEDGE BASE (optional): For resolved issues with high-confidence RCA,
    call write_kb_case to persist the case study for future reference.
+6. DISTILLATION: After generating the report, check for resolved issues with
+   RCA confidence >= 0.7. For each qualifying issue, call distill_case_study
+   with the health_issue_id. This distills the incident into a structured
+   Case Study with abstracted patterns, embeds it for semantic search, and
+   indexes it in the vector store for future RCA lookups.
 
 SEVERITY FORMATTING:
 - 🔴 critical -> immediate action required
@@ -104,6 +109,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 list_reports,
                 search_similar_cases,
                 write_kb_case,
+                distill_case_study,
             ],
         )
 

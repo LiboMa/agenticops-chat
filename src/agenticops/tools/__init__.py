@@ -39,6 +39,7 @@ from agenticops.tools.kb_tools import (
     read_kb_sops,
     write_kb_case,
     write_kb_sop,
+    distill_case_study,
 )
 
 __all__ = [
@@ -78,4 +79,5 @@ __all__ = [
     "read_kb_sops",
     "write_kb_case",
     "write_kb_sop",
+    "distill_case_study",
 ]
