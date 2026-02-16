@@ -1321,7 +1321,7 @@ def run_detect(
 def run_analyze(
     issue_id: int = typer.Argument(..., help="Health issue ID to analyze"),
 ):
-    """Show health issue details. RCA Agent coming in Phase 2."""
+    """Run Root Cause Analysis on a health issue using the RCA Agent."""
     init_db()
     session = get_session()
 
@@ -1330,58 +1330,35 @@ def run_analyze(
         if not item:
             console.print(f"[red]Health issue #{issue_id} not found.[/red]")
             raise typer.Exit(1)
-
-        severity_colors = {"critical": "red", "high": "orange1", "medium": "yellow", "low": "blue"}
-        color = severity_colors.get(item.severity, "white")
-
-        console.print(Panel(
-            f"[{color}][bold]{item.severity.upper()}[/bold][/{color}] {item.title}\n\n"
-            f"[bold]Resource:[/bold] {item.resource_id}\n"
-            f"[bold]Source:[/bold] {item.source}\n"
-            f"[bold]Description:[/bold] {item.description}",
-            title=f"Health Issue #{issue_id}",
-        ))
-
-        if item.metric_data:
-            console.print("\n[bold]Metric Data:[/bold]")
-            console.print(json.dumps(item.metric_data, indent=2))
-
-        if item.related_changes:
-            console.print("\n[bold]Related Changes:[/bold]")
-            for change in item.related_changes[:5]:
-                console.print(f"  - {change}")
-
-        console.print("\n[yellow]RCA Agent coming in Phase 2. "
-                      "Use 'aiops chat' and ask the agent to investigate this issue.[/yellow]")
-
     finally:
         session.close()
+
+    from agenticops.agents.rca_agent import rca_agent
+
+    console.print(f"[bold]Running RCA on HealthIssue #{issue_id}...[/bold]")
+
+    with console.status("RCA Agent investigating..."):
+        result = rca_agent(issue_id=issue_id)
+
+    console.print(f"\n{result}")
 
 
 @run_app.command("report")
 def run_report(
-    type: str = typer.Option("daily", "--type", "-t", help="Report type: daily, inventory"),
-    account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
+    type: str = typer.Option("daily", "--type", "-t", help="Report type: daily, incident, inventory"),
+    scope: str = typer.Option("all", "--scope", "-s", help="Resource scope filter (e.g., EC2, RDS) or 'all'"),
 ):
-    """Generate an operations report."""
-    from agenticops.report import ReportGenerator
+    """Generate an operations report using the Reporter Agent."""
+    init_db()
 
-    acc = get_account(account)
-    generator = ReportGenerator(acc)
+    from agenticops.agents.reporter_agent import reporter_agent
 
-    console.print(f"[bold]Generating {type} report...[/bold]")
+    console.print(f"[bold]Generating {type} report (scope={scope})...[/bold]")
 
-    with console.status("Generating report..."):
-        if type == "daily":
-            content = generator.generate_daily_report()
-        elif type == "inventory":
-            content = generator.generate_inventory_report()
-        else:
-            console.print(f"[red]Unknown report type: {type}[/red]")
-            raise typer.Exit(1)
+    with console.status("Reporter Agent generating report..."):
+        result = reporter_agent(report_type=type, scope=scope)
 
-    console.print(Panel(content[:2000] + ("..." if len(content) > 2000 else ""), title="Report Preview"))
-    console.print(f"\n[green]Full report saved to: {settings.reports_dir}[/green]")
+    console.print(f"\n{result}")
 
 
 @run_app.command("schedule")
@@ -2080,8 +2057,7 @@ def _slash_analyze(ctx: ChatContext, args: list) -> str:
             for change in item.related_changes[:5]:
                 lines.append(f"  - {change}")
 
-        lines.append(f"\n[yellow]RCA Agent coming in Phase 2. "
-                     f"Use 'aiops chat' and ask the agent to investigate this issue.[/yellow]")
+        lines.append(f"\n[dim]Use 'aiops run analyze {issue_id}' or ask in chat to run RCA.[/dim]")
 
         return "\n".join(lines)
     finally:

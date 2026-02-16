@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine, inspect
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -370,6 +370,16 @@ def init_db():
         if "anomaly_id" in columns and "health_issue_id" not in columns:
             # Old schema — drop and let create_all rebuild
             RCAResult.__table__.drop(engine, checkfirst=True)
+
+    # Migration: add 'managed' column to aws_resources if missing
+    if insp.has_table("aws_resources"):
+        columns = {col["name"] for col in insp.get_columns("aws_resources")}
+        if "managed" not in columns:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE aws_resources ADD COLUMN managed BOOLEAN DEFAULT 1")
+                )
+                conn.commit()
 
     Base.metadata.create_all(engine)
     return engine
