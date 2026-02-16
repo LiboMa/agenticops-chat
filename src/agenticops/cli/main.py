@@ -2195,8 +2195,13 @@ def _slash_scroll(ctx: ChatContext, args: list) -> str:
 
     output = "\n".join(lines)
 
-    # Print directly — terminal scrollback handles long output
-    console.print(output)
+    # Use pager for long history, direct print for short
+    term_height = console.size.height
+    if len(lines) > term_height:
+        with console.pager(styles=False):
+            console.print(output)
+    else:
+        console.print(output)
     return ""
 
 
@@ -2260,7 +2265,7 @@ def _slash_pager(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_less(ctx: ChatContext, args: list) -> str:
-    """Handle /less command - view full last output."""
+    """Handle /less command - view full last output in system pager."""
     content = ctx.last_full_output
     if not content:
         # Fallback to last assistant message in history
@@ -2272,13 +2277,10 @@ def _slash_less(ctx: ChatContext, args: list) -> str:
     if not content:
         return "[yellow]No output to display.[/yellow]"
 
-    # Print full content directly to terminal (no external pager).
-    # User scrolls back with terminal scrollback (mouse wheel / Shift+PageUp).
-    rendered = Markdown(content) if content.startswith("#") or "```" in content else content
-    console.print()
-    console.print(Rule("[bold]Full Output[/bold]", style="dim"))
-    console.print(rendered)
-    console.print(Rule(style="dim"))
+    # Use styles=False to strip ANSI escape codes before piping to pager.
+    # Rich's 24-bit RGB codes (ESC[38;2;r;g;b) garble in most pagers.
+    with console.pager(styles=False):
+        console.print(Markdown(content))
     return ""
 
 
@@ -3099,7 +3101,7 @@ def chat(
         complete_while_typing=False,
         style=prompt_style,
         enable_history_search=True,  # Ctrl+R for reverse search
-        mouse_support=True,
+        mouse_support=False,
     )
 
     # Welcome message
@@ -3108,7 +3110,7 @@ def chat(
         "Chat with your AI operations assistant using natural language.\n"
         "Examples: [cyan]\"scan my EC2 instances\"[/cyan], [cyan]\"check health of my resources\"[/cyan], [cyan]\"list issues\"[/cyan]\n\n"
         "[dim]Shortcuts:[/dim]  ↑/↓ History  |  Tab Complete  |  Ctrl+R Search  |  Ctrl+C Exit\n"
-        "[dim]Scroll:[/dim]     Mouse wheel  |  /scroll  |  /less\n"
+        "[dim]Scroll:[/dim]     Terminal native  |  /less full output  |  /scroll history\n"
         "[dim]Tokens:[/dim]     Displayed after each response (↑input ↓output Σtotal)\n",
         title="Welcome",
         border_style="blue",
