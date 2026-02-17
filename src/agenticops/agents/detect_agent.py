@@ -11,6 +11,10 @@ from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import assume_role
+from agenticops.tools.network_tools import (
+    describe_nat_gateways,
+    describe_load_balancers,
+)
 from agenticops.tools.cloudwatch_tools import (
     list_alarms,
     get_alarm_history,
@@ -44,12 +48,17 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
    - Call get_metrics for the affected resource (last 1-6 hours).
    - Call query_logs for recent error patterns.
    - Call lookup_cloudtrail_events for recent changes to this resource.
-5. STATISTICAL DETECTION (use when deep=True or when alarms are missing):
+5. NETWORK HEALTH CHECKS:
+   - Call describe_nat_gateways to check NAT Gateway state and CloudWatch metrics
+     (ErrorPortAllocation, PacketsDropCount are key failure signals).
+   - Call describe_load_balancers to check target health — UnHealthyHostCount > 0
+     is a top-3 root cause signal. Create HealthIssue for unhealthy targets.
+6. STATISTICAL DETECTION (use when deep=True or when alarms are missing):
    - After getting metrics via get_metrics, pass the values to run_zscore_detection
      to identify statistical anomalies that CloudWatch alarms might not catch.
    - Use run_rule_evaluation to check metric values against built-in threshold rules
      (e.g., CPUUtilization > 90% = critical, DatabaseConnections > 100 = medium).
-6. For confirmed problems, call create_health_issue with:
+7. For confirmed problems, call create_health_issue with:
    - severity, source, title, description, alarm_name, metric_data, related_changes.
 
 SEVERITY CLASSIFICATION:
@@ -99,6 +108,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 create_health_issue,
                 run_zscore_detection,
                 run_rule_evaluation,
+                # Network health tools
+                describe_nat_gateways,
+                describe_load_balancers,
             ],
         )
 

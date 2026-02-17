@@ -28,10 +28,22 @@ from agenticops.tools.metadata_tools import (
     list_health_issues,
     update_health_issue_status,
     save_rca_result,
+    save_fix_plan,
+    get_fix_plan,
+    approve_fix_plan,
 )
 from agenticops.tools.detect_tools import (
     run_zscore_detection,
     run_rule_evaluation,
+)
+from agenticops.tools.network_tools import (
+    describe_vpcs,
+    describe_subnets,
+    describe_security_groups,
+    describe_route_tables,
+    describe_nat_gateways,
+    describe_transit_gateways,
+    describe_load_balancers,
 )
 from agenticops.tools.kb_tools import (
     search_sops,
@@ -54,6 +66,14 @@ __all__ = [
     "list_dynamodb",
     "list_sqs",
     "list_sns",
+    # Network tools
+    "describe_vpcs",
+    "describe_subnets",
+    "describe_security_groups",
+    "describe_route_tables",
+    "describe_nat_gateways",
+    "describe_transit_gateways",
+    "describe_load_balancers",
     # CloudWatch tools
     "list_alarms",
     "get_alarm_history",
@@ -70,6 +90,9 @@ __all__ = [
     "list_health_issues",
     "update_health_issue_status",
     "save_rca_result",
+    "save_fix_plan",
+    "get_fix_plan",
+    "approve_fix_plan",
     # Detect tools
     "run_zscore_detection",
     "run_rule_evaluation",

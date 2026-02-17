@@ -12,6 +12,7 @@ from strands import tool
 from agenticops.models import (
     AWSAccount,
     AWSResource,
+    FixPlan,
     HealthIssue,
     RCAResult,
     get_session,
@@ -527,5 +528,202 @@ def get_rca_result(health_issue_id: int) -> str:
             "model_id": rca.model_id,
             "created_at": str(rca.created_at),
         }, default=str)
+    finally:
+        session.close()
+
+
+# ============================================================================
+# Fix Plan tools (SRE Agent)
+# ============================================================================
+
+
+@tool
+def save_fix_plan(
+    health_issue_id: int,
+    rca_result_id: int,
+    risk_level: str,
+    title: str,
+    summary: str,
+    steps: str = "[]",
+    rollback_plan: str = "{}",
+    estimated_impact: str = "",
+    pre_checks: str = "[]",
+    post_checks: str = "[]",
+) -> str:
+    """Save a structured fix plan for a health issue.
+
+    Args:
+        health_issue_id: The HealthIssue ID this plan addresses
+        rca_result_id: The RCAResult ID this plan is based on
+        risk_level: Risk classification: L0 (read-only), L1 (low-risk), L2 (service-affecting), L3 (high-risk)
+        title: Brief title for the fix plan
+        summary: Summary of what the fix plan does
+        steps: JSON array of ordered fix steps (each step is a dict with 'action' and 'command' keys)
+        rollback_plan: JSON object describing how to undo the fix
+        estimated_impact: Description of expected downtime or performance impact
+        pre_checks: JSON array of pre-conditions to verify before starting
+        post_checks: JSON array of checks to verify after completion
+
+    Returns:
+        Confirmation with the new FixPlan ID and risk level.
+    """
+    valid_levels = {"L0", "L1", "L2", "L3"}
+    risk_level = risk_level.upper()
+    if risk_level not in valid_levels:
+        return f"Invalid risk_level '{risk_level}'. Must be one of: {', '.join(sorted(valid_levels))}"
+
+    # Parse JSON parameters
+    try:
+        steps_parsed = json.loads(steps) if isinstance(steps, str) else steps
+    except json.JSONDecodeError:
+        steps_parsed = [steps]
+
+    try:
+        rollback_parsed = json.loads(rollback_plan) if isinstance(rollback_plan, str) else rollback_plan
+    except json.JSONDecodeError:
+        rollback_parsed = {"description": rollback_plan}
+
+    try:
+        pre_parsed = json.loads(pre_checks) if isinstance(pre_checks, str) else pre_checks
+    except json.JSONDecodeError:
+        pre_parsed = [pre_checks]
+
+    try:
+        post_parsed = json.loads(post_checks) if isinstance(post_checks, str) else post_checks
+    except json.JSONDecodeError:
+        post_parsed = [post_checks]
+
+    session = get_session()
+    try:
+        issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if not issue:
+            return f"HealthIssue #{health_issue_id} not found."
+
+        rca = session.query(RCAResult).filter_by(id=rca_result_id).first()
+        if not rca:
+            return f"RCAResult #{rca_result_id} not found."
+
+        plan = FixPlan(
+            health_issue_id=health_issue_id,
+            rca_result_id=rca_result_id,
+            risk_level=risk_level,
+            title=title,
+            summary=summary,
+            steps=steps_parsed,
+            rollback_plan=rollback_parsed,
+            estimated_impact=estimated_impact,
+            pre_checks=pre_parsed,
+            post_checks=post_parsed,
+            status="draft",
+        )
+        session.add(plan)
+
+        issue.status = "fix_planned"
+        session.commit()
+
+        return (
+            f"FixPlan #{plan.id} saved for HealthIssue #{health_issue_id}. "
+            f"Risk: {risk_level}. Title: {title}. "
+            f"Issue status updated to 'fix_planned'."
+        )
+    except Exception as e:
+        session.rollback()
+        return f"Error saving fix plan: {e}"
+    finally:
+        session.close()
+
+
+@tool
+def get_fix_plan(health_issue_id: int) -> str:
+    """Get the latest fix plan for a health issue.
+
+    Args:
+        health_issue_id: The HealthIssue ID to look up.
+
+    Returns:
+        JSON object with the latest FixPlan, or a message if none found.
+    """
+    session = get_session()
+    try:
+        plan = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=health_issue_id)
+            .order_by(FixPlan.created_at.desc())
+            .first()
+        )
+        if not plan:
+            return f"No fix plan found for HealthIssue #{health_issue_id}."
+
+        return json.dumps({
+            "id": plan.id,
+            "health_issue_id": plan.health_issue_id,
+            "rca_result_id": plan.rca_result_id,
+            "risk_level": plan.risk_level,
+            "title": plan.title,
+            "summary": plan.summary,
+            "steps": plan.steps,
+            "rollback_plan": plan.rollback_plan,
+            "estimated_impact": plan.estimated_impact,
+            "pre_checks": plan.pre_checks,
+            "post_checks": plan.post_checks,
+            "status": plan.status,
+            "approved_by": plan.approved_by,
+            "approved_at": str(plan.approved_at) if plan.approved_at else None,
+            "created_at": str(plan.created_at),
+        }, default=str)
+    finally:
+        session.close()
+
+
+@tool
+def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
+    """Approve a fix plan. L0/L1 can be auto-approved; L2/L3 require human approval.
+
+    Args:
+        fix_plan_id: The FixPlan ID to approve
+        approved_by: Name/identifier of the approver
+
+    Returns:
+        Confirmation of approval or rejection reason.
+    """
+    session = get_session()
+    try:
+        plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
+        if not plan:
+            return f"FixPlan #{fix_plan_id} not found."
+
+        if plan.status == "approved":
+            return f"FixPlan #{fix_plan_id} is already approved."
+
+        if plan.status == "rejected":
+            return f"FixPlan #{fix_plan_id} was rejected. Create a new plan instead."
+
+        # L2/L3 require human approval — flag it but still record
+        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
+            plan.status = "pending_approval"
+            session.commit()
+            return (
+                f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval. "
+                f"Status set to 'pending_approval'. A human operator must approve L2/L3 plans."
+            )
+
+        plan.status = "approved"
+        plan.approved_by = approved_by
+        plan.approved_at = datetime.utcnow()
+        session.commit()
+
+        # Update health issue status
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        if issue:
+            issue.status = "fix_approved"
+            session.commit()
+
+        return (
+            f"FixPlan #{fix_plan_id} approved by {approved_by}. "
+            f"Risk: {plan.risk_level}. HealthIssue status updated to 'fix_approved'."
+        )
+    except Exception as e:
+        session.rollback()
+        return f"Error approving fix plan: {e}"
     finally:
         session.close()

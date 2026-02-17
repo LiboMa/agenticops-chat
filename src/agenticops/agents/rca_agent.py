@@ -15,6 +15,15 @@ from agenticops.tools.aws_tools import assume_role
 from agenticops.tools.cloudwatch_tools import get_metrics, query_logs
 from agenticops.tools.cloudtrail_tools import lookup_cloudtrail_events
 from agenticops.tools.kb_tools import search_sops, search_similar_cases
+from agenticops.tools.network_tools import (
+    describe_vpcs,
+    describe_subnets,
+    describe_security_groups,
+    describe_route_tables,
+    describe_nat_gateways,
+    describe_transit_gateways,
+    describe_load_balancers,
+)
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_managed_resources,
@@ -40,6 +49,12 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 5. INVESTIGATE CHANGES (80% of issues are caused by recent changes):
    a. Call lookup_cloudtrail_events for the affected resource (last 24 hours).
    b. Look for deployment, config change, security group, IAM, or scaling events.
+5.5. INVESTIGATE NETWORK PATH (when resource has connectivity issues):
+   a. Call describe_vpcs and describe_subnets for the affected resource's VPC.
+   b. Call describe_security_groups for the resource's security groups.
+   c. Call describe_route_tables for the VPC to check routing.
+   d. If NAT Gateway or Transit Gateway is involved, call describe_nat_gateways / describe_transit_gateways.
+   e. If behind a load balancer, call describe_load_balancers to check target health.
 6. INVESTIGATE METRICS:
    a. Call get_metrics for the affected resource (relevant metrics based on resource type).
    b. Call query_logs if log patterns are relevant to the issue.
@@ -109,6 +124,14 @@ def rca_agent(issue_id: int) -> str:
                 search_sops,
                 search_similar_cases,
                 save_rca_result,
+                # Network investigation tools
+                describe_vpcs,
+                describe_subnets,
+                describe_security_groups,
+                describe_route_tables,
+                describe_nat_gateways,
+                describe_transit_gateways,
+                describe_load_balancers,
             ],
         )
 

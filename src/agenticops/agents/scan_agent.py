@@ -22,6 +22,15 @@ from agenticops.tools.aws_tools import (
     list_sqs,
     list_sns,
 )
+from agenticops.tools.network_tools import (
+    describe_vpcs,
+    describe_subnets,
+    describe_security_groups,
+    describe_route_tables,
+    describe_nat_gateways,
+    describe_transit_gateways,
+    describe_load_balancers,
+)
 from agenticops.tools.metadata_tools import (
     get_active_account,
     save_resources,
@@ -42,7 +51,7 @@ WORKFLOW:
 RULES:
 - Only READ operations. Never create, modify, or delete AWS resources.
 - If a service/region fails, log the error and continue with others.
-- When services='all', scan: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS.
+- When services='all', scan: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPC, Subnet, SecurityGroup, NATGateway, TransitGateway, ELB, RouteTable.
 - When regions='all', use the regions from the account configuration.
 - Always call save_resources at the end to persist discovered resources.
 """
@@ -53,7 +62,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
     """Scan AWS resources in the active account and update inventory.
 
     Args:
-        services: Comma-separated service names (EC2,RDS,Lambda,S3,ECS,EKS,DynamoDB,SQS,SNS) or 'all'
+        services: Comma-separated service names (EC2,RDS,Lambda,S3,ECS,EKS,DynamoDB,SQS,SNS,VPC,Subnet,SecurityGroup,NATGateway,TransitGateway,ELB,RouteTable) or 'all'
         regions: Comma-separated AWS regions or 'all' (uses account configured regions)
 
     Returns:
@@ -80,6 +89,15 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
                 list_dynamodb,
                 list_sqs,
                 list_sns,
+                # Network tools
+                describe_vpcs,
+                describe_subnets,
+                describe_security_groups,
+                describe_route_tables,
+                describe_nat_gateways,
+                describe_transit_gateways,
+                describe_load_balancers,
+                # Metadata
                 save_resources,
                 get_active_account,
             ],
