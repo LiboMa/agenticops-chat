@@ -44,6 +44,14 @@ from agenticops.tools.network_tools import (
     describe_nat_gateways,
     describe_transit_gateways,
     describe_load_balancers,
+    describe_region_topology,
+    analyze_vpc_topology,
+)
+from agenticops.tools.eks_tools import (
+    describe_eks_clusters,
+    describe_eks_nodegroups,
+    check_eks_pod_ip_capacity,
+    map_eks_to_vpc_topology,
 )
 from agenticops.tools.kb_tools import (
     search_sops,
@@ -52,6 +60,14 @@ from agenticops.tools.kb_tools import (
     write_kb_case,
     write_kb_sop,
     distill_case_study,
+)
+from agenticops.tools.aws_cli_tool import run_aws_cli
+from agenticops.graph.tools import (
+    query_reachability,
+    query_impact_radius,
+    find_network_path,
+    detect_network_anomalies,
+    analyze_network_segments,
 )
 
 __all__ = [
@@ -74,6 +90,13 @@ __all__ = [
     "describe_nat_gateways",
     "describe_transit_gateways",
     "describe_load_balancers",
+    "describe_region_topology",
+    "analyze_vpc_topology",
+    # EKS tools
+    "describe_eks_clusters",
+    "describe_eks_nodegroups",
+    "check_eks_pod_ip_capacity",
+    "map_eks_to_vpc_topology",
     # CloudWatch tools
     "list_alarms",
     "get_alarm_history",
@@ -103,4 +126,12 @@ __all__ = [
     "write_kb_case",
     "write_kb_sop",
     "distill_case_study",
+    # AWS CLI tool
+    "run_aws_cli",
+    # Graph tools
+    "query_reachability",
+    "query_impact_radius",
+    "find_network_path",
+    "detect_network_anomalies",
+    "analyze_network_segments",
 ]

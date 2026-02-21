@@ -6,12 +6,12 @@ import {
   Background,
   BackgroundVariant,
   type Node,
+  type Edge,
   type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import type { VpcTopology } from "@/api/types";
-import { mapTopologyToGraph, type BaseNodeData } from "./mapTopologyToGraph";
+import type { SerializedGraph, ReachabilityResult } from "@/api/types";
 import { useAutoLayout } from "./useAutoLayout";
 import { NodeDetailPanel } from "./NodeDetailPanel";
 
@@ -26,6 +26,20 @@ import { RouteTableNode } from "./nodes/RouteTableNode";
 
 // Custom edge types
 import { TopologyEdge } from "./edges/TopologyEdge";
+
+/* ------------------------------------------------------------------ */
+/*  Base data shape shared by all custom nodes                        */
+/* ------------------------------------------------------------------ */
+
+export interface BaseNodeData extends Record<string, unknown> {
+  label: string;
+  resourceType: string;
+  raw: Record<string, unknown>;
+  hasIssue?: boolean;
+  highlighted?: boolean;
+  dimmed?: boolean;
+  status?: string;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Type registrations                                                 */
@@ -77,26 +91,106 @@ function miniMapColor(node: Node): string {
 /* ------------------------------------------------------------------ */
 
 interface TopologyGraphProps {
-  topology: VpcTopology;
+  /** Pre-serialized graph from the backend graph API */
+  graph: SerializedGraph;
+  /** Reachability result to highlight a path (optional) */
+  reachability?: ReachabilityResult | null;
+  /** Callback when a subnet node is clicked */
+  onSubnetClick?: (subnetId: string) => void;
 }
 
-export default function TopologyGraph({ topology }: TopologyGraphProps) {
+export default function TopologyGraph({
+  graph,
+  reachability,
+  onSubnetClick,
+}: TopologyGraphProps) {
   const [selectedNode, setSelectedNode] = useState<Node<BaseNodeData> | null>(null);
 
-  // Map topology data → raw nodes/edges
-  const { nodes: rawNodes, edges: rawEdges } = useMemo(
-    () => mapTopologyToGraph(topology),
-    [topology]
+  // Convert backend SerializedGraph -> ReactFlow nodes/edges
+  const rawNodes: Node<BaseNodeData>[] = useMemo(
+    () =>
+      graph.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: n.data as BaseNodeData,
+      })),
+    [graph.nodes],
+  );
+
+  const rawEdges: Edge[] = useMemo(
+    () =>
+      graph.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: e.type,
+        data: e.data,
+      })),
+    [graph.edges],
   );
 
   // Apply dagre layout
-  const { nodes, edges } = useAutoLayout(rawNodes, rawEdges);
+  const { nodes: layoutNodes, edges: layoutEdges } = useAutoLayout(rawNodes, rawEdges);
+
+  // Build path highlight from reachability result
+  const highlightedNodeIds = useMemo(() => {
+    if (!reachability?.path?.length) return new Set<string>();
+    return new Set(reachability.path);
+  }, [reachability]);
+
+  const highlightedEdgeIds = useMemo(() => {
+    if (!reachability?.path?.length) return new Set<string>();
+    const ids = new Set<string>();
+    const pathNodes = reachability.path;
+    for (let i = 0; i < pathNodes.length - 1; i++) {
+      for (const edge of layoutEdges) {
+        if (
+          (edge.source === pathNodes[i] && edge.target === pathNodes[i + 1]) ||
+          (edge.source === pathNodes[i + 1] && edge.target === pathNodes[i])
+        ) {
+          ids.add(edge.id);
+        }
+      }
+    }
+    return ids;
+  }, [reachability, layoutEdges]);
+
+  const hasHighlight = highlightedNodeIds.size > 0;
+
+  // Apply highlight/dim to nodes
+  const nodes = useMemo(() => {
+    if (!hasHighlight) return layoutNodes;
+    return layoutNodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        highlighted: highlightedNodeIds.has(node.id),
+        dimmed: !highlightedNodeIds.has(node.id),
+      },
+    }));
+  }, [layoutNodes, hasHighlight, highlightedNodeIds]);
+
+  // Apply highlight to edges
+  const edges = useMemo(() => {
+    if (!hasHighlight) return layoutEdges;
+    return layoutEdges.map((edge) => ({
+      ...edge,
+      data: {
+        ...edge.data,
+        highlighted: highlightedEdgeIds.has(edge.id),
+      },
+    }));
+  }, [layoutEdges, hasHighlight, highlightedEdgeIds]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       setSelectedNode(node as Node<BaseNodeData>);
+      if (node.type === "subnetNode" && onSubnetClick) {
+        onSubnetClick(node.id);
+      }
     },
-    []
+    [onSubnetClick],
   );
 
   const onPaneClick = useCallback(() => {
@@ -126,7 +220,7 @@ export default function TopologyGraph({ topology }: TopologyGraphProps) {
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
-        {/* Arrow marker definition for edges */}
+        {/* Arrow marker definitions for edges */}
         <svg>
           <defs>
             <marker
@@ -140,6 +234,18 @@ export default function TopologyGraph({ topology }: TopologyGraphProps) {
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
+            </marker>
+            <marker
+              id="arrow-highlighted"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerUnits="strokeWidth"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#4ade80" />
             </marker>
           </defs>
         </svg>
@@ -157,6 +263,21 @@ export default function TopologyGraph({ topology }: TopologyGraphProps) {
       </ReactFlow>
 
       <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+
+      {/* Reachability indicator */}
+      {reachability && (
+        <div
+          className={`absolute top-3 left-3 px-3 py-2 rounded-md text-xs font-medium ${
+            reachability.can_reach_internet
+              ? "bg-green-100 text-green-800 border border-green-300"
+              : "bg-red-100 text-red-800 border border-red-300"
+          }`}
+        >
+          {reachability.can_reach_internet
+            ? `Subnet can reach Internet (${reachability.path.length} hops)`
+            : `No Internet access: ${reachability.blocking_reason}`}
+        </div>
+      )}
     </div>
   );
 }

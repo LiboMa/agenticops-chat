@@ -25,6 +25,8 @@ from agenticops.tools.metadata_tools import (
     list_health_issues,
     update_health_issue_status,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli
+from agenticops.graph.tools import detect_network_anomalies, analyze_network_segments
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,16 @@ RULES:
 10. When the user asks for a "report", "summary", "daily report", or "incident report", dispatch to reporter_agent with the appropriate report_type (daily, incident, or inventory).
 11. For questions about resources, accounts, or inventory, use the direct metadata tools.
 12. Be concise but thorough. Show actual data from tools, don't summarize away details.
+13. run_aws_cli: Execute AWS CLI commands for ad-hoc queries and operations.
+   Read-only commands are executed directly. Write commands require confirmation.
+   Always use --output json for structured results. Prefer this for queries not
+   covered by specialized tools (e.g., CloudFront, WAF, Config, SSM, Route53).
+   IMPORTANT: For write operations, ALWAYS present the command to the user first
+   and explain what it will do before executing with require_confirmation=True.
+14. detect_network_anomalies: Detect structural issues in a VPC's network topology
+   (orphan nodes, blackhole routes, routing loops, unreachable subnets).
+15. analyze_network_segments: Analyze network segmentation across all VPCs in a region
+   (connected components, isolated VPCs, cross-VPC connectivity).
 """
 
 
@@ -92,6 +104,11 @@ def create_main_agent() -> Agent:
             get_fix_plan,
             list_health_issues,
             update_health_issue_status,
+            # AWS CLI tool
+            run_aws_cli,
+            # Graph tools
+            detect_network_anomalies,
+            analyze_network_segments,
         ],
     )
 

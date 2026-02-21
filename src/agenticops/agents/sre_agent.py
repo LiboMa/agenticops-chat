@@ -25,6 +25,14 @@ from agenticops.tools.network_tools import (
     describe_nat_gateways,
     describe_transit_gateways,
     describe_load_balancers,
+    describe_region_topology,
+    analyze_vpc_topology,
+)
+from agenticops.tools.eks_tools import (
+    describe_eks_clusters,
+    describe_eks_nodegroups,
+    check_eks_pod_ip_capacity,
+    map_eks_to_vpc_topology,
 )
 from agenticops.tools.metadata_tools import (
     get_active_account,
@@ -34,6 +42,12 @@ from agenticops.tools.metadata_tools import (
     save_fix_plan,
 )
 from agenticops.tools.kb_tools import search_sops, search_similar_cases
+from agenticops.graph.tools import (
+    query_reachability,
+    query_impact_radius,
+    find_network_path,
+    detect_network_anomalies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +66,17 @@ FIX PLAN PROTOCOL:
    - L2: Service-affecting change (e.g., resize instance, modify SG rules)
    - L3: High-risk change (e.g., restart service, failover, data migration)
 5. INVESTIGATE: Gather current state of affected resource:
+   - Call describe_region_topology for a region-level view of all VPCs, Transit Gateways,
+     and peering connections — understand cross-VPC blast radius first.
+   - Call analyze_vpc_topology for VPC-level blast radius analysis (subnet classification,
+     blackhole routes, SG dependency map, peering/endpoint connectivity).
    - Call relevant describe tools (EC2, RDS, network tools, etc.)
+   - For EKS issues: use describe_eks_clusters, describe_eks_nodegroups,
+     check_eks_pod_ip_capacity, and map_eks_to_vpc_topology.
+   - Call query_reachability to verify subnet internet connectivity with exact path trace.
+   - Call find_network_path for point-to-point traffic path analysis.
+   - Call detect_network_anomalies to find structural issues (routing loops, orphan nodes, blackholes).
+   - Call query_impact_radius to assess blast radius of proposed changes.
    - Check if the issue has already self-resolved
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
@@ -115,6 +139,18 @@ def sre_agent(issue_id: int) -> str:
                 describe_nat_gateways,
                 describe_transit_gateways,
                 describe_load_balancers,
+                describe_region_topology,
+                analyze_vpc_topology,
+                # EKS networking tools
+                describe_eks_clusters,
+                describe_eks_nodegroups,
+                check_eks_pod_ip_capacity,
+                map_eks_to_vpc_topology,
+                # Graph-based analysis tools
+                query_reachability,
+                query_impact_radius,
+                find_network_path,
+                detect_network_anomalies,
             ],
         )
 

@@ -1,10 +1,11 @@
-"""Web Dashboard - FastAPI + HTMX simple dashboard."""
+"""Web Dashboard - FastAPI + HTMX simple dashboard + React SPA."""
 
+import os
 from datetime import datetime
 from typing import Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -22,6 +23,31 @@ from agenticops.models import (
     init_db,
 )
 from agenticops.config import settings
+
+import json
+import logging
+
+from agenticops.graph.api import router as graph_router
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_aws_session(region: str):
+    """Ensure an AWS session exists for the given region.
+
+    If no assumed-role session exists, inject a default boto3 session
+    from environment credentials (suitable for local/internal dashboard).
+    """
+    import boto3
+    import agenticops.tools.aws_tools as aws_tools_module
+
+    for key in aws_tools_module._session_cache:
+        if key.endswith(f":{region}"):
+            return  # Already have a session for this region
+    # Inject default credentials session
+    session = boto3.Session(region_name=region)
+    aws_tools_module._session_cache[f"web:{region}"] = session
+    logger.info("Injected default AWS session for region %s", region)
 
 
 # ============================================================================
@@ -243,6 +269,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Graph API router
+app.include_router(graph_router)
+
 # Templates directory
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 TEMPLATES_DIR.mkdir(exist_ok=True)
@@ -280,6 +309,7 @@ BASE_TEMPLATE = '''<!DOCTYPE html>
                     <a href="/resources" class="hover:text-indigo-200">Resources</a>
                     <a href="/anomalies" class="hover:text-indigo-200">Anomalies</a>
                     <a href="/reports" class="hover:text-indigo-200">Reports</a>
+                    <a href="/network" class="hover:text-indigo-200">Network</a>
                 </div>
                 <div class="text-sm text-indigo-200">
                     {{ now.strftime('%Y-%m-%d %H:%M UTC') }}
@@ -624,6 +654,265 @@ def ensure_templates():
 {% endblock %}'''
     (TEMPLATES_DIR / "reports.html").write_text(reports_html)
 
+    # Network / VPC Topology template
+    network_html = '''{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+    <!-- Input Form -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">VPC Topology Analysis</h2>
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">Region</label>
+                <input id="region" type="text" value="us-east-1"
+                       class="border rounded px-3 py-2 w-48 text-sm" placeholder="us-east-1">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">VPC ID</label>
+                <input id="vpc-id" type="text"
+                       class="border rounded px-3 py-2 w-64 text-sm" placeholder="vpc-0abc123...">
+            </div>
+            <button hx-get="/api/network/vpc-topology"
+                    hx-include="#region, #vpc-id"
+                    hx-vals=\'js:{region: document.getElementById("region").value, vpc_id: document.getElementById("vpc-id").value}\'
+                    hx-target="#result"
+                    hx-indicator="#spinner"
+                    class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm">
+                Analyze Topology
+            </button>
+            <button hx-get="/api/network/vpcs"
+                    hx-vals=\'js:{region: document.getElementById("region").value}\'
+                    hx-target="#vpc-list"
+                    hx-indicator="#spinner"
+                    class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 text-sm">
+                List VPCs
+            </button>
+            <span id="spinner" class="htmx-indicator">
+                <svg class="animate-spin h-5 w-5 text-indigo-600 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Loading...
+            </span>
+        </div>
+        <!-- VPC List Helper -->
+        <div id="vpc-list" class="mt-4"></div>
+    </div>
+
+    <!-- Result Area -->
+    <div id="result"></div>
+</div>
+{% endblock %}'''
+    (TEMPLATES_DIR / "network.html").write_text(network_html)
+
+    # VPC list fragment template (returned by /api/network/vpcs)
+    vpc_list_fragment = '''<div class="bg-gray-50 rounded p-4">
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">VPCs in {{ region }} ({{ vpcs|length }})</h3>
+    {% if vpcs %}
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-gray-500">
+                <th class="pb-1 pr-4">VPC ID</th>
+                <th class="pb-1 pr-4">CIDR</th>
+                <th class="pb-1 pr-4">Name</th>
+                <th class="pb-1 pr-4">State</th>
+                <th class="pb-1">Default</th>
+                <th class="pb-1"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in vpcs %}
+            <tr class="border-t border-gray-200">
+                <td class="py-1 pr-4 font-mono">{{ v.VpcId }}</td>
+                <td class="py-1 pr-4">{{ v.CidrBlock }}</td>
+                <td class="py-1 pr-4">{{ v.Name or "-" }}</td>
+                <td class="py-1 pr-4">{{ v.State }}</td>
+                <td class="py-1">{{ "Yes" if v.IsDefault else "No" }}</td>
+                <td class="py-1">
+                    <button onclick="document.getElementById(\'vpc-id\').value=\'{{ v.VpcId }}\'"
+                            class="text-indigo-600 hover:text-indigo-800 text-xs underline">Use</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500 text-sm">No VPCs found in this region.</p>
+    {% endif %}
+</div>'''
+    (TEMPLATES_DIR / "vpc_list_fragment.html").write_text(vpc_list_fragment)
+
+    # VPC topology result fragment template
+    topology_fragment = '''<div class="space-y-4">
+    <!-- Reachability Summary -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold mb-3">Reachability Summary</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-2xl font-bold {% if topology.reachability_summary.has_igw %}text-green-600{% else %}text-gray-400{% endif %}">
+                    {{ "Yes" if topology.reachability_summary.has_igw else "No" }}
+                </div>
+                <div class="text-xs text-gray-500">Internet Gateway</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-2xl font-bold text-indigo-600">{{ topology.reachability_summary.public_subnets }}</div>
+                <div class="text-xs text-gray-500">Public Subnets</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-2xl font-bold text-gray-700">{{ topology.reachability_summary.private_subnets }}</div>
+                <div class="text-xs text-gray-500">Private Subnets</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-2xl font-bold text-orange-600">{{ topology.reachability_summary.nat_gateways }}</div>
+                <div class="text-xs text-gray-500">NAT Gateways</div>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-xl font-bold text-gray-600">{{ topology.reachability_summary.transit_gateways }}</div>
+                <div class="text-xs text-gray-500">Transit Gateways</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-xl font-bold text-gray-600">{{ topology.reachability_summary.peering_connections }}</div>
+                <div class="text-xs text-gray-500">VPC Peering</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-xl font-bold text-gray-600">{{ topology.reachability_summary.vpc_endpoints }}</div>
+                <div class="text-xs text-gray-500">VPC Endpoints</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 rounded">
+                <div class="text-xl font-bold {% if topology.reachability_summary.issues|length > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                    {{ topology.reachability_summary.issues|length }}
+                </div>
+                <div class="text-xs text-gray-500">Issues</div>
+            </div>
+        </div>
+        {% if topology.reachability_summary.issues %}
+        <div class="mt-4 p-3 bg-red-50 border border-red-200 rounded">
+            <h4 class="text-sm font-semibold text-red-800 mb-1">Issues</h4>
+            <ul class="text-sm text-red-700 list-disc list-inside">
+                {% for issue in topology.reachability_summary.issues %}
+                <li>{{ issue }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- VPC Info -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold mb-3">VPC Details</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div><span class="text-gray-500">VPC ID:</span> <span class="font-mono">{{ topology.vpc_id }}</span></div>
+            <div><span class="text-gray-500">CIDR:</span> {{ topology.cidr_block }}</div>
+            <div><span class="text-gray-500">Name:</span> {{ topology.vpc_name or "-" }}</div>
+            <div><span class="text-gray-500">Region:</span> {{ topology.region }}</div>
+        </div>
+    </div>
+
+    <!-- Subnets Table -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold">Subnets ({{ topology.subnets|length }})</h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-gray-50 text-left text-gray-500">
+                        <th class="px-4 py-2">Subnet ID</th>
+                        <th class="px-4 py-2">Name</th>
+                        <th class="px-4 py-2">AZ</th>
+                        <th class="px-4 py-2">CIDR</th>
+                        <th class="px-4 py-2">Type</th>
+                        <th class="px-4 py-2">Available IPs</th>
+                        <th class="px-4 py-2">Route Table</th>
+                        <th class="px-4 py-2">Default Target</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in topology.subnets %}
+                    <tr class="border-t hover:bg-gray-50">
+                        <td class="px-4 py-2 font-mono">{{ s.subnet_id }}</td>
+                        <td class="px-4 py-2">{{ s.name or "-" }}</td>
+                        <td class="px-4 py-2">{{ s.availability_zone }}</td>
+                        <td class="px-4 py-2">{{ s.cidr_block }}</td>
+                        <td class="px-4 py-2">
+                            {% if s.type == "public" %}
+                            <span class="px-2 py-0.5 text-xs rounded bg-green-100 text-green-800">public</span>
+                            {% else %}
+                            <span class="px-2 py-0.5 text-xs rounded bg-gray-200 text-gray-700">private</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-2">{{ s.available_ips }}</td>
+                        <td class="px-4 py-2 font-mono text-xs">{{ s.route_table_id or "-" }}</td>
+                        <td class="px-4 py-2 text-xs">{{ s.default_route_target or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Blackhole Routes Alert -->
+    {% if topology.blackhole_routes %}
+    <div class="bg-red-50 border border-red-300 rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-red-800 mb-2">Blackhole Routes</h3>
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-red-700">
+                    <th class="pb-1 pr-4">Route Table</th>
+                    <th class="pb-1 pr-4">Destination</th>
+                    <th class="pb-1">Target</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bh in topology.blackhole_routes %}
+                <tr class="border-t border-red-200">
+                    <td class="py-1 pr-4 font-mono">{{ bh.route_table_id }}</td>
+                    <td class="py-1 pr-4">{{ bh.destination }}</td>
+                    <td class="py-1">{{ bh.target }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Security Group Dependency Map -->
+    {% if topology.sg_dependency_map %}
+    <div class="bg-white rounded-lg shadow">
+        <details>
+            <summary class="px-6 py-4 cursor-pointer hover:bg-gray-50 font-semibold text-lg">
+                Security Group Dependencies ({{ topology.sg_dependency_map|length }})
+            </summary>
+            <div class="px-6 pb-4 overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500">
+                            <th class="pb-1 pr-4">SG ID</th>
+                            <th class="pb-1 pr-4">Name</th>
+                            <th class="pb-1 pr-4">Inbound From SGs</th>
+                            <th class="pb-1">Outbound To SGs</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sg in topology.sg_dependency_map %}
+                        <tr class="border-t">
+                            <td class="py-1 pr-4 font-mono">{{ sg.sg_id }}</td>
+                            <td class="py-1 pr-4">{{ sg.name or "-" }}</td>
+                            <td class="py-1 pr-4 text-xs">{{ sg.inbound_from | join(", ") if sg.inbound_from else "-" }}</td>
+                            <td class="py-1 text-xs">{{ sg.outbound_to | join(", ") if sg.outbound_to else "-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    </div>
+    {% endif %}
+</div>'''
+    (TEMPLATES_DIR / "topology_fragment.html").write_text(topology_fragment)
+
 
 # ============================================================================
 # Routes
@@ -801,6 +1090,69 @@ async def reports_list(request: Request):
         )
     finally:
         session.close()
+
+
+@app.get("/network", response_class=HTMLResponse)
+async def network_page(request: Request):
+    """Network / VPC Topology analysis page."""
+    return templates.TemplateResponse(
+        "network.html",
+        {"request": request, "title": "Network", "now": datetime.utcnow()},
+    )
+
+
+# ============================================================================
+# Network API Endpoints
+# ============================================================================
+
+
+@app.get("/api/network/vpcs")
+async def api_list_vpcs(request: Request, region: str = Query("us-east-1")):
+    """List VPCs in a region (live AWS API call)."""
+    try:
+        _ensure_aws_session(region)
+        from agenticops.tools.network_tools import describe_vpcs
+
+        result = describe_vpcs(region=region)
+        vpcs = json.loads(result)
+        return JSONResponse({"region": region, "vpcs": vpcs})
+    except Exception as e:
+        logger.exception("Failed to list VPCs")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/network/region-topology")
+async def api_region_topology(request: Request, region: str = Query("us-east-1")):
+    """Get region-level topology: VPCs, Transit Gateways, Peering connections."""
+    try:
+        _ensure_aws_session(region)
+        from agenticops.tools.network_tools import describe_region_topology
+
+        result = describe_region_topology(region=region)
+        topology = json.loads(result)
+        return JSONResponse(topology)
+    except Exception as e:
+        logger.exception("Failed to get region topology")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/network/vpc-topology")
+async def api_vpc_topology(
+    request: Request,
+    region: str = Query(...),
+    vpc_id: str = Query(...),
+):
+    """Analyze VPC topology (live AWS API call)."""
+    try:
+        _ensure_aws_session(region)
+        from agenticops.tools.network_tools import analyze_vpc_topology
+
+        result = analyze_vpc_topology(region=region, vpc_id=vpc_id)
+        topology = json.loads(result)
+        return JSONResponse(topology)
+    except Exception as e:
+        logger.exception("Failed to analyze VPC topology")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ============================================================================
@@ -1426,6 +1778,46 @@ async def api_get_audit_stats(request: Request, hours: int = Query(24, le=720)):
         "logins": AuditService.count_actions(action="login", start_time=start_time),
         "login_failures": AuditService.count_actions(action="login_failed", start_time=start_time),
     }
+
+
+# ============================================================================
+# React SPA (served at /app/*)
+# ============================================================================
+
+FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
+
+# Mount built SPA assets
+if (FRONTEND_DIR / "assets").exists():
+    app.mount(
+        "/app/assets",
+        StaticFiles(directory=str(FRONTEND_DIR / "assets")),
+        name="spa-assets",
+    )
+
+
+@app.get("/app/{full_path:path}")
+async def serve_spa(full_path: str):
+    """SPA fallback — serve index.html for all /app/* routes."""
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    raise HTTPException(status_code=404, detail="Frontend not built. Run: cd frontend && npm install && npm run build")
+
+
+# ============================================================================
+# Dev CORS (only when AIOPS_DEV_MODE is set)
+# ============================================================================
+
+if os.getenv("AIOPS_DEV_MODE"):
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # ============================================================================

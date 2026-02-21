@@ -23,6 +23,14 @@ from agenticops.tools.network_tools import (
     describe_nat_gateways,
     describe_transit_gateways,
     describe_load_balancers,
+    describe_region_topology,
+    analyze_vpc_topology,
+)
+from agenticops.tools.eks_tools import (
+    describe_eks_clusters,
+    describe_eks_nodegroups,
+    check_eks_pod_ip_capacity,
+    map_eks_to_vpc_topology,
 )
 from agenticops.tools.metadata_tools import (
     get_active_account,
@@ -30,6 +38,12 @@ from agenticops.tools.metadata_tools import (
     get_health_issue,
     update_health_issue_status,
     save_rca_result,
+)
+from agenticops.graph.tools import (
+    query_reachability,
+    query_impact_radius,
+    find_network_path,
+    detect_network_anomalies,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,11 +64,20 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    a. Call lookup_cloudtrail_events for the affected resource (last 24 hours).
    b. Look for deployment, config change, security group, IAM, or scaling events.
 5.5. INVESTIGATE NETWORK PATH (when resource has connectivity issues):
-   a. Call describe_vpcs and describe_subnets for the affected resource's VPC.
-   b. Call describe_security_groups for the resource's security groups.
-   c. Call describe_route_tables for the VPC to check routing.
-   d. If NAT Gateway or Transit Gateway is involved, call describe_nat_gateways / describe_transit_gateways.
-   e. If behind a load balancer, call describe_load_balancers to check target health.
+   a. Call describe_region_topology to understand cross-VPC connectivity (Transit Gateways,
+      peering connections) and identify which VPCs can communicate.
+   b. Call analyze_vpc_topology with the affected resource's VPC ID for a holistic view
+      of subnets (public/private), routing, gateways, peering, endpoints, SG dependencies,
+      and blackhole routes. Check the reachability_summary for issues.
+   b. For individual deep-dives, use describe_security_groups, describe_route_tables, etc.
+   c. If behind a load balancer, call describe_load_balancers to check target health.
+   d. For EKS workloads: call describe_eks_clusters and map_eks_to_vpc_topology to understand
+      cluster networking. Use check_eks_pod_ip_capacity if pod scheduling failures are suspected.
+      Call describe_eks_nodegroups for node-level health issues.
+   e. Call query_reachability to verify subnet internet connectivity with exact path trace.
+   f. Call find_network_path for point-to-point traffic path analysis.
+   g. Call detect_network_anomalies to find structural issues (routing loops, orphan nodes, blackholes).
+   h. Call query_impact_radius to assess blast radius of suspected failed component.
 6. INVESTIGATE METRICS:
    a. Call get_metrics for the affected resource (relevant metrics based on resource type).
    b. Call query_logs if log patterns are relevant to the issue.
@@ -132,6 +155,18 @@ def rca_agent(issue_id: int) -> str:
                 describe_nat_gateways,
                 describe_transit_gateways,
                 describe_load_balancers,
+                describe_region_topology,
+                analyze_vpc_topology,
+                # EKS networking tools
+                describe_eks_clusters,
+                describe_eks_nodegroups,
+                check_eks_pod_ip_capacity,
+                map_eks_to_vpc_topology,
+                # Graph-based analysis tools
+                query_reachability,
+                query_impact_radius,
+                find_network_path,
+                detect_network_anomalies,
             ],
         )
 

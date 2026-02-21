@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -10,10 +10,15 @@ import { BlackholeAlert } from "@/components/network/BlackholeAlert";
 import { SgDependencyMap } from "@/components/network/SgDependencyMap";
 import { useVpcs } from "@/hooks/useVpcs";
 import { useVpcTopology } from "@/hooks/useVpcTopology";
+import { useVpcGraph, useRegionGraph, useVpcAnomalies, useSubnetReachability } from "@/hooks/useGraphTopology";
+import type { AnomalyItem } from "@/api/types";
 import { cn } from "@/lib/cn";
 
 const TopologyGraph = lazy(
   () => import("@/components/topology/TopologyGraph")
+);
+const RegionTopologyGraph = lazy(
+  () => import("@/components/topology/RegionTopologyGraph")
 );
 
 type ViewMode = "table" | "graph";
@@ -22,9 +27,14 @@ export default function Network() {
   const [region, setRegion] = useState("us-east-1");
   const [vpcId, setVpcId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [selectedSubnetId, setSelectedSubnetId] = useState<string | null>(null);
 
   const vpcs = useVpcs(region);
   const topology = useVpcTopology(region, vpcId);
+  const vpcGraph = useVpcGraph(region, vpcId);
+  const regionGraph = useRegionGraph(region);
+  const anomalies = useVpcAnomalies(region, vpcId);
+  const reachability = useSubnetReachability(region, vpcId, selectedSubnetId ?? "");
 
   const handleListVpcs = () => {
     vpcs.refetch();
@@ -33,12 +43,46 @@ export default function Network() {
   const handleAnalyze = () => {
     if (vpcId.trim()) {
       topology.refetch();
+      vpcGraph.refetch();
+      anomalies.refetch();
     }
+  };
+
+  const handleScanRegion = () => {
+    regionGraph.refetch();
   };
 
   const handleUseVpc = (id: string) => {
     setVpcId(id);
   };
+
+  // Drill-down from region graph: click a VPC node -> analyze its topology
+  const handleRegionVpcClick = useCallback(
+    (clickedVpcId: string) => {
+      setVpcId(clickedVpcId);
+      setTimeout(() => {
+        topology.refetch();
+        vpcGraph.refetch();
+        anomalies.refetch();
+      }, 0);
+    },
+    [topology, vpcGraph, anomalies],
+  );
+
+  // Subnet click -> fetch reachability from backend
+  const handleSubnetClick = useCallback(
+    (subnetId: string) => {
+      if (selectedSubnetId === subnetId) {
+        setSelectedSubnetId(null);
+      } else {
+        setSelectedSubnetId(subnetId);
+        setTimeout(() => {
+          reachability.refetch();
+        }, 0);
+      }
+    },
+    [selectedSubnetId, reachability],
+  );
 
   return (
     <div className="space-y-6">
@@ -46,7 +90,7 @@ export default function Network() {
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-gray-900">
-            VPC Topology Analysis
+            Network Topology
           </h2>
         </CardHeader>
         <CardBody>
@@ -57,8 +101,10 @@ export default function Network() {
             onVpcIdChange={setVpcId}
             onListVpcs={handleListVpcs}
             onAnalyze={handleAnalyze}
+            onScanRegion={handleScanRegion}
             isLoadingVpcs={vpcs.isFetching}
-            isLoadingTopology={topology.isFetching}
+            isLoadingTopology={topology.isFetching || vpcGraph.isFetching}
+            isLoadingRegionTopology={regionGraph.isFetching}
           />
 
           {/* VPC List */}
@@ -80,12 +126,55 @@ export default function Network() {
         </CardBody>
       </Card>
 
-      {/* Topology Results */}
-      {topology.isFetching && <Spinner label="Analyzing topology..." />}
+      {/* Region Topology Overview */}
+      {regionGraph.isFetching && (
+        <Spinner label="Scanning region topology..." />
+      )}
 
-      {topology.error && (
+      {regionGraph.error && (
         <ErrorBanner
-          message={topology.error.message}
+          message={regionGraph.error.message}
+          onRetry={handleScanRegion}
+        />
+      )}
+
+      {regionGraph.data && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Region Overview — {region}
+              </h2>
+              <div className="flex items-center gap-3 text-sm text-gray-500">
+                <span>{regionGraph.data.metadata.node_count} Nodes</span>
+                <span>{regionGraph.data.metadata.edge_count} Connections</span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardBody>
+            <p className="text-xs text-gray-400 mb-3">
+              Click a VPC node to drill into its detailed topology.
+            </p>
+            <Suspense
+              fallback={<Spinner label="Loading region topology graph..." />}
+            >
+              <RegionTopologyGraph
+                graph={regionGraph.data}
+                onVpcClick={handleRegionVpcClick}
+              />
+            </Suspense>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Single-VPC Topology Results */}
+      {(topology.isFetching || vpcGraph.isFetching) && (
+        <Spinner label="Analyzing VPC topology..." />
+      )}
+
+      {(topology.error || vpcGraph.error) && (
+        <ErrorBanner
+          message={(topology.error ?? vpcGraph.error)!.message}
           onRetry={handleAnalyze}
         />
       )}
@@ -93,6 +182,63 @@ export default function Network() {
       {topology.data && (
         <>
           <TopologySummary topology={topology.data} />
+
+          {/* Anomalies Panel */}
+          {anomalies.data && anomalies.data.total_anomalies > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-red-800">
+                    Topology Anomalies ({anomalies.data.total_anomalies})
+                  </h2>
+                  <span className="text-xs text-gray-500">
+                    {anomalies.data.summary}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardBody>
+                <div className="space-y-2">
+                  {anomalies.data.anomalies.map((anomaly: AnomalyItem, i: number) => (
+                    <div
+                      key={`${anomaly.node_id}-${i}`}
+                      className={cn(
+                        "flex items-start gap-3 p-3 rounded-md border text-sm",
+                        anomaly.severity === "critical"
+                          ? "bg-red-50 border-red-200"
+                          : anomaly.severity === "high"
+                            ? "bg-orange-50 border-orange-200"
+                            : "bg-yellow-50 border-yellow-200"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "px-1.5 py-0.5 text-xs rounded font-medium uppercase",
+                          anomaly.severity === "critical"
+                            ? "bg-red-600 text-white"
+                            : anomaly.severity === "high"
+                              ? "bg-orange-500 text-white"
+                              : "bg-yellow-500 text-white"
+                        )}
+                      >
+                        {anomaly.severity}
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-800">
+                          {anomaly.type.replace(/_/g, " ")}
+                        </div>
+                        <div className="text-gray-600 text-xs mt-0.5">
+                          {anomaly.description}
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono text-gray-400">
+                        {anomaly.node_id}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
+          )}
 
           {/* View Mode Toggle */}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
@@ -134,9 +280,13 @@ export default function Network() {
             </button>
           </div>
 
-          {viewMode === "graph" ? (
+          {viewMode === "graph" && vpcGraph.data ? (
             <Suspense fallback={<Spinner label="Loading topology graph..." />}>
-              <TopologyGraph topology={topology.data} />
+              <TopologyGraph
+                graph={vpcGraph.data}
+                reachability={reachability.data ?? null}
+                onSubnetClick={handleSubnetClick}
+              />
             </Suspense>
           ) : (
             <>
