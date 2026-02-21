@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/cn";
-import type { BaseNodeData } from "../mapTopologyToGraph";
+import type { BaseNodeData } from "../types";
+import { StatusBadge } from "./StatusBadge";
 
 function EndpointNodeInner({ data, selected }: NodeProps) {
   const d = data as BaseNodeData;
@@ -10,10 +11,13 @@ function EndpointNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border-2 border-indigo-400 bg-indigo-50 px-3 py-2 min-w-[180px] shadow-sm",
-        selected && "ring-2 ring-pd-green-500"
+        "relative rounded-lg border-2 border-indigo-400 bg-indigo-50 px-3 py-2 min-w-[180px] shadow-sm",
+        d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
+        d.dimmed && "opacity-40 transition-opacity duration-300",
+        selected && !d.highlighted && "ring-2 ring-pd-green-500"
       )}
     >
+      <StatusBadge status={d.status} />
       <Handle
         type="target"
         position={Position.Top}

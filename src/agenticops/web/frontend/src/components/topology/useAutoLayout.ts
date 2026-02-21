@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import Dagre from "@dagrejs/dagre";
 import type { Node, Edge } from "@xyflow/react";
-import type { BaseNodeData } from "./mapTopologyToGraph";
+import type { BaseNodeData } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Node size defaults (pixels) — must match the actual rendered size  */

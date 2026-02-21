@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { SerializedGraph } from "@/api/types";
+import type { RegionNodeData } from "./types";
 import { useRegionLayout } from "./useRegionLayout";
 
 // Custom node types
@@ -66,13 +67,13 @@ export default function RegionTopologyGraph({
   onVpcClick,
 }: RegionTopologyGraphProps) {
   // Convert backend SerializedGraph -> ReactFlow nodes/edges
-  const rawNodes: Node[] = useMemo(
+  const rawNodes: Node<RegionNodeData>[] = useMemo(
     () =>
       graph.nodes.map((n) => ({
         id: n.id,
         type: n.type,
         position: n.position,
-        data: n.data,
+        data: n.data as RegionNodeData,
       })),
     [graph.nodes],
   );

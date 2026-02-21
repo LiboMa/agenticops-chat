@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/cn";
-import type { BaseNodeData } from "../mapTopologyToGraph";
+import type { BaseNodeData } from "../types";
+import { StatusBadge } from "./StatusBadge";
 
 function SubnetNodeInner({ data, selected }: NodeProps) {
   const d = data as BaseNodeData;
@@ -11,14 +12,17 @@ function SubnetNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border-2 px-3 py-2 min-w-[180px] shadow-sm bg-white",
+        "relative rounded-lg border-2 px-3 py-2 min-w-[180px] shadow-sm bg-white",
         isPublic
           ? "border-green-400 bg-green-50"
           : "border-gray-300 bg-gray-50",
-        selected && "ring-2 ring-pd-green-500",
+        d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
+        d.dimmed && "opacity-40 transition-opacity duration-300",
+        selected && !d.highlighted && "ring-2 ring-pd-green-500",
         d.hasIssue && "border-red-500 animate-pulse"
       )}
     >
+      <StatusBadge status={d.status} />
       <Handle type="target" position={Position.Top} className="!bg-gray-400" />
       <div className="flex items-center gap-2">
         <span

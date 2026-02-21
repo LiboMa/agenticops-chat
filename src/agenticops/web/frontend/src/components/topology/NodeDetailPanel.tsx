@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Node } from "@xyflow/react";
-import type { BaseNodeData } from "./mapTopologyToGraph";
+import type { BaseNodeData } from "./types";
 
 interface NodeDetailPanelProps {
   node: Node<BaseNodeData> | null;

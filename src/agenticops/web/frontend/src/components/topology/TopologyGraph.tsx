@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { SerializedGraph, ReachabilityResult } from "@/api/types";
+import type { BaseNodeData } from "./types";
 import { useAutoLayout } from "./useAutoLayout";
 import { NodeDetailPanel } from "./NodeDetailPanel";
 
@@ -26,20 +27,6 @@ import { RouteTableNode } from "./nodes/RouteTableNode";
 
 // Custom edge types
 import { TopologyEdge } from "./edges/TopologyEdge";
-
-/* ------------------------------------------------------------------ */
-/*  Base data shape shared by all custom nodes                        */
-/* ------------------------------------------------------------------ */
-
-export interface BaseNodeData extends Record<string, unknown> {
-  label: string;
-  resourceType: string;
-  raw: Record<string, unknown>;
-  hasIssue?: boolean;
-  highlighted?: boolean;
-  dimmed?: boolean;
-  status?: string;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Type registrations                                                 */
