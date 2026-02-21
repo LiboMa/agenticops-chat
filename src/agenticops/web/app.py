@@ -139,14 +139,16 @@ class AnomalyResponse(BaseModel):
 class RCAResponse(BaseModel):
     """Schema for RCA response."""
     id: int
-    anomaly_id: int
-    analysis_type: str
+    health_issue_id: int
     root_cause: str
-    confidence_score: float
+    confidence: float
     contributing_factors: List[str]
     recommendations: List[str]
-    related_resources: List[str]
-    llm_model: str
+    fix_plan: dict
+    fix_risk_level: str
+    sop_used: Optional[str]
+    similar_cases: List
+    model_id: str
     created_at: datetime
 
     class Config:
@@ -579,17 +581,19 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
         return AnomalyResponse.model_validate(anomaly)
 
 
-@app.get("/api/anomalies/{anomaly_id}/rca", response_model=Optional[RCAResponse])
-async def api_get_anomaly_rca(anomaly_id: int):
-    """Get RCA result for an anomaly."""
+@app.get("/api/anomalies/{issue_id}/rca", response_model=Optional[RCAResponse])
+async def api_get_anomaly_rca(issue_id: int):
+    """Get RCA result for a health issue (or legacy anomaly ID)."""
+    from agenticops.models import HealthIssue
+
     with get_db_session() as session:
-        anomaly = session.query(Anomaly).filter_by(id=anomaly_id).first()
-        if not anomaly:
-            raise HTTPException(status_code=404, detail="Anomaly not found")
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
 
         rca = (
             session.query(RCAResult)
-            .filter_by(anomaly_id=anomaly_id)
+            .filter_by(health_issue_id=issue_id)
             .order_by(RCAResult.created_at.desc())
             .first()
         )
