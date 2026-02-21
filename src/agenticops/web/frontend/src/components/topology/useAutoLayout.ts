@@ -7,10 +7,10 @@ import type { BaseNodeData } from "./types";
 /*  Node size defaults (pixels) — must match the actual rendered size  */
 /* ------------------------------------------------------------------ */
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 60;
-const ROUTE_TABLE_WIDTH = 160;
-const ROUTE_TABLE_HEIGHT = 48;
+const NODE_WIDTH = 220;
+const NODE_HEIGHT = 68;
+const ROUTE_TABLE_WIDTH = 170;
+const ROUTE_TABLE_HEIGHT = 52;
 
 function getNodeDimensions(type: string | undefined) {
   if (type === "routeTableNode") {
@@ -39,8 +39,8 @@ export function useAutoLayout(
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({
       rankdir: "TB",
-      ranksep: 80,
-      nodesep: 40,
+      ranksep: 100,
+      nodesep: 60,
       marginx: 20,
       marginy: 20,
     });

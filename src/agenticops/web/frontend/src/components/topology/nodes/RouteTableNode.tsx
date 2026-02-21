@@ -11,20 +11,22 @@ function RouteTableNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded border-2 border-slate-300 bg-slate-50 px-2.5 py-1.5 min-w-[150px] shadow-sm",
+        "relative rounded border-2 border-slate-300 bg-gradient-to-br from-slate-50 to-gray-50 px-2.5 py-1.5 min-w-[150px] shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
         d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
         d.dimmed && "opacity-40 transition-opacity duration-300",
         selected && !d.highlighted && "ring-2 ring-pd-green-500",
         d.hasIssue && "border-red-500 animate-pulse"
       )}
     >
+      {/* Slate accent bar */}
+      <div className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-slate-400" />
       <StatusBadge status={d.status} />
       <Handle type="target" position={Position.Top} className="!bg-slate-400" />
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 pl-1.5">
         {/* Table icon */}
         <svg
           className={cn(
-            "w-3.5 h-3.5 flex-shrink-0",
+            "w-4 h-4 flex-shrink-0",
             d.hasIssue ? "text-red-500" : "text-slate-500"
           )}
           fill="none"

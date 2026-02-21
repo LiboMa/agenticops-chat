@@ -185,7 +185,7 @@ export default function TopologyGraph({
   }, []);
 
   return (
-    <div className="relative w-full h-[600px] bg-gray-50 rounded-lg border border-gray-200">
+    <div className="relative w-full h-[700px] bg-gray-50 rounded-lg border border-gray-200">
       {/* Blackhole animation keyframes */}
       <style>{`
         @keyframes blackhole-flow {

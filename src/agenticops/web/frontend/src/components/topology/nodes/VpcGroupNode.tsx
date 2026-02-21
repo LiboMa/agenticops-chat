@@ -10,15 +10,22 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-xl border-2 px-5 py-4 min-w-[220px] shadow-md",
+        "relative rounded-xl border-2 px-5 py-4 min-w-[220px] shadow-md transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
         isExternal
-          ? "border-dashed border-gray-300 bg-gray-50"
-          : "border-emerald-400 bg-emerald-50",
+          ? "border-dashed border-gray-300 bg-gradient-to-br from-gray-50 to-slate-50"
+          : "border-emerald-400 bg-gradient-to-br from-emerald-50 to-green-50",
         selected && "ring-2 ring-pd-green-500",
       )}
     >
+      {/* Emerald accent bar (or gray for external) */}
+      <div
+        className={cn(
+          "absolute left-0 top-3 bottom-3 w-1 rounded-full",
+          isExternal ? "bg-gray-300" : "bg-emerald-400"
+        )}
+      />
       <Handle type="target" position={Position.Top} className="!bg-emerald-500" />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pl-1">
         {/* VPC icon */}
         <div
           className={cn(
@@ -27,7 +34,7 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
           )}
         >
           <svg
-            className={cn("w-5 h-5", isExternal ? "text-gray-500" : "text-emerald-700")}
+            className={cn("w-6 h-6", isExternal ? "text-gray-500" : "text-emerald-700")}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

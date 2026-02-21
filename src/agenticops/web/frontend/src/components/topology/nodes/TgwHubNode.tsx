@@ -10,16 +10,18 @@ function TgwHubNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-xl border-2 border-purple-400 bg-purple-50 px-5 py-4 min-w-[220px] shadow-md",
+        "relative rounded-xl border-2 border-purple-400 bg-gradient-to-br from-purple-50 to-fuchsia-50 px-5 py-4 min-w-[220px] shadow-md transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
         selected && "ring-2 ring-pd-green-500",
       )}
     >
+      {/* Purple accent bar */}
+      <div className="absolute left-0 top-3 bottom-3 w-1 rounded-full bg-purple-400" />
       <Handle type="target" position={Position.Top} className="!bg-purple-500" />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pl-1">
         {/* TGW hub icon */}
         <div className="w-10 h-10 rounded-lg bg-purple-200 flex items-center justify-center flex-shrink-0">
           <svg
-            className="w-5 h-5 text-purple-700"
+            className="w-6 h-6 text-purple-700"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

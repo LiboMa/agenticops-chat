@@ -3,10 +3,10 @@ import Dagre from "@dagrejs/dagre";
 import type { Node, Edge } from "@xyflow/react";
 import type { RegionNodeData } from "./types";
 
-const VPC_WIDTH = 240;
-const VPC_HEIGHT = 80;
-const TGW_WIDTH = 240;
-const TGW_HEIGHT = 80;
+const VPC_WIDTH = 260;
+const VPC_HEIGHT = 90;
+const TGW_WIDTH = 260;
+const TGW_HEIGHT = 90;
 
 function getNodeDimensions(type: string | undefined) {
   if (type === "tgwHubNode") return { width: TGW_WIDTH, height: TGW_HEIGHT };
@@ -29,8 +29,8 @@ export function useRegionLayout(
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({
       rankdir: "TB",
-      ranksep: 120,
-      nodesep: 80,
+      ranksep: 150,
+      nodesep: 100,
       marginx: 40,
       marginy: 40,
     });

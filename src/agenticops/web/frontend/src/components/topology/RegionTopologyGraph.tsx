@@ -107,7 +107,7 @@ export default function RegionTopologyGraph({
   );
 
   return (
-    <div className="relative w-full h-[500px] bg-gray-50 rounded-lg border border-gray-200">
+    <div className="relative w-full h-[600px] bg-gray-50 rounded-lg border border-gray-200">
       <ReactFlow
         nodes={nodes}
         edges={edges}

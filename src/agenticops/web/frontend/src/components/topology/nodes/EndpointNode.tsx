@@ -11,22 +11,24 @@ function EndpointNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-lg border-2 border-indigo-400 bg-indigo-50 px-3 py-2 min-w-[180px] shadow-sm",
+        "relative rounded-lg border-2 border-indigo-400 bg-gradient-to-br from-indigo-50 to-violet-50 px-3 py-2 min-w-[180px] shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
         d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
         d.dimmed && "opacity-40 transition-opacity duration-300",
         selected && !d.highlighted && "ring-2 ring-pd-green-500"
       )}
     >
+      {/* Indigo accent bar */}
+      <div className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-indigo-400" />
       <StatusBadge status={d.status} />
       <Handle
         type="target"
         position={Position.Top}
         className="!bg-indigo-400"
       />
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pl-1.5">
         {/* Puzzle-piece icon */}
         <svg
-          className="w-4 h-4 text-indigo-600 flex-shrink-0"
+          className="w-5 h-5 text-indigo-600 flex-shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
