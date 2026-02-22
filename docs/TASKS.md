@@ -123,6 +123,34 @@
 | TASK-BUG-002 | 修复移动平均检测std=0时的Bug | ✅ | 2024-02 |
 | TASK-BUG-003 | 修复测试数据库隔离问题 | ✅ | 2024-02 |
 
+### 1.12 Phase 2 — 调度/通知/认证/集成测试
+
+| ID | 任务 | 状态 | 完成日期 |
+|----|------|------|----------|
+| TASK-100 | 定时调度器 (scheduler/scheduler.py + API endpoints) | ✅ | 2025 |
+| TASK-101 | 邮件通知 (notify/notifier.py EmailNotifier) | ✅ | 2025 |
+| TASK-102 | Slack通知 (notify/notifier.py SlackNotifier) | ✅ | 2025 |
+| TASK-103 | 通用Webhook通知 (notify/notifier.py WebhookNotifier，替代PagerDuty) | ✅ | 2025 |
+| TASK-104 | Web认证 (auth/ 模块 + JWT sessions + API keys) | ✅ | 2025 |
+| TASK-105 | 集成测试 (tests/integration/ AWS Mock测试，229项测试全部通过) | ✅ | 2025 |
+| TASK-110 | 知识库模块 (kb/ 模块，向量嵌入 + 关键词搜索) | ✅ | 2025 |
+| TASK-114 | 资源拓扑图 (graph/ 模块 + React Flow 前端) | ✅ | 2025 |
+| TASK-123 | 审计日志 (audit/ 模块 + API endpoints) | ✅ | 2025 |
+
+### 1.13 Phase 3 — Strands多智能体架构迁移
+
+| ID | 任务 | 状态 | 完成日期 |
+|----|------|------|----------|
+| TASK-200 | Strands Multi-Agent 架构迁移（从 LangChain 迁移） | ✅ | 2026-02 |
+| TASK-201 | HealthIssue 数据模型（替代 Anomaly） | ✅ | 2026-02 |
+| TASK-202 | FixPlan 数据模型 + SRE Agent | ✅ | 2026-02 |
+| TASK-203 | RCA Agent（集成知识库搜索） | ✅ | 2026-02 |
+| TASK-204 | 网络拓扑分析（VPC/EKS） | ✅ | 2026-02 |
+| TASK-205 | React SPA 前端 | ✅ | 2026-02 |
+| TASK-206 | HealthIssue/FixPlan/Schedule/Notification API endpoints | ✅ | 2026-02-22 |
+| TASK-207 | ThinkingDisplay spinner 动画修复 | ✅ | 2026-02-22 |
+| TASK-208 | Chat Token 用量追踪 | ✅ | 2026-02-22 |
+
 ---
 
 ## 2. 进行中任务 (In Progress)
@@ -139,37 +167,30 @@
 
 ### 3.1 高优先级 (P1)
 
-| ID | 任务 | 描述 | 依赖 | 预估工作量 |
-|----|------|------|------|-----------|
-| TASK-100 | 定时调度器 | 实现APScheduler定时任务 | - | 3天 |
-| TASK-101 | 邮件通知 | SMTP邮件告警通知 | - | 2天 |
-| TASK-102 | Slack通知 | Slack Webhook集成 | - | 1天 |
-| TASK-103 | PagerDuty集成 | PagerDuty告警集成 | - | 2天 |
-| TASK-104 | Web认证 | JWT/OAuth用户认证 | - | 5天 |
-| TASK-105 | 集成测试 | AWS Mock集成测试 | - | 3天 |
+*全部已完成，已移至 1.12 节*
 
 ### 3.2 中优先级 (P2)
 
-| ID | 任务 | 描述 | 依赖 | 预估工作量 |
-|----|------|------|------|-----------|
-| TASK-110 | 知识库模块 | RCA模式存储和检索 | - | 5天 |
-| TASK-111 | 趋势图表 | 指标趋势可视化 | - | 3天 |
-| TASK-112 | 自定义规则UI | Web界面配置检测规则 | TASK-104 | 4天 |
-| TASK-113 | 异常聚合 | 相似异常自动聚合 | - | 3天 |
-| TASK-114 | 资源拓扑图 | 资源依赖关系可视化 | - | 5天 |
-| TASK-115 | 批量操作 | 异常批量确认/忽略 | - | 2天 |
+| ID | 任务 | 描述 | 依赖 | 预估工作量 | 状态 |
+|----|------|------|------|-----------|------|
+| TASK-110 | 知识库模块 | RCA模式存储和检索 | - | 5天 | ✅ 已移至 1.12 |
+| TASK-111 | 趋势图表 | 指标趋势可视化 | - | 3天 | ⏳ 待开始 |
+| TASK-112 | 自定义规则UI | Web界面配置检测规则 | TASK-104 ✅ | 4天 | ⏳ 待开始 |
+| TASK-113 | 异常聚合 | 相似异常自动聚合 | - | 3天 | ⏳ 待开始 |
+| TASK-114 | 资源拓扑图 | 资源依赖关系可视化 | - | 5天 | ✅ 已移至 1.12 |
+| TASK-115 | 批量操作 | 异常批量确认/忽略 | - | 2天 | ⏳ 待开始 |
 
 ### 3.3 低优先级 (P3)
 
-| ID | 任务 | 描述 | 依赖 | 预估工作量 |
-|----|------|------|------|-----------|
-| TASK-120 | Azure支持 | Azure资源扫描 | - | 10天 |
-| TASK-121 | GCP支持 | GCP资源扫描 | - | 10天 |
-| TASK-122 | RBAC权限 | 角色权限控制 | TASK-104 | 5天 |
-| TASK-123 | 审计日志 | 操作审计追踪 | - | 3天 |
-| TASK-124 | API文档 | OpenAPI文档自动生成 | - | 1天 |
-| TASK-125 | Docker部署 | Dockerfile和compose | - | 2天 |
-| TASK-126 | K8s部署 | Helm Chart | TASK-125 | 3天 |
+| ID | 任务 | 描述 | 依赖 | 预估工作量 | 状态 |
+|----|------|------|------|-----------|------|
+| TASK-120 | Azure支持 | Azure资源扫描 | - | 10天 | ⏳ 待开始 |
+| TASK-121 | GCP支持 | GCP资源扫描 | - | 10天 | ⏳ 待开始 |
+| TASK-122 | RBAC权限 | 角色权限控制 | TASK-104 ✅ | 5天 | ⏳ 待开始 |
+| TASK-123 | 审计日志 | 操作审计追踪 | - | 3天 | ✅ 已移至 1.12 |
+| TASK-124 | API文档 | OpenAPI文档自动生成 | - | 1天 | 部分完成 (FastAPI自动生成OpenAPI) |
+| TASK-125 | Docker部署 | Dockerfile和compose | - | 2天 | ⏳ 待开始 |
+| TASK-126 | K8s部署 | Helm Chart | TASK-125 | 3天 | ⏳ 待开始 |
 
 ---
 
@@ -179,48 +200,67 @@
 - 核心功能：SCAN, MONITOR, DETECT, ANALYZE, REPORT
 - 接口：CLI, Web基础版, Agent
 
-### v0.2.0 - 计划中
+### v0.2.0 - ✅ 已完成
 - **主题**: 调度与通知
-- **任务**: TASK-100 ~ TASK-103
+- **任务**: TASK-100 ~ TASK-105
 - **里程碑**:
-  - [ ] 定时调度扫描/检测
-  - [ ] 多渠道告警通知
-  - [ ] 通知配置管理
+  - [x] 定时调度扫描/检测 (scheduler/scheduler.py)
+  - [x] 多渠道告警通知 (Email + Slack + Webhook)
+  - [x] 通知配置管理
+  - [x] Web认证 (JWT sessions + API keys)
+  - [x] 集成测试 (229项测试)
 
-### v0.3.0 - 计划中
+### v0.3.0 - 部分完成
 - **主题**: 安全与可视化
 - **任务**: TASK-104, TASK-111, TASK-114
 - **里程碑**:
-  - [ ] Web用户认证
-  - [ ] 指标趋势图表
-  - [ ] 资源拓扑图
+  - [x] Web用户认证 (TASK-104)
+  - [ ] 指标趋势图表 (TASK-111 ⏳)
+  - [x] 资源拓扑图 (TASK-114，graph/ 模块 + React Flow)
 
-### v0.4.0 - 计划中
+### v0.4.0 - 部分完成
 - **主题**: 智能增强
 - **任务**: TASK-110, TASK-112, TASK-113
 - **里程碑**:
-  - [ ] RCA知识库
-  - [ ] 自定义规则
-  - [ ] 异常聚合
+  - [x] RCA知识库 (TASK-110，kb/ 模块，向量嵌入 + 关键词搜索)
+  - [ ] 自定义规则 (TASK-112 ⏳)
+  - [ ] 异常聚合 (TASK-113 ⏳)
+
+### v0.5.0 - ✅ 已完成 (2026-02)
+- **主题**: Strands 多智能体架构
+- **任务**: TASK-200 ~ TASK-208
+- **里程碑**:
+  - [x] 从 LangChain 迁移至 Strands Multi-Agent
+  - [x] HealthIssue / FixPlan 数据模型
+  - [x] SRE Agent + RCA Agent
+  - [x] 网络拓扑分析 (VPC/EKS)
+  - [x] React SPA 前端
+  - [x] 全套 API endpoints
+  - [x] Chat 体验优化 (spinner + token 追踪)
 
 ### v1.0.0 - 长期
 - **主题**: 生产就绪
-- **任务**: TASK-122 ~ TASK-126
+- **任务**: TASK-111, TASK-112, TASK-113, TASK-115, TASK-122, TASK-125, TASK-126
 - **里程碑**:
-  - [ ] RBAC权限控制
-  - [ ] 完整审计日志
-  - [ ] 容器化部署
+  - [ ] 趋势图表 (TASK-111)
+  - [ ] 自定义规则UI (TASK-112)
+  - [ ] 异常聚合 (TASK-113)
+  - [ ] 批量操作 (TASK-115)
+  - [ ] RBAC权限控制 (TASK-122)
+  - [x] 审计日志 (TASK-123 ✅)
+  - [ ] 容器化部署 (TASK-125, TASK-126)
 
 ---
 
 ## 5. 技术债务
 
-| ID | 描述 | 优先级 | 影响范围 |
-|----|------|--------|----------|
-| DEBT-001 | datetime.utcnow() 弃用警告 | 低 | models.py |
-| DEBT-002 | 测试覆盖率不足 (<50%) | 中 | 全局 |
-| DEBT-003 | 缺少类型存根 | 低 | 全局 |
-| DEBT-004 | 硬编码的默认配置 | 低 | rules.py |
+| ID | 描述 | 优先级 | 影响范围 | 状态 |
+|----|------|--------|----------|------|
+| DEBT-001 | datetime.utcnow() 弃用警告 | 低 | models.py | 待修复 |
+| DEBT-002 | 测试覆盖率需持续提升 (当前229项测试) | 中 | 全局 | 持续改进中 |
+| DEBT-003 | 缺少类型存根 | 低 | 全局 | 待修复 |
+| DEBT-004 | 硬编码的默认配置 | 低 | rules.py | 待修复 |
+| DEBT-005 | ChatContext 在 context.py 和 main.py 中重复定义 | 中 | cli/ | 待重构 |
 
 ---
 
@@ -237,19 +277,20 @@
 ## 7. 下一步行动
 
 ### 立即行动 (本周)
-1. [ ] 补充集成测试用例
-2. [ ] 修复datetime弃用警告
-3. [ ] 完善错误处理
+1. [ ] 修复 datetime.utcnow() 弃用警告 (DEBT-001)
+2. [ ] 重构 ChatContext 消除 main.py / context.py 重复定义 (DEBT-005)
+3. [ ] 补充 Phase 3 (Strands) 相关单元测试
 
 ### 短期计划 (本月)
-1. [ ] 实现定时调度器 (TASK-100)
-2. [ ] 实现Slack通知 (TASK-102)
-3. [ ] 编写部署文档
+1. [ ] 指标趋势图表 (TASK-111)
+2. [ ] 自定义规则UI (TASK-112)
+3. [ ] 异常聚合 (TASK-113)
 
 ### 中期计划 (下季度)
-1. [ ] Web认证系统 (TASK-104)
-2. [ ] 知识库模块 (TASK-110)
-3. [ ] Docker部署 (TASK-125)
+1. [ ] 批量操作 (TASK-115)
+2. [ ] RBAC权限控制 (TASK-122)
+3. [ ] Docker / K8s 部署 (TASK-125, TASK-126)
+4. [ ] 多云支持评估 (Azure / GCP)
 
 ---
 
@@ -260,4 +301,10 @@
 - 原因1: SQLAlchemy `metadata` 保留字
 - 原因2: 移动平均检测边界条件
 - 原因3: 测试数据库隔离
-- 当前状态: 26/26 测试通过
+- 当时状态: 26/26 测试通过
+
+### 2026-02-22 Phase 3 完成 & 任务清单更新
+- Strands Multi-Agent 架构迁移全部完成 (TASK-200 ~ TASK-208)
+- 当前状态: 229/229 测试通过 (含 integration/ AWS Mock 测试)
+- 所有 P1 高优先级 Backlog 已清空
+- 下一阶段重点: 趋势图表、自定义规则UI、异常聚合

@@ -15,6 +15,18 @@ Agent-First Cloud Observability Platform for AWS.
 - **AUTH**: User authentication and API keys
 - **AUDIT**: Complete audit logging
 
+## New in v0.2.0 (2026-02-22)
+
+- **Multi-Agent Architecture** -- Migrated from LangChain to Strands Agents SDK with 6 specialized agents
+- **HealthIssue Lifecycle** -- Full issue lifecycle: open -> investigating -> root_cause_identified -> fix_planned -> fix_approved -> fix_executed -> resolved
+- **FixPlan Engine** -- Structured remediation plans with L0-L3 risk levels and approval workflow
+- **Knowledge Base** -- Vector embeddings (Titan V2) + keyword search for SOPs and case studies
+- **Network Topology** -- VPC topology analysis, blackhole route detection, SG dependency mapping
+- **React SPA Dashboard** -- Modern React + Tailwind + React Flow frontend
+- **60+ REST API Endpoints** -- Full CRUD for all models including health-issues, fix-plans, schedules, notifications
+- **Token Tracking** -- Real-time token usage display in chat (input/output/total)
+- **Animated Spinner** -- ThinkingDisplay with smooth braille animation and live elapsed time
+
 ## Quick Start
 
 ### 1. Install
@@ -364,27 +376,33 @@ aiops get resources -o wide    # Extended table with more columns
 |----------|-------------|---------|
 | `AIOPS_DATABASE_URL` | SQLite database URL | `sqlite:///data/agenticops.db` |
 | `AIOPS_BEDROCK_REGION` | AWS region for Bedrock | `us-east-1` |
-| `AIOPS_BEDROCK_MODEL_ID` | Bedrock model ID | `anthropic.claude-3-sonnet-20240229-v1:0` |
+| `AIOPS_BEDROCK_MODEL_ID` | Bedrock model ID | `global.anthropic.claude-opus-4-6-v1` |
 | `AIOPS_TABLE_STYLE` | Table border style | `default` |
+| `AIOPS_DEV_MODE` | Enable CORS dev mode (allows localhost origins) | `false` |
 | `FORCE_COLOR` | Force color output | - |
 
 ## Architecture
 
 ```
 src/agenticops/
-├── scan/       # AWS resource scanning
-├── monitor/    # CloudWatch metrics & logs
-├── detect/     # Anomaly detection
-├── analyze/    # RCA with LLM
-├── report/     # Report generation
-├── agent/      # LLM Agent orchestration
-├── pipeline/   # Workflow orchestration (NEW)
-├── scheduler/  # Cron scheduling (NEW)
-├── notify/     # Notifications (NEW)
-├── auth/       # Authentication (NEW)
-├── audit/      # Audit logging (NEW)
-├── cli/        # kubectl-style CLI + chat slash commands
-└── web/        # Web dashboard + REST API
+├── agents/    # 6 Strands agents (scan, detect, rca, sre, reporter, main)
+├── tools/     # 40+ agent tools (AWS, network, EKS, CloudWatch, KB, metadata)
+├── graph/     # Network topology graph engine + algorithms
+├── kb/        # Knowledge base (vector embeddings + keyword search)
+├── data/      # Data utilities
+├── scan/      # AWS resource scanning
+├── monitor/   # CloudWatch metrics & logs
+├── detect/    # Anomaly detection
+├── analyze/   # RCA with LLM
+├── report/    # Report generation
+├── agent/     # Base agent framework
+├── pipeline/  # Workflow orchestration
+├── scheduler/ # Cron scheduling
+├── notify/    # Notifications (Slack/Email/SNS/Webhook)
+├── auth/      # Authentication (JWT sessions + API keys)
+├── audit/     # Audit logging
+├── cli/       # kubectl-style CLI + chat (28 slash commands)
+└── web/       # FastAPI (60+ endpoints) + React SPA
 ```
 
 ## License
