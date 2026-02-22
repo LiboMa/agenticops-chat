@@ -141,6 +141,8 @@ class ThinkingDisplay:
         self.start_time = None
         self._live = None
         self._lock = threading.Lock()
+        self._spinner = None  # Persistent spinner for smooth animation
+        self._spinner_name = None
 
     def _format_duration(self, seconds: float) -> str:
         """Format duration in human-readable form."""
@@ -152,6 +154,16 @@ class ThinkingDisplay:
             mins = int(seconds // 60)
             secs = seconds % 60
             return f"{mins}m{secs:.0f}s"
+
+    class _DynamicRenderable:
+        """Wrapper that calls _build_display() on every Live refresh cycle,
+        so spinners animate and elapsed time updates in real time."""
+
+        def __init__(self, display):
+            self._display = display
+
+        def __rich_console__(self, console, options):
+            yield self._display._build_display()
 
     def _build_display(self) -> Group:
         """Build the display content."""
@@ -181,15 +193,20 @@ class ThinkingDisplay:
                 elapsed_secs = time.time() - self.start_time
                 elapsed = f" [dim]({self._format_duration(elapsed_secs)})[/dim]"
 
-            spinner = Spinner(spinner_name, text=Text.from_markup(f"[{color}]{self.current_step}[/{color}]{elapsed}"))
-            elements.append(Text("  ") + spinner.render(time.time()))
+            # Reuse persistent spinner so frame counter advances across refreshes
+            if self._spinner is None or self._spinner_name != spinner_name:
+                self._spinner = Spinner(spinner_name)
+                self._spinner_name = spinner_name
+
+            self._spinner.text = Text.from_markup(f"[{color}]{self.current_step}[/{color}]{elapsed}")
+            elements.append(self._spinner)
 
         return Group(*elements) if elements else Text("")
 
     @contextmanager
     def live_display(self):
         """Context manager for live display updates."""
-        with Live(self._build_display(), console=self.console, refresh_per_second=10, transient=False) as live:
+        with Live(self._DynamicRenderable(self), console=self.console, refresh_per_second=10, transient=False) as live:
             self._live = live
             try:
                 yield self
@@ -3156,6 +3173,18 @@ def chat(
                     result = agent(user_input)
                     response = str(result)
                     display.complete("Done")
+
+                    # Extract token usage from Strands metrics
+                    try:
+                        invocation = result.metrics.latest_agent_invocation
+                        if invocation:
+                            ctx.add_tokens(
+                                input_tokens=invocation.usage.get("inputTokens", 0),
+                                output_tokens=invocation.usage.get("outputTokens", 0),
+                            )
+                    except Exception:
+                        pass  # Don't break chat if metrics extraction fails
+
                 except Exception as e:
                     display.error(f"Error: {str(e)}")
                     response = f"Error: {str(e)}"

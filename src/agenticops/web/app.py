@@ -14,6 +14,8 @@ from agenticops.models import (
     AWSAccount,
     AWSResource,
     Anomaly,
+    HealthIssue,
+    FixPlan,
     RCAResult,
     Report,
     MonitoringConfig,
@@ -110,7 +112,7 @@ class ResourceResponse(BaseModel):
 
 class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
-    status: str = Field(..., pattern="^(open|acknowledged|resolved)$")
+    status: str = Field(..., pattern="^(open|investigating|root_cause_identified|fix_planned|fix_approved|fix_executed|resolved|acknowledged)$")
     note: Optional[str] = None
 
 
@@ -183,6 +185,226 @@ class HealthResponse(BaseModel):
     version: str
     database: str
     timestamp: datetime
+
+
+# ============================================================================
+# HealthIssue Pydantic Models
+# ============================================================================
+
+
+class HealthIssueCreate(BaseModel):
+    """Schema for creating a health issue."""
+    resource_id: str = Field(..., max_length=200)
+    severity: str = Field(..., pattern="^(critical|high|medium|low)$")
+    source: str = Field(..., max_length=50)
+    title: str = Field(..., max_length=300)
+    description: str
+    alarm_name: Optional[str] = Field(None, max_length=200)
+    metric_data: dict = Field(default_factory=dict)
+    related_changes: List = Field(default_factory=list)
+
+
+class HealthIssueUpdate(BaseModel):
+    """Schema for updating a health issue."""
+    severity: Optional[str] = Field(None, pattern="^(critical|high|medium|low)$")
+    title: Optional[str] = Field(None, max_length=300)
+    description: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(open|investigating|root_cause_identified|fix_planned|fix_approved|fix_executed|resolved)$")
+    metric_data: Optional[dict] = None
+    related_changes: Optional[List] = None
+
+
+class HealthIssueResponse(BaseModel):
+    """Schema for health issue response."""
+    id: int
+    resource_id: str
+    severity: str
+    source: str
+    title: str
+    description: str
+    alarm_name: Optional[str]
+    metric_data: dict
+    related_changes: list
+    status: str
+    detected_at: datetime
+    detected_by: str
+    resolved_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# FixPlan Pydantic Models
+# ============================================================================
+
+
+class FixPlanCreate(BaseModel):
+    """Schema for creating a fix plan."""
+    health_issue_id: int
+    rca_result_id: int
+    risk_level: str = Field(..., pattern="^(L0|L1|L2|L3)$")
+    title: str = Field(..., max_length=300)
+    summary: str
+    steps: List = Field(default_factory=list)
+    rollback_plan: dict = Field(default_factory=dict)
+    estimated_impact: str = ""
+    pre_checks: List = Field(default_factory=list)
+    post_checks: List = Field(default_factory=list)
+
+
+class FixPlanUpdate(BaseModel):
+    """Schema for updating a fix plan."""
+    risk_level: Optional[str] = Field(None, pattern="^(L0|L1|L2|L3)$")
+    title: Optional[str] = Field(None, max_length=300)
+    summary: Optional[str] = None
+    steps: Optional[List] = None
+    rollback_plan: Optional[dict] = None
+    estimated_impact: Optional[str] = None
+    pre_checks: Optional[List] = None
+    post_checks: Optional[List] = None
+    status: Optional[str] = Field(None, pattern="^(draft|pending_approval|approved|rejected)$")
+    approved_by: Optional[str] = Field(None, max_length=100)
+
+
+class FixPlanResponse(BaseModel):
+    """Schema for fix plan response."""
+    id: int
+    health_issue_id: int
+    rca_result_id: int
+    risk_level: str
+    title: str
+    summary: str
+    steps: list
+    rollback_plan: dict
+    estimated_impact: str
+    pre_checks: list
+    post_checks: list
+    status: str
+    approved_by: Optional[str]
+    approved_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# Schedule Pydantic Models
+# ============================================================================
+
+
+class ScheduleCreate(BaseModel):
+    """Schema for creating a schedule."""
+    name: str = Field(..., max_length=100)
+    pipeline_name: str = Field(..., max_length=100)
+    cron_expression: str = Field(..., max_length=100)
+    account_name: Optional[str] = Field(None, max_length=100)
+    is_enabled: bool = True
+    config: dict = Field(default_factory=dict)
+
+
+class ScheduleUpdate(BaseModel):
+    """Schema for updating a schedule."""
+    name: Optional[str] = Field(None, max_length=100)
+    pipeline_name: Optional[str] = Field(None, max_length=100)
+    cron_expression: Optional[str] = Field(None, max_length=100)
+    account_name: Optional[str] = Field(None, max_length=100)
+    is_enabled: Optional[bool] = None
+    config: Optional[dict] = None
+
+
+class ScheduleResponse(BaseModel):
+    """Schema for schedule response."""
+    id: int
+    name: str
+    pipeline_name: str
+    cron_expression: str
+    account_name: Optional[str]
+    is_enabled: bool
+    config: dict
+    last_run_at: Optional[datetime]
+    next_run_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleExecutionResponse(BaseModel):
+    """Schema for schedule execution response."""
+    id: int
+    schedule_id: int
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime]
+    duration_ms: Optional[int]
+    result: dict
+    error: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# Notification Pydantic Models
+# ============================================================================
+
+
+class NotificationChannelCreate(BaseModel):
+    """Schema for creating a notification channel."""
+    name: str = Field(..., max_length=100)
+    channel_type: str = Field(..., pattern="^(slack|email|sns|webhook)$")
+    config: dict = Field(default_factory=dict)
+    severity_filter: List[str] = Field(default_factory=list)
+    is_enabled: bool = True
+
+
+class NotificationChannelUpdate(BaseModel):
+    """Schema for updating a notification channel."""
+    name: Optional[str] = Field(None, max_length=100)
+    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|webhook)$")
+    config: Optional[dict] = None
+    severity_filter: Optional[List[str]] = None
+    is_enabled: Optional[bool] = None
+
+
+class NotificationChannelResponse(BaseModel):
+    """Schema for notification channel response."""
+    id: int
+    name: str
+    channel_type: str
+    config: dict
+    severity_filter: list
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationLogResponse(BaseModel):
+    """Schema for notification log response."""
+    id: int
+    channel_id: int
+    subject: str
+    body: str
+    severity: Optional[str]
+    status: str
+    error: Optional[str]
+    sent_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationSendRequest(BaseModel):
+    """Schema for sending a test notification."""
+    subject: str = "Test notification from AgenticOps"
+    body: str = "This is a test notification."
+    severity: Optional[str] = "low"
 
 
 # ============================================================================
@@ -406,8 +628,8 @@ async def api_stats():
     with get_db_session() as session:
         return {
             "total_resources": session.query(AWSResource).count(),
-            "open_anomalies": session.query(Anomaly).filter_by(status="open").count(),
-            "critical_anomalies": session.query(Anomaly).filter_by(severity="critical", status="open").count(),
+            "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
+            "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
             "total_accounts": session.query(AWSAccount).count(),
         }
 
@@ -528,8 +750,30 @@ async def api_get_resource(resource_id: int):
 
 
 # ============================================================================
-# Anomaly API Endpoints
+# Anomaly API Endpoints (Legacy — backed by HealthIssue)
 # ============================================================================
+
+
+def _health_issue_to_anomaly_response(issue: HealthIssue) -> AnomalyResponse:
+    """Map a HealthIssue to the legacy AnomalyResponse format."""
+    metric_data = issue.metric_data or {}
+    return AnomalyResponse(
+        id=issue.id,
+        resource_id=issue.resource_id,
+        resource_type=metric_data.get("resource_type", "unknown"),
+        region=metric_data.get("region", "unknown"),
+        anomaly_type=issue.source,
+        severity=issue.severity,
+        title=issue.title,
+        description=issue.description,
+        metric_name=metric_data.get("metric_name"),
+        expected_value=metric_data.get("expected_value"),
+        actual_value=metric_data.get("actual_value"),
+        deviation_percent=metric_data.get("deviation_percent"),
+        status=issue.status,
+        detected_at=issue.detected_at,
+        resolved_at=issue.resolved_at,
+    )
 
 
 @app.get("/api/anomalies", response_model=List[AnomalyResponse])
@@ -540,52 +784,52 @@ async def api_list_anomalies(
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
 ):
-    """List anomalies with filtering."""
+    """List anomalies (backed by HealthIssue)."""
     with get_db_session() as session:
-        query = session.query(Anomaly).order_by(Anomaly.detected_at.desc())
+        query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
 
         if severity:
             query = query.filter_by(severity=severity)
         if status:
             query = query.filter_by(status=status)
         if resource_type:
-            query = query.filter_by(resource_type=resource_type)
+            query = query.filter(
+                HealthIssue.metric_data["resource_type"].as_string() == resource_type
+            )
 
-        anomalies = query.offset(offset).limit(limit).all()
-        return [AnomalyResponse.model_validate(a) for a in anomalies]
+        issues = query.offset(offset).limit(limit).all()
+        return [_health_issue_to_anomaly_response(i) for i in issues]
 
 
 @app.get("/api/anomalies/{anomaly_id}", response_model=AnomalyResponse)
 async def api_get_anomaly(anomaly_id: int):
-    """Get anomaly by ID."""
+    """Get anomaly by ID (backed by HealthIssue)."""
     with get_db_session() as session:
-        anomaly = session.query(Anomaly).filter_by(id=anomaly_id).first()
-        if not anomaly:
+        issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
+        if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
-        return AnomalyResponse.model_validate(anomaly)
+        return _health_issue_to_anomaly_response(issue)
 
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
 async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
-    """Update anomaly status."""
+    """Update anomaly status (backed by HealthIssue)."""
     with get_db_session() as session:
-        anomaly = session.query(Anomaly).filter_by(id=anomaly_id).first()
-        if not anomaly:
+        issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
+        if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
 
-        anomaly.status = update.status
-        if update.status == "resolved":
-            anomaly.resolved_at = datetime.utcnow()
+        issue.status = update.status
+        if update.status == "resolved" and issue.resolved_at is None:
+            issue.resolved_at = datetime.utcnow()
 
         session.flush()
-        return AnomalyResponse.model_validate(anomaly)
+        return _health_issue_to_anomaly_response(issue)
 
 
 @app.get("/api/anomalies/{issue_id}/rca", response_model=Optional[RCAResponse])
 async def api_get_anomaly_rca(issue_id: int):
     """Get RCA result for a health issue (or legacy anomaly ID)."""
-    from agenticops.models import HealthIssue
-
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -602,6 +846,242 @@ async def api_get_anomaly_rca(issue_id: int):
             return None
 
         return RCAResponse.model_validate(rca)
+
+
+# ============================================================================
+# HealthIssue API Endpoints
+# ============================================================================
+
+
+@app.get("/api/health-issues", response_model=List[HealthIssueResponse])
+async def api_list_health_issues(
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = 0,
+):
+    """List health issues with filtering."""
+    with get_db_session() as session:
+        query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
+
+        if severity:
+            query = query.filter_by(severity=severity)
+        if status:
+            query = query.filter_by(status=status)
+        if resource_id:
+            query = query.filter_by(resource_id=resource_id)
+        if source:
+            query = query.filter_by(source=source)
+
+        issues = query.offset(offset).limit(limit).all()
+        return [HealthIssueResponse.model_validate(i) for i in issues]
+
+
+@app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
+async def api_get_health_issue(issue_id: int):
+    """Get health issue by ID."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+        return HealthIssueResponse.model_validate(issue)
+
+
+@app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
+async def api_create_health_issue(data: HealthIssueCreate):
+    """Create a new health issue."""
+    with get_db_session() as session:
+        issue = HealthIssue(
+            resource_id=data.resource_id,
+            severity=data.severity,
+            source=data.source,
+            title=data.title,
+            description=data.description,
+            alarm_name=data.alarm_name,
+            metric_data=data.metric_data,
+            related_changes=data.related_changes,
+        )
+        session.add(issue)
+        session.flush()
+        return HealthIssueResponse.model_validate(issue)
+
+
+@app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
+async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
+    """Update a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        # Auto-set resolved_at when status transitions to resolved
+        if update_data.get("status") == "resolved" and issue.status != "resolved":
+            update_data["resolved_at"] = datetime.utcnow()
+
+        for key, value in update_data.items():
+            setattr(issue, key, value)
+
+        session.flush()
+        return HealthIssueResponse.model_validate(issue)
+
+
+@app.delete("/api/health-issues/{issue_id}", status_code=204)
+async def api_delete_health_issue(issue_id: int):
+    """Delete a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+        session.delete(issue)
+
+
+@app.get("/api/health-issues/{issue_id}/rca", response_model=List[RCAResponse])
+async def api_list_health_issue_rca(issue_id: int):
+    """List all RCA results for a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        rcas = (
+            session.query(RCAResult)
+            .filter_by(health_issue_id=issue_id)
+            .order_by(RCAResult.created_at.desc())
+            .all()
+        )
+        return [RCAResponse.model_validate(r) for r in rcas]
+
+
+@app.get("/api/health-issues/{issue_id}/fix-plans", response_model=List[FixPlanResponse])
+async def api_list_health_issue_fix_plans(issue_id: int):
+    """List all fix plans for a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        plans = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=issue_id)
+            .order_by(FixPlan.created_at.desc())
+            .all()
+        )
+        return [FixPlanResponse.model_validate(p) for p in plans]
+
+
+# ============================================================================
+# FixPlan API Endpoints
+# ============================================================================
+
+
+@app.get("/api/fix-plans", response_model=List[FixPlanResponse])
+async def api_list_fix_plans(
+    status: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    health_issue_id: Optional[int] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = 0,
+):
+    """List fix plans with filtering."""
+    with get_db_session() as session:
+        query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
+
+        if status:
+            query = query.filter_by(status=status)
+        if risk_level:
+            query = query.filter_by(risk_level=risk_level)
+        if health_issue_id:
+            query = query.filter_by(health_issue_id=health_issue_id)
+
+        plans = query.offset(offset).limit(limit).all()
+        return [FixPlanResponse.model_validate(p) for p in plans]
+
+
+@app.get("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
+async def api_get_fix_plan(plan_id: int):
+    """Get fix plan by ID."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        return FixPlanResponse.model_validate(plan)
+
+
+@app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
+async def api_create_fix_plan(data: FixPlanCreate):
+    """Create a new fix plan."""
+    with get_db_session() as session:
+        # Validate health_issue_id exists
+        issue = session.query(HealthIssue).filter_by(id=data.health_issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=400, detail="Health issue not found")
+
+        # Validate rca_result_id exists
+        rca = session.query(RCAResult).filter_by(id=data.rca_result_id).first()
+        if not rca:
+            raise HTTPException(status_code=400, detail="RCA result not found")
+
+        plan = FixPlan(
+            health_issue_id=data.health_issue_id,
+            rca_result_id=data.rca_result_id,
+            risk_level=data.risk_level,
+            title=data.title,
+            summary=data.summary,
+            steps=data.steps,
+            rollback_plan=data.rollback_plan,
+            estimated_impact=data.estimated_impact,
+            pre_checks=data.pre_checks,
+            post_checks=data.post_checks,
+        )
+        session.add(plan)
+        session.flush()
+        return FixPlanResponse.model_validate(plan)
+
+
+@app.put("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
+async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate):
+    """Update a fix plan."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(plan, key, value)
+
+        session.flush()
+        return FixPlanResponse.model_validate(plan)
+
+
+@app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
+async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=True)):
+    """Approve a fix plan."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+
+        plan.status = "approved"
+        plan.approved_by = approved_by
+        plan.approved_at = datetime.utcnow()
+
+        session.flush()
+        return FixPlanResponse.model_validate(plan)
+
+
+@app.delete("/api/fix-plans/{plan_id}", status_code=204)
+async def api_delete_fix_plan(plan_id: int):
+    """Delete a fix plan."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        session.delete(plan)
 
 
 # ============================================================================
@@ -1000,6 +1480,294 @@ async def api_get_audit_stats(request: Request, hours: int = Query(24, le=720)):
         "logins": AuditService.count_actions(action="login", start_time=start_time),
         "login_failures": AuditService.count_actions(action="login_failed", start_time=start_time),
     }
+
+
+# ============================================================================
+# Schedule API Endpoints
+# ============================================================================
+
+
+@app.get("/api/schedules", response_model=List[ScheduleResponse])
+async def api_list_schedules():
+    """List all schedules."""
+    from agenticops.scheduler.scheduler import Schedule
+
+    with get_db_session() as session:
+        schedules = session.query(Schedule).order_by(Schedule.created_at.desc()).all()
+        return [ScheduleResponse.model_validate(s) for s in schedules]
+
+
+@app.get("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
+async def api_get_schedule(schedule_id: int):
+    """Get schedule by ID."""
+    from agenticops.scheduler.scheduler import Schedule
+
+    with get_db_session() as session:
+        schedule = session.query(Schedule).filter_by(id=schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        return ScheduleResponse.model_validate(schedule)
+
+
+@app.post("/api/schedules", response_model=ScheduleResponse, status_code=201)
+async def api_create_schedule(data: ScheduleCreate):
+    """Create a new schedule."""
+    from agenticops.scheduler.scheduler import Schedule
+
+    # Validate cron expression
+    try:
+        from croniter import croniter
+        croniter(data.cron_expression)
+    except (ImportError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}")
+
+    with get_db_session() as session:
+        existing = session.query(Schedule).filter_by(name=data.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Schedule name already exists")
+
+        schedule = Schedule(
+            name=data.name,
+            pipeline_name=data.pipeline_name,
+            cron_expression=data.cron_expression,
+            account_name=data.account_name,
+            is_enabled=data.is_enabled,
+            config=data.config,
+        )
+        session.add(schedule)
+        session.flush()
+        return ScheduleResponse.model_validate(schedule)
+
+
+@app.put("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
+async def api_update_schedule(schedule_id: int, data: ScheduleUpdate):
+    """Update a schedule."""
+    from agenticops.scheduler.scheduler import Schedule
+
+    with get_db_session() as session:
+        schedule = session.query(Schedule).filter_by(id=schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        # Validate cron if being updated
+        if "cron_expression" in update_data:
+            try:
+                from croniter import croniter
+                croniter(update_data["cron_expression"])
+            except (ImportError, ValueError) as e:
+                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}")
+
+        for key, value in update_data.items():
+            setattr(schedule, key, value)
+
+        session.flush()
+        return ScheduleResponse.model_validate(schedule)
+
+
+@app.delete("/api/schedules/{schedule_id}", status_code=204)
+async def api_delete_schedule(schedule_id: int):
+    """Delete a schedule."""
+    from agenticops.scheduler.scheduler import Schedule
+
+    with get_db_session() as session:
+        schedule = session.query(Schedule).filter_by(id=schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        session.delete(schedule)
+
+
+@app.post("/api/schedules/{schedule_id}/run", response_model=ScheduleExecutionResponse)
+async def api_run_schedule(schedule_id: int):
+    """Run a schedule immediately."""
+    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
+
+    with get_db_session() as session:
+        schedule = session.query(Schedule).filter_by(id=schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        # Create execution record
+        execution = ScheduleExecution(
+            schedule_id=schedule_id,
+            status="running",
+        )
+        session.add(execution)
+        session.flush()
+
+        # Update schedule last_run_at
+        schedule.last_run_at = datetime.utcnow()
+
+        try:
+            from agenticops.scheduler.scheduler import Scheduler
+            scheduler = Scheduler()
+            result = scheduler.run_pipeline(schedule.pipeline_name, schedule.account_name, schedule.config)
+
+            execution.status = "completed"
+            execution.completed_at = datetime.utcnow()
+            execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
+            execution.result = {"output": str(result)} if result else {}
+        except Exception as e:
+            execution.status = "failed"
+            execution.completed_at = datetime.utcnow()
+            execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
+            execution.error = str(e)
+
+        session.flush()
+        return ScheduleExecutionResponse.model_validate(execution)
+
+
+@app.get("/api/schedules/{schedule_id}/executions", response_model=List[ScheduleExecutionResponse])
+async def api_list_schedule_executions(
+    schedule_id: int,
+    limit: int = Query(default=50, le=200),
+    offset: int = 0,
+):
+    """List execution history for a schedule."""
+    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
+
+    with get_db_session() as session:
+        schedule = session.query(Schedule).filter_by(id=schedule_id).first()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        executions = (
+            session.query(ScheduleExecution)
+            .filter_by(schedule_id=schedule_id)
+            .order_by(ScheduleExecution.started_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return [ScheduleExecutionResponse.model_validate(e) for e in executions]
+
+
+# ============================================================================
+# Notification API Endpoints
+# ============================================================================
+
+
+@app.get("/api/notifications/channels", response_model=List[NotificationChannelResponse])
+async def api_list_notification_channels():
+    """List notification channels."""
+    from agenticops.notify.notifier import NotificationChannel
+
+    with get_db_session() as session:
+        channels = session.query(NotificationChannel).order_by(NotificationChannel.created_at.desc()).all()
+        return [NotificationChannelResponse.model_validate(c) for c in channels]
+
+
+@app.get("/api/notifications/channels/{channel_id}", response_model=NotificationChannelResponse)
+async def api_get_notification_channel(channel_id: int):
+    """Get notification channel by ID."""
+    from agenticops.notify.notifier import NotificationChannel
+
+    with get_db_session() as session:
+        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
+        if not channel:
+            raise HTTPException(status_code=404, detail="Notification channel not found")
+        return NotificationChannelResponse.model_validate(channel)
+
+
+@app.post("/api/notifications/channels", response_model=NotificationChannelResponse, status_code=201)
+async def api_create_notification_channel(data: NotificationChannelCreate):
+    """Create a new notification channel."""
+    from agenticops.notify.notifier import NotificationChannel
+
+    with get_db_session() as session:
+        existing = session.query(NotificationChannel).filter_by(name=data.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Channel name already exists")
+
+        channel = NotificationChannel(
+            name=data.name,
+            channel_type=data.channel_type,
+            config=data.config,
+            severity_filter=data.severity_filter,
+            is_enabled=data.is_enabled,
+        )
+        session.add(channel)
+        session.flush()
+        return NotificationChannelResponse.model_validate(channel)
+
+
+@app.put("/api/notifications/channels/{channel_id}", response_model=NotificationChannelResponse)
+async def api_update_notification_channel(channel_id: int, data: NotificationChannelUpdate):
+    """Update a notification channel."""
+    from agenticops.notify.notifier import NotificationChannel
+
+    with get_db_session() as session:
+        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
+        if not channel:
+            raise HTTPException(status_code=404, detail="Notification channel not found")
+
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(channel, key, value)
+
+        session.flush()
+        return NotificationChannelResponse.model_validate(channel)
+
+
+@app.delete("/api/notifications/channels/{channel_id}", status_code=204)
+async def api_delete_notification_channel(channel_id: int):
+    """Delete a notification channel."""
+    from agenticops.notify.notifier import NotificationChannel
+
+    with get_db_session() as session:
+        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
+        if not channel:
+            raise HTTPException(status_code=404, detail="Notification channel not found")
+        session.delete(channel)
+
+
+@app.post("/api/notifications/channels/{channel_id}/test")
+async def api_test_notification_channel(channel_id: int, data: NotificationSendRequest):
+    """Send a test notification through a channel."""
+    from agenticops.notify.notifier import NotificationChannel, NotificationLog, Notifier
+
+    with get_db_session() as session:
+        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
+        if not channel:
+            raise HTTPException(status_code=404, detail="Notification channel not found")
+
+        try:
+            notifier = Notifier()
+            notifier.send(
+                channel_id=channel_id,
+                subject=data.subject,
+                body=data.body,
+                severity=data.severity,
+            )
+            return {"status": "sent", "channel": channel.name}
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"status": "failed", "channel": channel.name, "error": str(e)},
+            )
+
+
+@app.get("/api/notifications/logs", response_model=List[NotificationLogResponse])
+async def api_list_notification_logs(
+    channel_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = 0,
+):
+    """List notification logs."""
+    from agenticops.notify.notifier import NotificationLog
+
+    with get_db_session() as session:
+        query = session.query(NotificationLog).order_by(NotificationLog.sent_at.desc())
+
+        if channel_id:
+            query = query.filter_by(channel_id=channel_id)
+        if status:
+            query = query.filter_by(status=status)
+
+        logs = query.offset(offset).limit(limit).all()
+        return [NotificationLogResponse.model_validate(log) for log in logs]
 
 
 # ============================================================================
