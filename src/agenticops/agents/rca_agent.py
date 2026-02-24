@@ -45,6 +45,7 @@ from agenticops.graph.tools import (
     find_network_path,
     detect_network_anomalies,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,8 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    - Create a fix plan with step-by-step remediation.
    - Assess fix risk level: low, medium, high, or critical.
 8. SAVE: Call save_rca_result with all findings.
+8.5. EXTENDED INVESTIGATION: Use run_aws_cli_readonly for services not covered
+     by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 
 CONFIDENCE SCORING:
 - 0.9-1.0: Clear evidence from CloudTrail + metrics confirming root cause
@@ -167,6 +170,8 @@ def rca_agent(issue_id: int) -> str:
                 query_impact_radius,
                 find_network_path,
                 detect_network_anomalies,
+                # Generic AWS CLI (read-only fallback)
+                run_aws_cli_readonly,
             ],
         )
 

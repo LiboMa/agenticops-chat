@@ -22,6 +22,7 @@ from agenticops.tools.aws_tools import (
     list_sqs,
     list_sns,
 )
+from agenticops.tools.eks_tools import describe_eks_clusters
 from agenticops.tools.network_tools import (
     describe_vpcs,
     describe_subnets,
@@ -30,11 +31,13 @@ from agenticops.tools.network_tools import (
     describe_nat_gateways,
     describe_transit_gateways,
     describe_load_balancers,
+    describe_region_topology,
 )
 from agenticops.tools.metadata_tools import (
     get_active_account,
     save_resources,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,8 @@ RULES:
 - When services='all', scan: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPC, Subnet, SecurityGroup, NATGateway, TransitGateway, ELB, RouteTable.
 - When regions='all', use the regions from the account configuration.
 - Always call save_resources at the end to persist discovered resources.
+- run_aws_cli_readonly: Fallback for querying AWS services not covered by specialized tools.
+  Only read-only commands accepted. Prefer specialized tools when available.
 """
 
 
@@ -86,6 +91,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
                 list_s3_buckets,
                 describe_ecs,
                 describe_eks,
+                describe_eks_clusters,
                 list_dynamodb,
                 list_sqs,
                 list_sns,
@@ -97,9 +103,12 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
                 describe_nat_gateways,
                 describe_transit_gateways,
                 describe_load_balancers,
+                describe_region_topology,
                 # Metadata
                 save_resources,
                 get_active_account,
+                # Generic AWS CLI (read-only fallback)
+                run_aws_cli_readonly,
             ],
         )
 

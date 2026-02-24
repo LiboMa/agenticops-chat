@@ -48,6 +48,7 @@ from agenticops.graph.tools import (
     find_network_path,
     detect_network_anomalies,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,8 @@ RULES:
 - Always include rollback plans for L2+ fixes.
 - Reference SOP steps when available.
 - Be specific: use actual resource IDs, exact CLI commands, specific parameter values.
+- run_aws_cli_readonly: Fallback for investigating services not covered by specialized tools.
+  Aligns with READ-ONLY mandate. Only read-only commands accepted.
 """
 
 
@@ -151,6 +154,8 @@ def sre_agent(issue_id: int) -> str:
                 query_impact_radius,
                 find_network_path,
                 detect_network_anomalies,
+                # Generic AWS CLI (read-only fallback)
+                run_aws_cli_readonly,
             ],
         )
 

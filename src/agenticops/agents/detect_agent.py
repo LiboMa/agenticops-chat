@@ -14,7 +14,10 @@ from agenticops.tools.aws_tools import assume_role
 from agenticops.tools.network_tools import (
     describe_nat_gateways,
     describe_load_balancers,
+    describe_region_topology,
+    analyze_vpc_topology,
 )
+from agenticops.tools.eks_tools import map_eks_to_vpc_topology
 from agenticops.tools.cloudwatch_tools import (
     list_alarms,
     get_alarm_history,
@@ -31,6 +34,7 @@ from agenticops.tools.detect_tools import (
     run_zscore_detection,
     run_rule_evaluation,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +53,14 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
    - Call query_logs for recent error patterns.
    - Call lookup_cloudtrail_events for recent changes to this resource.
 5. NETWORK HEALTH CHECKS:
+   - Call analyze_vpc_topology for each VPC to detect blackhole routes, isolated subnets,
+     and SG dependency issues. Check reachability_summary.issues for problems.
    - Call describe_nat_gateways to check NAT Gateway state and CloudWatch metrics
      (ErrorPortAllocation, PacketsDropCount are key failure signals).
    - Call describe_load_balancers to check target health — UnHealthyHostCount > 0
      is a top-3 root cause signal. Create HealthIssue for unhealthy targets.
+   - For EKS workloads: call map_eks_to_vpc_topology to detect topology issues
+     (e.g., private subnets without NAT gateway coverage).
 6. STATISTICAL DETECTION (use when deep=True or when alarms are missing):
    - After getting metrics via get_metrics, pass the values to run_zscore_detection
      to identify statistical anomalies that CloudWatch alarms might not catch.
@@ -72,6 +80,8 @@ RULES:
 - Always include related_changes (CloudTrail) in HealthIssue records when available.
 - Do NOT call LLM for simple alarm state checks - use tools directly.
 - Return a structured summary: total resources checked, alarms found, issues created.
+- run_aws_cli_readonly: Fallback for querying AWS services not covered by specialized tools.
+  Only read-only commands accepted. Prefer specialized tools when available.
 """
 
 
@@ -111,6 +121,11 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 # Network health tools
                 describe_nat_gateways,
                 describe_load_balancers,
+                describe_region_topology,
+                analyze_vpc_topology,
+                map_eks_to_vpc_topology,
+                # Generic AWS CLI (read-only fallback)
+                run_aws_cli_readonly,
             ],
         )
 
