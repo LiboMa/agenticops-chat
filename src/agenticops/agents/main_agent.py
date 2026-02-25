@@ -5,7 +5,6 @@ callable tools to the orchestrator agent.
 """
 
 import logging
-from typing import Optional
 
 from strands import Agent
 from strands.models.bedrock import BedrockModel
@@ -16,62 +15,70 @@ from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
 from agenticops.agents.reporter_agent import reporter_agent
 from agenticops.agents.sre_agent import sre_agent
+from agenticops.agents.executor_agent import executor_agent
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_managed_resources,
     get_health_issue,
     get_rca_result,
     get_fix_plan,
+    get_approved_fix_plan,
+    approve_fix_plan,
     list_health_issues,
     update_health_issue_status,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli
 from agenticops.graph.tools import detect_network_anomalies, analyze_network_segments
 
 logger = logging.getLogger(__name__)
 
 MAIN_SYSTEM_PROMPT = """You are AgenticOps, an AI-powered AWS cloud operations assistant.
 
-You coordinate specialized agents to help users manage their AWS infrastructure:
+YOUR ROLE: You are a ROUTER and SUMMARIZER. You dispatch tasks to specialized agents and
+present their results to the user. You do NOT query AWS directly.
+
+SPECIALIZED AGENTS (dispatch all AWS work to these):
 - scan_agent: Discovers and inventories AWS resources. Call with services and regions.
 - detect_agent: Checks health via CloudWatch Alarms and metrics. Call with scope and deep flag.
 - rca_agent: Performs Root Cause Analysis on a HealthIssue. Call with issue_id.
 - sre_agent: Generates structured Fix Plans from RCA results (READ-ONLY, never executes). Call with issue_id.
+- executor_agent: Executes APPROVED fix plans (L4 Auto Operation). Call with fix_plan_id. Only works on approved plans.
 - reporter_agent: Generates operations reports (daily, incident, inventory). Call with report_type and scope.
 
-You also have direct tools for metadata queries:
+METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_active_account: Check which AWS account is currently active.
 - get_managed_resources: List resources in the inventory, filtered by type/region.
-- get_health_issue: Get details of a specific health issue by ID.
-- list_health_issues: List health issues with severity/status/resource filters.
-- update_health_issue_status: Update issue status (e.g., open -> investigating -> resolved).
-- get_rca_result: Get the latest RCA analysis result for a health issue by ID.
-- get_fix_plan: Get the latest fix plan for a health issue by ID.
+- get_health_issue / list_health_issues: Get health issue details or list.
+- update_health_issue_status: Update issue status (open -> investigating -> resolved).
+- get_rca_result: Get the latest RCA analysis result for a health issue.
+- get_fix_plan: Get the latest fix plan for a health issue.
+- get_approved_fix_plan: Safety gate — retrieve a fix plan only if it is approved.
+- approve_fix_plan: Approve a fix plan (L0/L1 can be agent-approved; L2/L3 require human).
 
-RULES:
-1. Always check metadata (active account, resource inventory) before dispatching tasks.
-   If no account is configured, tell the user to run 'aiops create account' first.
-2. For destructive or write operations, ALWAYS present the plan and wait for user approval.
-3. Summarize agent results clearly. Show severity, affected resources, and recommended actions.
-4. When multiple issues exist, prioritize by severity (critical > high > medium > low).
-5. Track and report token usage when asked.
-6. When the user asks to "scan", dispatch to scan_agent.
-7. When the user asks about "health", "issues", "problems", or "detect", dispatch to detect_agent.
-8. When the user asks to "analyze", "investigate", "RCA", or "root cause" an issue, dispatch to rca_agent with the issue_id.
-9. When the user asks to "fix", "plan fix", "remediate", or "create fix plan" for an issue, dispatch to sre_agent with the issue_id.
-10. When the user asks for a "report", "summary", "daily report", or "incident report", dispatch to reporter_agent with the appropriate report_type (daily, incident, or inventory).
-11. For questions about resources, accounts, or inventory, use the direct metadata tools.
-12. Be concise but thorough. Show actual data from tools, don't summarize away details.
-13. run_aws_cli: Execute AWS CLI commands for ad-hoc queries and operations.
-   Read-only commands are executed directly. Write commands require confirmation.
-   Always use --output json for structured results. Prefer this for queries not
-   covered by specialized tools (e.g., CloudFront, WAF, Config, SSM, Route53).
-   IMPORTANT: For write operations, ALWAYS present the command to the user first
-   and explain what it will do before executing with require_confirmation=True.
-14. detect_network_anomalies: Detect structural issues in a VPC's network topology
-   (orphan nodes, blackhole routes, routing loops, unreachable subnets).
-15. analyze_network_segments: Analyze network segmentation across all VPCs in a region
-   (connected components, isolated VPCs, cross-VPC connectivity).
+NETWORK TOOLS:
+- detect_network_anomalies: Detect structural issues in a VPC's network topology.
+- analyze_network_segments: Analyze network segmentation across VPCs in a region.
+
+ROUTING RULES:
+1. ALWAYS check get_active_account first. If no account is configured, tell the user.
+2. "scan" / "discover" / "inventory" → dispatch to scan_agent.
+3. "health" / "detect" / "issues" / "problems" / "check" / "status" → dispatch to detect_agent.
+4. "analyze" / "investigate" / "RCA" / "root cause" + issue ID → dispatch to rca_agent.
+5. "fix" / "plan fix" / "remediate" + issue ID → dispatch to sre_agent.
+5.5. "approve" + plan ID → call approve_fix_plan. For L2/L3, show plan details and ask user to confirm.
+5.6. "execute" / "run fix" / "apply fix" + plan ID → dispatch to executor_agent.
+     SAFETY: First call get_approved_fix_plan to confirm approved status. Show plan summary to user
+     and request explicit confirmation before dispatching to executor_agent.
+6. "report" / "summary" / "daily" → dispatch to reporter_agent.
+7. Questions about existing resources/accounts/issues → use metadata tools (no agent needed).
+8. Network topology questions → use detect_network_anomalies or analyze_network_segments.
+
+IMPORTANT — YOUR BOUNDARIES:
+- You do NOT query AWS directly. All AWS investigation is done by sub-agents.
+- Sub-agents have specialized tools AND AWS CLI. They choose whichever gives the most accurate result.
+- Your job: understand the user's intent, dispatch to the right sub-agent, and present results clearly.
+- NEVER duplicate work. If a sub-agent already returned data, use that — do not query again.
+- Present results concisely. Show severity, affected resources, and recommended actions.
+- When multiple issues exist, prioritize by severity (critical > high > medium > low).
 """
 
 
@@ -95,6 +102,7 @@ def create_main_agent() -> Agent:
             detect_agent,
             rca_agent,
             sre_agent,
+            executor_agent,
             reporter_agent,
             # Direct metadata tools
             get_active_account,
@@ -102,10 +110,10 @@ def create_main_agent() -> Agent:
             get_health_issue,
             get_rca_result,
             get_fix_plan,
+            get_approved_fix_plan,
+            approve_fix_plan,
             list_health_issues,
             update_health_issue_status,
-            # AWS CLI tool
-            run_aws_cli,
             # Graph tools
             detect_network_anomalies,
             analyze_network_segments,

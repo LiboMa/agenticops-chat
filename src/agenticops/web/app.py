@@ -14,6 +14,7 @@ from agenticops.models import (
     AWSAccount,
     AWSResource,
     Anomaly,
+    FixExecution,
     HealthIssue,
     FixPlan,
     RCAResult,
@@ -263,7 +264,7 @@ class FixPlanUpdate(BaseModel):
     estimated_impact: Optional[str] = None
     pre_checks: Optional[List] = None
     post_checks: Optional[List] = None
-    status: Optional[str] = Field(None, pattern="^(draft|pending_approval|approved|rejected)$")
+    status: Optional[str] = Field(None, pattern="^(draft|pending_approval|approved|executing|executed|failed|rejected)$")
     approved_by: Optional[str] = Field(None, max_length=100)
 
 
@@ -283,6 +284,27 @@ class FixPlanResponse(BaseModel):
     status: str
     approved_by: Optional[str]
     approved_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FixExecutionResponse(BaseModel):
+    """Schema for fix execution response."""
+    id: int
+    fix_plan_id: int
+    health_issue_id: int
+    status: str
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    executed_by: str
+    pre_check_results: list
+    step_results: list
+    post_check_results: list
+    rollback_results: list
+    error_message: Optional[str]
+    duration_ms: int
     created_at: datetime
 
     class Config:
@@ -1060,15 +1082,36 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate):
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
 async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=True)):
-    """Approve a fix plan."""
+    """Approve a fix plan with risk-level enforcement.
+
+    L2/L3 plans require human approval — agent: prefixed approvers are rejected.
+    Already approved or rejected plans return 400.
+    """
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
 
+        if plan.status == "approved":
+            raise HTTPException(status_code=400, detail="Fix plan is already approved")
+        if plan.status == "rejected":
+            raise HTTPException(status_code=400, detail="Fix plan was rejected. Create a new plan instead")
+
+        # L2/L3 risk gate: reject agent-initiated approvals
+        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
+            raise HTTPException(
+                status_code=403,
+                detail=f"L2/L3 fix plans require human approval. Agent '{approved_by}' cannot approve risk level {plan.risk_level}",
+            )
+
         plan.status = "approved"
         plan.approved_by = approved_by
         plan.approved_at = datetime.utcnow()
+
+        # Sync HealthIssue status
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        if issue:
+            issue.status = "fix_approved"
 
         session.flush()
         return FixPlanResponse.model_validate(plan)
@@ -1082,6 +1125,99 @@ async def api_delete_fix_plan(plan_id: int):
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
         session.delete(plan)
+
+
+# ============================================================================
+# Fix Execution API Endpoints (L4 Auto Operation)
+# ============================================================================
+
+
+@app.post("/api/fix-plans/{plan_id}/execute", response_model=FixExecutionResponse, status_code=202)
+async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="api_user", embed=True)):
+    """Trigger execution of an approved fix plan.
+
+    Creates a FixExecution record in 'pending' status. The actual execution
+    is handled asynchronously by the executor agent.
+    """
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+
+        if plan.status != "approved":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Fix plan status is '{plan.status}', must be 'approved' to execute",
+            )
+
+        if not settings.executor_enabled:
+            raise HTTPException(
+                status_code=403,
+                detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
+            )
+
+        # Mark plan as executing
+        plan.status = "executing"
+
+        execution = FixExecution(
+            fix_plan_id=plan_id,
+            health_issue_id=plan.health_issue_id,
+            status="pending",
+            executed_by=executed_by,
+        )
+        session.add(execution)
+        session.flush()
+        return FixExecutionResponse.model_validate(execution)
+
+
+@app.get("/api/fix-executions", response_model=List[FixExecutionResponse])
+async def api_list_fix_executions(
+    fix_plan_id: Optional[int] = None,
+    health_issue_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = 0,
+):
+    """List fix executions with optional filters."""
+    with get_db_session() as session:
+        query = session.query(FixExecution).order_by(FixExecution.created_at.desc())
+
+        if fix_plan_id is not None:
+            query = query.filter_by(fix_plan_id=fix_plan_id)
+        if health_issue_id is not None:
+            query = query.filter_by(health_issue_id=health_issue_id)
+        if status:
+            query = query.filter_by(status=status)
+
+        executions = query.offset(offset).limit(limit).all()
+        return [FixExecutionResponse.model_validate(e) for e in executions]
+
+
+@app.get("/api/fix-executions/{execution_id}", response_model=FixExecutionResponse)
+async def api_get_fix_execution(execution_id: int):
+    """Get a specific fix execution with step-level results."""
+    with get_db_session() as session:
+        execution = session.query(FixExecution).filter_by(id=execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail="Fix execution not found")
+        return FixExecutionResponse.model_validate(execution)
+
+
+@app.get("/api/health-issues/{issue_id}/executions", response_model=List[FixExecutionResponse])
+async def api_list_issue_executions(issue_id: int):
+    """List all fix executions for a specific health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        executions = (
+            session.query(FixExecution)
+            .filter_by(health_issue_id=issue_id)
+            .order_by(FixExecution.created_at.desc())
+            .all()
+        )
+        return [FixExecutionResponse.model_validate(e) for e in executions]
 
 
 # ============================================================================

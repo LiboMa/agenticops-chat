@@ -103,6 +103,24 @@ class Settings(BaseSettings):
         description="Directory for Strands session files",
     )
 
+    # Executor settings (L4 Auto Operation)
+    executor_enabled: bool = Field(
+        default=False,
+        description="Enable fix execution (AIOPS_EXECUTOR_ENABLED=true to enable)",
+    )
+    executor_auto_approve_l0_l1: bool = Field(
+        default=True,
+        description="Auto-approve L0/L1 fix plans for execution",
+    )
+    executor_step_timeout: int = Field(
+        default=300,
+        description="Per-step execution timeout in seconds (default 5 min)",
+    )
+    executor_total_timeout: int = Field(
+        default=1800,
+        description="Total execution timeout in seconds (default 30 min)",
+    )
+
     def ensure_dirs(self) -> None:
         """Ensure all required directories exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)

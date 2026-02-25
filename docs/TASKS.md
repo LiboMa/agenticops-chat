@@ -349,3 +349,42 @@
 - 当前状态: 229/229 测试通过 (含 integration/ AWS Mock 测试)
 - 所有 P1 高优先级 Backlog 已清空
 - 下一阶段重点: 趋势图表、自定义规则UI、异常聚合
+
+---
+
+## 3. L4 Auto Operation (TASK-400 系列)
+
+### 3.1 核心实现
+
+| ID | 任务 | 状态 | 依赖 |
+|----|------|------|------|
+| TASK-400 | FixExecution 数据模型 + FixPlan status 扩展 | ✅ | -- |
+| TASK-401 | 4 个新 metadata tools (get_approved_fix_plan 等) | ✅ | TASK-400 |
+| TASK-402 | Config 扩展 (executor_enabled 等) | ✅ | -- |
+| TASK-403 | Executor Agent 实现 | ✅ | TASK-401, 402 |
+| TASK-404 | API 审批端点修复 (L2/L3 风险检查) | ✅ | -- |
+| TASK-405 | Main Agent 集成 (路由 + tools) | ✅ | TASK-403 |
+| TASK-406 | API 端点 (execute + fix-executions CRUD) | ✅ | TASK-400 |
+| TASK-407 | agents/__init__.py 导出 | ✅ | TASK-403 |
+| TASK-408 | 设计文档更新 (DESIGN.md + TASKS.md) | ✅ | -- |
+| TASK-409 | 单元测试 | ⏳ | TASK-400~407 |
+| TASK-410 | 集成测试 (端到端闭环) | ⏳ | TASK-409 |
+
+### 3.2 变更文件清单
+
+| 文件 | 操作 |
+|------|------|
+| `src/agenticops/models.py` | 编辑 — 新增 FixExecution 模型，扩展 FixPlan status |
+| `src/agenticops/tools/metadata_tools.py` | 编辑 — 新增 4 个执行相关工具 |
+| `src/agenticops/agents/executor_agent.py` | **新建** — Executor Agent (L4) |
+| `src/agenticops/agents/main_agent.py` | 编辑 — 集成 executor，新增路由规则 |
+| `src/agenticops/agents/__init__.py` | 编辑 — 导出 executor_agent |
+| `src/agenticops/web/app.py` | 编辑 — 审批修复 + 4 个新端点 |
+| `src/agenticops/config.py` | 编辑 — 新增 executor 配置项 |
+
+### 2026-02-25 L4 Auto Operation 实现
+- FixExecution 模型新增，跟踪执行步骤级结果
+- Executor Agent 实现 7 步执行协议
+- API 审批端点修复 L2/L3 风险检查 bug
+- 4 个新 API 端点: execute, fix-executions CRUD
+- 总开关 AIOPS_EXECUTOR_ENABLED 默认关闭

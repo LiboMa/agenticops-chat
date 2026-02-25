@@ -304,6 +304,7 @@ class HealthIssue(Base):
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
     fix_plans: Mapped[list["FixPlan"]] = relationship(back_populates="health_issue")
+    fix_executions: Mapped[list["FixExecution"]] = relationship(back_populates="health_issue")
 
 
 # ============================================================================
@@ -328,7 +329,7 @@ class FixPlan(Base):
     pre_checks: Mapped[list] = mapped_column(JSON, default=list)
     post_checks: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default="draft")
-    # Lifecycle: draft -> pending_approval -> approved -> rejected
+    # Lifecycle: draft -> pending_approval -> approved -> executing -> executed | failed | rejected
     approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -336,6 +337,42 @@ class FixPlan(Base):
     # Relationships
     health_issue: Mapped["HealthIssue"] = relationship(back_populates="fix_plans")
     rca_result: Mapped["RCAResult"] = relationship()
+    fix_executions: Mapped[list["FixExecution"]] = relationship(back_populates="fix_plan")
+
+
+# ============================================================================
+# Fix Execution (Executor Agent)
+# ============================================================================
+
+
+class FixExecution(Base):
+    """Execution record for an approved fix plan."""
+
+    __tablename__ = "fix_executions"
+    __table_args__ = (
+        Index("idx_fix_exec_status", "status"),
+        Index("idx_fix_exec_plan", "fix_plan_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fix_plan_id: Mapped[int] = mapped_column(ForeignKey("fix_plans.id"))
+    health_issue_id: Mapped[int] = mapped_column(ForeignKey("health_issues.id"))
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    # Lifecycle: pending -> running -> succeeded | failed | rolled_back | aborted
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    executed_by: Mapped[str] = mapped_column(String(100), default="executor_agent")
+    pre_check_results: Mapped[list] = mapped_column(JSON, default=list)
+    step_results: Mapped[list] = mapped_column(JSON, default=list)
+    post_check_results: Mapped[list] = mapped_column(JSON, default=list)
+    rollback_results: Mapped[list] = mapped_column(JSON, default=list)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    fix_plan: Mapped["FixPlan"] = relationship(back_populates="fix_executions")
+    health_issue: Mapped["HealthIssue"] = relationship(back_populates="fix_executions")
 
 
 # ============================================================================

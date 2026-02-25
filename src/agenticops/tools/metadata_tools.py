@@ -12,6 +12,7 @@ from strands import tool
 from agenticops.models import (
     AWSAccount,
     AWSResource,
+    FixExecution,
     FixPlan,
     HealthIssue,
     RCAResult,
@@ -725,5 +726,217 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     except Exception as e:
         session.rollback()
         return f"Error approving fix plan: {e}"
+    finally:
+        session.close()
+
+
+# ============================================================================
+# Executor tools (L4 Auto Operation)
+# ============================================================================
+
+
+@tool
+def get_approved_fix_plan(fix_plan_id: int) -> str:
+    """Safety gate: retrieve a fix plan ONLY if its status is 'approved'.
+
+    This is the mandatory first step before execution. Returns full plan
+    details needed for execution, or rejects with an explanation.
+
+    Args:
+        fix_plan_id: The FixPlan ID to retrieve.
+
+    Returns:
+        JSON object with full plan details if approved, or rejection message.
+    """
+    session = get_session()
+    try:
+        plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
+        if not plan:
+            return f"REJECTED: FixPlan #{fix_plan_id} not found."
+
+        if plan.status != "approved":
+            return (
+                f"REJECTED: FixPlan #{fix_plan_id} status is '{plan.status}', not 'approved'. "
+                f"Only approved plans can be executed."
+            )
+
+        return json.dumps({
+            "id": plan.id,
+            "health_issue_id": plan.health_issue_id,
+            "rca_result_id": plan.rca_result_id,
+            "risk_level": plan.risk_level,
+            "title": plan.title,
+            "summary": plan.summary,
+            "steps": plan.steps,
+            "rollback_plan": plan.rollback_plan,
+            "estimated_impact": plan.estimated_impact,
+            "pre_checks": plan.pre_checks,
+            "post_checks": plan.post_checks,
+            "status": plan.status,
+            "approved_by": plan.approved_by,
+            "approved_at": str(plan.approved_at) if plan.approved_at else None,
+            "created_at": str(plan.created_at),
+        }, default=str)
+    finally:
+        session.close()
+
+
+@tool
+def save_execution_result(
+    fix_plan_id: int,
+    health_issue_id: int,
+    status: str,
+    step_results: str = "[]",
+    pre_check_results: str = "[]",
+    post_check_results: str = "[]",
+    rollback_results: str = "[]",
+    error_message: str = "",
+    duration_ms: int = 0,
+    executed_by: str = "executor_agent",
+) -> str:
+    """Create a FixExecution record and update FixPlan status.
+
+    Args:
+        fix_plan_id: The FixPlan ID that was executed.
+        health_issue_id: The HealthIssue ID associated with the plan.
+        status: Execution outcome: succeeded, failed, rolled_back, or aborted.
+        step_results: JSON array of per-step results [{step_index, command, status, output, duration_ms}].
+        pre_check_results: JSON array of pre-check outcomes.
+        post_check_results: JSON array of post-check outcomes.
+        rollback_results: JSON array of rollback step outcomes (if applicable).
+        error_message: Error description if execution failed.
+        duration_ms: Total execution time in milliseconds.
+        executed_by: Identifier of who/what executed the plan.
+
+    Returns:
+        Confirmation with the new FixExecution ID.
+    """
+    valid_statuses = {"succeeded", "failed", "rolled_back", "aborted"}
+    if status not in valid_statuses:
+        return f"Invalid execution status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
+
+    def _parse_json(val, fallback):
+        try:
+            return json.loads(val) if isinstance(val, str) else val
+        except json.JSONDecodeError:
+            return fallback
+
+    session = get_session()
+    try:
+        plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
+        if not plan:
+            return f"FixPlan #{fix_plan_id} not found."
+
+        execution = FixExecution(
+            fix_plan_id=fix_plan_id,
+            health_issue_id=health_issue_id,
+            status=status,
+            started_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+            executed_by=executed_by,
+            pre_check_results=_parse_json(pre_check_results, []),
+            step_results=_parse_json(step_results, []),
+            post_check_results=_parse_json(post_check_results, []),
+            rollback_results=_parse_json(rollback_results, []),
+            error_message=error_message or None,
+            duration_ms=duration_ms,
+        )
+        session.add(execution)
+
+        # Update FixPlan status
+        if status == "succeeded":
+            plan.status = "executed"
+        elif status in ("failed", "rolled_back"):
+            plan.status = "failed"
+        # aborted -> keep approved (allow retry)
+
+        session.commit()
+
+        return (
+            f"FixExecution #{execution.id} saved for FixPlan #{fix_plan_id}. "
+            f"Status: {status}. FixPlan status updated to '{plan.status}'."
+        )
+    except Exception as e:
+        session.rollback()
+        return f"Error saving execution result: {e}"
+    finally:
+        session.close()
+
+
+@tool
+def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
+    """Mark a HealthIssue as fix_executed after successful execution.
+
+    Transitions HealthIssue status to 'fix_executed' and records the execution reference.
+
+    Args:
+        health_issue_id: The HealthIssue ID to update.
+        execution_id: The FixExecution ID that completed successfully.
+
+    Returns:
+        Confirmation of the status update.
+    """
+    session = get_session()
+    try:
+        issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if not issue:
+            return f"HealthIssue #{health_issue_id} not found."
+
+        execution = session.query(FixExecution).filter_by(id=execution_id).first()
+        if not execution:
+            return f"FixExecution #{execution_id} not found."
+
+        old_status = issue.status
+        issue.status = "fix_executed"
+        session.commit()
+
+        return (
+            f"HealthIssue #{health_issue_id} status: {old_status} -> fix_executed. "
+            f"Execution #{execution_id} recorded."
+        )
+    except Exception as e:
+        session.rollback()
+        return f"Error marking fix executed: {e}"
+    finally:
+        session.close()
+
+
+@tool
+def mark_fix_failed(health_issue_id: int, execution_id: int, reason: str = "") -> str:
+    """Record that a fix execution failed. Keeps HealthIssue in fix_approved state to allow retry.
+
+    Args:
+        health_issue_id: The HealthIssue ID.
+        execution_id: The FixExecution ID that failed.
+        reason: Brief description of why execution failed.
+
+    Returns:
+        Confirmation message.
+    """
+    session = get_session()
+    try:
+        issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if not issue:
+            return f"HealthIssue #{health_issue_id} not found."
+
+        execution = session.query(FixExecution).filter_by(id=execution_id).first()
+        if not execution:
+            return f"FixExecution #{execution_id} not found."
+
+        # Keep status at fix_approved so a retry or new plan is possible
+        if issue.status != "fix_approved":
+            issue.status = "fix_approved"
+            session.commit()
+
+        msg = (
+            f"HealthIssue #{health_issue_id} remains in 'fix_approved' (retry allowed). "
+            f"Execution #{execution_id} failed"
+        )
+        if reason:
+            msg += f": {reason}"
+        return msg
+    except Exception as e:
+        session.rollback()
+        return f"Error marking fix failed: {e}"
     finally:
         session.close()

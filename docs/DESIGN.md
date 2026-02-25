@@ -686,3 +686,65 @@ Datadog     ──→ PagerDuty    ──→ Webhook ──→ AgenticOps
 CloudWatch  ──→ SNS          ──→ Webhook ──→ AgenticOps
 ```
 此时 Provider 仍用于调查阶段的深度查询，Webhook 仅用于被动接收告警事件。
+
+---
+
+## L4 Auto Operation (自动修复执行)
+
+### 架构概览
+
+L4 层补齐了 HealthIssue 生命周期中 `fix_approved → fix_executed → resolved` 的自动化闭环。
+核心原则：**人工审批后自动执行，全程可审计**。
+
+```
+                          Human Approval (L2/L3)
+                                  |
+detect_agent --> rca_agent --> sre_agent --> approve --> executor_agent
+  (L2)           (L3)          (L3)         (gateway)      (L4)
+  |               |              |              |              |
+  v               v              v              v              v
+HealthIssue    RCAResult      FixPlan      FixPlan        FixExecution
+ (open)     (investigating) (fix_planned)  (approved)    (fix_executed)
+                                                              |
+                                                              v
+                                                         HealthIssue
+                                                         (resolved)
+```
+
+### 新增组件
+
+| 组件 | 文件 | 用途 |
+|------|------|------|
+| FixExecution 模型 | `models.py` | 记录每次执行的详细结果（步骤级追踪） |
+| Executor Agent | `agents/executor_agent.py` | 读取已审批 FixPlan，按步骤执行 AWS 操作 |
+| Metadata Tools | `tools/metadata_tools.py` | `get_approved_fix_plan`, `save_execution_result`, `mark_fix_executed`, `mark_fix_failed` |
+| 配置项 | `config.py` | `executor_enabled` (默认关闭), `executor_step_timeout`, `executor_total_timeout` |
+| API 端点 | `web/app.py` | 执行触发、执行记录查询、审批风险检查修复 |
+
+### 执行协议（7 步）
+
+1. **VERIFY** — `get_approved_fix_plan` 确认 status=approved
+2. **GATE** — 检查 `executor_enabled` 配置
+3. **PRE-CHECK** — 逐项验证前置条件（只读工具）
+4. **EXECUTE** — 按 plan.steps 顺序执行（`run_aws_cli`）
+5. **POST-CHECK** — 验证修复效果（只读工具）
+6. **ROLLBACK** — 仅失败时按 rollback_plan 反向执行
+7. **FINALIZE** — 记录结果，更新 HealthIssue 状态
+
+### 安全规则
+
+- 绝不执行未审批的计划
+- 绝不跳过 pre-check
+- 每步都记录结果（审计追踪）
+- 失败必须尝试回滚
+- L2/L3 审批端点拒绝 agent: 前缀的审批者
+- 总开关 `AIOPS_EXECUTOR_ENABLED` 默认关闭
+
+### 风险分级审批策略
+
+| 等级 | 审批方式 | 示例 |
+|------|----------|------|
+| L0 | 自动审批 | 只读验证（确认指标恢复） |
+| L1 | 自动审批 | 低风险配置变更（调整告警阈值） |
+| L2 | 人工审批 | 服务影响变更（调整实例大小） |
+| L3 | 人工审批 | 高风险变更（重启服务、故障转移） |
