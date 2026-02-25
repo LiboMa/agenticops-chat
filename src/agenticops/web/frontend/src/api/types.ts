@@ -352,3 +352,12 @@ export interface AnomalyReport {
   anomalies: AnomalyItem[];
   summary: string;
 }
+
+/* ------------------------------------------------------------------ */
+/*  AWS Regions                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface AwsRegion {
+  code: string;
+  name: string;
+}

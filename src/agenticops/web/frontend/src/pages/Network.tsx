@@ -10,6 +10,7 @@ import { BlackholeAlert } from "@/components/network/BlackholeAlert";
 import { SgDependencyMap } from "@/components/network/SgDependencyMap";
 import { useVpcs } from "@/hooks/useVpcs";
 import { useVpcTopology } from "@/hooks/useVpcTopology";
+import { useRegions } from "@/hooks/useRegions";
 import { useVpcGraph, useRegionGraph, useVpcAnomalies, useSubnetReachability } from "@/hooks/useGraphTopology";
 import type { AnomalyItem } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -29,6 +30,7 @@ export default function Network() {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [selectedSubnetId, setSelectedSubnetId] = useState<string | null>(null);
 
+  const regionsQuery = useRegions();
   const vpcs = useVpcs(region);
   const topology = useVpcTopology(region, vpcId);
   const vpcGraph = useVpcGraph(region, vpcId);
@@ -96,6 +98,7 @@ export default function Network() {
         <CardBody>
           <VpcSelector
             region={region}
+            regions={regionsQuery.data ?? [{ code: "us-east-1", name: "US East (N. Virginia)" }]}
             vpcId={vpcId}
             onRegionChange={setRegion}
             onVpcIdChange={setVpcId}

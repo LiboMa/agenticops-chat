@@ -21,9 +21,9 @@ Agent-First Cloud Observability Platform for AWS.
 - **HealthIssue Lifecycle** -- Full issue lifecycle: open -> investigating -> root_cause_identified -> fix_planned -> fix_approved -> fix_executed -> resolved
 - **FixPlan Engine** -- Structured remediation plans with L0-L3 risk levels and approval workflow
 - **Knowledge Base** -- Vector embeddings (Titan V2) + keyword search for SOPs and case studies
-- **Network Topology** -- VPC topology analysis, blackhole route detection, SG dependency mapping
+- **Network Topology** -- VPC topology analysis, blackhole route detection, SG dependency mapping, region dropdown with dynamic AWS region list
 - **React SPA Dashboard** -- Modern React + Tailwind + React Flow frontend
-- **60+ REST API Endpoints** -- Full CRUD for all models including health-issues, fix-plans, schedules, notifications
+- **60+ REST API Endpoints** -- Full CRUD for all models including health-issues, fix-plans, schedules, notifications, dynamic region listing
 - **Token Tracking** -- Real-time token usage display in chat (input/output/total)
 - **Animated Spinner** -- ThinkingDisplay with smooth braille animation and live elapsed time
 

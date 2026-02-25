@@ -26,8 +26,11 @@ from agenticops.models import (
 )
 from agenticops.config import settings
 
+import asyncio
 import json
 import logging
+import time
+import urllib.request
 
 from agenticops.graph.api import router as graph_router
 
@@ -563,6 +566,103 @@ async def reports_redirect():
 @app.get("/network")
 async def network_redirect():
     return RedirectResponse(url="/app/network", status_code=302)
+
+
+# ============================================================================
+# Dynamic AWS Region Data
+# ============================================================================
+
+_AWS_REGIONAL_TABLE_URL = (
+    "https://api.regional-table.region-services.aws.a2z.com/index.json"
+)
+
+# Display-name mapping — cosmetic only; the source of truth for which regions
+# exist comes from the AWS regional-table API at runtime.
+_REGION_DISPLAY_NAMES: dict[str, str] = {
+    "us-east-1": "US East (N. Virginia)",
+    "us-east-2": "US East (Ohio)",
+    "us-west-1": "US West (N. California)",
+    "us-west-2": "US West (Oregon)",
+    "af-south-1": "Africa (Cape Town)",
+    "ap-east-1": "Asia Pacific (Hong Kong)",
+    "ap-south-1": "Asia Pacific (Mumbai)",
+    "ap-south-2": "Asia Pacific (Hyderabad)",
+    "ap-southeast-1": "Asia Pacific (Singapore)",
+    "ap-southeast-2": "Asia Pacific (Sydney)",
+    "ap-southeast-3": "Asia Pacific (Jakarta)",
+    "ap-southeast-4": "Asia Pacific (Melbourne)",
+    "ap-southeast-5": "Asia Pacific (Malaysia)",
+    "ap-northeast-1": "Asia Pacific (Tokyo)",
+    "ap-northeast-2": "Asia Pacific (Seoul)",
+    "ap-northeast-3": "Asia Pacific (Osaka)",
+    "ca-central-1": "Canada (Central)",
+    "ca-west-1": "Canada West (Calgary)",
+    "eu-central-1": "Europe (Frankfurt)",
+    "eu-central-2": "Europe (Zurich)",
+    "eu-west-1": "Europe (Ireland)",
+    "eu-west-2": "Europe (London)",
+    "eu-west-3": "Europe (Paris)",
+    "eu-south-1": "Europe (Milan)",
+    "eu-south-2": "Europe (Spain)",
+    "eu-north-1": "Europe (Stockholm)",
+    "il-central-1": "Israel (Tel Aviv)",
+    "me-south-1": "Middle East (Bahrain)",
+    "me-central-1": "Middle East (UAE)",
+    "sa-east-1": "South America (São Paulo)",
+}
+
+# In-memory cache: (timestamp, data)
+_regions_cache: tuple[float, list[dict]] = (0.0, [])
+_REGIONS_CACHE_TTL = 86400  # 24 hours
+
+
+async def _fetch_aws_regions() -> list[dict]:
+    """Fetch unique AWS region codes from the public regional-table API."""
+    global _regions_cache
+    now = time.time()
+    cached_at, cached_data = _regions_cache
+    if cached_data and (now - cached_at) < _REGIONS_CACHE_TTL:
+        return cached_data
+
+    try:
+        def _do_fetch():
+            req = urllib.request.Request(_AWS_REGIONAL_TABLE_URL)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        data = await asyncio.to_thread(_do_fetch)
+
+        codes: set[str] = set()
+        for price in data.get("prices", []):
+            code = price.get("attributes", {}).get("aws:region")
+            if code:
+                codes.add(code)
+
+        regions = sorted(
+            [
+                {"code": c, "name": _REGION_DISPLAY_NAMES.get(c, c)}
+                for c in codes
+            ],
+            key=lambda r: r["code"],
+        )
+        _regions_cache = (now, regions)
+        logger.info("Refreshed AWS region list: %d regions", len(regions))
+        return regions
+    except Exception:
+        logger.exception("Failed to fetch AWS regional-table; using cache")
+        if cached_data:
+            return cached_data
+        # Ultimate fallback: return the display-name keys
+        return sorted(
+            [{"code": c, "name": n} for c, n in _REGION_DISPLAY_NAMES.items()],
+            key=lambda r: r["code"],
+        )
+
+
+@app.get("/api/regions")
+async def api_list_regions():
+    """Return the list of AWS regions with display names (fetched dynamically)."""
+    return await _fetch_aws_regions()
 
 
 # ============================================================================
