@@ -35,6 +35,8 @@ from agenticops.models import (
     AWSAccount,
     AWSResource,
     HealthIssue,
+    FixPlan,
+    FixExecution,
     Report,
     init_db,
     get_session,
@@ -1662,6 +1664,12 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
   /acknowledge <id>                Start investigating issue
   /resolve <id>                    Resolve issue
 
+[cyan]Fix Plans:[/cyan]
+  /fix list [issue_id] [--status S] [--risk L]   List fix plans
+  /fix show <plan_id>              Show fix plan details
+  /approve <plan_id>               Approve a fix plan (L2/L3 human gate)
+  /execute <plan_id>               Execute an approved fix plan
+
 [cyan]Workflows:[/cyan]  [dim](/help workflow for details)[/dim]
   /workflow full-scan              Full infrastructure scan
   /workflow daily                  Daily operations pipeline
@@ -2136,6 +2144,264 @@ def _slash_resolve(ctx: ChatContext, args: list) -> str:
         session.commit()
 
         return f"[green]Issue #{issue_id} resolved.[/green]"
+    finally:
+        session.close()
+
+
+# ── Fix Plan Commands ──────────────────────────────────────────────────
+
+
+def _slash_fix(ctx: ChatContext, args: list) -> str:
+    """Handle /fix list|show commands for fix plans."""
+    from rich.prompt import Prompt
+
+    if not args:
+        return """[yellow]Usage:
+  /fix list [issue_id] [--status S] [--risk L]
+  /fix show <plan_id>[/yellow]"""
+
+    sub = args[0].lower()
+
+    if sub in ("list", "ls"):
+        init_db()
+        session = get_session()
+        try:
+            query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
+
+            # Parse optional filters
+            rest = args[1:]
+            i = 0
+            while i < len(rest):
+                if rest[i] == "--status" and i + 1 < len(rest):
+                    query = query.filter_by(status=rest[i + 1])
+                    i += 2
+                elif rest[i] == "--risk" and i + 1 < len(rest):
+                    query = query.filter_by(risk_level=rest[i + 1].upper())
+                    i += 2
+                else:
+                    try:
+                        issue_id = int(rest[i])
+                        query = query.filter_by(health_issue_id=issue_id)
+                    except ValueError:
+                        pass
+                    i += 1
+
+            plans = query.limit(50).all()
+
+            if not plans:
+                return "[dim]No fix plans found.[/dim]"
+
+            table = create_table("Fix Plans")
+            table.add_column("ID", style="dim", width=5)
+            table.add_column("Risk", width=5)
+            table.add_column("Title", max_width=40)
+            table.add_column("Status", width=18)
+            table.add_column("Issue #", width=8)
+            table.add_column("Approved By", width=15)
+            table.add_column("Created")
+
+            risk_colors = {"L0": "white", "L1": "blue", "L2": "yellow", "L3": "red"}
+
+            for p in plans:
+                rc = risk_colors.get(p.risk_level, "white")
+                status_str = p.status.replace("_", " ")
+                table.add_row(
+                    str(p.id),
+                    f"[{rc}]{p.risk_level}[/{rc}]",
+                    p.title[:40],
+                    status_str,
+                    str(p.health_issue_id),
+                    p.approved_by or "-",
+                    p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "-",
+                )
+
+            buf = StringIO()
+            temp_console = Console(file=buf, force_terminal=True, width=ctx.console.size.width if hasattr(ctx, 'console') else 120)
+            temp_console.print(table)
+            return buf.getvalue()
+        finally:
+            session.close()
+
+    elif sub == "show":
+        if len(args) < 2:
+            return "[yellow]Usage: /fix show <plan_id>[/yellow]"
+
+        try:
+            plan_id = int(args[1])
+        except ValueError:
+            return "[red]Invalid plan ID.[/red]"
+
+        init_db()
+        session = get_session()
+        try:
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            if not plan:
+                return f"[red]Fix plan #{plan_id} not found.[/red]"
+
+            risk_colors = {"L0": "white", "L1": "blue", "L2": "yellow", "L3": "red"}
+            rc = risk_colors.get(plan.risk_level, "white")
+
+            lines = [
+                f"[bold]Fix Plan #{plan.id}[/bold]",
+                f"  Title:    {plan.title}",
+                f"  Risk:     [{rc}]{plan.risk_level}[/{rc}]",
+                f"  Status:   {plan.status.replace('_', ' ')}",
+                f"  Issue:    #{plan.health_issue_id}",
+                f"  Impact:   {plan.estimated_impact or '-'}",
+                f"  Summary:  {plan.summary[:200]}",
+                "",
+            ]
+
+            if plan.steps:
+                lines.append("[bold]Steps:[/bold]")
+                for i, step in enumerate(plan.steps, 1):
+                    step_text = step if isinstance(step, str) else json.dumps(step)
+                    lines.append(f"  {i}. {step_text}")
+                lines.append("")
+
+            if plan.pre_checks:
+                lines.append("[bold]Pre-checks:[/bold]")
+                for c in plan.pre_checks:
+                    lines.append(f"  - {c if isinstance(c, str) else json.dumps(c)}")
+                lines.append("")
+
+            if plan.post_checks:
+                lines.append("[bold]Post-checks:[/bold]")
+                for c in plan.post_checks:
+                    lines.append(f"  - {c if isinstance(c, str) else json.dumps(c)}")
+                lines.append("")
+
+            if plan.rollback_plan:
+                lines.append("[bold]Rollback Plan:[/bold]")
+                lines.append(f"  {json.dumps(plan.rollback_plan, indent=2)}")
+                lines.append("")
+
+            if plan.approved_by:
+                lines.append(f"  Approved by: [green]{plan.approved_by}[/green]")
+            if plan.approved_at:
+                lines.append(f"  Approved at: {plan.approved_at.strftime('%Y-%m-%d %H:%M')}")
+            if plan.created_at:
+                lines.append(f"  Created:     {plan.created_at.strftime('%Y-%m-%d %H:%M')}")
+
+            return "\n".join(lines)
+        finally:
+            session.close()
+
+    else:
+        return """[yellow]Usage:
+  /fix list [issue_id] [--status S] [--risk L]
+  /fix show <plan_id>[/yellow]"""
+
+
+def _slash_approve(ctx: ChatContext, args: list) -> str:
+    """Handle /approve <plan_id> command — approve a fix plan."""
+    from rich.prompt import Prompt, Confirm
+
+    if not args:
+        return "[yellow]Usage: /approve <plan_id>[/yellow]"
+
+    try:
+        plan_id = int(args[0])
+    except ValueError:
+        return "[red]Invalid plan ID.[/red]"
+
+    init_db()
+    session = get_session()
+
+    try:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            return f"[red]Fix plan #{plan_id} not found.[/red]"
+
+        if plan.status == "approved":
+            return "[yellow]Fix plan is already approved.[/yellow]"
+        if plan.status == "rejected":
+            return "[yellow]Fix plan was rejected. Create a new plan instead.[/yellow]"
+        if plan.status not in ("draft", "pending_approval"):
+            return f"[yellow]Fix plan status is '{plan.status}', cannot approve.[/yellow]"
+
+        # L2/L3 warning
+        if plan.risk_level in ("L2", "L3"):
+            console.print(
+                f"[bold yellow]Warning:[/bold yellow] This is a [bold]{plan.risk_level}[/bold] fix plan "
+                f"— requires human approval.\n"
+                f"  Title: {plan.title}\n"
+                f"  Impact: {plan.estimated_impact or 'N/A'}"
+            )
+            if not Confirm.ask("Proceed with approval?"):
+                return "[dim]Approval cancelled.[/dim]"
+
+        approver = Prompt.ask("Your name (approver)")
+        if not approver.strip():
+            return "[red]Approver name is required.[/red]"
+
+        plan.status = "approved"
+        plan.approved_by = approver.strip()
+        plan.approved_at = datetime.utcnow()
+
+        # Sync HealthIssue status
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        if issue:
+            issue.status = "fix_approved"
+
+        session.commit()
+
+        return f"[green]Fix plan #{plan_id} approved by {approver.strip()}.[/green]"
+    finally:
+        session.close()
+
+
+def _slash_execute(ctx: ChatContext, args: list) -> str:
+    """Handle /execute <plan_id> command — execute an approved fix plan."""
+    from rich.prompt import Confirm
+
+    if not args:
+        return "[yellow]Usage: /execute <plan_id>[/yellow]"
+
+    try:
+        plan_id = int(args[0])
+    except ValueError:
+        return "[red]Invalid plan ID.[/red]"
+
+    init_db()
+    session = get_session()
+
+    try:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            return f"[red]Fix plan #{plan_id} not found.[/red]"
+
+        if plan.status != "approved":
+            return f"[yellow]Fix plan status is '{plan.status}', must be 'approved' to execute.[/yellow]"
+
+        if not settings.executor_enabled:
+            return "[red]Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable.[/red]"
+
+        console.print(
+            f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
+            f"  Title: {plan.title}\n"
+            f"  Risk:  {plan.risk_level}\n"
+            f"  Steps: {len(plan.steps or [])}"
+        )
+        if not Confirm.ask("Confirm execution?"):
+            return "[dim]Execution cancelled.[/dim]"
+
+        # Create FixExecution record
+        execution = FixExecution(
+            fix_plan_id=plan.id,
+            health_issue_id=plan.health_issue_id,
+            status="pending",
+            executed_by="cli_user",
+            started_at=datetime.utcnow(),
+        )
+        plan.status = "executing"
+        session.add(execution)
+        session.commit()
+
+        return (
+            f"[green]Execution #{execution.id} created for fix plan #{plan_id}.[/green]\n"
+            f"[dim]Status: pending — the executor agent will pick it up.[/dim]"
+        )
     finally:
         session.close()
 
@@ -2823,6 +3089,14 @@ SLASH_COMMANDS = {
     "acknowledge": _slash_acknowledge,
     "ack": _slash_acknowledge,
     "resolve": _slash_resolve,
+
+    # Fix plans
+    "fix": _slash_fix,
+    "fixplan": _slash_fix,
+    "fixplans": _slash_fix,
+    "approve": _slash_approve,
+    "execute": _slash_execute,
+    "exec": _slash_execute,
 
     # Workflows
     "workflow": _slash_workflow,

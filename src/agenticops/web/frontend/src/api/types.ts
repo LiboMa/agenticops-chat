@@ -64,6 +64,56 @@ export interface Report {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Fix Plans & Executions                                             */
+/* ------------------------------------------------------------------ */
+
+export type RiskLevel = "L0" | "L1" | "L2" | "L3";
+
+export type FixPlanStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "executing"
+  | "executed"
+  | "failed"
+  | "rejected";
+
+export interface FixPlan {
+  id: number;
+  health_issue_id: number;
+  rca_result_id: number;
+  risk_level: RiskLevel;
+  title: string;
+  summary: string;
+  steps: unknown[];
+  rollback_plan: Record<string, unknown>;
+  estimated_impact: string;
+  pre_checks: unknown[];
+  post_checks: unknown[];
+  status: FixPlanStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+}
+
+export interface FixExecution {
+  id: number;
+  fix_plan_id: number;
+  health_issue_id: number;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  executed_by: string;
+  pre_check_results: unknown[];
+  step_results: unknown[];
+  post_check_results: unknown[];
+  rollback_results: unknown[];
+  error_message: string | null;
+  duration_ms: number;
+  created_at: string;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Region Topology (multi-VPC view)                                   */
 /* ------------------------------------------------------------------ */
 
