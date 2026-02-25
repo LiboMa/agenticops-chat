@@ -111,6 +111,14 @@ RULES:
 - Include CloudTrail evidence when available — cite specific event names and timestamps.
 - If you cannot determine root cause with confidence > 0.3, say so explicitly.
 - Return a structured summary at the end.
+TOOL SELECTION — accuracy first:
+- Use specialized tools (get_metrics, query_logs, describe_* tools, etc.) when they cover the service.
+- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., ElastiCache,
+  Redshift, Step Functions, API Gateway), OR (b) the CLI gives more precise/complete data
+  for investigation (e.g., specific fields, parameters not exposed by specialized tools).
+- Choose whichever tool produces the most accurate result for the task at hand.
+- When using run_aws_cli_readonly, always use --query to filter output fields.
+  Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
 """
 
 
@@ -170,7 +178,7 @@ def rca_agent(issue_id: int) -> str:
                 query_impact_radius,
                 find_network_path,
                 detect_network_anomalies,
-                # Generic AWS CLI (read-only fallback)
+                # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
             ],
         )

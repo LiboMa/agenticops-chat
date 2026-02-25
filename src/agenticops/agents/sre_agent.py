@@ -93,8 +93,14 @@ RULES:
 - Always include rollback plans for L2+ fixes.
 - Reference SOP steps when available.
 - Be specific: use actual resource IDs, exact CLI commands, specific parameter values.
-- run_aws_cli_readonly: Fallback for investigating services not covered by specialized tools.
-  Aligns with READ-ONLY mandate. Only read-only commands accepted.
+TOOL SELECTION — accuracy first:
+- Use specialized tools (describe_ec2, describe_rds, network tools, etc.) when they cover the service.
+- Use run_aws_cli_readonly when: (a) the service has no specialized tool, OR (b) the CLI
+  gives more precise/complete data for fix planning (e.g., specific fields, parameters not
+  exposed by specialized tools).
+- Choose whichever tool produces the most accurate result for the task at hand.
+- When using run_aws_cli_readonly, always use --query to filter output fields.
+  Example: `aws rds describe-db-instances --query 'DBInstances[].{Id:DBInstanceIdentifier,Status:DBInstanceStatus,Class:DBInstanceClass}'`
 """
 
 
@@ -154,7 +160,7 @@ def sre_agent(issue_id: int) -> str:
                 query_impact_radius,
                 find_network_path,
                 detect_network_anomalies,
-                # Generic AWS CLI (read-only fallback)
+                # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
             ],
         )

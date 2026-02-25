@@ -11,94 +11,177 @@ PREFIX="EKS-${CLUSTER_NAME}"
 
 PASS=0
 FAIL=0
+TOTAL=7
 
-check() {
+# Spinner for showing progress while a command runs
+spin() {
     local label="$1"
     shift
-    if "$@" &>/dev/null; then
+    local pid
+    local frames=("⠋" "⠙" "⠹" "⠸" "⠴" "⠦" "⠧" "⠏")
+    local i=0
+
+    # Run command in background
+    "$@" &>/dev/null &
+    pid=$!
+
+    # Animate spinner while waiting
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  %s %s ..." "${frames[$((i % ${#frames[@]}))]}" "${label}"
+        i=$((i + 1))
+        sleep 0.1
+    done
+
+    # Get exit code
+    wait "$pid" && local rc=0 || local rc=$?
+
+    # Clear spinner line and print result
+    printf "\r\033[K"
+    if [[ $rc -eq 0 ]]; then
         echo "  [PASS] ${label}"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         echo "  [FAIL] ${label}"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
+}
+
+# Spinner for commands whose output we need to capture
+spin_capture() {
+    local label="$1"
+    shift
+    local pid tmpfile
+    local frames=("⠋" "⠙" "⠹" "⠸" "⠴" "⠦" "⠧" "⠏")
+    local i=0
+
+    tmpfile=$(mktemp)
+
+    # Run command in background, capture output
+    "$@" > "$tmpfile" 2>/dev/null &
+    pid=$!
+
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  %s %s ..." "${frames[$((i % ${#frames[@]}))]}" "${label}"
+        i=$((i + 1))
+        sleep 0.1
+    done
+
+    wait "$pid" && local rc=0 || local rc=$?
+    printf "\r\033[K"
+
+    CAPTURED=$(cat "$tmpfile")
+    rm -f "$tmpfile"
+    return $rc
+}
+
+header() {
+    local step="$1"
+    local total="$2"
+    local title="$3"
+    echo ""
+    echo "[$step/$total] ${title}"
 }
 
 echo "============================================"
 echo "  AgenticOps Integration Verification"
+echo "  Cluster: ${CLUSTER_NAME} (${REGION})"
 echo "============================================"
-echo ""
 
-# Get account ID
+# Step 0: Get account ID
+printf "\n  Resolving AWS account ID ..."
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+printf "\r\033[K  Account: ${ACCOUNT_ID}\n"
 
 # 1. STS AssumeRole
-echo "1. IAM / STS"
-check "AssumeRole → ${ROLE_NAME}" \
+header 1 "$TOTAL" "IAM / STS"
+spin "AssumeRole → ${ROLE_NAME}" \
     aws sts assume-role \
         --role-arn "${ROLE_ARN}" \
         --role-session-name verify-test \
         --duration-seconds 900
 
 # 2. EKS Describe
-echo ""
-echo "2. EKS Cluster"
-check "Describe cluster ${CLUSTER_NAME}" \
+header 2 "$TOTAL" "EKS Cluster"
+spin "Describe cluster ${CLUSTER_NAME}" \
     aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${REGION}"
 
 # 3. CloudWatch alarms
-echo ""
-echo "3. CloudWatch Alarms"
-ALARM_COUNT=$(aws cloudwatch describe-alarms \
-    --alarm-name-prefix "${PREFIX}" \
-    --region "${REGION}" \
-    --query 'length(MetricAlarms)' \
-    --output text 2>/dev/null || echo "0")
+header 3 "$TOTAL" "CloudWatch Alarms"
+spin_capture "Querying alarms with prefix ${PREFIX}" \
+    aws cloudwatch describe-alarms \
+        --alarm-name-prefix "${PREFIX}" \
+        --region "${REGION}" \
+        --query 'length(MetricAlarms)' \
+        --output text \
+    || true
+ALARM_COUNT="${CAPTURED:-0}"
 
 if [[ "${ALARM_COUNT}" -ge 6 ]]; then
     echo "  [PASS] Alarm count: ${ALARM_COUNT} (expected ≥6)"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     echo "  [FAIL] Alarm count: ${ALARM_COUNT} (expected ≥6)"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 fi
 
 # 4. CloudWatch log groups
-echo ""
-echo "4. CloudWatch Logs"
+header 4 "$TOTAL" "CloudWatch Logs"
 LOG_GROUP="/aws/eks/${CLUSTER_NAME}/cluster"
-check "Log group exists: ${LOG_GROUP}" \
+spin "Log group exists: ${LOG_GROUP}" \
     aws logs describe-log-groups \
         --log-group-name-prefix "${LOG_GROUP}" \
         --region "${REGION}" \
         --query 'logGroups[0].logGroupName'
 
-# 5. kubectl connectivity
-echo ""
-echo "5. Kubernetes"
-NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+# 5. kubectl nodes
+header 5 "$TOTAL" "Kubernetes Nodes"
+spin_capture "Counting nodes" kubectl get nodes --no-headers || true
+NODE_COUNT=$(echo "${CAPTURED}" | grep -c '.' || echo "0")
+
 if [[ "${NODE_COUNT}" -ge 2 ]]; then
     echo "  [PASS] Node count: ${NODE_COUNT} (expected ≥2)"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     echo "  [FAIL] Node count: ${NODE_COUNT} (expected ≥2)"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 fi
 
-POD_COUNT=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+# 6. kubectl pods
+header 6 "$TOTAL" "Kubernetes Pods"
+spin_capture "Counting pods in ${NAMESPACE}" kubectl get pods -n "${NAMESPACE}" --no-headers || true
+POD_COUNT=$(echo "${CAPTURED}" | grep -c '.' || echo "0")
+
 if [[ "${POD_COUNT}" -ge 5 ]]; then
     echo "  [PASS] Pod count in ${NAMESPACE}: ${POD_COUNT} (expected ≥5)"
-    ((PASS++))
+    PASS=$((PASS + 1))
 else
     echo "  [FAIL] Pod count in ${NAMESPACE}: ${POD_COUNT} (expected ≥5)"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
+fi
+
+# 7. Pod status (all Running?)
+header 7 "$TOTAL" "Pod Health"
+spin_capture "Checking pod statuses" kubectl get pods -n "${NAMESPACE}" --no-headers || true
+NOT_RUNNING_LINES=$(echo "${CAPTURED}" | grep -v 'Running' || true)
+if [[ -z "${NOT_RUNNING_LINES}" ]]; then
+    echo "  [PASS] All pods Running"
+    PASS=$((PASS + 1))
+else
+    NOT_RUNNING_COUNT=$(echo "${NOT_RUNNING_LINES}" | wc -l | tr -d ' ')
+    echo "  [FAIL] ${NOT_RUNNING_COUNT} pod(s) not in Running state"
+    echo "${NOT_RUNNING_LINES}" | sed 's/^/         /'
+    FAIL=$((FAIL + 1))
 fi
 
 # Summary
 echo ""
 echo "============================================"
-echo "  Results: ${PASS} passed, ${FAIL} failed"
+if [[ "${FAIL}" -eq 0 ]]; then
+    echo "  Result: ${PASS}/${TOTAL} passed — ALL OK"
+else
+    echo "  Result: ${PASS}/${TOTAL} passed, ${FAIL} failed"
+fi
 echo "============================================"
 
 if [[ "${FAIL}" -gt 0 ]]; then
@@ -108,7 +191,7 @@ if [[ "${FAIL}" -gt 0 ]]; then
 fi
 
 echo ""
-echo "All checks passed. Register with AgenticOps:"
+echo "Register with AgenticOps:"
 echo ""
 echo "  aiops create account chaos-lab \\"
 echo "    --account-id ${ACCOUNT_ID} \\"

@@ -57,8 +57,13 @@ RULES:
 - When services='all', scan: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPC, Subnet, SecurityGroup, NATGateway, TransitGateway, ELB, RouteTable.
 - When regions='all', use the regions from the account configuration.
 - Always call save_resources at the end to persist discovered resources.
-- run_aws_cli_readonly: Fallback for querying AWS services not covered by specialized tools.
-  Only read-only commands accepted. Prefer specialized tools when available.
+TOOL SELECTION — accuracy first:
+- Use specialized tools (describe_ec2, describe_rds, etc.) when they cover the service.
+- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., ElastiCache,
+  Redshift, Step Functions), OR (b) the CLI gives more precise/complete data for the specific query.
+- Choose whichever tool produces the most accurate result for the task at hand.
+- When using run_aws_cli_readonly, always use --query to filter output fields.
+  Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
 """
 
 
@@ -107,7 +112,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
                 # Metadata
                 save_resources,
                 get_active_account,
-                # Generic AWS CLI (read-only fallback)
+                # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
             ],
         )

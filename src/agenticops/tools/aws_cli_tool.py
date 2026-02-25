@@ -151,8 +151,8 @@ BLOCKED_PATTERNS = [
     "aws ec2 terminate-instances",
 ]
 
-MAX_OUTPUT_CHARS = 4000
-MAX_OUTPUT_CHARS_READONLY = 8000
+MAX_OUTPUT_CHARS = 2000
+MAX_OUTPUT_CHARS_READONLY = 4000
 TIMEOUT_SECONDS = 30
 
 
@@ -276,21 +276,22 @@ def run_aws_cli(command: str, require_confirmation: bool = False) -> str:
 def run_aws_cli_readonly(command: str) -> str:
     """Execute a read-only AWS CLI command. Write and destructive operations are blocked.
 
-    Use this as a fallback for querying AWS services not covered by specialized tools.
-    Only read-only commands (describe, list, get) are accepted — all write, destructive,
-    and unrecognized commands are rejected.
+    Use this ONLY as a fallback for querying AWS services not covered by specialized tools.
+    Only read-only commands (describe, list, get) are accepted.
+
+    IMPORTANT: Always use --query to filter output and reduce data volume.
+    Never request full API responses — only request the fields you need.
 
     Args:
-        command: The full AWS CLI command (e.g., 'aws elasticache describe-cache-clusters --output json')
+        command: The full AWS CLI command with --query filter (e.g., 'aws elasticache describe-cache-clusters --query "CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus}" --region us-east-1')
 
     Returns:
         JSON output from the AWS CLI command, or error message.
 
     Examples:
-        run_aws_cli_readonly(command="aws elasticache describe-cache-clusters --region us-east-1")
-        run_aws_cli_readonly(command="aws redshift describe-clusters --region us-west-2")
-        run_aws_cli_readonly(command="aws stepfunctions list-state-machines --region us-east-1")
-        run_aws_cli_readonly(command="aws apigatewayv2 get-apis --region us-east-1")
+        run_aws_cli_readonly(command="aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus}' --region us-east-1")
+        run_aws_cli_readonly(command="aws redshift describe-clusters --query 'Clusters[].{Id:ClusterIdentifier,Status:ClusterStatus}' --region us-west-2")
+        run_aws_cli_readonly(command="aws stepfunctions list-state-machines --query 'stateMachines[].{Name:name,Arn:stateMachineArn}' --region us-east-1")
     """
     command = command.strip()
 

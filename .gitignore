@@ -52,3 +52,7 @@ logs/
 htmlcov/
 .tox/
 .mypy_cache/
+
+# Frontend
+node_modules/
+src/agenticops/web/frontend/dist/

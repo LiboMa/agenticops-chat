@@ -80,8 +80,14 @@ RULES:
 - Always include related_changes (CloudTrail) in HealthIssue records when available.
 - Do NOT call LLM for simple alarm state checks - use tools directly.
 - Return a structured summary: total resources checked, alarms found, issues created.
-- run_aws_cli_readonly: Fallback for querying AWS services not covered by specialized tools.
-  Only read-only commands accepted. Prefer specialized tools when available.
+TOOL SELECTION — accuracy first:
+- Use specialized tools (list_alarms, get_metrics, etc.) when they cover the service.
+- Use run_aws_cli_readonly when: (a) the service has no specialized tool, OR (b) the CLI
+  gives more precise/complete data for the specific query (e.g., specific --query filters,
+  fields not exposed by specialized tools).
+- Choose whichever tool produces the most accurate result for the task at hand.
+- When using run_aws_cli_readonly, always use --query to filter output fields.
+  Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 """
 
 
@@ -124,7 +130,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 describe_region_topology,
                 analyze_vpc_topology,
                 map_eks_to_vpc_topology,
-                # Generic AWS CLI (read-only fallback)
+                # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
             ],
         )
