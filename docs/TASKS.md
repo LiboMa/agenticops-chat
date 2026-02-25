@@ -155,11 +155,31 @@
 
 ## 2. 进行中任务 (In Progress)
 
-| ID | 任务 | 状态 | 负责人 | 预计完成 |
-|----|------|------|--------|----------|
-| - | - | - | - | - |
+### 2.1 EKS Chaos Lab — 端到端测试
 
-*当前无进行中任务*
+| ID | 任务 | 状态 | 说明 |
+|----|------|------|------|
+| TASK-300 | EKS Chaos Lab 基础设施脚本 | ✅ | `infra/eks-chaos-lab/` — 21个文件，本地验证全部通过 |
+| TASK-301 | EKS 集群创建 & 工作负载部署 | 🔄 | `setup.sh` 手动执行中 |
+| TASK-302 | CloudWatch 告警链路测试 | ⏳ | 6个告警 → detect agent → HealthIssue |
+| TASK-303 | Chaos 注入 & Agent 检测验证 | ⏳ | 5种故障场景逐个测试 (pod-kill, node-drain, resource-stress, network-chaos, config-break) |
+| TASK-304 | RCA + SRE Agent 修复流程验证 | ⏳ | analyze issue → fix issue → 端到端闭环 |
+| TASK-305 | 清理 & 测试报告 | ⏳ | cleanup.sh + 测试结果记录 |
+
+### 2.2 多监控源 Provider 设计 (待 Chaos Lab 完成后启动)
+
+| ID | 任务 | 状态 | 说明 |
+|----|------|------|------|
+| TASK-310 | Monitoring Provider 抽象层设计 | ⏳ | 定义统一 Provider 接口 (list_alarms, get_metrics, query_logs) |
+| TASK-311 | CloudWatch Provider 实现 | ⏳ | 将现有 CloudWatch 工具重构为第一个 Provider |
+| TASK-312 | Prometheus Provider 实现 | ⏳ | 对接 Prometheus API (PromQL 查询 + Alertmanager 告警) |
+| TASK-313 | Datadog Provider 实现 | ⏳ | 对接 Datadog API (monitors + metrics + logs) |
+| TASK-314 | Provider 注册 & 账户关联机制 | ⏳ | 账户配置中声明使用哪些 Provider，Agent 按需调用 |
+
+**架构决策记录 (ADR-001)**:
+> 采用 **路线 A — Provider 模式** 优先：为每个监控数据源实现独立的 Provider adapter，Agent 根据账户配置按需调用。
+> 后续如需统一告警收敛（路线 B — Webhook 聚合层），可在 Provider 之上叠加，两者不冲突。
+> 优先顺序：CloudWatch (已有) → Prometheus → Datadog → 其他。
 
 ---
 
@@ -191,6 +211,16 @@
 | TASK-124 | API文档 | OpenAPI文档自动生成 | - | 1天 | 部分完成 (FastAPI自动生成OpenAPI) |
 | TASK-125 | Docker部署 | Dockerfile和compose | - | 2天 | ⏳ 待开始 |
 | TASK-126 | K8s部署 | Helm Chart | TASK-125 | 3天 | ⏳ 待开始 |
+
+### 3.4 监控源扩展 (P2, 依赖 TASK-303 完成)
+
+| ID | 任务 | 描述 | 依赖 | 状态 |
+|----|------|------|------|------|
+| TASK-310 | Monitoring Provider 抽象层 | 统一接口: list_alarms, get_metrics, query_logs | TASK-303 | ⏳ 待开始 |
+| TASK-311 | CloudWatch Provider | 重构现有工具为 Provider 实现 | TASK-310 | ⏳ 待开始 |
+| TASK-312 | Prometheus Provider | PromQL + Alertmanager 对接 | TASK-310 | ⏳ 待开始 |
+| TASK-313 | Datadog Provider | Monitors + Metrics + Logs API 对接 | TASK-310 | ⏳ 待开始 |
+| TASK-314 | Provider 注册机制 | 账户配置关联 Provider，Agent 按需调用 | TASK-310 | ⏳ 待开始 |
 
 ---
 
@@ -237,6 +267,17 @@
   - [x] React SPA 前端
   - [x] 全套 API endpoints
   - [x] Chat 体验优化 (spinner + token 追踪)
+
+### v0.6.0 - 进行中 (2026-02)
+- **主题**: 端到端验证 & 多监控源
+- **任务**: TASK-300 ~ TASK-314
+- **里程碑**:
+  - [x] EKS Chaos Lab 基础设施 (TASK-300)
+  - [ ] CloudWatch 告警链路端到端验证 (TASK-301 ~ TASK-305)
+  - [ ] Monitoring Provider 抽象层 (TASK-310)
+  - [ ] CloudWatch Provider 重构 (TASK-311)
+  - [ ] Prometheus Provider (TASK-312)
+  - [ ] Datadog Provider (TASK-313)
 
 ### v1.0.0 - 长期
 - **主题**: 生产就绪

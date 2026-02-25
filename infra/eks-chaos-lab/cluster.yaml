@@ -1,0 +1,42 @@
+# eksctl cluster configuration for AgenticOps Chaos Lab
+# Usage: eksctl create cluster -f cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: agenticops-chaos-lab
+  region: us-east-1
+  version: "1.29"
+  tags:
+    Project: agenticops
+    Environment: chaos-lab
+
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: chaos-lab-ng
+    instanceType: t3.medium
+    minSize: 1
+    maxSize: 3
+    desiredCapacity: 2
+    volumeSize: 20
+    labels:
+      role: chaos-lab
+    tags:
+      Project: agenticops
+      Environment: chaos-lab
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator
+      - controllerManager
+      - scheduler
+    logRetentionInDays: 7
+
+addons:
+  - name: amazon-cloudwatch-observability
+    version: latest

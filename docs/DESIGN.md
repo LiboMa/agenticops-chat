@@ -618,3 +618,71 @@ def new_tool(param: str) -> str:
     """工具描述"""
     return result
 ```
+
+### 8.4 多监控源 — Monitoring Provider 架构
+
+**背景**: 当前系统仅支持 CloudWatch 作为告警和指标数据源。实际客户环境中普遍使用多种可观测性工具 (Prometheus, Datadog, Grafana, ELK 等)，需要支持从多个数据源获取告警、指标和日志。
+
+**架构决策 (ADR-001, 2026-02-24)**:
+
+> 采用 **Provider 模式** (路线 A) — 为每个监控数据源实现独立的 Provider adapter。
+> Agent 根据账户配置按需调用相应 Provider 的工具。
+> 后续如需统一告警收敛 (路线 B — Webhook 聚合层)，可在 Provider 之上叠加，两者不冲突。
+
+**Provider 接口定义**:
+
+```
+MonitoringProvider (抽象基类)
+├── list_alarms(filters) → List[Alarm]          # 查询告警
+├── get_metrics(query, time_range) → MetricData  # 查询指标
+├── query_logs(query, time_range) → List[LogEntry] # 查询日志
+└── get_provider_info() → ProviderInfo           # 提供者元信息
+```
+
+**Provider 实现优先级**:
+
+| 优先级 | Provider | 数据源 | 状态 |
+|--------|----------|--------|------|
+| P0 | CloudWatch | AWS CloudWatch Alarms + Metrics + Logs | 已有 (待重构) |
+| P1 | Prometheus | Prometheus API + Alertmanager | 待实现 |
+| P2 | Datadog | Datadog Monitors + Metrics + Logs API | 待实现 |
+| P3 | Grafana | Grafana Alerting + Loki + Mimir | 待评估 |
+
+**数据流**:
+
+```
+账户配置: account.monitoring_providers = ["cloudwatch", "prometheus"]
+
+告警触发阶段:
+  Detect Agent
+    → 遍历 account.monitoring_providers
+    → cloudwatch_provider.list_alarms()  → [Alarm1, Alarm2]
+    → prometheus_provider.list_alarms()  → [Alarm3]
+    → 合并告警 → 创建 HealthIssue
+
+调查阶段:
+  RCA Agent
+    → 根据 HealthIssue.source_provider 选择对应 Provider
+    → provider.get_metrics(related_metrics)
+    → provider.query_logs(error_patterns)
+    → 综合分析 → RCAResult
+
+修复阶段:
+  SRE Agent (不依赖 Provider，直接操作基础设施)
+    → kubectl / AWS API / Terraform
+```
+
+**对现有代码的影响**:
+- `tools/aws_tools.py` 中的 `list_alarms`, `get_metrics`, `query_logs` 将重构为 CloudWatch Provider
+- Agent 的 tool 注册将根据账户的 `monitoring_providers` 配置动态加载
+- 新增 `providers/` 模块目录
+
+**后续演进 — 路线 B (统一告警入口)**:
+
+当多个 Provider 均已实现后，可增加 Webhook 聚合层作为补充:
+```
+Prometheus  ──→ Alertmanager ──→ Webhook ──→ AgenticOps (创建 HealthIssue)
+Datadog     ──→ PagerDuty    ──→ Webhook ──→ AgenticOps
+CloudWatch  ──→ SNS          ──→ Webhook ──→ AgenticOps
+```
+此时 Provider 仍用于调查阶段的深度查询，Webhook 仅用于被动接收告警事件。
