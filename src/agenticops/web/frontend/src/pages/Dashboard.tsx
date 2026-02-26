@@ -1,6 +1,6 @@
 import { useStats } from "@/hooks/useStats";
 import { useAnomalies } from "@/hooks/useAnomalies";
-import { useResources } from "@/hooks/useResources";
+import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
 import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -13,18 +13,14 @@ import { useMemo } from "react";
 export default function Dashboard() {
   const stats = useStats();
   const anomalies = useAnomalies({ status: "open" });
-  const resources = useResources();
+  const typeCounts = useResourceTypeCounts();
   const navigate = useNavigate();
 
-  // Compute resource type counts
+  // Sort type counts descending
   const resourceTypes = useMemo(() => {
-    if (!resources.data) return [];
-    const counts: Record<string, number> = {};
-    for (const r of resources.data) {
-      counts[r.resource_type] = (counts[r.resource_type] ?? 0) + 1;
-    }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [resources.data]);
+    if (!typeCounts.data) return [];
+    return Object.entries(typeCounts.data).sort((a, b) => b[1] - a[1]);
+  }, [typeCounts.data]);
 
   if (stats.isLoading) return <Spinner label="Loading dashboard..." />;
   if (stats.error)
@@ -132,7 +128,7 @@ export default function Dashboard() {
           </h2>
         </CardHeader>
         <CardBody>
-          {resources.isLoading ? (
+          {typeCounts.isLoading ? (
             <Spinner />
           ) : resourceTypes.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

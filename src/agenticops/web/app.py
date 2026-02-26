@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field
 
+from sqlalchemy import func
+
 from agenticops.models import (
     AWSAccount,
     AWSResource,
@@ -859,6 +861,19 @@ async def api_list_resources(
 
         resources = query.offset(offset).limit(limit).all()
         return [ResourceResponse.model_validate(r) for r in resources]
+
+
+@app.get("/api/resources/type-counts")
+async def api_resource_type_counts():
+    """Resource counts grouped by type."""
+    with get_db_session() as session:
+        rows = (
+            session.query(AWSResource.resource_type, func.count())
+            .group_by(AWSResource.resource_type)
+            .order_by(func.count().desc())
+            .all()
+        )
+        return {rtype: count for rtype, count in rows}
 
 
 @app.get("/api/resources/{resource_id}", response_model=ResourceResponse)

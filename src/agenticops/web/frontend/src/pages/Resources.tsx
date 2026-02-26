@@ -15,10 +15,11 @@ export default function Resources() {
   const { data, isLoading, error, refetch } = useResources({
     type: typeFilter || undefined,
     region: regionFilter || undefined,
+    limit: 500,
   });
 
   // Extract unique types and regions for filter dropdowns
-  const allResources = useResources();
+  const allResources = useResources({ limit: 500 });
   const { types, regions } = useMemo(() => {
     if (!allResources.data) return { types: [], regions: [] };
     const typeSet = new Set<string>();
