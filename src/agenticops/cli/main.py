@@ -3335,20 +3335,89 @@ def issue(
         session.close()
 
 
+def _run_headless(query: str, account: Optional[str] = None):
+    """Execute a single agent query and print the result. No REPL."""
+    import sys
+    from rich.markdown import Markdown
+
+    init_db()
+
+    from agenticops.agents import create_main_agent
+    from agenticops.chat.preprocessor import preprocess_message
+
+    agent = create_main_agent()
+    enriched, warnings = preprocess_message(query, resolve_file_refs=True)
+
+    is_tty = sys.stdout.isatty()
+
+    if is_tty:
+        for w in warnings:
+            console.print(f"[yellow]Warning: {w}[/yellow]")
+        display = ThinkingDisplay(console)
+        with display.live_display():
+            display.start("Thinking...")
+            try:
+                result = agent(enriched)
+                display.complete("Done")
+            except Exception as e:
+                display.error(str(e))
+                raise typer.Exit(1)
+
+        response = str(result)
+        console.print()
+        if response.startswith("#") or "```" in response:
+            console.print(Markdown(response))
+        else:
+            console.print(response)
+
+        # Token summary
+        try:
+            invocation = result.metrics.latest_agent_invocation
+            if invocation:
+                inp = invocation.usage.get("inputTokens", 0)
+                out = invocation.usage.get("outputTokens", 0)
+                console.print(f"\n[dim]Tokens: ↑{inp} ↓{out} Σ{inp + out}[/dim]")
+        except Exception:
+            pass
+    else:
+        # Piped output: plain text, no Rich formatting
+        for w in warnings:
+            print(f"Warning: {w}", file=sys.stderr)
+        try:
+            result = agent(enriched)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            raise typer.Exit(1)
+        print(str(result))
+
+
 @app.command()
 def chat(
+    query: Optional[str] = typer.Argument(None, help="Single query (headless mode)"),
+    query_flag: Optional[str] = typer.Option(None, "--query", "-q", help="Query string (headless mode)"),
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
 ):
-    """Start an interactive chat with the AI operations agent.
+    """Start an interactive chat, or run a single query in headless mode.
 
-    Features:
-    - Arrow keys for history navigation (up/down)
-    - Ctrl+A/E for line start/end
-    - Ctrl+W to delete word
-    - Ctrl+U to clear line
-    - Tab completion for slash commands
-    - Copy/paste support (Ctrl+C/V or system clipboard)
+    Examples:
+      aiops chat                              # interactive REPL
+      aiops chat "check health of prod"       # single query, exit
+      aiops chat -q "scan us-east-1"          # explicit flag
+      echo "list issues" | aiops chat         # pipe mode
+      aiops chat "analyze I#42 and check R#17"
+      aiops chat "review this log @/tmp/error.log"
     """
+    import sys
+
+    # Determine headless input
+    headless_input = query or query_flag or None
+    if not headless_input and not sys.stdin.isatty():
+        headless_input = sys.stdin.read().strip()
+
+    if headless_input:
+        _run_headless(headless_input, account)
+        return
+
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -3437,6 +3506,14 @@ def chat(
             # Store user input in history
             ctx.add_to_history("user", user_input)
 
+            # Preprocess message: resolve I#/R# references, @file/path attachments
+            from agenticops.chat.preprocessor import preprocess_message
+            enriched_input, preprocess_warnings = preprocess_message(
+                user_input, resolve_file_refs=True,
+            )
+            for w in preprocess_warnings:
+                console.print(f"[yellow]Warning: {w}[/yellow]")
+
             # Call agent with simple spinner
             display = ThinkingDisplay(console)
 
@@ -3444,7 +3521,7 @@ def chat(
                 display.start("Thinking...")
 
                 try:
-                    result = agent(user_input)
+                    result = agent(enriched_input)
                     response = str(result)
                     display.complete("Done")
 

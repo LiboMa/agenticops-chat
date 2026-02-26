@@ -35,8 +35,22 @@ class Settings(BaseSettings):
         description="Bedrock model ID for LLM (Claude Ops 4.6)",
     )
     bedrock_max_tokens: int = Field(
-        default=8192,
+        default=4096,
         description="Max output tokens for Bedrock model responses",
+    )
+    bedrock_window_size: int = Field(
+        default=40,
+        description="Conversation manager sliding window size for agents",
+    )
+
+    # CORS
+    cors_origins: str = Field(
+        default="",
+        description="Comma-separated allowed CORS origins (empty = dev-mode only)",
+    )
+    cors_max_age: int = Field(
+        default=3600,
+        description="CORS preflight cache duration in seconds",
     )
 
     # Embedding (Titan V2)
@@ -123,6 +137,40 @@ class Settings(BaseSettings):
     executor_total_timeout: int = Field(
         default=1800,
         description="Total execution timeout in seconds (default 30 min)",
+    )
+
+    # RAG Pipeline
+    rag_pipeline_enabled: bool = Field(
+        default=True,
+        description="Enable automated RAG pipeline for SOP generation/upgrade",
+    )
+    sop_similarity_threshold: float = Field(
+        default=0.8,
+        description="Similarity threshold for SOP matching (>=threshold = upgrade, <threshold = new SOP)",
+    )
+
+    # Executor Service (background polling)
+    executor_poll_interval: int = Field(
+        default=30,
+        description="Executor service poll interval in seconds",
+    )
+    executor_auto_resolve: bool = Field(
+        default=True,
+        description="Auto-resolve HealthIssue after successful fix execution",
+    )
+
+    # Search Quality
+    search_vector_weight: float = Field(
+        default=0.6,
+        description="Weight for vector similarity in hybrid search reranking (0-1)",
+    )
+    search_efficiency_weight: float = Field(
+        default=0.2,
+        description="Weight for efficiency score in hybrid search reranking (0-1)",
+    )
+    search_base_weight: float = Field(
+        default=0.2,
+        description="Base weight in hybrid search reranking (0-1)",
     )
 
     def ensure_dirs(self) -> None:

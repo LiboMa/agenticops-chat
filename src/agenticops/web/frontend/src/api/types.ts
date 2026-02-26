@@ -502,3 +502,31 @@ export interface NotificationLog {
   error: string | null;
   sent_at: string;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Chat                                                               */
+/* ------------------------------------------------------------------ */
+
+export interface ChatSession {
+  id: number;
+  session_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  last_activity_at: string;
+  message_count: number;
+}
+
+export interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  tool_calls?: Array<{ name: string; status: string }>;
+  token_usage?: { input: number; output: number };
+  attachments?: Array<{ filename: string; size: number }>;
+  created_at: string;
+}
+
+export interface ChatSessionDetail extends ChatSession {
+  messages: ChatMessage[];
+}

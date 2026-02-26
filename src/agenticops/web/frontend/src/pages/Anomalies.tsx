@@ -34,14 +34,14 @@ export default function Anomalies() {
       sortable: true,
       sortValue: (a) => a.title,
       render: (a) => (
-        <span className="font-medium text-gray-900">{a.title}</span>
+        <span className="font-medium text-slate-900">{a.title}</span>
       ),
     },
     {
       key: "resource",
       header: "Resource",
       render: (a) => (
-        <span className="text-sm text-gray-500 font-mono">
+        <span className="text-sm text-slate-500 font-mono">
           {a.resource_type}/{a.resource_id.slice(0, 20)}
         </span>
       ),
@@ -51,7 +51,7 @@ export default function Anomalies() {
       header: "Region",
       sortable: true,
       sortValue: (a) => a.region,
-      render: (a) => <span className="text-sm text-gray-500">{a.region}</span>,
+      render: (a) => <span className="text-sm text-slate-500">{a.region}</span>,
     },
     {
       key: "status",
@@ -64,7 +64,7 @@ export default function Anomalies() {
             a.status === "open"
               ? "text-red-600 font-medium"
               : a.status === "acknowledged"
-                ? "text-yellow-600 font-medium"
+                ? "text-amber-600 font-medium"
                 : "text-green-600 font-medium"
           }
         >
@@ -78,7 +78,7 @@ export default function Anomalies() {
       sortable: true,
       sortValue: (a) => a.detected_at,
       render: (a) => (
-        <span className="text-sm text-gray-500">
+        <span className="text-sm text-slate-500">
           {formatShortDate(a.detected_at)}
         </span>
       ),
@@ -93,13 +93,13 @@ export default function Anomalies() {
 
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-slate-900">
             Anomalies{data ? ` (${data.length})` : ""}
           </h2>
           <select
             value={severity}
             onChange={(e) => setSeverity(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           >
             <option value="">All Severities</option>
             <option value="critical">Critical</option>

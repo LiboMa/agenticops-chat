@@ -10,10 +10,10 @@ import { formatShortDate } from "@/lib/formatDate";
 import type { Report } from "@/api/types";
 
 const TYPE_COLORS: Record<string, string> = {
-  daily: "bg-blue-100 text-blue-800",
-  incident: "bg-red-100 text-red-800",
-  inventory: "bg-emerald-100 text-emerald-800",
-  weekly: "bg-purple-100 text-purple-800",
+  daily: "bg-blue-100 text-blue-700",
+  incident: "bg-red-100 text-red-700",
+  inventory: "bg-emerald-100 text-emerald-700",
+  weekly: "bg-purple-100 text-purple-700",
 };
 
 const columns: Column<Report>[] = [
@@ -22,7 +22,7 @@ const columns: Column<Report>[] = [
     header: "Type",
     render: (r) => (
       <Badge
-        className={TYPE_COLORS[r.report_type] ?? "bg-gray-200 text-gray-700"}
+        className={TYPE_COLORS[r.report_type] ?? "bg-slate-100 text-slate-600"}
       >
         {r.report_type}
       </Badge>
@@ -33,14 +33,14 @@ const columns: Column<Report>[] = [
     key: "title",
     header: "Title",
     render: (r) => (
-      <span className="text-sm font-medium text-gray-900">{r.title}</span>
+      <span className="text-sm font-medium text-slate-900">{r.title}</span>
     ),
   },
   {
     key: "summary",
     header: "Summary",
     render: (r) => (
-      <span className="text-sm text-gray-600 line-clamp-2">
+      <span className="text-sm text-slate-600 line-clamp-2">
         {r.summary}
       </span>
     ),
@@ -51,7 +51,7 @@ const columns: Column<Report>[] = [
     sortable: true,
     sortValue: (r) => new Date(r.created_at).getTime(),
     render: (r) => (
-      <span className="text-sm text-gray-500">
+      <span className="text-sm text-slate-500">
         {formatShortDate(r.created_at)}
       </span>
     ),
@@ -83,16 +83,16 @@ export default function Reports() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Reports</h2>
           <div className="flex items-center gap-3">
             <input
               type="text"
               placeholder="Search reports..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             />
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-slate-400">
               {filtered.length} reports
             </span>
           </div>

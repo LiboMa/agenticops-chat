@@ -22,6 +22,8 @@ from agenticops.models import (
     RCAResult,
     Report,
     MonitoringConfig,
+    ChatSession,
+    ChatMessage,
     get_session,
     get_db_session,
     init_db,
@@ -33,8 +35,12 @@ import json
 import logging
 import time
 import urllib.request
+import uuid
+from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
+from agenticops.services.executor_service import ExecutorService
+from agenticops.web.session_manager import ChatSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -185,12 +191,20 @@ class ReportGenerateRequest(BaseModel):
     account_name: Optional[str] = None
 
 
+class HealthCheckResult(BaseModel):
+    """Result of a single health check."""
+    status: str  # "ok", "error", "warning"
+    latency_ms: Optional[int] = None
+    error: Optional[str] = None
+    details: Optional[dict] = None
+
+
 class HealthResponse(BaseModel):
     """Schema for health check response."""
-    status: str
+    status: str  # "healthy", "degraded", "unhealthy"
     version: str
-    database: str
     timestamp: datetime
+    checks: dict[str, HealthCheckResult] = Field(default_factory=dict)
 
 
 # ============================================================================
@@ -435,6 +449,49 @@ class NotificationSendRequest(BaseModel):
 
 
 # ============================================================================
+# Chat Pydantic Models
+# ============================================================================
+
+
+class ChatSessionCreate(BaseModel):
+    name: Optional[str] = None
+
+
+class ChatMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    tool_calls: Optional[list] = None
+    token_usage: Optional[dict] = None
+    attachments: Optional[list] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSessionResponse(BaseModel):
+    id: int
+    session_id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+    last_activity_at: datetime
+    message_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSessionDetail(ChatSessionResponse):
+    messages: List[ChatMessageResponse] = []
+
+
+# ============================================================================
 # Auth Pydantic Models
 # ============================================================================
 
@@ -522,6 +579,10 @@ app = FastAPI(
 # Graph API router
 app.include_router(graph_router)
 
+# Chat session manager
+_chat_sessions = ChatSessionManager(ttl_minutes=30)
+_executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)
+
 
 
 # ============================================================================
@@ -533,6 +594,15 @@ app.include_router(graph_router)
 async def startup():
     """Initialize on startup."""
     init_db()
+    _chat_sessions.start_cleanup()
+    _executor_service.start()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cleanup on shutdown."""
+    _chat_sessions.stop_cleanup()
+    _executor_service.stop()
 
 
 # ============================================================================
@@ -729,20 +799,88 @@ async def api_vpc_topology(
 @app.get("/api/health", response_model=HealthResponse)
 async def api_health():
     """Health check endpoint."""
+    import time
+    import shutil
+    import boto3
     from agenticops import __version__
 
-    db_status = "ok"
+    checks = {}
+
+    # 1. Database check
+    db_start = time.time()
     try:
         with get_db_session() as session:
             session.execute("SELECT 1")
-    except Exception:
-        db_status = "error"
+        checks["database"] = HealthCheckResult(
+            status="ok",
+            latency_ms=int((time.time() - db_start) * 1000),
+        )
+    except Exception as e:
+        checks["database"] = HealthCheckResult(
+            status="error",
+            error=str(e),
+        )
+
+    # 2. AWS credentials check
+    aws_start = time.time()
+    try:
+        sts = boto3.client("sts", region_name=settings.bedrock_region)
+        identity = sts.get_caller_identity()
+        checks["aws"] = HealthCheckResult(
+            status="ok",
+            latency_ms=int((time.time() - aws_start) * 1000),
+            details={"account_id": identity.get("Account")},
+        )
+    except Exception as e:
+        checks["aws"] = HealthCheckResult(
+            status="error",
+            error=str(e),
+        )
+
+    # 3. Disk space check
+    try:
+        usage = shutil.disk_usage(settings.reports_dir)
+        free_gb = usage.free / (1024**3)
+        total_gb = usage.total / (1024**3)
+        used_pct = (usage.used / usage.total) * 100
+
+        if used_pct > 90:
+            disk_status = "error"
+        elif used_pct > 80:
+            disk_status = "warning"
+        else:
+            disk_status = "ok"
+
+        checks["disk"] = HealthCheckResult(
+            status=disk_status,
+            details={
+                "path": str(settings.reports_dir),
+                "free_gb": round(free_gb, 2),
+                "total_gb": round(total_gb, 2),
+                "used_pct": round(used_pct, 2),
+            },
+        )
+    except Exception as e:
+        checks["disk"] = HealthCheckResult(
+            status="error",
+            error=str(e),
+        )
+
+    # Determine overall status
+    if checks["database"].status == "error":
+        overall_status = "unhealthy"
+    elif any(c.status == "error" for c in checks.values()):
+        overall_status = "degraded"
+    elif any(c.status == "warning" for c in checks.values()):
+        overall_status = "degraded"
+    else:
+        overall_status = "healthy"
 
     return HealthResponse(
-        status="healthy" if db_status == "ok" else "degraded",
+        status=overall_status,
         version=__version__,
-        database=db_status,
         timestamp=datetime.utcnow(),
+        checks=checks,
     )
 
 
@@ -843,8 +981,8 @@ async def api_list_resources(
     region: Optional[str] = None,
     account_id: Optional[int] = None,
     status: Optional[str] = None,
-    limit: int = Query(100, le=500),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List resources with filtering."""
     with get_db_session() as session:
@@ -996,8 +1134,8 @@ async def api_list_health_issues(
     status: Optional[str] = None,
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
-    limit: int = Query(default=100, le=500),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List health issues with filtering."""
     with get_db_session() as session:
@@ -1056,14 +1194,27 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
         update_data = data.model_dump(exclude_unset=True)
 
         # Auto-set resolved_at when status transitions to resolved
-        if update_data.get("status") == "resolved" and issue.status != "resolved":
+        transitioning_to_resolved = (
+            update_data.get("status") == "resolved" and issue.status != "resolved"
+        )
+        if transitioning_to_resolved:
             update_data["resolved_at"] = datetime.utcnow()
 
         for key, value in update_data.items():
             setattr(issue, key, value)
 
         session.flush()
-        return HealthIssueResponse.model_validate(issue)
+        result = HealthIssueResponse.model_validate(issue)
+
+    # Trigger post-resolution pipeline (outside DB session)
+    if transitioning_to_resolved:
+        try:
+            from agenticops.services.resolution_service import trigger_post_resolution
+            trigger_post_resolution(issue_id)
+        except Exception:
+            logger.warning("Failed to trigger post-resolution for issue #%d", issue_id)
+
+    return result
 
 
 @app.delete("/api/health-issues/{issue_id}", status_code=204)
@@ -1120,8 +1271,8 @@ async def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
-    limit: int = Query(default=100, le=500),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List fix plans with filtering."""
     with get_db_session() as session:
@@ -1333,6 +1484,157 @@ async def api_list_issue_executions(issue_id: int):
             .all()
         )
         return [FixExecutionResponse.model_validate(e) for e in executions]
+
+
+@app.post("/api/fix-executions/{execution_id}/cancel")
+async def api_cancel_execution(execution_id: int):
+    """Cancel a running fix execution."""
+    if _executor_service.cancel_execution(execution_id):
+        return {"status": "cancelled", "execution_id": execution_id}
+    raise HTTPException(status_code=400, detail="Execution not found or not in running state")
+
+
+@app.get("/api/executor/status")
+async def api_executor_status():
+    """Get executor service status."""
+    return {
+        "enabled": settings.executor_enabled,
+        "running": _executor_service.is_running,
+        "active_executions": _executor_service.active_count,
+        "poll_interval": settings.executor_poll_interval,
+        "auto_resolve": settings.executor_auto_resolve,
+    }
+
+
+# ============================================================================
+# Knowledge Base API Endpoints
+# ============================================================================
+
+
+@app.post("/api/rag/pipeline/{health_issue_id}")
+async def api_run_rag_pipeline(health_issue_id: int):
+    """Manually trigger RAG pipeline for a health issue."""
+    if not settings.rag_pipeline_enabled:
+        raise HTTPException(status_code=400, detail="RAG pipeline is disabled")
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+    from agenticops.pipeline.rag_pipeline import run_rag_pipeline
+
+    result = run_rag_pipeline(health_issue_id)
+    return {
+        "health_issue_id": result.health_issue_id,
+        "success": result.success,
+        "action": result.action,
+        "sop_path": result.sop_path,
+        "sop_filename": result.sop_filename,
+        "similarity_score": result.similarity_score,
+        "embed_status": result.embed_status,
+        "validation_passed": result.validation_passed,
+        "error": result.error,
+        "duration_ms": result.duration_ms,
+        "steps": result.steps,
+    }
+
+
+@app.post("/api/kb/distill/{health_issue_id}")
+async def api_distill_case(health_issue_id: int):
+    """Manually trigger case distillation for a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+    from agenticops.tools.kb_tools import distill_case_study
+
+    result = distill_case_study(health_issue_id)
+    return {"health_issue_id": health_issue_id, "result": result}
+
+
+@app.get("/api/kb/sops")
+async def api_list_sops():
+    """List all SOPs in the knowledge base."""
+    from agenticops.tools.kb_tools import _parse_frontmatter
+
+    sops = []
+    sops_dir = settings.sops_dir
+    if sops_dir.exists():
+        for f in sorted(sops_dir.glob("*.md")):
+            try:
+                content = f.read_text(encoding="utf-8")
+                metadata, body = _parse_frontmatter(content)
+                sops.append({
+                    "filename": f.name,
+                    "path": str(f),
+                    "resource_type": metadata.get("resource_type", ""),
+                    "issue_pattern": metadata.get("issue_pattern", ""),
+                    "severity": metadata.get("severity", ""),
+                    "last_updated": metadata.get("last_updated", ""),
+                    "size_bytes": f.stat().st_size,
+                    "preview": body[:200] if body else "",
+                })
+            except Exception as e:
+                sops.append({"filename": f.name, "error": str(e)})
+    return {"count": len(sops), "sops": sops}
+
+
+@app.get("/api/kb/cases")
+async def api_list_cases():
+    """List all case studies in the knowledge base."""
+    from agenticops.tools.kb_tools import _parse_frontmatter
+
+    cases = []
+    cases_dir = settings.cases_dir
+    if cases_dir.exists():
+        for f in sorted(cases_dir.glob("*.md"), reverse=True):
+            try:
+                content = f.read_text(encoding="utf-8")
+                metadata, body = _parse_frontmatter(content)
+                cases.append({
+                    "filename": f.name,
+                    "path": str(f),
+                    "case_id": f.stem,
+                    "resource_type": metadata.get("resource_type", ""),
+                    "severity": metadata.get("severity", ""),
+                    "created_at": metadata.get("created_at", ""),
+                    "status": metadata.get("status", ""),
+                    "size_bytes": f.stat().st_size,
+                    "preview": body[:200] if body else "",
+                })
+            except Exception as e:
+                cases.append({"filename": f.name, "error": str(e)})
+    return {"count": len(cases), "cases": cases}
+
+
+@app.get("/api/kb/stats")
+async def api_kb_stats():
+    """Get knowledge base statistics."""
+    sop_count = len(list(settings.sops_dir.glob("*.md"))) if settings.sops_dir.exists() else 0
+    case_count = len(list(settings.cases_dir.glob("*.md"))) if settings.cases_dir.exists() else 0
+
+    # Check embedding status
+    embedding_status = "disabled"
+    vector_count = 0
+    if settings.embedding_enabled:
+        try:
+            from agenticops.kb.vector_store import get_vector_store
+            store = get_vector_store()
+            vector_count = store.count() if hasattr(store, "count") else 0
+            embedding_status = "enabled"
+        except Exception:
+            embedding_status = "error"
+
+    return {
+        "sop_count": sop_count,
+        "case_count": case_count,
+        "embedding_status": embedding_status,
+        "vector_count": vector_count,
+        "rag_pipeline_enabled": settings.rag_pipeline_enabled,
+        "sop_similarity_threshold": settings.sop_similarity_threshold,
+    }
 
 
 # ============================================================================
@@ -1626,8 +1928,8 @@ async def api_list_audit_logs(
     entity_id: Optional[str] = None,
     user_id: Optional[int] = None,
     hours: int = Query(24, le=720),
-    limit: int = Query(100, le=500),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List audit log entries (requires admin)."""
     from agenticops.auth import get_current_user
@@ -1671,6 +1973,7 @@ async def api_get_entity_audit(
     entity_type: str,
     entity_id: str,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """Get audit history for a specific entity."""
     from agenticops.auth import get_current_user
@@ -1692,6 +1995,7 @@ async def api_get_entity_audit(
         entity_type=entity_type,
         entity_id=entity_id,
         limit=limit,
+        offset=offset,
     )
 
     return [AuditLogResponse.model_validate(log) for log in logs]
@@ -1872,8 +2176,8 @@ async def api_run_schedule(schedule_id: int):
 @app.get("/api/schedules/{schedule_id}/executions", response_model=List[ScheduleExecutionResponse])
 async def api_list_schedule_executions(
     schedule_id: int,
-    limit: int = Query(default=50, le=200),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List execution history for a schedule."""
     from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
@@ -2003,8 +2307,8 @@ async def api_test_notification_channel(channel_id: int, data: NotificationSendR
 async def api_list_notification_logs(
     channel_id: Optional[int] = None,
     status: Optional[str] = None,
-    limit: int = Query(default=100, le=500),
-    offset: int = 0,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
 ):
     """List notification logs."""
     from agenticops.notify.notifier import NotificationLog
@@ -2019,6 +2323,200 @@ async def api_list_notification_logs(
 
         logs = query.offset(offset).limit(limit).all()
         return [NotificationLogResponse.model_validate(log) for log in logs]
+
+
+# ============================================================================
+# Chat API Endpoints
+# ============================================================================
+
+
+@app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
+async def api_create_chat_session(payload: ChatSessionCreate):
+    sid = str(uuid.uuid4())
+    name = payload.name or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    with get_db_session() as db:
+        row = ChatSession(session_id=sid, name=name)
+        db.add(row)
+        db.flush()
+        return ChatSessionResponse(
+            id=row.id, session_id=row.session_id, name=row.name,
+            created_at=row.created_at, updated_at=row.updated_at,
+            last_activity_at=row.last_activity_at, message_count=0,
+        )
+
+
+@app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
+async def api_list_chat_sessions(
+    limit: int = Query(default=50, le=100),
+):
+    with get_db_session() as db:
+        rows = (
+            db.query(ChatSession)
+            .order_by(ChatSession.last_activity_at.desc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for r in rows:
+            cnt = db.query(func.count(ChatMessage.id)).filter(
+                ChatMessage.session_id == r.id
+            ).scalar()
+            result.append(ChatSessionResponse(
+                id=r.id, session_id=r.session_id, name=r.name,
+                created_at=r.created_at, updated_at=r.updated_at,
+                last_activity_at=r.last_activity_at, message_count=cnt,
+            ))
+        return result
+
+
+@app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
+async def api_get_chat_session(session_id: str):
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        msgs = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == row.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+        return ChatSessionDetail(
+            id=row.id, session_id=row.session_id, name=row.name,
+            created_at=row.created_at, updated_at=row.updated_at,
+            last_activity_at=row.last_activity_at,
+            message_count=len(msgs),
+            messages=[ChatMessageResponse(
+                id=m.id, role=m.role, content=m.content,
+                tool_calls=m.tool_calls, token_usage=m.token_usage,
+                created_at=m.created_at,
+            ) for m in msgs],
+        )
+
+
+@app.delete("/api/chat/sessions/{session_id}", status_code=204)
+async def api_delete_chat_session(session_id: str):
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+        db.delete(row)
+    _chat_sessions.remove(session_id)
+
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+async def api_send_chat_message(session_id: str, request: Request):
+    """Send a message, optionally with a file attachment.
+
+    Accepts:
+    - application/json: {"content": "message text"}
+    - multipart/form-data: content (text field) + file (optional)
+    """
+    from agenticops.chat.preprocessor import preprocess_message
+
+    content_type = request.headers.get("content-type", "")
+    file_contents: list[tuple[str, str]] = []
+    attachments: list[dict] | None = None
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        text_content = str(form.get("content", "")).strip()
+        upload = form.get("file")
+
+        if upload and hasattr(upload, "filename") and upload.filename:
+            from agenticops.chat.file_reader import read_upload_bytes
+            raw = await upload.read()
+            file_text, error = read_upload_bytes(upload.filename, raw)
+            if error:
+                raise HTTPException(400, error)
+            if file_text:
+                file_contents.append((upload.filename, file_text))
+                attachments = [{"filename": upload.filename, "size": len(raw)}]
+
+        if not text_content and not file_contents:
+            raise HTTPException(400, "Message content or file required")
+        if not text_content:
+            text_content = f"Please analyze the attached file: {upload.filename}"
+        user_content = text_content
+    else:
+        payload = ChatMessageCreate(**(await request.json()))
+        user_content = payload.content
+
+    # Preprocess: file injection + reference resolution
+    enriched_content, _ = preprocess_message(user_content, file_contents=file_contents)
+
+    # Validate session & persist user message
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        msg = ChatMessage(
+            session_id=row.id, role="user", content=user_content,
+            attachments=attachments,
+        )
+        db.add(msg)
+        row.last_activity_at = datetime.utcnow()
+        db_session_pk = row.id
+
+    async def _generate():
+        agent = _chat_sessions.get_or_create(session_id)
+        accumulated = ""
+        tool_calls = []
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            async for event in agent.stream_async(enriched_content):
+                ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
+                # Text token
+                if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
+                    accumulated += ev["data"]
+                    yield {"event": "text", "data": json.dumps({"token": ev["data"]})}
+                # Tool use
+                if "current_tool_use" in ev:
+                    tool_name = ev["current_tool_use"].get("name", "")
+                    if tool_name and tool_name not in [t["name"] for t in tool_calls]:
+                        tool_calls.append({"name": tool_name, "status": "running"})
+                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name})}
+                # Completion with result
+                if "result" in ev:
+                    res = ev["result"]
+                    if hasattr(res, "metrics"):
+                        inv = getattr(res.metrics, "latest_agent_invocation", None)
+                        if inv and hasattr(inv, "usage"):
+                            input_tokens = inv.usage.get("inputTokens", 0)
+                            output_tokens = inv.usage.get("outputTokens", 0)
+                    # If accumulated text is empty, extract from result
+                    if not accumulated and hasattr(res, "__str__"):
+                        accumulated = str(res)
+
+            # Mark tools done
+            for t in tool_calls:
+                t["status"] = "done"
+                yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
+
+            # Persist assistant message
+            with get_db_session() as db:
+                db.add(ChatMessage(
+                    session_id=db_session_pk,
+                    role="assistant",
+                    content=accumulated,
+                    tool_calls=tool_calls if tool_calls else None,
+                    token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
+                ))
+
+            yield {
+                "event": "done",
+                "data": json.dumps({
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                }),
+            }
+        except Exception as e:
+            logger.exception("Chat stream error for session %s", session_id)
+            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+
+    return EventSourceResponse(_generate())
 
 
 # ============================================================================
@@ -2046,18 +2544,25 @@ async def serve_spa(full_path: str):
 
 
 # ============================================================================
-# Dev CORS (only when AIOPS_DEV_MODE is set)
+# CORS — production origins from AIOPS_CORS_ORIGINS, dev fallback to localhost:5173
 # ============================================================================
 
-if os.getenv("AIOPS_DEV_MODE"):
+_cors_origins: list[str] = [
+    o.strip() for o in settings.cors_origins.split(",") if o.strip()
+]
+if not _cors_origins and os.getenv("AIOPS_DEV_MODE"):
+    _cors_origins = ["http://localhost:5173"]
+
+if _cors_origins:
     from fastapi.middleware.cors import CORSMiddleware
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
+        max_age=settings.cors_max_age,
     )
 
 

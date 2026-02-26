@@ -115,7 +115,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=40, per_turn=True
+                window_size=settings.bedrock_window_size, per_turn=True
             ),
             tools=[
                 assume_role,

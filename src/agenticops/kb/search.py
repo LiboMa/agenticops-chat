@@ -35,7 +35,7 @@ def hybrid_search(
     1. Filter by resource_type (SQL WHERE)
     2. Vector search via embedding + cosine similarity
     3. Keyword fallback if vector returns < top_k or embeddings unavailable
-    4. Rerank: final_score = cosine_sim * 0.6 + efficiency_score * 0.2 + 0.2
+    4. Rerank using configurable weights from settings (search_vector_weight, etc.).
        Verified cases get 1.2x boost.
 
     Args:
@@ -160,10 +160,17 @@ def _keyword_search(
 
 
 def _rerank(results: list[HybridResult]) -> list[HybridResult]:
-    """Rerank results: final_score = cosine_sim * 0.6 + efficiency_score * 0.2 + 0.2.
+    """Rerank results using configurable weights from settings.
 
+    Formula: final_score = sim * vector_weight + efficiency * efficiency_weight + base_weight
     Verified cases get a 1.2x boost.
     """
+    from agenticops.config import settings
+
+    w_vec = settings.search_vector_weight
+    w_eff = settings.search_efficiency_weight
+    w_base = settings.search_base_weight
+
     for r in results:
         efficiency = 0.5
         verified = False
@@ -174,7 +181,7 @@ def _rerank(results: list[HybridResult]) -> list[HybridResult]:
                 pass
             verified = str(r.metadata.get("verified", "false")).lower() == "true"
 
-        base_score = r.score * 0.6 + efficiency * 0.2 + 0.2
+        base_score = r.score * w_vec + efficiency * w_eff + w_base
         if verified:
             base_score *= 1.2
         r.score = min(base_score, 1.0)

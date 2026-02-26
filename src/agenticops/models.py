@@ -448,6 +448,37 @@ class Report(Base):
 
 
 # ============================================================================
+# Chat Sessions (Web UI)
+# ============================================================================
+
+
+class ChatSession(Base):
+    """Chat session for web UI."""
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ChatMessage(Base):
+    """Individual message in a chat session."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(20))  # "user" or "assistant"
+    content: Mapped[str] = mapped_column(Text)
+    tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    attachments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
 # Database Session Management
 # ============================================================================
 
@@ -475,6 +506,16 @@ def init_db():
             with engine.connect() as conn:
                 conn.execute(
                     text("ALTER TABLE aws_resources ADD COLUMN managed BOOLEAN DEFAULT 1")
+                )
+                conn.commit()
+
+    # Migration: add 'attachments' column to chat_messages if missing
+    if insp.has_table("chat_messages"):
+        columns = {col["name"] for col in insp.get_columns("chat_messages")}
+        if "attachments" not in columns:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE chat_messages ADD COLUMN attachments JSON")
                 )
                 conn.commit()
 

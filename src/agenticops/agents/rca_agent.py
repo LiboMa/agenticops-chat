@@ -8,6 +8,7 @@ and persists structured RCA results. Exposed as a tool for the Main Agent
 import logging
 
 from strands import Agent, tool
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
@@ -140,12 +141,16 @@ def rca_agent(issue_id: int) -> str:
         model = BedrockModel(
             model_id=settings.bedrock_model_id,
             region_name=settings.bedrock_region,
+            max_tokens=settings.bedrock_max_tokens,
         )
 
         agent = Agent(
             system_prompt=RCA_SYSTEM_PROMPT,
             model=model,
             callback_handler=None,
+            conversation_manager=SlidingWindowConversationManager(
+                window_size=settings.bedrock_window_size, per_turn=True
+            ),
             tools=[
                 assume_role,
                 get_active_account,

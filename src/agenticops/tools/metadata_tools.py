@@ -9,6 +9,7 @@ from datetime import datetime
 
 from strands import tool
 
+from agenticops.config import settings
 from agenticops.models import (
     AWSAccount,
     AWSResource,
@@ -299,6 +300,35 @@ def get_health_issue(issue_id: int) -> str:
             "detected_at": str(issue.detected_at),
             "detected_by": issue.detected_by,
             "resolved_at": str(issue.resolved_at) if issue.resolved_at else None,
+        }, default=str)
+    finally:
+        session.close()
+
+
+@tool
+def get_resource_by_id(resource_id: int) -> str:
+    """Get details of a specific AWS resource by its database ID.
+
+    Args:
+        resource_id: The AWSResource database ID (integer PK).
+
+    Returns:
+        JSON object with resource details.
+    """
+    session = get_session()
+    try:
+        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        if not resource:
+            return f"Resource #{resource_id} not found."
+        return json.dumps({
+            "id": resource.id,
+            "resource_id": resource.resource_id,
+            "resource_arn": resource.resource_arn,
+            "resource_type": resource.resource_type,
+            "resource_name": resource.resource_name,
+            "region": resource.region,
+            "status": resource.status,
+            "managed": resource.managed,
         }, default=str)
     finally:
         session.close()
@@ -850,12 +880,35 @@ def save_execution_result(
             plan.status = "failed"
         # aborted -> keep approved (allow retry)
 
+        # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
+        # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,
+        # intentionally skipping fix_executed. The FixExecution table tracks execution detail,
+        # while HealthIssue.status tracks the lifecycle. Controlled by executor_auto_resolve flag.
+        auto_resolved = False
+        if status == "succeeded" and settings.executor_auto_resolve:
+            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+            if issue and issue.status in ("fix_approved", "fix_executed"):
+                issue.status = "resolved"
+                issue.resolved_at = datetime.utcnow()
+                auto_resolved = True
+
         session.commit()
 
-        return (
+        # Trigger post-resolution pipeline (RAG + case distillation) in background
+        if auto_resolved:
+            try:
+                from agenticops.services.resolution_service import trigger_post_resolution
+                trigger_post_resolution(health_issue_id)
+            except Exception as e:
+                logger.warning("Failed to trigger post-resolution pipeline: %s", e)
+
+        msg = (
             f"FixExecution #{execution.id} saved for FixPlan #{fix_plan_id}. "
             f"Status: {status}. FixPlan status updated to '{plan.status}'."
         )
+        if auto_resolved:
+            msg += f" HealthIssue #{health_issue_id} auto-resolved. Post-resolution pipeline triggered."
+        return msg
     except Exception as e:
         session.rollback()
         return f"Error saving execution result: {e}"

@@ -65,57 +65,57 @@ function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Account ID</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Account ID</label>
             <input
               required
               disabled={isEdit}
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500 disabled:bg-gray-100"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-100"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role ARN</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Role ARN</label>
             <input
               required
               value={roleArn}
               onChange={(e) => setRoleArn(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               External ID (optional)
             </label>
             <input
               value={externalId}
               onChange={(e) => setExternalId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               Regions (comma-separated)
             </label>
             <input
               value={regions}
               onChange={(e) => setRegions(e.target.value)}
               placeholder="us-east-1, us-west-2"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -124,9 +124,9 @@ function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
               type="checkbox"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-slate-200"
             />
-            <label htmlFor="is-active" className="text-sm text-gray-700">
+            <label htmlFor="is-active" className="text-sm text-slate-700">
               Active
             </label>
           </div>
@@ -134,14 +134,14 @@ function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+              className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 text-sm text-white bg-pd-green-600 rounded-md hover:bg-pd-green-500 disabled:opacity-50"
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -170,22 +170,22 @@ function DeleteModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Account</h3>
-        <p className="text-sm text-gray-600 mb-4">
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Account</h3>
+        <p className="text-sm text-slate-600 mb-4">
           Are you sure you want to delete <strong>{account.name}</strong> (
           {account.account_id})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+            className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={deleting}
-            className="px-4 py-2 text-sm text-white bg-red-600 rounded-md hover:bg-red-500 disabled:opacity-50"
+            className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50"
           >
             {deleting ? "Deleting..." : "Delete"}
           </button>
@@ -205,7 +205,7 @@ const columns: Column<Account>[] = [
     header: "Name",
     sortable: true,
     sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-gray-900">{r.name}</span>,
+    render: (r) => <span className="font-medium text-slate-900">{r.name}</span>,
   },
   {
     key: "account_id",
@@ -216,7 +216,7 @@ const columns: Column<Account>[] = [
     key: "role_arn",
     header: "Role ARN",
     render: (r) => (
-      <span className="font-mono text-xs text-gray-500 truncate max-w-[200px] block">
+      <span className="font-mono text-xs text-slate-500 truncate max-w-[200px] block">
         {r.role_arn}
       </span>
     ),
@@ -227,7 +227,7 @@ const columns: Column<Account>[] = [
     render: (r) => (
       <div className="flex flex-wrap gap-1">
         {r.regions.map((reg) => (
-          <Badge key={reg} className="bg-gray-100 text-gray-600">
+          <Badge key={reg} className="bg-slate-100 text-slate-600">
             {reg}
           </Badge>
         ))}
@@ -241,7 +241,7 @@ const columns: Column<Account>[] = [
       r.is_active ? (
         <Badge className="bg-green-100 text-green-700">Active</Badge>
       ) : (
-        <Badge className="bg-gray-100 text-gray-500">Inactive</Badge>
+        <Badge className="bg-slate-100 text-slate-500">Inactive</Badge>
       ),
   },
   {
@@ -250,7 +250,7 @@ const columns: Column<Account>[] = [
     sortable: true,
     sortValue: (r) => r.last_scanned_at ?? "",
     render: (r) => (
-      <span className="text-sm text-gray-500">
+      <span className="text-sm text-slate-500">
         {r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}
       </span>
     ),
@@ -274,13 +274,13 @@ export default function Accounts() {
     <>
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">AWS Accounts</h2>
+          <h2 className="text-lg font-semibold text-slate-900">AWS Accounts</h2>
           <button
             onClick={() => {
               setEditing(null);
               setFormOpen(true);
             }}
-            className="px-4 py-2 text-sm text-white bg-pd-green-600 rounded-md hover:bg-pd-green-500"
+            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
           >
             New Account
           </button>
@@ -299,7 +299,7 @@ export default function Accounts() {
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="text-xs text-pd-green-600 hover:underline"
+                    className="text-xs text-primary-600 hover:underline"
                   >
                     Edit
                   </button>

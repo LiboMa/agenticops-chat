@@ -18,21 +18,21 @@ const columns: Column<AuditLogEntry>[] = [
     sortable: true,
     sortValue: (r) => r.timestamp,
     render: (r) => (
-      <span className="text-sm text-gray-500 font-mono">{formatShortDate(r.timestamp)}</span>
+      <span className="text-sm text-slate-500 font-mono">{formatShortDate(r.timestamp)}</span>
     ),
   },
   {
     key: "action",
     header: "Action",
     render: (r) => (
-      <span className="text-sm font-medium text-gray-800">{r.action}</span>
+      <span className="text-sm font-medium text-slate-800">{r.action}</span>
     ),
   },
   {
     key: "entity_type",
     header: "Entity",
     render: (r) => (
-      <span className="text-sm text-gray-600">
+      <span className="text-sm text-slate-600">
         {r.entity_type}
         {r.entity_id ? ` #${r.entity_id}` : ""}
       </span>
@@ -41,13 +41,13 @@ const columns: Column<AuditLogEntry>[] = [
   {
     key: "user_email",
     header: "User",
-    render: (r) => <span className="text-sm text-gray-600">{r.user_email}</span>,
+    render: (r) => <span className="text-sm text-slate-600">{r.user_email}</span>,
   },
   {
     key: "details",
     header: "Details",
     render: (r) => (
-      <span className="text-sm text-gray-500 truncate max-w-[250px] block">
+      <span className="text-sm text-slate-500 truncate max-w-[250px] block">
         {r.details ?? "-"}
       </span>
     ),
@@ -78,7 +78,7 @@ export default function AuditLog() {
           <StatCard label="Creates" value={stats.creates} colorClass="text-green-600" />
           <StatCard label="Updates" value={stats.updates} colorClass="text-blue-600" />
           <StatCard label="Deletes" value={stats.deletes} colorClass="text-red-600" />
-          <StatCard label="Logins" value={stats.logins} colorClass="text-gray-700" />
+          <StatCard label="Logins" value={stats.logins} colorClass="text-slate-700" />
           <StatCard
             label="Login Failures"
             value={stats.login_failures}
@@ -90,12 +90,12 @@ export default function AuditLog() {
       {/* Filter bar */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">Audit Log</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Audit Log</h2>
           <div className="flex items-center gap-3">
             <select
               value={action}
               onChange={(e) => setAction(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="">All Actions</option>
               {ACTION_OPTIONS.filter(Boolean).map((a) => (
@@ -107,7 +107,7 @@ export default function AuditLog() {
             <select
               value={entityType}
               onChange={(e) => setEntityType(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="">All Entities</option>
               {ENTITY_OPTIONS.filter(Boolean).map((e) => (
@@ -117,14 +117,14 @@ export default function AuditLog() {
               ))}
             </select>
             <div className="flex items-center gap-1">
-              <label className="text-sm text-gray-600">Hours:</label>
+              <label className="text-sm text-slate-500">Hours:</label>
               <input
                 type="number"
                 min={1}
                 max={720}
                 value={hours}
                 onChange={(e) => setHours(Number(e.target.value) || 24)}
-                className="w-16 text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+                className="w-16 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               />
             </div>
           </div>

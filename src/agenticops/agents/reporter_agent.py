@@ -8,6 +8,7 @@ structured reports. Exposed as a tool for the Main Agent
 import logging
 
 from strands import Agent, tool
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
@@ -93,12 +94,16 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         model = BedrockModel(
             model_id=settings.bedrock_model_id,
             region_name=settings.bedrock_region,
+            max_tokens=settings.bedrock_max_tokens,
         )
 
         agent = Agent(
             system_prompt=REPORTER_SYSTEM_PROMPT,
             model=model,
             callback_handler=None,
+            conversation_manager=SlidingWindowConversationManager(
+                window_size=settings.bedrock_window_size, per_turn=True
+            ),
             tools=[
                 get_active_account,
                 get_managed_resources,

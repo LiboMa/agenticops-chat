@@ -32,7 +32,7 @@ const columns: Column<FixPlan>[] = [
     key: "title",
     header: "Title",
     render: (r) => (
-      <span className="text-sm font-medium text-gray-900">{r.title}</span>
+      <span className="text-sm font-medium text-slate-900">{r.title}</span>
     ),
   },
   {
@@ -44,7 +44,7 @@ const columns: Column<FixPlan>[] = [
     key: "health_issue_id",
     header: "Issue #",
     render: (r) => (
-      <span className="text-sm text-gray-500 font-mono">
+      <span className="text-sm text-slate-500 font-mono">
         #{r.health_issue_id}
       </span>
     ),
@@ -53,7 +53,7 @@ const columns: Column<FixPlan>[] = [
     key: "approved_by",
     header: "Approved By",
     render: (r) => (
-      <span className="text-sm text-gray-500">{r.approved_by ?? "-"}</span>
+      <span className="text-sm text-slate-500">{r.approved_by ?? "-"}</span>
     ),
   },
   {
@@ -62,7 +62,7 @@ const columns: Column<FixPlan>[] = [
     sortable: true,
     sortValue: (r) => new Date(r.created_at).getTime(),
     render: (r) => (
-      <span className="text-sm text-gray-500">
+      <span className="text-sm text-slate-500">
         {formatShortDate(r.created_at)}
       </span>
     ),
@@ -92,12 +92,12 @@ export default function FixPlans() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">Fix Plans</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Fix Plans</h2>
           <div className="flex items-center gap-3">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="">All Statuses</option>
               {STATUS_OPTIONS.map((s) => (
@@ -109,7 +109,7 @@ export default function FixPlans() {
             <select
               value={riskFilter}
               onChange={(e) => setRiskFilter(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="">All Risk Levels</option>
               {RISK_OPTIONS.map((r) => (
@@ -118,7 +118,7 @@ export default function FixPlans() {
                 </option>
               ))}
             </select>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-slate-400">
               {data?.length ?? 0} plans
             </span>
           </div>

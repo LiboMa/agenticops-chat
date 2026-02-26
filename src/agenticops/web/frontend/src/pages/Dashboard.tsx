@@ -40,7 +40,7 @@ export default function Dashboard() {
         <StatCard
           label="Total Resources"
           value={s.total_resources}
-          colorClass="text-pd-green-600"
+          colorClass="text-primary-600"
         />
         <StatCard
           label="Open Anomalies"
@@ -55,14 +55,14 @@ export default function Dashboard() {
         <StatCard
           label="Accounts"
           value={s.total_accounts}
-          colorClass="text-gray-700"
+          colorClass="text-slate-700"
         />
       </div>
 
       {/* Recent Anomalies */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-slate-900">
             Recent Anomalies
           </h2>
         </CardHeader>
@@ -72,40 +72,40 @@ export default function Dashboard() {
           ) : anomalies.data && anomalies.data.length > 0 ? (
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <tr className="border-b border-slate-200">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Severity
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Title
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Resource
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Detected
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {anomalies.data.slice(0, 10).map((a) => (
                   <tr
                     key={a.id}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="hover:bg-slate-50 cursor-pointer transition-colors"
                     onClick={() => navigate(`/app/anomalies/${a.id}`)}
                   >
                     <td className="px-6 py-3">
                       <SeverityBadge severity={a.severity} />
                     </td>
-                    <td className="px-6 py-3 text-sm text-gray-900">
+                    <td className="px-6 py-3 text-sm text-slate-900">
                       {a.title.length > 50
                         ? a.title.slice(0, 50) + "..."
                         : a.title}
                     </td>
-                    <td className="px-6 py-3 text-sm text-gray-500 font-mono">
+                    <td className="px-6 py-3 text-sm text-slate-500 font-mono">
                       {a.resource_type}/{a.resource_id.slice(0, 20)}
                     </td>
-                    <td className="px-6 py-3 text-sm text-gray-500">
+                    <td className="px-6 py-3 text-sm text-slate-500">
                       {formatShortDate(a.detected_at)}
                     </td>
                   </tr>
@@ -113,7 +113,7 @@ export default function Dashboard() {
               </tbody>
             </table>
           ) : (
-            <div className="p-8 text-center text-gray-500 text-sm">
+            <div className="p-8 text-center text-slate-400 text-sm">
               No anomalies detected.
             </div>
           )}
@@ -123,7 +123,7 @@ export default function Dashboard() {
       {/* Resources by Type */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-slate-900">
             Resources by Type
           </h2>
         </CardHeader>
@@ -133,16 +133,16 @@ export default function Dashboard() {
           ) : resourceTypes.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {resourceTypes.map(([type, count]) => (
-                <div key={type} className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-2xl font-bold text-pd-green-600">
+                <div key={type} className="text-center p-4 bg-slate-50 rounded-lg">
+                  <div className="text-2xl font-semibold text-primary-600">
                     {count}
                   </div>
-                  <div className="text-sm text-gray-500 mt-1">{type}</div>
+                  <div className="text-sm text-slate-500 mt-1">{type}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center text-gray-500 text-sm">
+            <div className="text-center text-slate-400 text-sm">
               No resources found.
             </div>
           )}

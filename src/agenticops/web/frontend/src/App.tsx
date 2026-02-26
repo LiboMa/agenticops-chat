@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Spinner";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Chat = lazy(() => import("@/pages/Chat"));
 const Resources = lazy(() => import("@/pages/Resources"));
 const Anomalies = lazy(() => import("@/pages/Anomalies"));
 const AnomalyDetail = lazy(() => import("@/pages/AnomalyDetail"));
@@ -40,6 +41,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Dashboard />
+                </Suspense>
+              }
+            />
+            <Route
+              path="chat"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Chat />
                 </Suspense>
               }
             />

@@ -80,25 +80,25 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">
           {isEdit ? "Edit Channel" : "New Channel"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
             <select
               value={channelType}
               onChange={(e) => setChannelType(e.target.value as NotificationChannelType)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               {CHANNEL_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -108,21 +108,21 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               Config (JSON)
             </label>
             <textarea
               value={configJson}
               onChange={(e) => setConfigJson(e.target.value)}
               rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
             {configError && (
               <p className="text-xs text-red-600 mt-1">{configError}</p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               Severity Filter
             </label>
             <div className="flex gap-2">
@@ -132,7 +132,7 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
                     type="checkbox"
                     checked={severityFilter.includes(s)}
                     onChange={() => toggleSeverity(s)}
-                    className="rounded border-gray-300"
+                    className="rounded border-slate-200"
                   />
                   {s}
                 </label>
@@ -145,9 +145,9 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
               type="checkbox"
               checked={isEnabled}
               onChange={(e) => setIsEnabled(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-slate-200"
             />
-            <label htmlFor="channel-enabled" className="text-sm text-gray-700">
+            <label htmlFor="channel-enabled" className="text-sm text-slate-700">
               Enabled
             </label>
           </div>
@@ -155,14 +155,14 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+              className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 text-sm text-white bg-pd-green-600 rounded-md hover:bg-pd-green-500 disabled:opacity-50"
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -191,22 +191,22 @@ function DeleteModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Channel</h3>
-        <p className="text-sm text-gray-600 mb-4">
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Channel</h3>
+        <p className="text-sm text-slate-600 mb-4">
           Are you sure you want to delete <strong>{channel.name}</strong>? This action
           cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+            className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={deleting}
-            className="px-4 py-2 text-sm text-white bg-red-600 rounded-md hover:bg-red-500 disabled:opacity-50"
+            className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50"
           >
             {deleting ? "Deleting..." : "Delete"}
           </button>
@@ -225,9 +225,9 @@ function ChannelTypeBadge({ type }: { type: string }) {
     slack: "bg-purple-100 text-purple-700",
     email: "bg-blue-100 text-blue-700",
     sns: "bg-orange-100 text-orange-700",
-    webhook: "bg-gray-100 text-gray-700",
+    webhook: "bg-slate-100 text-slate-700",
   };
-  return <Badge className={colors[type] ?? "bg-gray-100 text-gray-700"}>{type}</Badge>;
+  return <Badge className={colors[type] ?? "bg-slate-100 text-slate-700"}>{type}</Badge>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,7 +240,7 @@ const columns: Column<NotificationChannel>[] = [
     header: "Name",
     sortable: true,
     sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-gray-900">{r.name}</span>,
+    render: (r) => <span className="font-medium text-slate-900">{r.name}</span>,
   },
   {
     key: "channel_type",
@@ -254,7 +254,7 @@ const columns: Column<NotificationChannel>[] = [
       r.is_enabled ? (
         <Badge className="bg-green-100 text-green-700">Enabled</Badge>
       ) : (
-        <Badge className="bg-gray-100 text-gray-500">Disabled</Badge>
+        <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
       ),
   },
   {
@@ -264,13 +264,13 @@ const columns: Column<NotificationChannel>[] = [
       r.severity_filter.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {r.severity_filter.map((s) => (
-            <Badge key={s} className="bg-gray-100 text-gray-600">
+            <Badge key={s} className="bg-slate-100 text-slate-600">
               {s}
             </Badge>
           ))}
         </div>
       ) : (
-        <span className="text-sm text-gray-400">all</span>
+        <span className="text-sm text-slate-400">all</span>
       ),
   },
   {
@@ -279,7 +279,7 @@ const columns: Column<NotificationChannel>[] = [
     sortable: true,
     sortValue: (r) => r.created_at,
     render: (r) => (
-      <span className="text-sm text-gray-500">{formatShortDate(r.created_at)}</span>
+      <span className="text-sm text-slate-500">{formatShortDate(r.created_at)}</span>
     ),
   },
 ];
@@ -304,12 +304,12 @@ export default function Notifications() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-slate-900">
               Notification Channels
             </h2>
             <button
               onClick={() => navigate("/app/notifications/logs")}
-              className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+              className="px-3 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
             >
               View Logs
             </button>
@@ -319,7 +319,7 @@ export default function Notifications() {
               setEditing(null);
               setFormOpen(true);
             }}
-            className="px-4 py-2 text-sm text-white bg-pd-green-600 rounded-md hover:bg-pd-green-500"
+            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
           >
             New Channel
           </button>
@@ -348,7 +348,7 @@ export default function Notifications() {
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="text-xs text-pd-green-600 hover:underline"
+                    className="text-xs text-primary-600 hover:underline"
                   >
                     Edit
                   </button>

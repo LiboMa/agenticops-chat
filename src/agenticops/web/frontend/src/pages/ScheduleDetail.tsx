@@ -30,7 +30,7 @@ export default function ScheduleDetail() {
       {/* Back link */}
       <Link
         to="/app/schedules"
-        className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
+        className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 transition-colors"
       >
         <svg
           className="h-4 w-4 mr-1"
@@ -53,17 +53,17 @@ export default function ScheduleDetail() {
         <CardBody>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900">{s.name}</h1>
+              <h1 className="text-2xl font-semibold text-slate-900">{s.name}</h1>
               {s.is_enabled ? (
                 <Badge className="bg-green-100 text-green-700">Enabled</Badge>
               ) : (
-                <Badge className="bg-gray-100 text-gray-500">Disabled</Badge>
+                <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
               )}
             </div>
             <button
               onClick={() => runMut.mutate(scheduleId)}
               disabled={runMut.isPending}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {runMut.isPending ? "Running..." : "Run Now"}
             </button>
@@ -71,35 +71,35 @@ export default function ScheduleDetail() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-gray-500 block">Pipeline</span>
+              <span className="text-slate-500 block">Pipeline</span>
               <Badge className="bg-blue-100 text-blue-700">{s.pipeline_name}</Badge>
             </div>
             <div>
-              <span className="text-gray-500 block">Cron</span>
+              <span className="text-slate-500 block">Cron</span>
               <span className="font-mono">{s.cron_expression}</span>
             </div>
             <div>
-              <span className="text-gray-500 block">Account</span>
+              <span className="text-slate-500 block">Account</span>
               <span>{s.account_name || "-"}</span>
             </div>
             <div>
-              <span className="text-gray-500 block">Created</span>
+              <span className="text-slate-500 block">Created</span>
               <span>{formatFullDate(s.created_at)}</span>
             </div>
             <div>
-              <span className="text-gray-500 block">Last Run</span>
+              <span className="text-slate-500 block">Last Run</span>
               <span>{s.last_run_at ? formatFullDate(s.last_run_at) : "Never"}</span>
             </div>
             <div>
-              <span className="text-gray-500 block">Next Run</span>
+              <span className="text-slate-500 block">Next Run</span>
               <span>{s.next_run_at ? formatFullDate(s.next_run_at) : "-"}</span>
             </div>
           </div>
 
           {Object.keys(s.config).length > 0 && (
             <div className="mt-4">
-              <span className="text-gray-500 block text-sm mb-1">Config</span>
-              <pre className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 overflow-x-auto">
+              <span className="text-slate-500 block text-sm mb-1">Config</span>
+              <pre className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 overflow-x-auto">
                 {JSON.stringify(s.config, null, 2)}
               </pre>
             </div>
@@ -110,7 +110,7 @@ export default function ScheduleDetail() {
       {/* Execution history */}
       <Card>
         <CardBody>
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">
             Execution History
           </h2>
           {executions.isLoading ? (
@@ -119,47 +119,47 @@ export default function ScheduleDetail() {
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       ID
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       Status
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       Started
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       Duration
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       Error
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-slate-100">
                   {executions.data.map((ex) => (
-                    <tr key={ex.id} className="hover:bg-gray-50">
+                    <tr key={ex.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2 text-sm font-mono">#{ex.id}</td>
                       <td className="px-4 py-2">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             ex.status === "succeeded"
                               ? "bg-green-100 text-green-800"
                               : ex.status === "failed"
                                 ? "bg-red-100 text-red-800"
                                 : ex.status === "running"
                                   ? "bg-blue-100 text-blue-800"
-                                  : "bg-gray-100 text-gray-700"
+                                  : "bg-slate-100 text-slate-700"
                           }`}
                         >
                           {ex.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-500">
+                      <td className="px-4 py-2 text-sm text-slate-500">
                         {formatFullDate(ex.started_at)}
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">
+                      <td className="px-4 py-2 text-sm text-slate-600">
                         {ex.duration_ms != null && ex.duration_ms > 0
                           ? `${(ex.duration_ms / 1000).toFixed(1)}s`
                           : "-"}
@@ -173,7 +173,7 @@ export default function ScheduleDetail() {
               </table>
             </div>
           ) : (
-            <p className="text-gray-500 text-sm">No executions yet.</p>
+            <p className="text-slate-500 text-sm">No executions yet.</p>
           )}
         </CardBody>
       </Card>
