@@ -7,8 +7,8 @@ import { Spinner } from "@/components/ui/Spinner";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Resources = lazy(() => import("@/pages/Resources"));
-const Anomalies = lazy(() => import("@/pages/Anomalies"));
-const AnomalyDetail = lazy(() => import("@/pages/AnomalyDetail"));
+const Issues = lazy(() => import("@/pages/Anomalies"));
+const IssueDetail = lazy(() => import("@/pages/AnomalyDetail"));
 const FixPlans = lazy(() => import("@/pages/FixPlans"));
 const FixPlanDetail = lazy(() => import("@/pages/FixPlanDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
@@ -61,18 +61,18 @@ export default function App() {
               }
             />
             <Route
-              path="anomalies"
+              path="issues"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <Anomalies />
+                  <Issues />
                 </Suspense>
               }
             />
             <Route
-              path="anomalies/:id"
+              path="issues/:id"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <AnomalyDetail />
+                  <IssueDetail />
                 </Suspense>
               }
             />

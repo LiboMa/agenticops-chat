@@ -43,7 +43,7 @@ export default function Dashboard() {
           colorClass="text-primary-600"
         />
         <StatCard
-          label="Open Anomalies"
+          label="Open Issues"
           value={s.open_anomalies}
           colorClass="text-red-600"
         />
@@ -59,11 +59,11 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Recent Anomalies */}
+      {/* Recent Issues */}
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-slate-900">
-            Recent Anomalies
+            Recent Issues
           </h2>
         </CardHeader>
         <CardBody className="p-0">
@@ -92,7 +92,7 @@ export default function Dashboard() {
                   <tr
                     key={a.id}
                     className="hover:bg-slate-50 cursor-pointer transition-colors"
-                    onClick={() => navigate(`/app/anomalies/${a.id}`)}
+                    onClick={() => navigate(`/app/issues/${a.id}`)}
                   >
                     <td className="px-6 py-3">
                       <SeverityBadge severity={a.severity} />
@@ -114,7 +114,7 @@ export default function Dashboard() {
             </table>
           ) : (
             <div className="p-8 text-center text-slate-400 text-sm">
-              No anomalies detected.
+              No issues detected.
             </div>
           )}
         </CardBody>

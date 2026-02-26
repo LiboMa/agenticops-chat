@@ -5,7 +5,7 @@ import type { Anomaly } from "@/api/types";
 export function useAnomaly(id: number) {
   return useQuery({
     queryKey: ["anomaly", id],
-    queryFn: () => apiFetch<Anomaly>(`/anomalies/${id}`),
+    queryFn: () => apiFetch<Anomaly>(`/issues/${id}`),
     staleTime: 5 * 60_000,
   });
 }

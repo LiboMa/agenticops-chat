@@ -110,7 +110,7 @@ export default function FixPlanDetail() {
             <div>
               <span className="text-slate-400 block">Issue</span>
               <Link
-                to={`/app/anomalies/${p.health_issue_id}`}
+                to={`/app/issues/${p.health_issue_id}`}
                 className="font-mono text-primary-600 hover:underline"
               >
                 #{p.health_issue_id}

@@ -1123,6 +1123,64 @@ async def api_get_anomaly_rca(issue_id: int):
         return RCAResponse.model_validate(rca)
 
 
+@app.post("/api/anomalies/{issue_id}/rca", status_code=202)
+async def api_trigger_anomaly_rca(issue_id: int):
+    """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint)."""
+    return await api_trigger_rca(issue_id)
+
+
+@app.post("/api/anomalies/{issue_id}/generate-fix-plan", status_code=202)
+async def api_trigger_anomaly_fix_plan(issue_id: int):
+    """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint)."""
+    return await api_trigger_fix_plan(issue_id)
+
+
+# ============================================================================
+# Issues API Endpoints (canonical /api/issues/* — delegates to anomaly handlers)
+# ============================================================================
+
+@app.get("/api/issues", response_model=List[AnomalyResponse])
+async def api_list_issues(
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = 0,
+):
+    """List issues."""
+    return await api_list_anomalies(severity, status, resource_type, limit, offset)
+
+
+@app.get("/api/issues/{issue_id}", response_model=AnomalyResponse)
+async def api_get_issue(issue_id: int):
+    """Get issue by ID."""
+    return await api_get_anomaly(issue_id)
+
+
+@app.put("/api/issues/{issue_id}/status", response_model=AnomalyResponse)
+async def api_update_issue_status(issue_id: int, update: AnomalyStatusUpdate):
+    """Update issue status."""
+    return await api_update_anomaly_status(issue_id, update)
+
+
+@app.get("/api/issues/{issue_id}/rca", response_model=Optional[RCAResponse])
+async def api_get_issue_rca(issue_id: int):
+    """Get RCA result for an issue."""
+    return await api_get_anomaly_rca(issue_id)
+
+
+@app.post("/api/issues/{issue_id}/rca", status_code=202)
+async def api_trigger_issue_rca(issue_id: int):
+    """Trigger RCA analysis for an issue."""
+    return await api_trigger_rca(issue_id)
+
+
+@app.post("/api/issues/{issue_id}/generate-fix-plan", status_code=202)
+async def api_trigger_issue_fix_plan(issue_id: int):
+    """Trigger fix plan generation for an issue."""
+    return await api_trigger_fix_plan(issue_id)
+
+
 # ============================================================================
 # HealthIssue API Endpoints
 # ============================================================================
@@ -1166,7 +1224,7 @@ async def api_get_health_issue(issue_id: int):
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
 async def api_create_health_issue(data: HealthIssueCreate):
-    """Create a new health issue."""
+    """Create a new health issue. Auto-triggers RCA in background."""
     with get_db_session() as session:
         issue = HealthIssue(
             resource_id=data.resource_id,
@@ -1180,7 +1238,13 @@ async def api_create_health_issue(data: HealthIssueCreate):
         )
         session.add(issue)
         session.flush()
-        return HealthIssueResponse.model_validate(issue)
+        response = HealthIssueResponse.model_validate(issue)
+
+    # Auto-trigger RCA after commit
+    from agenticops.services.rca_service import trigger_auto_rca
+    trigger_auto_rca(response.id)
+
+    return response
 
 
 @app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -1259,6 +1323,88 @@ async def api_list_health_issue_fix_plans(issue_id: int):
             .all()
         )
         return [FixPlanResponse.model_validate(p) for p in plans]
+
+
+@app.post("/api/health-issues/{issue_id}/rca", response_model=RCAResponse, status_code=202)
+async def api_trigger_rca(issue_id: int):
+    """Trigger RCA analysis for a health issue via the rca_agent.
+
+    Runs the rca_agent as a tool call and stores the result.
+    Returns the new RCA result.
+    """
+    import threading
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        # Run RCA agent in background thread and return immediately
+        issue_title = issue.title
+        issue_desc = issue.description
+        issue_resource = issue.resource_id
+
+    def _run_rca():
+        try:
+            from agenticops.agents.rca_agent import rca_agent
+            result = rca_agent(issue_id=issue_id)
+            logger.info("RCA triggered for issue #%d: %s", issue_id, str(result)[:200])
+        except Exception:
+            logger.exception("RCA trigger failed for issue #%d", issue_id)
+
+    thread = threading.Thread(target=_run_rca, daemon=True, name=f"rca-trigger-{issue_id}")
+    thread.start()
+
+    # Return a placeholder — the RCA will be available after the agent completes
+    return JSONResponse(
+        status_code=202,
+        content={
+            "message": f"RCA analysis triggered for issue #{issue_id}. Refresh to see results.",
+            "health_issue_id": issue_id,
+        },
+    )
+
+
+@app.post("/api/health-issues/{issue_id}/generate-fix-plan", status_code=202)
+async def api_trigger_fix_plan(issue_id: int):
+    """Trigger fix plan generation for a health issue via the sre_agent.
+
+    Requires an existing RCA result. Runs sre_agent in background.
+    """
+    import threading
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        rca = (
+            session.query(RCAResult)
+            .filter_by(health_issue_id=issue_id)
+            .order_by(RCAResult.created_at.desc())
+            .first()
+        )
+        if not rca:
+            raise HTTPException(status_code=400, detail="No RCA result found. Run RCA first.")
+
+    def _run_fix_plan():
+        try:
+            from agenticops.agents.sre_agent import sre_agent
+            result = sre_agent(issue_id=issue_id)
+            logger.info("Fix plan generated for issue #%d: %s", issue_id, str(result)[:200])
+        except Exception:
+            logger.exception("Fix plan generation failed for issue #%d", issue_id)
+
+    thread = threading.Thread(target=_run_fix_plan, daemon=True, name=f"fixplan-trigger-{issue_id}")
+    thread.start()
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "message": f"Fix plan generation triggered for issue #{issue_id}. Refresh to see results.",
+            "health_issue_id": issue_id,
+        },
+    )
 
 
 # ============================================================================

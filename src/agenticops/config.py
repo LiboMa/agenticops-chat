@@ -139,6 +139,12 @@ class Settings(BaseSettings):
         description="Total execution timeout in seconds (default 30 min)",
     )
 
+    # Auto-RCA
+    auto_rca_enabled: bool = Field(
+        default=True,
+        description="Automatically trigger RCA when a new HealthIssue is created",
+    )
+
     # RAG Pipeline
     rag_pipeline_enabled: bool = Field(
         default=True,

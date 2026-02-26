@@ -378,6 +378,178 @@ class ReportGenerator:
         finally:
             session.close()
 
+    def generate_network_health_report(self, regions: Optional[list[str]] = None, save: bool = True) -> str:
+        """Generate a network health report across all configured regions.
+
+        Collects region topology, per-VPC anomaly detection, and network
+        segmentation analysis, then produces a consolidated markdown report.
+
+        Args:
+            regions: List of AWS regions to report on. If None, uses the
+                     active account's configured regions.
+            save: Whether to persist the report to DB and file.
+
+        Returns:
+            Markdown report string.
+        """
+        import json
+        from agenticops.tools.network_tools import describe_region_topology, analyze_vpc_topology
+        from agenticops.graph.engine import InfraGraph
+        from agenticops.graph.algorithms import detect_anomalies as graph_detect_anomalies, network_segments
+
+        # Resolve regions
+        if not regions:
+            if self.account and self.account.regions:
+                regions = self.account.regions
+            else:
+                regions = ["us-east-1"]
+
+        now = datetime.utcnow()
+        lines = [
+            "# Network Health Report",
+            f"**Generated**: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Regions**: {', '.join(regions)}",
+            "",
+            "---",
+            "",
+        ]
+
+        total_vpcs = 0
+        total_subnets = 0
+        total_tgws = 0
+        total_peerings = 0
+        all_anomalies: list[dict] = []
+
+        for region in regions:
+            try:
+                raw = describe_region_topology(region=region)
+                topo = json.loads(raw)
+            except Exception as e:
+                lines.extend([f"## {region}", "", f"> ⚠ Failed to collect topology: {e}", ""])
+                continue
+
+            vpcs = topo.get("vpcs", [])
+            tgws = topo.get("transit_gateways", [])
+            peerings = topo.get("peering_connections", [])
+            total_vpcs += len(vpcs)
+            total_tgws += len(tgws)
+            total_peerings += len(peerings)
+
+            lines.extend([f"## {region}", ""])
+
+            # Region summary table
+            lines.extend([
+                "| Metric | Count |",
+                "|--------|-------|",
+                f"| VPCs | {len(vpcs)} |",
+                f"| Transit Gateways | {len(tgws)} |",
+                f"| VPC Peering Connections | {len(peerings)} |",
+                "",
+            ])
+
+            # Per-VPC analysis
+            for vpc in vpcs:
+                vpc_id = vpc.get("vpc_id", "")
+                vpc_name = vpc.get("name") or vpc_id
+                subnet_count = vpc.get("subnet_count", 0)
+                total_subnets += subnet_count
+
+                try:
+                    vpc_raw = analyze_vpc_topology(region=region, vpc_id=vpc_id)
+                    vpc_topo = json.loads(vpc_raw)
+                except Exception:
+                    lines.extend([f"### {vpc_name} (`{vpc_id}`)", "", "> ⚠ Failed to analyze", ""])
+                    continue
+
+                reach = vpc_topo.get("reachability_summary", {})
+                blackholes = vpc_topo.get("blackhole_routes", [])
+                issues = reach.get("issues", [])
+
+                # Graph anomaly detection
+                try:
+                    graph = InfraGraph().build_from_vpc_topology(vpc_topo)
+                    anomaly_report = graph_detect_anomalies(graph)
+                    vpc_anomalies = [a.model_dump() for a in anomaly_report.anomalies]
+                except Exception:
+                    vpc_anomalies = []
+
+                for a in vpc_anomalies:
+                    a["region"] = region
+                    a["vpc_id"] = vpc_id
+                all_anomalies.extend(vpc_anomalies)
+
+                status = "🟢 Healthy" if not vpc_anomalies and not issues else "🔴 Issues Detected"
+                lines.extend([
+                    f"### {vpc_name} (`{vpc_id}`) — {status}",
+                    "",
+                    f"- CIDR: `{vpc_topo.get('vpc_cidr', '-')}`",
+                    f"- Subnets: {reach.get('public_subnet_count', 0)} public / {reach.get('private_subnet_count', 0)} private",
+                    f"- Internet Gateway: {'Yes' if reach.get('has_internet_gateway') else 'No'}",
+                    f"- NAT Gateways: {reach.get('nat_gateway_count', 0)}",
+                    f"- TGW Attachments: {reach.get('transit_gateway_attachments', 0)}",
+                    f"- VPC Endpoints: {reach.get('vpc_endpoint_count', 0)}",
+                    f"- Blackhole Routes: {len(blackholes)}",
+                    f"- Anomalies: {len(vpc_anomalies)}",
+                    "",
+                ])
+
+                if vpc_anomalies:
+                    lines.extend([
+                        "| Severity | Type | Description |",
+                        "|----------|------|-------------|",
+                    ])
+                    for a in vpc_anomalies:
+                        lines.append(f"| {a['severity'].upper()} | {a['type']} | {a['description']} |")
+                    lines.append("")
+
+                if issues:
+                    lines.append("**Issues:**")
+                    for issue in issues:
+                        lines.append(f"- {issue}")
+                    lines.append("")
+
+        # Executive summary at the top (insert after header)
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for a in all_anomalies:
+            sev = a.get("severity", "medium")
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+        summary_lines = [
+            "## Executive Summary",
+            "",
+            f"- **Regions Scanned**: {len(regions)}",
+            f"- **Total VPCs**: {total_vpcs}",
+            f"- **Total Subnets**: {total_subnets}",
+            f"- **Transit Gateways**: {total_tgws}",
+            f"- **VPC Peerings**: {total_peerings}",
+            f"- **Network Anomalies**: {len(all_anomalies)}",
+            "",
+            "| Severity | Count |",
+            "|----------|-------|",
+            f"| Critical | {severity_counts['critical']} |",
+            f"| High | {severity_counts['high']} |",
+            f"| Medium | {severity_counts['medium']} |",
+            f"| Low | {severity_counts['low']} |",
+            "",
+        ]
+
+        # Insert summary after the header block (after "---\n\n")
+        insert_idx = lines.index("---") + 2
+        for i, sl in enumerate(summary_lines):
+            lines.insert(insert_idx + i, sl)
+
+        lines.extend(["---", "", "*Report generated by AgenticOps*"])
+        report_md = "\n".join(lines)
+
+        if save:
+            self._save_report(
+                report_type="network",
+                title=f"Network Health Report - {now.strftime('%Y-%m-%d')}",
+                content=report_md,
+            )
+
+        return report_md
+
     def _save_report(
         self,
         report_type: str,

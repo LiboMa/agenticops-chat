@@ -5,7 +5,7 @@ const NAV_ITEMS = [
   { to: "/app", label: "Dashboard", end: true, icon: "grid" },
   { to: "/app/chat", label: "Chat", end: false, icon: "chat" },
   { to: "/app/resources", label: "Resources", end: false, icon: "server" },
-  { to: "/app/anomalies", label: "Anomalies", end: false, icon: "alert" },
+  { to: "/app/issues", label: "Issues", end: false, icon: "alert" },
   { to: "/app/fix-plans", label: "Fix Plans", end: false, icon: "wrench" },
   { to: "/app/reports", label: "Reports", end: false, icon: "file" },
   { to: "/app/network", label: "Network", end: false, icon: "globe" },

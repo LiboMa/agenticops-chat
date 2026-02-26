@@ -20,6 +20,16 @@ export interface Resource {
   updated_at: string;
 }
 
+export type IssueStatus =
+  | "open"
+  | "investigating"
+  | "root_cause_identified"
+  | "fix_planned"
+  | "fix_approved"
+  | "fix_executed"
+  | "resolved"
+  | "acknowledged"; // legacy fallback
+
 export interface Anomaly {
   id: number;
   resource_id: string;
@@ -33,7 +43,7 @@ export interface Anomaly {
   expected_value: number | null;
   actual_value: number | null;
   deviation_percent: number | null;
-  status: "open" | "acknowledged" | "resolved";
+  status: IssueStatus;
   detected_at: string;
   resolved_at: string | null;
 }

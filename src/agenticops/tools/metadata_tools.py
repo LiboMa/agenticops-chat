@@ -262,6 +262,10 @@ def create_health_issue(
         session.add(issue)
         session.commit()
 
+        # Auto-trigger RCA for newly created issues
+        from agenticops.services.rca_service import trigger_auto_rca
+        trigger_auto_rca(issue.id)
+
         return f"Created HealthIssue #{issue.id}: [{severity.upper()}] {title}"
     except Exception as e:
         session.rollback()

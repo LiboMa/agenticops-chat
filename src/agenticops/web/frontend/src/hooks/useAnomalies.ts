@@ -17,7 +17,7 @@ export function useAnomalies(filters: AnomalyFilters = {}) {
 
   return useQuery({
     queryKey: ["anomalies", filters],
-    queryFn: () => apiFetch<Anomaly[]>(`/anomalies${qs ? `?${qs}` : ""}`),
+    queryFn: () => apiFetch<Anomaly[]>(`/issues${qs ? `?${qs}` : ""}`),
     staleTime: 30_000,
   });
 }

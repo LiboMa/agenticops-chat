@@ -5,7 +5,7 @@ import { formatUtcClock } from "@/lib/formatDate";
 const ROUTE_LABELS: Record<string, string> = {
   "/app": "Dashboard",
   "/app/resources": "Resources",
-  "/app/anomalies": "Anomalies",
+  "/app/issues": "Issues",
   "/app/reports": "Reports",
   "/app/network": "Network",
   "/app/accounts": "Accounts",
@@ -26,7 +26,7 @@ export function TopBar() {
   const pageLabel = ROUTE_LABELS[basePath] ?? "Detail";
 
   // Check for detail routes
-  const isDetail = location.pathname.match(/\/app\/anomalies\/(\d+)/);
+  const isDetail = location.pathname.match(/\/app\/issues\/(\d+)/);
 
   return (
     <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
