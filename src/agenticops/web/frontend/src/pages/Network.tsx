@@ -104,7 +104,7 @@ export default function Network() {
       {/* Input Form */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-slate-900">
             Network Topology
           </h2>
         </CardHeader>
@@ -143,14 +143,14 @@ export default function Network() {
       </Card>
 
       {/* Topology Scope Toggle */}
-      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
         <button
           onClick={() => setTopologyScope("region")}
           className={cn(
             "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
             topologyScope === "region"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
+              ? "bg-primary-50 text-primary-700 shadow-sm"
+              : "text-slate-500 hover:text-slate-700"
           )}
         >
           Single Region
@@ -160,8 +160,8 @@ export default function Network() {
           className={cn(
             "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
             topologyScope === "multi_region"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
+              ? "bg-primary-50 text-primary-700 shadow-sm"
+              : "text-slate-500 hover:text-slate-700"
           )}
         >
           Multi-Region
@@ -172,14 +172,14 @@ export default function Network() {
       {topologyScope === "multi_region" && (
         <Card>
           <CardHeader>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-slate-900">
               Cross-Region Network Topology
             </h2>
           </CardHeader>
           <CardBody>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Select regions (or leave empty for all):
                 </label>
                 <div className="flex flex-wrap gap-2">
@@ -190,8 +190,8 @@ export default function Network() {
                       className={cn(
                         "px-2.5 py-1 text-xs rounded-full border transition-colors",
                         selectedRegions.includes(r.code)
-                          ? "bg-indigo-100 border-indigo-400 text-indigo-700"
-                          : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
+                          ? "bg-primary-50 border-primary-300 text-primary-700"
+                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
                       )}
                     >
                       {r.code}
@@ -202,7 +202,7 @@ export default function Network() {
               <button
                 onClick={handleScanMultiRegion}
                 disabled={multiRegionGraph.isFetching}
-                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 active:bg-primary-800 disabled:opacity-50 transition-colors"
               >
                 {multiRegionGraph.isFetching ? "Scanning..." : "Scan Multi-Region Topology"}
               </button>
@@ -217,7 +217,7 @@ export default function Network() {
 
             {multiRegionGraph.data && (
               <div className="mt-4">
-                <div className="flex items-center gap-3 text-sm text-gray-500 mb-3">
+                <div className="flex items-center gap-3 text-sm text-slate-500 mb-3">
                   <span>{multiRegionGraph.data.metadata.node_count} Nodes</span>
                   <span>{multiRegionGraph.data.metadata.edge_count} Connections</span>
                   {multiRegionGraph.data.metadata.anomaly_count > 0 && (
@@ -226,7 +226,7 @@ export default function Network() {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-gray-400 mb-3">
+                <p className="text-xs text-slate-400 mb-3">
                   Cross-region edges are shown with dashed lines. Click a VPC node to drill down.
                 </p>
                 <Suspense
@@ -259,17 +259,17 @@ export default function Network() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-slate-900">
                 Region Overview — {region}
               </h2>
-              <div className="flex items-center gap-3 text-sm text-gray-500">
+              <div className="flex items-center gap-3 text-sm text-slate-500">
                 <span>{regionGraph.data.metadata.node_count} Nodes</span>
                 <span>{regionGraph.data.metadata.edge_count} Connections</span>
               </div>
             </div>
           </CardHeader>
           <CardBody>
-            <p className="text-xs text-gray-400 mb-3">
+            <p className="text-xs text-slate-400 mb-3">
               Click a VPC node to drill into its detailed topology.
             </p>
             <Suspense
@@ -305,10 +305,10 @@ export default function Network() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-red-800">
+                  <h2 className="text-lg font-semibold text-red-600">
                     Topology Anomalies ({anomalies.data.total_anomalies})
                   </h2>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-slate-400">
                     {anomalies.data.summary}
                   </span>
                 </div>
@@ -319,35 +319,35 @@ export default function Network() {
                     <div
                       key={`${anomaly.node_id}-${i}`}
                       className={cn(
-                        "flex items-start gap-3 p-3 rounded-md border text-sm",
+                        "flex items-start gap-3 p-3 rounded-lg border text-sm",
                         anomaly.severity === "critical"
                           ? "bg-red-50 border-red-200"
                           : anomaly.severity === "high"
                             ? "bg-orange-50 border-orange-200"
-                            : "bg-yellow-50 border-yellow-200"
+                            : "bg-amber-50 border-amber-200"
                       )}
                     >
                       <span
                         className={cn(
                           "px-1.5 py-0.5 text-xs rounded font-medium uppercase",
                           anomaly.severity === "critical"
-                            ? "bg-red-600 text-white"
+                            ? "bg-red-100 text-red-700"
                             : anomaly.severity === "high"
-                              ? "bg-orange-500 text-white"
-                              : "bg-yellow-500 text-white"
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-amber-100 text-amber-700"
                         )}
                       >
                         {anomaly.severity}
                       </span>
                       <div className="flex-1">
-                        <div className="font-medium text-gray-800">
+                        <div className="font-medium text-slate-900">
                           {anomaly.type.replace(/_/g, " ")}
                         </div>
-                        <div className="text-gray-600 text-xs mt-0.5">
+                        <div className="text-slate-500 text-xs mt-0.5">
                           {anomaly.description}
                         </div>
                       </div>
-                      <span className="text-xs font-mono text-gray-400">
+                      <span className="text-xs font-mono text-slate-400">
                         {anomaly.node_id}
                       </span>
                     </div>
@@ -358,18 +358,18 @@ export default function Network() {
           )}
 
           {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
             <button
               onClick={() => setViewMode("table")}
               className={cn(
                 "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
                 viewMode === "table"
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-primary-50 text-primary-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
               )}
             >
               <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <path d="M3 9h18M3 15h18M9 3v18" />
                 </svg>
@@ -381,12 +381,12 @@ export default function Network() {
               className={cn(
                 "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
                 viewMode === "graph"
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-primary-50 text-primary-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
               )}
             >
               <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <circle cx="6" cy="6" r="3" />
                   <circle cx="18" cy="18" r="3" />
                   <circle cx="18" cy="6" r="3" />
@@ -410,24 +410,24 @@ export default function Network() {
               {/* VPC Details */}
               <Card>
                 <CardBody>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-3">
                     VPC Details
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-500">VPC ID:</span>{" "}
+                      <span className="text-slate-500">VPC ID:</span>{" "}
                       <span className="font-mono">{topology.data.vpc_id}</span>
                     </div>
                     <div>
-                      <span className="text-gray-500">CIDR:</span>{" "}
+                      <span className="text-slate-500">CIDR:</span>{" "}
                       {topology.data.vpc_cidr}
                     </div>
                     <div>
-                      <span className="text-gray-500">Name:</span>{" "}
+                      <span className="text-slate-500">Name:</span>{" "}
                       {topology.data.vpc_name ?? "-"}
                     </div>
                     <div>
-                      <span className="text-gray-500">Region:</span>{" "}
+                      <span className="text-slate-500">Region:</span>{" "}
                       {topology.data.region}
                     </div>
                   </div>

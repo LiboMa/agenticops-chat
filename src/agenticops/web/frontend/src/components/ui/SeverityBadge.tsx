@@ -13,7 +13,7 @@ export const SeverityBadge = React.memo(function SeverityBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider",
+        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider",
         style.bg,
         style.text,
       )}

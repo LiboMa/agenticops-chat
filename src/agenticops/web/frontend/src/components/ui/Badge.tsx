@@ -13,7 +13,7 @@ export const Badge = React.memo(function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium",
+        "inline-flex items-center px-2.5 py-0.5 rounded-full border border-slate-200 text-xs font-medium",
         className,
       )}
     >

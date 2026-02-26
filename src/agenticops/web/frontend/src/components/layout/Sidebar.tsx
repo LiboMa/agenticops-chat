@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
   { to: "/app", label: "Dashboard", end: true, icon: "grid" },
+  { to: "/app/chat", label: "Chat", end: false, icon: "chat" },
   { to: "/app/resources", label: "Resources", end: false, icon: "server" },
   { to: "/app/anomalies", label: "Anomalies", end: false, icon: "alert" },
   { to: "/app/fix-plans", label: "Fix Plans", end: false, icon: "wrench" },
@@ -23,6 +24,12 @@ function NavIcon({ icon }: { icon: string }) {
       return (
         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+        </svg>
+      );
+    case "chat":
+      return (
+        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
         </svg>
       );
     case "server":
@@ -87,16 +94,16 @@ function NavIcon({ icon }: { icon: string }) {
 
 export function Sidebar() {
   return (
-    <aside className="fixed inset-y-0 left-0 w-60 bg-navy-900 flex flex-col z-30">
+    <aside className="fixed inset-y-0 left-0 w-60 bg-white border-r border-slate-200 flex flex-col z-30">
       {/* Logo */}
-      <div className="h-16 flex items-center px-6 border-b border-navy-700">
-        <span className="text-white text-lg font-bold tracking-tight">
+      <div className="h-14 flex items-center px-6 border-b border-slate-200">
+        <span className="text-primary-600 text-lg font-semibold tracking-tight">
           AgenticAIOps
         </span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
+      <nav className="flex-1 py-4 space-y-0.5 px-3 overflow-y-auto">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -104,10 +111,10 @@ export function Sidebar() {
             end={item.end}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
+                "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors",
                 isActive
-                  ? "bg-navy-700 text-white border-l-[3px] border-pd-green-500"
-                  : "text-gray-300 hover:bg-navy-800 hover:text-white border-l-[3px] border-transparent",
+                  ? "bg-primary-50 text-primary-700"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
               )
             }
           >
@@ -117,8 +124,11 @@ export function Sidebar() {
         ))}
 
         {/* Divider */}
-        <div className="border-t border-navy-700 my-3" />
+        <div className="border-t border-slate-200 my-3" />
 
+        <p className="px-3 text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">
+          Manage
+        </p>
         {MANAGE_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -126,10 +136,10 @@ export function Sidebar() {
             end={item.end}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
+                "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors",
                 isActive
-                  ? "bg-navy-700 text-white border-l-[3px] border-pd-green-500"
-                  : "text-gray-300 hover:bg-navy-800 hover:text-white border-l-[3px] border-transparent",
+                  ? "bg-primary-50 text-primary-700"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
               )
             }
           >
@@ -140,8 +150,8 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-navy-700">
-        <span className="text-xs text-gray-500">AgenticAIOps v0.1.0</span>
+      <div className="px-6 py-4 border-t border-slate-200">
+        <span className="text-xs text-slate-400">AgenticAIOps v0.1.0</span>
       </div>
     </aside>
   );

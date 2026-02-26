@@ -3,14 +3,14 @@ import { cn } from "@/lib/cn";
 
 const STATUS_STYLES: Record<string, { dot: string; label: string }> = {
   open: { dot: "bg-red-500", label: "text-red-700" },
-  acknowledged: { dot: "bg-yellow-500", label: "text-yellow-700" },
+  acknowledged: { dot: "bg-amber-500", label: "text-amber-700" },
   resolved: { dot: "bg-green-500", label: "text-green-700" },
   running: { dot: "bg-green-500", label: "text-green-700" },
   stopped: { dot: "bg-red-500", label: "text-red-700" },
   available: { dot: "bg-green-500", label: "text-green-700" },
 };
 
-const DEFAULT_STYLE = { dot: "bg-gray-400", label: "text-gray-600" };
+const DEFAULT_STYLE = { dot: "bg-slate-400", label: "text-slate-500" };
 
 interface StatusIndicatorProps {
   status: string;

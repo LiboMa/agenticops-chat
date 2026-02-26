@@ -29,19 +29,19 @@ export function TopBar() {
   const isDetail = location.pathname.match(/\/app\/anomalies\/(\d+)/);
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-20">
-      <nav className="flex items-center gap-2 text-sm">
-        <span className="text-gray-400">AgenticAIOps</span>
-        <span className="text-gray-300">/</span>
-        <span className="font-medium text-gray-800">{pageLabel}</span>
+    <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
+      <nav className="flex items-center gap-1.5 text-sm">
+        <span className="text-slate-400">AgenticAIOps</span>
+        <span className="text-slate-300">/</span>
+        <span className="font-medium text-slate-900">{pageLabel}</span>
         {isDetail && (
           <>
-            <span className="text-gray-300">/</span>
-            <span className="text-gray-600">#{isDetail[1]}</span>
+            <span className="text-slate-300">/</span>
+            <span className="text-slate-500">#{isDetail[1]}</span>
           </>
         )}
       </nav>
-      <div className="text-sm text-gray-500 font-mono">
+      <div className="text-sm text-slate-400 font-mono">
         {formatUtcClock(now)}
       </div>
     </header>

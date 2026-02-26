@@ -55,7 +55,7 @@ function DataTableInner<T>({
 
   if (data.length === 0) {
     return (
-      <div className="p-8 text-center text-gray-500 text-sm">
+      <div className="p-8 text-center text-slate-400 text-sm">
         {emptyMessage}
       </div>
     );
@@ -65,13 +65,13 @@ function DataTableInner<T>({
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
-          <tr className="bg-gray-50 border-b border-gray-200">
+          <tr className="border-b border-slate-200">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  "px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider",
-                  col.sortable && "cursor-pointer select-none hover:text-gray-700",
+                  "px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider",
+                  col.sortable && "cursor-pointer select-none hover:text-slate-700",
                   col.className,
                 )}
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
@@ -79,25 +79,25 @@ function DataTableInner<T>({
                 <span className="inline-flex items-center gap-1">
                   {col.header}
                   {col.sortable && sortCol === col.key && (
-                    <span>{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
+                    <span>{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
                   )}
                 </span>
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-slate-100">
           {sorted.map((row) => (
             <tr
               key={rowKey(row)}
               className={cn(
-                "hover:bg-gray-50 transition-colors",
+                "hover:bg-slate-50 transition-colors",
                 onRowClick && "cursor-pointer",
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (
-                <td key={col.key} className={cn("px-6 py-3", col.className)}>
+                <td key={col.key} className={cn("px-6 py-3 text-sm text-slate-600", col.className)}>
                   {col.render(row)}
                 </td>
               ))}
