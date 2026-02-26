@@ -38,6 +38,19 @@ export function useVpcAnomalies(region: string, vpcId: string) {
   });
 }
 
+export function useMultiRegionGraph(regions: string[]) {
+  const regionsParam = regions.join(",");
+  return useQuery({
+    queryKey: ["multi-region-graph", regionsParam],
+    queryFn: () =>
+      apiFetch<SerializedGraph>(
+        `/graph/multi-region?regions=${encodeURIComponent(regionsParam)}`,
+      ),
+    enabled: false, // manual trigger only
+    staleTime: 2 * 60_000,
+  });
+}
+
 export function useSubnetReachability(region: string, vpcId: string, subnetId: string) {
   return useQuery({
     queryKey: ["subnet-reachability", region, vpcId, subnetId],

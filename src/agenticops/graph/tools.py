@@ -42,6 +42,95 @@ def _build_region_graph(region: str) -> InfraGraph:
     return InfraGraph().build_from_region_topology(topo)
 
 
+def _build_multi_region_graph(regions: str) -> InfraGraph:
+    """Build graph from cross-region topology (calls existing network tool)."""
+    from agenticops.tools.network_tools import describe_cross_region_topology
+
+    raw = describe_cross_region_topology(regions=regions)
+    topo = json.loads(raw)
+    if "error" in topo:
+        raise RuntimeError(topo["error"])
+    return InfraGraph().build_from_multi_region_topology(topo)
+
+
+@tool
+def analyze_cross_region_topology(regions: str = "") -> str:
+    """Analyze network topology across multiple AWS regions.
+
+    Builds a merged multi-region graph and runs anomaly detection and
+    segmentation analysis. Highlights cross-region connections, isolated
+    regions, broken peerings, and TGW asymmetry.
+
+    Args:
+        regions: Comma-separated region codes (e.g. 'us-east-1,eu-west-1').
+                 If empty, discovers all enabled regions.
+
+    Returns:
+        JSON with per-region summaries, cross-region connections,
+        anomalies, and network segments.
+    """
+    try:
+        graph = _build_multi_region_graph(regions)
+        g = graph.graph
+
+        # Per-region summaries
+        region_summaries: dict[str, dict] = {}
+        for node_id, data in g.nodes(data=True):
+            raw = data.get("raw", {})
+            node_region = raw.get("region", "unknown")
+            if node_region not in region_summaries:
+                region_summaries[node_region] = {
+                    "region": node_region,
+                    "vpc_count": 0,
+                    "tgw_count": 0,
+                    "node_count": 0,
+                }
+            region_summaries[node_region]["node_count"] += 1
+            nt = data.get("node_type", "")
+            if nt == "vpc":
+                region_summaries[node_region]["vpc_count"] += 1
+            elif nt == "tgw":
+                region_summaries[node_region]["tgw_count"] += 1
+
+        # Cross-region connections
+        from agenticops.graph.types import EdgeType as ET
+        cross_region_connections = []
+        for u, v, edata in g.edges(data=True):
+            u_region = g.nodes[u].get("raw", {}).get("region", "")
+            v_region = g.nodes[v].get("raw", {}).get("region", "")
+            if u_region and v_region and u_region != v_region:
+                cross_region_connections.append({
+                    "source": u,
+                    "source_region": u_region,
+                    "target": v,
+                    "target_region": v_region,
+                    "edge_type": edata.get("edge_type", ""),
+                    "label": edata.get("label", ""),
+                    "state": edata.get("state", ""),
+                })
+
+        # Anomalies
+        anomaly_report = detect_anomalies(graph)
+
+        # Segmentation
+        segment_report = network_segments(graph)
+
+        # Agent summary
+        summary = to_agent_summary(graph)
+
+        output = {
+            "region_summaries": list(region_summaries.values()),
+            "cross_region_connections": cross_region_connections,
+            "anomalies": anomaly_report.model_dump(),
+            "segments": segment_report.model_dump(),
+            "graph_summary": summary,
+        }
+        return json.dumps(output, indent=2)
+    except Exception as e:
+        logger.exception("analyze_cross_region_topology failed")
+        return json.dumps({"error": str(e)})
+
+
 @tool
 def query_reachability(region: str, vpc_id: str, subnet_id: str) -> str:
     """Check if a subnet can reach the Internet, returning the exact path or blocking reason.

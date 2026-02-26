@@ -59,6 +59,40 @@ def _build_region_graph(region: str) -> InfraGraph:
     return InfraGraph().build_from_region_topology(topo)
 
 
+def _build_multi_region_graph(regions: list[str]) -> InfraGraph:
+    """Build an InfraGraph from multi-region topology."""
+    regions_str = ",".join(regions)
+    # Ensure sessions for all requested regions
+    for reg in regions:
+        _ensure_aws_session(reg)
+
+    from agenticops.tools.network_tools import describe_cross_region_topology
+
+    raw = describe_cross_region_topology(regions=regions_str)
+    topo = json.loads(raw)
+    if "error" in topo:
+        raise RuntimeError(topo["error"])
+    return InfraGraph().build_from_multi_region_topology(topo)
+
+
+@router.get("/multi-region")
+async def get_multi_region_graph(
+    regions: str = Query("", description="Comma-separated region codes, e.g. 'us-east-1,eu-west-1'. Empty = all regions."),
+) -> SerializedGraph:
+    """Get ReactFlow-ready graph for multi-region network topology.
+
+    Aggregates per-region graphs, adds cross-region VPC peering and TGW
+    peering edges, and returns a single graph with region grouping.
+    """
+    try:
+        region_list = [r.strip() for r in regions.split(",") if r.strip()] if regions else []
+        graph = _build_multi_region_graph(region_list)
+        return to_reactflow(graph, view="multi_region")
+    except Exception as e:
+        logger.exception("Failed to build multi-region graph")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/vpc/{vpc_id}")
 async def get_vpc_graph(
     vpc_id: str,

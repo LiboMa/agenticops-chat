@@ -11,7 +11,7 @@ import { SgDependencyMap } from "@/components/network/SgDependencyMap";
 import { useVpcs } from "@/hooks/useVpcs";
 import { useVpcTopology } from "@/hooks/useVpcTopology";
 import { useRegions } from "@/hooks/useRegions";
-import { useVpcGraph, useRegionGraph, useVpcAnomalies, useSubnetReachability } from "@/hooks/useGraphTopology";
+import { useVpcGraph, useRegionGraph, useMultiRegionGraph, useVpcAnomalies, useSubnetReachability } from "@/hooks/useGraphTopology";
 import type { AnomalyItem } from "@/api/types";
 import { cn } from "@/lib/cn";
 
@@ -29,12 +29,15 @@ export default function Network() {
   const [vpcId, setVpcId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [selectedSubnetId, setSelectedSubnetId] = useState<string | null>(null);
+  const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
+  const [topologyScope, setTopologyScope] = useState<"region" | "multi_region">("region");
 
   const regionsQuery = useRegions();
   const vpcs = useVpcs(region);
   const topology = useVpcTopology(region, vpcId);
   const vpcGraph = useVpcGraph(region, vpcId);
   const regionGraph = useRegionGraph(region);
+  const multiRegionGraph = useMultiRegionGraph(selectedRegions);
   const anomalies = useVpcAnomalies(region, vpcId);
   const reachability = useSubnetReachability(region, vpcId, selectedSubnetId ?? "");
 
@@ -52,6 +55,16 @@ export default function Network() {
 
   const handleScanRegion = () => {
     regionGraph.refetch();
+  };
+
+  const handleScanMultiRegion = () => {
+    multiRegionGraph.refetch();
+  };
+
+  const handleToggleRegionSelection = (code: string) => {
+    setSelectedRegions((prev) =>
+      prev.includes(code) ? prev.filter((r) => r !== code) : [...prev, code]
+    );
   };
 
   const handleUseVpc = (id: string) => {
@@ -129,19 +142,120 @@ export default function Network() {
         </CardBody>
       </Card>
 
+      {/* Topology Scope Toggle */}
+      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setTopologyScope("region")}
+          className={cn(
+            "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+            topologyScope === "region"
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          Single Region
+        </button>
+        <button
+          onClick={() => setTopologyScope("multi_region")}
+          className={cn(
+            "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+            topologyScope === "multi_region"
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          Multi-Region
+        </button>
+      </div>
+
+      {/* Multi-Region Panel */}
+      {topologyScope === "multi_region" && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Cross-Region Network Topology
+            </h2>
+          </CardHeader>
+          <CardBody>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select regions (or leave empty for all):
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(regionsQuery.data ?? []).map((r) => (
+                    <button
+                      key={r.code}
+                      onClick={() => handleToggleRegionSelection(r.code)}
+                      className={cn(
+                        "px-2.5 py-1 text-xs rounded-full border transition-colors",
+                        selectedRegions.includes(r.code)
+                          ? "bg-indigo-100 border-indigo-400 text-indigo-700"
+                          : "bg-white border-gray-300 text-gray-600 hover:border-gray-400"
+                      )}
+                    >
+                      {r.code}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={handleScanMultiRegion}
+                disabled={multiRegionGraph.isFetching}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {multiRegionGraph.isFetching ? "Scanning..." : "Scan Multi-Region Topology"}
+              </button>
+            </div>
+
+            {multiRegionGraph.error && (
+              <ErrorBanner
+                message={multiRegionGraph.error.message}
+                onRetry={handleScanMultiRegion}
+              />
+            )}
+
+            {multiRegionGraph.data && (
+              <div className="mt-4">
+                <div className="flex items-center gap-3 text-sm text-gray-500 mb-3">
+                  <span>{multiRegionGraph.data.metadata.node_count} Nodes</span>
+                  <span>{multiRegionGraph.data.metadata.edge_count} Connections</span>
+                  {multiRegionGraph.data.metadata.anomaly_count > 0 && (
+                    <span className="text-red-600 font-medium">
+                      {multiRegionGraph.data.metadata.anomaly_count} Anomalies
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mb-3">
+                  Cross-region edges are shown with dashed lines. Click a VPC node to drill down.
+                </p>
+                <Suspense
+                  fallback={<Spinner label="Loading multi-region topology graph..." />}
+                >
+                  <RegionTopologyGraph
+                    graph={multiRegionGraph.data}
+                    onVpcClick={handleRegionVpcClick}
+                  />
+                </Suspense>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       {/* Region Topology Overview */}
-      {regionGraph.isFetching && (
+      {topologyScope === "region" && regionGraph.isFetching && (
         <Spinner label="Scanning region topology..." />
       )}
 
-      {regionGraph.error && (
+      {topologyScope === "region" && regionGraph.error && (
         <ErrorBanner
           message={regionGraph.error.message}
           onRetry={handleScanRegion}
         />
       )}
 
-      {regionGraph.data && (
+      {topologyScope === "region" && regionGraph.data && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">

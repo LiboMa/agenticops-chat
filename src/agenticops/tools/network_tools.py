@@ -690,6 +690,146 @@ def describe_region_topology(region: str) -> str:
 
 
 @tool
+def describe_tgw_peering_attachments(region: str) -> str:
+    """Describe Transit Gateway peering attachments in a region.
+
+    Returns TGW-to-TGW peering attachments that connect Transit Gateways
+    across regions or accounts. These are attachment type 'peering' and are
+    not included in standard TGW VPC attachment listings.
+
+    Args:
+        region: AWS region
+
+    Returns:
+        JSON list of TGW peering attachments with local/remote TGW IDs,
+        state, and requester/accepter info.
+    """
+    try:
+        ec2 = _get_client("ec2", region)
+        resp = ec2.describe_transit_gateway_peering_attachments()
+        attachments = []
+        for att in resp.get("TransitGatewayPeeringAttachments", []):
+            req = att.get("RequesterTgwInfo", {})
+            acc = att.get("AccepterTgwInfo", {})
+            attachments.append({
+                "attachment_id": att.get("TransitGatewayAttachmentId"),
+                "state": att.get("State"),
+                "requester_tgw_id": req.get("TransitGatewayId"),
+                "requester_region": req.get("Region"),
+                "requester_owner": req.get("OwnerId"),
+                "accepter_tgw_id": acc.get("TransitGatewayId"),
+                "accepter_region": acc.get("Region"),
+                "accepter_owner": acc.get("OwnerId"),
+                "tags": {
+                    t["Key"]: t["Value"] for t in att.get("Tags", [])
+                },
+            })
+        return json.dumps(attachments, default=str)
+    except Exception as e:
+        return json.dumps({"error": f"Error describing TGW peering attachments in {region}: {e}"})
+
+
+@tool
+def describe_cross_region_topology(regions: str = "") -> str:
+    """Describe network topology across multiple AWS regions.
+
+    Aggregates per-region topology data, cross-region VPC peering connections,
+    and TGW peering attachments into a single multi-region view.
+
+    Args:
+        regions: Comma-separated region codes (e.g. 'us-east-1,eu-west-1').
+                 If empty, discovers all enabled regions in the account.
+
+    Returns:
+        JSON object with per-region topologies, cross-region VPC peerings,
+        and cross-region TGW peerings.
+    """
+    try:
+        # Resolve region list
+        if regions and regions.strip():
+            region_list = [r.strip() for r in regions.split(",") if r.strip()]
+        else:
+            ec2 = _get_client("ec2", "us-east-1")
+            resp = ec2.describe_regions(
+                Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+            )
+            region_list = [r["RegionName"] for r in resp.get("Regions", [])]
+
+        region_topologies = []
+        cross_region_peerings: list[dict] = []
+        tgw_peerings: list[dict] = []
+        seen_pcx: set[str] = set()
+        seen_tgw_att: set[str] = set()
+
+        for reg in region_list:
+            try:
+                # Per-region topology
+                raw = describe_region_topology(region=reg)
+                topo = json.loads(raw)
+                region_topologies.append(topo)
+
+                # Cross-region VPC peerings
+                ec2 = _get_client("ec2", reg)
+                peer_resp = ec2.describe_vpc_peering_connections()
+                for pcx in peer_resp.get("VpcPeeringConnections", []):
+                    pcx_id = pcx.get("VpcPeeringConnectionId", "")
+                    if pcx_id in seen_pcx:
+                        continue
+                    req = pcx.get("RequesterVpcInfo", {})
+                    acc = pcx.get("AccepterVpcInfo", {})
+                    req_region = req.get("Region", reg)
+                    acc_region = acc.get("Region", reg)
+                    if req_region != acc_region:
+                        seen_pcx.add(pcx_id)
+                        cross_region_peerings.append({
+                            "pcx_id": pcx_id,
+                            "status": pcx.get("Status", {}).get("Code"),
+                            "requester_vpc": req.get("VpcId"),
+                            "requester_cidr": req.get("CidrBlock"),
+                            "requester_region": req_region,
+                            "requester_owner": req.get("OwnerId"),
+                            "accepter_vpc": acc.get("VpcId"),
+                            "accepter_cidr": acc.get("CidrBlock"),
+                            "accepter_region": acc_region,
+                            "accepter_owner": acc.get("OwnerId"),
+                        })
+
+                # TGW peering attachments
+                try:
+                    tgw_peer_resp = ec2.describe_transit_gateway_peering_attachments()
+                    for att in tgw_peer_resp.get("TransitGatewayPeeringAttachments", []):
+                        att_id = att.get("TransitGatewayAttachmentId", "")
+                        if att_id in seen_tgw_att:
+                            continue
+                        seen_tgw_att.add(att_id)
+                        req_info = att.get("RequesterTgwInfo", {})
+                        acc_info = att.get("AccepterTgwInfo", {})
+                        tgw_peerings.append({
+                            "attachment_id": att_id,
+                            "state": att.get("State"),
+                            "requester_tgw_id": req_info.get("TransitGatewayId"),
+                            "requester_region": req_info.get("Region"),
+                            "requester_owner": req_info.get("OwnerId"),
+                            "accepter_tgw_id": acc_info.get("TransitGatewayId"),
+                            "accepter_region": acc_info.get("Region"),
+                            "accepter_owner": acc_info.get("OwnerId"),
+                        })
+                except ClientError:
+                    pass
+            except Exception as region_err:
+                logger.warning("Failed to collect topology for %s: %s", reg, region_err)
+
+        result = {
+            "regions": region_topologies,
+            "cross_region_peerings": cross_region_peerings,
+            "tgw_peerings": tgw_peerings,
+        }
+        return json.dumps(result, default=str)
+    except Exception as e:
+        return json.dumps({"error": f"Error describing cross-region topology: {e}"})
+
+
+@tool
 def analyze_vpc_topology(region: str, vpc_id: str) -> str:
     """Analyze complete VPC topology: subnets, routing, gateways, peering, endpoints, and SG dependencies.
 

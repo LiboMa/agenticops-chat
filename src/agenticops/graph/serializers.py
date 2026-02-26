@@ -72,14 +72,17 @@ def _edge_style(edge_type: str, state: str) -> str:
 
 def to_reactflow(
     graph: InfraGraph,
-    view: Literal["vpc", "region"] = "vpc",
+    view: Literal["vpc", "region", "multi_region"] = "vpc",
 ) -> SerializedGraph:
     """Convert InfraGraph to ReactFlow-compatible JSON.
 
     Replaces frontend mapTopologyToGraph.ts / mapRegionTopologyToGraph.ts.
     """
     g = graph.graph
-    type_map = REGION_NODE_TYPE_TO_REACTFLOW if view == "region" else NODE_TYPE_TO_REACTFLOW
+    type_map = (
+        REGION_NODE_TYPE_TO_REACTFLOW if view in ("region", "multi_region")
+        else NODE_TYPE_TO_REACTFLOW
+    )
 
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -129,7 +132,7 @@ def to_reactflow(
         }
 
         # Add region-specific data
-        if view == "region" and node_type == NodeType.VPC:
+        if view in ("region", "multi_region") and node_type == NodeType.VPC:
             node_data.update({
                 "vpcId": raw.get("vpc_id", node_id),
                 "cidr": raw.get("cidr_block", raw.get("cidr", "")),
@@ -137,7 +140,7 @@ def to_reactflow(
                 "isDefault": raw.get("is_default", False),
                 "state": raw.get("state", "available"),
             })
-        elif view == "region" and node_type == NodeType.TRANSIT_GATEWAY:
+        elif view in ("region", "multi_region") and node_type == NodeType.TRANSIT_GATEWAY:
             node_data.update({
                 "tgwId": raw.get("transit_gateway_id", node_id),
                 "state": raw.get("state", "unknown"),
@@ -178,6 +181,56 @@ def to_reactflow(
                 "edgeType": edge_type,
             },
         ))
+
+    # ── Multi-region layout: group by region with horizontal offsets ──
+    if view == "multi_region":
+        # Collect per-region node ids
+        region_groups: dict[str, list[str]] = {}
+        for node in nodes:
+            node_region = node.data.get("raw", {}).get("region", "") if isinstance(node.data.get("raw"), dict) else ""
+            if not node_region:
+                node_region = "__unknown__"
+            region_groups.setdefault(node_region, []).append(node.id)
+
+        # Assign horizontal offset per region (800px apart)
+        sorted_regions = sorted(r for r in region_groups if r != "__unknown__")
+        region_x_offset: dict[str, float] = {}
+        for idx, reg in enumerate(sorted_regions):
+            region_x_offset[reg] = idx * 800.0
+        if "__unknown__" in region_groups:
+            region_x_offset["__unknown__"] = len(sorted_regions) * 800.0
+
+        # Apply offsets to node positions and tag region in node data
+        node_lookup = {n.id: n for n in nodes}
+        for reg, nids in region_groups.items():
+            x_off = region_x_offset.get(reg, 0.0)
+            for i, nid in enumerate(nids):
+                node = node_lookup[nid]
+                node.position = {"x": x_off + (i % 4) * 180, "y": (i // 4) * 140}
+                node.data["region"] = reg
+
+        # Add region label annotation nodes
+        for reg in sorted_regions:
+            x_off = region_x_offset[reg]
+            nodes.append(GraphNode(
+                id=f"region-label-{reg}",
+                type="regionLabelNode",
+                position={"x": x_off, "y": -60},
+                data={"label": reg, "isAnnotation": True, "region": reg},
+            ))
+
+        # Style cross-region edges distinctly
+        node_region_map: dict[str, str] = {}
+        for reg, nids in region_groups.items():
+            for nid in nids:
+                node_region_map[nid] = reg
+
+        for edge in edges:
+            src_region = node_region_map.get(edge.source, "")
+            tgt_region = node_region_map.get(edge.target, "")
+            if src_region and tgt_region and src_region != tgt_region:
+                edge.data["crossRegion"] = True
+                edge.data["style"] = "cross_region"
 
     metadata = GraphMetadata(
         node_count=len(nodes),

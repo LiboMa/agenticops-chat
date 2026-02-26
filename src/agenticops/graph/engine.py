@@ -291,10 +291,28 @@ class InfraGraph:
             ))
             for att in tgw.get("attachments", []):
                 res_id = att.get("resource_id", "")
-                if att.get("resource_type") == "vpc" and res_id in region_vpc_ids:
+                res_type = att.get("resource_type", "")
+                if res_type == "vpc" and res_id in region_vpc_ids:
                     self._add_edge(tgw_id, res_id, EdgeAttrs(
                         edge_type=EdgeType.ATTACHED_TO,
                         label=att.get("state", ""),
+                    ))
+                elif res_type == "peering":
+                    # TGW peering attachment — the resource_id is the
+                    # remote TGW ID.  Create the remote TGW node if it
+                    # doesn't exist yet and add a PEERS_WITH edge.
+                    remote_tgw_id = res_id
+                    if not self._graph.has_node(remote_tgw_id):
+                        self._add_node(remote_tgw_id, NodeAttrs(
+                            node_type=NodeType.TRANSIT_GATEWAY,
+                            label=f"{remote_tgw_id} (external)",
+                            status=NodeStatus.UNKNOWN,
+                            resource_type="Transit Gateway",
+                            raw={"transit_gateway_id": remote_tgw_id, "state": "external"},
+                        ))
+                    self._add_edge(tgw_id, remote_tgw_id, EdgeAttrs(
+                        edge_type=EdgeType.PEERS_WITH,
+                        label=att.get("attachment_id", att.get("state", "")),
                     ))
 
         # Peering Connections
@@ -330,6 +348,82 @@ class InfraGraph:
                     edge_type=EdgeType.PEERS_WITH,
                     label=pcx_id,
                     state=pcx.get("status", ""),
+                ))
+
+        return self
+
+    def build_from_multi_region_topology(self, multi_topo: dict[str, Any]) -> InfraGraph:
+        """Build a merged graph from describe_cross_region_topology() output.
+
+        1. Builds per-region graphs via build_from_region_topology()
+        2. Merges them together
+        3. Adds cross-region VPC peering edges
+        4. Adds cross-region TGW peering edges
+        """
+        # 1. Per-region graphs
+        for region_topo in multi_topo.get("regions", []):
+            region_name = region_topo.get("region", "")
+            sub = InfraGraph().build_from_region_topology(region_topo)
+            # Annotate VPC and TGW nodes with their region
+            for node_id, data in sub._graph.nodes(data=True):
+                raw = data.get("raw", {})
+                if "region" not in raw:
+                    raw["region"] = region_name
+                    data["raw"] = raw
+            self.merge(sub)
+
+        # 2. Cross-region VPC peerings
+        for pcx in multi_topo.get("cross_region_peerings", []):
+            req_vpc = pcx.get("requester_vpc", "")
+            acc_vpc = pcx.get("accepter_vpc", "")
+            pcx_id = pcx.get("pcx_id", "")
+
+            # Ensure both VPC nodes exist (they may be missing if a
+            # region wasn't included in the scan)
+            for vpc_id, cidr, region_name in [
+                (req_vpc, pcx.get("requester_cidr", ""), pcx.get("requester_region", "")),
+                (acc_vpc, pcx.get("accepter_cidr", ""), pcx.get("accepter_region", "")),
+            ]:
+                if vpc_id and not self._graph.has_node(vpc_id):
+                    self._add_node(vpc_id, NodeAttrs(
+                        node_type=NodeType.VPC,
+                        label=f"{vpc_id} (external)",
+                        status=NodeStatus.UNKNOWN,
+                        resource_type="VPC",
+                        raw={"vpc_id": vpc_id, "cidr": cidr, "region": region_name, "state": "external"},
+                    ))
+
+            if req_vpc and acc_vpc:
+                self._add_edge(req_vpc, acc_vpc, EdgeAttrs(
+                    edge_type=EdgeType.PEERS_WITH,
+                    label=pcx_id,
+                    state=pcx.get("status", ""),
+                ))
+
+        # 3. Cross-region TGW peerings
+        for tgw_pcx in multi_topo.get("tgw_peerings", []):
+            req_tgw = tgw_pcx.get("requester_tgw_id", "")
+            acc_tgw = tgw_pcx.get("accepter_tgw_id", "")
+
+            for tgw_id, region_name in [
+                (req_tgw, tgw_pcx.get("requester_region", "")),
+                (acc_tgw, tgw_pcx.get("accepter_region", "")),
+            ]:
+                if tgw_id and not self._graph.has_node(tgw_id):
+                    self._add_node(tgw_id, NodeAttrs(
+                        node_type=NodeType.TRANSIT_GATEWAY,
+                        label=f"{tgw_id} (external)",
+                        status=NodeStatus.UNKNOWN,
+                        resource_type="Transit Gateway",
+                        raw={"transit_gateway_id": tgw_id, "region": region_name, "state": "external"},
+                    ))
+
+            if req_tgw and acc_tgw:
+                att_state = tgw_pcx.get("state", "")
+                self._add_edge(req_tgw, acc_tgw, EdgeAttrs(
+                    edge_type=EdgeType.PEERS_WITH,
+                    label=tgw_pcx.get("attachment_id", ""),
+                    state=att_state,
                 ))
 
         return self
