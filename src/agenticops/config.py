@@ -34,6 +34,10 @@ class Settings(BaseSettings):
         default="global.anthropic.claude-opus-4-6-v1",
         description="Bedrock model ID for LLM (Claude Ops 4.6)",
     )
+    bedrock_max_tokens: int = Field(
+        default=8192,
+        description="Max output tokens for Bedrock model responses",
+    )
 
     # Embedding (Titan V2)
     embedding_model_id: str = Field(

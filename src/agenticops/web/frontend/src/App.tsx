@@ -13,6 +13,10 @@ const FixPlanDetail = lazy(() => import("@/pages/FixPlanDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Network = lazy(() => import("@/pages/Network"));
+const Schedules = lazy(() => import("@/pages/Schedules"));
+const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
+const Notifications = lazy(() => import("@/pages/Notifications"));
+const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
 const Accounts = lazy(() => import("@/pages/Accounts"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 
@@ -100,6 +104,38 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Network />
+                </Suspense>
+              }
+            />
+            <Route
+              path="schedules"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Schedules />
+                </Suspense>
+              }
+            />
+            <Route
+              path="schedules/:id"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ScheduleDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="notifications"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Notifications />
+                </Suspense>
+              }
+            />
+            <Route
+              path="notifications/logs"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <NotificationLogs />
                 </Suspense>
               }
             />

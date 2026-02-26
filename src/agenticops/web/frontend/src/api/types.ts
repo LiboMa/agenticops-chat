@@ -411,3 +411,94 @@ export interface AwsRegion {
   code: string;
   name: string;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Schedules                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface Schedule {
+  id: number;
+  name: string;
+  pipeline_name: string;
+  cron_expression: string;
+  account_name: string | null;
+  is_enabled: boolean;
+  config: Record<string, unknown>;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduleCreate {
+  name: string;
+  pipeline_name: string;
+  cron_expression: string;
+  account_name?: string;
+  is_enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface ScheduleUpdate {
+  name?: string;
+  pipeline_name?: string;
+  cron_expression?: string;
+  account_name?: string;
+  is_enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface ScheduleExecution {
+  id: number;
+  schedule_id: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  result: Record<string, unknown>;
+  error: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Notification Channels & Logs                                       */
+/* ------------------------------------------------------------------ */
+
+export type NotificationChannelType = "slack" | "email" | "sns" | "webhook";
+
+export interface NotificationChannel {
+  id: number;
+  name: string;
+  channel_type: NotificationChannelType;
+  config: Record<string, unknown>;
+  severity_filter: string[];
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationChannelCreate {
+  name: string;
+  channel_type: NotificationChannelType;
+  config?: Record<string, unknown>;
+  severity_filter?: string[];
+  is_enabled?: boolean;
+}
+
+export interface NotificationChannelUpdate {
+  name?: string;
+  channel_type?: NotificationChannelType;
+  config?: Record<string, unknown>;
+  severity_filter?: string[];
+  is_enabled?: boolean;
+}
+
+export interface NotificationLog {
+  id: number;
+  channel_id: number;
+  subject: string;
+  body: string;
+  severity: string | null;
+  status: string;
+  error: string | null;
+  sent_at: string;
+}
