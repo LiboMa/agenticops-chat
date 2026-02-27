@@ -47,6 +47,9 @@ from agenticops.graph.tools import (
     detect_network_anomalies,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.skills.execution import run_on_host, run_kubectl
+from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +148,7 @@ def rca_agent(issue_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=RCA_SYSTEM_PROMPT,
+            system_prompt=build_prompt_with_skills(RCA_SYSTEM_PROMPT),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -185,6 +188,11 @@ def rca_agent(issue_id: int) -> str:
                 detect_network_anomalies,
                 # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
+                # Agent Skills (domain knowledge + host/kubectl execution)
+                activate_skill,
+                read_skill_reference,
+                run_on_host,
+                run_kubectl,
             ],
         )
 

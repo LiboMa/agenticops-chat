@@ -29,7 +29,14 @@ from agenticops.tools.metadata_tools import (
     list_health_issues,
     update_health_issue_status,
 )
-from agenticops.graph.tools import detect_network_anomalies, analyze_network_segments
+from agenticops.graph.tools import (
+    detect_network_anomalies,
+    analyze_network_segments,
+    detect_single_points_of_failure,
+    analyze_capacity_risk,
+)
+from agenticops.skills.tools import activate_skill, read_skill_reference, list_skills
+from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +72,8 @@ METADATA TOOLS (local database queries ONLY — no AWS calls):
 NETWORK TOOLS:
 - detect_network_anomalies: Detect structural issues in a VPC's network topology.
 - analyze_network_segments: Analyze network segmentation across VPCs in a region.
+- detect_single_points_of_failure: Find infrastructure SPOFs (articulation points and bridges).
+- analyze_capacity_risk: Check for subnet IP exhaustion and EKS pod capacity risks.
 
 ROUTING RULES:
 1. ALWAYS check get_active_account first. If no account is configured, tell the user.
@@ -79,10 +88,17 @@ ROUTING RULES:
 6. "report" / "summary" / "daily" → dispatch to reporter_agent.
 7. Questions about existing resources/accounts/issues → use metadata tools (no agent needed).
 8. Network topology questions → use detect_network_anomalies or analyze_network_segments.
-9. ANY other AWS question (e.g., "list my ElastiCache clusters", "show CloudFront distributions",
+8.5. SRE analysis (SPOFs, capacity, dependencies) → use detect_single_points_of_failure or analyze_capacity_risk.
+     For deep dependency chain or change simulation, dispatch to sre_query.
+9. Host-level troubleshooting (SSH, OS diagnostics, process/disk/memory/network issues, kubectl) →
+   dispatch to rca_agent or sre_query. They have run_on_host and run_kubectl tools.
+   You do NOT run host commands directly.
+9.5. Skills: Use list_skills to show available domain skills. Use activate_skill to load skill
+     knowledge for answering domain questions. Use read_skill_reference for deep-dive material.
+10. ANY other AWS question (e.g., "list my ElastiCache clusters", "show CloudFront distributions",
    "what are my DynamoDB tables", "check Route53 zones", "get cost breakdown",
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
-   This is your CATCH-ALL for AWS queries that don't fit rules 2-8.
+   This is your CATCH-ALL for AWS queries that don't fit rules 2-9.
 
 CONTEXT BLOCKS: Messages may contain <attached_file>, <referenced_issue>, and <referenced_resource>
 context blocks with pre-fetched data. Use this context directly to answer the user's question.
@@ -113,7 +129,7 @@ def create_main_agent() -> Agent:
     )
 
     agent = Agent(
-        system_prompt=MAIN_SYSTEM_PROMPT,
+        system_prompt=build_prompt_with_skills(MAIN_SYSTEM_PROMPT),
         model=model,
         conversation_manager=SlidingWindowConversationManager(
             window_size=settings.bedrock_window_size, per_turn=True
@@ -141,6 +157,12 @@ def create_main_agent() -> Agent:
             # Graph tools
             detect_network_anomalies,
             analyze_network_segments,
+            detect_single_points_of_failure,
+            analyze_capacity_risk,
+            # Agent Skills (knowledge only — no execution tools on main agent)
+            list_skills,
+            activate_skill,
+            read_skill_reference,
         ],
     )
 

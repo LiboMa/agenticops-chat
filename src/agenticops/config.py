@@ -120,6 +120,14 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "data" / "sessions",
         description="Directory for Strands session files",
     )
+    skills_dir: Path = Field(
+        default=PROJECT_ROOT / "skills",
+        description="Directory containing Agent Skills packages (SKILL.md format)",
+    )
+    skills_enabled: bool = Field(
+        default=True,
+        description="Enable Agent Skills integration (AIOPS_SKILLS_ENABLED=false to disable)",
+    )
 
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(

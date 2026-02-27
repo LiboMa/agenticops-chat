@@ -48,8 +48,15 @@ from agenticops.graph.tools import (
     query_impact_radius,
     find_network_path,
     detect_network_anomalies,
+    analyze_dependency_chain,
+    detect_single_points_of_failure,
+    analyze_capacity_risk,
+    simulate_edge_removal,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.skills.execution import run_on_host, run_kubectl
+from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +89,10 @@ MODE A — FIX PLAN PROTOCOL:
    - Call find_network_path for point-to-point traffic path analysis.
    - Call detect_network_anomalies to find structural issues (routing loops, orphan nodes, blackholes).
    - Call query_impact_radius to assess blast radius of proposed changes.
+   - Call analyze_dependency_chain to trace which services depend on the failing resource.
+   - Call detect_single_points_of_failure to identify infrastructure SPOFs.
+   - Call analyze_capacity_risk to check for IP exhaustion or pod capacity issues.
+   - Call simulate_edge_removal to preview the impact of removing a network link or rule.
    - Check if the issue has already self-resolved
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
@@ -132,7 +143,7 @@ def _create_sre_agent() -> Agent:
         max_tokens=settings.bedrock_max_tokens,
     )
     return Agent(
-        system_prompt=SRE_SYSTEM_PROMPT,
+        system_prompt=build_prompt_with_skills(SRE_SYSTEM_PROMPT),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(
@@ -171,8 +182,18 @@ def _create_sre_agent() -> Agent:
             query_impact_radius,
             find_network_path,
             detect_network_anomalies,
+            # SRE analysis tools
+            analyze_dependency_chain,
+            detect_single_points_of_failure,
+            analyze_capacity_risk,
+            simulate_edge_removal,
             # AWS CLI (read-only, for uncovered services or general queries)
             run_aws_cli_readonly,
+            # Agent Skills (domain knowledge + host/kubectl execution)
+            activate_skill,
+            read_skill_reference,
+            run_on_host,
+            run_kubectl,
         ],
     )
 
