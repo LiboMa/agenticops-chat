@@ -10,13 +10,21 @@ from fastapi.responses import JSONResponse
 
 from agenticops.graph.algorithms import (
     AnomalyReport,
+    CapacityRiskReport,
+    ChangeSimulationResult,
+    DependencyChainResult,
     ImpactResult,
     PathResult,
     ReachabilityResult,
+    SPOFReport,
     can_reach_internet,
+    capacity_risk_analysis,
+    dependency_chain_analysis,
     detect_anomalies,
+    detect_spof,
     find_traffic_path,
     impact_analysis,
+    simulate_change,
 )
 from agenticops.graph.engine import InfraGraph
 from agenticops.graph.serializers import to_reactflow
@@ -47,6 +55,16 @@ def _build_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
     raw = analyze_vpc_topology(region=region, vpc_id=vpc_id)
     topo = json.loads(raw)
     return InfraGraph().build_from_vpc_topology(topo)
+
+
+def _build_enriched_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
+    """Build VPC graph enriched with compute resources."""
+    graph = _build_vpc_graph(region, vpc_id)
+    from agenticops.graph.collectors import collect_vpc_compute
+
+    compute_data = collect_vpc_compute(region, vpc_id)
+    graph.enrich_with_compute(compute_data)
+    return graph
 
 
 def _build_region_graph(region: str) -> InfraGraph:
@@ -183,4 +201,81 @@ async def get_anomalies(
         return detect_anomalies(graph)
     except Exception as e:
         logger.exception("Anomaly detection failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── SRE Analysis Endpoints ───────────────────────────────────────────
+
+
+@router.get("/vpc/{vpc_id}/enriched")
+async def get_enriched_vpc_graph(
+    vpc_id: str,
+    region: str = Query("us-east-1"),
+) -> SerializedGraph:
+    """Get ReactFlow-ready graph for a VPC enriched with compute resources."""
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        return to_reactflow(graph, view="vpc")
+    except Exception as e:
+        logger.exception("Failed to build enriched VPC graph")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/vpc/{vpc_id}/dependency-chain")
+async def post_dependency_chain(
+    vpc_id: str,
+    fault_node_id: str = Query(..., description="Node ID to simulate failure for"),
+    region: str = Query("us-east-1"),
+) -> DependencyChainResult:
+    """Analyze dependency chain from a fault node (reverse BFS)."""
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        return dependency_chain_analysis(graph, fault_node_id)
+    except Exception as e:
+        logger.exception("Dependency chain analysis failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/vpc/{vpc_id}/spof")
+async def get_spof(
+    vpc_id: str,
+    region: str = Query("us-east-1"),
+) -> SPOFReport:
+    """Detect single points of failure in VPC topology."""
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        return detect_spof(graph)
+    except Exception as e:
+        logger.exception("SPOF detection failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/vpc/{vpc_id}/capacity-risk")
+async def get_capacity_risk(
+    vpc_id: str,
+    region: str = Query("us-east-1"),
+    threshold: float = Query(0.8, ge=0.0, le=1.0),
+) -> CapacityRiskReport:
+    """Analyze capacity risks (IP exhaustion, pod limits)."""
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        return capacity_risk_analysis(graph, threshold)
+    except Exception as e:
+        logger.exception("Capacity risk analysis failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/vpc/{vpc_id}/change-simulation")
+async def post_change_simulation(
+    vpc_id: str,
+    edge_source: str = Query(..., description="Source node of the edge to remove"),
+    edge_target: str = Query(..., description="Target node of the edge to remove"),
+    region: str = Query("us-east-1"),
+) -> ChangeSimulationResult:
+    """Simulate removing an edge and report reachability changes."""
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        return simulate_change(graph, edge_source, edge_target)
+    except Exception as e:
+        logger.exception("Change simulation failed")
         return JSONResponse({"error": str(e)}, status_code=500)

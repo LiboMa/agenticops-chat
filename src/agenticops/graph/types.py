@@ -20,6 +20,18 @@ class NodeType(str, Enum):
     VPC_ENDPOINT = "endpoint"
     SECURITY_GROUP = "security_group"
     LOAD_BALANCER = "load_balancer"
+    EC2_INSTANCE = "ec2_instance"
+    RDS_INSTANCE = "rds_instance"
+    LAMBDA_FUNCTION = "lambda_function"
+    EKS_CLUSTER = "eks_cluster"
+    EKS_NODE = "eks_node"
+    EKS_POD = "eks_pod"
+    EKS_SERVICE = "eks_service"
+    ECS_CLUSTER = "ecs_cluster"
+    ECS_SERVICE = "ecs_service"
+    ECS_TASK = "ecs_task"
+    TARGET_GROUP = "target_group"
+    ELASTICACHE_CLUSTER = "elasticache_cluster"
 
 
 class EdgeType(str, Enum):
@@ -31,6 +43,10 @@ class EdgeType(str, Enum):
     HOSTED_IN = "hosted_in"
     REFERENCES = "references"
     SERVES = "serves"
+    RUNS_ON = "runs_on"
+    TARGETS = "targets"
+    CONNECTS_TO = "connects_to"
+    MEMBER_OF = "member_of"
 
 
 class NodeStatus(str, Enum):

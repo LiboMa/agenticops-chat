@@ -29,6 +29,18 @@ NODE_TYPE_TO_REACTFLOW: dict[str, str] = {
     NodeType.SECURITY_GROUP: "sgNode",
     NodeType.LOAD_BALANCER: "lbNode",
     NodeType.VPC: "vpcGroupNode",
+    NodeType.EC2_INSTANCE: "ec2Node",
+    NodeType.RDS_INSTANCE: "rdsNode",
+    NodeType.LAMBDA_FUNCTION: "lambdaNode",
+    NodeType.EKS_CLUSTER: "eksClusterNode",
+    NodeType.EKS_NODE: "eksNodeNode",
+    NodeType.EKS_POD: "eksPodNode",
+    NodeType.EKS_SERVICE: "eksServiceNode",
+    NodeType.ECS_CLUSTER: "ecsClusterNode",
+    NodeType.ECS_SERVICE: "ecsServiceNode",
+    NodeType.ECS_TASK: "ecsTaskNode",
+    NodeType.TARGET_GROUP: "targetGroupNode",
+    NodeType.ELASTICACHE_CLUSTER: "cacheNode",
 }
 
 # Region-level types
@@ -44,14 +56,29 @@ RANK_PUBLIC = 1     # Public subnets
 RANK_NAT = 2        # NAT Gateways
 RANK_PRIVATE = 3    # Private subnets
 RANK_ENDPOINT = 4   # VPC Endpoints
+RANK_COMPUTE = 5    # EC2, Lambda, EKS, ECS, Target Groups
+RANK_DATA = 6       # RDS, ElastiCache
 
 RANK_BY_NODE_TYPE: dict[str, int] = {
     NodeType.INTERNET_GATEWAY: RANK_EXTERNAL,
     NodeType.TGW_ATTACHMENT: RANK_EXTERNAL,
     NodeType.TRANSIT_GATEWAY: RANK_EXTERNAL,
     NodeType.PEERING: RANK_EXTERNAL,
+    NodeType.LOAD_BALANCER: RANK_EXTERNAL,
     NodeType.NAT_GATEWAY: RANK_NAT,
     NodeType.VPC_ENDPOINT: RANK_ENDPOINT,
+    NodeType.EC2_INSTANCE: RANK_COMPUTE,
+    NodeType.LAMBDA_FUNCTION: RANK_COMPUTE,
+    NodeType.EKS_CLUSTER: RANK_COMPUTE,
+    NodeType.EKS_NODE: RANK_COMPUTE,
+    NodeType.EKS_POD: RANK_COMPUTE,
+    NodeType.EKS_SERVICE: RANK_COMPUTE,
+    NodeType.ECS_CLUSTER: RANK_COMPUTE,
+    NodeType.ECS_SERVICE: RANK_COMPUTE,
+    NodeType.ECS_TASK: RANK_COMPUTE,
+    NodeType.TARGET_GROUP: RANK_COMPUTE,
+    NodeType.RDS_INSTANCE: RANK_DATA,
+    NodeType.ELASTICACHE_CLUSTER: RANK_DATA,
 }
 
 # ── Edge style mapping ───────────────────────────────────────────────
@@ -64,6 +91,12 @@ def _edge_style(edge_type: str, state: str) -> str:
         return "dashed"
     if edge_type == EdgeType.REFERENCES:
         return "dotted"
+    if edge_type == EdgeType.CONNECTS_TO:
+        return "dashed"
+    if edge_type in (EdgeType.RUNS_ON, EdgeType.MEMBER_OF):
+        return "dotted"
+    if edge_type == EdgeType.TARGETS:
+        return "solid"
     return "solid"
 
 

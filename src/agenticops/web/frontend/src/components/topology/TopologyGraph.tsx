@@ -24,6 +24,12 @@ import { TGWNode } from "./nodes/TGWNode";
 import { PeeringNode } from "./nodes/PeeringNode";
 import { EndpointNode } from "./nodes/EndpointNode";
 import { RouteTableNode } from "./nodes/RouteTableNode";
+import { Ec2Node } from "./nodes/Ec2Node";
+import { RdsNode } from "./nodes/RdsNode";
+import { LambdaNode } from "./nodes/LambdaNode";
+import { EksClusterNode } from "./nodes/EksClusterNode";
+import { EcsClusterNode } from "./nodes/EcsClusterNode";
+import { CacheNode } from "./nodes/CacheNode";
 
 // Custom edge types
 import { TopologyEdge } from "./edges/TopologyEdge";
@@ -40,6 +46,22 @@ const nodeTypes = {
   peeringNode: PeeringNode,
   endpointNode: EndpointNode,
   routeTableNode: RouteTableNode,
+  // Compute nodes
+  ec2Node: Ec2Node,
+  rdsNode: RdsNode,
+  lambdaNode: LambdaNode,
+  // EKS nodes
+  eksClusterNode: EksClusterNode,
+  eksNodeNode: EksClusterNode,
+  eksPodNode: EksClusterNode,
+  eksServiceNode: EksClusterNode,
+  // ECS nodes
+  ecsClusterNode: EcsClusterNode,
+  ecsServiceNode: EcsClusterNode,
+  ecsTaskNode: EcsClusterNode,
+  // Cache / target group nodes
+  targetGroupNode: CacheNode,
+  cacheNode: CacheNode,
 } as const;
 
 const edgeTypes = {
@@ -68,6 +90,24 @@ function miniMapColor(node: Node): string {
       return "#818cf8";
     case "routeTableNode":
       return "#94a3b8";
+    case "ec2Node":
+      return "#fb923c"; // orange
+    case "rdsNode":
+      return "#a78bfa"; // violet
+    case "lambdaNode":
+      return "#fbbf24"; // amber
+    case "eksClusterNode":
+    case "eksNodeNode":
+    case "eksPodNode":
+    case "eksServiceNode":
+      return "#2dd4bf"; // teal
+    case "ecsClusterNode":
+    case "ecsServiceNode":
+    case "ecsTaskNode":
+      return "#22d3ee"; // cyan
+    case "cacheNode":
+    case "targetGroupNode":
+      return "#f472b6"; // pink
     default:
       return "#e5e7eb";
   }

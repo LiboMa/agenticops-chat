@@ -16,6 +16,14 @@ function getNodeDimensions(type: string | undefined) {
   if (type === "routeTableNode") {
     return { width: ROUTE_TABLE_WIDTH, height: ROUTE_TABLE_HEIGHT };
   }
+  // Compute nodes
+  if (type && ["ec2Node", "rdsNode", "lambdaNode", "targetGroupNode", "cacheNode"].includes(type)) {
+    return { width: 180, height: 56 };
+  }
+  // EKS/ECS nodes
+  if (type && ["eksClusterNode", "eksNodeNode", "eksPodNode", "eksServiceNode", "ecsClusterNode", "ecsServiceNode", "ecsTaskNode"].includes(type)) {
+    return { width: 200, height: 60 };
+  }
   return { width: NODE_WIDTH, height: NODE_HEIGHT };
 }
 

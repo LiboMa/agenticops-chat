@@ -8,10 +8,11 @@ import { TopologySummary } from "@/components/network/TopologySummary";
 import { SubnetsTable } from "@/components/network/SubnetsTable";
 import { BlackholeAlert } from "@/components/network/BlackholeAlert";
 import { SgDependencyMap } from "@/components/network/SgDependencyMap";
+import { SreAnalysisPanel } from "@/components/network/SreAnalysisPanel";
 import { useVpcs } from "@/hooks/useVpcs";
 import { useVpcTopology } from "@/hooks/useVpcTopology";
 import { useRegions } from "@/hooks/useRegions";
-import { useVpcGraph, useRegionGraph, useMultiRegionGraph, useVpcAnomalies, useSubnetReachability } from "@/hooks/useGraphTopology";
+import { useVpcGraph, useRegionGraph, useMultiRegionGraph, useVpcAnomalies, useSubnetReachability, useEnrichedVpcGraph } from "@/hooks/useGraphTopology";
 import type { AnomalyItem } from "@/api/types";
 import { cn } from "@/lib/cn";
 
@@ -31,6 +32,7 @@ export default function Network() {
   const [selectedSubnetId, setSelectedSubnetId] = useState<string | null>(null);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [topologyScope, setTopologyScope] = useState<"region" | "multi_region">("region");
+  const [enriched, setEnriched] = useState(false);
 
   const regionsQuery = useRegions();
   const vpcs = useVpcs(region);
@@ -40,6 +42,7 @@ export default function Network() {
   const multiRegionGraph = useMultiRegionGraph(selectedRegions);
   const anomalies = useVpcAnomalies(region, vpcId);
   const reachability = useSubnetReachability(region, vpcId, selectedSubnetId ?? "");
+  const enrichedGraph = useEnrichedVpcGraph(region, vpcId);
 
   const handleListVpcs = () => {
     vpcs.refetch();
@@ -50,6 +53,9 @@ export default function Network() {
       topology.refetch();
       vpcGraph.refetch();
       anomalies.refetch();
+      if (enriched) {
+        enrichedGraph.refetch();
+      }
     }
   };
 
@@ -357,50 +363,85 @@ export default function Network() {
             </Card>
           )}
 
-          {/* View Mode Toggle */}
-          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
-            <button
-              onClick={() => setViewMode("table")}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                viewMode === "table"
-                  ? "bg-primary-50 text-primary-700 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
-              )}
-            >
-              <span className="flex items-center gap-1.5">
+          {/* SRE Analysis Panel */}
+          <SreAnalysisPanel region={region} vpcId={vpcId} />
+
+          {/* View Mode Toggle + Enriched Toggle */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
+              <button
+                onClick={() => setViewMode("table")}
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  viewMode === "table"
+                    ? "bg-primary-50 text-primary-700 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M3 15h18M9 3v18" />
+                  </svg>
+                  Table View
+                </span>
+              </button>
+              <button
+                onClick={() => setViewMode("graph")}
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  viewMode === "graph"
+                    ? "bg-primary-50 text-primary-700 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <circle cx="6" cy="6" r="3" />
+                    <circle cx="18" cy="18" r="3" />
+                    <circle cx="18" cy="6" r="3" />
+                    <path d="M8.5 7.5L15.5 16.5M8.5 6L15.5 6" />
+                  </svg>
+                  Graph View
+                </span>
+              </button>
+            </div>
+
+            {/* Enriched toggle */}
+            {viewMode === "graph" && (
+              <button
+                onClick={() => {
+                  const next = !enriched;
+                  setEnriched(next);
+                  if (next && vpcId.trim()) {
+                    enrichedGraph.refetch();
+                  }
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors",
+                  enriched
+                    ? "bg-teal-50 text-teal-700 border-teal-300 shadow-sm"
+                    : "bg-white text-slate-500 border-slate-200 hover:text-slate-700 hover:border-slate-300"
+                )}
+              >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <path d="M3 9h18M3 15h18M9 3v18" />
+                  <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
-                Table View
-              </span>
-            </button>
-            <button
-              onClick={() => setViewMode("graph")}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
-                viewMode === "graph"
-                  ? "bg-primary-50 text-primary-700 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
-              )}
-            >
-              <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <circle cx="6" cy="6" r="3" />
-                  <circle cx="18" cy="18" r="3" />
-                  <circle cx="18" cy="6" r="3" />
-                  <path d="M8.5 7.5L15.5 16.5M8.5 6L15.5 6" />
-                </svg>
-                Graph View
-              </span>
-            </button>
+                Enriched
+                {enrichedGraph.isFetching && (
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
 
-          {viewMode === "graph" && vpcGraph.data ? (
+          {viewMode === "graph" && (enriched ? enrichedGraph.data : vpcGraph.data) ? (
             <Suspense fallback={<Spinner label="Loading topology graph..." />}>
               <TopologyGraph
-                graph={vpcGraph.data}
+                graph={(enriched && enrichedGraph.data) ? enrichedGraph.data : vpcGraph.data!}
                 reachability={reachability.data ?? null}
                 onSubnetClick={handleSubnetClick}
               />

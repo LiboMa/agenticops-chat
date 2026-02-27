@@ -467,6 +467,329 @@ class InfraGraph:
 
     # ── Status derivation helpers ────────────────────────────────────
 
+    # ── Compute enrichment ─────────────────────────────────────────
+
+    def enrich_with_compute(self, data: dict[str, Any]) -> InfraGraph:
+        """Enrich graph with EC2, RDS, Lambda, Target Groups, ElastiCache.
+
+        Uses output from collectors.collect_vpc_compute().
+        """
+        # EC2 instances
+        for inst in data.get("ec2_instances", []):
+            inst_id = inst["instance_id"]
+            status = self._derive_ec2_status(inst)
+            self._add_node(inst_id, NodeAttrs(
+                node_type=NodeType.EC2_INSTANCE,
+                label=inst.get("name") or inst_id,
+                status=status,
+                resource_type="EC2 Instance",
+                raw=inst,
+            ))
+            subnet_id = inst.get("subnet_id", "")
+            if subnet_id and self._graph.has_node(subnet_id):
+                self._add_edge(inst_id, subnet_id, EdgeAttrs(
+                    edge_type=EdgeType.HOSTED_IN,
+                    label="hosted in",
+                ))
+            for sg_id in inst.get("security_group_ids", []):
+                if self._graph.has_node(sg_id):
+                    self._add_edge(inst_id, sg_id, EdgeAttrs(
+                        edge_type=EdgeType.MEMBER_OF,
+                        label="member of",
+                    ))
+
+        # RDS instances
+        for db in data.get("rds_instances", []):
+            db_id = db["db_instance_id"]
+            status = self._derive_rds_status(db)
+            self._add_node(db_id, NodeAttrs(
+                node_type=NodeType.RDS_INSTANCE,
+                label=db_id,
+                status=status,
+                resource_type="RDS Instance",
+                raw=db,
+            ))
+            for subnet_id in db.get("subnet_ids", []):
+                if self._graph.has_node(subnet_id):
+                    self._add_edge(db_id, subnet_id, EdgeAttrs(
+                        edge_type=EdgeType.HOSTED_IN,
+                        label="hosted in",
+                    ))
+
+        # Lambda functions
+        for fn in data.get("lambda_functions", []):
+            fn_name = fn["function_name"]
+            status = self._derive_lambda_status(fn)
+            self._add_node(fn_name, NodeAttrs(
+                node_type=NodeType.LAMBDA_FUNCTION,
+                label=fn_name,
+                status=status,
+                resource_type="Lambda Function",
+                raw=fn,
+            ))
+            for subnet_id in fn.get("subnet_ids", []):
+                if self._graph.has_node(subnet_id):
+                    self._add_edge(fn_name, subnet_id, EdgeAttrs(
+                        edge_type=EdgeType.HOSTED_IN,
+                        label="hosted in",
+                    ))
+            for sg_id in fn.get("security_group_ids", []):
+                if self._graph.has_node(sg_id):
+                    self._add_edge(fn_name, sg_id, EdgeAttrs(
+                        edge_type=EdgeType.MEMBER_OF,
+                        label="member of",
+                    ))
+
+        # Target Groups
+        for tg in data.get("target_groups", []):
+            tg_name = tg.get("target_group_name", tg["target_group_arn"])
+            tg_id = tg_name
+            self._add_node(tg_id, NodeAttrs(
+                node_type=NodeType.TARGET_GROUP,
+                label=tg_name,
+                status=NodeStatus.HEALTHY,
+                resource_type="Target Group",
+                raw=tg,
+            ))
+            # Link to registered targets
+            for target in tg.get("targets", []):
+                target_id = target["id"]
+                if self._graph.has_node(target_id):
+                    self._add_edge(tg_id, target_id, EdgeAttrs(
+                        edge_type=EdgeType.TARGETS,
+                        label="targets",
+                    ))
+
+        # ElastiCache clusters
+        for cache in data.get("elasticache_clusters", []):
+            cache_id = cache["cache_cluster_id"]
+            status = NodeStatus.HEALTHY if cache.get("status") == "available" else NodeStatus.WARNING
+            self._add_node(cache_id, NodeAttrs(
+                node_type=NodeType.ELASTICACHE_CLUSTER,
+                label=cache_id,
+                status=status,
+                resource_type="ElastiCache",
+                raw=cache,
+            ))
+            for subnet_id in cache.get("subnet_ids", []):
+                if self._graph.has_node(subnet_id):
+                    self._add_edge(cache_id, subnet_id, EdgeAttrs(
+                        edge_type=EdgeType.HOSTED_IN,
+                        label="hosted in",
+                    ))
+
+        # Infer CONNECTS_TO edges from SG rules
+        self._infer_sg_connections()
+
+        return self
+
+    def enrich_with_eks(self, data: dict[str, Any]) -> InfraGraph:
+        """Enrich graph with EKS cluster and node groups.
+
+        Uses output from collectors.collect_eks_topology().
+        """
+        cluster = data.get("cluster", {})
+        if not cluster:
+            return self
+
+        cluster_name = cluster.get("name", "")
+        cluster_id = f"eks-{cluster_name}"
+        status = NodeStatus.HEALTHY if cluster.get("status") == "ACTIVE" else NodeStatus.WARNING
+
+        self._add_node(cluster_id, NodeAttrs(
+            node_type=NodeType.EKS_CLUSTER,
+            label=cluster_name,
+            status=status,
+            resource_type="EKS Cluster",
+            raw=cluster,
+        ))
+        for subnet_id in cluster.get("subnet_ids", []):
+            if self._graph.has_node(subnet_id):
+                self._add_edge(cluster_id, subnet_id, EdgeAttrs(
+                    edge_type=EdgeType.HOSTED_IN,
+                    label="hosted in",
+                ))
+        for sg_id in cluster.get("security_group_ids", []):
+            if self._graph.has_node(sg_id):
+                self._add_edge(cluster_id, sg_id, EdgeAttrs(
+                    edge_type=EdgeType.MEMBER_OF,
+                    label="member of",
+                ))
+
+        # Node groups
+        for ng in data.get("nodegroups", []):
+            ng_name = ng.get("nodegroup_name", "")
+            ng_id = f"eks-ng-{ng_name}"
+            ng_status = NodeStatus.HEALTHY if ng.get("status") == "ACTIVE" else NodeStatus.WARNING
+
+            self._add_node(ng_id, NodeAttrs(
+                node_type=NodeType.EKS_NODE,
+                label=ng_name,
+                status=ng_status,
+                resource_type="EKS Node Group",
+                raw=ng,
+            ))
+            self._add_edge(ng_id, cluster_id, EdgeAttrs(
+                edge_type=EdgeType.RUNS_ON,
+                label="runs on",
+            ))
+            for subnet_id in ng.get("subnet_ids", []):
+                if self._graph.has_node(subnet_id):
+                    self._add_edge(ng_id, subnet_id, EdgeAttrs(
+                        edge_type=EdgeType.HOSTED_IN,
+                        label="hosted in",
+                    ))
+
+        return self
+
+    def enrich_with_ecs(self, data: dict[str, Any]) -> InfraGraph:
+        """Enrich graph with ECS cluster, services, and tasks.
+
+        Uses output from collectors.collect_ecs_topology().
+        """
+        cluster = data.get("cluster", {})
+        if not cluster:
+            return self
+
+        cluster_name = cluster.get("cluster_name", "")
+        cluster_id = f"ecs-{cluster_name}"
+        status = NodeStatus.HEALTHY if cluster.get("status") == "ACTIVE" else NodeStatus.WARNING
+
+        self._add_node(cluster_id, NodeAttrs(
+            node_type=NodeType.ECS_CLUSTER,
+            label=cluster_name,
+            status=status,
+            resource_type="ECS Cluster",
+            raw=cluster,
+        ))
+
+        # Services
+        for svc in data.get("services", []):
+            svc_name = svc.get("service_name", "")
+            svc_id = f"ecs-svc-{svc_name}"
+            svc_status = NodeStatus.HEALTHY if svc.get("status") == "ACTIVE" else NodeStatus.WARNING
+
+            self._add_node(svc_id, NodeAttrs(
+                node_type=NodeType.ECS_SERVICE,
+                label=svc_name,
+                status=svc_status,
+                resource_type="ECS Service",
+                raw=svc,
+            ))
+            self._add_edge(cluster_id, svc_id, EdgeAttrs(
+                edge_type=EdgeType.CONTAINS,
+                label="contains",
+            ))
+            for subnet_id in svc.get("subnet_ids", []):
+                if self._graph.has_node(subnet_id):
+                    self._add_edge(svc_id, subnet_id, EdgeAttrs(
+                        edge_type=EdgeType.HOSTED_IN,
+                        label="hosted in",
+                    ))
+
+        # Tasks
+        for task in data.get("tasks", []):
+            task_arn = task.get("task_arn", "")
+            task_id = task_arn.split("/")[-1] if "/" in task_arn else task_arn
+            short_id = f"ecs-task-{task_id[:12]}"
+
+            self._add_node(short_id, NodeAttrs(
+                node_type=NodeType.ECS_TASK,
+                label=f"task-{task_id[:8]}",
+                status=NodeStatus.HEALTHY if task.get("last_status") == "RUNNING" else NodeStatus.WARNING,
+                resource_type="ECS Task",
+                raw=task,
+            ))
+
+            # Link to service via group field (e.g., "service:my-service")
+            group = task.get("group", "")
+            if group.startswith("service:"):
+                svc_name = group.split(":", 1)[1]
+                svc_node_id = f"ecs-svc-{svc_name}"
+                if self._graph.has_node(svc_node_id):
+                    self._add_edge(svc_node_id, short_id, EdgeAttrs(
+                        edge_type=EdgeType.CONTAINS,
+                        label="contains",
+                    ))
+
+            # Link to subnet (Fargate)
+            subnet_id = task.get("subnet_id", "")
+            if subnet_id and self._graph.has_node(subnet_id):
+                self._add_edge(short_id, subnet_id, EdgeAttrs(
+                    edge_type=EdgeType.HOSTED_IN,
+                    label="hosted in",
+                ))
+
+        return self
+
+    def _infer_sg_connections(self) -> None:
+        """Infer CONNECTS_TO edges between compute nodes that share SG rules.
+
+        If node A is in SG-X and SG-X allows inbound from SG-Y, and node B
+        is in SG-Y, then B CONNECTS_TO A.
+        """
+        # Build SG -> member nodes mapping
+        sg_members: dict[str, list[str]] = {}
+        for node_id, data in self._graph.nodes(data=True):
+            for _, target, edata in self._graph.out_edges(node_id, data=True):
+                if edata.get("edge_type") == EdgeType.MEMBER_OF:
+                    sg_members.setdefault(target, []).append(node_id)
+
+        # Build SG -> referenced SGs (from existing REFERENCES edges)
+        sg_refs: dict[str, list[str]] = {}
+        for u, v, edata in self._graph.edges(data=True):
+            if edata.get("edge_type") == EdgeType.REFERENCES:
+                sg_refs.setdefault(u, []).append(v)
+
+        # For each SG that references another SG, create CONNECTS_TO edges
+        # between their members
+        for sg_id, ref_sgs in sg_refs.items():
+            dest_members = sg_members.get(sg_id, [])
+            for ref_sg in ref_sgs:
+                src_members = sg_members.get(ref_sg, [])
+                for src in src_members:
+                    for dst in dest_members:
+                        if src != dst and not self._graph.has_edge(src, dst):
+                            self._add_edge(src, dst, EdgeAttrs(
+                                edge_type=EdgeType.CONNECTS_TO,
+                                label="connects to",
+                            ))
+
+    # ── Compute status derivation helpers ────────────────────────
+
+    @staticmethod
+    def _derive_ec2_status(inst: dict[str, Any]) -> NodeStatus:
+        state = inst.get("state", "")
+        if state == "running":
+            return NodeStatus.HEALTHY
+        if state in ("pending", "stopping"):
+            return NodeStatus.WARNING
+        if state in ("terminated", "stopped", "shutting-down"):
+            return NodeStatus.ERROR
+        return NodeStatus.UNKNOWN
+
+    @staticmethod
+    def _derive_rds_status(db: dict[str, Any]) -> NodeStatus:
+        status = db.get("status", "")
+        if status == "available":
+            return NodeStatus.HEALTHY
+        if status in ("creating", "modifying", "backing-up", "rebooting"):
+            return NodeStatus.WARNING
+        if status in ("failed", "deleting", "stopped"):
+            return NodeStatus.ERROR
+        return NodeStatus.UNKNOWN
+
+    @staticmethod
+    def _derive_lambda_status(fn: dict[str, Any]) -> NodeStatus:
+        state = fn.get("state", "")
+        if state == "Active":
+            return NodeStatus.HEALTHY
+        if state in ("Pending", "Inactive"):
+            return NodeStatus.WARNING
+        if state == "Failed":
+            return NodeStatus.ERROR
+        return NodeStatus.UNKNOWN
+
     @staticmethod
     def _derive_igw_status(attachments: list[dict[str, Any]]) -> NodeStatus:
         if not attachments:

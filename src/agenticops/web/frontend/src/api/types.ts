@@ -540,3 +540,72 @@ export interface ChatMessage {
 export interface ChatSessionDetail extends ChatSession {
   messages: ChatMessage[];
 }
+
+/* ------------------------------------------------------------------ */
+/*  SRE Analysis (graph engine results)                                */
+/* ------------------------------------------------------------------ */
+
+export interface DependencyNode {
+  node_id: string;
+  node_type: string;
+  label: string;
+  depth: number;
+}
+
+export interface DependencyChainResult {
+  fault_node_id: string;
+  fault_node_type: string;
+  affected_nodes: DependencyNode[];
+  depth_levels: Record<number, string[]>;
+  total_affected: number;
+  severity: string;
+}
+
+export interface SPOFItem {
+  node_id: string;
+  node_type: string;
+  label: string;
+  impact_description: string;
+  affected_components: number;
+  is_bridge: boolean;
+}
+
+export interface SPOFReport {
+  total_spofs: number;
+  articulation_points: SPOFItem[];
+  bridges: { source: string; source_type: string; source_label: string; target: string; target_type: string; target_label: string }[];
+  summary: string;
+}
+
+export interface CapacityRiskItem {
+  node_id: string;
+  node_type: string;
+  label: string;
+  metric: string;
+  current: number;
+  maximum: number;
+  utilization_pct: number;
+  risk_level: string;
+}
+
+export interface CapacityRiskReport {
+  total_risks: number;
+  items: CapacityRiskItem[];
+  summary: string;
+}
+
+export interface ReachabilityDiff {
+  node_id: string;
+  could_reach_before: string[];
+  can_reach_after: string[];
+  lost: string[];
+}
+
+export interface ChangeSimulationResult {
+  edge_source: string;
+  edge_target: string;
+  edge_existed: boolean;
+  lost_reachability: ReachabilityDiff[];
+  total_connections_lost: number;
+  impact_summary: string;
+}

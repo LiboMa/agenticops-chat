@@ -13,10 +13,14 @@ from strands import tool
 
 from agenticops.graph.algorithms import (
     can_reach_internet,
+    capacity_risk_analysis,
+    dependency_chain_analysis,
     detect_anomalies,
+    detect_spof,
     find_traffic_path,
     impact_analysis,
     network_segments,
+    simulate_change,
 )
 from agenticops.graph.engine import InfraGraph
 from agenticops.graph.serializers import to_agent_summary
@@ -31,6 +35,16 @@ def _build_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
     raw = analyze_vpc_topology(region=region, vpc_id=vpc_id)
     topo = json.loads(raw)
     return InfraGraph().build_from_vpc_topology(topo)
+
+
+def _build_enriched_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
+    """Build VPC graph enriched with compute resources."""
+    graph = _build_vpc_graph(region, vpc_id)
+    from agenticops.graph.collectors import collect_vpc_compute
+
+    compute_data = collect_vpc_compute(region, vpc_id)
+    graph.enrich_with_compute(compute_data)
+    return graph
 
 
 def _build_region_graph(region: str) -> InfraGraph:
@@ -256,4 +270,113 @@ def analyze_network_segments(region: str) -> str:
         return json.dumps(output, indent=2)
     except Exception as e:
         logger.exception("analyze_network_segments failed")
+        return json.dumps({"error": str(e)})
+
+
+# ── SRE Analysis Tools ───────────────────────────────────────────────
+
+
+@tool
+def analyze_dependency_chain(region: str, vpc_id: str, fault_node_id: str) -> str:
+    """Analyze the dependency chain from a fault node to find all affected services.
+
+    Performs reverse BFS from the fault node, following incoming CONNECTS_TO,
+    TARGETS, SERVES, RUNS_ON, and HOSTED_IN edges. Returns which services at
+    each depth level would be impacted if the fault node fails.
+
+    Args:
+        region: AWS region (e.g., 'us-east-1')
+        vpc_id: VPC ID to analyze
+        fault_node_id: The node ID to simulate failure for (e.g., an RDS instance ID,
+                       Lambda function name, or EC2 instance ID)
+
+    Returns:
+        JSON with fault_node_id, affected_nodes (with depth), depth_levels,
+        total_affected count, and severity.
+    """
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        result = dependency_chain_analysis(graph, fault_node_id)
+        return result.model_dump_json(indent=2)
+    except Exception as e:
+        logger.exception("analyze_dependency_chain failed")
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def detect_single_points_of_failure(region: str, vpc_id: str) -> str:
+    """Detect single points of failure (SPOFs) in a VPC's topology.
+
+    Uses graph articulation points and bridges to find nodes whose removal
+    would disconnect parts of the infrastructure. Reports the impact of
+    each SPOF (how many components would be created).
+
+    Args:
+        region: AWS region (e.g., 'us-east-1')
+        vpc_id: VPC ID to analyze
+
+    Returns:
+        JSON with total_spofs count, articulation_points (with impact description),
+        bridges (critical edges), and summary.
+    """
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        result = detect_spof(graph)
+        return result.model_dump_json(indent=2)
+    except Exception as e:
+        logger.exception("detect_single_points_of_failure failed")
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def analyze_capacity_risk(region: str, vpc_id: str, threshold: float = 0.8) -> str:
+    """Analyze capacity risks in a VPC — subnet IP exhaustion and EKS pod limits.
+
+    Checks all subnets for IP address utilization and EKS node groups for
+    pod capacity. Flags resources above the given utilization threshold.
+
+    Args:
+        region: AWS region (e.g., 'us-east-1')
+        vpc_id: VPC ID to analyze
+        threshold: Utilization threshold (0.0-1.0, default 0.8 = 80%)
+
+    Returns:
+        JSON with total_risks count, items (each with utilization_pct and risk_level),
+        and summary.
+    """
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        result = capacity_risk_analysis(graph, threshold)
+        return result.model_dump_json(indent=2)
+    except Exception as e:
+        logger.exception("analyze_capacity_risk failed")
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def simulate_edge_removal(
+    region: str, vpc_id: str, edge_source: str, edge_target: str
+) -> str:
+    """Simulate removing a network edge and report which connections break.
+
+    Creates a copy of the topology graph, removes the specified edge, and
+    compares subnet-to-IGW reachability before and after. Use this to
+    assess the impact of removing a security group rule, route, or link.
+
+    Args:
+        region: AWS region (e.g., 'us-east-1')
+        vpc_id: VPC ID to analyze
+        edge_source: Source node ID of the edge to remove
+        edge_target: Target node ID of the edge to remove
+
+    Returns:
+        JSON with edge_existed, lost_reachability (per-subnet diff),
+        total_connections_lost, and impact_summary.
+    """
+    try:
+        graph = _build_enriched_vpc_graph(region, vpc_id)
+        result = simulate_change(graph, edge_source, edge_target)
+        return result.model_dump_json(indent=2)
+    except Exception as e:
+        logger.exception("simulate_edge_removal failed")
         return json.dumps({"error": str(e)})

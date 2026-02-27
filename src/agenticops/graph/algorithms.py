@@ -85,6 +85,90 @@ class SegmentReport(BaseModel):
     isolated_vpcs: list[str] = Field(default_factory=list)
 
 
+# ── SRE Analysis Result Models ───────────────────────────────────────
+
+
+class DependencyNode(BaseModel):
+    """A node in a dependency chain."""
+
+    node_id: str
+    node_type: str = ""
+    label: str = ""
+    depth: int = 0
+
+
+class DependencyChainResult(BaseModel):
+    """Result of dependency chain analysis (reverse BFS from fault node)."""
+
+    fault_node_id: str
+    fault_node_type: str = ""
+    affected_nodes: list[DependencyNode] = Field(default_factory=list)
+    depth_levels: dict[int, list[str]] = Field(default_factory=dict)
+    total_affected: int = 0
+    severity: str = "low"
+
+
+class SPOFItem(BaseModel):
+    """A single point of failure."""
+
+    node_id: str
+    node_type: str = ""
+    label: str = ""
+    impact_description: str = ""
+    affected_components: int = 0
+    is_bridge: bool = False
+
+
+class SPOFReport(BaseModel):
+    """Result of single point of failure detection."""
+
+    total_spofs: int = 0
+    articulation_points: list[SPOFItem] = Field(default_factory=list)
+    bridges: list[dict[str, str]] = Field(default_factory=list)
+    summary: str = ""
+
+
+class CapacityRiskItem(BaseModel):
+    """A single capacity risk finding."""
+
+    node_id: str
+    node_type: str = ""
+    label: str = ""
+    metric: str = ""
+    current: float = 0.0
+    maximum: float = 0.0
+    utilization_pct: float = 0.0
+    risk_level: str = "medium"
+
+
+class CapacityRiskReport(BaseModel):
+    """Result of capacity risk analysis."""
+
+    total_risks: int = 0
+    items: list[CapacityRiskItem] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ReachabilityDiff(BaseModel):
+    """Reachability change for a single node."""
+
+    node_id: str
+    could_reach_before: list[str] = Field(default_factory=list)
+    can_reach_after: list[str] = Field(default_factory=list)
+    lost: list[str] = Field(default_factory=list)
+
+
+class ChangeSimulationResult(BaseModel):
+    """Result of simulating an edge removal."""
+
+    edge_source: str
+    edge_target: str
+    edge_existed: bool = False
+    lost_reachability: list[ReachabilityDiff] = Field(default_factory=list)
+    total_connections_lost: int = 0
+    impact_summary: str = ""
+
+
 # ── Algorithms ───────────────────────────────────────────────────────
 
 
@@ -507,3 +591,308 @@ def _path_has_blackhole(g: nx.DiGraph, path: list[str]) -> bool:
                 if edge_data.get("state") == "blackhole":
                     return True
     return False
+
+
+# ── SRE Analysis Algorithms ──────────────────────────────────────────
+
+
+def dependency_chain_analysis(
+    graph: InfraGraph, fault_node_id: str
+) -> DependencyChainResult:
+    """Reverse BFS from a fault node to find all upstream dependents.
+
+    Follows incoming CONNECTS_TO, TARGETS, SERVES, RUNS_ON edges to discover
+    which services would be affected if the fault node fails.
+    """
+    g = graph.graph
+
+    if fault_node_id not in g:
+        return DependencyChainResult(
+            fault_node_id=fault_node_id,
+            severity="unknown",
+        )
+
+    node_data = dict(g.nodes[fault_node_id])
+    fault_type = node_data.get("node_type", "")
+
+    # BFS using incoming edges of dependency types
+    dependency_edge_types = {
+        EdgeType.CONNECTS_TO,
+        EdgeType.TARGETS,
+        EdgeType.SERVES,
+        EdgeType.RUNS_ON,
+        EdgeType.HOSTED_IN,
+    }
+
+    visited: set[str] = {fault_node_id}
+    queue: list[tuple[str, int]] = [(fault_node_id, 0)]
+    affected: list[DependencyNode] = []
+    depth_levels: dict[int, list[str]] = {}
+
+    while queue:
+        current, depth = queue.pop(0)
+        # Find nodes that depend on current (incoming edges)
+        for source, _, edata in g.in_edges(current, data=True):
+            if source in visited:
+                continue
+            edge_type = edata.get("edge_type", "")
+            if edge_type not in dependency_edge_types:
+                continue
+
+            visited.add(source)
+            next_depth = depth + 1
+            src_data = g.nodes.get(source, {})
+            affected.append(DependencyNode(
+                node_id=source,
+                node_type=src_data.get("node_type", ""),
+                label=src_data.get("label", ""),
+                depth=next_depth,
+            ))
+            depth_levels.setdefault(next_depth, []).append(source)
+            queue.append((source, next_depth))
+
+    # Determine severity
+    if len(affected) > 10:
+        severity = "critical"
+    elif len(affected) > 5:
+        severity = "high"
+    elif len(affected) > 0:
+        severity = "medium"
+    else:
+        severity = "low"
+
+    return DependencyChainResult(
+        fault_node_id=fault_node_id,
+        fault_node_type=fault_type,
+        affected_nodes=affected,
+        depth_levels=depth_levels,
+        total_affected=len(affected),
+        severity=severity,
+    )
+
+
+def detect_spof(graph: InfraGraph) -> SPOFReport:
+    """Detect single points of failure using graph articulation points and bridges."""
+    g = graph.graph
+    undirected = g.to_undirected()
+
+    spof_items: list[SPOFItem] = []
+    bridge_list: list[dict[str, str]] = []
+
+    # Articulation points (cut vertices)
+    try:
+        art_points = list(nx.articulation_points(undirected))
+        for node_id in art_points:
+            node_data = g.nodes.get(node_id, {})
+            # Compute post-removal component count
+            test_graph = undirected.copy()
+            components_before = nx.number_connected_components(test_graph)
+            test_graph.remove_node(node_id)
+            components_after = nx.number_connected_components(test_graph)
+            additional_components = components_after - components_before
+
+            spof_items.append(SPOFItem(
+                node_id=node_id,
+                node_type=node_data.get("node_type", ""),
+                label=node_data.get("label", ""),
+                impact_description=(
+                    f"Removing {node_id} splits the graph into "
+                    f"{additional_components + 1} additional component(s)"
+                ),
+                affected_components=additional_components + 1,
+                is_bridge=False,
+            ))
+    except nx.NetworkXError:
+        pass
+
+    # Bridges (critical edges)
+    try:
+        bridges = list(nx.bridges(undirected))
+        for u, v in bridges:
+            u_data = g.nodes.get(u, {})
+            v_data = g.nodes.get(v, {})
+            bridge_list.append({
+                "source": u,
+                "source_type": u_data.get("node_type", ""),
+                "source_label": u_data.get("label", ""),
+                "target": v,
+                "target_type": v_data.get("node_type", ""),
+                "target_label": v_data.get("label", ""),
+            })
+    except nx.NetworkXError:
+        pass
+
+    summary_parts = []
+    if spof_items:
+        summary_parts.append(f"{len(spof_items)} articulation point(s)")
+    if bridge_list:
+        summary_parts.append(f"{len(bridge_list)} bridge(s)")
+
+    return SPOFReport(
+        total_spofs=len(spof_items),
+        articulation_points=spof_items,
+        bridges=bridge_list,
+        summary=", ".join(summary_parts) if summary_parts else "No single points of failure detected",
+    )
+
+
+def capacity_risk_analysis(
+    graph: InfraGraph, threshold: float = 0.8
+) -> CapacityRiskReport:
+    """Analyze capacity risks for subnets (IP exhaustion) and EKS nodes (pod limits)."""
+    g = graph.graph
+    items: list[CapacityRiskItem] = []
+
+    for node_id, data in g.nodes(data=True):
+        node_type = data.get("node_type", "")
+        raw = data.get("raw", {})
+
+        if node_type == NodeType.SUBNET:
+            available_ips = raw.get("available_ips")
+            cidr = raw.get("cidr", "")
+            if available_ips is not None and cidr:
+                # Estimate total IPs from CIDR (rough: 2^(32-prefix) - 5 reserved)
+                try:
+                    prefix_len = int(cidr.split("/")[1])
+                    total_ips = max((2 ** (32 - prefix_len)) - 5, 1)
+                    used = total_ips - available_ips
+                    utilization = used / total_ips if total_ips > 0 else 0.0
+
+                    if utilization >= threshold:
+                        risk_level = (
+                            "critical" if utilization >= 0.95
+                            else "high" if utilization >= 0.9
+                            else "medium"
+                        )
+                        items.append(CapacityRiskItem(
+                            node_id=node_id,
+                            node_type=node_type,
+                            label=data.get("label", node_id),
+                            metric="ip_utilization",
+                            current=float(used),
+                            maximum=float(total_ips),
+                            utilization_pct=round(utilization * 100, 1),
+                            risk_level=risk_level,
+                        ))
+                except (ValueError, IndexError):
+                    pass
+
+        elif node_type == NodeType.EKS_NODE:
+            current_pods = raw.get("current_size", 0)
+            max_pods = raw.get("max_pods", 110)
+            if max_pods > 0:
+                utilization = current_pods / max_pods
+                if utilization >= threshold:
+                    risk_level = (
+                        "critical" if utilization >= 0.95
+                        else "high" if utilization >= 0.9
+                        else "medium"
+                    )
+                    items.append(CapacityRiskItem(
+                        node_id=node_id,
+                        node_type=node_type,
+                        label=data.get("label", node_id),
+                        metric="pod_utilization",
+                        current=float(current_pods),
+                        maximum=float(max_pods),
+                        utilization_pct=round(utilization * 100, 1),
+                        risk_level=risk_level,
+                    ))
+
+    summary = (
+        f"{len(items)} capacity risk(s) found above {int(threshold * 100)}% threshold"
+        if items
+        else f"No capacity risks above {int(threshold * 100)}% threshold"
+    )
+
+    return CapacityRiskReport(
+        total_risks=len(items),
+        items=items,
+        summary=summary,
+    )
+
+
+def simulate_change(
+    graph: InfraGraph, edge_source: str, edge_target: str
+) -> ChangeSimulationResult:
+    """Simulate removing an edge and report reachability changes.
+
+    Compares subnet reachability to IGW nodes before and after edge removal.
+    """
+    g = graph.graph
+
+    edge_existed = g.has_edge(edge_source, edge_target)
+    if not edge_existed:
+        return ChangeSimulationResult(
+            edge_source=edge_source,
+            edge_target=edge_target,
+            edge_existed=False,
+            impact_summary=f"Edge {edge_source} -> {edge_target} does not exist in the graph",
+        )
+
+    # Get all subnet and IGW nodes
+    subnets = [
+        n for n, d in g.nodes(data=True)
+        if d.get("node_type") == NodeType.SUBNET
+    ]
+    igws = [
+        n for n, d in g.nodes(data=True)
+        if d.get("node_type") == NodeType.INTERNET_GATEWAY
+    ]
+
+    # Before: check reachability for each subnet
+    undirected_before = g.to_undirected()
+    before_reach: dict[str, set[str]] = {}
+    for subnet_id in subnets:
+        reachable = set()
+        for igw_id in igws:
+            try:
+                if nx.has_path(undirected_before, subnet_id, igw_id):
+                    reachable.add(igw_id)
+            except nx.NetworkXError:
+                pass
+        before_reach[subnet_id] = reachable
+
+    # After: remove edge and re-check
+    g_copy = g.copy()
+    g_copy.remove_edge(edge_source, edge_target)
+    undirected_after = g_copy.to_undirected()
+
+    lost_reachability: list[ReachabilityDiff] = []
+    total_lost = 0
+
+    for subnet_id in subnets:
+        reachable_after = set()
+        for igw_id in igws:
+            try:
+                if subnet_id in g_copy and igw_id in g_copy:
+                    if nx.has_path(undirected_after, subnet_id, igw_id):
+                        reachable_after.add(igw_id)
+            except nx.NetworkXError:
+                pass
+
+        lost = before_reach[subnet_id] - reachable_after
+        if lost:
+            lost_reachability.append(ReachabilityDiff(
+                node_id=subnet_id,
+                could_reach_before=sorted(before_reach[subnet_id]),
+                can_reach_after=sorted(reachable_after),
+                lost=sorted(lost),
+            ))
+            total_lost += len(lost)
+
+    impact_summary = (
+        f"Removing edge {edge_source} -> {edge_target} causes "
+        f"{len(lost_reachability)} subnet(s) to lose {total_lost} IGW connection(s)"
+        if lost_reachability
+        else f"Removing edge {edge_source} -> {edge_target} has no impact on subnet reachability"
+    )
+
+    return ChangeSimulationResult(
+        edge_source=edge_source,
+        edge_target=edge_target,
+        edge_existed=True,
+        lost_reachability=lost_reachability,
+        total_connections_lost=total_lost,
+        impact_summary=impact_summary,
+    )
