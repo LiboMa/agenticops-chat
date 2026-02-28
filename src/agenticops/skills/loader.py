@@ -14,7 +14,7 @@ from typing import Optional
 
 import yaml
 
-from agenticops.config import settings
+from agenticops.config import get_detail_level, settings
 
 logger = logging.getLogger(__name__)
 
@@ -231,20 +231,105 @@ AGENT SKILLS PROTOCOL:
 """
 
 
-def build_prompt_with_skills(base_prompt: str) -> str:
-    """Append skills XML + usage protocol to an agent system prompt.
+# ── Output Format Rule Templates ────────────────────────────────────
+
+_OUTPUT_RULES: dict[str, str] = {
+    "concise": """\
+OUTPUT FORMAT RULES (concise mode — target ~500 tokens):
+- Lead with root cause / answer in 1-2 sentences.
+- Bullet points only — no tables, no headings, no paragraphs.
+- Do NOT echo back skill content, tool results, or protocol steps.
+- Do NOT repeat the user's question.
+- Cite resource IDs inline (e.g., "i-0abc123 is running").
+- Omit recommendations and fix plans unless explicitly requested.""",
+
+    "medium": """\
+OUTPUT FORMAT RULES (medium mode — target ~1500 tokens):
+- Keep responses CONCISE. Aim for 500-1500 tokens of output text.
+- Use bullet points and short sentences — not paragraphs.
+- Lead with a 2-3 sentence summary, then key findings as bullets.
+- Include brief recommendations section when relevant.
+- Do NOT echo back full skill content or tool results verbatim. Summarize key findings.
+- Do NOT repeat the user's question or restate the protocol steps.
+- When citing resource IDs, use inline format (e.g., "i-0abc123 is running") not tables.""",
+
+    "detailed": """\
+OUTPUT FORMAT RULES (detailed mode — target ~4000 tokens):
+- Provide a thorough narrative with full evidence chain.
+- Use headings (##) to organize: Summary → Evidence → Analysis → Recommendations.
+- Include resource details with IDs, states, and relevant attributes.
+- Tables are allowed for comparing resources or metrics.
+- Include complete recommendations with specific CLI commands.
+- Still do NOT echo raw tool output or repeat the protocol — synthesize and explain.""",
+}
+
+_RCA_ADDENDA: dict[str, str] = {
+    "concise": """\
+- Structure: Root Cause (1 sentence) → top 3 evidence bullets → confidence score.""",
+    "medium": """\
+- Structure: Root Cause → Evidence → Contributing Factors → Recommendations → Fix Plan (if applicable).""",
+    "detailed": """\
+- Structure: Root Cause → Full Evidence Chain (with timestamps) → Contributing Factors → Detailed Recommendations → Fix Plan → Risk Assessment.
+- Include CloudTrail event names, metric data points, and KB matches when available.""",
+}
+
+_SRE_ADDENDA: dict[str, str] = {
+    "concise": """\
+- For Mode A (fix plans): numbered steps, one line per step, no prose.
+- For Mode B (investigation): 1-sentence answer + key findings bullets.""",
+    "medium": """\
+- For Mode A (fix plans): use numbered steps, one line per step.
+- For Mode B (investigation): lead with a 2-3 sentence summary, then key findings as bullets.""",
+    "detailed": """\
+- For Mode A (fix plans): numbered steps with full CLI commands, pre/post checks, rollback plan, and estimated impact.
+- For Mode B (investigation): comprehensive findings organized by resource, with topology context and capacity data.""",
+}
+
+
+def get_output_rules(agent_type: str = "generic") -> str:
+    """Return the OUTPUT FORMAT RULES block for the current detail level.
+
+    Reads the detail level from the ContextVar set by config.get_detail_level().
+
+    Args:
+        agent_type: One of 'rca', 'sre', or 'generic'.
+
+    Returns:
+        Formatted rules string ready to inject into a system prompt.
+    """
+    level = get_detail_level()
+    rules = _OUTPUT_RULES.get(level, _OUTPUT_RULES["medium"])
+
+    addenda = ""
+    if agent_type == "rca":
+        addenda = _RCA_ADDENDA.get(level, "")
+    elif agent_type == "sre":
+        addenda = _SRE_ADDENDA.get(level, "")
+
+    if addenda:
+        return f"{rules}\n{addenda}"
+    return rules
+
+
+def build_prompt_with_skills(base_prompt: str, agent_type: str = "generic") -> str:
+    """Append output rules + skills XML + usage protocol to an agent system prompt.
 
     Args:
         base_prompt: The agent's base system prompt.
+        agent_type: Agent type for output rule selection ('rca', 'sre', or 'generic').
 
     Returns:
-        Enhanced prompt with skills information appended.
+        Enhanced prompt with output rules and skills information appended.
     """
+    # Always inject output rules (even if skills are disabled)
+    output_rules = get_output_rules(agent_type)
+    prompt = f"{base_prompt}\n\n{output_rules}"
+
     if not settings.skills_enabled:
-        return base_prompt
+        return prompt
 
     xml = get_available_skills_xml()
     if not xml:
-        return base_prompt
+        return prompt
 
-    return f"{base_prompt}\n\n{xml}\n{_SKILLS_USAGE_PROTOCOL}"
+    return f"{prompt}\n\n{xml}\n{_SKILLS_USAGE_PROTOCOL}"

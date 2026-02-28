@@ -1,5 +1,6 @@
 """Configuration management for AgenticOps."""
 
+import contextvars
 from pathlib import Path
 from typing import Optional
 
@@ -133,9 +134,16 @@ class Settings(BaseSettings):
         description="Max characters for skill body content returned by activate_skill",
     )
 
+    # Agent output detail level
+    agent_output_detail: str = Field(
+        default="medium",
+        description="Default agent output detail level: concise, medium, or detailed",
+    )
+
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
-        default=False,
+        #default=False,
+        default=True,
         description="Enable fix execution (AIOPS_EXECUTOR_ENABLED=true to enable)",
     )
     executor_auto_approve_l0_l1: bool = Field(
@@ -204,3 +212,33 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+# ── Agent Detail Level ──────────────────────────────────────────────
+
+VALID_DETAIL_LEVELS = ("concise", "medium", "detailed")
+
+_detail_level_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "agent_detail_level", default=settings.agent_output_detail
+)
+
+
+def get_detail_level() -> str:
+    """Get the current agent output detail level from context."""
+    return _detail_level_var.get()
+
+
+def set_detail_level(level: str) -> contextvars.Token:
+    """Set the agent output detail level in context.
+
+    Args:
+        level: One of 'concise', 'medium', or 'detailed'.
+
+    Returns:
+        Token that can be used to reset to the previous value.
+
+    Raises:
+        ValueError: If level is not valid.
+    """
+    if level not in VALID_DETAIL_LEVELS:
+        raise ValueError(f"Invalid detail level '{level}'. Must be one of: {', '.join(VALID_DETAIL_LEVELS)}")
+    return _detail_level_var.set(level)

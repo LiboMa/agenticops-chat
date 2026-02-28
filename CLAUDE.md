@@ -29,6 +29,7 @@ Web Dashboard ──────┘         │
 - **Agents-as-tools pattern**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
 - **All 7 agents** use centralized config: `settings.bedrock_model_id`, `settings.bedrock_max_tokens`, `settings.bedrock_window_size`
 - **Conversation management**: `SlidingWindowConversationManager(window_size=40, per_turn=True)` on all agents to prevent `MaxTokensReachedException`
+- **Dynamic output rules**: `contextvars.ContextVar` holds detail level (concise/medium/detailed); `build_prompt_with_skills()` injects level-appropriate OUTPUT FORMAT RULES at agent creation time
 
 ## Key Files
 
@@ -48,7 +49,7 @@ Web Dashboard ──────┘         │
 | `src/agenticops/models.py` | SQLAlchemy models (HealthIssue, FixPlan, Report, ChatSession, ChatMessage, etc.) |
 | `src/agenticops/graph/collectors.py` | AWS data collectors for graph compute enrichment (EC2, RDS, Lambda, EKS, ECS, ElastiCache, TG) |
 | `src/agenticops/skills/__init__.py` | Agent Skills package init — exports all public functions |
-| `src/agenticops/skills/loader.py` | Skill discovery, YAML parsing, XML generation, prompt helper |
+| `src/agenticops/skills/loader.py` | Skill discovery, YAML parsing, XML generation, output rules, prompt helper |
 | `src/agenticops/skills/security.py` | Three-tier security classification for shell + kubectl commands |
 | `src/agenticops/skills/tools.py` | 3 @tool functions: activate_skill, read_skill_reference, list_skills |
 | `src/agenticops/skills/execution.py` | 2 @tool functions: run_on_host (SSM/SSH), run_kubectl (EKS) |
@@ -127,6 +128,8 @@ aiops chat -q "check health of prod"               # -q/--query flag
 echo "scan us-east-1" | aiops chat                  # piped stdin
 aiops chat "analyze I#42 and check R#17"            # with references
 aiops chat "review this log @/tmp/error.log"        # with file attachment
+aiops chat -d concise "quick status of prod"        # concise output
+aiops chat --detail detailed "deep dive on I#42"    # detailed output
 ```
 
 - `sys.stdout.isatty()` controls Rich vs plain text output
@@ -139,7 +142,7 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `bedrock_model_id` | `global.anthropic.claude-opus-4-6-v1` | Bedrock model ID |
-| `bedrock_max_tokens` | `8192` | Max output tokens for all agents |
+| `bedrock_max_tokens` | `16384` | Max output tokens for all agents |
 | `bedrock_window_size` | `40` | Sliding window conversation manager size |
 | `bedrock_region` | `us-east-1` | AWS region for Bedrock |
 | `cors_origins` | `""` | Comma-separated CORS origins (empty = dev-mode) |
@@ -149,6 +152,7 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | `database_url` | `sqlite:///.../data/agenticops.db` | SQLite path |
 | `skills_dir` | `PROJECT_ROOT / "skills"` | Directory containing Agent Skills packages |
 | `skills_enabled` | `true` | Enable Agent Skills integration |
+| `agent_output_detail` | `medium` | Default agent output detail level: concise, medium, or detailed |
 
 ## Graph Module
 
@@ -225,6 +229,33 @@ skills/
 ```
 
 ## Recent Changes
+
+### 2026-02-28: Configurable Agent Output Detail Level
+
+**Core mechanism** (config.py, skills/loader.py):
+- `agent_output_detail` pydantic setting (default: `medium`, env: `AIOPS_AGENT_OUTPUT_DETAIL`)
+- `contextvars.ContextVar` holds runtime detail level; `get_detail_level()` / `set_detail_level()` helpers
+- `VALID_DETAIL_LEVELS = ("concise", "medium", "detailed")`
+- `_OUTPUT_RULES` dict — 3 level templates: concise (~500 tok), medium (~1500 tok), detailed (~4000 tok)
+- `_RCA_ADDENDA` / `_SRE_ADDENDA` — agent-specific structure guidance per level
+- `get_output_rules(agent_type)` reads ContextVar, returns combined rules
+- `build_prompt_with_skills(base_prompt, agent_type="generic")` now injects dynamic output rules
+
+**Agent changes** (rca_agent.py, sre_agent.py):
+- Removed hardcoded `OUTPUT FORMAT RULES` blocks from both system prompts
+- Both now call `build_prompt_with_skills(..., agent_type="rca"|"sre")` for dynamic injection
+
+**CLI** (main.py, context.py):
+- `ChatContext.detail_level` replaces `verbose` (boolean → tri-state string)
+- `/detail [concise|medium|detailed]` slash command (cycles when no arg)
+- `/verbose` redirects to `/detail` handler for backward compatibility
+- `--detail / -d` flag on `aiops chat` command for headless mode
+- ContextVar set before each agent call in both interactive and headless paths
+
+**Web API** (app.py):
+- `ChatMessageCreate.detail_level` optional field
+- Extracted from JSON body or multipart form data
+- ContextVar set before agent call in SSE generator
 
 ### 2026-02-28: Multimodal Chat + Elasticsearch Skill
 
@@ -400,6 +431,7 @@ aiops chat
 # Run CLI chat (headless)
 aiops chat "check health of prod"
 aiops chat -q "scan us-east-1"
+aiops chat -d concise "quick status"
 echo "list issues" | aiops chat
 
 # Run API server

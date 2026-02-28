@@ -468,6 +468,11 @@ aiops chat "analyze this error log @/tmp/error.log"
 # With image analysis
 aiops chat "what's wrong in this screenshot @/tmp/dashboard.png"
 
+# Control output detail level (-d / --detail)
+aiops chat -d concise "quick status of prod"     # ~500 tokens, bullets only
+aiops chat -d medium "check health of EC2"        # ~1500 tokens (default)
+aiops chat --detail detailed "deep dive on I#42"  # ~4000 tokens, full narrative
+
 # Chain commands in CI/CD
 aiops chat "scan EC2 in us-east-1" && \
 aiops chat "check health of EC2" && \
@@ -475,6 +480,8 @@ aiops chat "generate daily report"
 ```
 
 **TTY detection:** Rich formatting when running in terminal, plain text when piped.
+
+**Detail levels:** Use `/detail` in interactive mode or `--detail` in headless mode to control how much detail agents return. `concise` gives root cause + bullets only; `medium` (default) adds evidence + recommendations; `detailed` provides full narrative with complete evidence chain.
 
 ---
 
@@ -581,6 +588,7 @@ generate an inventory report for EC2
 | `/execute <ID>` | Execute fix plan |
 | `/report list` | List reports |
 | `/context set <key> <val>` | Set chat context |
+| `/detail [concise\|medium\|detailed]` | Set agent output detail level |
 | `/output json` | Switch to JSON output |
 | `/pager auto` | Auto-paginate long output |
 | `/exit` | Exit chat |
@@ -613,6 +621,11 @@ curl -N -X POST $BASE/chat/sessions/{id}/messages \
   -H 'Content-Type: application/json' \
   -d '{"content": "check health of EC2"}'
 
+# Send message with detail level
+curl -N -X POST $BASE/chat/sessions/{id}/messages \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "deep dive on EC2", "detail_level": "detailed"}'
+
 # Upload image for analysis
 curl -X POST $BASE/chat/sessions/{id}/messages \
   -F "content=analyze this screenshot" \
@@ -644,6 +657,7 @@ export AIOPS_BEDROCK_MAX_TOKENS=8192
 export AIOPS_EXECUTOR_ENABLED=true     # Enable fix execution (default: false)
 export AIOPS_SKILLS_ENABLED=true       # Enable agent skills (default: true)
 export AIOPS_EMBEDDING_ENABLED=true    # Enable vector embeddings (default: true)
+export AIOPS_AGENT_OUTPUT_DETAIL=medium  # Agent output detail: concise, medium, detailed
 
 # Web
 export AIOPS_CORS_ORIGINS="http://localhost:3000,https://myapp.example.com"

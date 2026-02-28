@@ -459,6 +459,7 @@ class ChatSessionCreate(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
+    detail_level: Optional[str] = Field(None, description="Agent output detail: concise, medium, or detailed")
 
 
 class ChatMessageResponse(BaseModel):
@@ -2567,9 +2568,12 @@ async def api_send_chat_message(session_id: str, request: Request):
     file_documents: list[tuple[str, bytes, str, str]] = []
     attachments: list[dict] | None = None
 
+    detail_level_req: Optional[str] = None
+
     if "multipart/form-data" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
+        detail_level_req = str(form.get("detail_level", "")).strip() or None
         upload = form.get("file")
 
         if upload and hasattr(upload, "filename") and upload.filename:
@@ -2611,6 +2615,7 @@ async def api_send_chat_message(session_id: str, request: Request):
     else:
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
+        detail_level_req = payload.detail_level
 
     # Preprocess: file injection + reference resolution (returns str or list[ContentBlock])
     enriched_content, _ = preprocess_message(
@@ -2632,6 +2637,11 @@ async def api_send_chat_message(session_id: str, request: Request):
         db_session_pk = row.id
 
     async def _generate():
+        # Set detail level for this request if provided
+        if detail_level_req:
+            from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
+            if detail_level_req in VALID_DETAIL_LEVELS:
+                set_detail_level(detail_level_req)
         agent = _chat_sessions.get_or_create(session_id)
         accumulated = ""
         tool_calls = []

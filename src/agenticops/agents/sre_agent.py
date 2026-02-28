@@ -158,14 +158,6 @@ TOOL SELECTION — accuracy first:
   Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
   Example: `aws ce get-cost-and-usage --time-period Start=2026-02-01,End=2026-02-28 --granularity MONTHLY --metrics BlendedCost --query 'ResultsByTime[].Total'`
 
-OUTPUT FORMAT RULES:
-- Keep responses CONCISE. Aim for 500-1500 tokens of output text.
-- Use bullet points and short sentences — not paragraphs.
-- For Mode A (fix plans): use numbered steps, one line per step.
-- For Mode B (investigation): lead with a 2-3 sentence summary, then key findings as bullets.
-- Do NOT echo back full skill content or tool results verbatim. Summarize key points.
-- Do NOT repeat the user's question or restate the protocol steps.
-- When citing resource IDs, use inline format (e.g., "i-0abc123 is running") not tables.
 """
 
 
@@ -177,7 +169,7 @@ def _create_sre_agent() -> Agent:
         max_tokens=settings.bedrock_max_tokens,
     )
     return Agent(
-        system_prompt=build_prompt_with_skills(SRE_SYSTEM_PROMPT),
+        system_prompt=build_prompt_with_skills(SRE_SYSTEM_PROMPT, agent_type="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(

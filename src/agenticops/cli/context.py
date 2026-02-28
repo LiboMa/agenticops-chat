@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
+from agenticops.config import VALID_DETAIL_LEVELS
 
 
 class ChatContext:
@@ -15,7 +16,7 @@ class ChatContext:
         self.output_format = "table"  # table, json, wide
         self.table_style = os.environ.get("AIOPS_TABLE_STYLE", "default")
         self.account = None
-        self.verbose = False
+        self.detail_level = "medium"  # concise, medium, detailed
         self.output_history: List[Dict[str, str]] = []  # Store conversation history
         self.pager_threshold = 0  # 0 = auto (terminal height - 8)
         self.auto_pager = True  # Enable auto-truncation for long outputs
@@ -25,6 +26,13 @@ class ChatContext:
     def set_output(self, fmt: str):
         if fmt in ["table", "json", "wide", "yaml"]:
             self.output_format = fmt
+            return True
+        return False
+
+    def set_detail(self, level: str) -> bool:
+        """Set agent output detail level (concise, medium, detailed)."""
+        if level in VALID_DETAIL_LEVELS:
+            self.detail_level = level
             return True
         return False
 

@@ -1561,7 +1561,7 @@ class ChatContext:
         self.output_format = "table"  # table, json, wide
         self.table_style = os.environ.get("AIOPS_TABLE_STYLE", "default")
         self.account = None
-        self.verbose = False
+        self.detail_level = "medium"  # concise, medium, detailed
         self.output_history: List[Dict[str, str]] = []  # Store conversation history
         self.pager_threshold = 0  # 0 = auto (terminal height - 8)
         self.auto_pager = True  # Enable auto-truncation for long outputs
@@ -1571,6 +1571,14 @@ class ChatContext:
     def set_output(self, fmt: str):
         if fmt in ["table", "json", "wide", "yaml"]:
             self.output_format = fmt
+            return True
+        return False
+
+    def set_detail(self, level: str) -> bool:
+        """Set agent output detail level (concise, medium, detailed)."""
+        from agenticops.config import VALID_DETAIL_LEVELS
+        if level in VALID_DETAIL_LEVELS:
+            self.detail_level = level
             return True
         return False
 
@@ -1700,7 +1708,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 
 [cyan]Other:[/cyan]
   /clear                           Clear screen
-  /verbose                         Toggle verbose mode
+  /detail [concise|medium|detailed] Set agent output detail level
   /help [topic]                    Show help
 
 [cyan]Exit:[/cyan]
@@ -2611,7 +2619,7 @@ Usage: /workflow <name> [options]"""
     workflow_name = args[0].lower()
 
     if workflow_name in ["full-scan", "fullscan"]:
-        ctx.verbose and console.print("[dim]Starting full-scan workflow...[/dim]")
+        (ctx.detail_level == "detailed") and console.print("[dim]Starting full-scan workflow...[/dim]")
         results = []
         results.append(_slash_scan(ctx, []))
         results.append(_slash_detect(ctx, []))
@@ -2687,7 +2695,7 @@ def _slash_context(ctx: ChatContext, args: list) -> str:
         return f"""[bold]Current Context:[/bold]
   Account: {ctx.account or 'default'}
   Output Format: {ctx.output_format}
-  Verbose: {'ON' if ctx.verbose else 'OFF'}
+  Detail Level: {ctx.detail_level}
 
 Usage:
   /context account <name>   Switch account context
@@ -2705,7 +2713,7 @@ Usage:
     elif cmd == "reset":
         ctx.account = None
         ctx.output_format = "table"
-        ctx.verbose = False
+        ctx.detail_level = "medium"
         return "[green]Context reset to defaults.[/green]"
 
     return "[yellow]Usage: /context [account <name> | reset][/yellow]"
@@ -2739,7 +2747,7 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         session_data = {
             "account": ctx.account,
             "output_format": ctx.output_format,
-            "verbose": ctx.verbose,
+            "detail_level": ctx.detail_level,
             "saved_at": datetime.now().isoformat(),
         }
         session_file.write_text(json.dumps(session_data, indent=2))
@@ -2754,7 +2762,7 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         data = json.loads(session_file.read_text())
         ctx.account = data.get("account")
         ctx.output_format = data.get("output_format", "table")
-        ctx.verbose = data.get("verbose", False)
+        ctx.detail_level = data.get("detail_level", "medium")
         return f"[green]Session loaded: {name}[/green]"
 
     elif cmd == "delete" and len(args) > 1:
@@ -3132,6 +3140,8 @@ SLASH_COMMANDS = {
     # Token usage
     "tokens": _slash_tokens,
     "usage": _slash_tokens,
+
+    # Detail level (handled inline in handle_slash_command, but listed for /alias)
 }
 
 
@@ -3151,10 +3161,19 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
     if cmd in ["exit", "quit", "q"]:
         return "__EXIT__"
 
-    # Check for verbose toggle
-    if cmd == "verbose":
-        ctx.verbose = not ctx.verbose
-        return f"[green]Verbose mode: {'ON' if ctx.verbose else 'OFF'}[/green]"
+    # Detail level command
+    if cmd in ("detail", "verbosity", "verbose"):
+        from agenticops.config import VALID_DETAIL_LEVELS
+        if args:
+            level = args[0].lower()
+            if ctx.set_detail(level):
+                return f"[green]Detail level set to: {level}[/green]"
+            return f"[yellow]Invalid level '{level}'. Use: {', '.join(VALID_DETAIL_LEVELS)}[/yellow]"
+        # No args — cycle: concise → medium → detailed → concise
+        levels = list(VALID_DETAIL_LEVELS)
+        idx = (levels.index(ctx.detail_level) + 1) % len(levels)
+        ctx.set_detail(levels[idx])
+        return f"[green]Detail level: {ctx.detail_level}[/green]"
 
     handler = SLASH_COMMANDS.get(cmd)
     if handler:
@@ -3400,6 +3419,7 @@ def chat(
     query: Optional[str] = typer.Argument(None, help="Single query (headless mode)"),
     query_flag: Optional[str] = typer.Option(None, "--query", "-q", help="Query string (headless mode)"),
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
+    detail: Optional[str] = typer.Option(None, "--detail", "-d", help="Output detail level: concise, medium, detailed"),
 ):
     """Start an interactive chat, or run a single query in headless mode.
 
@@ -3410,8 +3430,17 @@ def chat(
       echo "list issues" | aiops chat         # pipe mode
       aiops chat "analyze I#42 and check R#17"
       aiops chat "review this log @/tmp/error.log"
+      aiops chat -d concise "quick status"    # concise output
     """
     import sys
+    from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
+
+    # Apply detail level if specified
+    if detail:
+        if detail not in VALID_DETAIL_LEVELS:
+            console.print(f"[red]Invalid detail level '{detail}'. Use: {', '.join(VALID_DETAIL_LEVELS)}[/red]")
+            raise typer.Exit(1)
+        set_detail_level(detail)
 
     # Determine headless input
     headless_input = query or query_flag or None
@@ -3448,7 +3477,7 @@ def chat(
         "/scan", "/detect", "/analyze", "/ack", "/resolve",
         "/workflow", "/schedule", "/notify",
         "/session", "/context", "/export", "/output",
-        "/exit", "/quit",
+        "/detail", "/exit", "/quit",
     ]
     completer = WordCompleter(slash_commands, ignore_case=True)
 
@@ -3521,6 +3550,10 @@ def chat(
                 media_count = sum(1 for b in enriched_input if "image" in b or "document" in b)
                 if media_count:
                     console.print(f"[dim]Attached {media_count} media file(s) for analysis[/dim]")
+
+            # Set detail level from context before each agent call
+            from agenticops.config import set_detail_level as _set_dl
+            _set_dl(ctx.detail_level)
 
             # Call agent with simple spinner
             display = ThinkingDisplay(console)
