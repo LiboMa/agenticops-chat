@@ -275,6 +275,54 @@ class RCAResult(Base):
 # ============================================================================
 
 
+# ── HealthIssue State Machine ────────────────────────────────────────
+
+VALID_ISSUE_STATUSES = {
+    "open", "investigating", "acknowledged", "root_cause_identified",
+    "fix_planned", "fix_approved", "fix_executing", "fix_executed", "resolved",
+}
+
+# Allowed transitions: from_status -> {to_status, ...}
+_ISSUE_TRANSITIONS: dict[str, set[str]] = {
+    "open":                   {"investigating", "acknowledged", "resolved"},
+    "investigating":          {"acknowledged", "root_cause_identified", "fix_planned", "resolved"},
+    "acknowledged":           {"investigating", "root_cause_identified", "fix_planned", "resolved"},
+    "root_cause_identified":  {"fix_planned", "resolved"},
+    "fix_planned":            {"fix_approved", "resolved"},
+    "fix_approved":           {"fix_executing", "resolved"},
+    "fix_executing":          {"fix_executed", "resolved"},
+    "fix_executed":           {"resolved"},
+    "resolved":               set(),  # terminal state
+}
+
+
+class InvalidStatusTransition(ValueError):
+    """Raised when a HealthIssue status transition is not allowed."""
+
+
+def validate_status_transition(current: str, new: str) -> None:
+    """Validate a HealthIssue status transition.
+
+    Args:
+        current: Current status value.
+        new: Requested new status value.
+
+    Raises:
+        InvalidStatusTransition: If the transition is not allowed.
+        ValueError: If either status is not a valid status.
+    """
+    if new not in VALID_ISSUE_STATUSES:
+        raise ValueError(f"Invalid status '{new}'. Valid: {', '.join(sorted(VALID_ISSUE_STATUSES))}")
+    if current == new:
+        return  # no-op is always fine
+    allowed = _ISSUE_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidStatusTransition(
+            f"Cannot transition from '{current}' to '{new}'. "
+            f"Allowed from '{current}': {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
 class HealthIssue(Base):
     """Detected health issues with lifecycle tracking."""
 

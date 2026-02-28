@@ -124,7 +124,7 @@ class ResourceResponse(BaseModel):
 
 class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
-    status: str = Field(..., pattern="^(open|investigating|root_cause_identified|fix_planned|fix_approved|fix_executed|resolved|acknowledged)$")
+    status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved)$")
     note: Optional[str] = None
 
 
@@ -229,7 +229,7 @@ class HealthIssueUpdate(BaseModel):
     severity: Optional[str] = Field(None, pattern="^(critical|high|medium|low)$")
     title: Optional[str] = Field(None, max_length=300)
     description: Optional[str] = None
-    status: Optional[str] = Field(None, pattern="^(open|investigating|root_cause_identified|fix_planned|fix_approved|fix_executed|resolved)$")
+    status: Optional[str] = Field(None, pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved)$")
     metric_data: Optional[dict] = None
     related_changes: Optional[List] = None
 
@@ -1089,11 +1089,20 @@ async def api_get_anomaly(anomaly_id: int):
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
 async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
-    """Update anomaly status (backed by HealthIssue)."""
+    """Update anomaly status (backed by HealthIssue) with state machine enforcement."""
+    from agenticops.models import InvalidStatusTransition, validate_status_transition
+
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
+
+        try:
+            validate_status_transition(issue.status, update.status)
+        except InvalidStatusTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         issue.status = update.status
         if update.status == "resolved" and issue.resolved_at is None:
@@ -1250,7 +1259,9 @@ async def api_create_health_issue(data: HealthIssueCreate):
 
 @app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
 async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
-    """Update a health issue."""
+    """Update a health issue with state machine enforcement on status transitions."""
+    from agenticops.models import InvalidStatusTransition, validate_status_transition
+
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -1258,9 +1269,19 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
 
         update_data = data.model_dump(exclude_unset=True)
 
+        # Validate status transition if status is being changed
+        new_status = update_data.get("status")
+        if new_status and new_status != issue.status:
+            try:
+                validate_status_transition(issue.status, new_status)
+            except InvalidStatusTransition as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
         # Auto-set resolved_at when status transitions to resolved
         transitioning_to_resolved = (
-            update_data.get("status") == "resolved" and issue.status != "resolved"
+            new_status == "resolved" and issue.status != "resolved"
         )
         if transitioning_to_resolved:
             update_data["resolved_at"] = datetime.utcnow()
@@ -2746,6 +2767,68 @@ if _cors_origins:
         allow_headers=["Content-Type", "Authorization"],
         max_age=settings.cors_max_age,
     )
+
+
+# ============================================================================
+# API Authentication Middleware (opt-in via AIOPS_API_AUTH_ENABLED=true)
+# ============================================================================
+
+# Public paths that never require authentication
+_PUBLIC_PATHS = {"/api/health", "/api/auth/login", "/api/auth/register"}
+_PUBLIC_PREFIXES = ("/app/", "/static/", "/docs", "/openapi.json", "/redoc")
+
+if settings.api_auth_enabled:
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    class APIAuthMiddleware(BaseHTTPMiddleware):
+        """Enforce Bearer token auth on /api/* endpoints when enabled."""
+
+        async def dispatch(self, request, call_next):
+            path = request.url.path
+
+            # Skip non-API and public paths
+            if not path.startswith("/api/") or path in _PUBLIC_PATHS:
+                return await call_next(request)
+            if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+                return await call_next(request)
+            # Allow OPTIONS for CORS preflight
+            if request.method == "OPTIONS":
+                return await call_next(request)
+
+            auth_header = request.headers.get("authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Authentication required. Use 'Authorization: Bearer <token>' header."},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            token = auth_header[7:]
+            from agenticops.auth import AuthService
+
+            # Try API key (aiops_*) or session token
+            user = None
+            if token.startswith("aiops_"):
+                result = AuthService.validate_api_key(token)
+                if result:
+                    user, _ = result
+            else:
+                user = AuthService.validate_session(token)
+
+            if not user:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired token."},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # Attach user to request state for downstream use
+            request.state.user = user
+            return await call_next(request)
+
+    app.add_middleware(APIAuthMiddleware)
+    logger.info("API authentication enabled — all /api/* endpoints require Bearer token")
 
 
 # ============================================================================

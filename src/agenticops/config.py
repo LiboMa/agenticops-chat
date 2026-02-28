@@ -134,6 +134,12 @@ class Settings(BaseSettings):
         description="Max characters for skill body content returned by activate_skill",
     )
 
+    # API Authentication
+    api_auth_enabled: bool = Field(
+        default=False,
+        description="Enable API authentication (AIOPS_API_AUTH_ENABLED=true to enable)",
+    )
+
     # Agent output detail level
     agent_output_detail: str = Field(
         default="medium",

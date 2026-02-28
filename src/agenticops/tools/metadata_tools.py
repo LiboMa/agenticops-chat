@@ -16,8 +16,10 @@ from agenticops.models import (
     FixExecution,
     FixPlan,
     HealthIssue,
+    InvalidStatusTransition,
     RCAResult,
     get_session,
+    validate_status_transition,
 )
 
 logger = logging.getLogger(__name__)
@@ -391,13 +393,17 @@ def list_health_issues(
 
 @tool
 def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -> str:
-    """Update the status of a health issue.
+    """Update the status of a health issue with state machine enforcement.
 
-    Valid status transitions:
-    - open -> investigating
-    - investigating -> root_cause_identified
-    - root_cause_identified -> fix_planned -> fix_approved -> fix_executed -> resolved
-    - Any status -> resolved (force close)
+    Valid transitions (see models.py _ISSUE_TRANSITIONS for full map):
+    - open -> investigating | acknowledged | resolved
+    - investigating -> acknowledged | root_cause_identified | fix_planned | resolved
+    - acknowledged -> investigating | root_cause_identified | fix_planned | resolved
+    - root_cause_identified -> fix_planned | resolved
+    - fix_planned -> fix_approved | resolved
+    - fix_approved -> fix_executing | resolved
+    - fix_executing -> fix_executed | resolved
+    - fix_executed -> resolved
 
     Args:
         issue_id: The HealthIssue ID to update
@@ -405,14 +411,9 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         note: Optional note explaining the status change
 
     Returns:
-        Confirmation of the status update.
+        Confirmation of the status update, or error message if transition is invalid.
     """
-    valid_statuses = {
-        "open", "investigating", "root_cause_identified",
-        "fix_planned", "fix_approved", "fix_executed", "resolved",
-    }
-    if new_status.lower() not in valid_statuses:
-        return f"Invalid status '{new_status}'. Valid: {', '.join(sorted(valid_statuses))}"
+    new_status = new_status.lower()
 
     session = get_session()
     try:
@@ -421,14 +422,19 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
             return f"HealthIssue #{issue_id} not found."
 
         old_status = issue.status
-        issue.status = new_status.lower()
+        try:
+            validate_status_transition(old_status, new_status)
+        except (InvalidStatusTransition, ValueError) as e:
+            return f"Status transition rejected: {e}"
 
-        if new_status.lower() == "resolved":
+        issue.status = new_status
+
+        if new_status == "resolved":
             issue.resolved_at = datetime.utcnow()
 
         session.commit()
 
-        msg = f"HealthIssue #{issue_id} status: {old_status} -> {new_status.lower()}"
+        msg = f"HealthIssue #{issue_id} status: {old_status} -> {new_status}"
         if note:
             msg += f" (note: {note})"
         return msg
