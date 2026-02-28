@@ -114,3 +114,26 @@ Q4：如何实现“工具的动态检索”而非“硬编码”？
 
 技术点： 当 RCA 决定查 CloudTrail 时，如果它没有现成的 Tool，它能否通过 "Code Interpreter" 现场写一个 Python 脚本来查？（这是 L5 Agent 的标志）。你是否敢开放这个权限？如果开放，如何通过沙箱（Sandbox/Docker）限制它不把你的 Access Key 打印出来？
 
+## Core feature journal
+* 扩展试Skills
+* 自增式知识库 - 自记录式 issue，不需要写文档，Agents帮你做记录，建立技能知识库
+* 主动式审查 - 一旦接管，无需更多人工参与，完成可完L4级别自动驾驶！
+* 自动修复！（L0-L4）根因分析后，高危手动修复，中低希自动修复并记录！
+* CLI Headless, 支持Command line 快速调用，对接第三方服务(如 opneclaw, CC!!）
+
+### 2026.2.28 -- 支持 Skills.md 功能加上去。
+
+由于RCA及SRE在查资源时，查出来的信息，非常非常的不具体，基本上都是资源层面的，所以想到了Skills，可是所以给Agents加上了 原生的Skills，这样无论是RCA，SRE，还是其它，都可以原生支持了Skills，无论是从SSH、Networking、DB等能力，都可以以Skills的方式给后续的Agent加上去，使整个应用有了一个质的扩展性。
+
+
+### 2026.2.28 - 支持SRE Skills时，上下文的Information  level - 主要是不要超过Bedrock的Token limitation，以及后续接其它模型时可以调整。a tiered verbosity control that adapts the OUTPUT FORMAT
+  RULES dynamically while keeping output within budget. Let me plan
+  this out.
+
+Actually, is there anyway to control or configure the context
+  detailed level that end user can get the difference level of
+  output, but DO NOT overflooded the buffer. for example,
+  concise(root cause only, core infromation only), medium(related
+  more information that user can refer to), detailed(more detailed
+  output that use can get, but DO overflooed the maximum token size
+  or output limit.)
