@@ -12,7 +12,13 @@ import json
 import logging
 from typing import Optional
 
-from agenticops.chat.file_reader import read_file_as_text
+from agenticops.chat.file_reader import (
+    read_file_as_text,
+    is_image_file,
+    is_document_file,
+    read_file_as_image_bytes,
+    read_file_as_document_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,43 +119,79 @@ def _extract_file_refs(text: str) -> tuple[str, list[str]]:
 def preprocess_message(
     text: str,
     file_contents: Optional[list[tuple[str, str]]] = None,
+    file_images: Optional[list[tuple[str, bytes, str]]] = None,
+    file_documents: Optional[list[tuple[str, bytes, str, str]]] = None,
     resolve_file_refs: bool = False,
-) -> tuple[str, list[str]]:
+) -> tuple[str | list[dict], list[str]]:
     """Full preprocessing pipeline: file injection + reference resolution.
 
     Args:
         text: Raw user message.
-        file_contents: Optional list of (filename, content) tuples (web uploads).
+        file_contents: Optional list of (filename, content) tuples — text extracts (web uploads).
+        file_images: Optional list of (filename, bytes, format) tuples — native image blocks.
+        file_documents: Optional list of (filename, bytes, format, name) tuples — native document blocks.
         resolve_file_refs: If True, extract @file/path from text and read them (CLI).
 
     Returns:
-        (enriched_message, warnings)
+        (enriched_message_or_content_blocks, warnings).
+        Returns str for text-only messages, list[ContentBlock] when images/documents are present.
     """
-    parts: list[str] = []
+    text_parts: list[str] = []
     warnings: list[str] = []
+    image_blocks: list[dict] = []
+    document_blocks: list[dict] = []
+
+    # Collect pre-supplied media blocks (from web uploads)
+    if file_images:
+        for filename, raw, fmt in file_images:
+            image_blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
+    if file_documents:
+        for filename, raw, fmt, name in file_documents:
+            document_blocks.append({"document": {"format": fmt, "name": name, "source": {"bytes": raw}}})
 
     # 1. Extract @file references from text (CLI mode)
     if resolve_file_refs:
         cleaned_text, file_paths = _extract_file_refs(text)
         for fpath in file_paths:
-            content, error = read_file_as_text(fpath)
-            if error:
-                warnings.append(error)
-            elif content:
-                parts.append(f'<attached_file path="{fpath}">\n{content}\n</attached_file>')
+            if is_image_file(fpath):
+                raw, fmt, error = read_file_as_image_bytes(fpath)
+                if error:
+                    warnings.append(error)
+                elif raw and fmt:
+                    image_blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
+            elif is_document_file(fpath):
+                raw, fmt, name, error = read_file_as_document_bytes(fpath)
+                if error:
+                    warnings.append(error)
+                elif raw and fmt and name:
+                    document_blocks.append({"document": {"format": fmt, "name": name, "source": {"bytes": raw}}})
+            else:
+                content, error = read_file_as_text(fpath)
+                if error:
+                    warnings.append(error)
+                elif content:
+                    text_parts.append(f'<attached_file path="{fpath}">\n{content}\n</attached_file>')
         text = cleaned_text if cleaned_text else text
 
-    # 2. Prepend any pre-read file contents (web upload mode)
+    # 2. Prepend any pre-read text file contents (web upload mode)
     if file_contents:
         for filename, content in file_contents:
-            parts.append(f'<attached_file path="{filename}">\n{content}\n</attached_file>')
+            text_parts.append(f'<attached_file path="{filename}">\n{content}\n</attached_file>')
 
     # 3. Append the user message
-    parts.append(text)
-    combined = "\n\n".join(parts)
+    text_parts.append(text)
+    combined = "\n\n".join(text_parts)
 
     # 4. Resolve I#/R# references
-    enriched, ref_warnings = resolve_references(combined)
+    enriched_text, ref_warnings = resolve_references(combined)
     warnings.extend(ref_warnings)
 
-    return enriched, warnings
+    # 5. If no media blocks, return plain string (100% backward compatible)
+    if not image_blocks and not document_blocks:
+        return enriched_text, warnings
+
+    # 6. Build list[ContentBlock] with text + media
+    content_blocks: list[dict] = [{"text": enriched_text}]
+    content_blocks.extend(image_blocks)
+    content_blocks.extend(document_blocks)
+    return content_blocks, warnings

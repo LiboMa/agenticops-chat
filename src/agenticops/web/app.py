@@ -2563,6 +2563,8 @@ async def api_send_chat_message(session_id: str, request: Request):
 
     content_type = request.headers.get("content-type", "")
     file_contents: list[tuple[str, str]] = []
+    file_images: list[tuple[str, bytes, str]] = []
+    file_documents: list[tuple[str, bytes, str, str]] = []
     attachments: list[dict] | None = None
 
     if "multipart/form-data" in content_type:
@@ -2571,16 +2573,37 @@ async def api_send_chat_message(session_id: str, request: Request):
         upload = form.get("file")
 
         if upload and hasattr(upload, "filename") and upload.filename:
-            from agenticops.chat.file_reader import read_upload_bytes
+            from agenticops.chat.file_reader import (
+                is_image_file, is_document_file,
+                read_upload_image_bytes, read_upload_document_bytes,
+                read_upload_bytes,
+            )
             raw = await upload.read()
-            file_text, error = read_upload_bytes(upload.filename, raw)
-            if error:
-                raise HTTPException(400, error)
-            if file_text:
-                file_contents.append((upload.filename, file_text))
-                attachments = [{"filename": upload.filename, "size": len(raw)}]
 
-        if not text_content and not file_contents:
+            if is_image_file(upload.filename):
+                img_bytes, fmt, error = read_upload_image_bytes(upload.filename, raw)
+                if error:
+                    raise HTTPException(400, error)
+                if img_bytes and fmt:
+                    file_images.append((upload.filename, img_bytes, fmt))
+                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "image"}]
+            elif is_document_file(upload.filename):
+                doc_bytes, fmt, name, error = read_upload_document_bytes(upload.filename, raw)
+                if error:
+                    raise HTTPException(400, error)
+                if doc_bytes and fmt and name:
+                    file_documents.append((upload.filename, doc_bytes, fmt, name))
+                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "document"}]
+            else:
+                file_text, error = read_upload_bytes(upload.filename, raw)
+                if error:
+                    raise HTTPException(400, error)
+                if file_text:
+                    file_contents.append((upload.filename, file_text))
+                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "text"}]
+
+        has_file = file_contents or file_images or file_documents
+        if not text_content and not has_file:
             raise HTTPException(400, "Message content or file required")
         if not text_content:
             text_content = f"Please analyze the attached file: {upload.filename}"
@@ -2589,8 +2612,11 @@ async def api_send_chat_message(session_id: str, request: Request):
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
 
-    # Preprocess: file injection + reference resolution
-    enriched_content, _ = preprocess_message(user_content, file_contents=file_contents)
+    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock])
+    enriched_content, _ = preprocess_message(
+        user_content, file_contents=file_contents,
+        file_images=file_images, file_documents=file_documents,
+    )
 
     # Validate session & persist user message
     with get_db_session() as db:

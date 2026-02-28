@@ -3353,6 +3353,10 @@ def _run_headless(query: str, account: Optional[str] = None):
     if is_tty:
         for w in warnings:
             console.print(f"[yellow]Warning: {w}[/yellow]")
+        if isinstance(enriched, list):
+            media_count = sum(1 for b in enriched if "image" in b or "document" in b)
+            if media_count:
+                console.print(f"[dim]Attached {media_count} media file(s) for analysis[/dim]")
         display = ThinkingDisplay(console)
         with display.live_display():
             display.start("Thinking...")
@@ -3513,6 +3517,10 @@ def chat(
             )
             for w in preprocess_warnings:
                 console.print(f"[yellow]Warning: {w}[/yellow]")
+            if isinstance(enriched_input, list):
+                media_count = sum(1 for b in enriched_input if "image" in b or "document" in b)
+                if media_count:
+                    console.print(f"[dim]Attached {media_count} media file(s) for analysis[/dim]")
 
             # Call agent with simple spinner
             display = ThinkingDisplay(console)
