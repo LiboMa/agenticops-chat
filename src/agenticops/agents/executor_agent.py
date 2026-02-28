@@ -1,7 +1,8 @@
 """Executor Agent - L4 Auto Operation: execute approved fix plans.
 
-Reads an approved FixPlan, executes each step via AWS CLI, verifies results
-with post-checks, and records the full execution trail. Follows a strict
+Reads an approved FixPlan, executes each step via the appropriate backend
+(AWS CLI, SSM/SSH host commands, or kubectl), verifies results with
+post-checks, and records the full execution trail. Follows a strict
 7-step protocol with safety gates at every stage.
 
 Exposed as a tool for the Main Agent (agents-as-tools pattern).
@@ -41,6 +42,9 @@ from agenticops.graph.tools import (
     detect_network_anomalies,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.skills.execution import run_on_host, run_kubectl
+from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +64,7 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
 
 3. PRE-CHECK
    For each item in the plan's pre_checks list:
-   - Execute the check using run_aws_cli_readonly or describe tools.
+   - Execute the check using the appropriate read-only tool (see TOOL SELECTION).
    - Record the result (pass/fail + output).
    - If ANY pre-check fails, ABORT:
      Call save_execution_result(status="aborted", ...) and mark_fix_failed.
@@ -69,20 +73,20 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
 4. EXECUTE
    Call assume_role first to get credentials for the target account.
    For each step in the plan's steps list (in order):
-   - Execute the command using run_aws_cli (this supports write operations).
-   - Record: step_index, command, status (succeeded/failed), output, duration.
+   - Determine the correct execution tool based on the step type (see TOOL SELECTION).
+   - Execute the command and record: step_index, command, status (succeeded/failed), output, duration.
    - If a step FAILS, STOP execution of remaining steps and go to step 6 (ROLLBACK).
    - Never modify, skip, or improvise steps — execute EXACTLY what the approved plan specifies.
 
 5. POST-CHECK
    For each item in the plan's post_checks list:
-   - Execute the verification using run_aws_cli_readonly or describe tools.
+   - Execute the verification using the appropriate read-only tool.
    - Record the result.
    - Post-check failures do NOT trigger rollback, but must be reported.
 
 6. ROLLBACK (only if step 4 failed)
-   Execute the plan's rollback_plan steps in reverse order using run_aws_cli.
-   Record each rollback step result.
+   Execute the plan's rollback_plan steps in reverse order using the same tool type as
+   the original step. Record each rollback step result.
    If rollback also fails, report it clearly.
 
 7. FINALIZE
@@ -102,10 +106,32 @@ SAFETY RULES (NEVER violate):
 - Per-step timeout: {settings.executor_step_timeout} seconds.
 - Total timeout: {settings.executor_total_timeout} seconds.
 
-TOOL SELECTION:
-- Use run_aws_cli for WRITE operations (step execution, rollback).
-- Use run_aws_cli_readonly for READ operations (pre-checks, post-checks).
-- Use describe tools for targeted resource verification.
+TOOL SELECTION (route each step to the correct backend):
+- AWS API operations (e.g., modify-instance-attribute, update-function-code, modify-db-instance):
+  Use run_aws_cli (write) or run_aws_cli_readonly (read-only checks).
+- Host-level commands (e.g., systemctl restart, kill, disk cleanup, log inspection):
+  Use run_on_host with method="ssm" (or "ssh"). Set require_confirmation=True for write commands —
+  the plan approval serves as the confirmation.
+- Kubernetes operations (e.g., rollout restart, scale deployment, apply manifest):
+  Use run_kubectl with the cluster_name and namespace. Set require_confirmation=True for write commands.
+- Resource verification: Use describe tools (describe_ec2, describe_rds, etc.) for targeted checks.
+
+SKILL ACTIVATION:
+Before executing steps that involve host-level or Kubernetes operations, call activate_skill
+to load relevant domain knowledge (e.g., activate_skill("linux-admin") for host commands,
+activate_skill("kubernetes-admin") for kubectl operations). This helps you understand the
+commands and verify they are correct before execution.
+
+STEP TYPE IDENTIFICATION:
+When the plan's steps include a field like "action" or "runner_type", use it to route:
+  - "aws_cli" → run_aws_cli / run_aws_cli_readonly
+  - "host_command" / "ssm" / "ssh" → run_on_host
+  - "kubectl" → run_kubectl
+  - "verify" → appropriate read-only tool
+When the step has no explicit type, infer from the command:
+  - Starts with "aws " → run_aws_cli
+  - Starts with "kubectl " → run_kubectl
+  - OS-level commands (systemctl, kill, df, ps, etc.) → run_on_host
 """
 
 
@@ -137,7 +163,7 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=EXECUTOR_SYSTEM_PROMPT,
+            system_prompt=build_prompt_with_skills(EXECUTOR_SYSTEM_PROMPT, agent_type="executor"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -146,10 +172,14 @@ def executor_agent(fix_plan_id: int) -> str:
             tools=[
                 # Plan verification (safety gate)
                 get_approved_fix_plan,
-                # Execution (write operations)
+                # Execution — AWS CLI (write + read-only)
                 run_aws_cli,
-                # Verification (read-only)
                 run_aws_cli_readonly,
+                # Execution — Host-level (SSM/SSH)
+                run_on_host,
+                # Execution — Kubernetes (kubectl)
+                run_kubectl,
+                # Verification (describe tools)
                 describe_ec2,
                 describe_rds,
                 describe_vpcs,
@@ -168,6 +198,9 @@ def executor_agent(fix_plan_id: int) -> str:
                 get_active_account,
                 get_health_issue,
                 assume_role,
+                # Agent Skills (domain knowledge for understanding commands)
+                activate_skill,
+                read_skill_reference,
             ],
         )
 

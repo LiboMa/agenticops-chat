@@ -147,7 +147,8 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | `bedrock_region` | `us-east-1` | AWS region for Bedrock |
 | `cors_origins` | `""` | Comma-separated CORS origins (empty = dev-mode) |
 | `cors_max_age` | `3600` | CORS preflight cache seconds |
-| `executor_enabled` | `false` | Enable fix execution |
+| `executor_enabled` | `true` | Enable fix execution |
+| `api_auth_enabled` | `false` | Enable API key auth middleware |
 | `embedding_enabled` | `true` | Enable vector embeddings |
 | `database_url` | `sqlite:///.../data/agenticops.db` | SQLite path |
 | `skills_dir` | `PROJECT_ROOT / "skills"` | Directory containing Agent Skills packages |
@@ -256,6 +257,29 @@ skills/
 - `ChatMessageCreate.detail_level` optional field
 - Extracted from JSON body or multipart form data
 - ContextVar set before agent call in SSE generator
+
+### 2026-02-28: Optimization Sprint — State Machine, API Auth, Code Cleanup
+
+**HealthIssue State Machine** (`models.py`, `metadata_tools.py`, `app.py`):
+- `VALID_ISSUE_STATUSES` — 9 valid states (open → resolved lifecycle)
+- `_ISSUE_TRANSITIONS` — directed adjacency map of allowed transitions
+- `validate_status_transition()` — raises `InvalidStatusTransition` on illegal moves
+- Enforced in: `update_health_issue_status` tool + 2 API endpoints (returns 409 Conflict)
+
+**API Authentication Middleware** (`config.py`, `app.py`):
+- Opt-in via `AIOPS_API_AUTH_ENABLED=true` (default: false)
+- `APIAuthMiddleware` gates all `/api/*` except public paths (`/api/health`, `/api/auth/*`)
+- Uses existing `auth/` module (User, APIKey, Session models + AuthService)
+
+**Code Cleanup** (`cli/main.py`):
+- Removed duplicate `ChatContext` class (~67 lines) — import at line 65 was already correct
+- Removed duplicate `ThinkingDisplay`/`ProgressTracker` (~279 lines) — `display.py` import at line 69 was already correct
+- Net reduction: -203 lines
+
+**Test Suite** (`tests/`):
+- `test_state_machine.py` — 75 tests (transitions, validation, tool integration)
+- `test_detail_level.py` — 31 tests (ContextVar, rules generation, ChatContext)
+- Total: 108 new tests, all passing
 
 ### 2026-02-28: Multimodal Chat + Elasticsearch Skill
 
