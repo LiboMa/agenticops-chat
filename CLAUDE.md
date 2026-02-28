@@ -4,6 +4,8 @@
 
 AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent architecture (Strands SDK on AWS Bedrock). Provides `aiops chat` interactive REPL, a React web dashboard with streaming chat, resource scanning, anomaly detection, fix planning, and reporting across AWS accounts.
 
+**User-facing docs:** `docs/WORKFLOW.md` — Mermaid diagrams of all workflows + 10 quick-start tutorials
+
 ## Architecture
 
 ```
@@ -192,6 +194,7 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 
 ```
 skills/
+├── ADDING_SKILLS.md      # How-to guide for adding new skills (zero code changes)
 ├── linux-admin/          # Linux sysadmin troubleshooting (process, disk, memory, network)
 │   ├── SKILL.md
 │   └── references/       # process-management.md, disk-io-analysis.md, memory-troubleshooting.md
@@ -204,6 +207,9 @@ skills/
 ├── database-admin/       # RDS, DynamoDB, ElastiCache (slow queries, replication, deadlocks)
 │   ├── SKILL.md
 │   └── references/       # mysql-diagnostics.md, postgresql-diagnostics.md, dynamodb-patterns.md, elasticache-redis.md
+├── elasticsearch/        # Elasticsearch/OpenSearch (cluster health, DSL, JVM, ILM, snapshots)
+│   ├── SKILL.md
+│   └── references/       # dsl-query-patterns.md, cluster-operations.md
 ├── monitoring/           # CloudWatch, Prometheus, SLI/SLO, alert fatigue
 │   ├── SKILL.md
 │   └── references/       # cloudwatch-best-practices.md, metric-selection-guide.md
@@ -219,6 +225,25 @@ skills/
 ```
 
 ## Recent Changes
+
+### 2026-02-28: Multimodal Chat + Elasticsearch Skill
+
+**Multimodal File Processing** (chat pipeline):
+- Images (.png/.jpeg/.gif/.webp) and documents (.pdf/.docx/.csv/.xlsx etc.) sent as native Strands SDK `ContentBlock` instead of placeholder text
+- `file_reader.py`: `IMAGE_FORMAT_MAP`, `DOCUMENT_FORMAT_MAP`, `is_image_file()`, `is_document_file()`, `read_file_as_image_bytes()`, `read_upload_image_bytes()`, `read_file_as_document_bytes()`, `read_upload_document_bytes()`
+- `preprocessor.py`: returns `str` for text-only (backward compat), `list[ContentBlock]` when media present
+- `app.py`: web upload routing branches by file type (image/document/text)
+- `main.py`: UX log "Attached N media file(s) for analysis"
+- Test suite: `tests/test_multimodal.py` (37 tests)
+
+**Elasticsearch Skill** (skills/elasticsearch/):
+- `SKILL.md`: cluster health (red/yellow), shard allocation, DSL optimization, JVM heap, circuit breakers, ILM, snapshot/restore, AWS OpenSearch specifics
+- `references/dsl-query-patterns.md`: full-text, filtering, bool, aggregations, anti-patterns, SRE queries
+- `references/cluster-operations.md`: rolling restart, scaling, index management, thread pool tuning
+
+**Skills Documentation** (skills/ADDING_SKILLS.md):
+- Step-by-step guide for adding new skills (zero code changes)
+- YAML frontmatter reference, SKILL.md template, agent routing table
 
 ### 2026-02-27: Agent Skills Integration
 
@@ -239,9 +264,10 @@ skills/
 - Main agent routing rule 9.5: skills listing and activation
 
 **Skill Packages** (skills/):
-- 8 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, monitoring, log-analysis, aws-compute, aws-storage
+- 9 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage
 - Each: SKILL.md with YAML frontmatter + references/*.md deep-dive files
-- ~800 tokens added to system prompts (available_skills XML); skill body loaded on demand (~3-5K tokens)
+- ~900 tokens added to system prompts (available_skills XML); skill body loaded on demand (~3-5K tokens)
+- Guide: `skills/ADDING_SKILLS.md` — template and step-by-step for adding new skills (zero code changes)
 
 ### 2026-02-26: SRE Analysis & Extended Topology Graph
 
