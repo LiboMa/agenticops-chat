@@ -177,7 +177,14 @@ def load_skill_body(skill_name: str) -> str | None:
         if s.name == skill_name:
             content = (s.path / "SKILL.md").read_text(encoding="utf-8")
             _, body = parse_frontmatter(content)
-            return body.strip()
+            body = body.strip()
+            max_chars = settings.skills_max_body_chars
+            if len(body) > max_chars:
+                body = body[:max_chars] + (
+                    "\n\n[... truncated — use read_skill_reference() "
+                    "for detailed sections]"
+                )
+            return body
     return None
 
 

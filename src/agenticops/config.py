@@ -35,7 +35,7 @@ class Settings(BaseSettings):
         description="Bedrock model ID for LLM (Claude Ops 4.6)",
     )
     bedrock_max_tokens: int = Field(
-        default=4096,
+        default=16384,
         description="Max output tokens for Bedrock model responses",
     )
     bedrock_window_size: int = Field(
@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     skills_enabled: bool = Field(
         default=True,
         description="Enable Agent Skills integration (AIOPS_SKILLS_ENABLED=false to disable)",
+    )
+    skills_max_body_chars: int = Field(
+        default=8000,
+        description="Max characters for skill body content returned by activate_skill",
     )
 
     # Executor settings (L4 Auto Operation)

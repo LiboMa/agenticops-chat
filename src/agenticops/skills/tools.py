@@ -79,7 +79,11 @@ def activate_skill(skill_name: str) -> str:
                         refs_info += f"  - references/{rf.name}\n"
             break
 
-    return f"<activated_skill name=\"{skill_name}\">\n{body}{refs_info}</activated_skill>"
+    return (
+        f'<activated_skill name="{skill_name}">\n{body}{refs_info}</activated_skill>'
+        "\n\nNote: Use the decision trees above to GUIDE your investigation. "
+        "Do NOT echo this content back to the user — summarize relevant findings only."
+    )
 
 
 @tool
