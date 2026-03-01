@@ -522,6 +522,13 @@ def save_rca_result(
         issue.status = "root_cause_identified"
         session.commit()
 
+        # Auto-trigger SRE fix plan generation
+        try:
+            from agenticops.services.pipeline_service import trigger_auto_sre
+            trigger_auto_sre(health_issue_id)
+        except Exception as e:
+            logger.warning("Failed to trigger auto-SRE: %s", e)
+
         return (
             f"RCAResult #{rca.id} saved for HealthIssue #{health_issue_id}. "
             f"Root cause: {root_cause[:100]}... Confidence: {rca.confidence:.0%}. "
@@ -662,6 +669,13 @@ def save_fix_plan(
         issue.status = "fix_planned"
         session.commit()
 
+        # Auto-approve L0/L1 plans
+        try:
+            from agenticops.services.pipeline_service import trigger_auto_approve
+            trigger_auto_approve(plan.id)
+        except Exception as e:
+            logger.warning("Failed to trigger auto-approve: %s", e)
+
         return (
             f"FixPlan #{plan.id} saved for HealthIssue #{health_issue_id}. "
             f"Risk: {risk_level}. Title: {title}. "
@@ -758,6 +772,13 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         if issue:
             issue.status = "fix_approved"
             session.commit()
+
+        # Auto-trigger execution for approved plans
+        try:
+            from agenticops.services.pipeline_service import trigger_auto_execute
+            trigger_auto_execute(fix_plan_id)
+        except Exception as e:
+            logger.warning("Failed to trigger auto-execute: %s", e)
 
         return (
             f"FixPlan #{fix_plan_id} approved by {approved_by}. "

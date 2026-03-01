@@ -171,6 +171,12 @@ class Settings(BaseSettings):
         description="Automatically trigger RCA when a new HealthIssue is created",
     )
 
+    # Auto-Fix Pipeline (RCA → SRE → Approve → Execute)
+    auto_fix_enabled: bool = Field(
+        default=True,
+        description="Enable auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute",
+    )
+
     # RAG Pipeline
     rag_pipeline_enabled: bool = Field(
         default=True,
