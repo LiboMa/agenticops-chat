@@ -1,9 +1,9 @@
 ---
 name: linux-admin
-description: "Linux system administration troubleshooting — covers process management, disk I/O analysis, memory troubleshooting, network diagnostics, log analysis, and performance tuning. Includes decision trees for CPU high, memory pressure, disk issues, network problems, and service failures."
+description: "Linux system administration troubleshooting — covers process management, disk I/O analysis, memory troubleshooting, network diagnostics, SSH operations, log analysis, and performance tuning. Includes decision trees for CPU high, memory pressure, disk issues, network problems, SSH connectivity, and service failures."
 metadata:
   author: agenticops
-  version: "1.0"
+  version: "1.1"
   domain: infrastructure
 ---
 
@@ -153,6 +153,59 @@ Network unreachable OR high latency/packet loss
         +-- SELinux: `sestatus` and `ausearch -m AVC -ts recent`
 ```
 
+### SSH Connectivity
+
+1. `ssh -v user@host` — verbose connection debugging (shows auth methods, key exchange)
+2. Check sshd running: `systemctl status sshd`
+3. Check port listening: `ss -tuln | grep :22`
+4. Key permissions: `ls -la ~/.ssh/` (private keys must be 600, .ssh dir must be 700)
+5. Server config test: `sshd -T | grep -i "permitroot\|passwordauth\|allowusers"`
+6. Auth logs: `grep "Failed\|Accepted" /var/log/secure | tail -20` (or `/var/log/auth.log`)
+
+**Escalation path:**
+
+```
+SSH connection failing
+  |
+  +-- "Connection refused"?
+  |     +-- sshd not running → `systemctl start sshd`
+  |     +-- Wrong port → check `grep "^Port" /etc/ssh/sshd_config`
+  |     +-- Firewall → `iptables -L -n | grep 22` or check AWS SG
+  |
+  +-- "Connection timed out"?
+  |     +-- Host unreachable → `ping`, `traceroute`
+  |     +-- SG/NACL blocking → check AWS VPC networking
+  |     +-- NAT/IGW missing → check route table
+  |
+  +-- "Permission denied (publickey)"?
+  |     +-- Wrong user? → ec2-user / ubuntu / admin (depends on AMI)
+  |     +-- Wrong key? → `ssh -i /correct/key.pem user@host`
+  |     +-- Key permissions? → `chmod 600 ~/.ssh/id_rsa && chmod 700 ~/.ssh`
+  |     +-- Agent not loaded? → `ssh-add -l` then `ssh-add ~/.ssh/key`
+  |     +-- Server authorized_keys? → check via SSM or console
+  |
+  +-- "Host key verification failed"?
+  |     +-- IP reused → `ssh-keygen -R host`
+  |     +-- Verify fingerprint via alternate channel (SSM/console)
+  |
+  +-- "Too many authentication failures"?
+  |     +-- Agent has too many keys → `ssh -o IdentitiesOnly=yes -i key host`
+  |     +-- Clear agent: `ssh-add -D` then add only needed key
+  |
+  +-- Can't reach private instances?
+        +-- Use bastion/jump host: `ssh -J bastion user@private-ip`
+        +-- Use SSM tunnel: `aws ssm start-session --target INSTANCE_ID`
+        +-- SSH over SSM: ProxyCommand with AWS-StartSSHSession
+```
+
+**Key checks:**
+
+- `ssh -v user@host 2>&1 | grep -i "offering\|accepted\|denied"` — quick auth summary
+- `ssh-keygen -lf key.pub` — verify key fingerprint
+- `ssh-keyscan host` — fetch server's host key
+- `sshd -t` — test server config syntax
+- AWS default users: Amazon Linux → `ec2-user`, Ubuntu → `ubuntu`, Debian → `admin`
+
 ### Service Failures
 
 1. `systemctl status service_name` — check loaded/active/main PID
@@ -285,3 +338,9 @@ System unresponsive but SSH works:
 | `slabtop` | Kernel slab cache | `-o` (batch mode) |
 | `smem` | Memory reporting | `-t -k -c "pid user command swap pss"` |
 | `ethtool` | NIC diagnostics | `-g` (ring buffer), `-S` (stats), `-i` (driver) |
+| `ssh` | Remote shell | `-v` (debug), `-J` (jump host), `-L`/`-R`/`-D` (tunnels) |
+| `ssh-add` | Key agent | `-l` (list), `-D` (clear), `-t` (timeout) |
+| `ssh-keygen` | Key management | `-R host` (remove known), `-lf` (fingerprint) |
+| `scp` | File copy over SSH | `-r` (recursive), `-l` (bandwidth limit), `-o ProxyJump=` |
+| `rsync` | Incremental sync | `-avz -e ssh` (archive+compress), `--bwlimit` |
+| `sshd` | Server management | `-t` (test config), `-T` (effective config) |

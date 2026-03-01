@@ -42,6 +42,11 @@ SHELL_READONLY_COMMANDS = {
     "docker stats", "docker top", "docker port", "docker diff",
     "docker history", "docker network ls", "docker network inspect",
     "docker volume ls", "docker volume inspect",
+    # SSH diagnostics (read-only) — lowercase: classifier lowercases input
+    "ssh-add -l",
+    "ssh-keygen -lf", "ssh-keygen -l",
+    "ssh-keyscan",
+    "sshd -t",
     # Misc
     "curl -s", "curl --silent", "wget -q", "openssl s_client",
     "env", "printenv", "set",
@@ -57,6 +62,10 @@ SHELL_WRITE_COMMANDS = {
     # File operations
     "cp", "mv", "chmod", "chown", "chgrp", "mkdir", "touch",
     "ln", "tar", "zip", "unzip", "gzip", "gunzip",
+    # SSH key/config modifications — lowercase: classifier lowercases input
+    "ssh-keygen -r", "ssh-add -d",
+    "ssh-add",  # adding keys changes agent state
+    "scp", "rsync",
     # Network modifications
     "iptables", "ip6tables", "nft", "firewall-cmd",
     "ip link set", "ip addr add", "ip route add",
