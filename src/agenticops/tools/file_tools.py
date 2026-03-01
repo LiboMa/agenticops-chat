@@ -5,7 +5,11 @@ logs, application code, Terraform/CloudFormation templates, Kubernetes manifests
 and other operational artifacts. All operations are strictly READ-ONLY.
 
 Security: a blocklist prevents access to sensitive paths (credentials, private
-keys, secrets, etc.). Output is truncated to prevent agent context overflow.
+keys, secrets, etc.). Admin mode (AIOPS_FILE_TOOLS_ADMIN_MODE=true) unlocks
+cluster management paths (~/.ssh, ~/.aws, ~/.kube) while keeping system-level
+blocks (/etc/shadow etc.) in place.
+
+Output is truncated to prevent agent context overflow.
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ import os
 from pathlib import Path
 
 from strands import tool
+
+from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +38,28 @@ def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
 
 # ── Security blocklists ─────────────────────────────────────────────────
 
-# Blocked path patterns (case-insensitive substring match on resolved path).
-_BLOCKED_PATH_SUBSTRINGS = (
+# Admin paths — blocked by default, unlocked by AIOPS_FILE_TOOLS_ADMIN_MODE=true.
+# These are needed for cluster management (SSH configs, AWS profiles, kubeconfig).
+_ADMIN_PATH_SUBSTRINGS = (
     "/.ssh/",
-    "/.gnupg/",
     "/.aws/credentials",
     "/.aws/config",
     "/.kube/config",
+)
+
+# Admin filenames — private keys used for SSH.
+_ADMIN_FILENAMES = frozenset({
+    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+})
+
+# Admin extensions — key files needed for SSH/TLS.
+_ADMIN_EXTENSIONS = frozenset({
+    ".pem", ".key",
+})
+
+# Always blocked — system-level secrets, never exposed regardless of mode.
+_SYSTEM_PATH_SUBSTRINGS = (
+    "/.gnupg/",
     "/.docker/config.json",
     "/etc/shadow",
     "/etc/gshadow",
@@ -46,19 +67,18 @@ _BLOCKED_PATH_SUBSTRINGS = (
     "/private/etc/shadow",
 )
 
-# Blocked file extensions — never read these.
-_BLOCKED_EXTENSIONS = frozenset({
-    ".pem", ".key", ".p12", ".pfx", ".jks",
+# Always blocked extensions — crypto keystores/certs (not SSH keys).
+_SYSTEM_EXTENSIONS = frozenset({
+    ".p12", ".pfx", ".jks",
     ".keystore", ".gpg", ".asc",
 })
 
-# Blocked filenames — never read these (exact basename match).
-_BLOCKED_FILENAMES = frozenset({
+# Always blocked filenames — application secrets.
+_SYSTEM_FILENAMES = frozenset({
     ".env", ".env.local", ".env.production", ".env.staging",
     "credentials", "credentials.json", "credentials.yaml",
     "secrets.yaml", "secrets.json", "secrets.yml",
     "service-account.json", "token", "master.key",
-    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
 })
 
 
@@ -69,18 +89,40 @@ def _is_blocked(path: str) -> str | None:
     except (OSError, ValueError):
         return "Invalid path"
 
+    admin_mode = settings.file_tools_admin_mode
     lower = resolved.lower()
-    for pattern in _BLOCKED_PATH_SUBSTRINGS:
+
+    # System-level paths — always blocked
+    for pattern in _SYSTEM_PATH_SUBSTRINGS:
         if pattern.lower() in lower:
             return f"Blocked: path contains '{pattern}'"
 
+    # Admin paths — blocked unless admin mode is on
+    if not admin_mode:
+        for pattern in _ADMIN_PATH_SUBSTRINGS:
+            if pattern.lower() in lower:
+                return f"Blocked: path contains '{pattern}' (set AIOPS_FILE_TOOLS_ADMIN_MODE=true to allow)"
+
     basename = os.path.basename(resolved).lower()
-    if basename in _BLOCKED_FILENAMES:
+
+    # System filenames — always blocked
+    if basename in _SYSTEM_FILENAMES:
         return f"Blocked: filename '{basename}' is in the sensitive-file blocklist"
 
+    # Admin filenames — blocked unless admin mode
+    if not admin_mode and basename in _ADMIN_FILENAMES:
+        return f"Blocked: filename '{basename}' (set AIOPS_FILE_TOOLS_ADMIN_MODE=true to allow)"
+
     _, ext = os.path.splitext(basename)
-    if ext.lower() in _BLOCKED_EXTENSIONS:
+    ext_lower = ext.lower()
+
+    # System extensions — always blocked
+    if ext_lower in _SYSTEM_EXTENSIONS:
         return f"Blocked: extension '{ext}' is in the sensitive-file blocklist"
+
+    # Admin extensions — blocked unless admin mode
+    if not admin_mode and ext_lower in _ADMIN_EXTENSIONS:
+        return f"Blocked: extension '{ext}' (set AIOPS_FILE_TOOLS_ADMIN_MODE=true to allow)"
 
     return None
 

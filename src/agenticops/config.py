@@ -133,6 +133,11 @@ class Settings(BaseSettings):
         default=8000,
         description="Max characters for skill body content returned by activate_skill",
     )
+    file_tools_admin_mode: bool = Field(
+        default=False,
+        description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "
+        "Set AIOPS_FILE_TOOLS_ADMIN_MODE=true for cluster management use cases.",
+    )
 
     # API Authentication
     api_auth_enabled: bool = Field(

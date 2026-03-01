@@ -30,15 +30,22 @@ When this skill is activated, 5 file tools are dynamically registered on the age
 
 ## Security Model
 
-**Automatically blocked** — the tools will refuse access to:
+Two tiers of protection:
 
-- SSH keys and configs: `~/.ssh/`, `~/.gnupg/`
-- AWS credentials: `~/.aws/credentials`, `~/.aws/config`
-- Kubernetes configs: `~/.kube/config`
-- Docker configs: `~/.docker/config.json`
-- System secrets: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers`
-- Sensitive extensions: `.pem`, `.key`, `.p12`, `.pfx`, `.jks`, `.gpg`
-- Sensitive filenames: `.env`, `credentials`, `secrets.yaml`, `master.key`, `id_rsa`
+### Always blocked (system-level secrets)
+- GnuPG: `~/.gnupg/`
+- Docker: `~/.docker/config.json`
+- System: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers`
+- Crypto: `.p12`, `.pfx`, `.jks`, `.keystore`, `.gpg`, `.asc`
+- App secrets: `.env`, `credentials`, `secrets.yaml`, `service-account.json`, `token`, `master.key`
+
+### Admin paths (unlocked by `AIOPS_FILE_TOOLS_ADMIN_MODE=true`)
+- SSH: `~/.ssh/` directory, `id_rsa`, `id_ed25519`, `.pem`, `.key`
+- AWS: `~/.aws/credentials`, `~/.aws/config`
+- Kubernetes: `~/.kube/config`
+
+Set `AIOPS_FILE_TOOLS_ADMIN_MODE=true` for cluster management use cases
+where admins need to inspect SSH configs, AWS profiles, and kubeconfig.
 
 Output is truncated to 4000 chars (single file) or 6000 chars (directory listings)
 to prevent agent context overflow.
