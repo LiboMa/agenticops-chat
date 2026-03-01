@@ -329,6 +329,7 @@ class HealthIssue(Base):
     __tablename__ = "health_issues"
     __table_args__ = (
         Index("idx_health_issue_severity_status", "severity", "status"),
+        Index("idx_health_issue_fingerprint", "fingerprint"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -348,6 +349,11 @@ class HealthIssue(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     detected_by: Mapped[str] = mapped_column(String(50), default="detect_agent")
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Fingerprint deduplication
+    fingerprint: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    occurrence_count: Mapped[int] = mapped_column(default=1)
+    first_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
@@ -643,6 +649,18 @@ def init_db():
                 conn.execute(
                     text("ALTER TABLE chat_messages ADD COLUMN attachments JSON")
                 )
+                conn.commit()
+
+    # Migration: add fingerprint dedup columns to health_issues if missing
+    if insp.has_table("health_issues"):
+        columns = {col["name"] for col in insp.get_columns("health_issues")}
+        if "fingerprint" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN fingerprint VARCHAR(64)"))
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN occurrence_count INTEGER DEFAULT 1"))
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN first_seen DATETIME"))
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN last_seen DATETIME"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_health_issue_fingerprint ON health_issues(fingerprint)"))
                 conn.commit()
 
     Base.metadata.create_all(engine)

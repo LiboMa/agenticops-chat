@@ -3,9 +3,11 @@
 Wraps database read/write operations on the metadata layer.
 """
 
+import hashlib
 import json
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
 from strands import tool
 
@@ -201,6 +203,18 @@ def save_resources(resources_json: str) -> str:
         session.close()
 
 
+def _compute_fingerprint(source: str, resource_id: str, title: str) -> str:
+    """Compute a SHA-256 fingerprint for HealthIssue deduplication.
+
+    Normalises the title (lowercase, collapse whitespace, strip numbers/timestamps)
+    so that semantically identical alerts produce the same fingerprint.
+    """
+    title_key = re.sub(r"\d+", "", title.lower())  # strip numbers
+    title_key = re.sub(r"\s+", " ", title_key).strip()
+    raw = f"{source}:{resource_id}:{title_key}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 @tool
 def create_health_issue(
     resource_id: str,
@@ -213,6 +227,11 @@ def create_health_issue(
     related_changes: str = "[]",
 ) -> str:
     """Create a new health issue record in the metadata database.
+
+    Uses fingerprint-based deduplication: if an open/investigating issue with the
+    same fingerprint (source + resource_id + normalised title) exists and was last
+    seen within 5 minutes, the existing issue is updated instead of creating a
+    duplicate.
 
     Args:
         resource_id: AWS resource ID (e.g., i-1234567890abcdef0)
@@ -240,18 +259,24 @@ def create_health_issue(
         except json.JSONDecodeError:
             changes_parsed = []
 
-        # Deduplication: check for existing open issue with same resource + source + alarm
-        dedup_query = session.query(HealthIssue).filter(
-            HealthIssue.resource_id == resource_id,
-            HealthIssue.source == source,
-            HealthIssue.status.in_(["open", "investigating"]),
-        )
-        if alarm_name:
-            dedup_query = dedup_query.filter(HealthIssue.alarm_name == alarm_name)
+        now = datetime.utcnow()
+        fingerprint = _compute_fingerprint(source, resource_id, title)
 
-        existing = dedup_query.first()
+        # Fingerprint-based deduplication: find open/investigating issue with same
+        # fingerprint seen within the last 5 minutes.
+        existing = (
+            session.query(HealthIssue)
+            .filter(
+                HealthIssue.fingerprint == fingerprint,
+                HealthIssue.status.in_(["open", "investigating"]),
+                HealthIssue.last_seen >= now - timedelta(minutes=5),
+            )
+            .first()
+        )
+
         if existing:
-            # Update existing issue instead of creating duplicate
+            existing.occurrence_count += 1
+            existing.last_seen = now
             existing.description = description
             existing.metric_data = metric_data_parsed
             existing.related_changes = changes_parsed
@@ -259,7 +284,8 @@ def create_health_issue(
                 existing.severity = severity.lower()
             session.commit()
             return (
-                f"Updated existing HealthIssue #{existing.id} (dedup): "
+                f"Deduplicated: updated existing HealthIssue #{existing.id} "
+                f"(count={existing.occurrence_count}): "
                 f"[{existing.severity.upper()}] {existing.title}"
             )
 
@@ -274,6 +300,10 @@ def create_health_issue(
             related_changes=changes_parsed,
             status="open",
             detected_by="detect_agent",
+            fingerprint=fingerprint,
+            occurrence_count=1,
+            first_seen=now,
+            last_seen=now,
         )
         session.add(issue)
         session.commit()

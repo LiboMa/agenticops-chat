@@ -276,6 +276,142 @@ def parse_grafana(body: dict) -> AlertPayload:
     )
 
 
+def parse_prometheus(body: dict) -> AlertPayload:
+    """Parse a Prometheus AlertManager webhook payload into an AlertPayload.
+
+    Prometheus AlertManager sends a JSON body with a top-level ``alerts``
+    array, ``status``, ``groupLabels``, ``commonLabels``, ``commonAnnotations``,
+    and ``externalURL``.  Each alert in the array has ``labels`` (including
+    ``alertname`` and ``severity``), ``annotations``, ``startsAt``,
+    ``endsAt``, and ``fingerprint``.
+
+    Args:
+        body: Raw JSON body from the Prometheus AlertManager webhook.
+
+    Returns:
+        An AlertPayload with source='prometheus'.
+    """
+    alerts = body.get("alerts", [])
+    if not isinstance(alerts, list):
+        alerts = []
+    alert = alerts[0] if alerts else {}
+
+    labels = alert.get("labels", {})
+    if not isinstance(labels, dict):
+        labels = {}
+
+    annotations = alert.get("annotations", {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+
+    # External ID: prefer fingerprint from the first alert.
+    external_id = str(alert.get("fingerprint", ""))
+    if not external_id:
+        external_id = _hash_title(labels.get("alertname", ""))
+
+    # Severity: from labels.severity (Prometheus convention).
+    raw_severity = labels.get("severity", "")
+    severity = _normalize_severity(str(raw_severity))
+
+    title = labels.get("alertname", "")
+    description = annotations.get("description", "") or annotations.get("summary", "")
+
+    # Resource hint: look for common Kubernetes/infrastructure label keys.
+    _RESOURCE_HINT_KEYS = (
+        "pod", "instance", "node", "container", "deployment",
+        "statefulset", "daemonset",
+    )
+    resource_hint = ""
+    for key in _RESOURCE_HINT_KEYS:
+        value = labels.get(key, "")
+        if value:
+            resource_hint = str(value)
+            break
+
+    return AlertPayload(
+        source="prometheus",
+        external_id=str(external_id),
+        severity=severity,
+        title=title,
+        description=description,
+        resource_hint=resource_hint,
+        tags=dict(labels),
+        raw=body,
+    )
+
+
+def parse_cloudwatch(body: dict) -> AlertPayload:
+    """Parse a CloudWatch SNS alarm notification into an AlertPayload.
+
+    CloudWatch alarm notifications forwarded via SNS contain
+    ``AlarmName``, ``AlarmDescription``, ``NewStateValue`` (``ALARM``,
+    ``INSUFFICIENT_DATA``, ``OK``), ``NewStateReason``, ``StateChangeTime``,
+    ``Region``, and a ``Trigger`` object with ``MetricName``, ``Namespace``,
+    and ``Dimensions``.
+
+    Args:
+        body: Raw JSON body from the CloudWatch SNS webhook.
+
+    Returns:
+        An AlertPayload with source='cloudwatch'.
+    """
+    alarm_name = body.get("AlarmName", "")
+
+    # External ID: deterministic hash of the alarm name.
+    external_id = _hash_title(alarm_name) if alarm_name else ""
+
+    # Severity: map NewStateValue to canonical levels.
+    state_value = body.get("NewStateValue", "").upper()
+    _STATE_SEVERITY_MAP = {
+        "ALARM": "high",
+        "INSUFFICIENT_DATA": "medium",
+        "OK": "low",
+    }
+    severity = _normalize_severity(_STATE_SEVERITY_MAP.get(state_value, "medium"))
+
+    title = alarm_name
+    description = body.get("NewStateReason", "") or body.get("AlarmDescription", "")
+
+    # Resource hint: extract from Trigger.Dimensions.
+    resource_hint = ""
+    trigger = body.get("Trigger", {})
+    if isinstance(trigger, dict):
+        dimensions = trigger.get("Dimensions", [])
+        if isinstance(dimensions, list):
+            # Prefer InstanceId, then fall back to first dimension value.
+            for dim in dimensions:
+                if isinstance(dim, dict) and dim.get("name") == "InstanceId":
+                    resource_hint = dim.get("value", "")
+                    break
+            if not resource_hint and dimensions:
+                first = dimensions[0]
+                if isinstance(first, dict):
+                    resource_hint = first.get("value", "")
+
+    # Tags: include useful CloudWatch metadata.
+    tags: dict[str, str] = {}
+    if body.get("Region"):
+        tags["region"] = str(body["Region"])
+    if isinstance(trigger, dict):
+        if trigger.get("MetricName"):
+            tags["metric_name"] = str(trigger["MetricName"])
+        if trigger.get("Namespace"):
+            tags["namespace"] = str(trigger["Namespace"])
+    if state_value:
+        tags["state"] = state_value
+
+    return AlertPayload(
+        source="cloudwatch",
+        external_id=str(external_id),
+        severity=severity,
+        title=title,
+        description=description,
+        resource_hint=resource_hint,
+        tags=tags,
+        raw=body,
+    )
+
+
 def parse_generic(body: dict) -> AlertPayload:
     """Parse a generic/unknown alert payload into an AlertPayload.
 
@@ -335,14 +471,19 @@ def detect_source(body: dict) -> str:
       1. ``event_type`` or ``alert_type`` present -> Datadog
       2. ``routing_key`` present, or ``payload`` dict containing ``severity``
          -> PagerDuty
-      3. ``alerts`` key containing a list -> Grafana
-      4. Otherwise -> generic
+      3. ``AlarmName`` present -> CloudWatch
+      4. ``alerts`` is a list AND any item has ``labels`` dict with
+         ``alertname`` key -> Prometheus (checked before Grafana since both
+         have an ``alerts`` array)
+      5. ``alerts`` key containing a list -> Grafana
+      6. Otherwise -> generic
 
     Args:
         body: Raw JSON body from the webhook.
 
     Returns:
-        One of 'datadog', 'pagerduty', 'grafana', or 'generic'.
+        One of 'datadog', 'pagerduty', 'cloudwatch', 'prometheus',
+        'grafana', or 'generic'.
     """
     if "event_type" in body or "alert_type" in body:
         return "datadog"
@@ -353,8 +494,18 @@ def detect_source(body: dict) -> str:
     if isinstance(payload, dict) and "severity" in payload:
         return "pagerduty"
 
+    if "AlarmName" in body:
+        return "cloudwatch"
+
     alerts = body.get("alerts")
     if isinstance(alerts, list):
+        # Prometheus AlertManager payloads have alerts with labels.alertname;
+        # Grafana payloads do not necessarily have that key.
+        for alert in alerts:
+            if isinstance(alert, dict):
+                labels = alert.get("labels")
+                if isinstance(labels, dict) and "alertname" in labels:
+                    return "prometheus"
         return "grafana"
 
     return "generic"
@@ -364,6 +515,8 @@ _PARSER_MAP: dict[str, Callable[[dict], AlertPayload]] = {
     "datadog": parse_datadog,
     "pagerduty": parse_pagerduty,
     "grafana": parse_grafana,
+    "prometheus": parse_prometheus,
+    "cloudwatch": parse_cloudwatch,
     "generic": parse_generic,
 }
 

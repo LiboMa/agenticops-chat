@@ -82,6 +82,44 @@ alertmanager:
       requests:
         cpu: 100m
         memory: 256Mi
+  config:
+    global:
+      resolve_timeout: 5m
+    receivers:
+      - name: "null"
+      - name: agenticops
+        webhook_configs:
+          # AgenticOps API on bastion host — replace <BASTION_PRIVATE_IP> with actual VPC IP.
+          # AlertManager Pod and bastion are in the same VPC, so internal traffic only.
+          - url: "http://<BASTION_PRIVATE_IP>:8000/api/webhooks/alert/prometheus"
+            send_resolved: true
+    route:
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: agenticops
+      routes:
+        # Silence Watchdog (always-firing health check alert)
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: "null"
+        # Critical alerts: short group wait for faster response
+        - matchers:
+            - severity = "critical"
+          group_wait: 10s
+          group_interval: 1m
+          repeat_interval: 1h
+          receiver: agenticops
+  # Load custom PrometheusRule from alert-rules.yaml
+  # (applied via additionalPrometheusRulesMap below)
+
+# Custom alert rules for AgenticOps incident scenarios
+additionalPrometheusRulesMap:
+  agenticops-rules:
+    groups:
+      - name: agenticops.rules
+        rules: []  # Actual rules defined in alert-rules.yaml (applied as separate PrometheusRule CR)
 
 # Node exporter runs on ALL nodes (DaemonSet)
 nodeExporter:

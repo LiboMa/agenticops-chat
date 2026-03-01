@@ -26,14 +26,25 @@ class Settings(BaseSettings):
         description="SQLite database URL",
     )
 
-    # AWS Bedrock
+    # AWS Bedrock — Tiered Model Configuration
+    # Default (Sonnet 4.6) for routing, RCA, SRE, executor agents
+    # Cheap (Haiku 4.5) for tool-orchestration agents (scan, detect, reporter)
+    # Strong (Opus 4.6) reserved for complex multi-service RCA scenarios
     bedrock_region: str = Field(
         default="us-east-1",
         description="AWS region for Bedrock",
     )
     bedrock_model_id: str = Field(
+        default="global.anthropic.claude-sonnet-4-6-v1",
+        description="Bedrock model ID — default tier (Sonnet 4.6) for reasoning agents",
+    )
+    bedrock_model_id_cheap: str = Field(
+        default="global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        description="Bedrock model ID — economy tier (Haiku 4.5) for tool-orchestration agents",
+    )
+    bedrock_model_id_strong: str = Field(
         default="global.anthropic.claude-opus-4-6-v1",
-        description="Bedrock model ID for LLM (Claude Ops 4.6)",
+        description="Bedrock model ID — strong tier (Opus 4.6) for complex reasoning",
     )
     bedrock_max_tokens: int = Field(
         default=16384,
@@ -134,9 +145,9 @@ class Settings(BaseSettings):
         description="Max characters for skill body content returned by activate_skill",
     )
     file_tools_admin_mode: bool = Field(
-        default=False,
+        default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "
-        "Set AIOPS_FILE_TOOLS_ADMIN_MODE=true for cluster management use cases.",
+        "Set AIOPS_FILE_TOOLS_ADMIN_MODE=false to lock down admin paths.",
     )
 
     # API Authentication

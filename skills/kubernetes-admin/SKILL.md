@@ -234,3 +234,327 @@ kubectl get limitrange -n NAMESPACE
 # Pod density per node (check against max-pods limit)
 kubectl get nodes -o custom-columns='NAME:.metadata.name,PODS:.status.allocatable.pods'
 ```
+
+## Fix/Remediation Decision Trees
+
+Automated fix patterns for common Kubernetes failures. The SRE agent uses these to generate
+fix plans with appropriate risk levels, rollback procedures, and sizing guidance.
+
+### OOMKilled Fix Path
+
+**Symptom:** Exit code 137, CrashLoopBackOff, `kubectl describe pod` shows OOMKilled in
+container last state.
+
+**Investigation:**
+
+```bash
+# Confirm OOMKilled
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.status.containerStatuses[*].lastState.terminated.reason}'
+
+# Get current memory limit
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.spec.containers[*].resources.limits.memory}'
+
+# Get observed peak memory usage
+kubectl top pod POD -n NAMESPACE --containers
+```
+
+**Fix:**
+
+```bash
+# Set new memory limit to 2x the observed peak memory usage from kubectl top pod
+kubectl set resources deploy/DEPLOY -n NAMESPACE --limits=memory=NEW_LIMIT
+```
+
+**Sizing guidance:** Set the memory limit to 2x the observed peak memory usage from
+`kubectl top pod`. For example, if peak usage is 400Mi, set the limit to 800Mi. For JVM
+apps, set `-Xmx` to 75% of the container memory limit.
+
+**Risk:** L1 (low-risk, pods restart gracefully via rolling update)
+
+**Rollback:**
+
+```bash
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+```
+
+### ImagePullBackOff Fix Path
+
+**Symptom:** ImagePullBackOff status. Events show "image not found", "manifest unknown",
+or "unauthorized".
+
+**Investigation:**
+
+```bash
+# Check the image reference
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.spec.containers[*].image}'
+
+# Check events for the specific error
+kubectl describe pod POD -n NAMESPACE | grep -A5 "Events"
+
+# Check imagePullSecrets
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.spec.imagePullSecrets}'
+```
+
+**Fix option 1 (bad tag/image name):** Roll back to the last known good image.
+
+```bash
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+```
+
+**Fix option 2 (ECR auth expired):** Refresh the ECR authentication token. ECR tokens
+expire every 12 hours.
+
+```bash
+# Refresh ECR token and update pull secret
+aws ecr get-login-password --region REGION | kubectl create secret docker-registry ecr-secret \
+  --docker-server=ACCOUNT.dkr.ecr.REGION.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password-stdin \
+  -n NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+```
+
+**Risk:** L1
+
+**Rollback:** Fix option 1 is already a rollback. For fix option 2, no rollback needed
+(authentication is additive).
+
+### Deployment ReplicasMismatch Fix Path
+
+**Symptom:** Desired replicas != available replicas. `kubectl get deploy DEPLOY` shows
+mismatch in READY column.
+
+**Investigation:**
+
+```bash
+# Check deployment status
+kubectl get deploy DEPLOY -n NAMESPACE
+
+# Check pod events for the unhealthy replicas
+kubectl describe deploy DEPLOY -n NAMESPACE
+
+# Check if pods are pending (node capacity)
+kubectl get pods -n NAMESPACE -l app=APP_LABEL --field-selector 'status.phase=Pending'
+
+# Check node capacity
+kubectl top nodes
+kubectl describe nodes | grep -A5 "Allocated resources"
+```
+
+**Fix:** Depends on root cause:
+- **Resource limits too tight:** `kubectl set resources deploy/DEPLOY -n NAMESPACE --limits=cpu=NEW_CPU --limits=memory=NEW_MEM`
+- **Node capacity exhausted:** Scale the node group (EKS: `aws eks update-nodegroup-config --cluster-name CLUSTER --nodegroup-name NG --scaling-config minSize=N,maxSize=M,desiredSize=D`)
+- **Scheduling constraints:** Check taints/tolerations and node affinity rules
+- **Readiness probe failing:** Fix the health check or adjust probe parameters
+
+**Risk:** Varies by root cause (L1 for resource adjustments, L2 for node scaling)
+
+**Rollback:**
+
+```bash
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+```
+
+### Node NotReady Fix Path
+
+**Symptom:** `kubectl get nodes` shows one or more nodes in NotReady status.
+
+**Investigation:**
+
+```bash
+# Check which nodes are NotReady
+kubectl get nodes | grep NotReady
+
+# Check node conditions (DiskPressure, MemoryPressure, PIDPressure, NetworkUnavailable)
+kubectl describe node NODE | grep -A10 "Conditions"
+
+# Check kubelet status on the node (requires host access)
+# run_on_host: systemctl status kubelet
+```
+
+**Fix (DiskPressure):** Clean disk space on the node, then uncordon if needed.
+
+```bash
+# Via run_on_host: clean unused container images and logs
+# run_on_host: crictl rmi --prune
+# run_on_host: journalctl --vacuum-size=500M
+
+# Uncordon the node after recovery
+kubectl uncordon NODE
+```
+
+**Fix (MemoryPressure):** Drain the node, restart kubelet.
+
+```bash
+# Drain workloads off the node (respects PDBs)
+kubectl drain NODE --ignore-daemonsets --delete-emptydir-data
+
+# Via run_on_host: restart kubelet
+# run_on_host: systemctl restart kubelet
+
+# Uncordon after recovery
+kubectl uncordon NODE
+```
+
+**Risk:** L2 (affects workloads on that node; drain moves pods but causes disruption)
+
+**Rollback:** Uncordon the node to allow scheduling again:
+
+```bash
+kubectl uncordon NODE
+```
+
+### CoreDNS Recovery
+
+**Symptom:** DNS resolution failures cluster-wide. Pods cannot resolve service names or
+external domains.
+
+**Investigation:**
+
+```bash
+# Check CoreDNS pod status
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+
+# Check CoreDNS logs for errors
+kubectl logs -n kube-system -l k8s-app=kube-dns --tail=50
+
+# Verify CoreDNS service endpoint
+kubectl get endpoints -n kube-system kube-dns
+```
+
+**Fix:** CoreDNS usually self-recovers via its ReplicaSet. If pods are stuck in
+CrashLoopBackOff or not responding:
+
+```bash
+kubectl rollout restart deploy/coredns -n kube-system
+```
+
+**Risk:** L1 (brief DNS disruption during restart, typically < 30 seconds with multiple
+replicas)
+
+**Rollback:** CoreDNS is managed by EKS/the cluster; a rollout restart uses the same
+image and config. If a config change caused the issue, restore the ConfigMap:
+
+```bash
+kubectl get configmap coredns -n kube-system -o yaml > coredns-backup.yaml
+# Edit and reapply: kubectl apply -f coredns-backup.yaml
+```
+
+### HPA Not Scaling Fix Path
+
+**Symptom:** HPA shows `<unknown>` in TARGETS column, or refuses to scale beyond current
+replica count.
+
+**Investigation:**
+
+```bash
+# Check HPA status and targets
+kubectl get hpa HPA -n NAMESPACE
+
+# Check HPA events for errors
+kubectl describe hpa HPA -n NAMESPACE
+
+# Verify metrics-server is running
+kubectl get pods -n kube-system | grep metrics-server
+
+# Check if metrics-server can reach the kubelet
+kubectl top pods -n NAMESPACE
+```
+
+**Fix (unknown targets -- metrics-server issue):**
+
+```bash
+# Restart metrics-server
+kubectl rollout restart deploy/metrics-server -n kube-system
+```
+
+**Fix (maxReplicas too low):**
+
+```bash
+kubectl patch hpa HPA -n NAMESPACE -p '{"spec":{"maxReplicas":NEW_MAX}}'
+```
+
+**Risk:** L1
+
+**Rollback:**
+
+```bash
+# Restore original maxReplicas
+kubectl patch hpa HPA -n NAMESPACE -p '{"spec":{"maxReplicas":ORIGINAL_MAX}}'
+```
+
+### PVC Pending Fix Path
+
+**Symptom:** PVC stuck in Pending state. Pods that mount the PVC are also Pending.
+
+**Investigation:**
+
+```bash
+# Check PVC status and events
+kubectl describe pvc PVC -n NAMESPACE
+
+# List available StorageClasses
+kubectl get sc
+
+# Check CSI driver pods
+kubectl get pods -n kube-system | grep csi
+```
+
+**Fix (wrong StorageClass):** PVC storageClassName is immutable after creation. Must
+delete and recreate:
+
+```bash
+# Export the PVC spec
+kubectl get pvc PVC -n NAMESPACE -o yaml > pvc-backup.yaml
+# Edit storageClassName in the file, then:
+kubectl delete pvc PVC -n NAMESPACE
+kubectl apply -f pvc-backup.yaml
+```
+
+**Fix (CSI driver not running):**
+
+```bash
+# Restart the CSI driver (e.g., EBS CSI)
+kubectl rollout restart deploy/ebs-csi-controller -n kube-system
+```
+
+**Risk:** L2 (may affect data if PVC is deleted; ensure no data loss before deleting)
+
+**Rollback:** Recreate the PVC with the original StorageClass from the backup YAML.
+
+### Service Crash (Missing Deployment) Fix Path
+
+**Symptom:** 5xx errors from a service. The backing deployment or pods are missing or
+have zero ready replicas.
+
+**Investigation:**
+
+```bash
+# Check if deployment exists
+kubectl get deploy -n NAMESPACE
+
+# Check if pods exist for the service
+kubectl get endpoints SVC -n NAMESPACE
+
+# Check recent events for deletions
+kubectl get events -n NAMESPACE --sort-by='.lastTimestamp' | grep -i "delete\|kill"
+```
+
+**Fix:** Reapply the Kubernetes manifests from source control or backup.
+
+```bash
+kubectl apply -f kubernetes-manifests.yaml -n NAMESPACE
+```
+
+If manifests are not available, scale the deployment back up:
+
+```bash
+kubectl scale deploy/DEPLOY -n NAMESPACE --replicas=DESIRED_COUNT
+```
+
+**Risk:** L1 (restoring a deployment is a standard operation)
+
+**Rollback:**
+
+```bash
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+```

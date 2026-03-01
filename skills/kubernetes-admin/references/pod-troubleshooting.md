@@ -52,6 +52,73 @@ dmesg | grep -i "oom\|killed process"
 3. Tune JVM heap for Java apps: `-Xmx` should be 75% of container memory limit
 4. For Go apps: check goroutine leaks with `runtime.NumGoroutine()`
 
+**OOMKilled remediation commands:**
+
+```bash
+# Step 1: Get current memory limit for the deployment
+kubectl get deploy DEPLOY -n NAMESPACE -o jsonpath='{.spec.template.spec.containers[*].resources.limits.memory}'
+
+# Step 2: Check observed peak memory usage (set new limit to 2x this value)
+kubectl top pod -n NAMESPACE -l app=APP_LABEL --containers
+
+# Step 3: Apply new memory limit (e.g., if peak is 400Mi, set to 800Mi)
+kubectl set resources deploy/DEPLOY -n NAMESPACE --limits=memory=NEW_LIMIT
+
+# Step 4: Verify pods restart with new limits
+kubectl rollout status deploy/DEPLOY -n NAMESPACE
+
+# Rollback if the new limit causes issues
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+```
+
+## ImagePullBackOff Remediation
+
+When a pod is stuck in ImagePullBackOff, the container runtime cannot pull the specified
+image. The two most common causes are a bad image reference (wrong tag or repository) and
+expired registry credentials.
+
+### Diagnosing ImagePullBackOff
+
+```bash
+# Check the exact image reference
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.spec.containers[*].image}'
+
+# Check events for the specific pull error
+kubectl describe pod POD -n NAMESPACE | grep -A5 "Events"
+# Look for: "image not found", "manifest unknown", "unauthorized", "denied"
+
+# Check if imagePullSecrets are configured
+kubectl get pod POD -n NAMESPACE -o jsonpath='{.spec.imagePullSecrets}'
+
+# Verify the secret exists and has valid data
+kubectl get secret SECRET -n NAMESPACE -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
+```
+
+### ImagePullBackOff Remediation Commands
+
+```bash
+# Fix option 1: Bad tag or image name — roll back to last known good image
+kubectl rollout undo deploy/DEPLOY -n NAMESPACE
+
+# Fix option 2: ECR auth expired (tokens expire every 12 hours)
+# Refresh ECR token and update the pull secret
+aws ecr get-login-password --region REGION | kubectl create secret docker-registry ecr-secret \
+  --docker-server=ACCOUNT.dkr.ecr.REGION.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password-stdin \
+  -n NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+# After refreshing credentials, delete the stuck pod to force a re-pull
+kubectl delete pod POD -n NAMESPACE
+
+# Fix option 3: Image tag exists but wrong architecture (e.g., amd64 vs arm64)
+# Verify the image manifest supports the node architecture
+# run_on_host: docker manifest inspect IMAGE:TAG
+
+# Verify pods start successfully after the fix
+kubectl rollout status deploy/DEPLOY -n NAMESPACE
+```
+
 ## Init Container Failures
 
 Init containers run sequentially before the main containers start. If any init container

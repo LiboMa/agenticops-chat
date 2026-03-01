@@ -1,0 +1,299 @@
+# PrometheusRule CRD for AgenticOps EKS Lab
+# Deployed alongside kube-prometheus-stack in the monitoring namespace.
+# These rules are designed so that AgenticOps agents can parse the alert
+# labels/annotations to perform automated triage, RCA, and fix planning.
+#
+# Apply manually:
+#   kubectl apply -f alert-rules.yaml -n monitoring
+#
+# Or add to prometheus-values.yaml under additionalPrometheusRulesMap.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: agenticops-lab-alerts
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: prometheus
+    role: alert-rules
+    project: agenticops
+spec:
+  groups:
+    # ------------------------------------------------------------------
+    # Group 1: Pod-level alerts
+    # ------------------------------------------------------------------
+    - name: agenticops.pod.rules
+      rules:
+        # 1. KubePodCrashLooping — restart count > 3 in 5 minutes
+        - alert: KubePodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total[5m]) > 3
+          for: 1m
+          labels:
+            severity: critical
+            category: workload
+            component: pod
+          annotations:
+            summary: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} (container: {{ $labels.container }})
+              is crash-looping with {{ $value | printf "%.0f" }} restarts in the last 5 minutes.
+            description: >-
+              The container {{ $labels.container }} in pod {{ $labels.pod }}
+              (namespace: {{ $labels.namespace }}) has restarted more than 3 times
+              within a 5-minute window. This typically indicates an application crash,
+              misconfigured liveness probe, or missing dependency (ConfigMap, Secret,
+              or downstream service). Check pod logs with
+              `kubectl logs {{ $labels.pod }} -c {{ $labels.container }} -n {{ $labels.namespace }} --previous`
+              and describe the pod for event history.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodcrashlooping
+
+        # 2. KubePodNotReady — pod not ready for > 3 minutes
+        - alert: KubePodNotReady
+          expr: |
+            min_over_time(kube_pod_status_ready{condition="true"}[3m]) == 0
+            and on(pod, namespace)
+            kube_pod_status_phase{phase=~"Running|Pending"} == 1
+          for: 3m
+          labels:
+            severity: warning
+            category: workload
+            component: pod
+          annotations:
+            summary: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a not-ready
+              state for more than 3 minutes.
+            description: >-
+              Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is running
+              but its readiness probe has been failing continuously for over 3 minutes.
+              This means the pod is not serving traffic. Common causes include a failing
+              readiness probe endpoint, a dependent service being unavailable, or resource
+              starvation (CPU throttling or memory pressure). Inspect the pod events with
+              `kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}`
+              and check application logs.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodnotready
+
+        # 9. KubePodOOMKilled — container killed by OOM (exit code 137)
+        - alert: KubePodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: critical
+            category: workload
+            component: pod
+          annotations:
+            summary: >-
+              Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+              was OOM-killed (exit code 137).
+            description: >-
+              The container {{ $labels.container }} in pod {{ $labels.pod }}
+              (namespace: {{ $labels.namespace }}) was terminated by the Linux OOM killer
+              because it exceeded its memory limit. Current memory limit can be checked with
+              `kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}`.
+              Resolution options: increase the container memory limit in the Deployment spec,
+              investigate for memory leaks in the application, or tune JVM/runtime heap settings
+              if applicable. This is a critical signal for capacity planning.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodoomkilled
+
+    # ------------------------------------------------------------------
+    # Group 2: Deployment and storage alerts
+    # ------------------------------------------------------------------
+    - name: agenticops.deployment.rules
+      rules:
+        # 3. KubeDeploymentReplicasMismatch — desired != available for 5 minutes
+        - alert: KubeDeploymentReplicasMismatch
+          expr: |
+            kube_deployment_spec_replicas
+            !=
+            kube_deployment_status_ready_replicas
+          for: 5m
+          labels:
+            severity: warning
+            category: workload
+            component: deployment
+          annotations:
+            summary: >-
+              Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has a replica
+              mismatch (desired: {{ $value | printf "%.0f" }} vs ready: not equal)
+              for more than 5 minutes.
+            description: >-
+              The deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }}
+              has not reached its desired replica count for over 5 minutes. This could
+              indicate insufficient cluster resources (CPU/memory), image pull failures,
+              pending PVCs, node affinity/taint issues, or pod scheduling conflicts.
+              Check ReplicaSet events with
+              `kubectl describe deployment {{ $labels.deployment }} -n {{ $labels.namespace }}`
+              and inspect pending pods.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentreplicasmismatch
+
+        # 10. KubePVCPending — PVC stuck in Pending for > 5 minutes
+        - alert: KubePVCPending
+          expr: |
+            kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: pvc
+          annotations:
+            summary: >-
+              PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} has been
+              in Pending state for more than 5 minutes.
+            description: >-
+              The PersistentVolumeClaim {{ $labels.persistentvolumeclaim }} in namespace
+              {{ $labels.namespace }} has been pending for over 5 minutes. On EKS with
+              the aws-ebs-csi-driver, this usually means: the StorageClass does not exist
+              or is misconfigured, the EBS CSI driver pod is not running, the IAM role for
+              the CSI driver lacks permissions (ec2:CreateVolume, ec2:AttachVolume), or the
+              availability zone has no capacity. Check with
+              `kubectl describe pvc {{ $labels.persistentvolumeclaim }} -n {{ $labels.namespace }}`
+              and verify CSI driver pods in kube-system namespace.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeclaimpending
+
+    # ------------------------------------------------------------------
+    # Group 3: Node-level alerts
+    # ------------------------------------------------------------------
+    - name: agenticops.node.rules
+      rules:
+        # 4. NodeNotReady — node in NotReady state for > 2 minutes
+        - alert: NodeNotReady
+          expr: |
+            kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            category: infrastructure
+            component: node
+          annotations:
+            summary: >-
+              Node {{ $labels.node }} has been in NotReady state for more than 2 minutes.
+            description: >-
+              Kubernetes node {{ $labels.node }} has been reporting a NotReady condition
+              for over 2 minutes. Pods scheduled on this node may be evicted or unable to
+              run. Common causes: kubelet process crashed or unresponsive, node ran out of
+              disk/memory/PIDs, network connectivity loss between node and API server, or
+              the underlying EC2 instance is impaired. Check node conditions with
+              `kubectl describe node {{ $labels.node }}` and verify the EC2 instance status
+              in the AWS console. For the agenticops-lab cluster, also check if the node
+              belongs to the workload or monitoring node group.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodenotready
+
+        # 5. NodeDiskPressure — node reporting DiskPressure condition
+        - alert: NodeDiskPressure
+          expr: |
+            kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+          for: 1m
+          labels:
+            severity: warning
+            category: infrastructure
+            component: node
+          annotations:
+            summary: >-
+              Node {{ $labels.node }} is reporting DiskPressure condition.
+            description: >-
+              Node {{ $labels.node }} has triggered the DiskPressure condition, meaning
+              available disk space on the node root filesystem or imagefs has dropped below
+              the kubelet eviction threshold (typically 10% free). The kubelet will begin
+              evicting pods to reclaim space. Common causes: large container image layers,
+              excessive emptyDir usage, or log files filling the disk. Investigate with
+              `kubectl describe node {{ $labels.node }}` to see allocatable vs capacity,
+              and SSH to the node to check `df -h` and identify space consumers. The EKS
+              lab nodes use 80GB (workload) or 100GB (monitoring) gp3 volumes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodediskpressure
+
+    # ------------------------------------------------------------------
+    # Group 4: Monitoring infrastructure alerts
+    # ------------------------------------------------------------------
+    - name: agenticops.monitoring.rules
+      rules:
+        # 6. TargetDown — Prometheus scrape target unreachable for 3 minutes
+        - alert: TargetDown
+          expr: |
+            up == 0
+          for: 3m
+          labels:
+            severity: warning
+            category: monitoring
+            component: scrape-target
+          annotations:
+            summary: >-
+              Prometheus scrape target {{ $labels.job }}/{{ $labels.instance }} has been
+              down for more than 3 minutes.
+            description: >-
+              The Prometheus scrape target at {{ $labels.instance }} (job: {{ $labels.job }})
+              has been unreachable for over 3 minutes. This means metrics from this target
+              are not being collected, which creates blind spots in monitoring. Possible
+              causes: the target pod/service crashed, a NetworkPolicy is blocking the scrape
+              port, the ServiceMonitor selector does not match, or the target endpoint path
+              changed. Verify the target is listed in Prometheus targets UI
+              (Status > Targets) and check if the corresponding pod is running.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/targetdown
+
+    # ------------------------------------------------------------------
+    # Group 5: Application-level alerts (HTTP metrics)
+    # Requires services to expose http_request_duration_seconds and
+    # http_requests_total metrics (standard from OTEL or custom instrumentation).
+    # ------------------------------------------------------------------
+    - name: agenticops.application.rules
+      rules:
+        # 7. HighErrorRate — HTTP 5xx responses exceed 5% of total in 5 minutes
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum by (namespace, service, job) (
+                rate(http_requests_total{status_code=~"5.."}[5m])
+              )
+              /
+              sum by (namespace, service, job) (
+                rate(http_requests_total[5m])
+              )
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            category: application
+            component: http
+          annotations:
+            summary: >-
+              Service {{ $labels.namespace }}/{{ $labels.service }} has an HTTP 5xx error
+              rate of {{ $value | humanizePercentage }} over the last 5 minutes.
+            description: >-
+              The service {{ $labels.service }} in namespace {{ $labels.namespace }}
+              (job: {{ $labels.job }}) is returning more than 5% server errors (HTTP 5xx).
+              Current error rate: {{ $value | humanizePercentage }}. This indicates an
+              application-level failure such as unhandled exceptions, downstream dependency
+              timeouts, database connection exhaustion, or resource limits being hit.
+              For Online Boutique services, check the specific microservice logs and its
+              upstream dependencies. Use `kubectl logs -l app={{ $labels.service }} -n {{ $labels.namespace }}`
+              to inspect error traces.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/higherrorrate
+
+        # 8. HighLatencyP99 — p99 response latency exceeds 2 seconds for 5 minutes
+        - alert: HighLatencyP99
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (namespace, service, job, le) (
+                rate(http_request_duration_seconds_bucket[5m])
+              )
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            category: application
+            component: http
+          annotations:
+            summary: >-
+              Service {{ $labels.namespace }}/{{ $labels.service }} p99 latency is
+              {{ $value | printf "%.2f" }}s (threshold: 2s) over the last 5 minutes.
+            description: >-
+              The 99th percentile response latency for service {{ $labels.service }} in
+              namespace {{ $labels.namespace }} (job: {{ $labels.job }}) has exceeded
+              2 seconds for over 5 minutes. Current p99: {{ $value | printf "%.2f" }}
+              seconds. High tail latency often indicates: resource contention (CPU
+              throttling, memory pressure), downstream service degradation, connection pool
+              exhaustion, garbage collection pauses, or network issues between pods. Check
+              CPU/memory usage of the service pods, review traces in the OTEL Collector
+              pipeline, and look for correlated alerts on downstream dependencies.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/highlatencyp99

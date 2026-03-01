@@ -1477,9 +1477,9 @@ async def api_webhook_alert_explicit(source: str, request: Request):
     """Receive an alert with explicit source type.
 
     Args:
-        source: One of datadog, pagerduty, grafana, generic.
+        source: One of datadog, pagerduty, grafana, prometheus, cloudwatch, generic.
     """
-    valid_sources = {"datadog", "pagerduty", "grafana", "generic"}
+    valid_sources = {"datadog", "pagerduty", "grafana", "prometheus", "cloudwatch", "generic"}
     if source.lower() not in valid_sources:
         raise HTTPException(
             status_code=400,
