@@ -106,8 +106,12 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.utcnow()
 
+            # Capture values before session closes
+            risk_level = plan.risk_level
+            health_issue_id = plan.health_issue_id
+
             # Update HealthIssue status
-            issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
             if issue:
                 issue.status = "fix_approved"
 
@@ -115,7 +119,7 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
 
         logger.info(
             "Auto-approved FixPlan #%d (%s) for HealthIssue #%d",
-            fix_plan_id, plan.risk_level, plan.health_issue_id,
+            fix_plan_id, risk_level, health_issue_id,
         )
 
         # Chain: trigger execution
