@@ -514,6 +514,42 @@ export interface NotificationLog {
 }
 
 /* ------------------------------------------------------------------ */
+/*  SOP Lifecycle                                                      */
+/* ------------------------------------------------------------------ */
+
+export type SOPStatus = "draft" | "review" | "active" | "deprecated" | "archived";
+
+export interface SOPRecord {
+  id: number;
+  filename: string;
+  resource_type: string;
+  issue_pattern: string;
+  severity: string;
+  status: SOPStatus;
+  quality_score: number;
+  application_count: number;
+  success_count: number;
+  source_issue_id: number | null;
+  approved_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  reviewed_at: string | null;
+  preview?: string;
+  content?: string;
+}
+
+export interface KBStats {
+  sop_count: number;
+  case_count: number;
+  vector_count: number;
+  embedding_status: string;
+  rag_pipeline_enabled: boolean;
+  sop_similarity_threshold?: number;
+  sop_by_status: Record<SOPStatus, number>;
+  review_queue_count: number;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Chat                                                               */
 /* ------------------------------------------------------------------ */
 

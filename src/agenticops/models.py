@@ -479,6 +479,63 @@ class CaseStudyRecord(Base):
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+# ── SOP Lifecycle State Machine ────────────────────────────────────────
+
+VALID_SOP_STATUSES = {"draft", "review", "active", "deprecated", "archived"}
+
+_SOP_TRANSITIONS: dict[str, set[str]] = {
+    "draft":      {"review", "archived"},
+    "review":     {"active", "draft", "archived"},
+    "active":     {"deprecated"},
+    "deprecated": {"active", "archived"},   # can resurrect or archive
+    "archived":   set(),                     # terminal
+}
+
+
+class InvalidSOPTransition(ValueError):
+    """Raised when an SOP status transition is not allowed."""
+
+
+def validate_sop_transition(current: str, new: str) -> None:
+    """Validate an SOP status transition."""
+    if new not in VALID_SOP_STATUSES:
+        raise ValueError(f"Invalid SOP status '{new}'. Valid: {', '.join(sorted(VALID_SOP_STATUSES))}")
+    if current == new:
+        return
+    allowed = _SOP_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidSOPTransition(
+            f"Cannot transition SOP from '{current}' to '{new}'. "
+            f"Allowed: {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
+class SOPRecord(Base):
+    """Metadata record for SOPs with lifecycle tracking."""
+
+    __tablename__ = "sop_records"
+    __table_args__ = (
+        Index("idx_sop_status", "status"),
+        Index("idx_sop_resource_type", "resource_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filename: Mapped[str] = mapped_column(String(200), unique=True)
+    resource_type: Mapped[str] = mapped_column(String(50), default="")
+    issue_pattern: Mapped[str] = mapped_column(String(500), default="")
+    severity: Mapped[str] = mapped_column(String(20), default="medium")
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    quality_score: Mapped[float] = mapped_column(default=0.0)
+    application_count: Mapped[int] = mapped_column(default=0)
+    success_count: Mapped[int] = mapped_column(default=0)
+    source_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    file_path: Mapped[str] = mapped_column(String(500), default="")
+    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class Report(Base):
     """Generated reports."""
 

@@ -111,6 +111,15 @@ def run_rag_pipeline(health_issue_id: int) -> RAGPipelineResult:
         result.sop_path = sop_path
         result.sop_filename = sop_filename
 
+        # Step 4b: Save SOP record with quality score
+        _save_sop_record(
+            filename=sop_filename,
+            file_path=sop_path,
+            case_data=case_data,
+            action=result.action,
+        )
+        result.steps.append({"step": "sop_record", "status": "ok", "action": result.action})
+
         embed_status = _embed_sop(sop_content, sop_filename)
         result.embed_status = embed_status
         result.steps.append({"step": "embed", "status": "ok", "detail": embed_status})
@@ -318,6 +327,57 @@ def _generate_sop_filename(case_data: dict) -> str:
 
     slug = "-".join(words) if words else "general"
     return f"{resource_type}-{slug}.md"
+
+
+def compute_sop_quality_score(case_data: dict) -> float:
+    """Compute quality score from data available at SOP creation time."""
+    confidence = float(case_data.get("confidence", 0.0))
+
+    risk_map = {"L0": 1.0, "L1": 0.85, "L2": 0.7, "L3": 0.5, "": 0.5, "unknown": 0.5}
+    risk_score = risk_map.get(case_data.get("fix_risk_level", ""), 0.5)
+
+    has_fix = 1.0 if case_data.get("fix_steps") else 0.3
+    has_checks = 1.0 if (case_data.get("post_checks") or case_data.get("rollback_plan")) else 0.5
+
+    return round(
+        0.35 * confidence
+        + 0.25 * risk_score
+        + 0.20 * has_fix
+        + 0.20 * has_checks,
+        3,
+    )
+
+
+def _save_sop_record(filename: str, file_path: str, case_data: dict, action: str) -> None:
+    """Save or update an SOPRecord in the DB after SOP file generation."""
+    from agenticops.models import SOPRecord, get_db_session
+
+    quality = compute_sop_quality_score(case_data)
+    initial_status = "review" if quality >= 0.6 else "draft"
+
+    try:
+        with get_db_session() as session:
+            existing = session.query(SOPRecord).filter_by(filename=filename).first()
+            if existing:
+                existing.quality_score = quality
+                existing.issue_pattern = (case_data.get("issue_pattern", "") or "")[:500]
+                existing.updated_at = datetime.utcnow()
+                if existing.status == "draft":
+                    existing.status = initial_status
+            else:
+                record = SOPRecord(
+                    filename=filename,
+                    resource_type=case_data.get("resource_type", ""),
+                    issue_pattern=(case_data.get("issue_pattern", "") or "")[:500],
+                    severity=case_data.get("severity", "medium"),
+                    status=initial_status,
+                    quality_score=quality,
+                    source_issue_id=case_data.get("source_issue_id"),
+                    file_path=file_path,
+                )
+                session.add(record)
+    except Exception as e:
+        logger.warning("Failed to save SOP record for %s: %s", filename, e)
 
 
 def _extract_section(body: str, heading: str, stop_heading: str = "") -> str:

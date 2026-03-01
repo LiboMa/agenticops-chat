@@ -24,6 +24,9 @@ from agenticops.models import (
     MonitoringConfig,
     ChatSession,
     ChatMessage,
+    SOPRecord,
+    InvalidSOPTransition,
+    validate_sop_transition,
     get_session,
     get_db_session,
     init_db,
@@ -1723,30 +1726,161 @@ async def api_distill_case(health_issue_id: int):
 
 
 @app.get("/api/kb/sops")
-async def api_list_sops():
-    """List all SOPs in the knowledge base."""
+async def api_list_sops(status: Optional[str] = None):
+    """List SOPs with lifecycle metadata."""
     from agenticops.tools.kb_tools import _parse_frontmatter
 
+    with get_db_session() as session:
+        query = session.query(SOPRecord).order_by(SOPRecord.updated_at.desc())
+        if status:
+            query = query.filter_by(status=status)
+        records = query.all()
+
     sops = []
+    for r in records:
+        preview = ""
+        try:
+            path = Path(r.file_path)
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+                _, body = _parse_frontmatter(content)
+                preview = body[:200] if body else ""
+        except Exception:
+            pass
+        sops.append({
+            "id": r.id,
+            "filename": r.filename,
+            "resource_type": r.resource_type,
+            "issue_pattern": r.issue_pattern,
+            "severity": r.severity,
+            "status": r.status,
+            "quality_score": r.quality_score,
+            "application_count": r.application_count,
+            "success_count": r.success_count,
+            "approved_by": r.approved_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "preview": preview,
+        })
+    return {"count": len(sops), "sops": sops}
+
+
+@app.get("/api/kb/sops/{sop_id}")
+async def api_get_sop(sop_id: int):
+    """Get SOP detail with full content."""
+    with get_db_session() as session:
+        record = session.query(SOPRecord).filter_by(id=sop_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="SOP not found")
+    content = ""
+    try:
+        path = Path(record.file_path)
+        if path.exists():
+            content = path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return {
+        "id": record.id,
+        "filename": record.filename,
+        "resource_type": record.resource_type,
+        "issue_pattern": record.issue_pattern,
+        "severity": record.severity,
+        "status": record.status,
+        "quality_score": record.quality_score,
+        "application_count": record.application_count,
+        "success_count": record.success_count,
+        "source_issue_id": record.source_issue_id,
+        "approved_by": record.approved_by,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
+        "content": content,
+    }
+
+
+@app.post("/api/kb/sops/{sop_id}/approve")
+async def api_approve_sop(sop_id: int, body: dict = Body(...)):
+    """Approve an SOP (transition to active)."""
+    approved_by = body.get("approved_by", "admin")
+    with get_db_session() as session:
+        record = session.query(SOPRecord).filter_by(id=sop_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="SOP not found")
+        try:
+            validate_sop_transition(record.status, "active")
+        except (InvalidSOPTransition, ValueError) as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        record.status = "active"
+        record.approved_by = approved_by
+        record.reviewed_at = datetime.utcnow()
+    return {"status": "active", "approved_by": approved_by}
+
+
+@app.post("/api/kb/sops/{sop_id}/reject")
+async def api_reject_sop(sop_id: int):
+    """Reject an SOP (transition to archived)."""
+    with get_db_session() as session:
+        record = session.query(SOPRecord).filter_by(id=sop_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="SOP not found")
+        try:
+            validate_sop_transition(record.status, "archived")
+        except (InvalidSOPTransition, ValueError) as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        record.status = "archived"
+        record.reviewed_at = datetime.utcnow()
+    return {"status": "archived"}
+
+
+@app.post("/api/kb/sops/{sop_id}/deprecate")
+async def api_deprecate_sop(sop_id: int):
+    """Deprecate an active SOP."""
+    with get_db_session() as session:
+        record = session.query(SOPRecord).filter_by(id=sop_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="SOP not found")
+        try:
+            validate_sop_transition(record.status, "deprecated")
+        except (InvalidSOPTransition, ValueError) as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        record.status = "deprecated"
+    return {"status": "deprecated"}
+
+
+@app.post("/api/kb/sops/backfill")
+async def api_backfill_sops():
+    """Backfill existing SOP files into SOPRecord table."""
+    from agenticops.tools.kb_tools import _parse_frontmatter
+
     sops_dir = settings.sops_dir
-    if sops_dir.exists():
+    if not sops_dir.exists():
+        return {"backfilled": 0, "skipped": 0}
+
+    backfilled = 0
+    skipped = 0
+    with get_db_session() as session:
         for f in sorted(sops_dir.glob("*.md")):
+            existing = session.query(SOPRecord).filter_by(filename=f.name).first()
+            if existing:
+                skipped += 1
+                continue
             try:
                 content = f.read_text(encoding="utf-8")
-                metadata, body = _parse_frontmatter(content)
-                sops.append({
-                    "filename": f.name,
-                    "path": str(f),
-                    "resource_type": metadata.get("resource_type", ""),
-                    "issue_pattern": metadata.get("issue_pattern", ""),
-                    "severity": metadata.get("severity", ""),
-                    "last_updated": metadata.get("last_updated", ""),
-                    "size_bytes": f.stat().st_size,
-                    "preview": body[:200] if body else "",
-                })
-            except Exception as e:
-                sops.append({"filename": f.name, "error": str(e)})
-    return {"count": len(sops), "sops": sops}
+                metadata, _ = _parse_frontmatter(content)
+                record = SOPRecord(
+                    filename=f.name,
+                    resource_type=metadata.get("resource_type", ""),
+                    issue_pattern=(metadata.get("issue_pattern", "") or "")[:500],
+                    severity=metadata.get("severity", "medium"),
+                    status="review",
+                    quality_score=0.5,
+                    file_path=str(f),
+                )
+                session.add(record)
+                backfilled += 1
+            except Exception:
+                skipped += 1
+    return {"backfilled": backfilled, "skipped": skipped}
 
 
 @app.get("/api/kb/cases")
@@ -1795,6 +1929,13 @@ async def api_kb_stats():
         except Exception:
             embedding_status = "error"
 
+    # SOP lifecycle counts
+    sop_by_status = {"draft": 0, "review": 0, "active": 0, "deprecated": 0, "archived": 0}
+    with get_db_session() as session:
+        for row in session.query(SOPRecord.status, func.count()).group_by(SOPRecord.status).all():
+            if row[0] in sop_by_status:
+                sop_by_status[row[0]] = row[1]
+
     return {
         "sop_count": sop_count,
         "case_count": case_count,
@@ -1802,6 +1943,8 @@ async def api_kb_stats():
         "vector_count": vector_count,
         "rag_pipeline_enabled": settings.rag_pipeline_enabled,
         "sop_similarity_threshold": settings.sop_similarity_threshold,
+        "sop_by_status": sop_by_status,
+        "review_queue_count": sop_by_status["review"],
     }
 
 
