@@ -1,0 +1,91 @@
+# OpenTelemetry Collector Helm values
+# Chart: open-telemetry/opentelemetry-collector
+# Docs: https://github.com/open-telemetry/opentelemetry-helm-charts
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+command:
+  name: otelcol-contrib
+
+mode: deployment
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Schedule on monitoring nodes
+nodeSelector:
+  role: monitoring
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: monitoring
+    effect: NoSchedule
+
+# Expose OTLP receivers as ClusterIP for in-cluster access
+service:
+  type: ClusterIP
+
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+  processors:
+    batch:
+      send_batch_size: 1024
+      timeout: 5s
+    memory_limiter:
+      check_interval: 5s
+      limit_mib: 400
+      spike_limit_mib: 100
+
+  exporters:
+    prometheusremotewrite:
+      endpoint: "http://prometheus-kube-prometheus-prometheus.monitoring:9090/api/v1/write"
+      tls:
+        insecure: true
+      resource_to_telemetry_conversion:
+        enabled: true
+    debug:
+      verbosity: basic
+      sampling_initial: 5
+      sampling_thereafter: 200
+
+  service:
+    pipelines:
+      metrics:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite, debug]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [debug]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [debug]

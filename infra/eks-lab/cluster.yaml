@@ -1,0 +1,80 @@
+# eksctl cluster configuration for AgenticOps lab environment
+# Usage: eksctl create cluster -f cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: agenticops-lab
+  region: us-west-2
+  version: "1.30"
+
+iam:
+  withOIDC: true
+
+addons:
+  - name: vpc-cni
+    version: latest
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+  - name: aws-ebs-csi-driver
+    version: latest
+    wellKnownPolicies:
+      ebsCSIController: true
+
+managedNodeGroups:
+  - name: workload
+    instanceType: m5.large
+    desiredCapacity: 3
+    minSize: 2
+    maxSize: 5
+    volumeSize: 80
+    volumeType: gp3
+    ssh:
+      allow: true
+      publicKeyName: sa-malibo
+    labels:
+      role: workload
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+    tags:
+      environment: lab
+      project: agenticops
+
+  - name: monitoring
+    instanceType: m5.large
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 3
+    volumeSize: 100
+    volumeType: gp3
+    labels:
+      role: monitoring
+    taints:
+      - key: dedicated
+        value: monitoring
+        effect: NoSchedule
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+    tags:
+      environment: lab
+      project: agenticops
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator
+      - controllerManager
+      - scheduler

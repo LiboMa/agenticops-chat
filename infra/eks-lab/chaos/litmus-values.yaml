@@ -1,0 +1,30 @@
+# LitmusChaos Helm values
+# Chart: litmuschaos/litmus
+# Docs: https://docs.litmuschaos.io/
+
+# Portal (ChaosCenter web UI)
+portal:
+  server:
+    service:
+      type: ClusterIP
+  frontend:
+    service:
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+        service.beta.kubernetes.io/aws-load-balancer-type: nlb
+
+# MongoDB for ChaosCenter state (Bitnami subchart)
+mongodb:
+  architecture: replicaset
+  replicaCount: 3
+  persistence:
+    enabled: true
+    storageClass: gp3
+    size: 20Gi
+  arbiter:
+    persistence:
+      storageClass: gp3
+
+# Resource limits
+portalScope: cluster

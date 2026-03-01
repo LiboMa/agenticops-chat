@@ -1,0 +1,67 @@
+# Online Boutique (Google microservices-demo) Helm values
+# Chart: oci://us-docker.pkg.dev/online-boutique-ci/charts/onlineboutique
+# Docs: https://github.com/GoogleCloudPlatform/microservices-demo
+
+# Frontend: expose via LoadBalancer
+frontend:
+  externalService: true
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+
+# Enable load generator for continuous traffic
+loadGenerator:
+  create: true
+
+# OpenTelemetry configuration — all services send traces/metrics to the OTEL Collector
+opentelemetryCollector:
+  create: false  # We deploy our own collector in the monitoring namespace
+  projectId: "agenticops-lab"
+
+# Point all services to our OTEL Collector
+cartservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+productcatalogservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+currencyservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+paymentservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+shippingservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+emailservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+checkoutservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+recommendationservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+adservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"

@@ -1,0 +1,108 @@
+# kube-prometheus-stack Helm values
+# Chart: prometheus-community/kube-prometheus-stack
+# Docs: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: gp3
+          resources:
+            requests:
+              storage: 50Gi
+    # Schedule on monitoring nodes
+    nodeSelector:
+      role: monitoring
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: monitoring
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    # Enable remote write endpoint for OTEL Collector
+    enableRemoteWriteReceiver: true
+    # Auto-discover ServiceMonitors across all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+grafana:
+  enabled: true
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+  adminPassword: "agenticops-lab"  # Change in production
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: gp3
+  nodeSelector:
+    role: monitoring
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: monitoring
+      effect: NoSchedule
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+  # Default K8s dashboards are included via kube-prometheus-stack
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: utc
+
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      role: monitoring
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: monitoring
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# Node exporter runs on ALL nodes (DaemonSet)
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics on monitoring nodes
+kube-state-metrics:
+  nodeSelector:
+    role: monitoring
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: monitoring
+      effect: NoSchedule
+
+# Prometheus operator on monitoring nodes
+prometheusOperator:
+  nodeSelector:
+    role: monitoring
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: monitoring
+      effect: NoSchedule
