@@ -2,15 +2,17 @@
 
 Scans the skills/ directory for valid SKILL.md packages, parses YAML
 frontmatter, and generates XML summaries for agent system prompts.
+Supports dynamic tool registration via the ``tools`` frontmatter field.
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -34,6 +36,7 @@ class SkillMetadata:
     license: Optional[str] = None
     compatibility: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+    tools: list[str] = field(default_factory=list)  # dotted paths to @tool functions
 
 
 # ── YAML Frontmatter Parsing ────────────────────────────────────────
@@ -117,6 +120,7 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
                     license=fm.get("license"),
                     compatibility=fm.get("compatibility"),
                     metadata=fm.get("metadata", {}),
+                    tools=fm.get("tools", []),
                 )
             )
         except Exception as e:
@@ -215,6 +219,43 @@ def load_skill_reference(skill_name: str, ref_path: str) -> str | None:
                 return None
             return target.read_text(encoding="utf-8")
     return None
+
+
+# ── Dynamic Tool Resolution ──────────────────────────────────────────
+
+
+def resolve_skill_tools(skill_name: str) -> list[Any]:
+    """Import and return @tool functions declared in a skill's YAML frontmatter.
+
+    Each entry in the ``tools`` field is a dotted path like
+    ``agenticops.tools.file_tools.read_local_file``.
+
+    Args:
+        skill_name: Name of the skill whose tools to resolve.
+
+    Returns:
+        List of @tool decorated function objects, or empty list if skill
+        has no tools declared or skill not found.
+    """
+    skills = discover_skills()
+    for s in skills:
+        if s.name == skill_name:
+            if not s.tools:
+                return []
+            resolved = []
+            for dotted_path in s.tools:
+                try:
+                    module_path, func_name = dotted_path.rsplit(".", 1)
+                    module = importlib.import_module(module_path)
+                    func = getattr(module, func_name)
+                    resolved.append(func)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to resolve tool '%s' for skill '%s': %s",
+                        dotted_path, skill_name, e,
+                    )
+            return resolved
+    return []
 
 
 # ── Prompt Helper ────────────────────────────────────────────────────

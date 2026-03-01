@@ -45,12 +45,6 @@ from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.skills.loader import build_prompt_with_skills
-from agenticops.tools.file_tools import (
-    read_local_file,
-    tail_local_file,
-    search_local_file,
-    list_local_directory,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -129,26 +123,24 @@ activate_skill("kubernetes-admin") for kubectl operations). This helps you under
 commands and verify they are correct before execution.
 
 LOCAL FILE ACCESS:
-Use read_local_file, tail_local_file, search_local_file, or list_local_directory to:
-- Read configuration files referenced in fix plan steps (e.g., Terraform, CloudFormation,
-  Kubernetes manifests, nginx/systemd configs, application properties).
-- Check log files for error context before and after step execution.
-- Verify file-based pre-checks and post-checks (e.g., confirm a config file was updated).
-- Discover related configuration artifacts in a directory tree.
-Sensitive files (credentials, .env, private keys) are automatically blocked.
+When you need to read local configs, logs, templates, or verify file-based pre/post-checks:
+a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
+b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
+   — these tools are dynamically registered when you activate the skill.
+c. Sensitive files (credentials, .env, private keys) are automatically blocked.
 
 STEP TYPE IDENTIFICATION:
 When the plan's steps include a field like "action" or "runner_type", use it to route:
   - "aws_cli" → run_aws_cli / run_aws_cli_readonly
   - "host_command" / "ssm" / "ssh" → run_on_host
   - "kubectl" → run_kubectl
-  - "file_read" / "verify_file" → read_local_file / search_local_file
+  - "file_read" / "verify_file" → activate_skill("local-os-operator") first, then read_local_file / search_local_file
   - "verify" → appropriate read-only tool
 When the step has no explicit type, infer from the command:
   - Starts with "aws " → run_aws_cli
   - Starts with "kubectl " → run_kubectl
   - OS-level commands (systemctl, kill, df, ps, etc.) → run_on_host
-  - File paths or "cat", "less", "grep" references → read_local_file / search_local_file
+  - File paths or "cat", "less", "grep" references → activate_skill("local-os-operator") first, then use file tools
 """
 
 
@@ -215,14 +207,9 @@ def executor_agent(fix_plan_id: int) -> str:
                 get_active_account,
                 get_health_issue,
                 assume_role,
-                # Agent Skills (domain knowledge for understanding commands)
+                # Agent Skills (domain knowledge + dynamic tool loading)
                 activate_skill,
                 read_skill_reference,
-                # Local file tools (read configs, logs, templates)
-                read_local_file,
-                tail_local_file,
-                search_local_file,
-                list_local_directory,
             ],
         )
 

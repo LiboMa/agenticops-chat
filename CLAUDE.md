@@ -231,12 +231,34 @@ skills/
 ├── aws-compute/          # EC2, ECS, EKS, Lambda troubleshooting
 │   ├── SKILL.md
 │   └── references/       # ec2-troubleshooting.md, ecs-task-placement.md, lambda-optimization.md
-└── aws-storage/          # S3, EBS, EFS, FSx troubleshooting
-    ├── SKILL.md
-    └── references/       # s3-access-troubleshooting.md, ebs-performance.md, efs-mount-issues.md
+├── aws-storage/          # S3, EBS, EFS, FSx troubleshooting
+│   ├── SKILL.md
+│   └── references/       # s3-access-troubleshooting.md, ebs-performance.md, efs-mount-issues.md
+└── local-os-operator/    # Local file operations (read configs, tail logs, search files)
+    └── SKILL.md          # YAML tools: field → dynamic tool registration on activation
 ```
 
 ## Recent Changes
+
+### 2026-03-01: Dynamic Skill-Based Tool Loading + local-os-operator Skill
+
+**Dynamic Tool Registration** (`skills/loader.py`, `skills/tools.py`):
+- Skills can now declare `tools:` in YAML frontmatter — list of dotted paths to `@tool` functions
+- `activate_skill()` accepts Strands SDK auto-injected `agent` parameter
+- On activation: resolves tool paths via `importlib`, registers them via `agent.tool_registry.process_tools()`
+- Idempotent: skips tools already in registry (safe to activate same skill twice)
+- `resolve_skill_tools(skill_name)` in `loader.py` — imports and returns `@tool` function objects
+- `SkillMetadata.tools` field added to dataclass
+
+**local-os-operator Skill** (`skills/local-os-operator/`):
+- 5 dynamically registered tools: `read_local_file`, `tail_local_file`, `search_local_file`, `list_local_directory`, `file_stat`
+- Security blocklists: SSH keys, AWS creds, `.env`, `.pem`, etc. (enforced by `tools/file_tools.py`)
+- Decision trees: config file discovery, log investigation, IaC inspection, file metadata checks
+- Tools NOT statically loaded — agents activate on demand via `activate_skill("local-os-operator")`
+
+**Agent Prompt Updates** (SRE, Executor, RCA):
+- Removed static `file_tools` imports and tool list entries from all 3 agents
+- Updated LOCAL FILE sections to reference `activate_skill("local-os-operator")` for dynamic loading
 
 ### 2026-03-01: Auto-Fix Pipeline + Multi-Backend Executor + Tool Output Truncation
 

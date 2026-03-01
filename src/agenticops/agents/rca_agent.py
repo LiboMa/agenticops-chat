@@ -54,12 +54,6 @@ from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
 )
-from agenticops.tools.file_tools import (
-    read_local_file,
-    tail_local_file,
-    search_local_file,
-    list_local_directory,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +112,10 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 8.5. EXTENDED INVESTIGATION: Use run_aws_cli_readonly for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 8.6. LOCAL FILE INSPECTION (when you need to check configs, logs, or templates):
-     a. Use read_local_file(path) to read configuration files, Terraform/CloudFormation
-        templates, Kubernetes manifests, Dockerfiles, etc.
-     b. Use tail_local_file(path) for recent log entries.
-     c. Use search_local_file(path, pattern) to find specific error patterns or config entries.
-     d. Use list_local_directory(path, pattern, recursive=True) to discover relevant files.
+     a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
+     b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
+        — these tools are dynamically registered when you activate the skill.
+     c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
 8.7. HOST-LEVEL INVESTIGATION (when you need OS-level data from an EC2 instance):
      a. Use run_on_host(host_id=INSTANCE_ID, command="...", method="ssm") to execute
         diagnostic commands on the host (ps, top, df, free, journalctl, ss, etc.).
@@ -225,7 +218,7 @@ def rca_agent(issue_id: int) -> str:
                 detect_network_anomalies,
                 # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
-                # Agent Skills (domain knowledge + host/kubectl execution)
+                # Agent Skills (domain knowledge + host/kubectl execution + dynamic tools)
                 activate_skill,
                 read_skill_reference,
                 run_on_host,
@@ -233,11 +226,6 @@ def rca_agent(issue_id: int) -> str:
                 # External monitoring providers
                 query_provider_metrics,
                 query_provider_logs,
-                # Local file tools (read configs, logs, templates)
-                read_local_file,
-                tail_local_file,
-                search_local_file,
-                list_local_directory,
             ],
         )
 

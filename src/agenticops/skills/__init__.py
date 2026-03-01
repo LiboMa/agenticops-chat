@@ -9,6 +9,7 @@ from agenticops.skills.loader import (
     discover_skills,
     get_available_skills_xml,
     build_prompt_with_skills,
+    resolve_skill_tools,
 )
 from agenticops.skills.tools import activate_skill, read_skill_reference, list_skills
 from agenticops.skills.execution import run_on_host, run_kubectl
@@ -17,6 +18,7 @@ __all__ = [
     "discover_skills",
     "get_available_skills_xml",
     "build_prompt_with_skills",
+    "resolve_skill_tools",
     "activate_skill",
     "read_skill_reference",
     "list_skills",

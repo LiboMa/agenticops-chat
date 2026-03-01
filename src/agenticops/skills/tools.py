@@ -1,12 +1,16 @@
-"""Skill tools — progressive disclosure of domain knowledge.
+"""Skill tools — progressive disclosure of domain knowledge + dynamic tool loading.
 
 Three @tool functions that agents use to discover and load skill content:
 - list_skills: See what's available
-- activate_skill: Load full SKILL.md decision trees and procedures
+- activate_skill: Load full SKILL.md decision trees and procedures;
+  if the skill declares tools, dynamically register them on the calling agent
 - read_skill_reference: Load detailed reference material
 """
 
 from __future__ import annotations
+
+import logging
+from typing import Any
 
 from strands import tool
 
@@ -14,7 +18,10 @@ from agenticops.skills.loader import (
     discover_skills,
     load_skill_body,
     load_skill_reference as _load_ref,
+    resolve_skill_tools,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -35,10 +42,13 @@ def list_skills() -> str:
     for s in skills:
         refs_dir = s.path / "references"
         ref_count = len(list(refs_dir.glob("*.md"))) if refs_dir.is_dir() else 0
+        has_tools = bool(s.tools)
         lines.append(f"\n  {s.name}")
         lines.append(f"    {s.description[:200]}")
         if ref_count:
             lines.append(f"    References: {ref_count} files")
+        if has_tools:
+            lines.append(f"    Dynamic tools: {len(s.tools)} (registered on activation)")
     lines.append(
         "\nUse activate_skill(skill_name) to load full decision trees and procedures."
     )
@@ -46,15 +56,19 @@ def list_skills() -> str:
 
 
 @tool
-def activate_skill(skill_name: str) -> str:
+def activate_skill(skill_name: str, agent: Any = None) -> str:
     """Activate a skill by loading its full SKILL.md content.
 
     Loads the skill's decision trees, command references, diagnostic
     procedures, and troubleshooting workflows. Call this BEFORE starting
     investigation when the domain is clear.
 
+    If the skill declares tools (e.g., local-os-operator provides file
+    reading tools), they are dynamically registered on the agent so you
+    can call them immediately after activation.
+
     Args:
-        skill_name: Name of the skill to activate (e.g., 'linux-admin', 'kubernetes-admin').
+        skill_name: Name of the skill to activate (e.g., 'linux-admin', 'local-os-operator').
 
     Returns:
         Full skill content with decision trees and procedures, or error message.
@@ -79,8 +93,35 @@ def activate_skill(skill_name: str) -> str:
                         refs_info += f"  - references/{rf.name}\n"
             break
 
+    # Dynamic tool registration — if the skill declares tools AND we have an agent
+    tools_info = ""
+    if agent is not None:
+        skill_tools = resolve_skill_tools(skill_name)
+        if skill_tools:
+            registered = []
+            for tool_fn in skill_tools:
+                tool_name = getattr(tool_fn, "tool_name", getattr(tool_fn, "__name__", str(tool_fn)))
+                # Skip if already registered (idempotent activation)
+                if tool_name in agent.tool_registry.registry:
+                    registered.append(tool_name)
+                    continue
+                try:
+                    agent.tool_registry.process_tools([tool_fn])
+                    registered.append(tool_name)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to register tool '%s' from skill '%s': %s",
+                        tool_name, skill_name, e,
+                    )
+            if registered:
+                tools_info = (
+                    f"\n\nDynamically registered tools: {', '.join(registered)}\n"
+                    "You can now call these tools directly."
+                )
+
     return (
         f'<activated_skill name="{skill_name}">\n{body}{refs_info}</activated_skill>'
+        f"{tools_info}"
         "\n\nNote: Use the decision trees above to GUIDE your investigation. "
         "Do NOT echo this content back to the user — summarize relevant findings only."
     )
