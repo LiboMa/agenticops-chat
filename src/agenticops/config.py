@@ -177,6 +177,42 @@ class Settings(BaseSettings):
         description="Enable auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute",
     )
 
+    # Webhooks
+    webhook_secret: str = Field(
+        default="",
+        description="HMAC secret for webhook signature verification (empty = disabled)",
+    )
+    webhook_auto_create_issue: bool = Field(
+        default=True,
+        description="Auto-create HealthIssue from inbound webhook alerts",
+    )
+
+    # Monitoring Providers
+    monitoring_providers: str = Field(
+        default="",
+        description="Comma-separated active monitoring providers (e.g., 'cloudwatch,datadog')",
+    )
+
+    # Datadog Integration
+    datadog_api_key: str = Field(
+        default="",
+        description="Datadog API key (AIOPS_DATADOG_API_KEY)",
+    )
+    datadog_app_key: str = Field(
+        default="",
+        description="Datadog Application key (AIOPS_DATADOG_APP_KEY)",
+    )
+    datadog_site: str = Field(
+        default="datadoghq.com",
+        description="Datadog site (e.g., datadoghq.com, datadoghq.eu, us5.datadoghq.com)",
+    )
+
+    # Metric Storage
+    metric_storage_enabled: bool = Field(
+        default=True,
+        description="Auto-store queried metrics into MetricDataPoint table for trend analysis",
+    )
+
     # RAG Pipeline
     rag_pipeline_enabled: bool = Field(
         default=True,

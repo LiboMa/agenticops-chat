@@ -557,6 +557,27 @@ class Report(Base):
 # ============================================================================
 
 
+class AlertEvent(Base):
+    """Inbound alert event from external monitoring systems."""
+
+    __tablename__ = "alert_events"
+    __table_args__ = (
+        Index("idx_alert_source_dedup", "source", "external_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(50))  # datadog, pagerduty, grafana, cloudwatch, generic
+    external_id: Mapped[str] = mapped_column(String(200))  # dedup key from source
+    severity: Mapped[str] = mapped_column(String(20))
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(Text, default="")
+    resource_hint: Mapped[str] = mapped_column(String(200), default="")  # best-effort resource ID
+    raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    health_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # linked HealthIssue
+    status: Mapped[str] = mapped_column(String(30), default="received")  # received, processed, ignored, error
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ChatSession(Base):
     """Chat session for web UI."""
     __tablename__ = "chat_sessions"

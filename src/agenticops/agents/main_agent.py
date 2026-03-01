@@ -37,6 +37,7 @@ from agenticops.graph.tools import (
 )
 from agenticops.skills.tools import activate_skill, read_skill_reference, list_skills
 from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.tools.integration_tools import list_monitoring_providers
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,9 @@ NETWORK TOOLS:
 - detect_single_points_of_failure: Find infrastructure SPOFs (articulation points and bridges).
 - analyze_capacity_risk: Check for subnet IP exhaustion and EKS pod capacity risks.
 
+MONITORING INTEGRATION TOOLS:
+- list_monitoring_providers: Show configured monitoring providers and their status (CloudWatch, Datadog, etc.).
+
 ROUTING RULES:
 1. ALWAYS check get_active_account first. If no account is configured, tell the user.
 2. "scan" / "discover" / "inventory" → dispatch to scan_agent.
@@ -95,6 +99,9 @@ ROUTING RULES:
    You do NOT run host commands directly.
 9.5. Skills: Use list_skills to show available domain skills. Use activate_skill to load skill
      knowledge for answering domain questions. Use read_skill_reference for deep-dive material.
+9.6. Monitoring providers: Use list_monitoring_providers to show configured external monitoring
+     integrations. For querying Datadog/external metrics or alerts, dispatch to detect_agent or rca_agent
+     (they have cross-platform provider tools).
 10. ANY other AWS question (e.g., "list my ElastiCache clusters", "show CloudFront distributions",
    "what are my DynamoDB tables", "check Route53 zones", "get cost breakdown",
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
@@ -163,6 +170,8 @@ def create_main_agent() -> Agent:
             list_skills,
             activate_skill,
             read_skill_reference,
+            # Monitoring integrations
+            list_monitoring_providers,
         ],
     )
 

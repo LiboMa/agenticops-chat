@@ -224,6 +224,7 @@ class Scheduler:
             FullScanPipeline,
             MonitoringPipeline,
             DailyReportPipeline,
+            HealthPatrolPipeline,
         )
 
         logger.info(f"Executing scheduled pipeline: {schedule.name}")
@@ -259,6 +260,8 @@ class Scheduler:
                 "MonitoringPipeline": MonitoringPipeline,
                 "DailyReport": DailyReportPipeline,
                 "DailyReportPipeline": DailyReportPipeline,
+                "HealthPatrol": HealthPatrolPipeline,
+                "HealthPatrolPipeline": HealthPatrolPipeline,
             }
 
             factory = pipeline_factories.get(schedule.pipeline_name)
@@ -266,7 +269,11 @@ class Scheduler:
                 raise ValueError(f"Unknown pipeline: {schedule.pipeline_name}")
 
             # Create and execute pipeline
-            pipeline = factory(account)
+            # HealthPatrolPipeline accepts an extra config kwarg
+            if factory is HealthPatrolPipeline:
+                pipeline = factory(account, config=schedule.config)
+            else:
+                pipeline = factory(account)
             result = asyncio.run(pipeline.execute())
 
             # Update execution record

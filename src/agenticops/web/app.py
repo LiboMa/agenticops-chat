@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 
 from agenticops.models import (
+    AlertEvent,
     AWSAccount,
     AWSResource,
     Anomaly,
@@ -213,6 +214,29 @@ class HealthResponse(BaseModel):
 # ============================================================================
 # HealthIssue Pydantic Models
 # ============================================================================
+
+
+# ============================================================================
+# Alert Event Pydantic Models (Webhooks)
+# ============================================================================
+
+
+class AlertEventResponse(BaseModel):
+    """Schema for alert event response."""
+    id: int
+    source: str
+    external_id: str
+    severity: str
+    title: str
+    description: str
+    resource_hint: str
+    health_issue_id: Optional[int]
+    status: str
+    received_at: datetime
+    raw_payload: dict
+
+    class Config:
+        from_attributes = True
 
 
 class HealthIssueCreate(BaseModel):
@@ -1428,6 +1452,191 @@ async def api_trigger_fix_plan(issue_id: int):
         content={
             "message": f"Fix plan generation triggered for issue #{issue_id}. Refresh to see results.",
             "health_issue_id": issue_id,
+        },
+    )
+
+
+# ============================================================================
+# Webhook — Inbound Alert Intake
+# ============================================================================
+
+
+@app.post("/api/webhooks/alert")
+async def api_webhook_alert_auto(request: Request):
+    """Receive an alert from any external monitoring system (auto-detect source).
+
+    Accepts JSON from Datadog, PagerDuty, Grafana, or generic format.
+    Creates an AlertEvent record, optionally creates a HealthIssue, and triggers RCA.
+    """
+    body = await request.json()
+    return await _process_webhook_alert(body)
+
+
+@app.post("/api/webhooks/alert/{source}")
+async def api_webhook_alert_explicit(source: str, request: Request):
+    """Receive an alert with explicit source type.
+
+    Args:
+        source: One of datadog, pagerduty, grafana, generic.
+    """
+    valid_sources = {"datadog", "pagerduty", "grafana", "generic"}
+    if source.lower() not in valid_sources:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown source '{source}'. Valid: {', '.join(sorted(valid_sources))}",
+        )
+    body = await request.json()
+    return await _process_webhook_alert(body, source=source.lower())
+
+
+@app.get("/api/webhooks/alert/events", response_model=List[AlertEventResponse])
+async def api_list_alert_events(
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=50, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """List recent alert events from webhooks."""
+    with get_db_session() as session:
+        query = session.query(AlertEvent).order_by(AlertEvent.received_at.desc())
+        if source:
+            query = query.filter_by(source=source)
+        if status:
+            query = query.filter_by(status=status)
+        events = query.offset(offset).limit(limit).all()
+        return [AlertEventResponse.model_validate(e) for e in events]
+
+
+@app.get("/api/webhooks/alert/events/{event_id}", response_model=AlertEventResponse)
+async def api_get_alert_event(event_id: int):
+    """Get a specific alert event by ID."""
+    with get_db_session() as session:
+        event = session.query(AlertEvent).filter_by(id=event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="Alert event not found")
+        return AlertEventResponse.model_validate(event)
+
+
+@app.get("/api/providers")
+async def api_list_providers():
+    """List configured monitoring providers and their status."""
+    from agenticops.integrations import list_provider_names
+    return list_provider_names()
+
+
+async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
+    """Process an inbound webhook alert: parse, dedup, create HealthIssue, trigger RCA."""
+    from agenticops.integrations.parsers import parse_alert
+
+    try:
+        alert = parse_alert(body, source=source)
+    except Exception as e:
+        logger.warning("Failed to parse webhook alert: %s", e)
+        raise HTTPException(status_code=400, detail=f"Failed to parse alert: {e}")
+
+    with get_db_session() as session:
+        # Deduplication: check for existing alert with same source + external_id
+        existing = None
+        if alert.external_id:
+            existing = (
+                session.query(AlertEvent)
+                .filter_by(source=alert.source, external_id=alert.external_id)
+                .first()
+            )
+
+        if existing:
+            # Update existing event
+            existing.severity = alert.severity
+            existing.title = alert.title
+            existing.description = alert.description
+            existing.raw_payload = alert.raw
+            session.flush()
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "message": f"Updated existing alert event #{existing.id} (dedup)",
+                    "alert_event_id": existing.id,
+                    "health_issue_id": existing.health_issue_id,
+                    "deduplicated": True,
+                },
+            )
+
+        # Create new AlertEvent
+        event = AlertEvent(
+            source=alert.source,
+            external_id=alert.external_id,
+            severity=alert.severity,
+            title=alert.title,
+            description=alert.description,
+            resource_hint=alert.resource_hint,
+            raw_payload=alert.raw,
+            status="received",
+        )
+        session.add(event)
+        session.flush()
+        event_id = event.id
+
+    # Optionally create a HealthIssue
+    health_issue_id = None
+    if settings.webhook_auto_create_issue:
+        try:
+            with get_db_session() as session:
+                # Dedup: check for existing open issue with same resource + source
+                dedup_query = session.query(HealthIssue).filter(
+                    HealthIssue.source == f"webhook_{alert.source}",
+                    HealthIssue.status.in_(["open", "investigating"]),
+                )
+                if alert.resource_hint:
+                    dedup_query = dedup_query.filter(
+                        HealthIssue.resource_id == alert.resource_hint
+                    )
+                else:
+                    dedup_query = dedup_query.filter(
+                        HealthIssue.title == alert.title
+                    )
+
+                existing_issue = dedup_query.first()
+                if existing_issue:
+                    health_issue_id = existing_issue.id
+                else:
+                    issue = HealthIssue(
+                        resource_id=alert.resource_hint or "unknown",
+                        severity=alert.severity,
+                        source=f"webhook_{alert.source}",
+                        title=alert.title,
+                        description=alert.description,
+                        metric_data={"webhook_source": alert.source, "tags": alert.tags},
+                    )
+                    session.add(issue)
+                    session.flush()
+                    health_issue_id = issue.id
+
+            # Link AlertEvent to HealthIssue
+            with get_db_session() as session:
+                evt = session.query(AlertEvent).filter_by(id=event_id).first()
+                if evt:
+                    evt.health_issue_id = health_issue_id
+                    evt.status = "processed"
+
+            # Auto-trigger RCA
+            if health_issue_id and not existing_issue:
+                from agenticops.services.rca_service import trigger_auto_rca
+                trigger_auto_rca(health_issue_id)
+
+        except Exception:
+            logger.exception("Failed to create HealthIssue from webhook alert")
+            with get_db_session() as session:
+                evt = session.query(AlertEvent).filter_by(id=event_id).first()
+                if evt:
+                    evt.status = "error"
+
+    return JSONResponse(
+        status_code=201,
+        content={
+            "message": f"Alert event created from {alert.source}",
+            "alert_event_id": event_id,
+            "health_issue_id": health_issue_id,
+            "deduplicated": False,
         },
     )
 

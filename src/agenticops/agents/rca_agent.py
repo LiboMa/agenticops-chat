@@ -50,6 +50,10 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.tools.integration_tools import (
+    query_provider_metrics,
+    query_provider_logs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,8 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 6. INVESTIGATE METRICS:
    a. Call get_metrics for the affected resource (relevant metrics based on resource type).
    b. Call query_logs if log patterns are relevant to the issue.
+   c. Call query_provider_metrics/query_provider_logs to pull cross-platform data from
+      Datadog or other configured providers for additional context.
 7. SYNTHESIZE: Combine all evidence into a root cause analysis:
    - Identify the most likely root cause with confidence score (0.0-1.0).
    - List contributing factors.
@@ -212,6 +218,9 @@ def rca_agent(issue_id: int) -> str:
                 read_skill_reference,
                 run_on_host,
                 run_kubectl,
+                # External monitoring providers
+                query_provider_metrics,
+                query_provider_logs,
             ],
         )
 

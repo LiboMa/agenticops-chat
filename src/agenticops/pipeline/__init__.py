@@ -12,6 +12,7 @@ from agenticops.pipeline.orchestrator import (
 from agenticops.pipeline.rag_pipeline import RAGPipelineResult, run_rag_pipeline
 from agenticops.pipeline.sop_identifier import SOPMatch, identify_matching_sop
 from agenticops.pipeline.sop_upgrader import generate_new_sop, upgrade_existing_sop
+from agenticops.pipeline.health_patrol import HealthPatrolPipeline
 
 __all__ = [
     "Pipeline",
@@ -21,6 +22,7 @@ __all__ = [
     "FullScanPipeline",
     "MonitoringPipeline",
     "DailyReportPipeline",
+    "HealthPatrolPipeline",
     "RAGPipelineResult",
     "run_rag_pipeline",
     "SOPMatch",

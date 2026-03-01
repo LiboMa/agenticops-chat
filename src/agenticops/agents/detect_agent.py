@@ -36,6 +36,10 @@ from agenticops.tools.detect_tools import (
     run_rule_evaluation,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.tools.integration_tools import (
+    list_provider_alerts,
+    query_provider_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,11 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
      to identify statistical anomalies that CloudWatch alarms might not catch.
    - Use run_rule_evaluation to check metric values against built-in threshold rules
      (e.g., CPUUtilization > 90% = critical, DatabaseConnections > 100 = medium).
+6.5. EXTERNAL PROVIDER ALERTS:
+   - Call list_provider_alerts to pull active alerts from external monitoring systems
+     (Datadog, Grafana, etc.) that are configured.
+   - Call query_provider_metrics to get cross-platform metrics for a resource.
+   - Cross-reference external alerts with CloudWatch findings for corroboration.
 7. For confirmed problems, call create_health_issue with:
    - severity, source, title, description, alarm_name, metric_data, related_changes.
 
@@ -137,6 +146,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 map_eks_to_vpc_topology,
                 # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
+                # External monitoring providers
+                list_provider_alerts,
+                query_provider_metrics,
             ],
         )
 
