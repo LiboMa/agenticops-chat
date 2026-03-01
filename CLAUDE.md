@@ -53,6 +53,10 @@ Web Dashboard ──────┘         │
 | `src/agenticops/skills/security.py` | Three-tier security classification for shell + kubectl commands |
 | `src/agenticops/skills/tools.py` | 3 @tool functions: activate_skill, read_skill_reference, list_skills |
 | `src/agenticops/skills/execution.py` | 2 @tool functions: run_on_host (SSM/SSH), run_kubectl (EKS) |
+| `src/agenticops/services/pipeline_service.py` | Auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute |
+| `src/agenticops/services/rca_service.py` | Auto-RCA trigger on HealthIssue creation |
+| `src/agenticops/services/executor_service.py` | Background executor polling for pre-queued FixExecutions |
+| `src/agenticops/services/resolution_service.py` | Post-resolution RAG pipeline + case distillation |
 
 ### Agents (all in `src/agenticops/agents/`)
 
@@ -154,6 +158,9 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | `skills_dir` | `PROJECT_ROOT / "skills"` | Directory containing Agent Skills packages |
 | `skills_enabled` | `true` | Enable Agent Skills integration |
 | `agent_output_detail` | `medium` | Default agent output detail level: concise, medium, or detailed |
+| `auto_rca_enabled` | `true` | Auto-trigger RCA on new HealthIssue |
+| `auto_fix_enabled` | `true` | Auto-fix pipeline: RCA → SRE → Approve → Execute |
+| `executor_auto_approve_l0_l1` | `true` | Auto-approve L0/L1 fix plans |
 
 ## Graph Module
 
@@ -230,6 +237,32 @@ skills/
 ```
 
 ## Recent Changes
+
+### 2026-03-01: Auto-Fix Pipeline + Multi-Backend Executor + Tool Output Truncation
+
+**Tool Output Truncation** (`tools/metadata_tools.py`):
+- Root cause fix for "内容过大被截断" errors: metadata tools returned unbounded JSON, overflowing agent context window after 30+ tool calls
+- Added `_truncate()` with `MAX_RESULT_CHARS=4000` (single records) and `MAX_LIST_RESULT_CHARS=6000` (list queries)
+- All 8 `json.dumps` return sites wrapped with truncation; truncation message guides agent to use `get_*` with specific ID
+- Reduced default query limits: `list_health_issues` 50→20, `get_managed_resources` 200→50
+- Matches existing pattern in `aws_cli_tool.py` (2000/4000) and `skills/execution.py` (4000)
+
+**Auto-Fix Pipeline** (`services/pipeline_service.py`, `metadata_tools.py`, `config.py`):
+- End-to-end pipeline: RCA → SRE → Approve(L0/L1) → Execute → Resolve
+- Three trigger hooks wired into metadata tools:
+  - `save_rca_result()` → `trigger_auto_sre()` (SRE agent in daemon thread)
+  - `save_fix_plan()` → `trigger_auto_approve()` (L0/L1 sync DB update → chains to execute)
+  - `approve_fix_plan()` → `trigger_auto_execute()` (Executor agent in daemon thread)
+- Three independent gates: `auto_fix_enabled` (master), `executor_auto_approve_l0_l1`, `executor_enabled`
+- L2/L3 plans require human approval → pipeline pauses at `fix_planned` status
+- On execution success: auto-resolve HealthIssue + trigger RAG pipeline (existing)
+
+**Multi-Backend Executor** (`agents/executor_agent.py`):
+- Executor Agent now supports AWS CLI + SSM/SSH host commands + kubectl
+- TOOL SELECTION routes by step type (`action`/`runner_type` field) or command prefix inference
+- SKILL ACTIVATION loads domain knowledge before host/kubectl execution
+- 4 new tools: `run_on_host`, `run_kubectl`, `activate_skill`, `read_skill_reference`
+- Dynamic output rules via `build_prompt_with_skills(prompt, agent_type="executor")`
 
 ### 2026-02-28: Configurable Agent Output Detail Level
 
