@@ -57,6 +57,13 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.tools.file_tools import (
+    read_local_file,
+    tail_local_file,
+    search_local_file,
+    list_local_directory,
+    file_stat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +120,14 @@ MODE A — FIX PLAN PROTOCOL:
      c. Follow the decision trees from the activated skill for systematic diagnosis.
      d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
         should be included in the fix plan, NOT executed directly.
+5.6. LOCAL FILE INSPECTION (when you need to read configs, logs, templates, or scripts):
+     a. Use read_local_file(path) to read configuration files (nginx, systemd units, Terraform,
+        CloudFormation, Kubernetes manifests, Dockerfiles, application configs, etc.).
+     b. Use tail_local_file(path, lines=100) for log files — reads the last N lines.
+     c. Use search_local_file(path, pattern) to find specific entries in large files.
+     d. Use list_local_directory(path, pattern="*.yaml", recursive=True) to discover files.
+     e. Use file_stat(path) to check file size, permissions, and modification time.
+     f. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
    - Pre-checks (what to verify before starting)
@@ -137,6 +152,9 @@ AWS infrastructure investigator:
      GuardDuty, Security Hub, Cost Explorer, Organizations, etc.)
 3. HOST-LEVEL DATA: When investigating host or pod issues, use run_on_host (SSM)
    or run_kubectl to gather OS-level or Kubernetes diagnostics directly.
+3.5. LOCAL FILE DATA: Use read_local_file, tail_local_file, search_local_file, or
+   list_local_directory to read local configs, logs, Terraform, CloudFormation templates,
+   Kubernetes manifests, scripts, and other operational artifacts.
 4. RESPOND: Present findings clearly with resource IDs, status, and key attributes.
 
 RULES:
@@ -220,6 +238,12 @@ def _create_sre_agent() -> Agent:
             read_skill_reference,
             run_on_host,
             run_kubectl,
+            # Local file tools (read-only)
+            read_local_file,
+            tail_local_file,
+            search_local_file,
+            list_local_directory,
+            file_stat,
         ],
     )
 

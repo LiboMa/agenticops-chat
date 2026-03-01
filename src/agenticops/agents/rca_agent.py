@@ -54,6 +54,12 @@ from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
 )
+from agenticops.tools.file_tools import (
+    read_local_file,
+    tail_local_file,
+    search_local_file,
+    list_local_directory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +117,12 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 8. SAVE: Call save_rca_result with all findings.
 8.5. EXTENDED INVESTIGATION: Use run_aws_cli_readonly for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
+8.6. LOCAL FILE INSPECTION (when you need to check configs, logs, or templates):
+     a. Use read_local_file(path) to read configuration files, Terraform/CloudFormation
+        templates, Kubernetes manifests, Dockerfiles, etc.
+     b. Use tail_local_file(path) for recent log entries.
+     c. Use search_local_file(path, pattern) to find specific error patterns or config entries.
+     d. Use list_local_directory(path, pattern, recursive=True) to discover relevant files.
 8.7. HOST-LEVEL INVESTIGATION (when you need OS-level data from an EC2 instance):
      a. Use run_on_host(host_id=INSTANCE_ID, command="...", method="ssm") to execute
         diagnostic commands on the host (ps, top, df, free, journalctl, ss, etc.).
@@ -221,6 +233,11 @@ def rca_agent(issue_id: int) -> str:
                 # External monitoring providers
                 query_provider_metrics,
                 query_provider_logs,
+                # Local file tools (read configs, logs, templates)
+                read_local_file,
+                tail_local_file,
+                search_local_file,
+                list_local_directory,
             ],
         )
 
