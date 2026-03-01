@@ -24,6 +24,20 @@ from agenticops.models import (
 
 logger = logging.getLogger(__name__)
 
+# ── Output size limits (prevents context window overflow) ──────────────
+# Matches pattern in aws_cli_tool.py and skills/execution.py.
+# Tool results accumulate in the agent conversation; unbounded JSON from
+# DB queries was the root cause of "内容过大被截断" errors.
+MAX_RESULT_CHARS = 4000
+MAX_LIST_RESULT_CHARS = 6000  # lists may need slightly more room
+
+
+def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
+    """Truncate tool output to *limit* characters."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n... (output truncated, use get_* with specific ID for full details)"
+
 
 @tool
 def get_active_account() -> str:
@@ -39,7 +53,7 @@ def get_active_account() -> str:
         if not account:
             return "No active AWS account configured. Use 'aiops create account' to add one."
 
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": account.id,
             "name": account.name,
             "account_id": account.account_id,
@@ -47,7 +61,7 @@ def get_active_account() -> str:
             "external_id": account.external_id or "",
             "regions": account.regions,
             "last_scanned_at": str(account.last_scanned_at) if account.last_scanned_at else "never",
-        })
+        }))
     finally:
         session.close()
 
@@ -77,7 +91,7 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
         if region:
             query = query.filter_by(region=region)
 
-        resources = query.limit(200).all()
+        resources = query.limit(50).all()
 
         if not resources:
             filters = []
@@ -100,7 +114,7 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                 "managed": r.managed,
             })
 
-        return json.dumps(result, default=str)
+        return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
     finally:
         session.close()
 
@@ -292,7 +306,7 @@ def get_health_issue(issue_id: int) -> str:
         if not issue:
             return f"HealthIssue #{issue_id} not found."
 
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": issue.id,
             "resource_id": issue.resource_id,
             "severity": issue.severity,
@@ -306,7 +320,7 @@ def get_health_issue(issue_id: int) -> str:
             "detected_at": str(issue.detected_at),
             "detected_by": issue.detected_by,
             "resolved_at": str(issue.resolved_at) if issue.resolved_at else None,
-        }, default=str)
+        }, default=str))
     finally:
         session.close()
 
@@ -326,7 +340,7 @@ def get_resource_by_id(resource_id: int) -> str:
         resource = session.query(AWSResource).filter_by(id=resource_id).first()
         if not resource:
             return f"Resource #{resource_id} not found."
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": resource.id,
             "resource_id": resource.resource_id,
             "resource_arn": resource.resource_arn,
@@ -335,7 +349,7 @@ def get_resource_by_id(resource_id: int) -> str:
             "region": resource.region,
             "status": resource.status,
             "managed": resource.managed,
-        }, default=str)
+        }, default=str))
     finally:
         session.close()
 
@@ -345,7 +359,7 @@ def list_health_issues(
     severity: str = "",
     status: str = "open",
     resource_type: str = "",
-    limit: int = 50,
+    limit: int = 20,
 ) -> str:
     """List health issues with optional filters.
 
@@ -353,7 +367,7 @@ def list_health_issues(
         severity: Filter by severity (critical, high, medium, low) or empty for all
         status: Filter by status (open, investigating, root_cause_identified, resolved) or empty for all
         resource_type: Filter by resource type prefix in resource_id (e.g., 'i-' for EC2) or empty for all
-        limit: Maximum number of results (default 50)
+        limit: Maximum number of results (default 20)
 
     Returns:
         JSON array of health issues with id, resource_id, severity, source, title, status, detected_at.
@@ -386,7 +400,7 @@ def list_health_issues(
                 "detected_at": str(i.detected_at),
             })
 
-        return json.dumps(result, default=str)
+        return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
     finally:
         session.close()
 
@@ -562,7 +576,7 @@ def get_rca_result(health_issue_id: int) -> str:
         if not rca:
             return f"No RCA result found for HealthIssue #{health_issue_id}."
 
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": rca.id,
             "health_issue_id": rca.health_issue_id,
             "root_cause": rca.root_cause,
@@ -575,7 +589,7 @@ def get_rca_result(health_issue_id: int) -> str:
             "similar_cases": rca.similar_cases,
             "model_id": rca.model_id,
             "created_at": str(rca.created_at),
-        }, default=str)
+        }, default=str))
     finally:
         session.close()
 
@@ -709,7 +723,7 @@ def get_fix_plan(health_issue_id: int) -> str:
         if not plan:
             return f"No fix plan found for HealthIssue #{health_issue_id}."
 
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": plan.id,
             "health_issue_id": plan.health_issue_id,
             "rca_result_id": plan.rca_result_id,
@@ -725,7 +739,7 @@ def get_fix_plan(health_issue_id: int) -> str:
             "approved_by": plan.approved_by,
             "approved_at": str(plan.approved_at) if plan.approved_at else None,
             "created_at": str(plan.created_at),
-        }, default=str)
+        }, default=str))
     finally:
         session.close()
 
@@ -821,7 +835,7 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
                 f"Only approved plans can be executed."
             )
 
-        return json.dumps({
+        return _truncate(json.dumps({
             "id": plan.id,
             "health_issue_id": plan.health_issue_id,
             "rca_result_id": plan.rca_result_id,
@@ -837,7 +851,7 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
             "approved_by": plan.approved_by,
             "approved_at": str(plan.approved_at) if plan.approved_at else None,
             "created_at": str(plan.created_at),
-        }, default=str)
+        }, default=str))
     finally:
         session.close()
 
