@@ -8,6 +8,12 @@ from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
 from agenticops.config import VALID_DETAIL_LEVELS
 
+MODEL_ALIASES = {
+    "opus": "global.anthropic.claude-opus-4-6-v1",
+    "sonnet": "global.anthropic.claude-sonnet-4-6-v1",
+    "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+}
+
 
 class ChatContext:
     """Context for chat session, holding state like output format."""
@@ -17,6 +23,8 @@ class ChatContext:
         self.table_style = os.environ.get("AIOPS_TABLE_STYLE", "default")
         self.account = None
         self.detail_level = "medium"  # concise, medium, detailed
+        self.current_model = "sonnet"  # friendly name — default matches settings.bedrock_model_id
+        self.agent = None  # set after agent creation; enables /model runtime switching
         self.output_history: List[Dict[str, str]] = []  # Store conversation history
         self.pager_threshold = 0  # 0 = auto (terminal height - 8)
         self.auto_pager = True  # Enable auto-truncation for long outputs
@@ -35,6 +43,22 @@ class ChatContext:
             self.detail_level = level
             return True
         return False
+
+    def set_model(self, alias: str) -> bool:
+        """Switch the agent's Bedrock model at runtime."""
+        if alias not in MODEL_ALIASES:
+            return False
+        if self.agent is None:
+            return False
+        from strands.models.bedrock import BedrockModel
+        from agenticops.config import settings
+        self.agent.model = BedrockModel(
+            model_id=MODEL_ALIASES[alias],
+            region_name=settings.bedrock_region,
+            max_tokens=settings.bedrock_max_tokens,
+        )
+        self.current_model = alias
+        return True
 
     def set_table_style(self, style: str) -> bool:
         """Set table style (default, simple, minimal, double, ascii)."""

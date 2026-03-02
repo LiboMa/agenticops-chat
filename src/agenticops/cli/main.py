@@ -1363,6 +1363,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Other:[/cyan]
   /clear                           Clear screen
   /detail [concise|medium|detailed] Set agent output detail level
+  /model [opus|sonnet|haiku]       Switch Bedrock model at runtime
   /help [topic]                    Show help
 
 [cyan]Exit:[/cyan]
@@ -2829,6 +2830,18 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
         ctx.set_detail(levels[idx])
         return f"[green]Detail level: {ctx.detail_level}[/green]"
 
+    # Model switching command
+    if cmd == "model":
+        from agenticops.cli.context import MODEL_ALIASES
+        if args:
+            alias = args[0].lower()
+            if ctx.set_model(alias):
+                return f"[green]Model switched to: {alias} ({MODEL_ALIASES[alias]})[/green]"
+            return f"[yellow]Invalid model '{alias}'. Use: {', '.join(MODEL_ALIASES.keys())}[/yellow]"
+        # No args — show current model and options
+        options = "  ".join(f"{'→' if k == ctx.current_model else ' '} {k}" for k in MODEL_ALIASES)
+        return f"[cyan]Current model: {ctx.current_model}[/cyan]\n  Available: {options}\n  Usage: /model <opus|sonnet|haiku>"
+
     handler = SLASH_COMMANDS.get(cmd)
     if handler:
         try:
@@ -3117,7 +3130,15 @@ def chat(
 
     # Initialize chat context
     ctx = ChatContext()
+    ctx.agent = agent  # Enable /model to swap model at runtime
     ctx.account = account
+
+    # Detect initial model alias from settings
+    from agenticops.cli.context import MODEL_ALIASES
+    for alias, model_id in MODEL_ALIASES.items():
+        if settings.bedrock_model_id == model_id:
+            ctx.current_model = alias
+            break
 
     # Setup history file
     history_dir = Path.home() / ".aiops"
@@ -3131,7 +3152,7 @@ def chat(
         "/scan", "/detect", "/analyze", "/ack", "/resolve",
         "/workflow", "/schedule", "/notify",
         "/session", "/context", "/export", "/output",
-        "/detail", "/exit", "/quit",
+        "/detail", "/model", "/exit", "/quit",
     ]
     completer = WordCompleter(slash_commands, ignore_case=True)
 
@@ -3242,7 +3263,7 @@ def chat(
             print_with_truncation(console, response, ctx, header="Agent")
 
             # Show session token summary in status bar
-            console.print(f"[dim]─── Session: {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
+            console.print(f"[dim]─── {ctx.current_model} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Press Ctrl+C again to exit, or continue typing.[/yellow]")
