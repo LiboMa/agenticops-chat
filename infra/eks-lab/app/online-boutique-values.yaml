@@ -4,12 +4,11 @@
 
 # Frontend: expose via LoadBalancer
 frontend:
-  externalService: true
+  externalService: false
   service:
-    type: LoadBalancer
-    annotations:
-      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
-      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    type: ClusterIP
+    # Access via: kubectl port-forward svc/frontend -n online-boutique 8080:80
+    # Then SSH tunnel: ssh -L 8080:localhost:8080 ubuntu@<bastion>
 
 # Enable load generator for continuous traffic
 loadGenerator:

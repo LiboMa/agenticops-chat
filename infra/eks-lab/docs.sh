@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECONFIG_PATH="${SCRIPT_DIR}/kubeconfig"
 CLUSTER_NAME="agenticops-lab"
-REGION="us-west-2"
+REGION="ap-southeast-1"
 
 BOLD='\033[1m'
 BLUE='\033[0;34m'
@@ -222,7 +222,7 @@ show_agenticops() {
     blank
 
     note "Test kubectl tools"
-    cmd "aiops chat 'check health of agenticops-lab cluster in us-west-2'"
+    cmd "aiops chat 'check health of agenticops-lab cluster in ap-southeast-1'"
     cmd "aiops chat 'list all pods in online-boutique namespace'"
     cmd "aiops chat 'show resource usage for the online-boutique workloads'"
     blank
@@ -262,7 +262,7 @@ show_agenticops() {
 show_costs() {
     section "Cost Estimate & Resource Cleanup"
 
-    echo "  Running resources and estimated hourly cost (us-west-2):"
+    echo "  Running resources and estimated hourly cost (ap-southeast-1):"
     blank
     echo "    EKS Control Plane:      \$0.10/hr"
     echo "    m5.large × 3 (workload): \$0.288/hr  (\$0.096 each)"

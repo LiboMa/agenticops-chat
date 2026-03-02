@@ -15,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECONFIG_PATH="${SCRIPT_DIR}/kubeconfig"
 CLUSTER_NAME="agenticops-lab"
-REGION="us-west-2"
+REGION="ap-southeast-1"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

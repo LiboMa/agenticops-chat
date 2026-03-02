@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECONFIG_PATH="${SCRIPT_DIR}/kubeconfig"
 CLUSTER_NAME="agenticops-lab"
-REGION="us-west-2"
+REGION="ap-southeast-1"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -32,7 +32,7 @@ echo "============================================================"
 echo ""
 warn "This will destroy the entire agenticops-lab EKS cluster."
 read -rp "Continue? (y/N) " confirm
-if [[ "${confirm,,}" != "y" ]]; then
+if [[ "${confirm}" != "y" ]]; then
     echo "Aborted."
     exit 0
 fi

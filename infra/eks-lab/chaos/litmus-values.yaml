@@ -9,10 +9,9 @@ portal:
       type: ClusterIP
   frontend:
     service:
-      type: LoadBalancer
-      annotations:
-        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
-        service.beta.kubernetes.io/aws-load-balancer-type: nlb
+      type: ClusterIP
+      # Access via: kubectl port-forward svc/litmus-frontend -n chaos-testing 9091:9091
+      # Then SSH tunnel: ssh -L 9091:localhost:9091 ubuntu@<bastion>
 
 # MongoDB for ChaosCenter state (Bitnami subchart)
 mongodb:

@@ -37,10 +37,9 @@ prometheus:
 grafana:
   enabled: true
   service:
-    type: LoadBalancer
-    annotations:
-      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
-      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    type: ClusterIP
+    # Access via: kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
+    # Then SSH tunnel: ssh -L 3000:localhost:3000 ubuntu@<bastion>
   adminPassword: "agenticops-lab"  # Change in production
   persistence:
     enabled: true
