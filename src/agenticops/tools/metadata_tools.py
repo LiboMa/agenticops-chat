@@ -312,6 +312,13 @@ def create_health_issue(
         from agenticops.services.rca_service import trigger_auto_rca
         trigger_auto_rca(issue.id)
 
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_issue_created
+            notify_issue_created(issue.id, severity, title, resource_id)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
+
         return f"Created HealthIssue #{issue.id}: [{severity.upper()}] {title}"
     except Exception as e:
         session.rollback()
@@ -573,6 +580,13 @@ def save_rca_result(
         except Exception as e:
             logger.warning("Failed to trigger auto-SRE: %s", e)
 
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_rca_completed
+            notify_rca_completed(health_issue_id, root_cause, rca.confidence)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
+
         return (
             f"RCAResult #{rca.id} saved for HealthIssue #{health_issue_id}. "
             f"Root cause: {root_cause[:100]}... Confidence: {rca.confidence:.0%}. "
@@ -720,6 +734,13 @@ def save_fix_plan(
         except Exception as e:
             logger.warning("Failed to trigger auto-approve: %s", e)
 
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_fix_planned
+            notify_fix_planned(health_issue_id, plan.id, risk_level, title)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
+
         return (
             f"FixPlan #{plan.id} saved for HealthIssue #{health_issue_id}. "
             f"Risk: {risk_level}. Title: {title}. "
@@ -823,6 +844,13 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
             trigger_auto_execute(fix_plan_id)
         except Exception as e:
             logger.warning("Failed to trigger auto-execute: %s", e)
+
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_fix_approved
+            notify_fix_approved(fix_plan_id, approved_by, plan.risk_level)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
 
         return (
             f"FixPlan #{fix_plan_id} approved by {approved_by}. "
@@ -976,6 +1004,13 @@ def save_execution_result(
                 trigger_post_resolution(health_issue_id)
             except Exception as e:
                 logger.warning("Failed to trigger post-resolution pipeline: %s", e)
+
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_execution_result
+            notify_execution_result(fix_plan_id, health_issue_id, status, error_message)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
 
         msg = (
             f"FixExecution #{execution.id} saved for FixPlan #{fix_plan_id}. "

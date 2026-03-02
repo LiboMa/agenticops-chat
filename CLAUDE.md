@@ -42,12 +42,13 @@ Web Dashboard ──────┘         │
 | `src/agenticops/cli/context.py` | `ChatContext` class — chat session state |
 | `src/agenticops/cli/display.py` | `ThinkingDisplay` class — spinner/progress; `TokenUsage` class |
 | `src/agenticops/cli/formatters.py` | Table styles, markdown/json rendering helpers |
-| `src/agenticops/web/app.py` | FastAPI backend (~2370 lines), 75 endpoints |
+| `src/agenticops/web/app.py` | FastAPI backend (~2500 lines), 80 endpoints |
 | `src/agenticops/web/session_manager.py` | Per-session agent manager for web chat (TTL cleanup) |
 | `src/agenticops/chat/preprocessor.py` | Shared message preprocessor: I#/R# refs, @file, file upload |
 | `src/agenticops/chat/file_reader.py` | File content extraction (text, DOCX, PDF, images) |
+| `src/agenticops/chat/send_to.py` | Shared `/send_to` command processor (CLI + Web + IM) |
 | `src/agenticops/config.py` | Centralized `pydantic-settings` config (env vars with `AIOPS_` prefix) |
-| `src/agenticops/models.py` | SQLAlchemy models (HealthIssue, FixPlan, Report, ChatSession, ChatMessage, etc.) |
+| `src/agenticops/models.py` | SQLAlchemy models (HealthIssue, FixPlan, Report, LocalDoc, IMAlias, ChatSession, ChatMessage, etc.) |
 | `src/agenticops/graph/collectors.py` | AWS data collectors for graph compute enrichment (EC2, RDS, Lambda, EKS, ECS, ElastiCache, TG) |
 | `src/agenticops/skills/__init__.py` | Agent Skills package init — exports all public functions |
 | `src/agenticops/skills/loader.py` | Skill discovery, YAML parsing, XML generation, output rules, prompt helper |
@@ -58,6 +59,7 @@ Web Dashboard ──────┘         │
 | `src/agenticops/services/rca_service.py` | Auto-RCA trigger on HealthIssue creation |
 | `src/agenticops/services/executor_service.py` | Background executor polling for pre-queued FixExecutions |
 | `src/agenticops/services/resolution_service.py` | Post-resolution RAG pipeline + case distillation |
+| `src/agenticops/services/notification_service.py` | Fire-and-forget auto-notifications on pipeline events |
 
 ### Agents (all in `src/agenticops/agents/`)
 
@@ -83,7 +85,7 @@ Web Dashboard ──────┘         │
 
 **Note**: `ChatContext` is defined in both `context.py` AND duplicated in `main.py` (~line 1568). Both must be kept in sync.
 
-## API Endpoints (75 total)
+## API Endpoints (80 total)
 
 | Group | Count | Base Path |
 |-------|-------|-----------|
@@ -102,6 +104,8 @@ Web Dashboard ──────┘         │
 | Audit Log | 2 | `/api/audit-log` |
 | Stats/Health | 3 | `/api/stats`, `/api/health` |
 | Auth | 3 | `/api/auth` |
+| IM Aliases | 3 | `/api/im-aliases` |
+| Local Docs | 2 | `/api/local-docs` |
 | SPA | 1 | `/app/{path}` |
 
 ### Chat SSE Streaming
@@ -163,6 +167,7 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | `agent_output_detail` | `medium` | Default agent output detail level: concise, medium, or detailed |
 | `auto_rca_enabled` | `true` | Auto-trigger RCA on new HealthIssue |
 | `auto_fix_enabled` | `true` | Auto-fix pipeline: RCA → SRE → Approve → Execute |
+| `notifications_enabled` | `true` | Auto-notifications on pipeline events |
 | `executor_auto_approve_l0_l1` | `true` | Auto-approve L0/L1 fix plans |
 
 ## Graph Module
@@ -265,6 +270,36 @@ skills/
 - `skills/kubernetes-admin/SKILL.md` — Fix/Remediation decision trees (8 paths)
 
 ## Recent Changes
+
+### 2026-03-02: Auto-Notifications + `/send_to` Chat Command
+
+**Auto-Notifications** (`services/notification_service.py`, 7 trigger points):
+- Fire-and-forget notifications at 7 pipeline event points via daemon threads (same pattern as `pipeline_service.py`)
+- `notify_event()` — core function: checks `settings.notifications_enabled`, runs `NotificationManager.send_notification()` in daemon thread with new event loop
+- 7 convenience functions: `notify_issue_created`, `notify_rca_completed`, `notify_fix_planned`, `notify_fix_approved`, `notify_execution_result`, `notify_report_saved`, `notify_schedule_result`
+- Wired into: `metadata_tools.py` (5 triggers), `report_tools.py` (1), `scheduler.py` (2 — success/failure)
+- Gated by `settings.notifications_enabled` (AIOPS_NOTIFICATIONS_ENABLED, default: true)
+
+**New Models** (`models.py`):
+- `LocalDoc` — tracks files written by `write_local_file` tool (file_path unique, file_type, size_bytes, created_by)
+- `IMAlias` — maps friendly names to IM chat IDs (name unique, platform, chat_id, app_name)
+- `write_local_file` now auto-registers LocalDoc records via `_register_local_doc()` helper in `file_tools.py`
+
+**`/send_to` Command** (`chat/send_to.py`, CLI, Web, IM):
+- Syntax: `/send_to <target> #R<id>, #D<id>, "text"`
+- Target resolution: NotificationChannel (by name) → IMAlias (by name)
+- Content resolution: `#R<id>` → Report content, `#D<id>` → LocalDoc file content, free text
+- CLI: `_slash_send_to()` handler, registered as `send_to` and `sendto` in SLASH_COMMANDS
+- Web: Intercepted in `api_send_chat_message()` before agent dispatch, returns SSE stream
+- IM (app.py): Intercepted in `_handle_im_message()` before agent dispatch
+- IM (feishu_ws.py): Intercepted in `_process_and_reply()` before agent dispatch
+
+**API Endpoints** (5 new):
+- `GET /api/im-aliases` — list all IM aliases
+- `POST /api/im-aliases` — create IM alias
+- `DELETE /api/im-aliases/{id}` — delete IM alias
+- `GET /api/local-docs` — list tracked local docs
+- `GET /api/local-docs/{id}` — get local doc detail
 
 ### 2026-03-02: Phase 0 — Tiered Models, Fingerprint Dedup, Prometheus Webhook, Alert Rules
 

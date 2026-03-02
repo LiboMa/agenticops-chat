@@ -2718,6 +2718,17 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
         session.close()
 
 
+def _slash_send_to(ctx: ChatContext, args: list) -> str:
+    """Handle /send_to command — push content to notification channels or IM groups."""
+    command = "/send_to " + " ".join(args)
+    from agenticops.chat.send_to import execute_send_to
+    result = execute_send_to(command)
+    if result.success:
+        return f"[green]{result.message}[/green]"
+    else:
+        return f"[yellow]{result.message}[/yellow]"
+
+
 # Map of slash commands to handlers
 SLASH_COMMANDS = {
     # Help & Info
@@ -2773,6 +2784,10 @@ SLASH_COMMANDS = {
     # Automation
     "schedule": _slash_schedule,
     "notify": _slash_notify,
+
+    # Send to channels/IM
+    "send_to": _slash_send_to,
+    "sendto": _slash_send_to,
 
     # Export
     "export": _slash_export,

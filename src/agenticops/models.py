@@ -559,6 +559,48 @@ class Report(Base):
 
 
 # ============================================================================
+# Local Documents (tracked files from write_local_file)
+# ============================================================================
+
+
+class LocalDoc(Base):
+    """Tracks files written by the write_local_file agent tool."""
+
+    __tablename__ = "local_docs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(500), unique=True)
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_type: Mapped[str] = mapped_column(String(50))  # extension: md, json, yaml, txt...
+    size_bytes: Mapped[int] = mapped_column(default=0)
+    created_by: Mapped[str] = mapped_column(String(100), default="agent")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+# ============================================================================
+# IM Aliases (friendly names → IM chat IDs)
+# ============================================================================
+
+
+class IMAlias(Base):
+    """Maps friendly names to IM platform chat IDs for /send_to."""
+
+    __tablename__ = "im_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    platform: Mapped[str] = mapped_column(String(20))  # feishu / dingtalk / wecom
+    chat_id: Mapped[str] = mapped_column(String(200))
+    app_name: Mapped[str] = mapped_column(String(100), default="default")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
 # Chat Sessions (Web UI)
 # ============================================================================
 
@@ -585,12 +627,14 @@ class AlertEvent(Base):
 
 
 class ChatSession(Base):
-    """Chat session for web UI."""
+    """Chat session for web UI and IM bidirectional chat."""
     __tablename__ = "chat_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
+    im_platform: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # feishu|dingtalk|wecom|None
+    im_chat_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # IM group chat ID
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -649,6 +693,15 @@ def init_db():
                 conn.execute(
                     text("ALTER TABLE chat_messages ADD COLUMN attachments JSON")
                 )
+                conn.commit()
+
+    # Migration: add IM chat columns to chat_sessions if missing
+    if insp.has_table("chat_sessions"):
+        columns = {col["name"] for col in insp.get_columns("chat_sessions")}
+        if "im_platform" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN im_platform VARCHAR(20)"))
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN im_chat_id VARCHAR(200)"))
                 conn.commit()
 
     # Migration: add fingerprint dedup columns to health_issues if missing

@@ -136,6 +136,14 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "skills",
         description="Directory containing Agent Skills packages (SKILL.md format)",
     )
+    im_apps_config: Path = Field(
+        default=PROJECT_ROOT / "config" / "im-apps.yaml",
+        description="Path to IM app credentials YAML (Feishu/DingTalk/WeCom)",
+    )
+    feishu_ws_enabled: bool = Field(
+        default=True,
+        description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",
+    )
     skills_enabled: bool = Field(
         default=True,
         description="Enable Agent Skills integration (AIOPS_SKILLS_ENABLED=false to disable)",
@@ -191,6 +199,12 @@ class Settings(BaseSettings):
     auto_fix_enabled: bool = Field(
         default=True,
         description="Enable auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute",
+    )
+
+    # Notifications
+    notifications_enabled: bool = Field(
+        default=True,
+        description="Enable auto-notifications on pipeline events (AIOPS_NOTIFICATIONS_ENABLED=false to disable)",
     )
 
     # Webhooks

@@ -423,7 +423,7 @@ class ScheduleExecutionResponse(BaseModel):
 class NotificationChannelCreate(BaseModel):
     """Schema for creating a notification channel."""
     name: str = Field(..., max_length=100)
-    channel_type: str = Field(..., pattern="^(slack|email|sns|webhook)$")
+    channel_type: str = Field(..., pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
     config: dict = Field(default_factory=dict)
     severity_filter: List[str] = Field(default_factory=list)
     is_enabled: bool = True
@@ -432,7 +432,7 @@ class NotificationChannelCreate(BaseModel):
 class NotificationChannelUpdate(BaseModel):
     """Schema for updating a notification channel."""
     name: Optional[str] = Field(None, max_length=100)
-    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|webhook)$")
+    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
     config: Optional[dict] = None
     severity_filter: Optional[List[str]] = None
     is_enabled: Optional[bool] = None
@@ -625,12 +625,31 @@ async def startup():
     _chat_sessions.start_cleanup()
     _executor_service.start()
 
+    # Start Feishu WebSocket long-connection if enabled
+    if settings.feishu_ws_enabled:
+        try:
+            from agenticops.im.feishu_ws import start_feishu_ws
+            start_feishu_ws()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Feishu WS service failed to start (set AIOPS_FEISHU_WS_ENABLED=false to disable)",
+                exc_info=True,
+            )
+
 
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown."""
     _chat_sessions.stop_cleanup()
     _executor_service.stop()
+
+    # Stop Feishu WebSocket service
+    try:
+        from agenticops.im.feishu_ws import stop_feishu_ws
+        stop_feishu_ws()
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -2845,6 +2864,13 @@ async def api_list_notification_logs(
         return [NotificationLogResponse.model_validate(log) for log in logs]
 
 
+@app.get("/api/notifications/im-apps")
+async def api_list_im_apps():
+    """Diagnostic endpoint — list configured IM app names (no secrets)."""
+    from agenticops.notify.im_config import list_apps
+    return list_apps()
+
+
 # ============================================================================
 # Chat API Endpoints
 # ============================================================================
@@ -2989,6 +3015,26 @@ async def api_send_chat_message(session_id: str, request: Request):
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
         detail_level_req = payload.detail_level
+
+    # Intercept /send_to command before agent dispatch
+    if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
+        from agenticops.chat.send_to import execute_send_to
+
+        send_result = execute_send_to(user_content.strip())
+
+        # Persist user message + result
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row:
+                db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
+                db.add(ChatMessage(session_id=row.id, role="assistant", content=send_result.message))
+                row.last_activity_at = datetime.utcnow()
+
+        async def _send_to_stream():
+            yield {"event": "text", "data": json.dumps({"token": send_result.message})}
+            yield {"event": "done", "data": json.dumps({"input_tokens": 0, "output_tokens": 0})}
+
+        return EventSourceResponse(_send_to_stream())
 
     # Preprocess: file injection + reference resolution (returns str or list[ContentBlock])
     enriched_content, _ = preprocess_message(
@@ -3181,6 +3227,293 @@ if settings.api_auth_enabled:
 
     app.add_middleware(APIAuthMiddleware)
     logger.info("API authentication enabled — all /api/* endpoints require Bearer token")
+
+
+# ============================================================================
+# IM Aliases + Local Docs API
+# ============================================================================
+
+
+@app.get("/api/im-aliases")
+async def api_list_im_aliases():
+    """List all IM aliases."""
+    from agenticops.models import IMAlias
+    with get_db_session() as db:
+        aliases = db.query(IMAlias).order_by(IMAlias.name).all()
+        return [
+            {
+                "id": a.id,
+                "name": a.name,
+                "platform": a.platform,
+                "chat_id": a.chat_id,
+                "app_name": a.app_name,
+                "description": a.description,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in aliases
+        ]
+
+
+@app.post("/api/im-aliases", status_code=201)
+async def api_create_im_alias(request: Request):
+    """Create a new IM alias."""
+    from agenticops.models import IMAlias
+    data = await request.json()
+    name = data.get("name", "").strip()
+    platform = data.get("platform", "").strip()
+    chat_id = data.get("chat_id", "").strip()
+
+    if not name or not platform or not chat_id:
+        raise HTTPException(400, "name, platform, and chat_id are required")
+    if platform not in ("feishu", "dingtalk", "wecom"):
+        raise HTTPException(400, f"Invalid platform '{platform}'. Must be feishu, dingtalk, or wecom")
+
+    with get_db_session() as db:
+        existing = db.query(IMAlias).filter_by(name=name).first()
+        if existing:
+            raise HTTPException(409, f"IM alias '{name}' already exists")
+        alias = IMAlias(
+            name=name,
+            platform=platform,
+            chat_id=chat_id,
+            app_name=data.get("app_name", "default"),
+            description=data.get("description"),
+        )
+        db.add(alias)
+        db.flush()
+        return {"id": alias.id, "name": alias.name, "platform": alias.platform}
+
+
+@app.delete("/api/im-aliases/{alias_id}")
+async def api_delete_im_alias(alias_id: int):
+    """Delete an IM alias."""
+    from agenticops.models import IMAlias
+    with get_db_session() as db:
+        alias = db.query(IMAlias).filter_by(id=alias_id).first()
+        if not alias:
+            raise HTTPException(404, "IM alias not found")
+        db.delete(alias)
+    return {"deleted": True}
+
+
+@app.get("/api/local-docs")
+async def api_list_local_docs(limit: int = 50, offset: int = 0):
+    """List tracked local documents."""
+    from agenticops.models import LocalDoc
+    with get_db_session() as db:
+        docs = (
+            db.query(LocalDoc)
+            .order_by(LocalDoc.updated_at.desc())
+            .offset(offset)
+            .limit(min(limit, 200))
+            .all()
+        )
+        return [
+            {
+                "id": d.id,
+                "file_path": d.file_path,
+                "title": d.title,
+                "description": d.description,
+                "file_type": d.file_type,
+                "size_bytes": d.size_bytes,
+                "created_by": d.created_by,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+            }
+            for d in docs
+        ]
+
+
+@app.get("/api/local-docs/{doc_id}")
+async def api_get_local_doc(doc_id: int):
+    """Get a specific local document detail."""
+    from agenticops.models import LocalDoc
+    with get_db_session() as db:
+        doc = db.query(LocalDoc).filter_by(id=doc_id).first()
+        if not doc:
+            raise HTTPException(404, "Local document not found")
+        return {
+            "id": doc.id,
+            "file_path": doc.file_path,
+            "title": doc.title,
+            "description": doc.description,
+            "file_type": doc.file_type,
+            "size_bytes": doc.size_bytes,
+            "created_by": doc.created_by,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+        }
+
+
+# ============================================================================
+# IM Bidirectional Chat Endpoints (Feishu / DingTalk / WeCom)
+# ============================================================================
+
+# Lazy-initialized singleton — created on first IM callback
+_im_sessions = None
+
+
+def _get_im_sessions():
+    global _im_sessions
+    if _im_sessions is None:
+        from agenticops.im.session_manager import IMChatSessionManager
+        _im_sessions = IMChatSessionManager(ttl_minutes=60)
+        _im_sessions.start_cleanup()
+    return _im_sessions
+
+
+async def _handle_im_message(platform: str, msg) -> None:
+    """Process an inbound IM message: run agent → reply via notifier."""
+    from agenticops.im.gateway import IMInboundMessage
+
+    # Intercept /send_to command before agent dispatch
+    content_stripped = msg.content.strip()
+    if content_stripped.lower().startswith(("/send_to ", "/sendto ")):
+        from agenticops.chat.send_to import execute_send_to
+        send_result = execute_send_to(content_stripped)
+        response_text = send_result.message
+    else:
+        im_sessions = _get_im_sessions()
+        agent = im_sessions.get_or_create(platform, msg.chat_id, msg.app_name)
+
+        try:
+            result = agent(msg.content)
+            response_text = str(result) if result else "No response generated."
+        except Exception as e:
+            logger.error("IM agent error (%s:%s): %s", platform, msg.chat_id, e)
+            response_text = f"Agent error: {e}"
+
+    notifier = _get_im_sessions().get_notifier(platform, msg.chat_id, msg.app_name)
+
+    # Persist messages
+    from agenticops.models import ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel
+    with get_db_session() as db:
+        # Find or create IM chat session
+        row = db.query(ChatSessionModel).filter(
+            ChatSessionModel.im_platform == platform,
+            ChatSessionModel.im_chat_id == msg.chat_id,
+        ).first()
+        if not row:
+            row = ChatSessionModel(
+                session_id=f"im-{platform}-{msg.chat_id}",
+                name=f"IM {platform} {msg.chat_id[:20]}",
+                im_platform=platform,
+                im_chat_id=msg.chat_id,
+            )
+            db.add(row)
+            db.flush()
+        # Save user message
+        db.add(ChatMessageModel(session_id=row.id, role="user", content=msg.content))
+        # Save assistant response
+        db.add(ChatMessageModel(session_id=row.id, role="assistant", content=response_text))
+        row.last_activity_at = datetime.utcnow()
+
+    # Reply to IM
+    if notifier:
+        try:
+            await notifier.send(subject="", body=response_text, severity=None)
+        except Exception as e:
+            logger.error("IM reply failed (%s:%s): %s", platform, msg.chat_id, e)
+
+
+@app.post("/api/im/feishu/callback")
+async def api_feishu_callback(request: Request):
+    """Feishu Event Subscription callback endpoint."""
+    from agenticops.im.feishu_gateway import FeishuGateway
+
+    body = await request.body()
+    payload = json.loads(body)
+
+    # URL verification challenge
+    if FeishuGateway.is_challenge(payload):
+        return FeishuGateway.challenge_response(payload)
+
+    gateway = FeishuGateway()
+
+    # Verify signature
+    headers = dict(request.headers)
+    if not gateway.verify_callback(body, headers):
+        raise HTTPException(403, "Invalid signature")
+
+    msg = gateway.parse_message(payload)
+    if msg:
+        # Run in background to respond quickly (Feishu expects fast 200)
+        import asyncio
+        asyncio.ensure_future(_handle_im_message("feishu", msg))
+
+    return {"code": 0}
+
+
+@app.post("/api/im/dingtalk/callback")
+async def api_dingtalk_callback(request: Request):
+    """DingTalk robot callback endpoint."""
+    from agenticops.im.dingtalk_gateway import DingTalkGateway
+
+    body = await request.body()
+    payload = json.loads(body)
+
+    gateway = DingTalkGateway()
+
+    headers = dict(request.headers)
+    if not gateway.verify_callback(body, headers):
+        raise HTTPException(403, "Invalid signature")
+
+    msg = gateway.parse_message(payload)
+    if msg:
+        import asyncio
+        asyncio.ensure_future(_handle_im_message("dingtalk", msg))
+
+    return {"status": "ok"}
+
+
+@app.api_route("/api/im/wecom/callback", methods=["GET", "POST"])
+async def api_wecom_callback(request: Request):
+    """WeCom callback endpoint with AES decryption.
+
+    GET:  URL verification (echostr decryption)
+    POST: Message callback
+    """
+    from agenticops.im.wecom_gateway import WeComGateway
+
+    gateway = WeComGateway()
+
+    # WeCom passes signature params in query string
+    params = dict(request.query_params)
+    headers_with_params = {
+        "msg_signature": params.get("msg_signature", ""),
+        "timestamp": params.get("timestamp", ""),
+        "nonce": params.get("nonce", ""),
+    }
+
+    # URL verification: GET with echostr
+    if request.method == "GET":
+        echostr = params.get("echostr", "")
+        if echostr:
+            # Verify signature using empty body for GET
+            if not gateway.verify_callback(b"", headers_with_params):
+                raise HTTPException(403, "Invalid signature")
+            decrypted = gateway.decrypt_echostr(echostr)
+            if decrypted:
+                from fastapi.responses import PlainTextResponse
+                return PlainTextResponse(decrypted)
+        raise HTTPException(400, "Missing or invalid echostr")
+
+    # POST: Message callback
+    body = await request.body()
+
+    if not gateway.verify_callback(body, headers_with_params):
+        raise HTTPException(403, "Invalid signature")
+
+    payload = {
+        "xml_body": body.decode("utf-8"),
+        **headers_with_params,
+    }
+    msg = gateway.parse_message(payload)
+    if msg:
+        import asyncio
+        asyncio.ensure_future(_handle_im_message("wecom", msg))
+
+    return ""
 
 
 # ============================================================================

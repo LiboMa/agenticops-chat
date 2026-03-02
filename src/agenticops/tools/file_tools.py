@@ -25,6 +25,34 @@ from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _register_local_doc(resolved_path: str, size_bytes: int, mode: str) -> None:
+    """Register or update a LocalDoc record for a written file (best-effort)."""
+    try:
+        from agenticops.models import LocalDoc, get_db_session
+
+        p = Path(resolved_path)
+        ext = p.suffix.lstrip(".").lower() or "txt"
+        title = p.stem
+
+        with get_db_session() as db:
+            existing = db.query(LocalDoc).filter_by(file_path=resolved_path).first()
+            if existing:
+                if mode == "overwrite":
+                    existing.size_bytes = size_bytes
+                # append: no size update needed (file stat would be more accurate)
+            else:
+                db.add(LocalDoc(
+                    file_path=resolved_path,
+                    title=title,
+                    file_type=ext,
+                    size_bytes=size_bytes,
+                    created_by="agent",
+                ))
+    except Exception:
+        logger.debug("Failed to register LocalDoc for %s", resolved_path, exc_info=True)
+
+
 # ── Output limits (matches metadata_tools.py / aws_cli_tool.py) ────────
 MAX_RESULT_CHARS = 4000
 MAX_LIST_RESULT_CHARS = 6000
@@ -405,6 +433,9 @@ def write_local_file(path: str, content: str, mode: str = "overwrite") -> str:
         file_mode = "w" if mode == "overwrite" else "a"
         with open(resolved, file_mode, encoding="utf-8") as f:
             f.write(content)
+
+        # Track in LocalDoc table (best-effort)
+        _register_local_doc(str(resolved), len(content_bytes), mode)
 
         action = "Wrote" if mode == "overwrite" else "Appended"
         return f"{action} {len(content_bytes):,} bytes to {resolved}"

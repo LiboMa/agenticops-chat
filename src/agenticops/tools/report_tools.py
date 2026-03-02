@@ -74,6 +74,13 @@ def save_report(
         session.add(report)
         session.commit()
 
+        # Auto-notify
+        try:
+            from agenticops.services.notification_service import notify_report_saved
+            notify_report_saved(report.id, report_type, title)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
+
         return (
             f"Report #{report.id} saved: [{report_type.upper()}] {title}. "
             f"File: {filepath}"

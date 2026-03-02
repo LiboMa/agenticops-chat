@@ -299,6 +299,13 @@ class Scheduler:
 
             logger.info(f"Schedule '{schedule.name}' completed: {result.status.value}")
 
+            # Auto-notify on completion
+            try:
+                from agenticops.services.notification_service import notify_schedule_result
+                notify_schedule_result(schedule.name, result.success)
+            except Exception:
+                logger.debug("Notification trigger failed", exc_info=True)
+
         except Exception as e:
             logger.error(f"Schedule '{schedule.name}' failed: {e}")
 
@@ -310,6 +317,13 @@ class Scheduler:
                     execution.status = "failed"
                     execution.completed_at = datetime.utcnow()
                     execution.error = str(e)
+
+            # Auto-notify on failure
+            try:
+                from agenticops.services.notification_service import notify_schedule_result
+                notify_schedule_result(schedule.name, False, str(e))
+            except Exception:
+                logger.debug("Notification trigger failed", exc_info=True)
 
     @staticmethod
     def add_schedule(
