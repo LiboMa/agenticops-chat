@@ -3346,6 +3346,88 @@ async def api_get_local_doc(doc_id: int):
 
 
 # ============================================================================
+# IM Bot Status API
+# ============================================================================
+
+
+@app.get("/api/im/bots")
+async def api_im_bots():
+    """Return status of each IM bot platform (Feishu/DingTalk/WeCom)."""
+    from agenticops.notify.im_config import list_apps
+
+    configured = list_apps()  # {"feishu": ["default"], ...}
+
+    # Count active IM sessions per platform from the lazy singleton
+    session_counts: dict[str, int] = {"feishu": 0, "dingtalk": 0, "wecom": 0}
+    if _im_sessions is not None:
+        with _im_sessions._lock:
+            for key in _im_sessions._agents:
+                plat = key.split(":", 1)[0]
+                if plat in session_counts:
+                    session_counts[plat] += 1
+
+    bots = []
+
+    # --- Feishu (WebSocket mode) ---
+    feishu_apps = configured.get("feishu", [])
+    if feishu_apps:
+        try:
+            from agenticops.im.feishu_ws import _feishu_ws_service
+            ws_enabled = settings.feishu_ws_enabled
+            ws_started = _feishu_ws_service is not None and _feishu_ws_service._started
+            ws_thread_alive = (
+                _feishu_ws_service is not None
+                and _feishu_ws_service._thread is not None
+                and _feishu_ws_service._thread.is_alive()
+            )
+            if ws_started and ws_thread_alive:
+                status = "connected"
+            elif ws_enabled:
+                status = "disconnected"
+            else:
+                status = "not_configured"
+        except Exception:
+            ws_enabled = False
+            ws_started = False
+            ws_thread_alive = False
+            status = "not_configured"
+
+        bots.append({
+            "platform": "feishu",
+            "mode": "websocket",
+            "apps": feishu_apps,
+            "status": status,
+            "active_sessions": session_counts["feishu"],
+            "ws_enabled": ws_enabled,
+            "ws_thread_alive": ws_thread_alive,
+        })
+    else:
+        bots.append({
+            "platform": "feishu",
+            "mode": "websocket",
+            "apps": [],
+            "status": "not_configured",
+            "active_sessions": 0,
+            "ws_enabled": False,
+            "ws_thread_alive": False,
+        })
+
+    # --- DingTalk / WeCom (callback mode) ---
+    for plat, callback_path in [("dingtalk", "/api/im/dingtalk/callback"), ("wecom", "/api/im/wecom/callback")]:
+        apps = configured.get(plat, [])
+        bots.append({
+            "platform": plat,
+            "mode": "callback",
+            "apps": apps,
+            "status": "ready" if apps else "not_configured",
+            "active_sessions": session_counts[plat],
+            "callback_url": callback_path,
+        })
+
+    return bots
+
+
+# ============================================================================
 # IM Bidirectional Chat Endpoints (Feishu / DingTalk / WeCom)
 # ============================================================================
 

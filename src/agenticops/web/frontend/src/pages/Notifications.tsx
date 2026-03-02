@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { formatShortDate } from "@/lib/formatDate";
+import { apiFetch } from "@/api/client";
 import {
   useNotificationChannels,
   useCreateChannel,
@@ -20,7 +22,7 @@ import type {
   NotificationChannelType,
 } from "@/api/types";
 
-const CHANNEL_TYPES: NotificationChannelType[] = ["slack", "email", "sns", "webhook"];
+const CHANNEL_TYPES: NotificationChannelType[] = ["slack", "email", "sns", "feishu", "dingtalk", "wecom", "webhook"];
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "low"];
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +219,97 @@ function DeleteModal({
 }
 
 /* ------------------------------------------------------------------ */
+/*  IM Bot status types + card                                         */
+/* ------------------------------------------------------------------ */
+
+interface IMBotStatus {
+  platform: string;
+  mode: string;
+  apps: string[];
+  status: string;
+  active_sessions: number;
+  ws_enabled?: boolean;
+  ws_thread_alive?: boolean;
+  callback_url?: string;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    connected: "bg-green-100 text-green-700",
+    ready: "bg-blue-100 text-blue-700",
+    disconnected: "bg-red-100 text-red-700",
+    not_configured: "bg-slate-100 text-slate-500",
+  };
+  const labels: Record<string, string> = {
+    connected: "Connected",
+    ready: "Ready",
+    disconnected: "Disconnected",
+    not_configured: "Not Configured",
+  };
+  return (
+    <Badge className={styles[status] ?? "bg-slate-100 text-slate-500"}>
+      {labels[status] ?? status}
+    </Badge>
+  );
+}
+
+function IMBotsCard() {
+  const { data: bots, isLoading, error } = useQuery<IMBotStatus[]>({
+    queryKey: ["im-bots"],
+    queryFn: () => apiFetch("/api/im/bots"),
+    refetchInterval: 30_000,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-slate-900">IM Bots</h2>
+      </CardHeader>
+      {isLoading ? (
+        <div className="p-4"><Spinner /></div>
+      ) : error ? (
+        <div className="p-4"><ErrorBanner message={(error as Error).message} /></div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {(bots ?? []).map((bot) => (
+            <div key={bot.platform} className="flex items-center justify-between px-6 py-3">
+              <div className="flex items-center gap-3">
+                <PlatformBadge platform={bot.platform} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={bot.status} />
+                    <span className="text-xs text-slate-400 uppercase">{bot.mode}</span>
+                  </div>
+                  {bot.apps.length > 0 && (
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Apps: {bot.apps.join(", ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="text-right text-sm text-slate-500">
+                {bot.active_sessions > 0 && (
+                  <span>{bot.active_sessions} active session{bot.active_sessions !== 1 ? "s" : ""}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PlatformBadge({ platform }: { platform: string }) {
+  const colors: Record<string, string> = {
+    feishu: "bg-teal-100 text-teal-700",
+    dingtalk: "bg-sky-100 text-sky-700",
+    wecom: "bg-emerald-100 text-emerald-700",
+  };
+  return <Badge className={colors[platform] ?? "bg-slate-100 text-slate-700"}>{platform}</Badge>;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Channel type badge colors                                          */
 /* ------------------------------------------------------------------ */
 
@@ -225,6 +318,9 @@ function ChannelTypeBadge({ type }: { type: string }) {
     slack: "bg-purple-100 text-purple-700",
     email: "bg-blue-100 text-blue-700",
     sns: "bg-orange-100 text-orange-700",
+    feishu: "bg-teal-100 text-teal-700",
+    dingtalk: "bg-sky-100 text-sky-700",
+    wecom: "bg-emerald-100 text-emerald-700",
     webhook: "bg-slate-100 text-slate-700",
   };
   return <Badge className={colors[type] ?? "bg-slate-100 text-slate-700"}>{type}</Badge>;
@@ -300,7 +396,9 @@ export default function Notifications() {
   if (error) return <ErrorBanner message={(error as Error).message} />;
 
   return (
-    <>
+    <div className="space-y-6">
+      <IMBotsCard />
+
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
@@ -405,6 +503,6 @@ export default function Notifications() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }

@@ -85,7 +85,7 @@ Web Dashboard ──────┘         │
 
 **Note**: `ChatContext` is defined in both `context.py` AND duplicated in `main.py` (~line 1568). Both must be kept in sync.
 
-## API Endpoints (80 total)
+## API Endpoints (81 total)
 
 | Group | Count | Base Path |
 |-------|-------|-----------|
@@ -104,7 +104,7 @@ Web Dashboard ──────┘         │
 | Audit Log | 2 | `/api/audit-log` |
 | Stats/Health | 3 | `/api/stats`, `/api/health` |
 | Auth | 3 | `/api/auth` |
-| IM Aliases | 3 | `/api/im-aliases` |
+| IM Aliases + Bots | 4 | `/api/im-aliases`, `/api/im/bots` |
 | Local Docs | 2 | `/api/local-docs` |
 | SPA | 1 | `/app/{path}` |
 
