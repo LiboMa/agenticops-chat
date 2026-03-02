@@ -1,8 +1,8 @@
-"""Local file tools — read files, list directories, and search file contents.
+"""Local file tools — read files, list directories, search file contents, and write files.
 
-Provides agents with the ability to inspect local files such as configuration,
-logs, application code, Terraform/CloudFormation templates, Kubernetes manifests,
-and other operational artifacts. All operations are strictly READ-ONLY.
+Provides agents with the ability to inspect and write local files such as
+configuration, logs, application code, Terraform/CloudFormation templates,
+Kubernetes manifests, and other operational artifacts.
 
 Security: a blocklist prevents access to sensitive paths (credentials, private
 keys, secrets, etc.). Admin mode (AIOPS_FILE_TOOLS_ADMIN_MODE=true) unlocks
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # ── Output limits (matches metadata_tools.py / aws_cli_tool.py) ────────
 MAX_RESULT_CHARS = 4000
 MAX_LIST_RESULT_CHARS = 6000
+MAX_WRITE_BYTES = 1_048_576  # 1 MB
 
 
 def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
@@ -363,3 +364,52 @@ def file_stat(path: str) -> str:
         )
     except Exception as e:
         return f"Error: {e}"
+
+
+@tool
+def write_local_file(path: str, content: str, mode: str = "overwrite") -> str:
+    """Write text content to a local file.
+
+    Use this to save analysis results, reports, config snippets, scripts,
+    and other operational artifacts to the local filesystem.
+
+    Args:
+        path: Absolute or relative file path to write.
+        content: Text content to write to the file.
+        mode: Write mode — "overwrite" (default) replaces the file,
+              "append" adds to the end.
+
+    Returns:
+        Confirmation with resolved path and bytes written, or error message.
+    """
+    blocked = _is_blocked(path)
+    if blocked:
+        return f"ACCESS DENIED: {blocked}. Cannot write to sensitive files."
+
+    content_bytes = content.encode("utf-8")
+    if len(content_bytes) > MAX_WRITE_BYTES:
+        return (
+            f"Content too large: {len(content_bytes):,} bytes "
+            f"(limit {MAX_WRITE_BYTES:,} bytes / 1 MB)."
+        )
+
+    if mode not in ("overwrite", "append"):
+        return f"Invalid mode '{mode}'. Use 'overwrite' or 'append'."
+
+    try:
+        resolved = Path(path).resolve()
+
+        # Auto-create parent directories
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+
+        file_mode = "w" if mode == "overwrite" else "a"
+        with open(resolved, file_mode, encoding="utf-8") as f:
+            f.write(content)
+
+        action = "Wrote" if mode == "overwrite" else "Appended"
+        return f"{action} {len(content_bytes):,} bytes to {resolved}"
+
+    except PermissionError:
+        return f"Permission denied: {path}"
+    except Exception as e:
+        return f"Error writing {path}: {e}"

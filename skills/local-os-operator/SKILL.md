@@ -1,9 +1,9 @@
 ---
 name: local-os-operator
-description: "Local filesystem operations — read configs, tail logs, search files, list directories, and inspect file metadata. Provides secure, read-only access to local operational artifacts (Terraform, CloudFormation, Kubernetes manifests, systemd units, nginx configs, application properties, log files). Includes security blocklists for sensitive files."
+description: "Local filesystem operations — read configs, tail logs, search files, list directories, inspect file metadata, and write files. Provides secure access to local operational artifacts (Terraform, CloudFormation, Kubernetes manifests, systemd units, nginx configs, application properties, log files). Includes security blocklists for sensitive files."
 metadata:
   author: agenticops
-  version: "1.0"
+  version: "1.1"
   domain: infrastructure
 tools:
   - agenticops.tools.file_tools.read_local_file
@@ -11,14 +11,15 @@ tools:
   - agenticops.tools.file_tools.search_local_file
   - agenticops.tools.file_tools.list_local_directory
   - agenticops.tools.file_tools.file_stat
+  - agenticops.tools.file_tools.write_local_file
 ---
 
 # Local OS Operator Skill
 
 ## Overview
 
-Provides secure, read-only access to local files for operational investigation.
-When this skill is activated, 5 file tools are dynamically registered on the agent:
+Provides secure access to local files for operational investigation and output.
+When this skill is activated, 6 file tools are dynamically registered on the agent:
 
 | Tool | Purpose | Key Args |
 |------|---------|----------|
@@ -27,6 +28,7 @@ When this skill is activated, 5 file tools are dynamically registered on the age
 | `search_local_file` | Case-insensitive grep | `path`, `pattern`, `max_matches` |
 | `list_local_directory` | List files with sizes | `path`, `pattern`, `recursive` |
 | `file_stat` | File metadata (size, perms, mtime) | `path` |
+| `write_local_file` | Write/append text to file | `path`, `content`, `mode` |
 
 ## Security Model
 

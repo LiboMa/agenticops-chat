@@ -21,6 +21,7 @@ from agenticops.tools.metadata_tools import (
 )
 from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
+from agenticops.skills.tools import activate_skill
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,14 @@ REPORT QUALITY:
 - Recommendations should be specific and actionable, not generic advice.
 - If no issues are found, report that explicitly as a positive finding.
 
+LOCAL FILE OUTPUT:
+- When the user asks to save/export results to a local file, call
+  activate_skill("local-os-operator") first to load the write_local_file tool,
+  then use write_local_file to save the content.
+
 RULES:
-- Only READ from AWS metadata. The only writes are save_report and write_kb_case.
+- Only READ from AWS metadata. The only writes are save_report, write_kb_case,
+  and write_local_file (when user explicitly requests file export).
 - Always check list_reports first to avoid generating duplicate reports.
 - Return the report summary and file path at the end.
 """
@@ -115,6 +122,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 search_similar_cases,
                 write_kb_case,
                 distill_case_study,
+                activate_skill,
             ],
         )
 
