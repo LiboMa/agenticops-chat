@@ -27,7 +27,8 @@ Web Dashboard ──────┘         │
 ```
 
 - **Agents-as-tools pattern**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
-- **All 7 agents** use centralized config: `settings.bedrock_model_id`, `settings.bedrock_max_tokens`, `settings.bedrock_window_size`
+- **Tiered model config**: `bedrock_model_id` (Sonnet 4.6), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6)
+- **All 7 agents** use centralized config: `settings.bedrock_model_id*`, `settings.bedrock_max_tokens`, `settings.bedrock_window_size`
 - **Conversation management**: `SlidingWindowConversationManager(window_size=40, per_turn=True)` on all agents to prevent `MaxTokensReachedException`
 - **Dynamic output rules**: `contextvars.ContextVar` holds detail level (concise/medium/detailed); `build_prompt_with_skills()` injects level-appropriate OUTPUT FORMAT RULES at agent creation time
 
@@ -145,7 +146,9 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `bedrock_model_id` | `global.anthropic.claude-opus-4-6-v1` | Bedrock model ID |
+| `bedrock_model_id` | `global.anthropic.claude-sonnet-4-6-v1` | Default Bedrock model (Sonnet 4.6) for reasoning agents |
+| `bedrock_model_id_cheap` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Economy model (Haiku 4.5) for scan/detect/reporter |
+| `bedrock_model_id_strong` | `global.anthropic.claude-opus-4-6-v1` | Strong model (Opus 4.6) reserved for complex scenarios |
 | `bedrock_max_tokens` | `16384` | Max output tokens for all agents |
 | `bedrock_window_size` | `40` | Sliding window conversation manager size |
 | `bedrock_region` | `us-east-1` | AWS region for Bedrock |
@@ -238,7 +241,57 @@ skills/
     └── SKILL.md          # YAML tools: field → dynamic tool registration on activation
 ```
 
+## Closed-Loop Validation Roadmap (Active)
+
+**Goal**: 4 weeks to validate 10 real incident cases with end-to-end auto-remediation on EKS Lab.
+**Constraint**: All testing on VPC bastion host — no public endpoint exposure.
+
+| Phase | Week | Status | Scope |
+|-------|------|--------|-------|
+| **Phase 0**: Cost + Detection Hardening | W1 前半 | **DONE** | Tiered models ($14→$3/cycle), fingerprint dedup, Prometheus/CW parsers, alert rules, K8s fix skills |
+| **Phase 1**: EKS Lab + Cases 1-3 | W1 后半 + W2 | PENDING | Deploy lab, OOM kill, ImagePullBackOff, network loss |
+| **Phase 2**: Cases 4-10 + Pipeline Polish | W3 | PENDING | NodeNotReady, PodPending, LB, CoreDNS, PVC, HPA, 5xx; prompt/skill tuning |
+| **Phase 3**: Automation + Docs | W4 | PENDING | `scenarios/*.sh` injection scripts, `docs/cases/*.md`, cost report |
+
+**Acceptance**: ≥7/10 auto-fix, ≤3min detect, ≤10min resolve, ≤$3/cycle
+
+**Key files (Phase 0)**:
+- `config.py` — `bedrock_model_id_cheap` (Haiku), `bedrock_model_id_strong` (Opus)
+- `models.py` — `fingerprint`, `occurrence_count`, `first_seen`, `last_seen` on HealthIssue
+- `metadata_tools.py` — `_compute_fingerprint()` + dedup in `create_health_issue()`
+- `integrations/parsers.py` — `parse_prometheus()`, `parse_cloudwatch()`
+- `infra/eks-lab/monitoring/alert-rules.yaml` — 10 PrometheusRule alerts
+- `infra/eks-lab/monitoring/prometheus-values.yaml` — AlertManager webhook receiver
+- `skills/kubernetes-admin/SKILL.md` — Fix/Remediation decision trees (8 paths)
+
 ## Recent Changes
+
+### 2026-03-02: Phase 0 — Tiered Models, Fingerprint Dedup, Prometheus Webhook, Alert Rules
+
+**Tiered Model Configuration** (`config.py`, 3 agent files):
+- `bedrock_model_id` default changed from Opus 4.6 → Sonnet 4.6
+- New `bedrock_model_id_cheap` (Haiku 4.5) for detect_agent, scan_agent, reporter_agent
+- New `bedrock_model_id_strong` (Opus 4.6) reserved for complex scenarios
+- Expected cost: $14/cycle → ~$2-3/cycle (80% reduction)
+
+**HealthIssue Fingerprint Deduplication** (`models.py`, `metadata_tools.py`):
+- SHA-256 fingerprint of (source, resource_id, normalised title) with 5-minute dedup window
+- New columns: `fingerprint`, `occurrence_count`, `first_seen`, `last_seen`
+- DB auto-migration in `init_db()` for existing tables
+
+**Prometheus + CloudWatch Alert Parsers** (`integrations/parsers.py`, `web/app.py`):
+- `parse_prometheus()` — AlertManager webhook format (labels, annotations, fingerprint)
+- `parse_cloudwatch()` — SNS notification format (AlarmName, NewStateValue, Trigger)
+- `detect_source()` heuristics updated: Prometheus distinguished from Grafana by `labels.alertname`
+- Webhook `valid_sources` expanded to 6: datadog, pagerduty, grafana, prometheus, cloudwatch, generic
+
+**AlertManager + Alert Rules** (`infra/eks-lab/monitoring/`):
+- `prometheus-values.yaml` — AlertManager webhook receiver → bastion VPC IP, route grouping, Watchdog silenced
+- `alert-rules.yaml` — 10 PrometheusRule CRD alerts: KubePodCrashLooping, KubePodNotReady, KubeDeploymentReplicasMismatch, NodeNotReady, NodeDiskPressure, TargetDown, HighErrorRate, HighLatencyP99, KubePodOOMKilled, KubePVCPending
+
+**Kubernetes Skill Enhancement** (`skills/kubernetes-admin/`):
+- SKILL.md: 8 fix/remediation decision trees (OOM, ImagePull, ReplicasMismatch, NodeNotReady, CoreDNS, HPA, PVC, ServiceCrash)
+- `references/pod-troubleshooting.md`: OOM remediation commands + ImagePullBackOff section
 
 ### 2026-03-01: Dynamic Skill-Based Tool Loading + local-os-operator Skill
 
