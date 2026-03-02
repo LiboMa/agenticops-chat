@@ -10,7 +10,7 @@ from agenticops.config import VALID_DETAIL_LEVELS
 
 MODEL_ALIASES = {
     "opus": "global.anthropic.claude-opus-4-6-v1",
-    "sonnet": "global.anthropic.claude-sonnet-4-6-v1",
+    "sonnet": "global.anthropic.claude-sonnet-4-6",
     "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 }
 

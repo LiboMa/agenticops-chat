@@ -2836,11 +2836,15 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
         if args:
             alias = args[0].lower()
             if ctx.set_model(alias):
-                return f"[green]Model switched to: {alias} ({MODEL_ALIASES[alias]})[/green]"
-            return f"[yellow]Invalid model '{alias}'. Use: {', '.join(MODEL_ALIASES.keys())}[/yellow]"
+                return f"[green]Model switched to: {MODEL_ALIASES[alias]}[/green]"
+            valid = ", ".join(f"{k} ({v})" for k, v in MODEL_ALIASES.items())
+            return f"[yellow]Invalid model '{alias}'. Use:[/yellow]\n  {valid}"
         # No args — show current model and options
-        options = "  ".join(f"{'→' if k == ctx.current_model else ' '} {k}" for k in MODEL_ALIASES)
-        return f"[cyan]Current model: {ctx.current_model}[/cyan]\n  Available: {options}\n  Usage: /model <opus|sonnet|haiku>"
+        lines = "\n".join(
+            f"  {'→' if k == ctx.current_model else ' '} {k:8s} {v}"
+            for k, v in MODEL_ALIASES.items()
+        )
+        return f"[cyan]Current model: {MODEL_ALIASES[ctx.current_model]}[/cyan]\n{lines}\n  Usage: /model <opus|sonnet|haiku>"
 
     handler = SLASH_COMMANDS.get(cmd)
     if handler:
@@ -3263,7 +3267,8 @@ def chat(
             print_with_truncation(console, response, ctx, header="Agent")
 
             # Show session token summary in status bar
-            console.print(f"[dim]─── {ctx.current_model} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
+            from agenticops.cli.context import MODEL_ALIASES
+            console.print(f"[dim]─── {MODEL_ALIASES.get(ctx.current_model, ctx.current_model)} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Press Ctrl+C again to exit, or continue typing.[/yellow]")
