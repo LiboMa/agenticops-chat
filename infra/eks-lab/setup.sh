@@ -182,24 +182,14 @@ wait_and_print_info() {
     info "Kubeconfig: export KUBECONFIG=${KUBECONFIG_PATH}"
     echo ""
 
-    # Frontend URL
-    FRONTEND_URL=$(kubectl get svc frontend-external -n online-boutique \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-    info "Online Boutique: http://${FRONTEND_URL}"
-
-    # Grafana URL
-    GRAFANA_URL=$(kubectl get svc prometheus-grafana -n monitoring \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-    info "Grafana:         http://${GRAFANA_URL} (admin / agenticops-lab)"
-
-    # LitmusChaos URL
-    LITMUS_URL=$(kubectl get svc litmus-frontend-service -n chaos-testing \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-    info "LitmusChaos:     http://${LITMUS_URL} (admin / litmus)"
-
+    info "All services are ClusterIP (internal only). Access via kubectl port-forward:"
     echo ""
-    info "If URLs show 'pending', wait a minute and run:"
-    info "  kubectl get svc -A | grep LoadBalancer"
+    info "Online Boutique: kubectl port-forward svc/frontend -n online-boutique 8080:80"
+    info "Grafana:         kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80  (admin / agenticops-lab)"
+    info "LitmusChaos:     kubectl port-forward svc/litmus-frontend-service -n chaos-testing 9091:9091  (admin / litmus)"
+    info "Prometheus:      kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090"
+    echo ""
+    info "SSH tunnel from local: ssh -L 3000:localhost:3000 -L 8080:localhost:8080 ubuntu@<bastion>"
     echo ""
 
     # Quick verification

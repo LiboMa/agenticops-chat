@@ -2,7 +2,7 @@
 # Chart: oci://us-docker.pkg.dev/online-boutique-ci/charts/onlineboutique
 # Docs: https://github.com/GoogleCloudPlatform/microservices-demo
 
-# Frontend: expose via LoadBalancer
+# Frontend: ClusterIP (internal only — access via kubectl port-forward)
 frontend:
   externalService: false
   service:

@@ -1,5 +1,8 @@
 # eksctl cluster configuration for AgenticOps lab environment
 # Usage: eksctl create cluster -f cluster.yaml
+#
+# Security: All nodes in private subnets (no public IPs).
+# Access: kubectl via bastion SSH or SSM. Node access via SSM only.
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
@@ -31,9 +34,10 @@ managedNodeGroups:
     maxSize: 5
     volumeSize: 80
     volumeType: gp3
+    privateNetworking: true  # Nodes in private subnets — no public IPs
     ssh:
       allow: true
-      publicKeyName: sa-malibo
+      publicKeyName: sa-malibo  # SSH only reachable via SSM or bastion in same VPC
     labels:
       role: workload
     iam:
@@ -54,6 +58,7 @@ managedNodeGroups:
     maxSize: 3
     volumeSize: 100
     volumeType: gp3
+    privateNetworking: true  # Nodes in private subnets — no public IPs
     labels:
       role: monitoring
     taints:

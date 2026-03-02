@@ -29,23 +29,17 @@ SECTION="${1:-all}"
 show_urls() {
     section "Access URLs"
 
-    if [[ -f "$KUBECONFIG_PATH" ]]; then
-        export KUBECONFIG="$KUBECONFIG_PATH"
-
-        FRONTEND=$(kubectl get svc frontend-external -n online-boutique -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "<pending>")
-        GRAFANA=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "<pending>")
-        LITMUS=$(kubectl get svc litmus-frontend-service -n chaos-testing -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "<pending>")
-
-        echo -e "  Online Boutique:  ${BLUE}http://$FRONTEND${NC}"
-        echo -e "  Grafana:          ${BLUE}http://$GRAFANA${NC}  (admin / agenticops-lab)"
-        echo -e "  LitmusChaos:      ${BLUE}http://$LITMUS${NC}  (admin / litmus)"
-    else
-        echo "  (kubeconfig not found — run setup.sh first)"
-    fi
-
+    echo "  All services are ClusterIP (internal only). Access via kubectl port-forward + SSH tunnel."
     blank
-    echo "  If URLs show <pending>, LoadBalancers are still provisioning."
-    cmd "kubectl get svc -A | grep LoadBalancer"
+    note "Port-forward commands (run on bastion):"
+    cmd "kubectl port-forward svc/frontend -n online-boutique 8080:80"
+    cmd "kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80        # admin / agenticops-lab"
+    cmd "kubectl port-forward svc/litmus-frontend-service -n chaos-testing 9091:9091  # admin / litmus"
+    cmd "kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090"
+    cmd "kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093"
+    blank
+    note "SSH tunnel from local machine:"
+    cmd "ssh -L 3000:localhost:3000 -L 8080:localhost:8080 -L 9090:localhost:9090 ubuntu@<bastion>"
 }
 
 # ===================================================================
@@ -306,9 +300,10 @@ show_troubleshooting() {
     echo "  Fix: check StorageClass exists (kubectl get sc) and EBS CSI driver is ACTIVE"
     blank
 
-    echo "  ${BOLD}LoadBalancer stuck in <pending>${NC}"
-    cmd "kubectl describe svc <svc> -n <ns>  # check Events"
-    echo "  Fix: usually takes 1-3 minutes. Check subnet tags and security groups."
+    echo "  ${BOLD}Service not reachable via port-forward${NC}"
+    cmd "kubectl get svc -n <ns>  # verify ClusterIP and port"
+    cmd "kubectl get endpoints <svc> -n <ns>  # verify backends exist"
+    echo "  Fix: check pod readiness and label selectors."
     blank
 
     echo "  ${BOLD}Prometheus targets down${NC}"

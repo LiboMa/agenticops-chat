@@ -97,16 +97,14 @@ for svc in $EXPECTED_SERVICES; do
     [[ $READY -ge 1 ]] && pass "$svc: $READY replica(s) ready" || fail "$svc: not ready"
 done
 
-# Frontend LoadBalancer
-FRONTEND_HOST=$(kubectl get svc frontend-external -n online-boutique -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-if [[ -n "$FRONTEND_HOST" ]]; then
-    pass "Frontend LB: $FRONTEND_HOST"
-    if [[ "$QUICK" != "--quick" ]]; then
-        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${FRONTEND_HOST}" 2>/dev/null || echo "000")
-        [[ "$HTTP_CODE" == "200" ]] && pass "Frontend HTTP 200 OK" || warn "Frontend HTTP $HTTP_CODE (LB may need a minute to warm up)"
-    fi
+# Frontend Service (ClusterIP — access via port-forward)
+FRONTEND_TYPE=$(kubectl get svc frontend -n online-boutique -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
+if [[ "$FRONTEND_TYPE" == "ClusterIP" ]]; then
+    pass "Frontend: ClusterIP (internal only, access via kubectl port-forward)"
+elif [[ -n "$FRONTEND_TYPE" ]]; then
+    warn "Frontend: $FRONTEND_TYPE (expected ClusterIP for internal-only access)"
 else
-    warn "Frontend LB: pending"
+    warn "Frontend service: not found"
 fi
 
 # ===================================================================
@@ -121,11 +119,13 @@ PROM_READY=$(kubectl get statefulset prometheus-prometheus-kube-prometheus-prome
 GRAFANA_READY=$(kubectl get deploy prometheus-grafana -n monitoring -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 [[ "${GRAFANA_READY:-0}" -ge 1 ]] && pass "Grafana: $GRAFANA_READY replica(s) ready" || fail "Grafana: not ready"
 
-GRAFANA_HOST=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-if [[ -n "$GRAFANA_HOST" ]]; then
-    pass "Grafana LB: $GRAFANA_HOST"
+GRAFANA_TYPE=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
+if [[ "$GRAFANA_TYPE" == "ClusterIP" ]]; then
+    pass "Grafana: ClusterIP (internal only, access via kubectl port-forward :3000)"
+elif [[ -n "$GRAFANA_TYPE" ]]; then
+    warn "Grafana: $GRAFANA_TYPE (expected ClusterIP for internal-only access)"
 else
-    warn "Grafana LB: pending"
+    warn "Grafana service: not found"
 fi
 
 # Alertmanager
@@ -160,11 +160,13 @@ LITMUS_AUTH=$(kubectl get deploy litmus-auth-server -n chaos-testing -o jsonpath
 MONGO_READY=$(kubectl get statefulset litmus-mongodb -n chaos-testing -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 [[ "${MONGO_READY:-0}" -ge 1 ]] && pass "MongoDB: $MONGO_READY replica(s) ready" || fail "MongoDB: not ready"
 
-LITMUS_HOST=$(kubectl get svc litmus-frontend-service -n chaos-testing -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-if [[ -n "$LITMUS_HOST" ]]; then
-    pass "LitmusChaos LB: $LITMUS_HOST"
+LITMUS_TYPE=$(kubectl get svc litmus-frontend-service -n chaos-testing -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
+if [[ "$LITMUS_TYPE" == "ClusterIP" ]]; then
+    pass "LitmusChaos: ClusterIP (internal only, access via kubectl port-forward :9091)"
+elif [[ -n "$LITMUS_TYPE" ]]; then
+    warn "LitmusChaos: $LITMUS_TYPE (expected ClusterIP for internal-only access)"
 else
-    warn "LitmusChaos LB: pending"
+    warn "LitmusChaos service: not found"
 fi
 
 # ===================================================================
@@ -289,10 +291,15 @@ header "8. Access URLs"
 # ===================================================================
 
 echo ""
-[[ -n "${FRONTEND_HOST:-}" ]] && info "Online Boutique:  http://$FRONTEND_HOST" || info "Online Boutique:  (pending)"
-[[ -n "${GRAFANA_HOST:-}" ]]  && info "Grafana:          http://$GRAFANA_HOST  (admin / agenticops-lab)" || info "Grafana:          (pending)"
-[[ -n "${LITMUS_HOST:-}" ]]   && info "LitmusChaos:      http://$LITMUS_HOST  (admin / litmus)" || info "LitmusChaos:      (pending)"
+info "All services are ClusterIP (internal only). Access via kubectl port-forward + SSH tunnel:"
 echo ""
+info "Online Boutique:  kubectl port-forward svc/frontend -n online-boutique 8080:80"
+info "Grafana:          kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80  (admin / agenticops-lab)"
+info "LitmusChaos:      kubectl port-forward svc/litmus-frontend-service -n chaos-testing 9091:9091  (admin / litmus)"
+info "Prometheus:       kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090"
+info "Alertmanager:     kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093"
+echo ""
+info "SSH tunnel:       ssh -L 3000:localhost:3000 -L 8080:localhost:8080 -L 9090:localhost:9090 ubuntu@<bastion>"
 info "Kubeconfig:       export KUBECONFIG=$KUBECONFIG_PATH"
 echo ""
 
