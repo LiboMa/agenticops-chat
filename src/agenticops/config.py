@@ -27,16 +27,16 @@ class Settings(BaseSettings):
     )
 
     # AWS Bedrock — Tiered Model Configuration
-    # Default (Sonnet 4.6) for routing, RCA, SRE, executor agents
+    # Default (Opus 4.6) for main agent, RCA, SRE, executor agents
     # Cheap (Haiku 4.5) for tool-orchestration agents (scan, detect, reporter)
-    # Strong (Opus 4.6) reserved for complex multi-service RCA scenarios
+    # Strong (Opus 4.6) same as default; override via env for future stronger models
     bedrock_region: str = Field(
         default="us-east-1",
         description="AWS region for Bedrock",
     )
     bedrock_model_id: str = Field(
-        default="global.anthropic.claude-sonnet-4-6-v1",
-        description="Bedrock model ID — default tier (Sonnet 4.6) for reasoning agents",
+        default="global.anthropic.claude-opus-4-6-v1",
+        description="Bedrock model ID — default tier for main agent and reasoning sub-agents",
     )
     bedrock_model_id_cheap: str = Field(
         default="global.anthropic.claude-haiku-4-5-20251001-v1:0",
