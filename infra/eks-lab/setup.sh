@@ -190,13 +190,17 @@ install_online_boutique() {
 
     kubectl apply -f "$MANIFESTS_FILE" -n online-boutique
 
-    # Patch OTEL endpoint for all microservices (Phase 2 readiness)
-    log "Patching OTEL exporter endpoint on Online Boutique services"
+    # Patch OTEL endpoint + enable tracing for all microservices
+    log "Patching OTEL exporter endpoint and enabling tracing on Online Boutique services"
     local OTEL_ENDPOINT="http://otel-collector-opentelemetry-collector.monitoring:4317"
+    local COLLECTOR_ADDR="otel-collector-opentelemetry-collector.monitoring:4317"
     for deploy in cartservice productcatalogservice currencyservice paymentservice \
                    shippingservice emailservice checkoutservice recommendationservice adservice frontend; do
         kubectl set env deploy/"$deploy" -n online-boutique \
-            OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_ENDPOINT" 2>/dev/null || true
+            OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_ENDPOINT" \
+            OTEL_SERVICE_NAME="$deploy" \
+            COLLECTOR_SERVICE_ADDR="$COLLECTOR_ADDR" \
+            ENABLE_TRACING=1 2>/dev/null || true
     done
 
     log "Online Boutique installed"
