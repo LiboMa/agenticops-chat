@@ -1771,8 +1771,20 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
         if issue:
             issue.status = "fix_approved"
 
+        # Capture plan_id before session closes
+        approved_plan_id = plan.id
+
         session.flush()
-        return FixPlanResponse.model_validate(plan)
+        response = FixPlanResponse.model_validate(plan)
+
+    # Chain to auto-execute (outside DB session)
+    try:
+        from agenticops.services.pipeline_service import trigger_auto_execute
+        trigger_auto_execute(approved_plan_id)
+    except Exception:
+        logger.warning("Failed to trigger auto-execute for plan #%d", approved_plan_id, exc_info=True)
+
+    return response
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)

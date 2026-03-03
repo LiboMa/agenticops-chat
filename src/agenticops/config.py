@@ -174,6 +174,16 @@ class Settings(BaseSettings):
         description="Default agent output detail level: concise, medium, or detailed",
     )
 
+    # EKS cluster defaults (used by agents for kubectl operations)
+    eks_cluster_name: str = Field(
+        default="",
+        description="Default EKS cluster name for kubectl operations (AIOPS_EKS_CLUSTER_NAME)",
+    )
+    eks_cluster_region: str = Field(
+        default="",
+        description="Default EKS cluster region (AIOPS_EKS_CLUSTER_REGION). Falls back to bedrock_region if empty.",
+    )
+
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
         #default=False,

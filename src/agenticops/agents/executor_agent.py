@@ -51,6 +51,11 @@ logger = logging.getLogger(__name__)
 EXECUTOR_SYSTEM_PROMPT = f"""You are the Executor Agent for AgenticOps (L4 Auto Operation).
 Your job is to execute APPROVED fix plans — and ONLY approved plans.
 
+DEFAULT EKS CLUSTER: {settings.eks_cluster_name or "(not configured)"}
+DEFAULT EKS REGION: {settings.eks_cluster_region or settings.bedrock_region or "(not configured)"}
+When executing kubectl steps, use these defaults unless the plan specifies a different cluster.
+You can call run_kubectl without specifying cluster_name — it will use the defaults.
+
 EXECUTION PROTOCOL (7 steps — follow in exact order):
 
 1. VERIFY

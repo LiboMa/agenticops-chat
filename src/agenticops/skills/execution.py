@@ -10,6 +10,7 @@ Both enforce security classification before execution.
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -169,9 +170,9 @@ def _execute_ssh(host: str, command: str) -> str:
 
 @tool
 def run_kubectl(
-    cluster_name: str,
-    command: str,
-    region: str = "us-east-1",
+    cluster_name: str = "",
+    command: str = "",
+    region: str = "",
     namespace: str = "default",
     require_confirmation: bool = False,
 ) -> str:
@@ -183,18 +184,26 @@ def run_kubectl(
     commands are blocked.
 
     Args:
-        cluster_name: EKS cluster name.
+        cluster_name: EKS cluster name. Leave empty to use the default cluster from config.
         command: kubectl subcommand (e.g., 'get pods', 'describe node ip-10-0-1-5', 'logs pod/my-app -c main --tail=100').
-        region: AWS region (default: us-east-1).
+        region: AWS region. Leave empty to use the default region from config.
         namespace: Kubernetes namespace (default: 'default').
         require_confirmation: Set to true to acknowledge a write operation.
 
     Returns:
         kubectl output, or error/confirmation message.
     """
+    from agenticops.config import settings
+
     command = command.strip()
     if not command:
         return "Error: Empty kubectl command."
+
+    # Apply config defaults for cluster and region
+    if not cluster_name:
+        cluster_name = settings.eks_cluster_name
+    if not region:
+        region = settings.eks_cluster_region or settings.bedrock_region or "us-east-1"
 
     # Security classification
     tier = classify_kubectl_command(command)
@@ -219,16 +228,22 @@ def run_kubectl(
 def _execute_kubectl(cluster_name: str, command: str, region: str, namespace: str) -> str:
     """Execute kubectl after updating kubeconfig for the EKS cluster."""
     try:
-        # Update kubeconfig for the cluster
-        update_result = subprocess.run(
-            ["aws", "eks", "update-kubeconfig", "--name", cluster_name, "--region", region],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            shell=False,
-        )
-        if update_result.returncode != 0:
-            return f"Failed to update kubeconfig: {update_result.stderr.strip()}"
+        # If KUBECONFIG env var is set, use it directly (skip update-kubeconfig).
+        # This supports pre-configured kubeconfig files (e.g., EKS Lab bastion).
+        kubeconfig_path = os.environ.get("KUBECONFIG", "")
+        if not kubeconfig_path or not os.path.isfile(kubeconfig_path):
+            # No pre-configured kubeconfig — update via aws eks
+            if not cluster_name:
+                return "Error: No cluster_name provided and no KUBECONFIG set. Set AIOPS_EKS_CLUSTER_NAME or pass cluster_name."
+            update_result = subprocess.run(
+                ["aws", "eks", "update-kubeconfig", "--name", cluster_name, "--region", region],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                shell=False,
+            )
+            if update_result.returncode != 0:
+                return f"Failed to update kubeconfig: {update_result.stderr.strip()}"
 
         # Build kubectl command
         kubectl_cmd = f"kubectl -n {shlex.quote(namespace)} {command}"
