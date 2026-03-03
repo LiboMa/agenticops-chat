@@ -1,0 +1,31 @@
+# IM App Credentials — env var interpolation: ${VAR_NAME}
+# Copy this file to im-apps.yaml and fill in your credentials.
+#
+# Feishu: https://open.feishu.cn/app
+# DingTalk: https://open-dev.dingtalk.com
+# WeCom: https://work.weixin.qq.com/wework_admin
+
+feishu:
+  default:
+    app_id: "${FEISHU_APP_ID}"
+    app_secret: "${FEISHU_APP_SECRET}"
+    # For bidirectional chat (Phase 2):
+    # encrypt_key: "${FEISHU_ENCRYPT_KEY}"
+    # verification_token: "${FEISHU_VERIFY_TOKEN}"
+    # Channel name → chat_id mapping (source of truth for IM chat IDs)
+    channels:
+      my-alerts-channel: "${FEISHU_ALERTS_CHAT_ID}"
+
+dingtalk:
+  default:
+    app_key: "${DINGTALK_APP_KEY}"
+    app_secret: "${DINGTALK_APP_SECRET}"
+
+wecom:
+  default:
+    corp_id: "${WECOM_CORP_ID}"
+    corp_secret: "${WECOM_CORP_SECRET}"
+    agent_id: 1000002
+    # For bidirectional chat (Phase 2):
+    # callback_token: "${WECOM_CALLBACK_TOKEN}"
+    # encoding_aes_key: "${WECOM_ENCODING_AES_KEY}"

@@ -37,6 +37,7 @@ data/
 *.db
 .env
 reports/
+config/im-apps.yaml
 
 # OS
 .DS_Store

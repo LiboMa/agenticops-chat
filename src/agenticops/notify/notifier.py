@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import smtplib
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -345,6 +346,348 @@ class SNSNotifier(Notifier):
 
 
 # ============================================================================
+# IM Notifier Base Class — shared token caching for Feishu/DingTalk/WeCom
+# ============================================================================
+
+
+class IMNotifier(Notifier):
+    """Base class for IM platform notifiers with shared token caching."""
+
+    SEVERITY_COLORS = {
+        "critical": "red",
+        "high": "orange",
+        "medium": "yellow",
+        "low": "blue",
+    }
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.app_name: str = config.get("app_name", "default")
+        self._access_token: str = ""
+        self._token_expires_at: float = 0.0
+
+    def _token_valid(self) -> bool:
+        return bool(self._access_token) and time.monotonic() < self._token_expires_at
+
+    def _cache_token(self, token: str, expires_in: int = 7200) -> None:
+        self._access_token = token
+        # Refresh 5 min early
+        self._token_expires_at = time.monotonic() + expires_in - 300
+
+    async def _get_token(self) -> str:
+        if self._token_valid():
+            return self._access_token
+        await self._acquire_token()
+        return self._access_token
+
+    async def _acquire_token(self) -> None:
+        raise NotImplementedError
+
+
+# ============================================================================
+# Feishu (飞书) Notifier — App API + Interactive Card
+# ============================================================================
+
+
+class FeishuNotifier(IMNotifier):
+    """Feishu (Lark) notifier via Open API with Interactive Card messages."""
+
+    BASE_URL = "https://open.feishu.cn/open-apis"
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.chat_id = config.get("chat_id", "")
+        # App credentials: lazy-loaded from YAML, fallback to channel config
+        self._app_id: str = ""
+        self._app_secret: str = ""
+
+    def _ensure_app_config(self) -> None:
+        """Load app credentials from YAML config, fallback to channel DB config."""
+        if self._app_id and self._app_secret:
+            return
+        from agenticops.notify.im_config import get_feishu_app
+        app = get_feishu_app(self.app_name)
+        if app and app.app_id and app.app_secret:
+            self._app_id = app.app_id
+            self._app_secret = app.app_secret
+        else:
+            # Backward compat: read from channel config JSON
+            self._app_id = self.config.get("app_id", "")
+            self._app_secret = self.config.get("app_secret", "")
+
+    async def _acquire_token(self) -> None:
+        self._ensure_app_config()
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.BASE_URL}/auth/v3/tenant_access_token/internal",
+                json={"app_id": self._app_id, "app_secret": self._app_secret},
+                timeout=10.0,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"Feishu token error: {data.get('msg', resp.text)}")
+            self._cache_token(data["tenant_access_token"], data.get("expire", 7200))
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Send an Interactive Card message to a Feishu group chat."""
+        self._ensure_app_config()
+        if not (self._app_id and self._app_secret and self.chat_id):
+            logger.error("Feishu app_id, app_secret, or chat_id not configured")
+            return False
+
+        header_color = self.SEVERITY_COLORS.get(severity, "blue")
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": subject},
+                "template": header_color,
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": body},
+                },
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": f"Severity: {(severity or 'info').upper()} | AgenticAIOps | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+                        }
+                    ],
+                },
+            ],
+        }
+
+        try:
+            token = await self._get_token()
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/im/v1/messages",
+                    params={"receive_id_type": "chat_id"},
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "receive_id": self.chat_id,
+                        "msg_type": "interactive",
+                        "content": json.dumps(card),
+                    },
+                    timeout=10.0,
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.error(f"Feishu send error: {data.get('msg', resp.text)}")
+                    return False
+                return True
+        except Exception as e:
+            logger.error(f"Feishu notification failed: {e}")
+            return False
+
+    async def test_connection(self) -> bool:
+        """Validate app credentials by obtaining a tenant token."""
+        try:
+            await self._get_token()
+            return True
+        except Exception as e:
+            logger.error(f"Feishu test failed: {e}")
+            return False
+
+
+# ============================================================================
+# DingTalk (钉钉) Notifier — Open API + Markdown Card
+# ============================================================================
+
+
+class DingTalkNotifier(IMNotifier):
+    """DingTalk notifier via Open API with Markdown group messages."""
+
+    TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+    SEND_URL = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.chat_id = config.get("chat_id", "")  # openConversationId
+        self._app_key: str = ""
+        self._app_secret: str = ""
+
+    def _ensure_app_config(self) -> None:
+        if self._app_key and self._app_secret:
+            return
+        from agenticops.notify.im_config import get_dingtalk_app
+        app = get_dingtalk_app(self.app_name)
+        if app and app.app_key and app.app_secret:
+            self._app_key = app.app_key
+            self._app_secret = app.app_secret
+        else:
+            self._app_key = self.config.get("app_key", "")
+            self._app_secret = self.config.get("app_secret", "")
+
+    async def _acquire_token(self) -> None:
+        self._ensure_app_config()
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                self.TOKEN_URL,
+                json={"appKey": self._app_key, "appSecret": self._app_secret},
+                timeout=10.0,
+            )
+            data = resp.json()
+            token = data.get("accessToken")
+            if not token:
+                raise RuntimeError(f"DingTalk token error: {data}")
+            self._cache_token(token, data.get("expireIn", 7200))
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Send a Markdown message to a DingTalk group chat."""
+        self._ensure_app_config()
+        if not (self._app_key and self._app_secret and self.chat_id):
+            logger.error("DingTalk app_key, app_secret, or chat_id not configured")
+            return False
+
+        sev_label = (severity or "info").upper()
+        md_content = f"### [{sev_label}] {subject}\n\n{body}\n\n---\n*AgenticAIOps | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*"
+
+        try:
+            token = await self._get_token()
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    self.SEND_URL,
+                    headers={"x-acs-dingtalk-access-token": token},
+                    json={
+                        "msgParam": json.dumps({"title": subject, "text": md_content}),
+                        "msgKey": "sampleMarkdown",
+                        "openConversationId": self.chat_id,
+                        "robotCode": self._app_key,
+                    },
+                    timeout=10.0,
+                )
+                data = resp.json()
+                if "processQueryKey" not in data:
+                    logger.error(f"DingTalk send error: {data}")
+                    return False
+                return True
+        except Exception as e:
+            logger.error(f"DingTalk notification failed: {e}")
+            return False
+
+    async def test_connection(self) -> bool:
+        """Validate app credentials by obtaining an access token."""
+        try:
+            await self._get_token()
+            return True
+        except Exception as e:
+            logger.error(f"DingTalk test failed: {e}")
+            return False
+
+
+# ============================================================================
+# WeCom (企业微信) Notifier — App API + TextCard
+# ============================================================================
+
+
+class WeComNotifier(IMNotifier):
+    """WeCom (WeChat Work) notifier via App API with TextCard messages."""
+
+    TOKEN_URL = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+    SEND_URL = "https://qyapi.weixin.qq.com/cgi-bin/message/send"
+    APPCHAT_SEND_URL = "https://qyapi.weixin.qq.com/cgi-bin/appchat/send"
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.touser = config.get("touser", "")  # user mode: "@all" or "user1|user2"
+        self.chatid = config.get("chatid", "")  # group chat mode
+        self._corp_id: str = ""
+        self._corp_secret: str = ""
+        self._agent_id: int = 0
+
+    def _ensure_app_config(self) -> None:
+        if self._corp_id and self._corp_secret:
+            return
+        from agenticops.notify.im_config import get_wecom_app
+        app = get_wecom_app(self.app_name)
+        if app and app.corp_id and app.corp_secret:
+            self._corp_id = app.corp_id
+            self._corp_secret = app.corp_secret
+            self._agent_id = app.agent_id
+        else:
+            self._corp_id = self.config.get("corp_id", "")
+            self._corp_secret = self.config.get("corp_secret", "")
+            self._agent_id = int(self.config.get("agent_id", 0))
+
+    async def _acquire_token(self) -> None:
+        self._ensure_app_config()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                self.TOKEN_URL,
+                params={"corpid": self._corp_id, "corpsecret": self._corp_secret},
+                timeout=10.0,
+            )
+            data = resp.json()
+            if data.get("errcode") != 0:
+                raise RuntimeError(f"WeCom token error: {data.get('errmsg', data)}")
+            self._cache_token(data["access_token"], data.get("expires_in", 7200))
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Send a TextCard message via WeCom."""
+        self._ensure_app_config()
+        if not (self._corp_id and self._corp_secret):
+            logger.error("WeCom corp_id or corp_secret not configured")
+            return False
+
+        sev_label = (severity or "info").upper()
+        description = f"<div class=\"gray\">{sev_label}</div><div class=\"normal\">{body[:500]}</div>"
+
+        try:
+            token = await self._get_token()
+
+            if self.chatid:
+                # Group chat mode
+                payload = {
+                    "chatid": self.chatid,
+                    "msgtype": "textcard",
+                    "textcard": {
+                        "title": subject,
+                        "description": description,
+                        "btntxt": "View Detail",
+                    },
+                }
+                url = f"{self.APPCHAT_SEND_URL}?access_token={token}"
+            else:
+                # User message mode
+                payload = {
+                    "touser": self.touser or "@all",
+                    "msgtype": "textcard",
+                    "agentid": self._agent_id,
+                    "textcard": {
+                        "title": subject,
+                        "description": description,
+                        "url": "https://agenticops.local",
+                        "btntxt": "View Detail",
+                    },
+                }
+                url = f"{self.SEND_URL}?access_token={token}"
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json=payload, timeout=10.0)
+                data = resp.json()
+                if data.get("errcode") != 0:
+                    logger.error(f"WeCom send error: {data.get('errmsg', data)}")
+                    return False
+                return True
+        except Exception as e:
+            logger.error(f"WeCom notification failed: {e}")
+            return False
+
+    async def test_connection(self) -> bool:
+        """Validate app credentials by obtaining an access token."""
+        try:
+            await self._get_token()
+            return True
+        except Exception as e:
+            logger.error(f"WeCom test failed: {e}")
+            return False
+
+
+# ============================================================================
 # Webhook Notifier
 # ============================================================================
 
@@ -416,6 +759,31 @@ class WebhookNotifier(Notifier):
 
 
 # ============================================================================
+# YAML → DB Config Resolution
+# ============================================================================
+
+_IM_CHANNEL_TYPES = frozenset(("feishu", "dingtalk", "wecom"))
+
+
+def resolve_channel_config(channel: "NotificationChannel") -> dict:
+    """Return effective channel config with YAML chat_id override for IM channels.
+
+    YAML im-apps.yaml is the source of truth for chat_id.
+    Falls back to DB config.chat_id if channel not found in YAML.
+    """
+    config = dict(channel.config or {})
+    if channel.channel_type in _IM_CHANNEL_TYPES:
+        from agenticops.notify.im_config import get_channel_chat_id
+        app_name = config.get("app_name", "default")
+        yaml_chat_id = get_channel_chat_id(
+            channel.channel_type, app_name, channel.name,
+        )
+        if yaml_chat_id:
+            config["chat_id"] = yaml_chat_id
+    return config
+
+
+# ============================================================================
 # Notification Manager
 # ============================================================================
 
@@ -427,20 +795,37 @@ class NotificationManager:
         "slack": SlackNotifier,
         "email": EmailNotifier,
         "sns": SNSNotifier,
+        "feishu": FeishuNotifier,
+        "dingtalk": DingTalkNotifier,
+        "wecom": WeComNotifier,
         "webhook": WebhookNotifier,
     }
 
     def __init__(self):
         self._notifiers: Dict[str, Notifier] = {}
 
-    def _get_notifier(self, channel: NotificationChannel) -> Optional[Notifier]:
-        """Get or create a notifier for a channel."""
+    def _get_notifier(
+        self, channel: NotificationChannel, session=None,
+    ) -> Optional[Notifier]:
+        """Get or create a notifier for a channel.
+
+        Resolves chat_id from YAML (source of truth) and syncs back to DB
+        when a session is provided and the value differs.
+        """
         cache_key = f"{channel.id}:{channel.updated_at.isoformat()}"
 
         if cache_key not in self._notifiers:
             notifier_class = self.NOTIFIER_CLASSES.get(channel.channel_type)
             if notifier_class:
-                self._notifiers[cache_key] = notifier_class(channel.config)
+                config = resolve_channel_config(channel)
+                # Sync resolved chat_id back to DB if changed
+                if (
+                    session
+                    and channel.channel_type in _IM_CHANNEL_TYPES
+                    and config.get("chat_id") != (channel.config or {}).get("chat_id")
+                ):
+                    channel.config = config
+                self._notifiers[cache_key] = notifier_class(config)
 
         return self._notifiers.get(cache_key)
 
@@ -478,7 +863,7 @@ class NotificationManager:
                     if severity not in channel.severity_filter:
                         continue
 
-                notifier = self._get_notifier(channel)
+                notifier = self._get_notifier(channel, session=session)
                 if not notifier:
                     logger.warning(f"Unknown channel type: {channel.channel_type}")
                     results[channel.name] = False
@@ -587,15 +972,60 @@ Actual: {anomaly.actual_value}
 
     @staticmethod
     def list_channels() -> List[NotificationChannel]:
-        """List all notification channels."""
+        """List all notification channels, syncing IM chat_ids from YAML."""
         init_db()
 
         with get_db_session() as session:
-            return session.query(NotificationChannel).all()
+            # Prevent attribute expiry after commit so returned objects stay usable
+            session.expire_on_commit = False
+            channels = session.query(NotificationChannel).all()
+            # Sync IM chat_ids from YAML (source of truth)
+            for ch in channels:
+                if ch.channel_type in _IM_CHANNEL_TYPES:
+                    config = resolve_channel_config(ch)
+                    if config.get("chat_id") != (ch.config or {}).get("chat_id"):
+                        ch.config = config
+            return channels
+
+    @staticmethod
+    def sync_im_channels_from_yaml() -> Dict[str, str]:
+        """Bulk-sync IM channel chat_ids from YAML config to DB.
+
+        Returns:
+            Dict mapping channel name to sync status:
+            "updated", "unchanged", or "not_in_yaml"
+        """
+        results: Dict[str, str] = {}
+
+        with get_db_session() as session:
+            channels = session.query(NotificationChannel).filter(
+                NotificationChannel.channel_type.in_(list(_IM_CHANNEL_TYPES))
+            ).all()
+
+            for channel in channels:
+                config = resolve_channel_config(channel)
+                yaml_chat_id = config.get("chat_id")
+                db_chat_id = (channel.config or {}).get("chat_id")
+
+                if not yaml_chat_id or yaml_chat_id == db_chat_id:
+                    results[channel.name] = (
+                        "unchanged" if yaml_chat_id else "not_in_yaml"
+                    )
+                    continue
+
+                channel.config = config
+                results[channel.name] = "updated"
+                logger.info(
+                    "Synced chat_id for channel '%s' from YAML", channel.name,
+                )
+
+        return results
 
     @staticmethod
     async def test_channel(name: str) -> bool:
         """Test a notification channel.
+
+        Resolves chat_id from YAML and syncs back to DB before testing.
 
         Args:
             name: Channel name to test
@@ -612,5 +1042,13 @@ Actual: {anomaly.actual_value}
             if not notifier_class:
                 raise ValueError(f"Unknown channel type: {channel.channel_type}")
 
-            notifier = notifier_class(channel.config)
+            config = resolve_channel_config(channel)
+            # Sync to DB if changed
+            if (
+                channel.channel_type in _IM_CHANNEL_TYPES
+                and config.get("chat_id") != (channel.config or {}).get("chat_id")
+            ):
+                channel.config = config
+
+            notifier = notifier_class(config)
             return await notifier.test_connection()

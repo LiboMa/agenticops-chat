@@ -2744,23 +2744,38 @@ async def api_list_schedule_executions(
 
 @app.get("/api/notifications/channels", response_model=List[NotificationChannelResponse])
 async def api_list_notification_channels():
-    """List notification channels."""
-    from agenticops.notify.notifier import NotificationChannel
+    """List notification channels (syncs IM chat_ids from YAML)."""
+    from agenticops.notify.notifier import (
+        NotificationChannel, _IM_CHANNEL_TYPES, resolve_channel_config,
+    )
 
     with get_db_session() as session:
         channels = session.query(NotificationChannel).order_by(NotificationChannel.created_at.desc()).all()
+        # Sync IM chat_ids from YAML (source of truth)
+        for ch in channels:
+            if ch.channel_type in _IM_CHANNEL_TYPES:
+                config = resolve_channel_config(ch)
+                if config.get("chat_id") != (ch.config or {}).get("chat_id"):
+                    ch.config = config
         return [NotificationChannelResponse.model_validate(c) for c in channels]
 
 
 @app.get("/api/notifications/channels/{channel_id}", response_model=NotificationChannelResponse)
 async def api_get_notification_channel(channel_id: int):
-    """Get notification channel by ID."""
-    from agenticops.notify.notifier import NotificationChannel
+    """Get notification channel by ID (syncs IM chat_id from YAML)."""
+    from agenticops.notify.notifier import (
+        NotificationChannel, _IM_CHANNEL_TYPES, resolve_channel_config,
+    )
 
     with get_db_session() as session:
         channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
         if not channel:
             raise HTTPException(status_code=404, detail="Notification channel not found")
+        # Sync IM chat_id from YAML (source of truth)
+        if channel.channel_type in _IM_CHANNEL_TYPES:
+            config = resolve_channel_config(channel)
+            if config.get("chat_id") != (channel.config or {}).get("chat_id"):
+                channel.config = config
         return NotificationChannelResponse.model_validate(channel)
 
 
@@ -2818,23 +2833,41 @@ async def api_delete_notification_channel(channel_id: int):
 
 @app.post("/api/notifications/channels/{channel_id}/test")
 async def api_test_notification_channel(channel_id: int, data: NotificationSendRequest):
-    """Send a test notification through a channel."""
-    from agenticops.notify.notifier import NotificationChannel, NotificationLog, Notifier
+    """Send a test notification through a channel (resolves IM chat_id from YAML)."""
+    from agenticops.notify.notifier import (
+        NotificationChannel, NotificationManager,
+        _IM_CHANNEL_TYPES, resolve_channel_config,
+    )
 
     with get_db_session() as session:
         channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
         if not channel:
             raise HTTPException(status_code=404, detail="Notification channel not found")
 
+        notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
+        if not notifier_class:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown channel type: {channel.channel_type}",
+            )
+
+        config = resolve_channel_config(channel)
+        # Sync to DB if changed
+        if (
+            channel.channel_type in _IM_CHANNEL_TYPES
+            and config.get("chat_id") != (channel.config or {}).get("chat_id")
+        ):
+            channel.config = config
+
         try:
-            notifier = Notifier()
-            notifier.send(
-                channel_id=channel_id,
+            notifier = notifier_class(config)
+            success = await notifier.send(
                 subject=data.subject,
                 body=data.body,
                 severity=data.severity,
             )
-            return {"status": "sent", "channel": channel.name}
+            status = "sent" if success else "failed"
+            return {"status": status, "channel": channel.name}
         except Exception as e:
             return JSONResponse(
                 status_code=500,
