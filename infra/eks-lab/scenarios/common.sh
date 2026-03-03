@@ -18,10 +18,10 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-report_pass() { echo -e "  ${GREEN}✓ PASS${NC} $*"; }
-report_fail() { echo -e "  ${RED}✗ FAIL${NC} $*"; }
-report_info() { echo -e "  ${BLUE}ℹ${NC} $*"; }
-report_time() { echo -e "  ${YELLOW}⏱${NC} $*"; }
+report_pass() { echo -e "  ${GREEN}✓ PASS${NC} $*" >&2; }
+report_fail() { echo -e "  ${RED}✗ FAIL${NC} $*" >&2; }
+report_info() { echo -e "  ${BLUE}ℹ${NC} $*" >&2; }
+report_time() { echo -e "  ${YELLOW}⏱${NC} $*" >&2; }
 
 # ---------------------------------------------------------------
 # api_get PATH
