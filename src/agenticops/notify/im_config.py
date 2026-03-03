@@ -1,15 +1,16 @@
-"""IM App configuration loader — YAML with environment variable interpolation.
+"""IM App and notification channel configuration loader.
 
-Loads Feishu/DingTalk/WeCom app credentials from a YAML file, with automatic
+Loads Feishu/DingTalk/WeCom app credentials from im-apps.yaml and
+notification channel definitions from channels.yaml. Both support
 ${VAR_NAME} env var substitution and mtime-based cache invalidation.
 """
 
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -134,13 +135,6 @@ def get_wecom_app(name: str = "default") -> Optional[WeComAppConfig]:
     )
 
 
-def get_channel_chat_id(platform: str, app_name: str, channel_name: str) -> Optional[str]:
-    """Resolve a channel's chat_id from YAML config. Returns None if not found."""
-    data = _load_raw()
-    app = data.get(platform, {}).get(app_name, {})
-    return app.get("channels", {}).get(channel_name)
-
-
 def list_apps() -> Dict[str, list]:
     """List all configured IM app names grouped by platform."""
     data = _load_raw()
@@ -150,3 +144,134 @@ def list_apps() -> Dict[str, list]:
         if names:
             result[platform] = names
     return result
+
+
+# ── Notification Channels (channels.yaml) ─────────────────────────
+
+_CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter"))
+
+_channels_cache: Optional[Dict[str, Any]] = None
+_channels_mtime: float = 0.0
+
+
+@dataclass
+class ChannelConfig:
+    """A notification channel loaded from YAML."""
+    name: str
+    channel_type: str
+    config: dict
+    is_enabled: bool = True
+    severity_filter: list = field(default_factory=list)
+
+
+def _load_channels_raw() -> Dict[str, Any]:
+    """Load and cache channels.yaml, reloading on file change."""
+    global _channels_cache, _channels_mtime
+
+    config_path: Path = settings.channels_config
+    if not config_path.exists():
+        logger.debug("Channels config not found at %s", config_path)
+        return {}
+
+    mtime = config_path.stat().st_mtime
+    if _channels_cache is not None and mtime == _channels_mtime:
+        return _channels_cache
+
+    with open(config_path) as f:
+        raw = yaml.safe_load(f) or {}
+
+    _channels_cache = _interpolate_env(raw)
+    _channels_mtime = mtime
+    logger.info("Loaded channels config from %s", config_path)
+    return _channels_cache
+
+
+def _parse_channel(name: str, data: dict) -> ChannelConfig:
+    """Parse a single channel entry from YAML into ChannelConfig."""
+    channel_type = data.get("type", "")
+    is_enabled = data.get("enabled", True)
+    severity_filter = data.get("severity_filter", [])
+    # Everything not in reserved keys goes into the config dict
+    config = {k: v for k, v in data.items() if k not in _CHANNEL_RESERVED_KEYS}
+    return ChannelConfig(
+        name=name,
+        channel_type=channel_type,
+        config=config,
+        is_enabled=bool(is_enabled),
+        severity_filter=severity_filter or [],
+    )
+
+
+def load_channels() -> List[ChannelConfig]:
+    """Load all notification channels from channels.yaml."""
+    raw = _load_channels_raw()
+    channels_dict = raw.get("channels", {})
+    return [_parse_channel(name, data) for name, data in channels_dict.items()
+            if isinstance(data, dict)]
+
+
+def get_channel(name: str) -> Optional[ChannelConfig]:
+    """Get a specific channel by name from channels.yaml."""
+    raw = _load_channels_raw()
+    data = raw.get("channels", {}).get(name)
+    if not isinstance(data, dict):
+        return None
+    return _parse_channel(name, data)
+
+
+def save_channel(name: str, channel_type: str, config: dict,
+                 is_enabled: bool = True,
+                 severity_filter: Optional[list] = None) -> None:
+    """Add or update a channel in channels.yaml."""
+    config_path: Path = settings.channels_config
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+    else:
+        raw = {}
+
+    if "channels" not in raw:
+        raw["channels"] = {}
+
+    entry: dict = {"type": channel_type, "enabled": is_enabled}
+    if severity_filter:
+        entry["severity_filter"] = severity_filter
+    entry.update(config)
+
+    raw["channels"][name] = entry
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # Invalidate cache
+    _invalidate_channels_cache()
+
+
+def delete_channel(name: str) -> bool:
+    """Remove a channel from channels.yaml. Returns True if found and removed."""
+    config_path: Path = settings.channels_config
+    if not config_path.exists():
+        return False
+
+    with open(config_path) as f:
+        raw = yaml.safe_load(f) or {}
+
+    channels = raw.get("channels", {})
+    if name not in channels:
+        return False
+
+    del channels[name]
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    _invalidate_channels_cache()
+    return True
+
+
+def _invalidate_channels_cache() -> None:
+    global _channels_cache, _channels_mtime
+    _channels_cache = None
+    _channels_mtime = 0.0

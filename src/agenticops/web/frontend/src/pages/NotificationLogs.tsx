@@ -20,10 +20,10 @@ const columns: Column<NotificationLog>[] = [
     ),
   },
   {
-    key: "channel_id",
+    key: "channel_name",
     header: "Channel",
     render: (r) => (
-      <span className="font-mono text-sm text-slate-600">#{r.channel_id}</span>
+      <span className="font-mono text-sm text-slate-600">{r.channel_name}</span>
     ),
   },
   {
@@ -76,12 +76,12 @@ const columns: Column<NotificationLog>[] = [
 ];
 
 export default function NotificationLogs() {
-  const [channelFilter, setChannelFilter] = useState<number | undefined>(undefined);
+  const [channelFilter, setChannelFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   const { data: channels } = useNotificationChannels();
   const { data: logs, isLoading, error } = useNotificationLogs({
-    channel_id: channelFilter,
+    channel_name: channelFilter,
     status: statusFilter,
   });
 
@@ -117,13 +117,13 @@ export default function NotificationLogs() {
           <select
             value={channelFilter ?? ""}
             onChange={(e) =>
-              setChannelFilter(e.target.value ? Number(e.target.value) : undefined)
+              setChannelFilter(e.target.value || undefined)
             }
             className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Channels</option>
             {(channels ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
+              <option key={c.name} value={c.name}>
                 {c.name}
               </option>
             ))}

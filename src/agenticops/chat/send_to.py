@@ -83,29 +83,24 @@ def _help_text() -> str:
 def resolve_target(name: str) -> tuple[str, dict]:
     """Resolve a target name to a channel or IM alias config.
 
+    Channels are resolved from channels.yaml; IM aliases from DB.
+
     Returns:
         ("channel", channel_config) or ("im", alias_config) or ("unknown", {})
     """
-    from agenticops.models import get_db_session
-    from agenticops.notify.notifier import NotificationChannel
+    # Try channels.yaml first
+    from agenticops.notify.im_config import get_channel
 
-    with get_db_session() as db:
-        # Try NotificationChannel first
-        channel = (
-            db.query(NotificationChannel)
-            .filter_by(name=name, is_enabled=True)
-            .first()
-        )
-        if channel:
-            return "channel", {
-                "id": channel.id,
-                "name": channel.name,
-                "channel_type": channel.channel_type,
-                "config": channel.config,
-            }
+    channel = get_channel(name)
+    if channel and channel.is_enabled:
+        return "channel", {
+            "name": channel.name,
+            "channel_type": channel.channel_type,
+            "config": channel.config,
+        }
 
-    # Try IMAlias
-    from agenticops.models import IMAlias
+    # Try IMAlias (still in DB)
+    from agenticops.models import IMAlias, get_db_session
 
     with get_db_session() as db:
         alias = db.query(IMAlias).filter_by(name=name).first()

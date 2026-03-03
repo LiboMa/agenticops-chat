@@ -473,17 +473,14 @@ export interface ScheduleExecution {
 /*  Notification Channels & Logs                                       */
 /* ------------------------------------------------------------------ */
 
-export type NotificationChannelType = "slack" | "email" | "sns" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "sns" | "feishu" | "dingtalk" | "wecom" | "webhook";
 
 export interface NotificationChannel {
-  id: number;
   name: string;
   channel_type: NotificationChannelType;
   config: Record<string, unknown>;
   severity_filter: string[];
   is_enabled: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface NotificationChannelCreate {
@@ -495,7 +492,6 @@ export interface NotificationChannelCreate {
 }
 
 export interface NotificationChannelUpdate {
-  name?: string;
   channel_type?: NotificationChannelType;
   config?: Record<string, unknown>;
   severity_filter?: string[];
@@ -504,7 +500,7 @@ export interface NotificationChannelUpdate {
 
 export interface NotificationLog {
   id: number;
-  channel_id: number;
+  channel_name: string;
   subject: string;
   body: string;
   severity: string | null;

@@ -38,6 +38,7 @@ data/
 .env
 reports/
 config/im-apps.yaml
+config/channels.yaml
 
 # OS
 .DS_Store

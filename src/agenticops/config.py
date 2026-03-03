@@ -140,6 +140,10 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "config" / "im-apps.yaml",
         description="Path to IM app credentials YAML (Feishu/DingTalk/WeCom)",
     )
+    channels_config: Path = Field(
+        default=PROJECT_ROOT / "config" / "channels.yaml",
+        description="Path to notification channels YAML (sole source of truth)",
+    )
     feishu_ws_enabled: bool = Field(
         default=True,
         description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",

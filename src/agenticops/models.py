@@ -716,6 +716,22 @@ def init_db():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_health_issue_fingerprint ON health_issues(fingerprint)"))
                 conn.commit()
 
+    # Migration: notification_logs channel_id → channel_name (YAML-only channels)
+    if insp.has_table("notification_logs"):
+        columns = {col["name"] for col in insp.get_columns("notification_logs")}
+        if "channel_name" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE notification_logs ADD COLUMN channel_name VARCHAR(100) DEFAULT ''"))
+                # Backfill from old channel_id if notification_channels table exists
+                if insp.has_table("notification_channels") and "channel_id" in columns:
+                    conn.execute(text(
+                        "UPDATE notification_logs SET channel_name = "
+                        "(SELECT name FROM notification_channels WHERE notification_channels.id = notification_logs.channel_id) "
+                        "WHERE channel_name = '' AND channel_id IS NOT NULL"
+                    ))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notification_log_channel_name ON notification_logs(channel_name)"))
+                conn.commit()
+
     Base.metadata.create_all(engine)
 
     # Ensure case_vectors table exists (used by SQLiteVectorStore,

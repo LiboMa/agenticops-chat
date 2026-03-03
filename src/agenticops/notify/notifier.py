@@ -1,4 +1,8 @@
-"""Notifier - Multi-channel notification system for AgenticOps."""
+"""Notifier - Multi-channel notification system for AgenticOps.
+
+Channel configuration is loaded exclusively from channels.yaml (via im_config).
+NotificationLog is stored in the DB for audit purposes.
+"""
 
 import asyncio
 import json
@@ -12,34 +16,17 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
 
 import httpx
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Boolean, JSON
+from sqlalchemy import DateTime, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agenticops.models import Base, get_db_session, init_db
+from agenticops.models import Base, get_db_session
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Notification Models
+# Notification Log (DB — audit only)
 # ============================================================================
-
-
-class NotificationChannel(Base):
-    """Notification channel configuration."""
-
-    __tablename__ = "notification_channels"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
-    channel_type: Mapped[str] = mapped_column(String(20))  # slack, email, sns, webhook
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
-    severity_filter: Mapped[list] = mapped_column(JSON, default=list)  # ["critical", "high"]
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
 
 
 class NotificationLog(Base):
@@ -47,12 +34,12 @@ class NotificationLog(Base):
 
     __tablename__ = "notification_logs"
     __table_args__ = (
-        Index("idx_notification_log_channel", "channel_id"),
+        Index("idx_notification_log_channel_name", "channel_name"),
         Index("idx_notification_log_sent", "sent_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    channel_id: Mapped[int] = mapped_column(ForeignKey("notification_channels.id"))
+    channel_name: Mapped[str] = mapped_column(String(100))
     subject: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
     severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -759,37 +746,16 @@ class WebhookNotifier(Notifier):
 
 
 # ============================================================================
-# YAML → DB Config Resolution
-# ============================================================================
-
-_IM_CHANNEL_TYPES = frozenset(("feishu", "dingtalk", "wecom"))
-
-
-def resolve_channel_config(channel: "NotificationChannel") -> dict:
-    """Return effective channel config with YAML chat_id override for IM channels.
-
-    YAML im-apps.yaml is the source of truth for chat_id.
-    Falls back to DB config.chat_id if channel not found in YAML.
-    """
-    config = dict(channel.config or {})
-    if channel.channel_type in _IM_CHANNEL_TYPES:
-        from agenticops.notify.im_config import get_channel_chat_id
-        app_name = config.get("app_name", "default")
-        yaml_chat_id = get_channel_chat_id(
-            channel.channel_type, app_name, channel.name,
-        )
-        if yaml_chat_id:
-            config["chat_id"] = yaml_chat_id
-    return config
-
-
-# ============================================================================
-# Notification Manager
+# Notification Manager — reads channels from YAML (channels.yaml)
 # ============================================================================
 
 
 class NotificationManager:
-    """Manager for sending notifications across multiple channels."""
+    """Manager for sending notifications across multiple channels.
+
+    All channel configuration is loaded from channels.yaml (via im_config).
+    No DB reads for channel config — DB is only used for NotificationLog audit.
+    """
 
     NOTIFIER_CLASSES = {
         "slack": SlackNotifier,
@@ -804,30 +770,25 @@ class NotificationManager:
     def __init__(self):
         self._notifiers: Dict[str, Notifier] = {}
 
-    def _get_notifier(
-        self, channel: NotificationChannel, session=None,
-    ) -> Optional[Notifier]:
-        """Get or create a notifier for a channel.
+    def _get_notifier(self, channel_name: str, channel_type: str,
+                      config: Dict[str, Any]) -> Optional[Notifier]:
+        """Get or create a notifier for a channel (from YAML config)."""
+        notifier_class = self.NOTIFIER_CLASSES.get(channel_type)
+        if not notifier_class:
+            return None
 
-        Resolves chat_id from YAML (source of truth) and syncs back to DB
-        when a session is provided and the value differs.
-        """
-        cache_key = f"{channel.id}:{channel.updated_at.isoformat()}"
-
+        cache_key = channel_name
         if cache_key not in self._notifiers:
-            notifier_class = self.NOTIFIER_CLASSES.get(channel.channel_type)
-            if notifier_class:
-                config = resolve_channel_config(channel)
-                # Sync resolved chat_id back to DB if changed
-                if (
-                    session
-                    and channel.channel_type in _IM_CHANNEL_TYPES
-                    and config.get("chat_id") != (channel.config or {}).get("chat_id")
-                ):
-                    channel.config = config
-                self._notifiers[cache_key] = notifier_class(config)
+            self._notifiers[cache_key] = notifier_class(config)
 
         return self._notifiers.get(cache_key)
+
+    def invalidate_cache(self, channel_name: Optional[str] = None) -> None:
+        """Invalidate notifier cache (e.g. after YAML config change)."""
+        if channel_name:
+            self._notifiers.pop(channel_name, None)
+        else:
+            self._notifiers.clear()
 
     async def send_notification(
         self,
@@ -838,96 +799,103 @@ class NotificationManager:
     ) -> Dict[str, bool]:
         """Send notification to all matching channels.
 
-        Args:
-            subject: Notification subject
-            body: Notification body
-            severity: Severity level for filtering
-            channel_names: Optional list of specific channels to use
-
-        Returns:
-            Dict mapping channel names to success status
+        Loads channels from channels.yaml. Logs results to DB.
         """
+        from agenticops.notify.im_config import load_channels
+
         results = {}
+        all_channels = load_channels()
 
-        with get_db_session() as session:
-            query = session.query(NotificationChannel).filter_by(is_enabled=True)
+        # Filter to requested channels
+        if channel_names:
+            channels = [c for c in all_channels if c.name in channel_names and c.is_enabled]
+        else:
+            channels = [c for c in all_channels if c.is_enabled]
 
-            if channel_names:
-                query = query.filter(NotificationChannel.name.in_(channel_names))
-
-            channels = query.all()
-
-            for channel in channels:
-                # Check severity filter
-                if severity and channel.severity_filter:
-                    if severity not in channel.severity_filter:
-                        continue
-
-                notifier = self._get_notifier(channel, session=session)
-                if not notifier:
-                    logger.warning(f"Unknown channel type: {channel.channel_type}")
-                    results[channel.name] = False
+        for channel in channels:
+            # Check severity filter
+            if severity and channel.severity_filter:
+                if severity not in channel.severity_filter:
                     continue
 
-                try:
-                    success = await notifier.send(subject, body, severity)
-                    results[channel.name] = success
+            notifier = self._get_notifier(
+                channel.name, channel.channel_type, channel.config,
+            )
+            if not notifier:
+                logger.warning("Unknown channel type: %s", channel.channel_type)
+                results[channel.name] = False
+                continue
 
-                    # Log notification
-                    log = NotificationLog(
-                        channel_id=channel.id,
-                        subject=subject,
-                        body=body[:1000],  # Truncate body
-                        severity=severity,
-                        status="sent" if success else "failed",
-                    )
-                    session.add(log)
+            try:
+                success = await notifier.send(subject, body, severity)
+                results[channel.name] = success
 
-                except Exception as e:
-                    logger.error(f"Notification to '{channel.name}' failed: {e}")
-                    results[channel.name] = False
+                # Log notification to DB
+                self._log_notification(
+                    channel_name=channel.name,
+                    subject=subject,
+                    body=body,
+                    severity=severity,
+                    status="sent" if success else "failed",
+                )
 
-                    # Log failure
-                    log = NotificationLog(
-                        channel_id=channel.id,
-                        subject=subject,
-                        body=body[:1000],
-                        severity=severity,
-                        status="failed",
-                        error=str(e),
-                    )
-                    session.add(log)
+            except Exception as e:
+                logger.error("Notification to '%s' failed: %s", channel.name, e)
+                results[channel.name] = False
+
+                self._log_notification(
+                    channel_name=channel.name,
+                    subject=subject,
+                    body=body,
+                    severity=severity,
+                    status="failed",
+                    error=str(e),
+                )
 
         return results
 
+    @staticmethod
+    def _log_notification(
+        channel_name: str,
+        subject: str,
+        body: str,
+        severity: Optional[str],
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """Write a notification log entry to DB."""
+        try:
+            with get_db_session() as session:
+                log = NotificationLog(
+                    channel_name=channel_name,
+                    subject=subject,
+                    body=body[:1000],
+                    severity=severity,
+                    status=status,
+                    error=error,
+                )
+                session.add(log)
+        except Exception as e:
+            logger.debug("Failed to write notification log: %s", e)
+
     async def send_anomaly_notification(self, anomaly) -> Dict[str, bool]:
-        """Send notification about an anomaly.
-
-        Args:
-            anomaly: Anomaly model instance
-
-        Returns:
-            Dict mapping channel names to success status
-        """
+        """Send notification about an anomaly."""
         subject = f"[{anomaly.severity.upper()}] {anomaly.title}"
 
-        body = f"""
-Anomaly Detected
-
-Title: {anomaly.title}
-Description: {anomaly.description}
-
-Resource: {anomaly.resource_type}/{anomaly.resource_id}
-Region: {anomaly.region}
-Detected: {anomaly.detected_at.strftime('%Y-%m-%d %H:%M UTC')}
-
-"""
+        body = (
+            f"Anomaly Detected\n\n"
+            f"Title: {anomaly.title}\n"
+            f"Description: {anomaly.description}\n\n"
+            f"Resource: {anomaly.resource_type}/{anomaly.resource_id}\n"
+            f"Region: {anomaly.region}\n"
+            f"Detected: {anomaly.detected_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+        )
         if anomaly.metric_name:
-            body += f"""
-Metric: {anomaly.metric_name}
-Expected: {anomaly.expected_value}
-Actual: {anomaly.actual_value}
-"""
+            body += (
+                f"\nMetric: {anomaly.metric_name}\n"
+                f"Expected: {anomaly.expected_value}\n"
+                f"Actual: {anomaly.actual_value}\n"
+            )
 
         return await self.send_notification(
             subject=subject,
@@ -936,96 +904,8 @@ Actual: {anomaly.actual_value}
         )
 
     @staticmethod
-    def add_channel(
-        name: str,
-        channel_type: str,
-        config: Dict[str, Any],
-        severity_filter: Optional[List[str]] = None,
-    ) -> NotificationChannel:
-        """Add a new notification channel.
-
-        Args:
-            name: Unique channel name
-            channel_type: Channel type (slack, email, sns, webhook)
-            config: Channel-specific configuration
-            severity_filter: List of severities to notify for
-
-        Returns:
-            Created NotificationChannel
-        """
-        init_db()
-
-        with get_db_session() as session:
-            existing = session.query(NotificationChannel).filter_by(name=name).first()
-            if existing:
-                raise ValueError(f"Channel '{name}' already exists")
-
-            channel = NotificationChannel(
-                name=name,
-                channel_type=channel_type,
-                config=config,
-                severity_filter=severity_filter or [],
-            )
-            session.add(channel)
-            session.flush()
-            return channel
-
-    @staticmethod
-    def list_channels() -> List[NotificationChannel]:
-        """List all notification channels, syncing IM chat_ids from YAML."""
-        init_db()
-
-        with get_db_session() as session:
-            # Prevent attribute expiry after commit so returned objects stay usable
-            session.expire_on_commit = False
-            channels = session.query(NotificationChannel).all()
-            # Sync IM chat_ids from YAML (source of truth)
-            for ch in channels:
-                if ch.channel_type in _IM_CHANNEL_TYPES:
-                    config = resolve_channel_config(ch)
-                    if config.get("chat_id") != (ch.config or {}).get("chat_id"):
-                        ch.config = config
-            return channels
-
-    @staticmethod
-    def sync_im_channels_from_yaml() -> Dict[str, str]:
-        """Bulk-sync IM channel chat_ids from YAML config to DB.
-
-        Returns:
-            Dict mapping channel name to sync status:
-            "updated", "unchanged", or "not_in_yaml"
-        """
-        results: Dict[str, str] = {}
-
-        with get_db_session() as session:
-            channels = session.query(NotificationChannel).filter(
-                NotificationChannel.channel_type.in_(list(_IM_CHANNEL_TYPES))
-            ).all()
-
-            for channel in channels:
-                config = resolve_channel_config(channel)
-                yaml_chat_id = config.get("chat_id")
-                db_chat_id = (channel.config or {}).get("chat_id")
-
-                if not yaml_chat_id or yaml_chat_id == db_chat_id:
-                    results[channel.name] = (
-                        "unchanged" if yaml_chat_id else "not_in_yaml"
-                    )
-                    continue
-
-                channel.config = config
-                results[channel.name] = "updated"
-                logger.info(
-                    "Synced chat_id for channel '%s' from YAML", channel.name,
-                )
-
-        return results
-
-    @staticmethod
     async def test_channel(name: str) -> bool:
-        """Test a notification channel.
-
-        Resolves chat_id from YAML and syncs back to DB before testing.
+        """Test a notification channel by name (reads from YAML).
 
         Args:
             name: Channel name to test
@@ -1033,22 +913,15 @@ Actual: {anomaly.actual_value}
         Returns:
             True if test successful
         """
-        with get_db_session() as session:
-            channel = session.query(NotificationChannel).filter_by(name=name).first()
-            if not channel:
-                raise ValueError(f"Channel '{name}' not found")
+        from agenticops.notify.im_config import get_channel
 
-            notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
-            if not notifier_class:
-                raise ValueError(f"Unknown channel type: {channel.channel_type}")
+        channel = get_channel(name)
+        if not channel:
+            raise ValueError(f"Channel '{name}' not found in channels.yaml")
 
-            config = resolve_channel_config(channel)
-            # Sync to DB if changed
-            if (
-                channel.channel_type in _IM_CHANNEL_TYPES
-                and config.get("chat_id") != (channel.config or {}).get("chat_id")
-            ):
-                channel.config = config
+        notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
+        if not notifier_class:
+            raise ValueError(f"Unknown channel type: {channel.channel_type}")
 
-            notifier = notifier_class(config)
-            return await notifier.test_connection()
+        notifier = notifier_class(channel.config)
+        return await notifier.test_connection()

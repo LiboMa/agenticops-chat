@@ -421,7 +421,7 @@ class ScheduleExecutionResponse(BaseModel):
 
 
 class NotificationChannelCreate(BaseModel):
-    """Schema for creating a notification channel."""
+    """Schema for creating/updating a notification channel (YAML-backed)."""
     name: str = Field(..., max_length=100)
     channel_type: str = Field(..., pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
     config: dict = Field(default_factory=dict)
@@ -430,8 +430,7 @@ class NotificationChannelCreate(BaseModel):
 
 
 class NotificationChannelUpdate(BaseModel):
-    """Schema for updating a notification channel."""
-    name: Optional[str] = Field(None, max_length=100)
+    """Schema for updating a notification channel (YAML-backed)."""
     channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
     config: Optional[dict] = None
     severity_filter: Optional[List[str]] = None
@@ -439,24 +438,18 @@ class NotificationChannelUpdate(BaseModel):
 
 
 class NotificationChannelResponse(BaseModel):
-    """Schema for notification channel response."""
-    id: int
+    """Schema for notification channel response (YAML-backed)."""
     name: str
     channel_type: str
     config: dict
     severity_filter: list
     is_enabled: bool
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class NotificationLogResponse(BaseModel):
     """Schema for notification log response."""
     id: int
-    channel_id: int
+    channel_name: str
     subject: str
     body: str
     severity: Optional[str]
@@ -2744,140 +2737,140 @@ async def api_list_schedule_executions(
 
 @app.get("/api/notifications/channels", response_model=List[NotificationChannelResponse])
 async def api_list_notification_channels():
-    """List notification channels (syncs IM chat_ids from YAML)."""
-    from agenticops.notify.notifier import (
-        NotificationChannel, _IM_CHANNEL_TYPES, resolve_channel_config,
+    """List notification channels from channels.yaml."""
+    from agenticops.notify.im_config import load_channels
+
+    channels = load_channels()
+    return [
+        NotificationChannelResponse(
+            name=c.name,
+            channel_type=c.channel_type,
+            config=c.config,
+            severity_filter=c.severity_filter,
+            is_enabled=c.is_enabled,
+        )
+        for c in channels
+    ]
+
+
+@app.get("/api/notifications/channels/{channel_name}", response_model=NotificationChannelResponse)
+async def api_get_notification_channel(channel_name: str):
+    """Get notification channel by name from channels.yaml."""
+    from agenticops.notify.im_config import get_channel
+
+    channel = get_channel(channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+    return NotificationChannelResponse(
+        name=channel.name,
+        channel_type=channel.channel_type,
+        config=channel.config,
+        severity_filter=channel.severity_filter,
+        is_enabled=channel.is_enabled,
     )
-
-    with get_db_session() as session:
-        channels = session.query(NotificationChannel).order_by(NotificationChannel.created_at.desc()).all()
-        # Sync IM chat_ids from YAML (source of truth)
-        for ch in channels:
-            if ch.channel_type in _IM_CHANNEL_TYPES:
-                config = resolve_channel_config(ch)
-                if config.get("chat_id") != (ch.config or {}).get("chat_id"):
-                    ch.config = config
-        return [NotificationChannelResponse.model_validate(c) for c in channels]
-
-
-@app.get("/api/notifications/channels/{channel_id}", response_model=NotificationChannelResponse)
-async def api_get_notification_channel(channel_id: int):
-    """Get notification channel by ID (syncs IM chat_id from YAML)."""
-    from agenticops.notify.notifier import (
-        NotificationChannel, _IM_CHANNEL_TYPES, resolve_channel_config,
-    )
-
-    with get_db_session() as session:
-        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
-        if not channel:
-            raise HTTPException(status_code=404, detail="Notification channel not found")
-        # Sync IM chat_id from YAML (source of truth)
-        if channel.channel_type in _IM_CHANNEL_TYPES:
-            config = resolve_channel_config(channel)
-            if config.get("chat_id") != (channel.config or {}).get("chat_id"):
-                channel.config = config
-        return NotificationChannelResponse.model_validate(channel)
 
 
 @app.post("/api/notifications/channels", response_model=NotificationChannelResponse, status_code=201)
 async def api_create_notification_channel(data: NotificationChannelCreate):
-    """Create a new notification channel."""
-    from agenticops.notify.notifier import NotificationChannel
+    """Create a new notification channel in channels.yaml."""
+    from agenticops.notify.im_config import get_channel, save_channel
 
-    with get_db_session() as session:
-        existing = session.query(NotificationChannel).filter_by(name=data.name).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Channel name already exists")
+    existing = get_channel(data.name)
+    if existing:
+        raise HTTPException(status_code=400, detail="Channel name already exists")
 
-        channel = NotificationChannel(
-            name=data.name,
-            channel_type=data.channel_type,
-            config=data.config,
-            severity_filter=data.severity_filter,
-            is_enabled=data.is_enabled,
-        )
-        session.add(channel)
-        session.flush()
-        return NotificationChannelResponse.model_validate(channel)
-
-
-@app.put("/api/notifications/channels/{channel_id}", response_model=NotificationChannelResponse)
-async def api_update_notification_channel(channel_id: int, data: NotificationChannelUpdate):
-    """Update a notification channel."""
-    from agenticops.notify.notifier import NotificationChannel
-
-    with get_db_session() as session:
-        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
-        if not channel:
-            raise HTTPException(status_code=404, detail="Notification channel not found")
-
-        update_data = data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(channel, key, value)
-
-        session.flush()
-        return NotificationChannelResponse.model_validate(channel)
-
-
-@app.delete("/api/notifications/channels/{channel_id}", status_code=204)
-async def api_delete_notification_channel(channel_id: int):
-    """Delete a notification channel."""
-    from agenticops.notify.notifier import NotificationChannel
-
-    with get_db_session() as session:
-        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
-        if not channel:
-            raise HTTPException(status_code=404, detail="Notification channel not found")
-        session.delete(channel)
-
-
-@app.post("/api/notifications/channels/{channel_id}/test")
-async def api_test_notification_channel(channel_id: int, data: NotificationSendRequest):
-    """Send a test notification through a channel (resolves IM chat_id from YAML)."""
-    from agenticops.notify.notifier import (
-        NotificationChannel, NotificationManager,
-        _IM_CHANNEL_TYPES, resolve_channel_config,
+    save_channel(
+        name=data.name,
+        channel_type=data.channel_type,
+        config=data.config,
+        is_enabled=data.is_enabled,
+        severity_filter=data.severity_filter or None,
+    )
+    return NotificationChannelResponse(
+        name=data.name,
+        channel_type=data.channel_type,
+        config=data.config,
+        severity_filter=data.severity_filter,
+        is_enabled=data.is_enabled,
     )
 
-    with get_db_session() as session:
-        channel = session.query(NotificationChannel).filter_by(id=channel_id).first()
-        if not channel:
-            raise HTTPException(status_code=404, detail="Notification channel not found")
 
-        notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
-        if not notifier_class:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown channel type: {channel.channel_type}",
-            )
+@app.put("/api/notifications/channels/{channel_name}", response_model=NotificationChannelResponse)
+async def api_update_notification_channel(channel_name: str, data: NotificationChannelUpdate):
+    """Update a notification channel in channels.yaml."""
+    from agenticops.notify.im_config import get_channel, save_channel
 
-        config = resolve_channel_config(channel)
-        # Sync to DB if changed
-        if (
-            channel.channel_type in _IM_CHANNEL_TYPES
-            and config.get("chat_id") != (channel.config or {}).get("chat_id")
-        ):
-            channel.config = config
+    channel = get_channel(channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
 
-        try:
-            notifier = notifier_class(config)
-            success = await notifier.send(
-                subject=data.subject,
-                body=data.body,
-                severity=data.severity,
-            )
-            status = "sent" if success else "failed"
-            return {"status": status, "channel": channel.name}
-        except Exception as e:
-            return JSONResponse(
-                status_code=500,
-                content={"status": "failed", "channel": channel.name, "error": str(e)},
-            )
+    update_data = data.model_dump(exclude_unset=True)
+    new_type = update_data.get("channel_type", channel.channel_type)
+    new_config = update_data.get("config", channel.config)
+    new_enabled = update_data.get("is_enabled", channel.is_enabled)
+    new_severity = update_data.get("severity_filter", channel.severity_filter)
+
+    save_channel(
+        name=channel_name,
+        channel_type=new_type,
+        config=new_config,
+        is_enabled=new_enabled,
+        severity_filter=new_severity or None,
+    )
+    return NotificationChannelResponse(
+        name=channel_name,
+        channel_type=new_type,
+        config=new_config,
+        severity_filter=new_severity or [],
+        is_enabled=new_enabled,
+    )
+
+
+@app.delete("/api/notifications/channels/{channel_name}", status_code=204)
+async def api_delete_notification_channel(channel_name: str):
+    """Delete a notification channel from channels.yaml."""
+    from agenticops.notify.im_config import delete_channel
+
+    if not delete_channel(channel_name):
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+
+
+@app.post("/api/notifications/channels/{channel_name}/test")
+async def api_test_notification_channel(channel_name: str, data: NotificationSendRequest):
+    """Send a test notification through a channel (from channels.yaml)."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import NotificationManager
+
+    channel = get_channel(channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+
+    notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
+    if not notifier_class:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown channel type: {channel.channel_type}",
+        )
+
+    try:
+        notifier = notifier_class(channel.config)
+        success = await notifier.send(
+            subject=data.subject,
+            body=data.body,
+            severity=data.severity,
+        )
+        status = "sent" if success else "failed"
+        return {"status": status, "channel": channel.name}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "failed", "channel": channel.name, "error": str(e)},
+        )
 
 
 @app.get("/api/notifications/logs", response_model=List[NotificationLogResponse])
 async def api_list_notification_logs(
-    channel_id: Optional[int] = None,
+    channel_name: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
@@ -2888,8 +2881,8 @@ async def api_list_notification_logs(
     with get_db_session() as session:
         query = session.query(NotificationLog).order_by(NotificationLog.sent_at.desc())
 
-        if channel_id:
-            query = query.filter_by(channel_id=channel_id)
+        if channel_name:
+            query = query.filter_by(channel_name=channel_name)
         if status:
             query = query.filter_by(status=status)
 

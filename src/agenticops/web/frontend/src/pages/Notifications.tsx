@@ -6,7 +6,6 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
-import { formatShortDate } from "@/lib/formatDate";
 import { apiFetch } from "@/api/client";
 import {
   useNotificationChannels,
@@ -369,15 +368,6 @@ const columns: Column<NotificationChannel>[] = [
         <span className="text-sm text-slate-400">all</span>
       ),
   },
-  {
-    key: "created_at",
-    header: "Created",
-    sortable: true,
-    sortValue: (r) => r.created_at,
-    render: (r) => (
-      <span className="text-sm text-slate-500">{formatShortDate(r.created_at)}</span>
-    ),
-  },
 ];
 
 export default function Notifications() {
@@ -433,7 +423,7 @@ export default function Notifications() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      testMut.mutate(r.id);
+                      testMut.mutate(r.name);
                     }}
                     disabled={testMut.isPending}
                     className="text-xs text-blue-600 hover:underline"
@@ -464,7 +454,7 @@ export default function Notifications() {
             },
           ]}
           data={channels ?? []}
-          rowKey={(r) => r.id}
+          rowKey={(r) => r.name}
           emptyMessage="No notification channels configured."
         />
       </Card>
@@ -480,7 +470,7 @@ export default function Notifications() {
           onSave={async (data) => {
             if (editing) {
               await updateMut.mutateAsync({
-                id: editing.id,
+                name: editing.name,
                 data: data as NotificationChannelUpdate,
               });
             } else {
@@ -498,7 +488,7 @@ export default function Notifications() {
           deleting={deleteMut.isPending}
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
-            await deleteMut.mutateAsync(deleting.id);
+            await deleteMut.mutateAsync(deleting.name);
             setDeleting(null);
           }}
         />

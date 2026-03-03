@@ -18,11 +18,13 @@ from agenticops.models import (
     FixExecution,
     FixPlan,
     HealthIssue,
+    IMAlias,
     InvalidStatusTransition,
     RCAResult,
     get_session,
     validate_status_transition,
 )
+from agenticops.notify.im_config import load_channels as _load_yaml_channels
 
 logger = logging.getLogger(__name__)
 
@@ -1103,3 +1105,49 @@ def mark_fix_failed(health_issue_id: int, execution_id: int, reason: str = "") -
         return f"Error marking fix failed: {e}"
     finally:
         session.close()
+
+
+@tool
+def list_send_targets(target_type: str = "") -> str:
+    """List available /send_to targets (notification channels and IM aliases).
+
+    Args:
+        target_type: Filter by type: "channel", "im", or "" for all.
+
+    Returns:
+        JSON with channels and im_aliases arrays, plus usage hint.
+    """
+    result: dict = {}
+
+    if target_type in ("", "channel"):
+        yaml_channels = _load_yaml_channels()
+        result["channels"] = [
+            {
+                "name": ch.name,
+                "channel_type": ch.channel_type,
+                "is_enabled": ch.is_enabled,
+                "severity_filter": ch.severity_filter or [],
+            }
+            for ch in yaml_channels
+            if ch.is_enabled
+        ]
+
+    if target_type in ("", "im"):
+        session = get_session()
+        try:
+            aliases = session.query(IMAlias).all()
+            result["im_aliases"] = [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "platform": a.platform,
+                    "app_name": a.app_name,
+                    "description": a.description or "",
+                }
+                for a in aliases
+            ]
+        finally:
+            session.close()
+
+    result["hint"] = 'Use /send_to <name> #R<id> or /send_to <name> "message" to send.'
+    return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)

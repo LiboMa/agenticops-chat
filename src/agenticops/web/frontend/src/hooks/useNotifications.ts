@@ -14,22 +14,22 @@ export function useNotificationChannels() {
   });
 }
 
-export function useNotificationChannel(id: number) {
+export function useNotificationChannel(name: string) {
   return useQuery({
-    queryKey: ["notification-channel", id],
-    queryFn: () => apiFetch<NotificationChannel>(`/notifications/channels/${id}`),
-    enabled: id > 0,
+    queryKey: ["notification-channel", name],
+    queryFn: () => apiFetch<NotificationChannel>(`/notifications/channels/${name}`),
+    enabled: !!name,
   });
 }
 
 interface LogFilters {
-  channel_id?: number;
+  channel_name?: string;
   status?: string;
 }
 
 export function useNotificationLogs(filters: LogFilters = {}) {
   const params = new URLSearchParams();
-  if (filters.channel_id) params.set("channel_id", String(filters.channel_id));
+  if (filters.channel_name) params.set("channel_name", filters.channel_name);
   if (filters.status) params.set("status", filters.status);
   const qs = params.toString();
 
@@ -59,13 +59,13 @@ export function useUpdateChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
-      id,
+      name,
       data,
     }: {
-      id: number;
+      name: string;
       data: NotificationChannelUpdate;
     }) =>
-      apiFetch<NotificationChannel>(`/notifications/channels/${id}`, {
+      apiFetch<NotificationChannel>(`/notifications/channels/${name}`, {
         method: "PUT",
         body: JSON.stringify(data),
       }),
@@ -77,8 +77,8 @@ export function useUpdateChannel() {
 export function useDeleteChannel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<void>(`/notifications/channels/${id}`, { method: "DELETE" }),
+    mutationFn: (name: string) =>
+      apiFetch<void>(`/notifications/channels/${name}`, { method: "DELETE" }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["notification-channels"] }),
   });
@@ -86,8 +86,8 @@ export function useDeleteChannel() {
 
 export function useTestChannel() {
   return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<unknown>(`/notifications/channels/${id}/test`, {
+    mutationFn: (name: string) =>
+      apiFetch<unknown>(`/notifications/channels/${name}/test`, {
         method: "POST",
         body: JSON.stringify({
           subject: "Test notification from AgenticOps",

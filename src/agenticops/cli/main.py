@@ -1257,7 +1257,7 @@ def init():
 
     # Also create tables for new modules
     from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
-    from agenticops.notify.notifier import NotificationChannel, NotificationLog
+    from agenticops.notify.notifier import NotificationLog
     from agenticops.auth.models import User, APIKey, Session
     from agenticops.audit.models import AuditLog
     from agenticops.models import Base, get_engine

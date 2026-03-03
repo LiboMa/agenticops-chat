@@ -1,7 +1,6 @@
 """Notification module for AgenticOps."""
 
 from agenticops.notify.notifier import (
-    NotificationChannel,
     NotificationLog,
     Notifier,
     IMNotifier,
@@ -15,8 +14,10 @@ from agenticops.notify.notifier import (
     NotificationManager,
 )
 
+from agenticops.notify.im_config import ChannelConfig
+
 __all__ = [
-    "NotificationChannel",
+    "ChannelConfig",
     "NotificationLog",
     "Notifier",
     "IMNotifier",

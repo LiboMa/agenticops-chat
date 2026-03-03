@@ -1,0 +1,43 @@
+# Notification Channels — sole source of truth for channel configuration.
+# Copy this file to channels.yaml and fill in your values.
+# Env var interpolation: ${VAR_NAME}
+#
+# Each channel has:
+#   type:             Channel type (feishu, dingtalk, wecom, slack, email, sns, webhook)
+#   enabled:          true/false (default: true)
+#   severity_filter:  List of severities to notify for (empty = all)
+#   ...               All other keys become the notifier config dict
+
+channels:
+  # Feishu (Lark) example
+  my-feishu-alerts:
+    type: feishu
+    enabled: true
+    app_name: default
+    chat_id: "${FEISHU_CHAT_ID}"
+
+  # Slack example
+  my-slack-alerts:
+    type: slack
+    enabled: true
+    severity_filter: ["critical", "high"]
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#alerts"
+
+  # Email example
+  ops-email:
+    type: email
+    enabled: false
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: 587
+    smtp_user: "${SMTP_USER}"
+    smtp_password: "${SMTP_PASSWORD}"
+    from_email: "aiops@example.com"
+    to_emails: ["ops@example.com"]
+
+  # Webhook example
+  my-webhook:
+    type: webhook
+    enabled: false
+    url: "${WEBHOOK_URL}"
+    method: POST
