@@ -109,42 +109,39 @@ graph TB
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Detected : Detect Agent finds anomaly
-    Detected --> Acknowledged : User acknowledges (optional)
-    Detected --> Investigating : RCA Agent starts analysis
-    Acknowledged --> Investigating : RCA Agent starts analysis
+    [*] --> open : Webhook alert / Detect Agent
+    open --> investigating : Auto-RCA triggered (daemon thread)
 
-    Investigating --> RootCauseIdentified : RCA complete (confidence score)
-    RootCauseIdentified --> FixPlanning : SRE Agent generates fix plan
+    investigating --> root_cause_identified : RCA complete
 
-    FixPlanning --> FixReady : Fix plan created (L0-L3)
+    root_cause_identified --> fix_planned : Auto-SRE generates plan (daemon thread)
 
-    FixReady --> FixApproved : User approves plan
-    FixApproved --> Executing : Executor Agent runs plan
+    fix_planned --> fix_approved : L0/L1 auto-approved OR human approves L2/L3
+    fix_planned --> acknowledged : User defers fix
 
-    Executing --> Resolved : Execution succeeded
-    Executing --> FixFailed : Execution failed
-    FixFailed --> FixPlanning : Retry with new plan
+    fix_approved --> resolved : Auto-execute succeeds (daemon thread)
+    fix_approved --> fix_failed : Execution failed (rollback attempted)
+    fix_failed --> fix_planned : Retry with new plan
 
-    Resolved --> [*] : KB case study saved
+    resolved --> [*] : KB case study + SOP saved
 
-    note right of Investigating
+    note right of investigating
         Skills activated based on issue type
         CloudTrail + metrics + logs analyzed
         Similar past cases searched
     end note
 
-    note right of FixReady
-        L0: Read-only verification
-        L1: Low-risk config change
-        L2: Service-affecting change
-        L3: High-risk (restart, failover)
+    note right of fix_planned
+        L0: Read-only verification (auto)
+        L1: Single workload fix (auto)
+        L2: Multi-resource change (human)
+        L3: High-risk operation (human)
     end note
 
-    note right of Executing
-        Pre-check → Execute → Post-check
-        Auto-rollback on failure
-        Full audit trail
+    note right of fix_approved
+        7-step protocol:
+        Verify → Gate → Pre-check → Execute
+        → Post-check → Rollback → Finalize
     end note
 ```
 
@@ -245,6 +242,53 @@ flowchart TD
     style FINAL_OK fill:#6f6
     style RESOLVE fill:#6f6
 ```
+
+---
+
+## Auto-Fix Pipeline (Closed-Loop Remediation)
+
+When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes:
+
+```mermaid
+flowchart TD
+    PROM["① Prometheus<br/>kube-state-metrics + node-exporter"] -->|scrape 15s| RULES["PrometheusRule<br/>(10 alert rules)"]
+    RULES -->|evaluate 30s| AM["② AlertManager"]
+    AM -->|POST webhook| WH["③ AgenticOps API<br/>POST /api/webhooks/prometheus"]
+
+    WH --> PARSE["parse_prometheus()<br/>+ create_health_issue()<br/>(fingerprint dedup)"]
+
+    PARSE -->|daemon thread| RCA["④ Auto-RCA<br/>rca_agent() — Sonnet 4.6<br/>Skills + kubectl + KB lookup"]
+
+    RCA --> SRE["⑤ Auto-SRE<br/>sre_agent() — Sonnet 4.6<br/>Fix plan + risk classification"]
+
+    SRE --> APPROVE{"⑥ Auto-Approve"}
+    APPROVE -->|L0/L1| AUTO["Auto-approved ✓"]
+    APPROVE -->|L2/L3| HUMAN["⏸ Paused<br/>Human approval required"]
+
+    AUTO -->|daemon thread| EXEC["⑦ Auto-Execute<br/>executor_agent() — Opus 4.6<br/>Pre-check → Execute → Post-check"]
+
+    HUMAN -->|API/Chat approve| EXEC
+
+    EXEC --> RESOLVE["⑧ Resolved<br/>KB case study + SOP update<br/>+ Notification sent"]
+
+    style AUTO fill:#6f6
+    style HUMAN fill:#f96
+    style RESOLVE fill:#6f6
+```
+
+**Code path**: `app.py:_process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → resolved.
+
+**Key settings**:
+
+| Setting | Default | What it controls |
+|---------|---------|-----------------|
+| `AIOPS_AUTO_RCA_ENABLED` | `true` | Auto-trigger RCA on new HealthIssue |
+| `AIOPS_AUTO_FIX_ENABLED` | `true` | Master switch for auto-fix pipeline |
+| `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | `true` | Auto-approve low-risk plans |
+| `AIOPS_EXECUTOR_ENABLED` | `true` | Enable fix execution |
+| `AIOPS_NOTIFICATIONS_ENABLED` | `true` | Auto-notify on pipeline events |
+
+> **See also**: [EKS Lab Auto-Fix Pipeline (Use Case 6)](use-cases/use-case-6-eks-lab-auto-fix-pipeline.md) for validated end-to-end test results.
 
 ---
 
@@ -418,9 +462,9 @@ execute plan 7
 | Level | Risk | Example | Approval |
 |-------|------|---------|----------|
 | L0 | Read-only | Verify metric recovered | Auto |
-| L1 | Low | Adjust alarm threshold | Auto |
-| L2 | Medium | Resize EC2 instance | **Manual** |
-| L3 | High | Restart service, failover | **Manual** |
+| L1 | Single workload | kubectl rollout undo, set resources, delete networkpolicy, scale | Auto |
+| L2 | Multi-resource | Resize instance, modify SG rules, multi-namespace changes | **Manual** |
+| L3 | High-risk | Service restart, failover, data migration, node drain | **Manual** |
 
 **Execution flow:** Pre-checks → Execute steps → Post-checks → Auto-rollback on failure.
 
@@ -447,7 +491,9 @@ Open `http://localhost:8000/app/dashboard` and explore:
 | **Network** | Interactive topology graph with SRE analysis (SPOF detection, capacity risk) |
 | **Reports** | Generate and view daily/incident/inventory reports |
 | **Schedules** | Set up cron-based automated scans/detections |
-| **Notifications** | Configure alerting channels (email, Slack, PagerDuty) |
+| **Notifications** | Configure alerting channels (Feishu, Slack, Email, Webhook) |
+
+> **See also**: [Web Service Workflow](web_service_workflow.md) — process model, SSE vs WebSocket, Feishu Bot, startup lifecycle.
 
 **Web chat supports file uploads** — click the paperclip icon to attach screenshots (PNG/JPEG) for visual analysis or PDFs/docs for document analysis.
 

@@ -80,6 +80,7 @@ src/agenticops/
 │   ├── detect_agent.py     # Detect Agent — 异常检测智能体
 │   ├── rca_agent.py        # RCA Agent — 根因分析智能体
 │   ├── sre_agent.py        # SRE Agent — 站点可靠性工程智能体
+│   ├── executor_agent.py   # Executor Agent — 修复执行智能体 (L0-L4)
 │   ├── reporter_agent.py   # Reporter Agent — 报告生成智能体
 │   └── main_agent.py       # Main Agent — 主编排智能体
 │
@@ -101,8 +102,27 @@ src/agenticops/
 ├── scheduler/               # SCHEDULER - 调度模块
 │   └── scheduler.py        # Cron调度器
 │
+├── services/                # SERVICES - 后台服务模块
+│   ├── pipeline_service.py # 自动修复管线 (RCA→SRE→Approve→Execute)
+│   ├── rca_service.py      # 自动RCA触发器
+│   ├── executor_service.py # 后台执行轮询服务
+│   ├── resolution_service.py # 后处理 (RAG管线 + case蒸馏)
+│   └── notification_service.py # 事件自动通知 (7个触发点)
+│
+├── skills/                  # SKILLS - Agent技能模块
+│   ├── loader.py           # 技能发现、YAML解析、XML生成
+│   ├── security.py         # 三级安全分类 (shell + kubectl)
+│   ├── tools.py            # activate_skill, read_skill_reference, list_skills
+│   └── execution.py        # run_on_host (SSM/SSH), run_kubectl (EKS)
+│
+├── im/                      # IM - 即时通讯模块
+│   ├── feishu_ws.py        # 飞书WebSocket长连接 (outbound, 免公网)
+│   ├── gateway.py          # IM网关抽象
+│   └── session_manager.py  # IM会话Agent管理
+│
 ├── notify/                  # NOTIFY - 通知模块
-│   └── notifier.py         # 多渠道通知 (Slack/Email/SNS/Webhook)
+│   ├── notifier.py         # 多渠道通知 (Feishu/Slack/Email/DingTalk/WeCom/Webhook)
+│   └── im_config.py        # YAML频道配置 + IM应用凭证管理
 │
 ├── auth/                    # AUTH - 认证模块
 │   ├── models.py           # User, APIKey, Session模型
@@ -115,8 +135,15 @@ src/agenticops/
 ├── cli/                     # CLI - 命令行接口
 │   └── main.py             # ~3200行, kubectl风格命令 + 28个聊天斜杠命令
 │
+├── chat/                    # CHAT - 聊天预处理模块
+│   ├── preprocessor.py     # I#/R# 引用解析、@file、多模态
+│   ├── file_reader.py      # 文件内容提取 (text/DOCX/PDF/images)
+│   ├── send_to.py          # /send_to 命令处理器
+│   └── channel.py          # /channel 命令处理器
+│
 └── web/                     # WEB - Web仪表板
-    └── app.py              # FastAPI + 60+ REST API端点 + React SPA
+    ├── app.py              # FastAPI + 80+ REST API端点 + SSE Chat + Webhook
+    └── session_manager.py  # ChatSessionManager (per-session Agent, TTL清理)
 ```
 
 ---
