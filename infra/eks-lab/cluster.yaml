@@ -11,6 +11,25 @@ metadata:
   region: ap-southeast-1
   version: "1.30"
 
+# Use existing bastion VPC — same VPC so AlertManager can reach bastion:8000
+vpc:
+  id: vpc-028fe79b3785c1aba
+  subnets:
+    private:
+      ap-southeast-1a:
+        id: subnet-0634feb8477a666fa  # project Private 1 (10.0.101.0/24)
+      ap-southeast-1b:
+        id: subnet-0b68d4f84d93abc26  # project Private 2 (10.0.102.0/24)
+      ap-southeast-1c:
+        id: subnet-0265c17a51f71d02c  # project Private 3 (10.0.103.0/24)
+    public:
+      ap-southeast-1a:
+        id: subnet-0528a9eddeb9f8f78  # project Public 1 (10.0.1.0/24) — bastion here
+      ap-southeast-1b:
+        id: subnet-0ba6596ade21d766c  # project Public 2 (10.0.2.0/24)
+      ap-southeast-1c:
+        id: subnet-04200dc193bde143b  # project Public 3 (10.0.4.0/24)
+
 iam:
   withOIDC: true
 
@@ -37,7 +56,7 @@ managedNodeGroups:
     privateNetworking: true  # Nodes in private subnets — no public IPs
     ssh:
       allow: true
-      publicKeyName: sa-malibo  # SSH only reachable via SSM or bastion in same VPC
+      publicKeyName: key-malibo-sa  # SSH only reachable via SSM or bastion in same VPC
     labels:
       role: workload
     iam:

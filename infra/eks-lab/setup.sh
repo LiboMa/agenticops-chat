@@ -16,6 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECONFIG_PATH="${SCRIPT_DIR}/kubeconfig"
 CLUSTER_NAME="agenticops-lab"
 REGION="ap-southeast-1"
+BASTION_IP="${BASTION_IP:?ERROR: Set BASTION_IP to your bastion private IP (e.g. export BASTION_IP=10.0.1.100)}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -106,13 +107,41 @@ install_prometheus() {
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo update prometheus-community
 
+    log "Rendering prometheus-values.yaml with BASTION_IP=${BASTION_IP}"
+    sed "s/<BASTION_PRIVATE_IP>/${BASTION_IP}/g" \
+        "${SCRIPT_DIR}/monitoring/prometheus-values.yaml" > /tmp/prometheus-values-rendered.yaml
+
     log "Installing kube-prometheus-stack"
     helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
         --namespace monitoring \
-        --values "${SCRIPT_DIR}/monitoring/prometheus-values.yaml" \
+        --values /tmp/prometheus-values-rendered.yaml \
         --timeout 10m \
         --wait
     log "Prometheus + Grafana installed"
+}
+
+# -------------------------------------------------------------------
+# Step 4b: Install metrics-server (needed for kubectl top, HPA)
+# -------------------------------------------------------------------
+install_metrics_server() {
+    # eksctl may install metrics-server as an EKS addon — skip if already running
+    if kubectl get deploy metrics-server -n kube-system &>/dev/null; then
+        log "metrics-server already installed (EKS addon), skipping"
+        return
+    fi
+    log "Installing metrics-server"
+    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+    kubectl wait --for=condition=available deploy/metrics-server -n kube-system --timeout=120s
+    log "metrics-server installed"
+}
+
+# -------------------------------------------------------------------
+# Step 4c: Apply alert rules (PrometheusRule CRD)
+# -------------------------------------------------------------------
+install_alert_rules() {
+    log "Applying PrometheusRule alert rules"
+    kubectl apply -f "${SCRIPT_DIR}/monitoring/alert-rules.yaml" -n monitoring
+    log "Alert rules applied"
 }
 
 # -------------------------------------------------------------------
@@ -144,6 +173,16 @@ install_online_boutique() {
     fi
 
     kubectl apply -f "$MANIFESTS_FILE" -n online-boutique
+
+    # Patch OTEL endpoint for all microservices (Phase 2 readiness)
+    log "Patching OTEL exporter endpoint on Online Boutique services"
+    local OTEL_ENDPOINT="http://otel-collector-opentelemetry-collector.monitoring:4317"
+    for deploy in cartservice productcatalogservice currencyservice paymentservice \
+                   shippingservice emailservice checkoutservice recommendationservice adservice frontend; do
+        kubectl set env deploy/"$deploy" -n online-boutique \
+            OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_ENDPOINT" 2>/dev/null || true
+    done
+
     log "Online Boutique installed"
 }
 
@@ -164,7 +203,17 @@ install_litmus() {
 }
 
 # -------------------------------------------------------------------
-# Step 8: Wait for pods and print access info
+# Step 8: Snapshot clean state for scenario restore
+# -------------------------------------------------------------------
+snapshot_clean_state() {
+    log "Saving clean-state snapshot for scenario framework"
+    mkdir -p "${SCRIPT_DIR}/scenarios"
+    kubectl get deploy -n online-boutique -o yaml > "${SCRIPT_DIR}/scenarios/.clean-state.yaml"
+    log "Clean state saved to scenarios/.clean-state.yaml"
+}
+
+# -------------------------------------------------------------------
+# Step 9: Wait for pods and print access info
 # -------------------------------------------------------------------
 wait_and_print_info() {
     log "Waiting for Online Boutique pods to be ready..."
@@ -215,9 +264,12 @@ main() {
     create_namespaces
     create_storage_class
     install_prometheus
+    install_metrics_server
+    install_alert_rules
     install_otel_collector
     install_online_boutique
     install_litmus
+    snapshot_clean_state
     wait_and_print_info
 }
 

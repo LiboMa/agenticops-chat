@@ -170,6 +170,42 @@ else
 fi
 
 # ===================================================================
+header "4b. Metrics Server (kube-system)"
+# ===================================================================
+
+MS_READY=$(kubectl get deploy metrics-server -n kube-system -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+[[ "${MS_READY:-0}" -ge 1 ]] && pass "Metrics Server: $MS_READY replica(s) ready" || fail "Metrics Server: not ready (install via setup.sh)"
+
+# ===================================================================
+header "4c. Alert Rules"
+# ===================================================================
+
+if kubectl get prometheusrule agenticops-lab-alerts -n monitoring &>/dev/null; then
+    RULE_GROUPS=$(kubectl get prometheusrule agenticops-lab-alerts -n monitoring -o jsonpath='{.spec.groups[*].name}' 2>/dev/null || echo "")
+    pass "PrometheusRule agenticops-lab-alerts exists (groups: $RULE_GROUPS)"
+else
+    fail "PrometheusRule agenticops-lab-alerts not found in monitoring namespace"
+fi
+
+# Check AlertManager webhook URL has no placeholder
+AM_SECRET=$(kubectl get secret alertmanager-prometheus-kube-prometheus-alertmanager -n monitoring -o jsonpath='{.data.alertmanager\.yaml}' 2>/dev/null || echo "")
+if [[ -n "$AM_SECRET" ]]; then
+    AM_CONFIG=$(echo "$AM_SECRET" | base64 -d 2>/dev/null || echo "")
+    if echo "$AM_CONFIG" | grep -q '<BASTION_PRIVATE_IP>'; then
+        fail "AlertManager config still has <BASTION_PRIVATE_IP> placeholder — re-run setup.sh with BASTION_IP set"
+    else
+        WEBHOOK_URL=$(echo "$AM_CONFIG" | grep -o 'http://[^"]*prometheus' || echo "")
+        if [[ -n "$WEBHOOK_URL" ]]; then
+            pass "AlertManager webhook: $WEBHOOK_URL"
+        else
+            warn "AlertManager config: could not extract webhook URL"
+        fi
+    fi
+else
+    warn "AlertManager secret not found — cannot verify webhook config"
+fi
+
+# ===================================================================
 header "5. Storage"
 # ===================================================================
 

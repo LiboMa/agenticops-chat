@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agenticops-chaos-deny-cartservice
+  namespace: online-boutique
+  labels:
+    chaos-injected: "true"
+    agenticops-scenario: case-3
+spec:
+  podSelector:
+    matchLabels:
+      app: cartservice
+  policyTypes:
+    - Ingress
+  ingress: []   # Deny all ingress
