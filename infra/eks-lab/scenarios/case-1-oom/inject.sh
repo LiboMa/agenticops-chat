@@ -15,10 +15,10 @@ CURRENT_LIMIT=$(kubectl get deploy adservice -n online-boutique \
 echo "$CURRENT_LIMIT" > /tmp/case1-original-memory.txt
 report_info "Original memory limit: ${CURRENT_LIMIT}"
 
-# Inject: set memory limit to 32Mi (OOM guaranteed for Java app)
-report_info "Setting adservice memory limit to 32Mi..."
+# Inject: set memory request+limit to 32Mi (OOM guaranteed for Java app)
+report_info "Setting adservice memory request=32Mi limit=32Mi..."
 kubectl set resources deploy/adservice -n online-boutique \
-    --limits=memory=32Mi
+    --requests=memory=32Mi --limits=memory=32Mi
 kubectl rollout status deploy/adservice -n online-boutique --timeout=60s 2>/dev/null || true
 
 report_pass "Fault injected — adservice memory=32Mi (was ${CURRENT_LIMIT})"
