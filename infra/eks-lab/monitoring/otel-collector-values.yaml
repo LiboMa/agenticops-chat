@@ -71,7 +71,7 @@ config:
       resource_to_telemetry_conversion:
         enabled: true
     otlp/jaeger:
-      endpoint: "jaeger-collector.monitoring:4317"
+      endpoint: "jaeger.monitoring:4317"
       tls:
         insecure: true
     debug:
