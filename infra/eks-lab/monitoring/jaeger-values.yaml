@@ -1,0 +1,46 @@
+# Jaeger All-in-One Helm values
+# Chart: jaegertracing/jaeger
+# Docs: https://github.com/jaegertracing/helm-charts
+#
+# Single pod: collector + query + UI with in-memory storage.
+# Lab only — production would use Elasticsearch/Cassandra backend.
+
+provisionDataStore:
+  cassandra: false
+
+allInOne:
+  enabled: true
+  extraEnv:
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  nodeSelector:
+    role: monitoring
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: monitoring
+      effect: NoSchedule
+
+storage:
+  type: memory
+
+query:
+  service:
+    type: ClusterIP
+
+collector:
+  service:
+    otlp:
+      grpc:
+        name: otlp-grpc
+        port: 4317
+      http:
+        name: otlp-http
+        port: 4318

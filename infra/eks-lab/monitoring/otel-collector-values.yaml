@@ -70,6 +70,10 @@ config:
         insecure: true
       resource_to_telemetry_conversion:
         enabled: true
+    otlp/jaeger:
+      endpoint: "jaeger-collector.monitoring:4317"
+      tls:
+        insecure: true
     debug:
       verbosity: basic
       sampling_initial: 5
@@ -84,7 +88,7 @@ config:
       traces:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [debug]
+        exporters: [otlp/jaeger, debug]
       logs:
         receivers: [otlp]
         processors: [memory_limiter, batch]

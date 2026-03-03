@@ -145,6 +145,22 @@ install_alert_rules() {
 }
 
 # -------------------------------------------------------------------
+# Step 4d: Install Jaeger (all-in-one trace backend)
+# -------------------------------------------------------------------
+install_jaeger() {
+    helm repo add jaegertracing https://jaegertracing.github.io/helm-charts
+    helm repo update jaegertracing
+
+    log "Installing Jaeger (all-in-one)"
+    helm upgrade --install jaeger jaegertracing/jaeger \
+        --namespace monitoring \
+        --values "${SCRIPT_DIR}/monitoring/jaeger-values.yaml" \
+        --timeout 5m \
+        --wait
+    log "Jaeger installed (query: jaeger-query.monitoring:16686)"
+}
+
+# -------------------------------------------------------------------
 # Step 5: Install OpenTelemetry Collector
 # -------------------------------------------------------------------
 install_otel_collector() {
@@ -266,6 +282,7 @@ main() {
     install_prometheus
     install_metrics_server
     install_alert_rules
+    install_jaeger
     install_otel_collector
     install_online_boutique
     install_litmus

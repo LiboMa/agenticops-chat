@@ -211,6 +211,20 @@ class Settings(BaseSettings):
         description="Enable auto-notifications on pipeline events (AIOPS_NOTIFICATIONS_ENABLED=false to disable)",
     )
 
+    # Distributed Tracing (Jaeger)
+    jaeger_query_endpoint: str = Field(
+        default="http://jaeger-query.monitoring:16686",
+        description="Jaeger Query API endpoint for trace lookups (AIOPS_JAEGER_QUERY_ENDPOINT)",
+    )
+    jaeger_enabled: bool = Field(
+        default=True,
+        description="Enable distributed trace querying in RCA agent (AIOPS_JAEGER_ENABLED)",
+    )
+    jaeger_default_lookback: str = Field(
+        default="1h",
+        description="Default trace lookback window (AIOPS_JAEGER_DEFAULT_LOOKBACK)",
+    )
+
     # Webhooks
     webhook_secret: str = Field(
         default="",

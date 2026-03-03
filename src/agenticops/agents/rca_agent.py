@@ -72,6 +72,7 @@ INVESTIGATION PROTOCOL — follow this order strictly:
      - CloudWatch/metrics → activate_skill("monitoring")
      - Log analysis → activate_skill("log-analysis")
      - S3/EBS/EFS → activate_skill("aws-storage")
+     - Service degradation/latency/5xx/cascading failures → activate_skill("distributed-tracing")
      The skill provides decision trees and command references — use them to guide your investigation.
 2. READ ISSUE: Call get_health_issue with the given issue_id to understand the problem.
 3. SET STATUS: Call update_health_issue_status to set status to 'investigating'.
@@ -102,6 +103,23 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    b. Call query_logs if log patterns are relevant to the issue.
    c. Call query_provider_metrics/query_provider_logs to pull cross-platform data from
       Datadog or other configured providers for additional context.
+6.5. INVESTIGATE DISTRIBUTED TRACES (when the issue involves service degradation, latency, or errors):
+   a. First activate the skill: activate_skill("distributed-tracing") — this loads trace
+      query tools and decision trees for cross-service analysis.
+   b. Call get_service_dependencies() to understand the service call graph.
+   c. Call query_traces(service=AFFECTED_SERVICE, lookback="15m") to find recent traces.
+   d. For traces with high latency or errors, call get_trace_detail(trace_id) to see the
+      full span tree — this reveals which downstream service is the actual bottleneck.
+   e. Call find_error_traces(service=AFFECTED_SERVICE) to find error patterns across traces.
+   f. KEY INSIGHT: If the affected service (e.g., frontend) shows errors, but the trace reveals
+      the latency/error originates in a downstream service (e.g., redis, database), the ROOT CAUSE
+      is the downstream service — not the one that triggered the alert.
+   g. Example: Alert on "frontend HighErrorRate" → trace shows:
+      frontend(5s) → checkoutservice(4.8s) → cartservice(4.5s) → redis(4.2s TIMEOUT)
+      Root cause: redis, not frontend.
+   NOTE: Trace investigation requires Jaeger to be deployed. If trace tools return a
+   connection error, skip trace investigation and note "Distributed tracing not available"
+   in your analysis. Do NOT let trace query failures block the RCA.
 7. SYNTHESIZE: Combine all evidence into a root cause analysis:
    - Identify the most likely root cause with confidence score (0.0-1.0).
    - List contributing factors.

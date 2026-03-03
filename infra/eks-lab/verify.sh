@@ -141,6 +141,10 @@ NE_DESIRED=$(kubectl get ds prometheus-prometheus-node-exporter -n monitoring -o
 NE_READY=$(kubectl get ds prometheus-prometheus-node-exporter -n monitoring -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
 [[ "$NE_READY" == "$NE_DESIRED" ]] && pass "Node exporter: $NE_READY/$NE_DESIRED ready" || warn "Node exporter: $NE_READY/$NE_DESIRED ready"
 
+# Jaeger
+JAEGER_READY=$(kubectl get deploy jaeger -n monitoring -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+[[ "${JAEGER_READY:-0}" -ge 1 ]] && pass "Jaeger: ready" || fail "Jaeger: not ready"
+
 # OTEL Collector
 OTEL_READY=$(kubectl get deploy otel-collector-opentelemetry-collector -n monitoring -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 [[ "${OTEL_READY:-0}" -ge 1 ]] && pass "OTEL Collector: ready" || fail "OTEL Collector: not ready"
@@ -297,6 +301,15 @@ print(f'{up}/{len(targets)}')
     DASH_COUNT=$(curl -s -u admin:agenticops-lab 'http://localhost:3000/api/search?type=dash-db' 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     [[ "$DASH_COUNT" -gt 0 ]] && pass "Grafana dashboards: $DASH_COUNT available" || info "Grafana dashboards: port-forward to :3000 to check"
 
+    # Trace flow: port-forward Jaeger query, check services exist
+    JAEGER_PF_PID=""
+    kubectl port-forward svc/jaeger-query -n monitoring 16686:16686 &>/dev/null &
+    JAEGER_PF_PID=$!
+    sleep 2
+    TRACE_SERVICES=$(curl -s 'http://localhost:16686/api/services' 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo "0")
+    [[ "$TRACE_SERVICES" -gt 0 ]] && pass "Jaeger trace services: $TRACE_SERVICES discovered" || warn "Jaeger: no trace services yet (wait for traffic)"
+    kill "$JAEGER_PF_PID" 2>/dev/null || true
+
     cleanup_pf
     PROM_PF_PID=""
 fi
@@ -331,11 +344,12 @@ info "All services are ClusterIP (internal only). Access via kubectl port-forwar
 echo ""
 info "Online Boutique:  kubectl port-forward svc/frontend -n online-boutique 8080:80"
 info "Grafana:          kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80  (admin / agenticops-lab)"
+info "Jaeger:           kubectl port-forward svc/jaeger-query -n monitoring 16686:16686"
 info "LitmusChaos:      kubectl port-forward svc/litmus-frontend-service -n chaos-testing 9091:9091  (admin / litmus)"
 info "Prometheus:       kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090"
 info "Alertmanager:     kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093"
 echo ""
-info "SSH tunnel:       ssh -L 3000:localhost:3000 -L 8080:localhost:8080 -L 9090:localhost:9090 ubuntu@<bastion>"
+info "SSH tunnel:       ssh -L 3000:localhost:3000 -L 8080:localhost:8080 -L 9090:localhost:9090 -L 16686:localhost:16686 ubuntu@<bastion>"
 info "Kubeconfig:       export KUBECONFIG=$KUBECONFIG_PATH"
 echo ""
 
