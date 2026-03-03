@@ -57,12 +57,8 @@ from agenticops.tools.integration_tools import (
 
 logger = logging.getLogger(__name__)
 
-RCA_SYSTEM_PROMPT = f"""You are the RCA Agent for AgenticOps.
+RCA_SYSTEM_PROMPT = """You are the RCA Agent for AgenticOps.
 Your job is to perform Root Cause Analysis on a specific HealthIssue.
-
-DEFAULT EKS CLUSTER: {settings.eks_cluster_name or "(not configured)"}
-DEFAULT EKS REGION: {settings.eks_cluster_region or settings.bedrock_region or "(not configured)"}
-When investigating Kubernetes issues, use these defaults for run_kubectl unless the issue specifies a different cluster.
 
 INVESTIGATION PROTOCOL — follow this order strictly:
 
