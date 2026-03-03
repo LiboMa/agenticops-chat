@@ -193,17 +193,9 @@ def run_kubectl(
     Returns:
         kubectl output, or error/confirmation message.
     """
-    from agenticops.config import settings
-
     command = command.strip()
     if not command:
         return "Error: Empty kubectl command."
-
-    # Apply config defaults for cluster and region
-    if not cluster_name:
-        cluster_name = settings.eks_cluster_name
-    if not region:
-        region = settings.eks_cluster_region or settings.bedrock_region or "us-east-1"
 
     # Security classification
     tier = classify_kubectl_command(command)
