@@ -1341,6 +1341,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Automation:[/cyan]
   /schedule list | run <name>      Manage schedules
   /notify list | test | send       Notifications
+  /channel list | show | sync | test  Channel management
 
 [cyan]Session & Context:[/cyan]
   /session list | save | load      Session management
@@ -2597,6 +2598,19 @@ Usage: /notify <command> [options]"""
     return "[yellow]Usage: /notify [list | test [channel] | send <message>][/yellow]"
 
 
+def _slash_channel(ctx: ChatContext, args: list) -> str:
+    """Handle /channel commands."""
+    from agenticops.chat.channel import execute_channel
+
+    # Reconstruct the full command for the shared processor
+    cmd = "/channel " + " ".join(args) if args else "/channel"
+    result = execute_channel(cmd)
+
+    if result.success:
+        return f"[green]{result.message}[/green]"
+    return f"[yellow]{result.message}[/yellow]"
+
+
 def _slash_export(ctx: ChatContext, args: list) -> str:
     """Handle /export command - quick data export."""
     if not args:
@@ -2788,6 +2802,10 @@ SLASH_COMMANDS = {
     # Send to channels/IM
     "send_to": _slash_send_to,
     "sendto": _slash_send_to,
+
+    # Channel management
+    "channel": _slash_channel,
+    "channels": _slash_channel,
 
     # Export
     "export": _slash_export,
@@ -3169,7 +3187,7 @@ def chat(
         "/help", "/status", "/alias", "/clear",
         "/account", "/resource", "/issue", "/issues", "/report",
         "/scan", "/detect", "/analyze", "/ack", "/resolve",
-        "/workflow", "/schedule", "/notify",
+        "/workflow", "/schedule", "/notify", "/channel",
         "/session", "/context", "/export", "/output",
         "/detail", "/model", "/exit", "/quit",
     ]

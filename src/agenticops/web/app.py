@@ -3049,6 +3049,25 @@ async def api_send_chat_message(session_id: str, request: Request):
         user_content = payload.content
         detail_level_req = payload.detail_level
 
+    # Intercept /channel command before agent dispatch
+    if user_content.strip().lower().startswith(("/channel", "/channels")):
+        from agenticops.chat.channel import execute_channel
+
+        ch_result = execute_channel(user_content.strip())
+
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row:
+                db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
+                db.add(ChatMessage(session_id=row.id, role="assistant", content=ch_result.message))
+                row.last_activity_at = datetime.utcnow()
+
+        async def _channel_stream():
+            yield {"event": "text", "data": json.dumps({"token": ch_result.message})}
+            yield {"event": "done", "data": json.dumps({"input_tokens": 0, "output_tokens": 0})}
+
+        return EventSourceResponse(_channel_stream())
+
     # Intercept /send_to command before agent dispatch
     if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
@@ -3481,9 +3500,14 @@ async def _handle_im_message(platform: str, msg) -> None:
     """Process an inbound IM message: run agent → reply via notifier."""
     from agenticops.im.gateway import IMInboundMessage
 
-    # Intercept /send_to command before agent dispatch
+    # Intercept /channel command before agent dispatch
     content_stripped = msg.content.strip()
-    if content_stripped.lower().startswith(("/send_to ", "/sendto ")):
+    if content_stripped.lower().startswith(("/channel", "/channels")):
+        from agenticops.chat.channel import execute_channel
+        ch_result = execute_channel(content_stripped)
+        response_text = ch_result.message
+    # Intercept /send_to command before agent dispatch
+    elif content_stripped.lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
         send_result = execute_send_to(content_stripped)
         response_text = send_result.message

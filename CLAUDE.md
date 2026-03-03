@@ -60,6 +60,10 @@ Web Dashboard ──────┘         │
 | `src/agenticops/services/executor_service.py` | Background executor polling for pre-queued FixExecutions |
 | `src/agenticops/services/resolution_service.py` | Post-resolution RAG pipeline + case distillation |
 | `src/agenticops/services/notification_service.py` | Fire-and-forget auto-notifications on pipeline events |
+| `src/agenticops/notify/im_config.py` | IM app YAML config loader (env var interpolation, mtime cache, channel chat_id resolution) |
+| `src/agenticops/notify/notifier.py` | Multi-channel notification system (Slack, Email, SNS, Feishu, DingTalk, WeCom, Webhook) |
+| `config/im-apps.yaml` | IM app credentials + channel chat_id mappings (gitignored, source of truth) |
+| `config/im-apps.yaml.example` | Template for im-apps.yaml with `${VAR}` placeholders |
 
 ### Agents (all in `src/agenticops/agents/`)
 
@@ -270,6 +274,30 @@ skills/
 - `skills/kubernetes-admin/SKILL.md` — Fix/Remediation decision trees (8 paths)
 
 ## Recent Changes
+
+### 2026-03-03: YAML-Managed Channel chat_id for IM Notifiers
+
+**YAML as source of truth** (`config/im-apps.yaml`, `notify/im_config.py`, `notify/notifier.py`):
+- IM channel `chat_id` now managed in `config/im-apps.yaml` `channels:` dict under each app
+- Format: `channels: { channel-name: "chat_id_value" }` — flat, env-var interpolatable
+- `get_channel_chat_id(platform, app_name, channel_name)` resolves chat_id from YAML via `_load_raw()` (mtime-cached)
+- `resolve_channel_config(channel)` — module-level helper returns effective config with YAML chat_id merged
+- DB stays synced: every read/write path (send, list, get, test) resolves YAML → updates DB if different
+- `sync_im_channels_from_yaml()` — bulk sync utility for on-demand or startup use
+- Backward compatible: falls back to DB `config.chat_id` if channel not found in YAML
+
+**IM Notifiers** (`notify/notifier.py`):
+- `IMNotifier` base class with shared token caching (monotonic clock, 5-min early refresh)
+- `FeishuNotifier` — Open API + Interactive Card messages
+- `DingTalkNotifier` — Open API + Markdown group messages
+- `WeComNotifier` — App API + TextCard (user mode + group chat mode)
+- All three: lazy-load app credentials from YAML via `_ensure_app_config()`, fallback to DB config
+
+**API endpoint fixes** (`web/app.py`):
+- List/get/test-send notification channel endpoints now sync YAML → DB on every request
+- Fixed broken test-send endpoint (was instantiating abstract `Notifier()` class)
+
+**Config**: `config/im-apps.yaml` gitignored (real credentials); `config/im-apps.yaml.example` committed as template
 
 ### 2026-03-02: Auto-Notifications + `/send_to` Chat Command
 
