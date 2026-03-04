@@ -112,6 +112,25 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "data" / "reports",
         description="Directory for generated reports",
     )
+
+    # Report storage backend
+    report_storage: str = Field(
+        default="local",
+        description="Report storage backend: 'local' or 's3' (AIOPS_REPORT_STORAGE)",
+    )
+    report_s3_bucket: str = Field(
+        default="",
+        description="S3 bucket for report storage (AIOPS_REPORT_S3_BUCKET)",
+    )
+    report_s3_prefix: str = Field(
+        default="reports/",
+        description="S3 key prefix for reports (AIOPS_REPORT_S3_PREFIX)",
+    )
+    report_s3_region: str = Field(
+        default="us-east-1",
+        description="S3 region for report storage (AIOPS_REPORT_S3_REGION)",
+    )
+
     knowledge_base_dir: Path = Field(
         default=PROJECT_ROOT / "data" / "knowledge_base",
         description="Directory for RCA knowledge base",

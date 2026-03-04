@@ -1268,6 +1268,82 @@ def init():
     console.print("[green]Database initialized successfully![/green]")
     console.print(f"Data directory: {settings.data_dir.absolute()}")
 
+    # Report storage backend setup
+    _init_report_storage()
+
+
+# ── Report Storage Init Helpers ─────────────────────────────────────────────
+
+
+def _init_report_storage() -> None:
+    """Prompt user to choose report storage backend (local or S3)."""
+    from rich.prompt import Prompt
+
+    console.print("\n[bold]Report Storage Configuration[/bold]")
+    console.print("  Reports can be stored locally or on S3.")
+    console.print("  S3 is recommended for production (shared access, knowledge base source).\n")
+
+    choice = Prompt.ask(
+        "Storage backend",
+        choices=["local", "s3"],
+        default="local",
+    )
+
+    if choice == "s3":
+        bucket = Prompt.ask("S3 bucket name")
+        prefix = Prompt.ask("S3 key prefix", default="reports/")
+        region = Prompt.ask("S3 region", default="us-east-1")
+
+        # Validate bucket access
+        try:
+            _validate_s3_bucket(bucket, region)
+        except Exception as e:
+            console.print(f"[red]S3 validation failed: {e}[/red]")
+            console.print("[yellow]Falling back to local storage.[/yellow]")
+            _write_env_var("AIOPS_REPORT_STORAGE", "local")
+            console.print(f"[green]Local storage: {settings.reports_dir}[/green]")
+            return
+
+        _write_env_var("AIOPS_REPORT_STORAGE", "s3")
+        _write_env_var("AIOPS_REPORT_S3_BUCKET", bucket)
+        _write_env_var("AIOPS_REPORT_S3_PREFIX", prefix)
+        _write_env_var("AIOPS_REPORT_S3_REGION", region)
+        console.print(f"[green]S3 storage configured: s3://{bucket}/{prefix}[/green]")
+    else:
+        _write_env_var("AIOPS_REPORT_STORAGE", "local")
+        console.print(f"[green]Local storage: {settings.reports_dir}[/green]")
+
+
+def _validate_s3_bucket(bucket: str, region: str) -> None:
+    """Verify S3 bucket exists and is writable."""
+    import boto3
+
+    s3 = boto3.client("s3", region_name=region)
+    s3.head_bucket(Bucket=bucket)
+    # Test write + cleanup
+    s3.put_object(Bucket=bucket, Key=".agenticops-probe", Body=b"ok")
+    s3.delete_object(Bucket=bucket, Key=".agenticops-probe")
+
+
+def _write_env_var(key: str, value: str) -> None:
+    """Set a variable in .env (create if needed, update if exists)."""
+    env_path = Path(".env")
+    lines: list[str] = []
+    found = False
+
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}=") or line.startswith(f"# {key}="):
+                lines[i] = f"{key}={value}"
+                found = True
+                break
+
+    if not found:
+        lines.append(f"{key}={value}")
+
+    env_path.write_text("\n".join(lines) + "\n")
+
 
 # ============================================================================
 # Chat Slash Commands

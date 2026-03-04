@@ -7,11 +7,9 @@ and list recent reports.
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 
 from strands import tool
 
-from agenticops.config import settings
 from agenticops.models import Report, get_session
 
 logger = logging.getLogger(__name__)
@@ -49,14 +47,15 @@ def save_report(
     except json.JSONDecodeError:
         metadata_parsed = {}
 
-    # Write markdown file
-    settings.ensure_dirs()
+    # Write via storage backend (local or S3)
+    from agenticops.storage import get_storage_backend
+
+    backend = get_storage_backend()
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    filename = f"{report_type.lower()}-{timestamp}.md"
-    filepath = settings.reports_dir / filename
+    key = f"{report_type.lower()}/{report_type.lower()}-{timestamp}.md"
 
     try:
-        filepath.write_text(content_markdown)
+        uri = backend.write(key, content_markdown.encode("utf-8"), "text/markdown")
     except Exception as e:
         return f"Error writing report file: {e}"
 
@@ -68,7 +67,7 @@ def save_report(
             title=title[:200],
             summary=summary,
             content_markdown=content_markdown,
-            file_path=str(filepath),
+            file_path=uri,
             report_metadata=metadata_parsed,
         )
         session.add(report)
@@ -83,13 +82,13 @@ def save_report(
 
         return (
             f"Report #{report.id} saved: [{report_type.upper()}] {title}. "
-            f"File: {filepath}"
+            f"File: {uri}"
         )
     except Exception as e:
         session.rollback()
         # Clean up file if DB write failed
         try:
-            filepath.unlink(missing_ok=True)
+            backend.delete(uri)
         except Exception:
             pass
         return f"Error saving report: {e}"
@@ -135,3 +134,15 @@ def list_reports(report_type: str = "", limit: int = 20) -> str:
         return json.dumps(result, default=str)
     finally:
         session.close()
+
+
+def get_report_content(file_path: str) -> str | None:
+    """Read report content from storage (local or S3) by file_path URI."""
+    from agenticops.storage import get_storage_backend
+
+    backend = get_storage_backend()
+    try:
+        return backend.read(file_path).decode("utf-8")
+    except Exception:
+        logger.debug("Failed to read report from %s", file_path, exc_info=True)
+        return None
