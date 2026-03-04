@@ -41,3 +41,21 @@ channels:
     enabled: false
     url: "${WEBHOOK_URL}"
     method: POST
+
+  # SNS Report Distribution — sends formatted reports to email subscribers
+  ops-reports:
+    type: sns-report
+    enabled: false
+    topic_arn: "${SNS_REPORT_TOPIC_ARN}"
+    region: "us-east-1"
+    s3_bucket: "${REPORT_S3_BUCKET}"
+    s3_prefix: "reports/"
+    s3_region: "us-east-1"          # defaults to region if omitted
+    url_expiry: 604800              # presigned URL expiry (seconds), default 7 days
+    formats: [html, pdf, markdown]  # which formats to generate
+    report_types: [daily, incident] # auto-distribute only these types (empty = all)
+    # SES HTML email delivery (optional) — renders HTML in email clients.
+    # Without SES, SNS email sends plain text only (no HTML rendering).
+    # Both sender and recipients must be verified in SES (sandbox mode).
+    ses_sender: "${SES_SENDER_EMAIL}"          # verified SES sender email
+    ses_recipients: ["${SES_RECIPIENT_EMAIL}"] # verified SES recipient email(s)

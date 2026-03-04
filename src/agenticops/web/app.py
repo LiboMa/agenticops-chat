@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
@@ -191,7 +191,7 @@ class ReportResponse(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     """Schema for report generation request."""
-    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly)$")
+    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter)$")
     account_name: Optional[str] = None
 
 
@@ -423,7 +423,7 @@ class ScheduleExecutionResponse(BaseModel):
 class NotificationChannelCreate(BaseModel):
     """Schema for creating/updating a notification channel (YAML-backed)."""
     name: str = Field(..., max_length=100)
-    channel_type: str = Field(..., pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
+    channel_type: str = Field(..., pattern="^(slack|email|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
     config: dict = Field(default_factory=dict)
     severity_filter: List[str] = Field(default_factory=list)
     is_enabled: bool = True
@@ -431,7 +431,7 @@ class NotificationChannelCreate(BaseModel):
 
 class NotificationChannelUpdate(BaseModel):
     """Schema for updating a notification channel (YAML-backed)."""
-    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|feishu|dingtalk|wecom|webhook)$")
+    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
     config: Optional[dict] = None
     severity_filter: Optional[List[str]] = None
     is_enabled: Optional[bool] = None
@@ -466,6 +466,43 @@ class NotificationSendRequest(BaseModel):
     subject: str = "Test notification from AgenticOps"
     body: str = "This is a test notification."
     severity: Optional[str] = "low"
+
+
+# -- Report Publishing Models -----------------------------------------------
+
+
+class ReportPublishRequest(BaseModel):
+    """Request to publish a report via an sns-report channel."""
+    channel_name: str
+    formats: Optional[List[str]] = None  # None = use channel defaults
+
+
+class ReportPublishResponse(BaseModel):
+    """Response from report publishing."""
+    report_id: int
+    channel_name: str
+    formats_generated: List[str]
+    download_urls: Dict[str, str]
+    sns_message_id: Optional[str] = None
+
+
+class ReportSubscribeRequest(BaseModel):
+    """Request to subscribe an email to an sns-report channel."""
+    channel_name: str
+    email: str = Field(..., pattern=r"^[^@]+@[^@]+\.[^@]+$")
+
+
+class ReportSubscriptionResponse(BaseModel):
+    """A single subscription entry."""
+    subscription_arn: str
+    protocol: str
+    endpoint: str
+    status: str
+
+
+class ReportUnsubscribeRequest(BaseModel):
+    """Request to unsubscribe from an sns-report channel."""
+    channel_name: str
 
 
 # ============================================================================
@@ -2248,6 +2285,152 @@ async def api_generate_report(request: ReportGenerateRequest):
             return ReportResponse.model_validate(report)
         else:
             raise HTTPException(status_code=500, detail="Report generation failed")
+
+
+# ============================================================================
+# Report Publishing & Subscription API Endpoints
+# ============================================================================
+
+
+@app.post("/api/reports/{report_id}/publish", response_model=ReportPublishResponse)
+async def api_publish_report(report_id: int, request: ReportPublishRequest):
+    """Publish a report to an sns-report channel (converts to PDF/HTML/DOCX, uploads to S3)."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SNSReportNotifier
+
+    # Validate channel
+    channel = get_channel(request.channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail=f"Channel '{request.channel_name}' not found")
+    if channel.channel_type != "sns-report":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Channel '{request.channel_name}' is type '{channel.channel_type}', not 'sns-report'",
+        )
+
+    # Load report
+    with get_db_session() as session:
+        report = session.query(Report).filter_by(id=report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        title = report.title
+        summary = report.summary
+        content_md = report.content_markdown
+        report_type = report.report_type
+        report_meta = report.report_metadata or {}
+
+    notifier = SNSReportNotifier(channel.config)
+    try:
+        result = await notifier.send_report(
+            report_id=report_id,
+            title=title,
+            summary=summary,
+            content_markdown=content_md,
+            report_type=report_type,
+            formats=request.formats,
+            report_metadata=report_meta,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Report publish failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Publish failed: {e}")
+
+    return ReportPublishResponse(
+        report_id=report_id,
+        channel_name=request.channel_name,
+        formats_generated=result.get("formats", []),
+        download_urls=result.get("urls", {}),
+        sns_message_id=result.get("message_id"),
+    )
+
+
+@app.post("/api/reports/subscriptions", response_model=ReportSubscriptionResponse)
+async def api_subscribe_report(request: ReportSubscribeRequest):
+    """Subscribe an email address to an sns-report channel's SNS topic."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SNSReportNotifier
+
+    channel = get_channel(request.channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail=f"Channel '{request.channel_name}' not found")
+    if channel.channel_type != "sns-report":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Channel '{request.channel_name}' is not an sns-report channel",
+        )
+
+    notifier = SNSReportNotifier(channel.config)
+    try:
+        result = notifier.subscribe_email(request.email)
+    except Exception as e:
+        logger.error("Subscribe failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Subscribe failed: {e}")
+
+    return ReportSubscriptionResponse(
+        subscription_arn=result["subscription_arn"],
+        protocol="email",
+        endpoint=request.email,
+        status=result["status"],
+    )
+
+
+@app.get("/api/reports/subscriptions", response_model=List[ReportSubscriptionResponse])
+async def api_list_report_subscriptions(channel_name: str = Query(...)):
+    """List all subscriptions for an sns-report channel."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SNSReportNotifier
+
+    channel = get_channel(channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail=f"Channel '{channel_name}' not found")
+    if channel.channel_type != "sns-report":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Channel '{channel_name}' is not an sns-report channel",
+        )
+
+    notifier = SNSReportNotifier(channel.config)
+    try:
+        subs = notifier.list_subscriptions()
+    except Exception as e:
+        logger.error("List subscriptions failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to list subscriptions: {e}")
+
+    return [ReportSubscriptionResponse(**s) for s in subs]
+
+
+@app.delete("/api/reports/subscriptions/{subscription_arn_b64}")
+async def api_unsubscribe_report(subscription_arn_b64: str, request: ReportUnsubscribeRequest):
+    """Unsubscribe from an sns-report channel's SNS topic.
+
+    The subscription ARN is base64-encoded in the URL path to avoid slash issues.
+    """
+    import base64
+
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SNSReportNotifier
+
+    channel = get_channel(request.channel_name)
+    if not channel:
+        raise HTTPException(status_code=404, detail=f"Channel '{request.channel_name}' not found")
+    if channel.channel_type != "sns-report":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Channel '{request.channel_name}' is not an sns-report channel",
+        )
+
+    try:
+        subscription_arn = base64.urlsafe_b64decode(subscription_arn_b64).decode("utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid subscription ARN encoding")
+
+    notifier = SNSReportNotifier(channel.config)
+    success = notifier.unsubscribe(subscription_arn)
+    if not success:
+        raise HTTPException(status_code=500, detail="Unsubscribe failed")
+
+    return {"status": "unsubscribed", "subscription_arn": subscription_arn}
 
 
 # ============================================================================

@@ -172,7 +172,11 @@ def notify_execution_result(
 def notify_report_saved(
     report_id: int, report_type: str, title: str
 ) -> None:
-    """Notify: report generated and saved."""
+    """Notify: report generated and saved.
+
+    Also triggers rich report distribution to any enabled sns-report channels.
+    """
+    # Plain text notification (existing behaviour)
     notify_event(
         event_type="report_saved",
         subject=f"Report #{report_id} Generated: {title}",
@@ -181,6 +185,82 @@ def notify_report_saved(
             f"Report #{report_id}: {title}"
         ),
     )
+
+    # Rich report distribution to sns-report channels
+    if settings.notifications_enabled:
+        _trigger_report_distribution(report_id, report_type)
+
+
+def _trigger_report_distribution(report_id: int, report_type: str) -> None:
+    """Fire-and-forget: distribute formatted report to sns-report channels."""
+    thread = threading.Thread(
+        target=_run_report_distribution,
+        args=(report_id, report_type),
+        daemon=True,
+        name=f"report-dist-{report_id}",
+    )
+    thread.start()
+
+
+def _run_report_distribution(report_id: int, report_type: str) -> None:
+    """Load report from DB, find sns-report channels, call send_report()."""
+    try:
+        from agenticops.notify.im_config import load_channels
+        from agenticops.notify.notifier import SNSReportNotifier
+        from agenticops.models import Report, get_db_session
+
+        # Find enabled sns-report channels
+        channels = [
+            c for c in load_channels()
+            if c.channel_type == "sns-report" and c.is_enabled
+        ]
+        if not channels:
+            return
+
+        # Load report from DB
+        with get_db_session() as db:
+            report = db.query(Report).filter_by(id=report_id).first()
+            if not report:
+                logger.debug("Report #%d not found for distribution", report_id)
+                return
+            title = report.title
+            summary = report.summary
+            content_md = report.content_markdown
+            report_meta = report.report_metadata or {}
+
+        loop = asyncio.new_event_loop()
+        try:
+            for ch in channels:
+                # Filter by report_types config (empty = all)
+                ch_report_types = ch.config.get("report_types", [])
+                if ch_report_types and report_type not in ch_report_types:
+                    continue
+
+                notifier = SNSReportNotifier(ch.config)
+                try:
+                    result = loop.run_until_complete(
+                        notifier.send_report(
+                            report_id=report_id,
+                            title=title,
+                            summary=summary,
+                            content_markdown=content_md,
+                            report_type=report_type,
+                            report_metadata=report_meta,
+                        )
+                    )
+                    fmts = result.get("formats", [])
+                    logger.info(
+                        "Report #%d distributed to '%s': formats=%s",
+                        report_id, ch.name, fmts,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Report distribution to '%s' failed", ch.name, exc_info=True,
+                    )
+        finally:
+            loop.close()
+    except Exception:
+        logger.debug("Report distribution for #%d failed", report_id, exc_info=True)
 
 
 def notify_schedule_result(

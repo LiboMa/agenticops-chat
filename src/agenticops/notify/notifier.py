@@ -333,6 +333,393 @@ class SNSNotifier(Notifier):
 
 
 # ============================================================================
+# SNS Report Notifier — formatted report distribution via S3 + SNS
+# ============================================================================
+
+
+class SNSReportNotifier(Notifier):
+    """SNS-backed report distribution — converts reports to PDF/HTML/DOCX,
+    uploads to S3 with presigned URLs, publishes download links to email subscribers."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.topic_arn: str = config.get("topic_arn", "")
+        self.region: str = config.get("region", "us-east-1")
+        self.s3_bucket: str = config.get("s3_bucket", "")
+        self.s3_prefix: str = config.get("s3_prefix", "reports/")
+        self.s3_region: str = config.get("s3_region", self.region)
+        self.url_expiry: int = int(config.get("url_expiry", 604800))  # 7 days
+        self.formats: List[str] = config.get("formats", ["html", "markdown"])
+        self.report_types: List[str] = config.get("report_types", [])  # empty = all
+        # SES config — when set, HTML reports are sent via SES (rendered in email)
+        # instead of SNS (which delivers plain text only).
+        self.ses_sender: str = config.get("ses_sender", "")
+        self.ses_recipients: List[str] = config.get("ses_recipients", [])
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Plain text fallback — for non-report pipeline notifications.
+
+        Delegates to basic SNS publish (same as SNSNotifier).
+        """
+        if not self.topic_arn:
+            logger.error("SNS topic ARN not configured for sns-report channel")
+            return False
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, self._publish_text, subject, body, severity,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"SNS report channel text send failed: {e}")
+            return False
+
+    def _publish_text(self, subject: str, body: str, severity: Optional[str]) -> None:
+        """Publish plain text to SNS (blocking)."""
+        import boto3
+
+        client = boto3.client("sns", region_name=self.region)
+        message = {
+            "default": body,
+            "email": f"[{severity.upper() if severity else 'INFO'}] {subject}\n\n{body}",
+        }
+        client.publish(
+            TopicArn=self.topic_arn,
+            Subject=f"[AgenticOps] {subject[:100]}",
+            Message=json.dumps(message),
+            MessageStructure="json",
+        )
+
+    async def send_report(
+        self,
+        report_id: int,
+        title: str,
+        summary: str,
+        content_markdown: str,
+        report_type: str,
+        formats: Optional[List[str]] = None,
+        report_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Full report distribution pipeline.
+
+        1. Filter by report_types config
+        2. format_report() → list[FormattedReport]
+        3. Upload each format to S3 → presigned URLs
+        4. Build email message — inline HTML preferred, download links appended
+        5. SNS publish with MessageStructure="json"
+
+        Returns:
+            {"formats": [...], "urls": {...}, "message_id": "..."}
+        """
+        # Filter by configured report types (empty = all)
+        if self.report_types and report_type not in self.report_types:
+            logger.info(
+                "Report type '%s' not in sns-report filter %s — skipping",
+                report_type, self.report_types,
+            )
+            return {"formats": [], "urls": {}, "message_id": None, "skipped": True}
+
+        if not self.topic_arn or not self.s3_bucket:
+            raise ValueError("topic_arn and s3_bucket are required for sns-report channel")
+
+        from agenticops.notify.report_formatter import format_report
+
+        use_formats = formats or self.formats
+        meta = dict(report_metadata or {})
+        meta["report_type"] = report_type
+        formatted = format_report(
+            title=title,
+            content_markdown=content_markdown,
+            formats=use_formats,
+            report_metadata=meta,
+        )
+
+        if not formatted:
+            logger.warning("No report formats generated for report #%d", report_id)
+            return {"formats": [], "urls": {}, "message_id": None}
+
+        # Extract inline HTML content (used for email body)
+        inline_html: str = ""
+        for fr in formatted:
+            if fr.format == "html":
+                inline_html = fr.content.decode("utf-8")
+                break
+
+        # Upload to S3 and collect presigned URLs
+        loop = asyncio.get_event_loop()
+        urls: Dict[str, str] = {}
+        generated_formats: List[str] = []
+
+        for fr in formatted:
+            date_str = datetime.utcnow().strftime("%Y-%m-%d")
+            s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
+            url = await loop.run_in_executor(
+                None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
+            )
+            urls[fr.format] = url
+            generated_formats.append(fr.format)
+
+        # Build and publish SNS message — inline HTML preferred
+        message_id = await loop.run_in_executor(
+            None, self._publish_report_message,
+            title, summary, urls, report_type, report_id, inline_html,
+        )
+
+        return {
+            "formats": generated_formats,
+            "urls": urls,
+            "message_id": message_id,
+        }
+
+    def _upload_to_s3(self, key: str, content: bytes, content_type: str) -> str:
+        """Upload file to S3 and return a presigned download URL."""
+        import boto3
+
+        s3 = boto3.client("s3", region_name=self.s3_region)
+        s3.put_object(
+            Bucket=self.s3_bucket,
+            Key=key,
+            Body=content,
+            ContentType=content_type,
+        )
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.s3_bucket, "Key": key},
+            ExpiresIn=self.url_expiry,
+        )
+        return url
+
+    def _build_html_body(
+        self,
+        title: str,
+        summary: str,
+        urls: Dict[str, str],
+        report_type: str,
+        report_id: int,
+        inline_html: str = "",
+    ) -> str:
+        """Build the HTML body for email delivery (used by both SES and SNS paths)."""
+        if inline_html:
+            links_html = "".join(
+                f'<li><a href="{url}">{fmt.upper()}</a></li>'
+                for fmt, url in urls.items()
+            )
+            download_section = (
+                f'<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;">'
+                f'<p style="color:#64748b;font-size:0.85rem;">'
+                f'Download links (valid {self.url_expiry // 86400} days): '
+                f'<ul style="font-size:0.85rem;">{links_html}</ul></p></div>'
+            )
+            if "</body>" in inline_html:
+                return inline_html.replace("</body>", f"{download_section}</body>")
+            return inline_html + download_section
+
+        links_html = "".join(
+            f'<li><a href="{url}">{fmt.upper()}</a></li>'
+            for fmt, url in urls.items()
+        )
+        return (
+            f"<h2>{title}</h2>"
+            f"<p><strong>Type:</strong> {report_type} &nbsp; "
+            f"<strong>Report ID:</strong> #{report_id}</p>"
+            f"<h3>Summary</h3><p>{summary[:1000]}</p>"
+            f"<h3>Download Links</h3>"
+            f"<p><em>Valid for {self.url_expiry // 86400} days</em></p>"
+            f"<ul>{links_html}</ul>"
+            f"<hr><p style='color:#999;font-size:12px'>AgenticOps Report Distribution</p>"
+        )
+
+    def _send_html_via_ses(
+        self,
+        title: str,
+        summary: str,
+        html_body: str,
+        plain_body: str,
+    ) -> str:
+        """Send HTML email via SES. Returns MessageId."""
+        import boto3
+
+        client = boto3.client("ses", region_name=self.region)
+        resp = client.send_email(
+            Source=self.ses_sender,
+            Destination={"ToAddresses": self.ses_recipients},
+            Message={
+                "Subject": {"Data": f"[AgenticOps Report] {title[:80]}", "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {"Data": plain_body, "Charset": "UTF-8"},
+                    "Html": {"Data": html_body, "Charset": "UTF-8"},
+                },
+            },
+        )
+        return resp.get("MessageId", "")
+
+    def _publish_report_message(
+        self,
+        title: str,
+        summary: str,
+        urls: Dict[str, str],
+        report_type: str,
+        report_id: int,
+        inline_html: str = "",
+    ) -> str:
+        """Build email message and deliver via SES (HTML) or SNS (plain text).
+
+        When ``ses_sender`` and ``ses_recipients`` are configured, the full
+        HTML report is sent via SES so email clients render it properly.
+        Otherwise falls back to SNS (plain text only — SNS email protocol
+        does not support HTML Content-Type).
+        """
+        import boto3
+
+        # ── Plain-text body (used by both SES and SNS) ───────────────
+        links_text = "\n".join(
+            f"  - {fmt.upper()}: {url}" for fmt, url in urls.items()
+        )
+        plain_body = (
+            f"Report: {title}\n"
+            f"Type: {report_type}\n"
+            f"Report ID: #{report_id}\n\n"
+            f"Summary:\n{summary[:1000]}\n\n"
+            f"Download Links (valid for {self.url_expiry // 86400} days):\n"
+            f"{links_text}\n\n"
+            f"-- AgenticOps"
+        )
+
+        # ── HTML body ─────────────────────────────────────────────────
+        html_body = self._build_html_body(
+            title, summary, urls, report_type, report_id, inline_html,
+        )
+
+        # ── SES path (HTML email) ────────────────────────────────────
+        if self.ses_sender and self.ses_recipients:
+            try:
+                msg_id = self._send_html_via_ses(title, summary, html_body, plain_body)
+                logger.info(
+                    "Report HTML email sent via SES to %s (MessageId=%s)",
+                    self.ses_recipients, msg_id,
+                )
+                return msg_id
+            except Exception:
+                logger.warning(
+                    "SES delivery failed — falling back to SNS", exc_info=True,
+                )
+
+        # ── SNS fallback (plain text — SNS email doesn't render HTML) ─
+        client = boto3.client("sns", region_name=self.region)
+
+        # SNS message size limit is 256 KB
+        max_sns_bytes = 250_000
+        if len(html_body.encode("utf-8")) > max_sns_bytes:
+            logger.warning(
+                "Inline HTML too large (%d bytes) — falling back to links only",
+                len(html_body.encode("utf-8")),
+            )
+            html_body = (
+                f"<h2>{title}</h2>"
+                f"<p>{summary[:1000]}</p>"
+                f"<p>Full report too large for inline delivery. "
+                f"Please use the download links below.</p>"
+                f"<ul>{''.join(f'<li><a href=\"{u}\">{f.upper()}</a></li>' for f, u in urls.items())}</ul>"
+            )
+
+        message = {
+            "default": plain_body,
+            "email": html_body,
+        }
+
+        resp = client.publish(
+            TopicArn=self.topic_arn,
+            Subject=f"[AgenticOps Report] {title[:80]}",
+            Message=json.dumps(message),
+            MessageStructure="json",
+            MessageAttributes={
+                "report_type": {
+                    "DataType": "String",
+                    "StringValue": report_type,
+                },
+                "report_id": {
+                    "DataType": "Number",
+                    "StringValue": str(report_id),
+                },
+            },
+        )
+        return resp.get("MessageId", "")
+
+    async def test_connection(self) -> bool:
+        """Validate SNS topic exists and S3 bucket is writable."""
+        try:
+            import boto3
+
+            # Check SNS topic
+            sns = boto3.client("sns", region_name=self.region)
+            sns.get_topic_attributes(TopicArn=self.topic_arn)
+
+            # Check S3 bucket (head_bucket)
+            if self.s3_bucket:
+                s3 = boto3.client("s3", region_name=self.s3_region)
+                s3.head_bucket(Bucket=self.s3_bucket)
+
+            return True
+        except Exception as e:
+            logger.error(f"SNS report channel test failed: {e}")
+            return False
+
+    # -- Subscription management --
+
+    def subscribe_email(self, email: str) -> Dict[str, str]:
+        """Subscribe an email address to the SNS topic.
+
+        AWS sends a confirmation email automatically.
+
+        Returns:
+            {"subscription_arn": "pending confirmation", "status": "pending"}
+        """
+        import boto3
+
+        client = boto3.client("sns", region_name=self.region)
+        resp = client.subscribe(
+            TopicArn=self.topic_arn,
+            Protocol="email",
+            Endpoint=email,
+            ReturnSubscriptionArn=True,
+        )
+        arn = resp.get("SubscriptionArn", "pending confirmation")
+        status = "confirmed" if arn.startswith("arn:") else "pending"
+        return {"subscription_arn": arn, "status": status}
+
+    def list_subscriptions(self) -> List[Dict[str, str]]:
+        """List all subscriptions on the SNS topic."""
+        import boto3
+
+        client = boto3.client("sns", region_name=self.region)
+        subs: List[Dict[str, str]] = []
+        paginator = client.get_paginator("list_subscriptions_by_topic")
+        for page in paginator.paginate(TopicArn=self.topic_arn):
+            for sub in page.get("Subscriptions", []):
+                status = "confirmed" if sub["SubscriptionArn"].startswith("arn:") else "pending"
+                subs.append({
+                    "subscription_arn": sub["SubscriptionArn"],
+                    "protocol": sub["Protocol"],
+                    "endpoint": sub["Endpoint"],
+                    "status": status,
+                })
+        return subs
+
+    def unsubscribe(self, subscription_arn: str) -> bool:
+        """Unsubscribe from the SNS topic."""
+        import boto3
+
+        try:
+            client = boto3.client("sns", region_name=self.region)
+            client.unsubscribe(SubscriptionArn=subscription_arn)
+            return True
+        except Exception as e:
+            logger.error(f"SNS unsubscribe failed: {e}")
+            return False
+
+
+# ============================================================================
 # IM Notifier Base Class — shared token caching for Feishu/DingTalk/WeCom
 # ============================================================================
 
@@ -761,6 +1148,7 @@ class NotificationManager:
         "slack": SlackNotifier,
         "email": EmailNotifier,
         "sns": SNSNotifier,
+        "sns-report": SNSReportNotifier,
         "feishu": FeishuNotifier,
         "dingtalk": DingTalkNotifier,
         "wecom": WeComNotifier,
