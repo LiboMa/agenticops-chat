@@ -99,7 +99,11 @@ ROUTING RULES:
    You do NOT run host commands directly.
 9.5. Skills: Use list_skills to show available domain skills. Use activate_skill to load skill
      knowledge for answering domain questions. Use read_skill_reference for deep-dive material.
-9.6. Monitoring providers: Use list_monitoring_providers to show configured external monitoring
+9.7. Sending notifications / distributing reports: First call activate_skill("notification-operator")
+     to load notification tools (list_notification_channels, send_to_channel, distribute_report).
+     Then use list_notification_channels to discover targets, send_to_channel for single-channel
+     text/issue/file sends, or distribute_report for batch format-aware report distribution.
+9.8. Monitoring providers: Use list_monitoring_providers to show configured external monitoring
      integrations. For querying Datadog/external metrics or alerts, dispatch to detect_agent or rca_agent
      (they have cross-platform provider tools).
 10. ANY other AWS question (e.g., "list my ElastiCache clusters", "show CloudFront distributions",

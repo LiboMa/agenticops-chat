@@ -3,9 +3,11 @@
 # Env var interpolation: ${VAR_NAME}
 #
 # Each channel has:
-#   type:             Channel type (feishu, dingtalk, wecom, slack, email, sns, webhook)
+#   type:             Channel type (feishu, dingtalk, wecom, slack, email, sns, sns-report, webhook)
 #   enabled:          true/false (default: true)
 #   severity_filter:  List of severities to notify for (empty = all)
+#   preferred_format: Format for report distribution (markdown, html, text, pdf).
+#                     Defaults per type: feishu/dingtalk/wecom/slack/webhook=markdown, email/sns-report=html, sns=text
 #   ...               All other keys become the notifier config dict
 
 channels:
@@ -13,6 +15,7 @@ channels:
   my-feishu-alerts:
     type: feishu
     enabled: true
+    preferred_format: markdown
     app_name: default
     chat_id: "${FEISHU_CHAT_ID}"
 
@@ -20,6 +23,7 @@ channels:
   my-slack-alerts:
     type: slack
     enabled: true
+    preferred_format: markdown
     severity_filter: ["critical", "high"]
     webhook_url: "${SLACK_WEBHOOK_URL}"
     channel: "#alerts"
@@ -28,6 +32,7 @@ channels:
   ops-email:
     type: email
     enabled: false
+    preferred_format: html
     smtp_host: "${SMTP_HOST}"
     smtp_port: 587
     smtp_user: "${SMTP_USER}"
@@ -39,6 +44,7 @@ channels:
   my-webhook:
     type: webhook
     enabled: false
+    preferred_format: markdown
     url: "${WEBHOOK_URL}"
     method: POST
 
@@ -46,6 +52,7 @@ channels:
   ops-reports:
     type: sns-report
     enabled: false
+    preferred_format: html
     topic_arn: "${SNS_REPORT_TOPIC_ARN}"
     region: "us-east-1"
     s3_bucket: "${REPORT_S3_BUCKET}"

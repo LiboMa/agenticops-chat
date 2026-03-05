@@ -21,7 +21,7 @@ from agenticops.tools.metadata_tools import (
 )
 from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
-from agenticops.skills.tools import activate_skill
+from agenticops.skills.tools import activate_skill, read_skill_reference
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,14 @@ LOCAL FILE OUTPUT:
   activate_skill("local-os-operator") first to load the write_local_file tool,
   then use write_local_file to save the content.
 
+REPORT DISTRIBUTION:
+- After saving a report, if the user requests distribution (or if you are instructed
+  to distribute), call activate_skill("notification-operator") to load notification tools.
+- Use list_notification_channels to discover available channels and their format preferences.
+- Use distribute_report with the report ID to batch-distribute to multiple channels.
+  Each channel receives the report in its preferred format (HTML, PDF, markdown).
+- Use send_to_channel for single-channel text/issue sends.
+
 RULES:
 - Only READ from AWS metadata. The only writes are save_report, write_kb_case,
   and write_local_file (when user explicitly requests file export).
@@ -123,6 +131,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 write_kb_case,
                 distill_case_study,
                 activate_skill,
+                read_skill_reference,
             ],
         )
 

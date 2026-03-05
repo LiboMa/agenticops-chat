@@ -148,7 +148,18 @@ def list_apps() -> Dict[str, list]:
 
 # ── Notification Channels (channels.yaml) ─────────────────────────
 
-_CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter"))
+_CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter", "preferred_format"))
+
+_DEFAULT_PREFERRED_FORMAT: Dict[str, str] = {
+    "feishu": "markdown",
+    "dingtalk": "markdown",
+    "wecom": "markdown",
+    "slack": "markdown",
+    "email": "html",
+    "sns": "text",
+    "sns-report": "html",
+    "webhook": "markdown",
+}
 
 _channels_cache: Optional[Dict[str, Any]] = None
 _channels_mtime: float = 0.0
@@ -162,6 +173,7 @@ class ChannelConfig:
     config: dict
     is_enabled: bool = True
     severity_filter: list = field(default_factory=list)
+    preferred_format: str = ""
 
 
 def _load_channels_raw() -> Dict[str, Any]:
@@ -191,6 +203,10 @@ def _parse_channel(name: str, data: dict) -> ChannelConfig:
     channel_type = data.get("type", "")
     is_enabled = data.get("enabled", True)
     severity_filter = data.get("severity_filter", [])
+    preferred_format = data.get(
+        "preferred_format",
+        _DEFAULT_PREFERRED_FORMAT.get(channel_type, "markdown"),
+    )
     # Everything not in reserved keys goes into the config dict
     config = {k: v for k, v in data.items() if k not in _CHANNEL_RESERVED_KEYS}
     return ChannelConfig(
@@ -199,6 +215,7 @@ def _parse_channel(name: str, data: dict) -> ChannelConfig:
         config=config,
         is_enabled=bool(is_enabled),
         severity_filter=severity_filter or [],
+        preferred_format=preferred_format,
     )
 
 
