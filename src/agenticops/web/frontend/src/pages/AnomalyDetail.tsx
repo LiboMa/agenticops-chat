@@ -5,6 +5,7 @@ import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueExecutions } from "@/hooks/useIssueExecutions";
+import { useCancelExecution } from "@/hooks/useFixExecutions";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
@@ -28,6 +29,7 @@ export default function AnomalyDetail() {
   const fixPlans = useFixPlans({ health_issue_id: anomalyId });
   const executions = useIssueExecutions(anomalyId);
   const updateStatusMut = useUpdateIssueStatus();
+  const cancelExecMut = useCancelExecution();
 
   const [rcaLoading, setRcaLoading] = useState(false);
   const [fixPlanLoading, setFixPlanLoading] = useState(false);
@@ -370,6 +372,9 @@ export default function AnomalyDetail() {
                     <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                       Started
                     </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -403,6 +408,22 @@ export default function AnomalyDetail() {
                         {ex.started_at
                           ? formatFullDate(ex.started_at)
                           : "-"}
+                      </td>
+                      <td className="px-4 py-2">
+                        {(ex.status === "pending" || ex.status === "running") && (
+                          <button
+                            onClick={() => {
+                              if (!window.confirm("Cancel this execution?")) return;
+                              cancelExecMut.mutate(ex.id, {
+                                onError: (err) => setActionMsg(`Cancel failed: ${err.message}`),
+                              });
+                            }}
+                            disabled={cancelExecMut.isPending}
+                            className="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

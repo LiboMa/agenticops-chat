@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agenticops-stress
+  namespace: online-boutique
+  labels:
+    chaos-injected: "true"
+    agenticops-scenario: case-5
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: agenticops-stress
+      chaos-injected: "true"
+  template:
+    metadata:
+      labels:
+        app: agenticops-stress
+        chaos-injected: "true"
+    spec:
+      containers:
+        - name: stress
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do :; done"]
+          resources:
+            requests:
+              cpu: 900m
+              memory: 256Mi
+            limits:
+              cpu: 900m
+              memory: 256Mi

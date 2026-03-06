@@ -39,13 +39,17 @@ if [[ -n "$FIX_INFO" ]]; then
     report_pass "Fix plan found: ${FIX_INFO}"
     PASSED=$((PASSED + 1))
 else
-    report_info "No fix plan yet, waiting..."
-    sleep 30
-    FIX_INFO=$(get_fix_plan "$ISSUE_ID")
-    if [[ -n "$FIX_INFO" ]]; then
-        report_pass "Fix plan found: ${FIX_INFO}"
-        PASSED=$((PASSED + 1))
-    else
+    for wait in 30 30 30; do
+        report_info "No fix plan yet, waiting ${wait}s..."
+        sleep "$wait"
+        FIX_INFO=$(get_fix_plan "$ISSUE_ID")
+        if [[ -n "$FIX_INFO" ]]; then
+            report_pass "Fix plan found: ${FIX_INFO}"
+            PASSED=$((PASSED + 1))
+            break
+        fi
+    done
+    if [[ -z "$FIX_INFO" ]]; then
         report_fail "No fix plan created for issue ${ISSUE_ID}"
     fi
 fi

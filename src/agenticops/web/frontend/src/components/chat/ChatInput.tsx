@@ -5,11 +5,13 @@ interface Props {
   onCancel?: () => void;
   disabled?: boolean;
   streaming?: boolean;
+  detailLevel?: string;
+  onDetailLevelChange?: (level: string) => void;
 }
 
 const ACCEPTED_TYPES = ".txt,.log,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.png,.jpg,.jpeg,.py,.sh,.xml,.tf";
 
-export function ChatInput({ onSend, onCancel, disabled, streaming }: Props) {
+export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, onDetailLevelChange }: Props) {
   const [input, setInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +60,21 @@ export function ChatInput({ onSend, onCancel, disabled, streaming }: Props) {
           accept={ACCEPTED_TYPES}
           onChange={handleFileSelect}
         />
+
+        {/* Detail level selector */}
+        {onDetailLevelChange && (
+          <select
+            value={detailLevel ?? "medium"}
+            onChange={(e) => onDetailLevelChange(e.target.value)}
+            disabled={disabled}
+            className="self-end text-xs border border-slate-200 rounded-lg px-2 py-2.5 text-slate-600 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+            title="Response detail level"
+          >
+            <option value="concise">Concise</option>
+            <option value="medium">Medium</option>
+            <option value="detailed">Detailed</option>
+          </select>
+        )}
 
         {/* Paperclip / attach button */}
         <button

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: agenticops-pvc-consumer
+  namespace: online-boutique
+  labels:
+    chaos-injected: "true"
+    agenticops-scenario: case-8
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "echo 'Waiting for PVC...' && sleep 3600"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      resources:
+        requests:
+          cpu: 10m
+          memory: 256Mi
+        limits:
+          cpu: 50m
+          memory: 256Mi
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: agenticops-bad-pvc
+  restartPolicy: Never

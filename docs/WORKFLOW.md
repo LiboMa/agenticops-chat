@@ -36,6 +36,8 @@ graph TB
     subgraph "User Interfaces"
         CLI["CLI<br/><code>aiops chat</code>"]
         WEB["Web Dashboard<br/>React + SSE"]
+        IM["IM Bot<br/>飞书 / 钉钉 / 企业微信"]
+        HOOK["Webhook<br/>Prometheus / CloudWatch / Datadog"]
     end
 
     subgraph "Preprocessing"
@@ -54,8 +56,13 @@ graph TB
 
     subgraph "Knowledge & Skills"
         KB["Knowledge Base<br/>SOPs + Past Cases"]
-        SKILLS["Agent Skills (9)<br/>Domain expertise packages"]
+        SKILLS["Agent Skills (12)<br/>Domain expertise packages"]
         RAG["RAG Pipeline<br/>Vector search + reranking"]
+    end
+
+    subgraph "Notifications"
+        NOTIFY["Notification Service<br/>7 auto-trigger points"]
+        CHANNELS["Channels (YAML)<br/>Feishu / Slack / Email<br/>DingTalk / WeCom / SNS / Webhook"]
     end
 
     subgraph "AWS Infrastructure"
@@ -72,6 +79,8 @@ graph TB
 
     CLI --> PP
     WEB --> PP
+    IM --> PP
+    HOOK --> DETECT
     PP --> MAIN
     MAIN --> SCAN
     MAIN --> DETECT
@@ -101,6 +110,12 @@ graph TB
     SRE --> GRAPH
 
     KB --> RAG
+
+    EXEC --> NOTIFY
+    RCA --> NOTIFY
+    SRE --> NOTIFY
+    RPT --> NOTIFY
+    NOTIFY --> CHANNELS
 ```
 
 ---
@@ -302,7 +317,7 @@ flowchart LR
         REF["read_skill_reference<br/>~2-8K tokens<br/>(deep dive)"]
     end
 
-    subgraph "9 Domain Skills"
+    subgraph "12 Domain Skills"
         S1["linux-admin"]
         S2["network-engineer"]
         S3["kubernetes-admin"]
@@ -312,6 +327,9 @@ flowchart LR
         S7["log-analysis"]
         S8["aws-compute"]
         S9["aws-storage"]
+        S10["local-os-operator<br/>(5 dynamic tools)"]
+        S11["distributed-tracing"]
+        S12["notification-operator"]
     end
 
     subgraph "Execution Tools"
@@ -335,6 +353,9 @@ flowchart LR
     S7 --> ACTIVATE
     S8 --> ACTIVATE
     S9 --> ACTIVATE
+    S10 --> ACTIVATE
+    S11 --> ACTIVATE
+    S12 --> ACTIVATE
     ACTIVATE --> HOST
     ACTIVATE --> KUBE
 
@@ -491,7 +512,9 @@ Open `http://localhost:8000/app/dashboard` and explore:
 | **Network** | Interactive topology graph with SRE analysis (SPOF detection, capacity risk) |
 | **Reports** | Generate and view daily/incident/inventory reports |
 | **Schedules** | Set up cron-based automated scans/detections |
-| **Notifications** | Configure alerting channels (Feishu, Slack, Email, Webhook) |
+| **Notifications** | Configure channels (Feishu, Slack, Email, DingTalk, WeCom, Webhook), view logs |
+| **Accounts** | Manage AWS accounts (activate, deactivate) |
+| **Audit Log** | View all system audit events |
 
 > **See also**: [Web Service Workflow](web_service_workflow.md) — process model, SSE vs WebSocket, Feishu Bot, startup lifecycle.
 
@@ -617,6 +640,72 @@ generate an inventory report for EC2
 
 ---
 
+### Tutorial 11: Notification Channels & /send_to
+
+```bash
+# List configured channels (reads from config/channels.yaml)
+/channel list
+
+# Show channel details
+/channel show feishu-ops
+
+# Test a channel (sends a test message)
+/channel test feishu-ops
+
+# Update channel config (writes to YAML)
+/channel set feishu-ops severity_filter critical,high
+/channel set slack-incidents enabled true
+
+# Send report to a channel
+/send_to feishu-ops #R5
+
+# Send local doc to a channel
+/send_to slack-incidents #D3
+
+# Send free text to an IM alias
+/send_to ops-team "Production incident resolved"
+```
+
+**How it works:**
+
+- `/channel` manages channels defined in `config/channels.yaml` (the sole source of truth)
+- `/send_to` resolves target as: NotificationChannel name -> IMAlias name
+- Content can be: `#R<id>` (Report), `#D<id>` (LocalDoc), or free text
+- Available in CLI, Web chat, and IM bot
+
+**Supported channel types:** Feishu, DingTalk, WeCom, Slack, Email (SES), SNS, Webhook.
+
+**Auto-notifications:** When `AIOPS_NOTIFICATIONS_ENABLED=true`, the pipeline automatically sends notifications at 7 event points (issue created, RCA completed, fix planned, fix approved, execution result, report saved, schedule result).
+
+---
+
+### Tutorial 12: IM Bot (Feishu / DingTalk / WeCom)
+
+```bash
+# Start with embedded Feishu bot (default)
+uvicorn agenticops.web.app:app --port 8000
+
+# Or run Feishu bot standalone (no web)
+python -m agenticops.im.feishu_ws
+```
+
+In any IM conversation with the bot, you can use the same natural language as CLI:
+
+```
+User: check health of EC2 in us-east-1
+Bot:  Found 3 health issues: ...
+
+User: analyze I#42
+Bot:  Root cause: memory leak in container...
+
+User: /send_to slack-incidents #R5
+Bot:  Report sent to slack-incidents channel
+```
+
+**Setup:** Configure IM app credentials in `config/im-apps.yaml` and notification channels in `config/channels.yaml`.
+
+---
+
 ## CLI Slash Command Quick Reference
 
 | Command | Purpose |
@@ -635,6 +724,8 @@ generate an inventory report for EC2
 | `/report list` | List reports |
 | `/context set <key> <val>` | Set chat context |
 | `/detail [concise\|medium\|detailed]` | Set agent output detail level |
+| `/channel list\|show\|test\|set` | Manage notification channels (YAML-backed) |
+| `/send_to <target> <content>` | Send content to channel or IM alias |
 | `/output json` | Switch to JSON output |
 | `/pager auto` | Auto-paginate long output |
 | `/exit` | Exit chat |
@@ -685,6 +776,19 @@ curl "$BASE/graph/vpc/{vpc_id}/enriched?region=us-east-1"
 
 # Detect single points of failure
 curl "$BASE/graph/vpc/{vpc_id}/spof?region=us-east-1"
+
+# List notification channels
+curl $BASE/notifications/channels
+
+# Test a notification channel
+curl -X POST $BASE/notifications/channels/feishu-ops/test
+
+# List IM aliases
+curl $BASE/im-aliases
+
+# Submit webhook alert (Prometheus format)
+curl -X POST $BASE/webhooks/prometheus -H 'Content-Type: application/json' \
+  -d '{"alerts":[{"status":"firing","labels":{"alertname":"KubePodOOMKilled"}}]}'
 ```
 
 ---
@@ -694,18 +798,92 @@ curl "$BASE/graph/vpc/{vpc_id}/spof?region=us-east-1"
 All settings use env vars with `AIOPS_` prefix. Set via `.env` file or shell:
 
 ```bash
-# Core
-export AIOPS_BEDROCK_MODEL_ID="us.anthropic.claude-sonnet-4-20250514"  # or claude-opus-4-6
+# Core — Tiered Model Configuration
+export AIOPS_BEDROCK_MODEL_ID="global.anthropic.claude-sonnet-4-6-v1"          # Default (Sonnet 4.6)
+export AIOPS_BEDROCK_MODEL_ID_CHEAP="global.anthropic.claude-haiku-4-5-20251001-v1:0"  # Economy (Haiku 4.5)
+export AIOPS_BEDROCK_MODEL_ID_STRONG="global.anthropic.claude-opus-4-6-v1"     # Strong (Opus 4.6)
 export AIOPS_BEDROCK_REGION="us-east-1"
-export AIOPS_BEDROCK_MAX_TOKENS=8192
+export AIOPS_BEDROCK_MAX_TOKENS=16384
+export AIOPS_BEDROCK_WINDOW_SIZE=40    # Sliding window conversation manager
+
+# Auto-Fix Pipeline
+export AIOPS_EXECUTOR_ENABLED=true              # Enable fix execution (default: true)
+export AIOPS_AUTO_RCA_ENABLED=true              # Auto-trigger RCA on new issue (default: true)
+export AIOPS_AUTO_FIX_ENABLED=true              # Auto-fix pipeline master switch (default: true)
+export AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1=true   # Auto-approve low-risk plans (default: true)
+export AIOPS_NOTIFICATIONS_ENABLED=true         # Auto-notify on pipeline events (default: true)
 
 # Features
-export AIOPS_EXECUTOR_ENABLED=true     # Enable fix execution (default: false)
 export AIOPS_SKILLS_ENABLED=true       # Enable agent skills (default: true)
 export AIOPS_EMBEDDING_ENABLED=true    # Enable vector embeddings (default: true)
 export AIOPS_AGENT_OUTPUT_DETAIL=medium  # Agent output detail: concise, medium, detailed
 
-# Web
+# Web & Auth
 export AIOPS_CORS_ORIGINS="http://localhost:3000,https://myapp.example.com"
+export AIOPS_API_AUTH_ENABLED=false     # API key auth middleware (default: false)
 export AIOPS_DATABASE_URL="sqlite:///path/to/agenticops.db"
+
+# IM Bot
+export AIOPS_FEISHU_WS_ENABLED=true    # Feishu WebSocket long connection (default: true)
 ```
+
+---
+
+## Closed-Loop Validation
+
+### Running Validation
+
+```bash
+# Run all 10 cases sequentially on EKS Lab
+cd infra/eks-lab/scenarios
+AGENTICOPS_URL=http://localhost:8000 bash run-all-scenarios.sh
+
+# Run individual case
+bash case-1-oom/inject.sh && bash case-1-oom/verify.sh
+
+# Run Phase 1 only (Cases 1-3)
+AGENTICOPS_URL=http://localhost:8000 bash run-phase1.sh
+
+# Run Phase 2 only (Cases 4-10)
+AGENTICOPS_URL=http://localhost:8000 bash run-phase2.sh
+```
+
+### Validation Results (2026-03-06)
+
+All 10 cases passed 5/5 on EKS Lab (`agenticops-lab`, ap-southeast-1):
+
+| Case | Scenario | Score | MTTR |
+|------|----------|-------|------|
+| 1 | OOM Kill (adservice) | 5/5 | 5m 34s |
+| 2 | Bad Image (productcatalog) | 5/5 | 6m 38s |
+| 3 | Redis Crash (redis-cart) | 5/5 | 7m 3s |
+| 4 | Node DiskPressure | 5/5 | 8m 41s |
+| 5 | Pod Pending (CPU exhaustion) | 5/5 | 7m 30s |
+| 6 | Unhealthy Targets (readiness) | 5/5 | 5m 24s |
+| 7 | CoreDNS Down | 5/5 | 4m 42s |
+| 8 | PVC Pending (wrong SC) | 5/5 | 6m 38s |
+| 9 | HPA Maxed Out | 5/5 | 4m 7s |
+| 10 | Service Crash (cartservice) | 5/5 | 6m 24s |
+
+**Acceptance criteria**: auto-fix ≥7/10 ✅, detect ≤3min ✅, resolve ≤10min ✅, cost ≤$3/cycle ✅
+
+### Pipeline Flow Per Case
+
+Each case follows the same 5-step verification:
+
+```
+1. HealthIssue detection  → Alert fires → webhook → HealthIssue created
+2. Root Cause Analysis    → RCA agent investigates (kubectl, metrics, KB)
+3. Fix Plan creation      → SRE agent proposes fix (risk-classified L0-L3)
+4. Execution + resolution → Executor runs fix → issue auto-resolved
+5. Service recovery       → Verify target resource is healthy
+```
+
+### Case Documentation
+
+Each case is documented in `docs/cases/case-N-*.md` with:
+- Fault description (type, severity, target)
+- Injection script and key commands
+- Expected alert flow and pipeline flow
+- Expected fix (command, risk level)
+- Actual metrics (detection latency, MTTR, cost)

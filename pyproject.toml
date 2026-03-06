@@ -36,12 +36,19 @@ dependencies = [
     "python-multipart>=0.0.7",
     # Graph
     "networkx>=3.2",
+    # Report formatting (MD→HTML)
+    "markdown>=3.5.0",
 ]
 
 [project.optional-dependencies]
 files = [
     "python-docx>=1.0.0",
     "pymupdf>=1.24.0",
+]
+reports = [
+    "markdown>=3.5.0",
+    "weasyprint>=60.0",
+    "python-docx>=1.0.0",
 ]
 dev = [
     "pytest>=8.0.0",

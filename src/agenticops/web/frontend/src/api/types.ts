@@ -473,7 +473,7 @@ export interface ScheduleExecution {
 /*  Notification Channels & Logs                                       */
 /* ------------------------------------------------------------------ */
 
-export type NotificationChannelType = "slack" | "email" | "sns" | "feishu" | "dingtalk" | "wecom" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "sns" | "sns-report" | "feishu" | "dingtalk" | "wecom" | "webhook";
 
 export interface NotificationChannel {
   name: string;
@@ -640,4 +640,28 @@ export interface ChangeSimulationResult {
   lost_reachability: ReachabilityDiff[];
   total_connections_lost: number;
   impact_summary: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Report Publishing & Subscriptions                                  */
+/* ------------------------------------------------------------------ */
+
+export interface ReportPublishRequest {
+  channel_name: string;
+  formats?: string[];
+}
+
+export interface ReportPublishResponse {
+  report_id: number;
+  channel_name: string;
+  formats_generated: string[];
+  download_urls: Record<string, string>;
+  sns_message_id: string | null;
+}
+
+export interface ReportSubscription {
+  subscription_arn: string;
+  protocol: string;
+  endpoint: string;
+  status: string;
 }

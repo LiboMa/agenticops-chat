@@ -5,6 +5,9 @@ import type {
   NotificationChannelCreate,
   NotificationChannelUpdate,
   NotificationLog,
+  ReportPublishRequest,
+  ReportPublishResponse,
+  ReportSubscription,
 } from "@/api/types";
 
 export function useNotificationChannels() {
@@ -94,6 +97,67 @@ export function useTestChannel() {
           body: "This is a test notification.",
           severity: "low",
         }),
+      }),
+  });
+}
+
+// -- Report Publishing & Subscription hooks --
+
+export function usePublishReport(reportId: number) {
+  return useMutation({
+    mutationFn: (data: ReportPublishRequest) =>
+      apiFetch<ReportPublishResponse>(`/reports/${reportId}/publish`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  });
+}
+
+export function useReportSubscriptions(channelName: string) {
+  return useQuery({
+    queryKey: ["report-subscriptions", channelName],
+    queryFn: () =>
+      apiFetch<ReportSubscription[]>(
+        `/reports/subscriptions?channel_name=${encodeURIComponent(channelName)}`,
+      ),
+    enabled: !!channelName,
+  });
+}
+
+export function useSubscribeEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { channel_name: string; email: string }) =>
+      apiFetch<ReportSubscription>("/reports/subscriptions", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (_data, variables) =>
+      qc.invalidateQueries({
+        queryKey: ["report-subscriptions", variables.channel_name],
+      }),
+  });
+}
+
+export function useUnsubscribe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      channel_name,
+      subscription_arn,
+    }: {
+      channel_name: string;
+      subscription_arn: string;
+    }) => {
+      const arnB64 = btoa(subscription_arn);
+      return apiFetch<unknown>(`/reports/subscriptions/${arnB64}`, {
+        method: "DELETE",
+        body: JSON.stringify({ channel_name }),
+      });
+    },
+    onSuccess: (_data, variables) =>
+      qc.invalidateQueries({
+        queryKey: ["report-subscriptions", variables.channel_name],
       }),
   });
 }

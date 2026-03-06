@@ -1593,37 +1593,57 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
                 .first()
             )
 
+        reuse_event = False
         if existing:
-            # Update existing event
-            existing.severity = alert.severity
-            existing.title = alert.title
-            existing.description = alert.description
-            existing.raw_payload = alert.raw
-            session.flush()
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "message": f"Updated existing alert event #{existing.id} (dedup)",
-                    "alert_event_id": existing.id,
-                    "health_issue_id": existing.health_issue_id,
-                    "deduplicated": True,
-                },
-            )
+            # Check if linked HealthIssue is in a completed/terminal state.
+            # If so, allow creating a new HealthIssue for the re-fired alert.
+            linked_issue = None
+            if existing.health_issue_id:
+                linked_issue = session.query(HealthIssue).filter_by(id=existing.health_issue_id).first()
+            terminal_statuses = {"resolved", "fix_executed", "closed"}
+            if linked_issue and linked_issue.status in terminal_statuses:
+                # Reuse existing AlertEvent but unlink from terminal issue
+                existing.health_issue_id = None
+                existing.severity = alert.severity
+                existing.title = alert.title
+                existing.description = alert.description
+                existing.raw_payload = alert.raw
+                existing.status = "received"
+                session.flush()
+                event_id = existing.id
+                reuse_event = True
+            else:
+                # Active issue — true dedup
+                existing.severity = alert.severity
+                existing.title = alert.title
+                existing.description = alert.description
+                existing.raw_payload = alert.raw
+                session.flush()
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "message": f"Updated existing alert event #{existing.id} (dedup)",
+                        "alert_event_id": existing.id,
+                        "health_issue_id": existing.health_issue_id,
+                        "deduplicated": True,
+                    },
+                )
 
-        # Create new AlertEvent
-        event = AlertEvent(
-            source=alert.source,
-            external_id=alert.external_id,
-            severity=alert.severity,
-            title=alert.title,
-            description=alert.description,
-            resource_hint=alert.resource_hint,
-            raw_payload=alert.raw,
-            status="received",
-        )
-        session.add(event)
-        session.flush()
-        event_id = event.id
+        if not reuse_event:
+            # Create new AlertEvent
+            event = AlertEvent(
+                source=alert.source,
+                external_id=alert.external_id,
+                severity=alert.severity,
+                title=alert.title,
+                description=alert.description,
+                resource_hint=alert.resource_hint,
+                raw_payload=alert.raw,
+                status="received",
+            )
+            session.add(event)
+            session.flush()
+            event_id = event.id
 
     # Optionally create a HealthIssue
     health_issue_id = None

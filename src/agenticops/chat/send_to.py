@@ -1,10 +1,11 @@
 """/send_to command processor — shared by CLI, Web chat, and IM chat.
 
-Syntax: /send_to <target> #R<id>, #D<id>, "free text"
+Syntax: /send_to <target> #R<id>, #D<id>, #I<id>, "free text"
 
 References:
   #R<id>  → Report (by Report.id) — includes content_markdown[:2000]
   #D<id>  → LocalDoc (by LocalDoc.id) — reads file content[:4000]
+  #I<id>  → HealthIssue (by HealthIssue.id) — formatted issue summary with RCA
   Free text → passed as-is
 
 Target resolution order:
@@ -21,7 +22,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_REF_RE = re.compile(r"#([RD])(\d+)")
+_REF_RE = re.compile(r"#([RDI])(\d+)")
 
 
 @dataclass
@@ -60,7 +61,7 @@ def parse_send_to(command: str) -> tuple[Optional[str], str]:
     content_spec = parts[1] if len(parts) > 1 else ""
 
     if not content_spec:
-        return None, f"Missing content for target '{target}'. Usage: /send_to <target> #R<id> or \"text\""
+        return None, f"Missing content for target '{target}'. Usage: /send_to <target> #R<id>, #I<id>, or \"text\""
 
     return target, content_spec
 
@@ -72,9 +73,11 @@ def _help_text() -> str:
         "Content:\n"
         "  #R<id>  — Send Report by ID\n"
         "  #D<id>  — Send LocalDoc by ID\n"
+        "  #I<id>  — Send HealthIssue by ID\n"
         "  \"text\" — Send free text\n\n"
         "Examples:\n"
         "  /send_to ops-team #R1\n"
+        "  /send_to sre-oncall #I42\n"
         "  /send_to sre-oncall #D3 please review\n"
         "  /send_to slack-alerts Critical: service down"
     )
@@ -142,6 +145,12 @@ def resolve_content(spec: str) -> tuple[str, str]:
                     parts.append((subject, body))
                 else:
                     free_text_parts.append(f"(LocalDoc #{ref_id} not found)")
+            elif ref_type == "I":
+                subject, body = _resolve_issue(ref_id)
+                if body:
+                    parts.append((subject, body))
+                else:
+                    free_text_parts.append(f"(Issue #{ref_id} not found)")
         else:
             free_text_parts.append(token)
 
@@ -201,6 +210,44 @@ def _resolve_local_doc(doc_id: int) -> tuple[str, str]:
         return "", ""
 
 
+def _resolve_issue(issue_id: int) -> tuple[str, str]:
+    """Resolve a HealthIssue reference."""
+    try:
+        from agenticops.models import HealthIssue, RCAResult, get_db_session
+
+        with get_db_session() as db:
+            issue = db.query(HealthIssue).filter_by(id=issue_id).first()
+            if not issue:
+                return "", ""
+
+            subject = f"Issue #{issue.id} [{issue.severity.upper()}]: {issue.title}"
+            lines = [
+                f"**Issue #{issue.id}**: {issue.title}",
+                f"**Severity**: {issue.severity} | **Status**: {issue.status}",
+                f"**Resource**: {issue.resource_id}",
+                f"**Source**: {issue.source}",
+                f"**Detected**: {issue.detected_at}",
+                "",
+                issue.description[:2000] if issue.description else "",
+            ]
+
+            # Append RCA if available
+            rca = (
+                db.query(RCAResult)
+                .filter_by(health_issue_id=issue.id)
+                .order_by(RCAResult.id.desc())
+                .first()
+            )
+            if rca:
+                lines.append("")
+                lines.append(f"**Root Cause** (confidence {rca.confidence:.0%}): {rca.root_cause[:1000]}")
+
+            return subject, "\n".join(lines)
+    except Exception:
+        logger.debug("Failed to resolve Issue #%d", issue_id, exc_info=True)
+        return "", ""
+
+
 def execute_send_to(command: str) -> SendToResult:
     """Execute a /send_to command synchronously.
 
@@ -241,7 +288,22 @@ def execute_send_to(command: str) -> SendToResult:
 
 
 def _send_via_channel(channel_name: str, subject: str, body: str) -> SendToResult:
-    """Send via NotificationManager to a specific channel."""
+    """Send via NotificationManager to a specific channel.
+
+    For sns-report channels with a #R<id> reference, triggers rich report distribution
+    (formatted files uploaded to S3 with presigned URLs).
+    """
+    from agenticops.notify.im_config import get_channel
+
+    channel = get_channel(channel_name)
+
+    # Rich report distribution for sns-report channels
+    if channel and channel.channel_type == "sns-report":
+        report_id = _extract_report_id(body)
+        if report_id:
+            return _send_report_via_channel(channel_name, channel.config, report_id)
+
+    # Default: plain text via NotificationManager
     from agenticops.notify.notifier import NotificationManager
 
     manager = NotificationManager()
@@ -265,6 +327,57 @@ def _send_via_channel(channel_name: str, subject: str, body: str) -> SendToResul
     return SendToResult(
         success=success,
         message=f"Sent to {channel_name}: {detail}",
+    )
+
+
+def _extract_report_id(body: str) -> Optional[int]:
+    """Extract a Report ID from body text (looks for 'Report #N' pattern)."""
+    m = re.search(r"Report\s*#(\d+)", body)
+    return int(m.group(1)) if m else None
+
+
+def _send_report_via_channel(
+    channel_name: str, config: dict, report_id: int,
+) -> SendToResult:
+    """Send a formatted report via sns-report channel."""
+    from agenticops.notify.notifier import SNSReportNotifier
+    from agenticops.models import Report, get_db_session
+
+    with get_db_session() as db:
+        report = db.query(Report).filter_by(id=report_id).first()
+        if not report:
+            return SendToResult(success=False, message=f"Report #{report_id} not found.")
+        title = report.title
+        summary = report.summary
+        content_md = report.content_markdown
+        report_type = report.report_type
+
+    notifier = SNSReportNotifier(config)
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(
+            notifier.send_report(
+                report_id=report_id,
+                title=title,
+                summary=summary,
+                content_markdown=content_md,
+                report_type=report_type,
+            )
+        )
+    finally:
+        loop.close()
+
+    fmts = result.get("formats", [])
+    urls = result.get("urls", {})
+    if fmts:
+        url_lines = ", ".join(f"{k}: {v[:60]}..." for k, v in urls.items())
+        return SendToResult(
+            success=True,
+            message=f"Report #{report_id} published to {channel_name} ({', '.join(fmts)}). {url_lines}",
+        )
+    return SendToResult(
+        success=False,
+        message=f"Report #{report_id} distribution to {channel_name} produced no formats.",
     )
 
 

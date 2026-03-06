@@ -73,6 +73,31 @@ spec:
               and check application logs.
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodnotready
 
+        # 11. KubePodPending — pod stuck in Pending phase for > 3 minutes
+        #     Used by: Case 5 (resource exhaustion → scheduling failure)
+        - alert: KubePodPending
+          expr: |
+            kube_pod_status_phase{phase="Pending"} == 1
+          for: 3m
+          labels:
+            severity: warning
+            category: workload
+            component: pod
+          annotations:
+            summary: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in Pending phase
+              for more than 3 minutes.
+            description: >-
+              Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been stuck
+              in Pending phase for over 3 minutes. The scheduler cannot place the pod on
+              any node. Common causes: insufficient CPU or memory across all nodes,
+              node affinity or anti-affinity rules that cannot be satisfied, taints with
+              no matching tolerations, PVC not bound, or a resource quota exceeded.
+              Check pending events with
+              `kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}`
+              and verify cluster capacity with `kubectl top nodes`.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodpending
+
         # 9. KubePodOOMKilled — container killed by OOM (exit code 137)
         - alert: KubePodOOMKilled
           expr: |
@@ -126,6 +151,33 @@ spec:
               `kubectl describe deployment {{ $labels.deployment }} -n {{ $labels.namespace }}`
               and inspect pending pods.
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentreplicasmismatch
+
+        # 12. KubeHPAMaxedOut — HPA current replicas at or above max for > 5 minutes
+        #     Used by: Case 9 (HPA misconfigured with maxReplicas=1)
+        - alert: KubeHPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas
+            >=
+            kube_horizontalpodautoscaler_spec_max_replicas
+          for: 5m
+          labels:
+            severity: warning
+            category: workload
+            component: hpa
+          annotations:
+            summary: >-
+              HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is at max
+              replicas ({{ $value | printf "%.0f" }}) for more than 5 minutes.
+            description: >-
+              The HorizontalPodAutoscaler {{ $labels.horizontalpodautoscaler }} in namespace
+              {{ $labels.namespace }} has been running at its maximum replica count
+              ({{ $value | printf "%.0f" }}) for over 5 minutes. This means the autoscaler
+              cannot scale further to handle load. Either increase maxReplicas, optimize
+              application resource usage, or investigate the traffic source causing sustained
+              high load. Check HPA status with
+              `kubectl describe hpa {{ $labels.horizontalpodautoscaler }} -n {{ $labels.namespace }}`
+              and review current CPU/memory utilization targets.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpamaxedout
 
         # 10. KubePVCPending — PVC stuck in Pending for > 5 minutes
         - alert: KubePVCPending
@@ -230,6 +282,31 @@ spec:
               (Status > Targets) and check if the corresponding pod is running.
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/targetdown
 
+        # 13. KubeCoreDNSDown — CoreDNS pods unavailable for > 1 minute
+        #     Used by: Case 7 (CoreDNS scaled to 0)
+        - alert: KubeCoreDNSDown
+          expr: |
+            absent(up{job="kube-dns"} == 1)
+          for: 1m
+          labels:
+            severity: critical
+            category: monitoring
+            component: dns
+          annotations:
+            summary: >-
+              CoreDNS is down — no healthy kube-dns targets for more than 1 minute.
+            description: >-
+              All CoreDNS pods (job: kube-dns) have been unreachable for over 1 minute.
+              DNS resolution within the cluster is broken, which will cause widespread
+              service failures as pods cannot resolve service names. This is a critical
+              infrastructure issue. Common causes: CoreDNS deployment scaled to 0, all
+              CoreDNS pods crash-looping, or the kube-system namespace has resource
+              constraints preventing scheduling. On EKS, the CoreDNS addon controller
+              may self-recover by re-creating pods. Check with
+              `kubectl get deploy coredns -n kube-system` and
+              `kubectl get pods -n kube-system -l k8s-app=kube-dns`.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecorednsfailed
+
     # ------------------------------------------------------------------
     # Group 5: Application-level alerts (HTTP metrics)
     # Requires services to expose http_request_duration_seconds and
@@ -270,6 +347,7 @@ spec:
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/higherrorrate
 
         # 8. HighLatencyP99 — p99 response latency exceeds 2 seconds for 5 minutes
+        #    Used by: Case 3 (high latency from network loss)
         - alert: HighLatencyP99
           expr: |
             histogram_quantile(

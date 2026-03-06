@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Case 1: OOM Kill → CrashLoopBackOff
-# Inject: Set adservice memory limit to 32Mi (normally ~300Mi Java app)
+# Inject: Set adservice memory limit to 64Mi (normally ~300Mi Java app)
 # Expected: KubePodOOMKilled alert (immediate) + KubePodCrashLooping (1 min)
 
 set -euo pipefail
@@ -15,11 +15,13 @@ CURRENT_LIMIT=$(kubectl get deploy adservice -n online-boutique \
 echo "$CURRENT_LIMIT" > /tmp/case1-original-memory.txt
 report_info "Original memory limit: ${CURRENT_LIMIT}"
 
-# Inject: set memory request+limit to 32Mi (OOM guaranteed for Java app)
-report_info "Setting adservice memory request=32Mi limit=32Mi..."
+# Inject: set memory limit to 64Mi AND force JVM to try 256m heap — guaranteed OOM.
+report_info "Setting adservice memory=64Mi + JAVA_TOOL_OPTIONS=-Xmx256m -Xms256m..."
 kubectl set resources deploy/adservice -n online-boutique \
-    --requests=memory=32Mi --limits=memory=32Mi
+    --requests=memory=64Mi --limits=memory=64Mi
+kubectl set env deploy/adservice -n online-boutique \
+    JAVA_TOOL_OPTIONS="-Xmx256m -Xms256m"
 kubectl rollout status deploy/adservice -n online-boutique --timeout=60s 2>/dev/null || true
 
-report_pass "Fault injected — adservice memory=32Mi (was ${CURRENT_LIMIT})"
+report_pass "Fault injected — adservice memory=256Mi + JVM heap=256m (was ${CURRENT_LIMIT})"
 report_info "Expected alerts: KubePodOOMKilled (immediate), KubePodCrashLooping (~1 min)"

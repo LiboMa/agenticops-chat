@@ -9,6 +9,7 @@ import { ChatInput } from "@/components/chat/ChatInput";
 export default function Chat() {
   const { data: sessions } = useChatSessions();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailLevel, setDetailLevel] = useState("medium");
 
   // Auto-select first session
   useEffect(() => {
@@ -45,10 +46,12 @@ export default function Chat() {
               </div>
             )}
             <ChatInput
-              onSend={(msg, file) => sendMessage(msg, file)}
+              onSend={(msg, file) => sendMessage(msg, file, detailLevel)}
               onCancel={cancel}
               disabled={streaming}
               streaming={streaming}
+              detailLevel={detailLevel}
+              onDetailLevelChange={setDetailLevel}
             />
           </>
         )}

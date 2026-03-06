@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
@@ -107,6 +108,10 @@ class ThinkingDisplay:
         self._lock = threading.Lock()
         self.token_usage = token_usage
 
+    def __rich__(self):
+        """Make ThinkingDisplay a Rich renderable so Live can animate it."""
+        return self._build_display()
+
     def _build_display(self) -> Group:
         """Build the display content."""
         elements = []
@@ -136,14 +141,14 @@ class ThinkingDisplay:
                 elapsed = f" [dim]({format_duration(elapsed_secs)})[/dim]"
 
             spinner = Spinner(spinner_name, text=Text.from_markup(f"[{color}]{self.current_step}[/{color}]{elapsed}"))
-            elements.append(Text("  ") + spinner.render(time.time()))
+            elements.append(Padding(spinner, (0, 0, 0, 2)))
 
         return Group(*elements) if elements else Text("")
 
     @contextmanager
     def live_display(self):
         """Context manager for live display updates."""
-        with Live(self._build_display(), console=self.console, refresh_per_second=10, transient=False) as live:
+        with Live(self, console=self.console, refresh_per_second=10, transient=False) as live:
             self._live = live
             try:
                 yield self
@@ -151,9 +156,9 @@ class ThinkingDisplay:
                 self._live = None
 
     def _update(self):
-        """Update the live display."""
+        """Trigger an immediate display refresh."""
         if self._live:
-            self._live.update(self._build_display())
+            self._live.refresh()
 
     def _complete_current_step(self):
         """Mark current step as complete."""

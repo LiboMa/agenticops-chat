@@ -1052,6 +1052,14 @@ def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
             return f"FixExecution #{execution_id} not found."
 
         old_status = issue.status
+
+        # If already auto-resolved by save_execution_result(), don't overwrite
+        if old_status == "resolved":
+            return (
+                f"HealthIssue #{health_issue_id} already auto-resolved. "
+                f"Execution #{execution_id} recorded. No status change needed."
+            )
+
         issue.status = "fix_executed"
         session.commit()
 

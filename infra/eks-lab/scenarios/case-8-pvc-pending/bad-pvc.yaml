@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agenticops-bad-pvc
+  namespace: online-boutique
+  labels:
+    chaos-injected: "true"
+    agenticops-scenario: case-8
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nonexistent-sc
+  resources:
+    requests:
+      storage: 1Gi

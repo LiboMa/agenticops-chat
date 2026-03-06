@@ -40,20 +40,37 @@ api_get() {
 wait_for_health_issue() {
     local pattern="$1"
     local timeout="${2:-180}"
+    local max_age="${3:-10}"  # only match issues created within last N minutes
     local start=$SECONDS
     local issue_id=""
 
-    report_info "Waiting for HealthIssue matching '${pattern}' (timeout ${timeout}s)..."
+    report_info "Waiting for HealthIssue matching '${pattern}' (timeout ${timeout}s, max_age ${max_age}m)..."
     while (( SECONDS - start < timeout )); do
         local body
         body=$(api_get "/api/health-issues?limit=20")
         if [[ -n "$body" ]]; then
             issue_id=$(echo "$body" | python3 -c "
 import json, re, sys
+from datetime import datetime, timedelta, timezone
 data = json.load(sys.stdin)
 items = data if isinstance(data, list) else data.get('items', data.get('results', []))
 pattern = re.compile(r'${pattern}', re.IGNORECASE)
+max_age_min = ${max_age}
+cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_min)
 for item in items:
+    # Skip already-resolved issues
+    if item.get('status') in ('resolved', 'closed'):
+        continue
+    # Time filter: only match recent issues
+    detected = item.get('detected_at', '')
+    try:
+        dt = datetime.fromisoformat(detected.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if dt < cutoff:
+            continue
+    except (ValueError, TypeError):
+        pass
     title = item.get('title', '') + ' ' + item.get('description', '')
     if pattern.search(title):
         print(item['id'])
@@ -144,4 +161,47 @@ restore_clean_state() {
     else
         report_info "No clean-state snapshot found — skipping restore"
     fi
+}
+
+# ---------------------------------------------------------------
+# cleanup_chaos_artifacts
+#   Remove all resources labelled chaos-injected=true, plus
+#   restore CoreDNS if it was scaled to 0.
+# ---------------------------------------------------------------
+cleanup_chaos_artifacts() {
+    report_info "Cleaning up chaos artifacts (label: chaos-injected=true)..."
+
+    # Delete labelled resources in the online-boutique namespace
+    for kind in job pod deploy pvc networkpolicy hpa; do
+        kubectl delete "$kind" -l chaos-injected=true -n online-boutique --ignore-not-found 2>/dev/null || true
+    done
+
+    # Restore CoreDNS if scaled to 0 (Case 7)
+    local coredns_replicas
+    coredns_replicas=$(kubectl get deploy coredns -n kube-system \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "2")
+    if [[ "$coredns_replicas" == "0" ]]; then
+        report_info "CoreDNS has 0 replicas — restoring to 2..."
+        kubectl scale deploy/coredns -n kube-system --replicas=2
+        kubectl rollout status deploy/coredns -n kube-system --timeout=60s 2>/dev/null || true
+    fi
+
+    report_pass "Chaos artifacts cleaned up"
+}
+
+# ---------------------------------------------------------------
+# collect_timing CASE_NAME ELAPSED STATUS
+#   Append a row to .timing-results.csv in the scenarios directory.
+#   Creates the CSV with a header if it does not exist.
+# ---------------------------------------------------------------
+collect_timing() {
+    local case_name="$1"
+    local elapsed="$2"
+    local status="$3"
+    local csv="${BASH_SOURCE[0]%/*}/.timing-results.csv"
+
+    if [[ ! -f "$csv" ]]; then
+        echo "case,elapsed_seconds,status,timestamp" > "$csv"
+    fi
+    echo "${case_name},${elapsed},${status},$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$csv"
 }

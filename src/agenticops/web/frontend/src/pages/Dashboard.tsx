@@ -1,6 +1,7 @@
 import { useStats } from "@/hooks/useStats";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
+import { useExecutorStatus } from "@/hooks/useExecutorStatus";
 import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -14,6 +15,7 @@ export default function Dashboard() {
   const stats = useStats();
   const anomalies = useAnomalies({ status: "open" });
   const typeCounts = useResourceTypeCounts();
+  const executor = useExecutorStatus();
   const navigate = useNavigate();
 
   // Sort type counts descending
@@ -58,6 +60,47 @@ export default function Dashboard() {
           colorClass="text-slate-700"
         />
       </div>
+
+      {/* Pipeline Status */}
+      {executor.data && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Pipeline Status
+            </h2>
+          </CardHeader>
+          <CardBody>
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-block w-2.5 h-2.5 rounded-full ${
+                    executor.data.running ? "bg-green-500" : "bg-slate-300"
+                  }`}
+                />
+                <span className="text-sm text-slate-600">
+                  Executor {executor.data.enabled ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+              <div className="text-sm text-slate-600">
+                <span className="text-slate-400">Active Executions:</span>{" "}
+                <span className="font-medium">{executor.data.active_executions}</span>
+              </div>
+              <div className="text-sm text-slate-600">
+                <span className="text-slate-400">Auto-resolve:</span>{" "}
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                    executor.data.auto_resolve
+                      ? "bg-green-100 text-green-700"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {executor.data.auto_resolve ? "On" : "Off"}
+                </span>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Recent Issues */}
       <Card>

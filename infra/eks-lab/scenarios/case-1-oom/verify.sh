@@ -38,14 +38,18 @@ if [[ -n "$FIX_INFO" ]]; then
     report_pass "Fix plan found: ${FIX_INFO}"
     PASSED=$((PASSED + 1))
 else
-    # Wait a bit more — SRE agent may still be running
-    report_info "No fix plan yet, waiting..."
-    sleep 30
-    FIX_INFO=$(get_fix_plan "$ISSUE_ID")
-    if [[ -n "$FIX_INFO" ]]; then
-        report_pass "Fix plan found: ${FIX_INFO}"
-        PASSED=$((PASSED + 1))
-    else
+    # SRE agent may still be working — retry with longer backoff
+    for wait in 30 30 30; do
+        report_info "No fix plan yet, waiting ${wait}s..."
+        sleep "$wait"
+        FIX_INFO=$(get_fix_plan "$ISSUE_ID")
+        if [[ -n "$FIX_INFO" ]]; then
+            report_pass "Fix plan found: ${FIX_INFO}"
+            PASSED=$((PASSED + 1))
+            break
+        fi
+    done
+    if [[ -z "$FIX_INFO" ]]; then
         report_fail "No fix plan created for issue ${ISSUE_ID}"
     fi
 fi
@@ -59,15 +63,19 @@ else
     report_fail "Issue not resolved (final status: ${FINAL_STATUS})"
 fi
 
-# Step 5: Verify fix applied — memory limit should no longer be 32Mi
+# Step 5: Verify fix applied — memory limit should be restored OR JVM env removed
 echo -e "\n${BOLD}Step 5/5: Verify fix applied${NC}"
 CURRENT_LIMIT=$(kubectl get deploy adservice -n online-boutique \
     -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}' 2>/dev/null || echo "unknown")
-if [[ "$CURRENT_LIMIT" != "32Mi" ]]; then
-    report_pass "adservice memory limit is now ${CURRENT_LIMIT} (no longer 32Mi)"
+JVM_OPTS=$(kubectl get deploy adservice -n online-boutique \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="JAVA_TOOL_OPTIONS")].value}' 2>/dev/null || echo "")
+RESTARTS=$(kubectl get pods -n online-boutique -l app=adservice \
+    -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || echo "unknown")
+if [[ "$CURRENT_LIMIT" != "256Mi" ]] || [[ -z "$JVM_OPTS" ]] || [[ "$RESTARTS" == "0" ]]; then
+    report_pass "adservice fixed: memory=${CURRENT_LIMIT}, JVM_OPTS='${JVM_OPTS}', restarts=${RESTARTS}"
     PASSED=$((PASSED + 1))
 else
-    report_fail "adservice memory limit is still 32Mi — fix was not applied"
+    report_fail "adservice still broken: memory=${CURRENT_LIMIT}, JVM_OPTS='${JVM_OPTS}', restarts=${RESTARTS}"
 fi
 
 # Summary

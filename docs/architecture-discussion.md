@@ -468,3 +468,159 @@ Phase 4: 进化
 ---
 
 *最后更新: 2026-02-09*
+
+
+## Session 3: 2026-03-01 — 自愈闭环架构：告警驱动 + 巡检预测
+
+### 讨论背景
+
+在运行 detect_agent 后发现 Issue #67（EKS 集群 `agenticops-chaos-lab`
+被用户手动删除后，
+Detect 基于旧 Inventory 报出 CRITICAL 误报），引发了对 Inventory 与 Detect
+同步机制的深入讨论，
+最终演进为完整的自愈闭环架构设计。
+
+### 核心问题
+
+1. **Inventory 是静态快照** — Scan 后 AWS 侧发生变更，Detect
+基于旧数据检查导致误报
+2. **当前流程是线性手动的** — 需要人工依次触发 Scan → Detect → RCA → Fix
+3. **缺乏预测能力** — 只能发现"已发生"的问题，无法预见"即将发生"的问题
+
+### 架构决策：两条流水线，一个闭环
+
+#### 核心理念
+
+> 告警止血 + 巡检预测，共享同一套 RCA → Fix → Resolve 后端。
+
+#### 流水线 A：告警驱动（被动止血，实时）
+
+```
+多源告警接入 (CloudWatch / Prometheus / Datadog / PagerDuty / Custom)
+    │
+    ▼
+告警聚合/关联引擎 (Alert Correlation)
+  - 时间窗口 30-60s 聚合
+  - 资源依赖图关联同根因告警
+  - 去重：5 个告警 → 1 个 Incident
+    │
+    ▼
+Inventory 预检
+  - 资源在库且 TTL 有效？ → 跳过 Scan，直接 Detect
+  - 资源不在库？ → 局部 Scan → 再 Detect
+    │
+    ▼
+Detect (局部, shallow)
+  - 只查告警相关资源 + Blast Radius（依赖图扩展 N 层）
+    │
+    ▼
+[进入统一后端]
+```
+
+**关键洞察（由用户提出）：在应用级别，事件告警比资源变更更普遍、更实际。
+告警才是驱动整个流程的第一推动力。**
+
+#### 流水线 B：定时巡检（主动预测，周期性）
+
+```
+Cron (每 1-4 小时)
+    │
+    ▼
+Scan (全量/增量) → 刷新 Inventory + TTL
+    │
+    ▼
+Detect (全量, deep=true)
+  - 拉取历史指标做趋势分析
+    │
+    ▼
+趋势预测引擎
+  - 磁盘 72% + 2%/天 → 14 天后满
+  - 子网 IP 65% → 3 周后耗尽
+  - DB 连接峰值递增 → 下月触顶
+  - 证书到期倒计时
+    │
+    ▼
+生成预测性 Issue → [进入统一后端]
+```
+
+**关键洞察：巡检的价值不在于"现在有没有问题"，而在于"照这趋势，未来会不会出问题"。
+**
+
+#### 统一后端：RCA → Fix → Resolve
+
+```
+统一 Issue 管理层 (告警 Issue + 预测 Issue，去重/优先级排序)
+    │
+    ▼
+RCA Agent (CloudTrail + Metrics + Logs + Knowledge Base)
+    │
+    ▼
+Fix Plan + 风险分级门控
+  - L0 无风险 (清日志、重启 Pod) → 全自动
+  - L1 低风险 (扩容 ASG) → 可自动
+  - L2 中风险 (改 SG、切 DB) → 需人工确认
+  - L3 高风险 (删资源、改 IAM) → 必须审批
+    │
+    ▼
+执行 → Post-Check 验证
+  - 通过 → Resolved ✅
+  - 失败 → Rollback + 升级人工 🔴
+  - 30 分钟内复发 → 标记"反复发作" → 升级为架构问题 📋
+    │
+    ▼
+知识沉淀 (已解决 Case → Knowledge Base → 加速未来 RCA)
+```
+
+### 两条流水线对比
+
+| 维度 | 流水线 A：告警止血 | 流水线 B：巡检预测 |
+|------|-------------------|-------------------|
+| 触发 | Alert 事件（被动） | Cron 定时（主动） |
+| Scan | 条件触发（Inventory 缺失时才跑） | 全量/增量（刷新 Inventory） |
+| Detect 范围 | 局部 — 告警资源 + Blast Radius | 全局 — 所有托管资源 |
+| Detect 深度 | shallow — 当前状态 | deep — 历史趋势 + 预测 |
+| 核心问题 | "现在出了什么问题？" | "照这趋势，未来会出什么问题？" |
+| 时效要求 | 秒级 ~ 分钟级 | 小时级 |
+| Issue 类型 | 告警 Issue（urgent） | 预测 Issue（proactive） |
+| 价值 | 减少 MTTR | 减少事故数量 |
+
+### 关键设计决策
+
+1. **告警聚合层** — 30-60s 时间窗口 + 依赖图关联 + 去重，避免同一故障触发多轮 RCA
+2. **Inventory TTL 机制** — 告警进来先查 Inventory，TTL 内跳过
+Scan，过期或缺失才局部 Scan
+3. **Blast Radius 分析** — 从告警资源沿依赖图扩展 N 层，Detect 只查爆炸半径内资源
+4. **趋势预测引擎** —
+线性外推（磁盘/IP/连接数）、到期倒计时（证书）、周期性峰值预测
+5. **Fix 风险分级门控** — L0-L3 四级，与现有 approve_fix_plan 机制对齐
+6. **反馈闭环** — Post-Check + Rollback + 反复发作检测 + 知识沉淀
+
+### 与现有系统的映射
+
+| 架构组件 | 当前状态 | 需要建设 |
+|---------|---------|---------|
+| 多源告警接入 | ✅ CloudWatch + 外部 Provider | 🔨 告警聚合/关联引擎 |
+| Inventory | ✅ scan_agent | 🔨 TTL 机制 + 条件触发 |
+| Detect | ✅ detect_agent (shallow + deep) | 🔨 Blast Radius 局部检测 |
+| 依赖图 | ✅ 网络拓扑（VPC 级） | 🔨 扩展到全资源类型 |
+| RCA | ✅ rca_agent | ✅ 已有 |
+| Fix Plan | ✅ sre_agent + 风险分级 | ✅ 已有 |
+| 审批门控 | ✅ approve_fix_plan (L0-L3) | ✅ 已有 |
+| Auto Fix | ✅ executor_agent | ✅ 已有 |
+| Post-Check | ✅ 执行器内置 | 🔨 反复发作检测 |
+| 趋势预测 | ❌ | 🔨 需新建 |
+| 知识沉淀 | ✅ Knowledge Base + Case Study | 🔨 自动沉淀闭环 |
+
+### 建设优先级
+
+**Phase 1（短期，价值最大）：**
+- 告警聚合层 — 减少噪音和重复工作
+- Inventory TTL + 条件 Scan — 告警响应提速
+
+**Phase 2（中期）：**
+- 资源依赖图 + Blast Radius — 精准局部 Detect
+- 反复发作检测 — 避免反复修同一个问题
+
+**Phase 3（长期）：**
+- 趋势预测引擎 — 从被动响应走向主动预防
+- 知识自动沉淀 — RCA 越做越快，形成飞轮
