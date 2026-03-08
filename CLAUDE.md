@@ -279,6 +279,34 @@ skills/
 
 ## Recent Changes
 
+### 2026-03-08: Agent-Based IM Alert Routing (Feature A Redesign)
+
+**Architecture**: ALL IM messages go through Main Agent. For alert channels (`role: alert` in channels.yaml), messages are wrapped with `_ALERT_CHANNEL_PROMPT` — a 5-step verification prompt that instructs the Agent to read the full message, verify it's a real alert with evidence, assess severity independently, and only create a HealthIssue if confident. Normal conversation in alert channels gets a normal Agent response (no HealthIssue).
+
+**What was deleted**: `alert_classifier.py` (305-line regex classifier that false-positived on normal SRE conversations).
+
+**Key files**:
+- `src/agenticops/im/feishu_ws.py` — `_ALERT_CHANNEL_PROMPT` (5-step verification), `_build_agent_input()` (wraps alert channel messages), debug logging
+- `src/agenticops/web/app.py` — imports `_ALERT_CHANNEL_PROMPT` from `feishu_ws`, same routing pattern
+- `src/agenticops/agents/main_agent.py` — `create_health_issue` added to tool list
+- `src/agenticops/im/alert_pipeline.py` — deterministic detection functions preserved for webhook use (`should_handle_as_alert`, `is_alert_channel`, `is_alert_by_prefix`); IM handlers no longer call `handle_alert_message()`
+- `src/agenticops/notify/im_config.py` — `ChannelConfig.role` ("alert"/"chat"), `alert_senders`, `find_channel_by_chat()`
+
+**Flow**: IM message → `_build_agent_input()` (wraps if alert channel) → Main Agent → Agent reads full text → verifies → `create_health_issue` tool (if real alert) → auto-RCA pipeline
+
+**Config** (`channels.yaml`):
+```yaml
+feishu-alert:
+  type: feishu
+  role: alert          # All messages analyzed as potential alerts
+  enabled: true
+  app_name: default
+  chat_id: "oc_..."
+  alert_senders: []    # Optional: specific sender IDs
+```
+
+**Tests**: 54 passing in `test_v2_features.py` (+6 `TestBuildAgentInput` tests)
+
 ### 2026-03-03: YAML-Only Channel Config (DB Eliminated)
 
 **Architecture**: `config/channels.yaml` is now the **sole source of truth** for ALL notification channel configuration. The `notification_channels` DB table is no longer used for config reads/writes. `NotificationLog` remains in DB for audit.

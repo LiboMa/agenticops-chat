@@ -8,16 +8,30 @@
 #   severity_filter:  List of severities to notify for (empty = all)
 #   preferred_format: Format for report distribution (markdown, html, text, pdf).
 #                     Defaults per type: feishu/dingtalk/wecom/slack/webhook=markdown, email/sns-report=html, sns=text
+#   role:             Channel role: "alert" (all messages = alerts) or "chat" (default, Agent responds)
+#   alert_senders:    List of sender IDs that always send alerts (for shared channels)
 #   ...               All other keys become the notifier config dict
 
 channels:
-  # Feishu (Lark) example
-  my-feishu-alerts:
+  # Feishu (Lark) — dedicated alert channel (all messages are alerts)
+  feishu-prometheus-alerts:
     type: feishu
+    role: alert
+    enabled: true
+    preferred_format: markdown
+    app_name: default
+    chat_id: "${FEISHU_ALERT_CHAT_ID}"
+
+  # Feishu (Lark) — regular ops chat (Agent responds as SRE assistant)
+  my-feishu-chat:
+    type: feishu
+    role: chat
     enabled: true
     preferred_format: markdown
     app_name: default
     chat_id: "${FEISHU_CHAT_ID}"
+    # Optional: specific senders that always send alerts in this chat channel
+    # alert_senders: ["bot_prometheus_id", "bot_grafana_id"]
 
   # Slack example
   my-slack-alerts:

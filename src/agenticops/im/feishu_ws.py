@@ -6,12 +6,14 @@ The bot connects to Feishu's servers via WebSocket and receives events in real-t
 
 import json
 import logging
+import logging.handlers
 import re
 import threading
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 
 import lark_oapi as lark
@@ -22,16 +24,112 @@ from lark_oapi.api.im.v1 import (
 )
 from lark_oapi.ws import Client as WSClient
 
+from agenticops.config import PROJECT_ROOT, settings
 from agenticops.im.session_manager import IMChatSessionManager
 from agenticops.notify.im_config import get_feishu_app
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_file_logging() -> None:
+    """Configure file logging for the Feishu WS service and related modules."""
+    log_dir = PROJECT_ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "service_wss.log"
+
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5,
+        encoding="utf-8",
+    )
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s"
+    ))
+
+    # Attach to relevant loggers
+    for name in (
+        "agenticops.im",
+        "agenticops.integrations",
+        "agenticops.services.rca_service",
+        "agenticops.services.pipeline_service",
+        "agenticops.notify",
+        "Lark",
+    ):
+        logging.getLogger(name).addHandler(handler)
+
+    # Also attach to root so we catch anything unexpected
+    logging.getLogger().addHandler(handler)
+    logger.info("File logging → %s", log_file)
 
 # Thread pool for agent invocations (avoid blocking WS event loop)
 _AGENT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="feishu-agent")
 
 # @mention placeholder pattern in Feishu message text
 _MENTION_RE = re.compile(r"@_user_\d+\s*")
+
+_ALERT_CHANNEL_PROMPT = """<im_alert_context>
+SOURCE: This message was received from a **dedicated alert/monitoring channel** (channel: {channel_name}, platform: {platform}).
+Messages in this channel typically come from monitoring systems (Prometheus, CloudWatch, Grafana, etc.) or ops team members reporting incidents.
+
+CRITICAL: You MUST read and understand the COMPLETE message below — do NOT skip or summarize any part. The full message content is your primary evidence for analysis.
+
+YOUR TASK (follow strictly in order):
+
+STEP 1 — FULL COMPREHENSION:
+- Read the ENTIRE message carefully. Do not truncate or skip any details.
+- Identify: message source (monitoring system? human?), format (structured alert? free text?), all mentioned resources, metrics, thresholds, timestamps.
+
+STEP 2 — CLASSIFICATION & VERIFICATION:
+- Is this a real alert/incident, or normal conversation/question?
+- If it looks like an alert, VERIFY before acting:
+  a) Does it contain specific resource identifiers (instance IDs, pod names, service names)?
+  b) Does it report a measurable anomaly (metric threshold breach, error rate spike, health check failure)?
+  c) Is the severity claim credible (e.g., "CRITICAL" with supporting evidence, not just a keyword)?
+- Rate your confidence: HIGH (clear structured alert with evidence) / MEDIUM (likely alert but ambiguous) / LOW (probably not a real alert)
+
+STEP 3 — DECISION:
+- HIGH confidence real alert → Proceed to Step 4
+- MEDIUM confidence → Proceed to Step 4 but set severity conservatively (e.g., medium instead of critical)
+- LOW confidence or normal conversation → Respond as an SRE assistant, do NOT create a HealthIssue
+
+STEP 4 — CREATE HEALTH ISSUE (only if Steps 2-3 confirm real alert):
+- Use the create_health_issue tool with:
+  - title: concise, factual summary of the issue
+  - severity: based on your verified assessment (critical/high/medium/low), NOT just what the alert claims
+  - description: include the FULL original alert message text — do not truncate. This is the primary evidence for downstream RCA.
+  - source/resource info: extract accurately from the message
+- The auto-RCA pipeline will trigger automatically after HealthIssue creation to perform deep root cause analysis.
+- Respond with: what you found, your severity assessment rationale, and the HealthIssue ID created.
+
+STEP 5 — If NOT creating a HealthIssue:
+- Respond normally as an SRE assistant — answer questions, provide guidance, etc.
+</im_alert_context>
+
+"""
+
+
+def _build_agent_input(
+    text: str, platform: str, chat_id: str, sender_id: str
+) -> str:
+    """Build agent input, wrapping with alert context for alert channels."""
+    if settings.im_alert_detection_enabled:
+        from agenticops.notify.im_config import find_channel_by_chat
+
+        ch = find_channel_by_chat(platform, chat_id)
+        if ch and ch.role == "alert":
+            prefix = _ALERT_CHANNEL_PROMPT.format(
+                channel_name=ch.name, platform=platform,
+            )
+            return prefix + text
+
+        # Also check sender-based and prefix-based detection
+        if ch and ch.alert_senders and sender_id in ch.alert_senders:
+            prefix = _ALERT_CHANNEL_PROMPT.format(
+                channel_name=ch.name, platform=platform,
+            )
+            return prefix + text
+
+    return text
 
 
 class FeishuWSService:
@@ -70,7 +168,7 @@ class FeishuWSService:
             app_id=self._app_config.app_id,
             app_secret=self._app_config.app_secret,
             event_handler=handler,
-            log_level=lark.LogLevel.INFO,
+            log_level=lark.LogLevel.DEBUG,
             auto_reconnect=True,
         )
 
@@ -89,13 +187,19 @@ class FeishuWSService:
 
     def _on_message_receive(self, data: P2ImMessageReceiveV1) -> None:
         """Handle incoming message event from WebSocket."""
+        logger.info(">>> WS event received: type=%s", type(data).__name__)
         try:
             event = data.event
             if not event or not event.message:
+                logger.warning(">>> WS event has no message payload: event=%s", event)
                 return
 
             msg = event.message
             sender = event.sender
+            logger.info(
+                ">>> Raw event: chat_id=%s msg_type=%s content=%s",
+                msg.chat_id, msg.message_type, (msg.content or "")[:200],
+            )
 
             # Only handle text messages
             if msg.message_type != "text":
@@ -164,11 +268,28 @@ class FeishuWSService:
                 send_result = execute_send_to(text.strip())
                 response_text = send_result.message
             else:
+                # All messages go through Main Agent.
+                # For alert channels, wrap with alert context so Agent
+                # understands this is from a monitoring channel and should
+                # analyze → create HealthIssue → trigger RCA if appropriate.
                 agent = self._im_sessions.get_or_create(
                     "feishu", chat_id, self._app_name
                 )
-                result = agent(text)
+                agent_input = _build_agent_input(
+                    text, "feishu", chat_id, sender_id
+                )
+                logger.info(
+                    ">>> Agent dispatch: chat_id=%s is_alert_ctx=%s input_len=%d",
+                    chat_id,
+                    agent_input != text,
+                    len(agent_input),
+                )
+                logger.debug(">>> Agent input (first 500): %s", agent_input[:500])
+                result = agent(agent_input)
                 response_text = str(result)
+                logger.info(
+                    ">>> Agent response (first 300): %s", response_text[:300]
+                )
 
             # Persist conversation to DB
             self._persist_messages(chat_id, sender_id, text, response_text)
@@ -269,6 +390,7 @@ class FeishuWSService:
             logger.warning("Feishu WS service already started")
             return
 
+        _setup_file_logging()
         self._im_sessions.start_cleanup()
         self._thread = threading.Thread(
             target=self._run_ws,

@@ -659,10 +659,24 @@ async def startup():
     if settings.feishu_ws_enabled:
         try:
             from agenticops.im.feishu_ws import start_feishu_ws
-            start_feishu_ws()
+            svc = start_feishu_ws()
+            if svc:
+                import logging as _logging
+                _log = _logging.getLogger(__name__)
+                _log.info(
+                    "Feishu WS: started=%s thread_alive=%s app=%s",
+                    svc._started,
+                    svc._thread.is_alive() if svc._thread else False,
+                    svc._app_name,
+                )
+            else:
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "Feishu WS: start_feishu_ws() returned None — check im-apps.yaml"
+                )
         except Exception:
             import logging
-            logging.getLogger(__name__).warning(
+            logging.getLogger(__name__).error(
                 "Feishu WS service failed to start (set AIOPS_FEISHU_WS_ENABLED=false to disable)",
                 exc_info=True,
             )
@@ -1576,6 +1590,7 @@ async def api_list_providers():
 async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
     """Process an inbound webhook alert: parse, dedup, create HealthIssue, trigger RCA."""
     from agenticops.integrations.parsers import parse_alert
+    from agenticops.integrations.alert_processor import process_alert
 
     try:
         alert = parse_alert(body, source=source)
@@ -1583,129 +1598,19 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
         logger.warning("Failed to parse webhook alert: %s", e)
         raise HTTPException(status_code=400, detail=f"Failed to parse alert: {e}")
 
-    with get_db_session() as session:
-        # Deduplication: check for existing alert with same source + external_id
-        existing = None
-        if alert.external_id:
-            existing = (
-                session.query(AlertEvent)
-                .filter_by(source=alert.source, external_id=alert.external_id)
-                .first()
-            )
+    result = process_alert(alert)
 
-        reuse_event = False
-        if existing:
-            # Check if linked HealthIssue is in a completed/terminal state.
-            # If so, allow creating a new HealthIssue for the re-fired alert.
-            linked_issue = None
-            if existing.health_issue_id:
-                linked_issue = session.query(HealthIssue).filter_by(id=existing.health_issue_id).first()
-            terminal_statuses = {"resolved", "fix_executed", "closed"}
-            if linked_issue and linked_issue.status in terminal_statuses:
-                # Reuse existing AlertEvent but unlink from terminal issue
-                existing.health_issue_id = None
-                existing.severity = alert.severity
-                existing.title = alert.title
-                existing.description = alert.description
-                existing.raw_payload = alert.raw
-                existing.status = "received"
-                session.flush()
-                event_id = existing.id
-                reuse_event = True
-            else:
-                # Active issue — true dedup
-                existing.severity = alert.severity
-                existing.title = alert.title
-                existing.description = alert.description
-                existing.raw_payload = alert.raw
-                session.flush()
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "message": f"Updated existing alert event #{existing.id} (dedup)",
-                        "alert_event_id": existing.id,
-                        "health_issue_id": existing.health_issue_id,
-                        "deduplicated": True,
-                    },
-                )
+    if result.action == "error":
+        raise HTTPException(status_code=500, detail=result.message)
 
-        if not reuse_event:
-            # Create new AlertEvent
-            event = AlertEvent(
-                source=alert.source,
-                external_id=alert.external_id,
-                severity=alert.severity,
-                title=alert.title,
-                description=alert.description,
-                resource_hint=alert.resource_hint,
-                raw_payload=alert.raw,
-                status="received",
-            )
-            session.add(event)
-            session.flush()
-            event_id = event.id
-
-    # Optionally create a HealthIssue
-    health_issue_id = None
-    if settings.webhook_auto_create_issue:
-        try:
-            with get_db_session() as session:
-                # Dedup: check for existing open issue with same resource + source
-                dedup_query = session.query(HealthIssue).filter(
-                    HealthIssue.source == f"webhook_{alert.source}",
-                    HealthIssue.status.in_(["open", "investigating"]),
-                )
-                if alert.resource_hint:
-                    dedup_query = dedup_query.filter(
-                        HealthIssue.resource_id == alert.resource_hint
-                    )
-                else:
-                    dedup_query = dedup_query.filter(
-                        HealthIssue.title == alert.title
-                    )
-
-                existing_issue = dedup_query.first()
-                if existing_issue:
-                    health_issue_id = existing_issue.id
-                else:
-                    issue = HealthIssue(
-                        resource_id=alert.resource_hint or "unknown",
-                        severity=alert.severity,
-                        source=f"webhook_{alert.source}",
-                        title=alert.title,
-                        description=alert.description,
-                        metric_data={"webhook_source": alert.source, "tags": alert.tags},
-                    )
-                    session.add(issue)
-                    session.flush()
-                    health_issue_id = issue.id
-
-            # Link AlertEvent to HealthIssue
-            with get_db_session() as session:
-                evt = session.query(AlertEvent).filter_by(id=event_id).first()
-                if evt:
-                    evt.health_issue_id = health_issue_id
-                    evt.status = "processed"
-
-            # Auto-trigger RCA
-            if health_issue_id and not existing_issue:
-                from agenticops.services.rca_service import trigger_auto_rca
-                trigger_auto_rca(health_issue_id)
-
-        except Exception:
-            logger.exception("Failed to create HealthIssue from webhook alert")
-            with get_db_session() as session:
-                evt = session.query(AlertEvent).filter_by(id=event_id).first()
-                if evt:
-                    evt.status = "error"
-
+    is_dedup = result.action == "deduplicated"
     return JSONResponse(
-        status_code=201,
+        status_code=200 if is_dedup else 201,
         content={
-            "message": f"Alert event created from {alert.source}",
-            "alert_event_id": event_id,
-            "health_issue_id": health_issue_id,
-            "deduplicated": False,
+            "message": result.message,
+            "alert_event_id": result.alert_event_id,
+            "health_issue_id": result.health_issue_id,
+            "deduplicated": is_dedup,
         },
     )
 
@@ -3720,11 +3625,35 @@ async def _handle_im_message(platform: str, msg) -> None:
         send_result = execute_send_to(content_stripped)
         response_text = send_result.message
     else:
+        # All messages go through Main Agent.
+        # For alert channels, wrap with alert context so Agent understands
+        # this is from a monitoring channel and should analyze accordingly.
         im_sessions = _get_im_sessions()
         agent = im_sessions.get_or_create(platform, msg.chat_id, msg.app_name)
 
+        agent_input = content_stripped
+        if settings.im_alert_detection_enabled:
+            try:
+                from agenticops.notify.im_config import find_channel_by_chat
+
+                ch = find_channel_by_chat(platform, msg.chat_id)
+                is_alert_ctx = False
+                if ch and ch.role == "alert":
+                    is_alert_ctx = True
+                elif ch and ch.alert_senders and msg.sender_id in ch.alert_senders:
+                    is_alert_ctx = True
+
+                if is_alert_ctx:
+                    from agenticops.im.feishu_ws import _ALERT_CHANNEL_PROMPT
+                    alert_prefix = _ALERT_CHANNEL_PROMPT.format(
+                        channel_name=ch.name, platform=platform,
+                    )
+                    agent_input = alert_prefix + content_stripped
+            except Exception as e:
+                logger.warning("Alert context build error: %s", e)
+
         try:
-            result = agent(msg.content)
+            result = agent(agent_input)
             response_text = str(result) if result else "No response generated."
         except Exception as e:
             logger.error("IM agent error (%s:%s): %s", platform, msg.chat_id, e)

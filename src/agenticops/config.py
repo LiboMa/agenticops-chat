@@ -167,9 +167,21 @@ class Settings(BaseSettings):
         default=True,
         description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",
     )
+    skills_draft_dir: Path = Field(
+        default=PROJECT_ROOT / "skills" / "draft",
+        description="Directory for draft/generated skills (AIOPS_SKILLS_DRAFT_DIR)",
+    )
     skills_enabled: bool = Field(
         default=True,
         description="Enable Agent Skills integration (AIOPS_SKILLS_ENABLED=false to disable)",
+    )
+    clawhub_enabled: bool = Field(
+        default=False,
+        description="Enable ClawHub skill registry integration (AIOPS_CLAWHUB_ENABLED)",
+    )
+    clawhub_token: str = Field(
+        default="",
+        description="ClawHub API token for skill registry (AIOPS_CLAWHUB_TOKEN)",
     )
     skills_max_body_chars: int = Field(
         default=8000,
@@ -230,6 +242,16 @@ class Settings(BaseSettings):
         description="Enable auto-notifications on pipeline events (AIOPS_NOTIFICATIONS_ENABLED=false to disable)",
     )
 
+    # IM Alert Detection
+    im_alert_detection_enabled: bool = Field(
+        default=True,
+        description="Enable channel-based alert detection in IM messages (AIOPS_IM_ALERT_DETECTION_ENABLED)",
+    )
+    im_alert_cooldown_seconds: int = Field(
+        default=60,
+        description="Cooldown window in seconds for IM alert dedup (AIOPS_IM_ALERT_COOLDOWN_SECONDS)",
+    )
+
     # Distributed Tracing (Jaeger)
     jaeger_query_endpoint: str = Field(
         default="http://jaeger-query.monitoring:16686",
@@ -242,6 +264,20 @@ class Settings(BaseSettings):
     jaeger_default_lookback: str = Field(
         default="1h",
         description="Default trace lookback window (AIOPS_JAEGER_DEFAULT_LOOKBACK)",
+    )
+
+    # Graph Sync
+    graph_sync_enabled: bool = Field(
+        default=True,
+        description="Enable background graph sync service (AIOPS_GRAPH_SYNC_ENABLED)",
+    )
+    graph_sync_interval_minutes: int = Field(
+        default=15,
+        description="Graph sync interval in minutes (AIOPS_GRAPH_SYNC_INTERVAL_MINUTES)",
+    )
+    graph_node_ttl_hours: int = Field(
+        default=24,
+        description="TTL in hours for stale graph node cleanup (AIOPS_GRAPH_NODE_TTL_HOURS)",
     )
 
     # Webhooks

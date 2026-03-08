@@ -148,7 +148,7 @@ def list_apps() -> Dict[str, list]:
 
 # ── Notification Channels (channels.yaml) ─────────────────────────
 
-_CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter", "preferred_format"))
+_CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter", "preferred_format", "role", "alert_senders"))
 
 _DEFAULT_PREFERRED_FORMAT: Dict[str, str] = {
     "feishu": "markdown",
@@ -174,6 +174,8 @@ class ChannelConfig:
     is_enabled: bool = True
     severity_filter: list = field(default_factory=list)
     preferred_format: str = ""
+    role: str = "chat"                     # "alert" | "chat"
+    alert_senders: list = field(default_factory=list)  # sender IDs that always send alerts
 
 
 def _load_channels_raw() -> Dict[str, Any]:
@@ -207,6 +209,8 @@ def _parse_channel(name: str, data: dict) -> ChannelConfig:
         "preferred_format",
         _DEFAULT_PREFERRED_FORMAT.get(channel_type, "markdown"),
     )
+    role = data.get("role", "chat")
+    alert_senders = data.get("alert_senders", [])
     # Everything not in reserved keys goes into the config dict
     config = {k: v for k, v in data.items() if k not in _CHANNEL_RESERVED_KEYS}
     return ChannelConfig(
@@ -216,6 +220,8 @@ def _parse_channel(name: str, data: dict) -> ChannelConfig:
         is_enabled=bool(is_enabled),
         severity_filter=severity_filter or [],
         preferred_format=preferred_format,
+        role=role,
+        alert_senders=alert_senders or [],
     )
 
 
@@ -286,6 +292,17 @@ def delete_channel(name: str) -> bool:
 
     _invalidate_channels_cache()
     return True
+
+
+def find_channel_by_chat(platform: str, chat_id: str) -> Optional[ChannelConfig]:
+    """Find channel config matching a platform type and chat_id.
+
+    Used by IM alert detection to determine if a chat is a dedicated alert channel.
+    """
+    for ch in load_channels():
+        if ch.channel_type == platform and ch.config.get("chat_id") == chat_id:
+            return ch
+    return None
 
 
 def _invalidate_channels_cache() -> None:

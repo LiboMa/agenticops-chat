@@ -28,6 +28,7 @@ from agenticops.tools.metadata_tools import (
     approve_fix_plan,
     list_health_issues,
     update_health_issue_status,
+    create_health_issue,
 )
 from agenticops.graph.tools import (
     detect_network_anomalies,
@@ -35,7 +36,10 @@ from agenticops.graph.tools import (
     detect_single_points_of_failure,
     analyze_capacity_risk,
 )
-from agenticops.skills.tools import activate_skill, read_skill_reference, list_skills
+from agenticops.skills.tools import (
+    activate_skill, read_skill_reference, list_skills,
+    create_skill, improve_skill, search_skill_registry,
+)
 from agenticops.skills.loader import build_prompt_with_skills
 from agenticops.tools.integration_tools import list_monitoring_providers
 
@@ -99,6 +103,15 @@ ROUTING RULES:
    You do NOT run host commands directly.
 9.5. Skills: Use list_skills to show available domain skills. Use activate_skill to load skill
      knowledge for answering domain questions. Use read_skill_reference for deep-dive material.
+     Use search_skill_registry to find skills by keyword across local and remote registries.
+9.6. SKILL SELF-IMPROVEMENT: When a sub-agent reports inability to handle a scenario, finds no
+     matching skill, or you identify a gap in existing skill coverage:
+     1. Use create_skill(name, description) to generate a new skill from a description, OR
+        use improve_skill(skill_name, improvement) to enhance an existing skill.
+     2. The skill is immediately available as a draft — activate and continue the investigation.
+     3. Draft skills will be reviewed later by human operators via /skill review and /skill promote.
+     Only create/improve skills when there is a clear knowledge gap — do not generate skills
+     for one-off questions.
 9.7. Sending notifications / distributing reports: First call activate_skill("notification-operator")
      to load notification tools (list_notification_channels, send_to_channel, distribute_report).
      Then use list_notification_channels to discover targets, send_to_channel for single-channel
@@ -165,15 +178,19 @@ def create_main_agent() -> Agent:
             approve_fix_plan,
             list_health_issues,
             update_health_issue_status,
+            create_health_issue,
             # Graph tools
             detect_network_anomalies,
             analyze_network_segments,
             detect_single_points_of_failure,
             analyze_capacity_risk,
-            # Agent Skills (knowledge only — no execution tools on main agent)
+            # Agent Skills (knowledge + self-improvement — no execution tools on main agent)
             list_skills,
             activate_skill,
             read_skill_reference,
+            create_skill,
+            improve_skill,
+            search_skill_registry,
             # Monitoring integrations
             list_monitoring_providers,
         ],

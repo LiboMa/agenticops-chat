@@ -5,6 +5,7 @@
 ## 讨论时间线
 
 - **Session 1**: 2026-02-08
+- **Session 4**: 2026-03-08 — IM 告警路由重构：Agent-First 架构
 
 ---
 
@@ -624,3 +625,76 @@ Scan，过期或缺失才局部 Scan
 **Phase 3（长期）：**
 - 趋势预测引擎 — 从被动响应走向主动预防
 - 知识自动沉淀 — RCA 越做越快，形成飞轮
+
+---
+
+## Session 4: 2026-03-08 — IM 告警路由重构：Agent-First 架构
+
+> 核心洞察：让 Agent（LLM）理解消息内容后决定是否创建 Issue，而非代码机械判断。
+
+### 问题回顾
+
+Feature A 的 IM 告警检测经历了三次迭代：
+
+| 版本 | 方案 | 结果 |
+|------|------|------|
+| V1 | 300 行正则分类器 (`alert_classifier.py`) | 误报严重：关键词密度匹配把正常对话当告警 |
+| V2 | Channel-based 确定性检测 + 机械 pipeline | 不区分内容：alert 群里所有消息直接走 `process_alert()`，正常对话也创建垃圾 HealthIssue |
+| **V3 (当前)** | **Agent-First：所有消息过 Main Agent，alert 群加上下文 prompt** | **Agent 理解全文后决定是否创建 Issue** |
+
+### V3 架构设计
+
+```
+IM 消息 (Feishu/DingTalk/WeCom)
+    │
+    ▼
+_build_agent_input()
+    ├── 检测 channel.role == "alert" 或 sender_id ∈ alert_senders？
+    │   ├── 是 → 包裹 _ALERT_CHANNEL_PROMPT（5步验证指令）+ 原始消息全文
+    │   └── 否 → 原始消息直接传入
+    ▼
+Main Agent (Bedrock Claude)
+    ├── 阅读完整消息
+    ├── 验证：是否真实告警？有资源 ID？有指标异常？
+    ├── 评估可信度：HIGH / MEDIUM / LOW
+    ├── HIGH/MEDIUM → create_health_issue tool → 自动触发 RCA pipeline
+    └── LOW/普通对话 → 正常回复
+```
+
+### 关键设计决策
+
+1. **Agent 理解优于代码判断**：LLM 能理解"让你 @ 它"是普通对话、而"ALARM: EC2-HighCPU i-0a1b..."是真实告警。正则和关键词做不到。
+
+2. **全量消息保留**：Prompt 明确要求 Agent 把完整原文写入 HealthIssue.description，不截断。这是下游 RCA 的关键输入。
+
+3. **严重度独立验证**：Agent 不盲信告警自称的 severity。如果一条消息说 "CRITICAL" 但没有具体证据，Agent 可以降级为 medium。
+
+4. **5 步验证流程**：
+   - Step 1：全量阅读，识别来源/格式/资源/指标
+   - Step 2：分类验证（有资源 ID？有指标异常？severity 可信？）
+   - Step 3：可信度评级 → 决策
+   - Step 4：创建 HealthIssue（仅 HIGH/MEDIUM）
+   - Step 5：非告警则正常回复
+
+5. **单一 Prompt 来源**：`_ALERT_CHANNEL_PROMPT` 定义在 `feishu_ws.py`，`app.py` import 复用，避免重复。
+
+### 实现文件
+
+| 文件 | 变更 |
+|------|------|
+| `im/feishu_ws.py` | `_ALERT_CHANNEL_PROMPT` + `_build_agent_input()` + debug 日志 |
+| `web/app.py` | 导入 `_ALERT_CHANNEL_PROMPT`，同一路由模式 |
+| `agents/main_agent.py` | 工具列表增加 `create_health_issue` |
+| `im/alert_pipeline.py` | 保留 `should_handle_as_alert()` 等函数供 webhook 使用，IM 不再调用 `handle_alert_message()` |
+| `notify/im_config.py` | `ChannelConfig.role` + `alert_senders` + `find_channel_by_chat()` |
+
+### 测试验证
+
+- 单元测试：54 passing（+6 `TestBuildAgentInput` 测试覆盖 prompt 包裹、跳过、禁用等场景）
+- Live 测试：Feishu WS 连接 → CloudWatch ALARM 消息 → Agent 分析 → HealthIssue 创建 → RCA pipeline 触发 → 通知发送到 3 个 channel
+
+### 后续优化方向
+
+- 真实场景大规模测试（更多告警格式、中英文混合、多人对话等）
+- 考虑 prompt 中增加 few-shot 示例提升准确率
+- 考虑 Agent 响应时间优化（当前 Bedrock 调用可能 10-20s）
