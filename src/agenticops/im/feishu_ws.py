@@ -112,6 +112,8 @@ def _build_agent_input(
     text: str, platform: str, chat_id: str, sender_id: str
 ) -> str:
     """Build agent input, wrapping with alert context for alert channels."""
+    if settings.alert_pipeline_mode not in ("channel_driven", "both"):
+        return text
     if settings.im_alert_detection_enabled:
         from agenticops.notify.im_config import find_channel_by_chat
 

@@ -297,6 +297,7 @@ class TestBuildAgentInput:
         )
         with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
              patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "both"
             mock_settings.im_alert_detection_enabled = True
             result = _build_agent_input("CPU at 99%", "feishu", "oc_alert", "user1")
             assert "<im_alert_context>" in result
@@ -316,6 +317,7 @@ class TestBuildAgentInput:
         )
         with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
              patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "both"
             mock_settings.im_alert_detection_enabled = True
             result = _build_agent_input("hello", "feishu", "oc_chat", "user1")
             assert result == "hello"
@@ -333,6 +335,7 @@ class TestBuildAgentInput:
         )
         with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
              patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "both"
             mock_settings.im_alert_detection_enabled = True
             result = _build_agent_input("firing", "feishu", "oc_shared", "bot_prometheus")
             assert "<im_alert_context>" in result
@@ -371,6 +374,7 @@ class TestBuildAgentInput:
         )
         with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
              patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "both"
             mock_settings.im_alert_detection_enabled = True
             result = _build_agent_input(long_alert, "feishu", "oc_a", "")
             # Full text must be present after the prompt
@@ -783,3 +787,200 @@ class TestV2Config:
         assert settings.graph_sync_enabled is True
         assert settings.graph_sync_interval_minutes == 15
         assert settings.graph_node_ttl_hours == 24
+
+    def test_alert_pipeline_mode_setting(self):
+        from agenticops.config import settings
+
+        assert hasattr(settings, "alert_pipeline_mode")
+        assert settings.alert_pipeline_mode == "both"
+
+
+# ============================================================================
+# Webhook Alert Parser Tests
+# ============================================================================
+
+
+class TestWebhookParsers:
+    """Test parse_alert() for various monitoring sources."""
+
+    def test_parse_prometheus(self):
+        from agenticops.integrations.parsers import parse_alert
+
+        body = {
+            "alerts": [{
+                "labels": {"alertname": "KubePodCrashLooping", "severity": "critical", "pod": "payment-api"},
+                "annotations": {"description": "Pod is crash looping"},
+                "fingerprint": "abc123",
+            }],
+            "status": "firing",
+        }
+        alert = parse_alert(body)
+        assert alert.source == "prometheus"
+        assert alert.title == "KubePodCrashLooping"
+        assert alert.severity == "critical"
+        assert alert.resource_hint == "payment-api"
+        assert alert.external_id == "abc123"
+
+    def test_parse_cloudwatch(self):
+        from agenticops.integrations.parsers import parse_alert
+
+        body = {
+            "AlarmName": "HighCPUUtilization",
+            "NewStateValue": "ALARM",
+            "NewStateReason": "Threshold crossed",
+            "Region": "us-east-1",
+            "Trigger": {
+                "MetricName": "CPUUtilization",
+                "Namespace": "AWS/EC2",
+                "Dimensions": [{"name": "InstanceId", "value": "i-1234567890abcdef0"}],
+            },
+        }
+        alert = parse_alert(body)
+        assert alert.source == "cloudwatch"
+        assert alert.title == "HighCPUUtilization"
+        assert alert.severity == "high"
+        assert alert.resource_hint == "i-1234567890abcdef0"
+
+    def test_parse_datadog(self):
+        from agenticops.integrations.parsers import parse_alert
+
+        body = {
+            "event_type": "alert",
+            "title": "High Error Rate",
+            "priority": "P2",
+            "text": "Error rate above threshold",
+            "tags": ["host:web-01", "env:prod"],
+        }
+        alert = parse_alert(body)
+        assert alert.source == "datadog"
+        assert alert.title == "High Error Rate"
+        assert alert.severity == "high"
+        assert alert.resource_hint == "web-01"
+
+    def test_parse_generic(self):
+        from agenticops.integrations.parsers import parse_alert
+
+        body = {
+            "title": "Custom Alert",
+            "severity": "medium",
+            "description": "Something happened",
+            "resource_id": "my-service",
+        }
+        alert = parse_alert(body)
+        assert alert.source == "generic"
+        assert alert.title == "Custom Alert"
+        assert alert.severity == "medium"
+        assert alert.resource_hint == "my-service"
+
+    def test_source_auto_detection_prometheus(self):
+        from agenticops.integrations.parsers import detect_source
+
+        body = {"alerts": [{"labels": {"alertname": "Test"}}]}
+        assert detect_source(body) == "prometheus"
+
+    def test_source_auto_detection_grafana(self):
+        from agenticops.integrations.parsers import detect_source
+
+        body = {"alerts": [{"status": "firing"}]}
+        assert detect_source(body) == "grafana"
+
+    def test_source_auto_detection_cloudwatch(self):
+        from agenticops.integrations.parsers import detect_source
+
+        body = {"AlarmName": "HighCPU"}
+        assert detect_source(body) == "cloudwatch"
+
+    def test_source_auto_detection_datadog(self):
+        from agenticops.integrations.parsers import detect_source
+
+        body = {"event_type": "alert", "title": "Test"}
+        assert detect_source(body) == "datadog"
+
+    def test_source_auto_detection_generic(self):
+        from agenticops.integrations.parsers import detect_source
+
+        body = {"title": "something"}
+        assert detect_source(body) == "generic"
+
+    def test_explicit_source_override(self):
+        from agenticops.integrations.parsers import parse_alert
+
+        body = {"title": "Test Alert", "severity": "high"}
+        alert = parse_alert(body, source="generic")
+        assert alert.source == "generic"
+
+
+# ============================================================================
+# Pipeline Mode Tests
+# ============================================================================
+
+
+class TestPipelineMode:
+    """Test alert_pipeline_mode gate behavior."""
+
+    def test_event_driven_mode_allows_webhook(self):
+        """event_driven mode should NOT block webhook processing."""
+        from agenticops.config import Settings
+
+        s = Settings(alert_pipeline_mode="event_driven")
+        assert s.alert_pipeline_mode == "event_driven"
+        # Webhook gate: blocked only when mode == "channel_driven"
+        assert s.alert_pipeline_mode != "channel_driven"
+
+    def test_channel_driven_mode_blocks_webhook(self):
+        """channel_driven mode should block webhook processing."""
+        from agenticops.config import Settings
+
+        s = Settings(alert_pipeline_mode="channel_driven")
+        assert s.alert_pipeline_mode == "channel_driven"
+
+    def test_both_mode_allows_all(self):
+        """both mode allows all pipelines."""
+        from agenticops.config import Settings
+
+        s = Settings(alert_pipeline_mode="both")
+        assert s.alert_pipeline_mode != "channel_driven"
+        assert s.alert_pipeline_mode in ("channel_driven", "both")
+
+    def test_build_agent_input_blocked_by_event_driven_mode(self):
+        """event_driven mode disables channel-driven alert wrapping."""
+        from agenticops.im.feishu_ws import _build_agent_input
+
+        with patch("agenticops.im.feishu_ws.settings") as mock_settings:
+            mock_settings.alert_pipeline_mode = "event_driven"
+            mock_settings.im_alert_detection_enabled = True
+            result = _build_agent_input("ALARM: test", "feishu", "oc_alert", "")
+            assert result == "ALARM: test"
+            assert "<im_alert_context>" not in result
+
+    def test_build_agent_input_allowed_by_channel_driven_mode(self):
+        """channel_driven mode allows alert wrapping."""
+        from agenticops.im.feishu_ws import _build_agent_input
+        from agenticops.notify.im_config import ChannelConfig
+
+        mock_ch = ChannelConfig(
+            name="alerts", channel_type="feishu",
+            config={"chat_id": "oc_alert"}, role="alert",
+        )
+        with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
+             patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "channel_driven"
+            mock_settings.im_alert_detection_enabled = True
+            result = _build_agent_input("ALARM: test", "feishu", "oc_alert", "")
+            assert "<im_alert_context>" in result
+
+    def test_build_agent_input_allowed_by_both_mode(self):
+        """both mode allows alert wrapping."""
+        from agenticops.im.feishu_ws import _build_agent_input
+        from agenticops.notify.im_config import ChannelConfig
+
+        mock_ch = ChannelConfig(
+            name="alerts", channel_type="feishu",
+            config={"chat_id": "oc_alert"}, role="alert",
+        )
+        with patch("agenticops.im.feishu_ws.settings") as mock_settings, \
+             patch("agenticops.notify.im_config.load_channels", return_value=[mock_ch]):
+            mock_settings.alert_pipeline_mode = "both"
+            mock_settings.im_alert_detection_enabled = True
+            result = _build_agent_input("ALARM: test", "feishu", "oc_alert", "")
+            assert "<im_alert_context>" in result

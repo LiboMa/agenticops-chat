@@ -251,6 +251,13 @@ class Settings(BaseSettings):
         default=60,
         description="Cooldown window in seconds for IM alert dedup (AIOPS_IM_ALERT_COOLDOWN_SECONDS)",
     )
+    alert_pipeline_mode: str = Field(
+        default="both",
+        description=(
+            "Active alert pipeline mode: 'event_driven' (webhook only), "
+            "'channel_driven' (IM Agent only), or 'both' (AIOPS_ALERT_PIPELINE_MODE)"
+        ),
+    )
 
     # Distributed Tracing (Jaeger)
     jaeger_query_endpoint: str = Field(

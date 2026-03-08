@@ -1589,6 +1589,12 @@ async def api_list_providers():
 
 async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
     """Process an inbound webhook alert: parse, dedup, create HealthIssue, trigger RCA."""
+    if settings.alert_pipeline_mode == "channel_driven":
+        raise HTTPException(
+            status_code=503,
+            detail="Event-driven pipeline disabled (mode=channel_driven)",
+        )
+
     from agenticops.integrations.parsers import parse_alert
     from agenticops.integrations.alert_processor import process_alert
 
@@ -3632,7 +3638,9 @@ async def _handle_im_message(platform: str, msg) -> None:
         agent = im_sessions.get_or_create(platform, msg.chat_id, msg.app_name)
 
         agent_input = content_stripped
-        if settings.im_alert_detection_enabled:
+        if settings.alert_pipeline_mode not in ("channel_driven", "both"):
+            pass  # Channel-driven pipeline disabled — skip alert wrapping
+        elif settings.im_alert_detection_enabled:
             try:
                 from agenticops.notify.im_config import find_channel_by_chat
 

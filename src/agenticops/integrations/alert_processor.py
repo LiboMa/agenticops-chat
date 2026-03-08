@@ -170,6 +170,16 @@ def process_alert(
 
                 trigger_auto_rca(health_issue_id)
 
+                # Auto-notify (parity with Agent path in metadata_tools.py)
+                try:
+                    from agenticops.services.notification_service import notify_issue_created
+                    notify_issue_created(
+                        health_issue_id, alert.severity, alert.title,
+                        alert.resource_hint or "unknown",
+                    )
+                except Exception:
+                    logger.debug("Webhook notification failed", exc_info=True)
+
         except Exception:
             logger.exception("Failed to create HealthIssue from alert")
             with get_db_session() as session:
