@@ -1,0 +1,37 @@
+{
+  "targets": [
+    {
+      "name": "slack-alerts",
+      "platform": "slack_bot",
+      "enabled": true,
+      "bot_token": "xoxb-YOUR-ALERTBOT-TOKEN",
+      "chat_id": "C0YOUR_CHANNEL_ID",
+      "mention": "U0OPSBOT_USER_ID",
+      "_comment": "Sends via Bot API. 'mention' = Opsbot user ID, so @mention triggers RCA"
+    },
+    {
+      "name": "slack-webhook",
+      "platform": "slack",
+      "enabled": false,
+      "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+      "_comment": "Alternative: Incoming Webhook (simpler, but messages come from 'Incoming Webhook' not bot user)"
+    },
+    {
+      "name": "feishu-alerts",
+      "platform": "feishu",
+      "enabled": false,
+      "app_id": "cli_YOUR_APP_ID",
+      "app_secret": "YOUR_APP_SECRET",
+      "chat_id": "oc_YOUR_CHAT_ID",
+      "_comment": "Feishu bot API — sends to group chat"
+    },
+    {
+      "name": "agenticops-webhook",
+      "platform": "webhook",
+      "enabled": false,
+      "url": "https://your-agenticops-server/api/webhooks/alerts",
+      "headers": {"X-Source": "alert-gateway"},
+      "_comment": "Direct webhook to AgenticOps server (event-driven pipeline)"
+    }
+  ]
+}

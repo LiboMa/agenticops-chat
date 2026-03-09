@@ -122,10 +122,6 @@ class SlackWSService:
         if event.get("subtype"):
             return
 
-        # Skip bot messages (including our own)
-        if event.get("bot_id"):
-            return
-
         # Skip our own messages by user ID
         user = event.get("user", "")
         if self._bot_user_id and user == self._bot_user_id:
@@ -135,10 +131,15 @@ class SlackWSService:
         if not text:
             return
 
-        channel = event.get("channel", "")
-
-        # respond_to logic
+        # Check for @mention BEFORE bot filtering — other bots (e.g. alert-bot)
+        # may @mention us to trigger RCA processing.
         has_mention = bool(re.search(rf"<@{self._bot_user_id}>", text)) if self._bot_user_id else False
+
+        # Skip bot messages UNLESS they @mention us
+        if event.get("bot_id") and not has_mention:
+            return
+
+        channel = event.get("channel", "")
 
         if self._respond_to == "mentions_only":
             # Check if this is an alert channel (always respond in alert channels)

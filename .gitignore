@@ -39,6 +39,7 @@ data/
 reports/
 config/im-apps.yaml
 config/channels.yaml
+infra/web-lab/lambda/alert-targets.json
 
 # OS
 .DS_Store

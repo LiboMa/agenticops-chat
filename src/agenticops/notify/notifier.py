@@ -1248,6 +1248,9 @@ class NotificationManager:
                       config: Dict[str, Any]) -> Optional[Notifier]:
         """Get or create a notifier for a channel (from YAML config)."""
         notifier_class = self.NOTIFIER_CLASSES.get(channel_type)
+        # Slack: auto-select Bot API vs Webhook based on config keys
+        if channel_type == "slack" and config.get("chat_id") and not config.get("webhook_url"):
+            notifier_class = SlackIMNotifier
         if not notifier_class:
             return None
 
