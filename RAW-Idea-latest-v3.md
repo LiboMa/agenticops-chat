@@ -1,4 +1,34 @@
 
+## 核心主张
+
+"想想有一天，你早上醒来，你打开手机，收到一条欢迎的消息，Agent向你介绍昨天发现了几个问题，都己解决。具体内容如下：xxxx. 你喝了口咖啡，听着 Agent向你介绍着解决问题的过程..开启美好的一天"
+
+
+叙事思路：
+1. 愿景理想
+* 任何形式的UI将弱化,，退化（进化）成一个、或一组Agent体，7*24小时守护在人周围
+* 自主性Agent的崛起
+* 不只是找到问题，还能安全地修复它 !
+从问题发现，到定位，再到修复，知识沉淀更新，自主式进化，完成自动闭环！
+
+2. 架构设计
+    2.1 长效治理 Scan-Detect-RCA-analysis-report
+        * Inventory /Issets management
+        * Health check
+        * cloud issets /resources security update / CVE / 
+        * issues/SOP/Knowledge Bases keep updated
+        * Skills/tools/MCP
+    2.2 即时性事件 Event-Driven->Event-GW->RCA_Analysis->FixPlan->auto-fixed->-Report & KB knowledge update
+        * Cross-Services issues identification
+        * Explode cedius(爆炸半径)
+        * Issues auto fixed(L0-L5)
+        * Knowledge Base /Graph Database update
+
+3. 实施Demo
+4. 未来发展 - 自举式Agents/Skills生成，进化
+
+
+
 ## AgenticOps Description
 基于LangChan/or Strands SDK+LLM 多Agent AgenticOps系统,主要针对AWS SDK/Official MCP, 基于账号的管理资源，拥有自主的，主动检测的Agentic应用，进行Root Cause Analysis 以及自动修复（人工触发）
 
@@ -120,6 +150,11 @@ Q4：如何实现“工具的动态检索”而非“硬编码”？
 * 主动式审查 - 一旦接管，无需更多人工参与，完成可完L4级别自动驾驶！
 * 自动修复！（L0-L4）根因分析后，高危手动修复，中低希自动修复并记录！
 * CLI Headless, 支持Command line 快速调用，对接第三方服务(如 opneclaw, CC!!）
+* event driven scan and detect -> 其实，我认为，在应用级别层面，不应该是资源变更，而是事件告警更多，更普遍，所以整体个流程差不多应该是
+：alerm from（cloudwatch, prometheus, datadog, or any monitoring application）-> scan -> detect(not ful
+l scan, but related resources(cpu,networking, db, cache, logs etc..)). 然后再发起RCA，至此前半段完成，
+后面可以接 fix_plan, and auto fix 直至issues resloved. 请你对我的思路提出质疑，以及给出合理化建议。
+
 
 ### 2026.2.28 -- 支持 Skills.md 功能加上去。
 
@@ -137,3 +172,265 @@ Actually, is there anyway to control or configure the context
   more information that user can refer to), detailed(more detailed
   output that use can get, but DO overflooed the maximum token size
   or output limit.)
+
+### 2026.3.1 [Active] 阶段性结 Event Driven Issue detect and RCA, AgenticOps 自愈闭环架构 v2
+见[new updated architecture](./docs/architecture-discussion.md)
+ Alert(CW/Prometheus/Datadog/...) → Scan(局部) → Detect(关联资源) → RCA → Fix
+ Plan → Auto Fix → Resolved
+
+我完全同意你的核心判断：告警比资源变更更普遍、更实际。 这是对的。 
+* 其实，我认为，在应用级别层面，不应该是资源变更，而是事件告警更多，更普遍，所以整体个流程差不多应该是
+：alerm from（cloudwatch, prometheus, datadog, or any monitoring application）-> scan -> detect(not ful
+l scan, but related resources(cpu,networking, db, cache, logs etc..)). 然后再发起RCA，至此前半段完成，
+后面可以接 fix_plan, and auto fix 直至issues resloved. 请你对我的思路提出质疑，以及给出合理化建议。
+
+
+#### 核心理念
+
+> **两条流水线，一个闭环：告警止血 + 巡检预测，共享同一套 RCA → Fix → Resolve
+后端。**
+
+---
+
+#### 完整架构图
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  ┌───────────────────────────────────────────────────────────┐      │
+│  │           流水线 A：告警驱动（被动止血，实时）               │      │
+│  │                                                           │      │
+│  │  多源告警接入                                              │      │
+│  │  CloudWatch / Prometheus / Datadog / PagerDuty / Custom   │      │
+│  │           │                                               │      │
+│  │           ▼                                               │      │
+│  │  ┌─────────────────────┐                                  │      │
+│  │  │  告警聚合/关联引擎    │ ← 时间窗口30-60s + 去重          │      │
+│  │  │  Alert Correlation   │   同一根因的多个告警 → 1个事件    │      │
+│  │  └──────────┬──────────┘                                  │      │
+│  │             │                                             │      │
+│  │             ▼                                             │      │
+│  │  ┌─────────────────────┐                                  │      │
+│  │  │  Inventory 预检      │                                  │      │
+│  │  │  资源在库？TTL有效？  │                                  │      │
+│  │  │   YES → 跳过Scan     │                                  │      │
+│  │  │   NO  → 局部Scan     │                                  │      │
+│  │  └──────────┬──────────┘                                  │      │
+│  │             │                                             │      │
+│  │             ▼                                             │      │
+│  │  Detect(局部, shallow)                                    │      │
+│  │  只查告警相关资源 + 依赖图 Blast Radius                    │      │
+│  │                                                           │      │
+│  └───────────────────────┬───────────────────────────────────┘      │
+│                          │                                          │
+│  ┌───────────────────────┼───────────────────────────────────┐      │
+│  │           流水线 B：定时巡检（主动预测，周期性）             │      │
+│  │                       │                                   │      │
+│  │  Cron (每1-4小时)      │                                   │      │
+│  │       │               │                                   │      │
+│  │       ▼               │                                   │      │
+│  │  Scan(全量/增量)       │                                   │      │
+│  │       │               │                                   │      │
+│  │       ▼               │                                   │      │
+│  │  Detect(全量, deep)    │                                   │      │
+│  │  拉取历史指标做趋势分析 │                                   │      │
+│  │       │               │                                   │      │
+│  │       ▼               │                                   │      │
+│  │  趋势预测引擎          │                                   │      │
+│  │  - 磁盘 72% +2%/天    │                                   │      │
+│  │    → 14天后满          │                                   │      │
+│  │  - 子网IP 65%          │                                   │      │
+│  │    → 3周后耗尽         │                                   │      │
+│  │  - DB连接峰值递增       │                                   │      │
+│  │    → 下月触顶          │                                   │      │
+│  │  - 证书到期倒计时       │                                   │      │
+│  │                       │                                   │      │
+│  └───────────────────────┼───────────────────────────────────┘      │
+│                          │                                          │
+│            ┌─────────────┴─────────────┐                            │
+│            │    统一 Issue 管理层       │                            │
+│            │  告警Issue + 预测Issue     │                            │
+│            │  去重 / 优先级排序         │                            │
+│            └─────────────┬─────────────┘                            │
+│                          │                                          │
+│            ┌─────────────▼─────────────┐                            │
+│            │         RCA Agent         │                            │
+│            │  CloudTrail + Metrics +   │                            │
+│            │  Logs + Knowledge Base    │                            │
+│            └─────────────┬─────────────┘                            │
+│                          │                                          │
+│            ┌─────────────▼─────────────┐                            │
+│            │    Fix Plan + 风险分级     │                            │
+│            │  L0 无风险  → 全自动       │                            │
+│            │  L1 低风险  → 可自动       │                            │
+│            │  L2 中风险  → 需人工确认   │                            │
+│            │  L3 高风险  → 必须审批     │                            │
+│            └──┬──────┬──────┬─────────┘                            │
+│               │      │      │                                       │
+│            ┌──▼──┐┌──▼──┐┌──▼──┐                                   │
+│            │Auto ││通知 ││人工 │                                    │
+│            │执行 ││等待 ││审批 │                                    │
+│            └──┬──┘└──┬──┘└──┬──┘                                   │
+│               └──────┼──────┘                                       │
+│                      │                                              │
+│            ┌─────────▼─────────┐                                    │
+│            │    Post-Check     │                                    │
+│            │    修复验证        │                                    │
+│            └────┬────┬────┬───┘                                    │
+│                 │    │    │                                          │
+│              ┌──▼┐┌──▼──┐┌▼─────────┐                              │
+│              │ ✅ ││回滚 ││反复发作   │                              │
+│              │解决││+升级││→架构问题  │                              │
+│              └───┘└─────┘└──────────┘                              │
+│                                                                     │
+│            ┌────────────────────────┐                               │
+│            │    知识沉淀 (Feedback)  │                               │
+│            │  解决的Case → 知识库    │                               │
+│            │  下次RCA更快更准        │                               │
+│            └────────────────────────┘                               │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+---
+
+#### 两条流水线对比
+
+| 维度 | 流水线 A：告警止血 | 流水线 B：巡检预测 |
+|------|-------------------|-------------------|
+| **触发** | Alert 事件（被动） | Cron 定时（主动） |
+| **Scan** | 条件触发（Inventory 缺失时才跑） | 全量/增量（刷新 Inventory） |
+| **Detect 范围** | 局部 — 告警资源 + Blast Radius | 全局 — 所有托管资源 |
+| **Detect 深度** | shallow — 当前状态 | deep — 历史趋势 + 预测 |
+| **核心问题** | "现在出了什么问题？" | "照这趋势，未来会出什么问题？" |
+| **时效要求** | 秒级 ~ 分钟级 | 小时级 |
+| **Issue 类型** | 告警 Issue（urgent） | 预测 Issue（proactive） |
+| **价值** | 减少 MTTR | 减少事故数量 |
+
+### 2026.3.2 [Pending TODO] 日常巡检，安全更新，云服务日常升级报告，以及定时任务通知客户等，也是不可忽视的需求
+
+1. 其实Detect也是很关键的，除了日常系统中遇到了Bug，或是fatal等问题，还很诸多的信息需要SRE，和IT人员关注。安
+  全更新，成本，云服务商功能特性升级，加密功能更新，证书更新，SSL证书到期，云服务商新功能上线，RI/Capacity
+  Block等这些问题，其实都可以算得上是日常巡检的一部分，而并非单单只是系统出了问题，才叫问题。所以，在这方向
+  ，我认为Detect方面以及通知方面，应该更加丰富一些。特别是：用户可以根据自己的需求，要求关注哪些功能的状态
+  和变化，这些变像是定时任务一样，Scan Resources，拿到信息，总结，然后通过SNS/Email等发给关注的人。在这方面
+  ，我认为，可能是一个SRE也需要关注的方面。
+
+2. 分析Nano Claow - https://github.com/qwibitai/nanoclaw 看看是否可以将Slack，Feishu，等功能加入进来，或是从工程化的角度是否可以有所借鉴，特别是Client服务端，多Agent架构，Session管理，以及长期记忆相关的Feature是否有所借鉴？
+
+### 2026.3.2 [feishu/we/dingtalk/sns/channel support]
+1. 支持了双向通信，从IM -> Main Agent, 从 Chat -> IM
+2. Auto send health check via IM
+
+### 2026.3.3 auto-fix pipeline working & feishu report
+1. 支持了L0-L1 auto-fix pipeline（enable/disable)
+2. feishu group chat working - chat for detailed inforamtion
+
+### 2026.3.3 [Pending TODO] - 优化Input的数据给Alert Events
+1. 优化数据治理，形成更好的RCA库，以及更好的整治方案
+
+### 2026.3.4人人都是产品经理
+Email SNS/SES 加入
+0. 构建原型
+0.1 提供 feishu或是EamilChanel
+
+1. 请朋友们来提意见 - add a feishu/email channel - Opencalw 来monitoring - 核心部分监控
+2. Opencalow 收到意见与feature提供之后 - 开始立即开始开发 - 将需求内容审核后，做Design，然后开发
+3. 定期向Channel的人来做Report，来汇报开发进度及状态
+4. 收官-Close
+
+---
+
+后续的UI没有用了，变成了
+人脑中的意图 -> 文字 -> Agents处理 -> 结果
+
+### 2026.3.5 channel feature 更新：
+1. Chat Feature 更新：请设计一个send_to_channel的
+  Skills，可以使所有的Agents，通过激活的Channel发送报告及消息的能力，而非只能通过 /send_to
+  来完成。好好设计，尽可能的使用现有框架，不同的Channel发送的形式和内容，可以通过channel.yaml的config
+  可以配置，常用的是html,markdown,pdf. 可根据Channel不同的特性，提前总结好format，然后发送，不需要单个的、分批次的。
+
+### 2026.3.5 [pending TODO] - Open Skills for user, Self-improving Skills optimizaer and scheduler
+1. Main Agents 可以定期巡检，来优化Skills, 可以自主进化 - 用户可以根据自己的需求，来创建自己需要的Skills，不需要管理员来配置
+2. 所有创建出来的Skills可以在记忆不断加深过程之后，自主进化，不断达到精益求精的状态。
+
+对于SKills的生成部分， 怎么会是和Case联系起来？正确的方式是 -
+      应用使用Chat功能，就可以自主根据描述构建需要的Skills，而不需要管理员人工干预，
+      可是从：https://clawhub.ai/寻找可以匹配的Skills来加载进来都可以。此外，Main
+      Agents有自主性，如果SRE或其它Agent发现自己的工具不能匹配任何执行的能力，可以交
+      由Main
+      Agents自主研发，或更新迭代Skills，采用Self-improving的方式来完成Skills的优化！
+
+
+### 2026.3.5 [pending TODO ] - scan->detect & alert-Post->agents_api thinking..
+Scan, Detect: "专注于预测性运维和长效治理", 并不玩全适合海量告警处理，这个最好还是交给Datadog/Prometheus这样的告警网关来做即是。
+
+| 认知层（你的 AgenticOps 系统）
+| RCA Agent 被唤醒。此时，它接收到的不是 50 个 JSON 告警，而是语义网关递过来的一份“结构化案卷（Dossier）”。
+
+    ** Agent 接收到的输入示例：**
+    "在 2026-03-05 10:00:00 左右，支付核心链路发生异常。
+
+    监测到属于 payment-vpc 的 3 台 EC2 实例出现网络丢包报警。
+    关联的 RDS db-pay-master 数据库连接数在 10 秒内打满，当前处于拒绝服务状态。
+    CloudTrail 显示 5 分钟前有 IAM 用户 devops-admin 修改了该 VPC 的 Security Group 规则。
+    请据此展开 RCA 根因分析。"
+
+
+### 2026.3.6 [DEPRECIATED] 语义网关设计 - 利用现有的监控系统，不重复造轮子
+
+<!-- 1.业界最优解：引入“语义网关（Semantic Gateway）”的混合驱动架构
+真正的破局之道，不是在“告警驱动”和“主动扫描”之间二选一，而是在它们与 LLM 之间，插入一个确定性的“语义转化与降噪层”。
+
+这种架构被业界称为 Event-Driven with Semantic Triage（带有语义预检的事件驱动）。
+
+具体工作流如下：
+
+2.1 第一层：感知层（监控系统 + 告警引擎）
+Datadog、Prometheus 依然在最前线。它们最擅长处理时序数据（Metrics）、海量日志（Logs）和链路追踪（Traces）。当规则被触发时，它们发出 Webhook 告警。
+
+2.2. 第二层：语义网关 / 预检层（非 LLM 的规则/图谱引擎）—— 核心解法
+这是一个用 Python/Golang 写的小型中控服务，它不使用大模型，它的任务是**“拦截风暴，翻译情报”**：
+
+静默与聚合： 等待 30-60 秒，将同一时间段内来自 Datadog 的 50 个相关联的告警合并为 1 个事件（Incident）。
+
+拓扑富化（Topology Enrichment）： 根据本地维护的资源依赖树，找出这些告警的共同上游节点。
+
+语义翻译（Semantic Translation）： 这是最关键的一步。它将冰冷的 JSON 告警，翻译成一段给人（和大模型）看的高质量文本摘要。
+
+2.3 第三层：认知层（你的 AgenticOps 系统）
+RCA Agent 被唤醒。此时，它接收到的不是 50 个 JSON 告警，而是语义网关递过来的一份“结构化案卷（Dossier）”。
+
+** Agent 接收到的输入示例：**
+"在 2026-03-05 10:00:00 左右，支付核心链路发生异常。
+
+监测到属于 payment-vpc 的 3 台 EC2 实例出现网络丢包报警。
+
+关联的 RDS db-pay-master 数据库连接数在 10 秒内打满，当前处于拒绝服务状态。
+
+CloudTrail 显示 5 分钟前有 IAM 用户 devops-admin 修改了该 VPC 的 Security Group 规则。
+请据此展开 RCA 根因分析。"
+
+在这个架构下，大模型发挥了它最强大的能力：逻辑推理和常识判断，而彻底避开了它最不擅长的事情：从海量数字中找规律。 -->
+见：### 2026 3.7 [pending needs to be planned TODO@3722] 处理告警的另外一个方向？
+
+
+### 2026.3.7 [pending TODO ]Scan+Detect  重新定义 Scan/Detect 的角色：作为系统的“后台数据飞轮”
+
+在上述混合架构中，你的 Scan Agent 和 Detect Agent 并没有废弃，而是退居幕后，承担了极其重要但非紧急的任务：
+
+状态同步与资产盘点（Inventory Sync）： 每天/每小时运行，更新本地的 Metadata（相当于维护一份最新的系统地图）。当语义网关需要进行拓扑富化时，用的就是这份地图。
+
+配置漂移检测（Drift Detection）： 扫描基础设施状态，对比基线，发现潜在的隐患（例如：S3 桶被意外公开、证书还有 7 天过期）。这属于预测性维护（Predictive Maintenance）。
+
+深潜核查（Deep Dive Check）： 在 RCA 过程中，如果主 Agent 发现网关提供的信息不够，它可以主动下发指令给 Detect Agent，让其针对某个特定的 RDS 实例执行一次极深度的健康检查脚本
+
+### 2026 3.7 [pending needs to be planned TODO@3722] 处理监控的更优的方向是：监控Alert Channel（聚合好的）进行后续处理，这样会更加专注于RCA和Fix Plan/Action要做的是
+
+我觉得现在监控软件及系统如Cloudwatch/data dog，或是Promethues等是如此的成熟，我们为什么要做一个语义网关聚合的工具
+  ，让Alert直接进到某个IM的工具里去（即把Aiops Agent
+  当成真正的SRE的数字员工来使用，而非是监控软件来使用），然后，Detect
+  Agent直接从Channel里拿数据，而后来进行RCA，或是各强的修复不好吗？这个语义网关是不应该直接收到系统所以有的裸报警的
+  吧？让告警直告警的事，而让多Agents建立Grap知识从而生成真实可行的修复计划及动作才是我们Aiops或是Sre的关键才是的吧？
+
+  所以，最终的工作流大致应该是： Main Agent 监听 -> Alter Channel (IM/chat) -> Detect/RCA Feautre -> Fix_plan - [L0/L1/L2/Ln] -> approve auto-fixed | 人工修复 -> resolved
+
+### 2026.3.7 [pending, needs to be investigation]  Active Inference（主动推断） 与 World Model（世界模型）(SOTA?)

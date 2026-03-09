@@ -58,3 +58,4 @@ htmlcov/
 # Frontend
 node_modules/
 src/agenticops/web/frontend/dist/
+docs/use-cases/test.html
