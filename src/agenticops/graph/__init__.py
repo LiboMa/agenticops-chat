@@ -12,9 +12,11 @@ from agenticops.graph.types import (
     SerializedGraph,
 )
 from agenticops.graph.engine import InfraGraph
+from agenticops.graph.store import GraphStore
 
 __all__ = [
     "InfraGraph",
+    "GraphStore",
     "NodeType",
     "EdgeType",
     "NodeStatus",

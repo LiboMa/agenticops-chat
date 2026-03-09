@@ -734,6 +734,56 @@ def init_db():
 
     Base.metadata.create_all(engine)
 
+    # Ensure graph tables exist (used by GraphStore, raw SQL for performance)
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id TEXT PRIMARY KEY,
+                node_type TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'unknown',
+                resource_type TEXT DEFAULT '',
+                raw_json TEXT DEFAULT '{}',
+                raw_hash TEXT DEFAULT '',
+                vpc_id TEXT DEFAULT '',
+                region TEXT DEFAULT '',
+                account_id TEXT DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                label TEXT DEFAULT '',
+                state TEXT DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_id, target_id, edge_type)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS graph_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL DEFAULT '',
+                snapshot_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                node_count INTEGER DEFAULT 0,
+                edge_count INTEGER DEFAULT 0,
+                nodes_added INTEGER DEFAULT 0,
+                nodes_updated INTEGER DEFAULT 0,
+                nodes_removed INTEGER DEFAULT 0
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_nodes_region ON graph_nodes(region)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_nodes_vpc ON graph_nodes(vpc_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_nodes_updated ON graph_nodes(updated_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id)"))
+        conn.commit()
+
     # Ensure case_vectors table exists (used by SQLiteVectorStore,
     # created via raw SQL to keep vector storage decoupled from ORM)
     with engine.connect() as conn:

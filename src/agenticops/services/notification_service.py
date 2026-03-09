@@ -263,6 +263,84 @@ def _run_report_distribution(report_id: int, report_type: str) -> None:
         logger.debug("Report distribution for #%d failed", report_id, exc_info=True)
 
 
+def notify_im_origin(
+    health_issue_id: int, event_type: str, message: str
+) -> None:
+    """Send a notification back to the IM chat that originated an alert.
+
+    Reads im_origin from HealthIssue.metric_data and sends via the
+    appropriate IM notifier.
+
+    Args:
+        health_issue_id: HealthIssue ID to look up im_origin.
+        event_type: Event type for logging (e.g. "rca_completed").
+        message: Message text to send back.
+    """
+    if not settings.notifications_enabled:
+        return
+
+    thread = threading.Thread(
+        target=_run_im_origin_notify,
+        args=(health_issue_id, event_type, message),
+        daemon=True,
+        name=f"im-origin-{event_type}-{health_issue_id}",
+    )
+    thread.start()
+
+
+def _run_im_origin_notify(
+    health_issue_id: int, event_type: str, message: str
+) -> None:
+    """Send notification to originating IM chat (runs in daemon thread)."""
+    try:
+        from agenticops.models import HealthIssue, get_db_session
+
+        with get_db_session() as session:
+            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+            if not issue:
+                return
+            metric_data = issue.metric_data or {}
+            im_origin = metric_data.get("im_origin")
+            if not im_origin:
+                return
+            platform = im_origin.get("platform", "")
+            chat_id = im_origin.get("chat_id", "")
+            if not platform or not chat_id:
+                return
+
+        # Find channel matching the IM origin and send
+        from agenticops.notify.im_config import load_channels
+        from agenticops.notify.notifier import NotificationManager
+
+        channels = load_channels()
+        target_channel = None
+        for ch in channels:
+            if ch.channel_type == platform and ch.config.get("chat_id") == chat_id and ch.is_enabled:
+                target_channel = ch.name
+                break
+
+        if target_channel:
+            manager = NotificationManager()
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    manager.send_notification(
+                        subject=f"[{event_type}] Issue #{health_issue_id}",
+                        body=message,
+                        channel_names=[target_channel],
+                    )
+                )
+            finally:
+                loop.close()
+        else:
+            logger.debug(
+                "No matching IM channel for origin %s:%s (issue #%d)",
+                platform, chat_id, health_issue_id,
+            )
+    except Exception:
+        logger.debug("IM origin notify failed for issue #%d", health_issue_id, exc_info=True)
+
+
 def notify_schedule_result(
     name: str, success: bool, error: str = ""
 ) -> None:
