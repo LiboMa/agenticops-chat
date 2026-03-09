@@ -276,6 +276,7 @@ class HealthIssueResponse(BaseModel):
     detected_at: datetime
     detected_by: str
     resolved_at: Optional[datetime]
+    trace_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -648,6 +649,18 @@ _executor_service = ExecutorService(poll_interval=settings.executor_poll_interva
 # ============================================================================
 
 
+class TraceIdFilter(logging.Filter):
+    """Inject pipeline trace_id into log records."""
+
+    def filter(self, record):
+        from agenticops.config import get_trace_id
+        record.trace_id = get_trace_id() or "-"
+        return True
+
+
+_trace_filter = TraceIdFilter()
+
+
 def _setup_service_logging() -> None:
     """Configure file-based logging for backend + frontend (access) logs."""
     import logging.handlers
@@ -655,7 +668,7 @@ def _setup_service_logging() -> None:
     log_dir = Path(__file__).parent.parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
 
-    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s [%(trace_id)s] %(message)s")
 
     # backend.log — application errors, startup, agent activity
     backend_handler = logging.handlers.RotatingFileHandler(
@@ -663,6 +676,7 @@ def _setup_service_logging() -> None:
     )
     backend_handler.setLevel(logging.DEBUG)
     backend_handler.setFormatter(fmt)
+    backend_handler.addFilter(_trace_filter)
     for name in ("agenticops", "uvicorn.error", "uvicorn"):
         logging.getLogger(name).addHandler(backend_handler)
 
@@ -672,6 +686,7 @@ def _setup_service_logging() -> None:
     )
     access_handler.setLevel(logging.INFO)
     access_handler.setFormatter(fmt)
+    access_handler.addFilter(_trace_filter)
     logging.getLogger("uvicorn.access").addHandler(access_handler)
 
 
@@ -1352,6 +1367,7 @@ async def api_list_health_issues(
     status: Optional[str] = None,
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
+    trace_id: Optional[str] = None,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
@@ -1367,6 +1383,8 @@ async def api_list_health_issues(
             query = query.filter_by(resource_id=resource_id)
         if source:
             query = query.filter_by(source=source)
+        if trace_id:
+            query = query.filter_by(trace_id=trace_id)
 
         issues = query.offset(offset).limit(limit).all()
         return [HealthIssueResponse.model_validate(i) for i in issues]
@@ -1655,8 +1673,13 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
             detail="Event-driven pipeline disabled (mode=channel_driven)",
         )
 
+    from agenticops.config import generate_trace_id, set_trace_id
     from agenticops.integrations.parsers import parse_alert
     from agenticops.integrations.alert_processor import process_alert
+
+    # Generate trace_id at alert entry point
+    trace_id = generate_trace_id()
+    set_trace_id(trace_id)
 
     try:
         alert = parse_alert(body, source=source)
@@ -1664,7 +1687,7 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
         logger.warning("Failed to parse webhook alert: %s", e)
         raise HTTPException(status_code=400, detail=f"Failed to parse alert: {e}")
 
-    result = process_alert(alert)
+    result = process_alert(alert, trace_id=trace_id)
 
     if result.action == "error":
         raise HTTPException(status_code=500, detail=result.message)
@@ -1677,6 +1700,7 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
             "alert_event_id": result.alert_event_id,
             "health_issue_id": result.health_issue_id,
             "deduplicated": is_dedup,
+            "trace_id": trace_id,
         },
     )
 
@@ -1928,6 +1952,60 @@ async def api_get_issue_timeline(issue_id: int):
 
     from agenticops.services.pipeline_events import get_timeline
     return get_timeline(issue_id)
+
+
+@app.get("/api/trace/{trace_id}")
+async def api_get_trace(trace_id: str):
+    """Get all artifacts linked to a pipeline trace ID."""
+    from agenticops.models import PipelineEvent
+
+    with get_db_session() as session:
+        # Find linked HealthIssues
+        issues = session.query(HealthIssue).filter_by(trace_id=trace_id).all()
+        issue_ids = [i.id for i in issues]
+        issues_data = [HealthIssueResponse.model_validate(i).model_dump(mode="json") for i in issues]
+
+        # Find linked AlertEvents
+        alert_events = session.query(AlertEvent).filter_by(trace_id=trace_id).all()
+        alerts_data = [
+            {
+                "id": a.id, "source": a.source, "external_id": a.external_id,
+                "severity": a.severity, "title": a.title,
+                "health_issue_id": a.health_issue_id, "status": a.status,
+                "received_at": a.received_at.isoformat() if a.received_at else None,
+                "trace_id": a.trace_id,
+            }
+            for a in alert_events
+        ]
+
+        # Find PipelineEvents for all linked issues
+        timeline = []
+        if issue_ids:
+            events = (
+                session.query(PipelineEvent)
+                .filter(PipelineEvent.health_issue_id.in_(issue_ids))
+                .order_by(PipelineEvent.created_at.asc())
+                .all()
+            )
+            timeline = [
+                {
+                    "id": e.id, "health_issue_id": e.health_issue_id,
+                    "event_type": e.event_type, "stage": e.stage,
+                    "status": e.status, "actor": e.actor,
+                    "duration_ms": e.duration_ms,
+                    "detail": json.loads(e.detail) if e.detail else None,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "trace_id": e.trace_id,
+                }
+                for e in events
+            ]
+
+    return {
+        "trace_id": trace_id,
+        "health_issues": issues_data,
+        "alert_events": alerts_data,
+        "timeline": timeline,
+    }
 
 
 @app.post("/api/fix-executions/{execution_id}/cancel")

@@ -299,8 +299,11 @@ def create_health_issue(
                 f"[{existing.severity.upper()}] {existing.title}"
             )
 
+        # Inject trace_id from ContextVar
+        from agenticops.config import get_im_origin, get_trace_id
+        trace_id = get_trace_id()
+
         # Inject IM origin if called from an IM agent context
-        from agenticops.config import get_im_origin
         im_origin = get_im_origin()
         if im_origin and isinstance(metric_data_parsed, dict):
             metric_data_parsed["im_origin"] = im_origin
@@ -322,6 +325,7 @@ def create_health_issue(
             occurrence_count=1,
             first_seen=now,
             last_seen=now,
+            trace_id=trace_id,
         )
         session.add(issue)
         session.commit()
@@ -336,7 +340,7 @@ def create_health_issue(
 
         # Auto-trigger RCA for newly created issues
         from agenticops.services.rca_service import trigger_auto_rca
-        trigger_auto_rca(issue.id)
+        trigger_auto_rca(issue.id, trace_id=trace_id)
 
         # Auto-notify
         try:
@@ -383,6 +387,7 @@ def get_health_issue(issue_id: int) -> str:
             "detected_at": str(issue.detected_at),
             "detected_by": issue.detected_by,
             "resolved_at": str(issue.resolved_at) if issue.resolved_at else None,
+            "trace_id": issue.trace_id,
         }, default=str))
     finally:
         session.close()
@@ -610,7 +615,7 @@ def save_rca_result(
         # Auto-trigger SRE fix plan generation
         try:
             from agenticops.services.pipeline_service import trigger_auto_sre
-            trigger_auto_sre(health_issue_id)
+            trigger_auto_sre(health_issue_id, trace_id=issue.trace_id)
         except Exception as e:
             logger.warning("Failed to trigger auto-SRE: %s", e)
 
@@ -776,7 +781,7 @@ def save_fix_plan(
         # Auto-approve L0/L1 plans
         try:
             from agenticops.services.pipeline_service import trigger_auto_approve
-            trigger_auto_approve(plan.id)
+            trigger_auto_approve(plan.id, trace_id=issue.trace_id)
         except Exception as e:
             logger.warning("Failed to trigger auto-approve: %s", e)
 
@@ -887,7 +892,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         # Auto-trigger execution for approved plans
         try:
             from agenticops.services.pipeline_service import trigger_auto_execute
-            trigger_auto_execute(fix_plan_id)
+            trigger_auto_execute(fix_plan_id, trace_id=issue.trace_id if issue else None)
         except Exception as e:
             logger.warning("Failed to trigger auto-execute: %s", e)
 

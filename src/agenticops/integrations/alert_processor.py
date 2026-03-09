@@ -29,6 +29,7 @@ class AlertProcessResult:
 def process_alert(
     alert: AlertPayload,
     im_origin: Optional[dict] = None,
+    trace_id: Optional[str] = None,
 ) -> AlertProcessResult:
     """Process a parsed alert through the dedup + HealthIssue pipeline.
 
@@ -105,6 +106,7 @@ def process_alert(
                     resource_hint=alert.resource_hint,
                     raw_payload=alert.raw,
                     status="received",
+                    trace_id=trace_id,
                 )
                 session.add(event)
                 session.flush()
@@ -152,6 +154,7 @@ def process_alert(
                         title=alert.title,
                         description=alert.description,
                         metric_data=metric_data,
+                        trace_id=trace_id,
                     )
                     session.add(issue)
                     session.flush()
@@ -168,7 +171,7 @@ def process_alert(
             if health_issue_id and not existing_issue:
                 from agenticops.services.rca_service import trigger_auto_rca
 
-                trigger_auto_rca(health_issue_id)
+                trigger_auto_rca(health_issue_id, trace_id=trace_id)
 
                 # Auto-notify (parity with Agent path in metadata_tools.py)
                 try:

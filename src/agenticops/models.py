@@ -354,6 +354,8 @@ class HealthIssue(Base):
     occurrence_count: Mapped[int] = mapped_column(default=1)
     first_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Pipeline trace ID (generated at alert entry, flows through entire lifecycle)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
 
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
@@ -452,6 +454,7 @@ class PipelineEvent(Base):
     actor: Mapped[str] = mapped_column(String(100), default="system")
     duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
 
 
 # ============================================================================
@@ -649,6 +652,7 @@ class AlertEvent(Base):
     health_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # linked HealthIssue
     status: Mapped[str] = mapped_column(String(30), default="received")  # received, processed, ignored, error
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 class ChatSession(Base):
@@ -740,6 +744,17 @@ def init_db():
                 conn.execute(text("ALTER TABLE health_issues ADD COLUMN last_seen DATETIME"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_health_issue_fingerprint ON health_issues(fingerprint)"))
                 conn.commit()
+
+    # Migration: add trace_id columns to health_issues, pipeline_events, alert_events
+    for tbl in ("health_issues", "pipeline_events", "alert_events"):
+        if insp.has_table(tbl):
+            columns = {col["name"] for col in insp.get_columns(tbl)}
+            if "trace_id" not in columns:
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN trace_id VARCHAR(20)"))
+                    if tbl != "alert_events":
+                        conn.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_trace_id ON {tbl}(trace_id)"))
+                    conn.commit()
 
     # Migration: notification_logs channel_id → channel_name (YAML-only channels)
     if insp.has_table("notification_logs"):
