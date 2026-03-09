@@ -1252,13 +1252,208 @@ def logs_entity(
 
 
 @app.command()
-def init():
-    """Initialize the AgenticOps database and directories."""
-    console.print("[bold blue]Initializing AgenticOps...[/bold blue]")
+def init(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
+):
+    """Interactive setup wizard for AgenticOps."""
+    import re
+    import shutil
+    from rich.prompt import Prompt, Confirm
+    from agenticops.config import PROJECT_ROOT
+
+    env_path = PROJECT_ROOT / ".env"
+    env_vars: dict[str, str] = {}
+
+    # ── Step 0: Welcome Banner ───────────────────────────────────────────
+    console.print()
+    console.print(Rule("[bold blue]AgenticOps Setup Wizard[/bold blue]"))
+    console.print()
+    console.print("  This wizard will guide you through essential configuration.")
+    console.print("  Settings are saved to [cyan].env[/cyan] — edit anytime.\n")
+
+    if env_path.exists():
+        console.print("[yellow]Existing .env detected.[/yellow]")
+        if not yes:
+            reconfigure = Confirm.ask("Reconfigure? (No = skip to DB init)", default=False)
+            if not reconfigure:
+                console.print("[dim]Skipping configuration steps...[/dim]")
+                _init_finalize(env_path, env_vars)
+                return
+        else:
+            console.print("[dim]--yes: reconfiguring with defaults...[/dim]")
+
+    # ── Step 1: AWS Bedrock (Essential) ──────────────────────────────────
+    console.print(Rule("[bold]Step 1/4 — AWS Bedrock[/bold]"))
+    console.print()
+
+    # Region
+    default_region = "us-east-1"
+    if yes:
+        region = default_region
+    else:
+        region = Prompt.ask("Bedrock region", default=default_region)
+        while not re.match(r"^[a-z]{2}-[a-z]+-\d+$", region):
+            console.print("[red]Invalid region format (e.g., us-east-1)[/red]")
+            region = Prompt.ask("Bedrock region", default=default_region)
+    env_vars["AIOPS_BEDROCK_REGION"] = region
+
+    # Model picker
+    models = {
+        "1": ("Claude Opus 4.6", "global.anthropic.claude-opus-4-6-v1"),
+        "2": ("Claude Sonnet 4.6", "global.anthropic.claude-sonnet-4-6-v1"),
+        "3": ("Claude Haiku 4.5", "global.anthropic.claude-haiku-4-5-20251001-v1:0"),
+    }
+    haiku_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    sonnet_id = "global.anthropic.claude-sonnet-4-6-v1"
+    opus_id = "global.anthropic.claude-opus-4-6-v1"
+
+    if yes:
+        choice = "2"
+    else:
+        console.print("\n  Select primary Bedrock model:")
+        console.print("    [bold][1][/bold] Claude Opus 4.6    (strongest reasoning, higher cost)")
+        console.print("    [bold][2][/bold] Claude Sonnet 4.6  (balanced performance/cost)  [dim]← default[/dim]")
+        console.print("    [bold][3][/bold] Claude Haiku 4.5   (fastest, lowest cost)")
+        console.print("    [bold][4][/bold] Custom model ID")
+        choice = Prompt.ask("\n  Choice", choices=["1", "2", "3", "4"], default="2")
+
+    if choice == "4":
+        model_id = Prompt.ask("Custom model ID")
+        env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
+        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
+        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
+    else:
+        _, model_id = models[choice]
+        env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
+        # Auto-derive cheap + strong
+        if choice == "1":  # Opus
+            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
+            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
+        elif choice == "2":  # Sonnet
+            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
+            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
+        else:  # Haiku
+            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
+            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = sonnet_id
+
+    console.print(f"\n  [green]Primary:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID']}")
+    console.print(f"  [green]Economy:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID_CHEAP']}")
+    console.print(f"  [green]Strong:[/green]  {env_vars['AIOPS_BEDROCK_MODEL_ID_STRONG']}")
+
+    # Optional AWS connectivity test
+    if not yes:
+        if Confirm.ask("\n  Test AWS connectivity?", default=False):
+            try:
+                import boto3
+                sts = boto3.client("sts", region_name=region)
+                identity = sts.get_caller_identity()
+                console.print(f"  [green]OK[/green] — Account: {identity['Account']}, ARN: {identity['Arn']}")
+            except Exception as e:
+                console.print(f"  [yellow]AWS check failed: {e}[/yellow]")
+                console.print("  [dim]You can fix credentials later.[/dim]")
+
+    # ── Step 2: Pipeline Behavior (Recommended) ─────────────────────────
+    console.print()
+    console.print(Rule("[bold]Step 2/4 — Pipeline Behavior[/bold]"))
+    console.print()
+
+    if yes:
+        env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
+        env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
+        env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
+        console.print("  [dim]Using defaults: auto-fix=true, auto-approve L0/L1=true, notifications=true[/dim]")
+    else:
+        skip = Confirm.ask("  Skip pipeline config? (use defaults)", default=False)
+        if skip:
+            env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
+            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
+            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
+            console.print("  [dim]Using defaults.[/dim]")
+        else:
+            auto_fix = Confirm.ask("  Enable auto-fix pipeline (RCA → SRE → Approve → Execute)?", default=True)
+            env_vars["AIOPS_AUTO_FIX_ENABLED"] = str(auto_fix).lower()
+
+            auto_approve = Confirm.ask("  Auto-approve L0/L1 fix plans?", default=True)
+            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = str(auto_approve).lower()
+
+            notifications = Confirm.ask("  Enable auto-notifications on pipeline events?", default=True)
+            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = str(notifications).lower()
+
+    # ── Step 3: Report Storage (Recommended) ─────────────────────────────
+    console.print()
+    console.print(Rule("[bold]Step 3/4 — Report Storage[/bold]"))
+    console.print()
+
+    if yes:
+        env_vars["AIOPS_REPORT_STORAGE"] = "local"
+        console.print(f"  [dim]Using default: local storage ({settings.reports_dir})[/dim]")
+    else:
+        skip = Confirm.ask("  Skip report storage config? (use local)", default=True)
+        if skip:
+            env_vars["AIOPS_REPORT_STORAGE"] = "local"
+        else:
+            _init_report_storage(env_vars)
+
+    # ── Step 4: Optional Integrations ────────────────────────────────────
+    console.print()
+    console.print(Rule("[bold]Step 4/4 — Optional Integrations[/bold]"))
+    console.print()
+
+    if yes:
+        console.print("  [dim]Skipping optional integrations.[/dim]")
+    else:
+        # IM Integration
+        if Confirm.ask("  Configure an IM platform (Feishu/Slack/DingTalk/WeCom)?", default=False):
+            im_choice = Prompt.ask(
+                "    Platform",
+                choices=["feishu", "slack", "dingtalk", "wecom"],
+                default="feishu",
+            )
+            _init_copy_template(
+                PROJECT_ROOT / "config" / "im-apps.yaml.example",
+                PROJECT_ROOT / "config" / "im-apps.yaml",
+            )
+            console.print(f"\n    [green]Copied[/green] config/im-apps.yaml — fill in your {im_choice} credentials.")
+            if im_choice == "feishu":
+                console.print("    [dim]Docs: https://open.feishu.cn/app[/dim]")
+            elif im_choice == "slack":
+                console.print("    [dim]Docs: https://api.slack.com/apps[/dim]")
+            elif im_choice == "dingtalk":
+                console.print("    [dim]Docs: https://open-dev.dingtalk.com[/dim]")
+            elif im_choice == "wecom":
+                console.print("    [dim]Docs: https://work.weixin.qq.com/wework_admin[/dim]")
+
+        # Datadog
+        if Confirm.ask("  Configure Datadog integration?", default=False):
+            dd_api_key = Prompt.ask("    Datadog API key")
+            dd_app_key = Prompt.ask("    Datadog Application key")
+            dd_site = Prompt.ask("    Datadog site", default="datadoghq.com")
+            env_vars["AIOPS_MONITORING_PROVIDERS"] = "datadog"
+            env_vars["AIOPS_DATADOG_API_KEY"] = dd_api_key
+            env_vars["AIOPS_DATADOG_APP_KEY"] = dd_app_key
+            env_vars["AIOPS_DATADOG_SITE"] = dd_site
+            console.print("    [green]Datadog configured.[/green]")
+
+    # ── Finalize ─────────────────────────────────────────────────────────
+    _init_finalize(env_path, env_vars)
+
+
+def _init_finalize(env_path: Path, env_vars: dict[str, str]) -> None:
+    """Write .env, init DB, copy templates, print summary."""
+    import shutil
+    from agenticops.config import PROJECT_ROOT
+
+    # Write env vars
+    if env_vars:
+        for key, value in env_vars.items():
+            _write_env_var(key, value, env_path)
+        console.print(f"\n[green]Settings saved to {env_path.relative_to(PROJECT_ROOT)}[/green]")
+
+    # Directory creation + DB init
+    console.print("\n[bold]Initializing database and directories...[/bold]")
     settings.ensure_dirs()
     init_db()
 
-    # Also create tables for new modules
     from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
     from agenticops.notify.notifier import NotificationLog
     from agenticops.auth.models import User, APIKey, Session
@@ -1267,54 +1462,89 @@ def init():
 
     engine = get_engine()
     Base.metadata.create_all(engine)
+    console.print("[green]Database initialized.[/green]")
 
-    console.print("[green]Database initialized successfully![/green]")
-    console.print(f"Data directory: {settings.data_dir.absolute()}")
+    # Copy config templates if missing
+    _init_copy_template(
+        PROJECT_ROOT / "config" / "channels.yaml.example",
+        PROJECT_ROOT / "config" / "channels.yaml",
+    )
+    _init_copy_template(
+        PROJECT_ROOT / "config" / "im-apps.yaml.example",
+        PROJECT_ROOT / "config" / "im-apps.yaml",
+    )
 
-    # Report storage backend setup
-    _init_report_storage()
+    # ── Summary ──────────────────────────────────────────────────────────
+    if env_vars:
+        console.print()
+        console.print(Rule("[bold green]Configuration Summary[/bold green]"))
+        summary = Table(show_header=True, box=SIMPLE)
+        summary.add_column("Setting", style="cyan")
+        summary.add_column("Value")
+        for key, value in env_vars.items():
+            # Mask sensitive values
+            display = "****" if any(s in key.lower() for s in ("secret", "password", "token", "api_key", "app_key")) else value
+            summary.add_row(key, display)
+        console.print(summary)
+
+    console.print()
+    console.print(Rule("[bold]Next Steps[/bold]"))
+    console.print("  1. [cyan]aiops chat[/cyan]           — start interactive chat")
+    console.print("  2. [cyan]aiops service start[/cyan]   — run as background service")
+    console.print("  3. Edit [cyan]config/channels.yaml[/cyan] to configure notification channels")
+    console.print()
 
 
-# ── Report Storage Init Helpers ─────────────────────────────────────────────
+# ── Init Helpers ────────────────────────────────────────────────────────────
 
 
-def _init_report_storage() -> None:
+def _init_report_storage(env_vars: dict[str, str]) -> None:
     """Prompt user to choose report storage backend (local or S3)."""
     from rich.prompt import Prompt
 
-    console.print("\n[bold]Report Storage Configuration[/bold]")
     console.print("  Reports can be stored locally or on S3.")
-    console.print("  S3 is recommended for production (shared access, knowledge base source).\n")
+    console.print("  S3 is recommended for production.\n")
 
     choice = Prompt.ask(
-        "Storage backend",
+        "  Storage backend",
         choices=["local", "s3"],
         default="local",
     )
 
     if choice == "s3":
-        bucket = Prompt.ask("S3 bucket name")
-        prefix = Prompt.ask("S3 key prefix", default="reports/")
-        region = Prompt.ask("S3 region", default="us-east-1")
+        bucket = Prompt.ask("  S3 bucket name")
+        prefix = Prompt.ask("  S3 key prefix", default="reports/")
+        region = Prompt.ask("  S3 region", default="us-east-1")
 
-        # Validate bucket access
         try:
             _validate_s3_bucket(bucket, region)
         except Exception as e:
-            console.print(f"[red]S3 validation failed: {e}[/red]")
-            console.print("[yellow]Falling back to local storage.[/yellow]")
-            _write_env_var("AIOPS_REPORT_STORAGE", "local")
-            console.print(f"[green]Local storage: {settings.reports_dir}[/green]")
+            console.print(f"  [red]S3 validation failed: {e}[/red]")
+            console.print("  [yellow]Falling back to local storage.[/yellow]")
+            env_vars["AIOPS_REPORT_STORAGE"] = "local"
             return
 
-        _write_env_var("AIOPS_REPORT_STORAGE", "s3")
-        _write_env_var("AIOPS_REPORT_S3_BUCKET", bucket)
-        _write_env_var("AIOPS_REPORT_S3_PREFIX", prefix)
-        _write_env_var("AIOPS_REPORT_S3_REGION", region)
-        console.print(f"[green]S3 storage configured: s3://{bucket}/{prefix}[/green]")
+        env_vars["AIOPS_REPORT_STORAGE"] = "s3"
+        env_vars["AIOPS_REPORT_S3_BUCKET"] = bucket
+        env_vars["AIOPS_REPORT_S3_PREFIX"] = prefix
+        env_vars["AIOPS_REPORT_S3_REGION"] = region
+        console.print(f"  [green]S3 storage configured: s3://{bucket}/{prefix}[/green]")
     else:
-        _write_env_var("AIOPS_REPORT_STORAGE", "local")
-        console.print(f"[green]Local storage: {settings.reports_dir}[/green]")
+        env_vars["AIOPS_REPORT_STORAGE"] = "local"
+        console.print(f"  [green]Local storage: {settings.reports_dir}[/green]")
+
+
+def _init_copy_template(src: Path, dest: Path) -> None:
+    """Copy a config template file if destination doesn't exist."""
+    import shutil
+
+    if dest.exists():
+        return
+    if not src.exists():
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    console.print(f"  [green]Created[/green] {dest.name} from template")
 
 
 def _validate_s3_bucket(bucket: str, region: str) -> None:
@@ -1323,14 +1553,16 @@ def _validate_s3_bucket(bucket: str, region: str) -> None:
 
     s3 = boto3.client("s3", region_name=region)
     s3.head_bucket(Bucket=bucket)
-    # Test write + cleanup
     s3.put_object(Bucket=bucket, Key=".agenticops-probe", Body=b"ok")
     s3.delete_object(Bucket=bucket, Key=".agenticops-probe")
 
 
-def _write_env_var(key: str, value: str) -> None:
+def _write_env_var(key: str, value: str, env_path: Optional[Path] = None) -> None:
     """Set a variable in .env (create if needed, update if exists)."""
-    env_path = Path(".env")
+    if env_path is None:
+        from agenticops.config import PROJECT_ROOT
+        env_path = PROJECT_ROOT / ".env"
+
     lines: list[str] = []
     found = False
 
