@@ -1107,8 +1107,12 @@ class SlackIMNotifier(IMNotifier):
             logger.error("Slack bot_token or chat_id not configured")
             return False
 
-        # For IM replies, body is the full response; subject may be empty
-        text = body if body else subject
+        # Combine subject + body for readable notification
+        # (Feishu has card header; Slack uses plain text — prepend subject as bold title)
+        if subject and body:
+            text = f"*{subject}*\n\n{body}"
+        else:
+            text = body or subject
 
         try:
             async with httpx.AsyncClient() as client:

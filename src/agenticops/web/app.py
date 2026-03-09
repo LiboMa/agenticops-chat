@@ -1890,6 +1890,18 @@ async def api_list_issue_executions(issue_id: int):
         return [FixExecutionResponse.model_validate(e) for e in executions]
 
 
+@app.get("/api/health-issues/{issue_id}/timeline")
+async def api_get_issue_timeline(issue_id: int):
+    """Get the pipeline event timeline for a health issue."""
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+    from agenticops.services.pipeline_events import get_timeline
+    return get_timeline(issue_id)
+
+
 @app.post("/api/fix-executions/{execution_id}/cancel")
 async def api_cancel_execution(execution_id: int):
     """Cancel a running fix execution."""
@@ -3739,7 +3751,11 @@ async def _handle_im_message(platform: str, msg) -> None:
                 logger.warning("Alert context build error: %s", e)
 
         try:
+            # Set IM origin context so create_health_issue stores it
+            from agenticops.config import set_im_origin
+            set_im_origin({"platform": platform, "chat_id": msg.chat_id})
             result = agent(agent_input)
+            set_im_origin(None)  # clear after agent completes
             response_text = str(result) if result else "No response generated."
         except Exception as e:
             logger.error("IM agent error (%s:%s): %s", platform, msg.chat_id, e)

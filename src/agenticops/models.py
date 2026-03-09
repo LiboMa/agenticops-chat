@@ -430,6 +430,31 @@ class FixExecution(Base):
 
 
 # ============================================================================
+# Pipeline Event Timeline
+# ============================================================================
+
+
+class PipelineEvent(Base):
+    """Timeline event log for HealthIssue lifecycle tracking."""
+
+    __tablename__ = "pipeline_events"
+    __table_args__ = (
+        Index("idx_pipeline_event_issue", "health_issue_id"),
+        Index("idx_pipeline_event_time", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    health_issue_id: Mapped[int] = mapped_column(index=True)
+    event_type: Mapped[str] = mapped_column(String(50))
+    stage: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20))
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actor: Mapped[str] = mapped_column(String(100), default="system")
+    duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
 # Agent Audit Log
 # ============================================================================
 

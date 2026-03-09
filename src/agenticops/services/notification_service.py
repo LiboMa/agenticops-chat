@@ -79,6 +79,23 @@ def _run_notify(
                     "Notification [%s]: sent=%d failed=%d channels=%s",
                     event_type, ok, fail, list(results.keys()),
                 )
+                # Log pipeline event for issue-related notifications
+                if event_type in ("issue_created", "rca_completed", "fix_planned",
+                                   "fix_approved", "execution_result"):
+                    try:
+                        from agenticops.services.pipeline_events import log_event as _log_pe
+                        # Extract issue_id from subject (pattern: "Issue #NNN")
+                        import re
+                        m = re.search(r"Issue #(\d+)", subject)
+                        if not m:
+                            m = re.search(r"#(\d+)", subject)
+                        if m:
+                            _log_pe(
+                                int(m.group(1)), "notification_sent", "notification",
+                                detail={"channels": list(results.keys()), "sent": ok, "failed": fail},
+                            )
+                    except Exception:
+                        pass
         finally:
             loop.close()
     except Exception:
