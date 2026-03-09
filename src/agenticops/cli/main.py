@@ -8,6 +8,7 @@ import time
 import threading
 from datetime import datetime, timedelta
 from io import StringIO
+from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 from contextlib import contextmanager
 from enum import Enum
@@ -230,6 +231,7 @@ delete_app = typer.Typer(help="Delete resources")
 update_app = typer.Typer(help="Update a resource")
 run_app = typer.Typer(help="Run operations (scan, detect, analyze)")
 logs_app = typer.Typer(help="View logs and audit trail")
+service_app = typer.Typer(help="Manage background services (web dashboard + IM WebSocket)")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -238,6 +240,7 @@ app.add_typer(delete_app, name="delete")
 app.add_typer(update_app, name="update")
 app.add_typer(run_app, name="run")
 app.add_typer(logs_app, name="logs")
+app.add_typer(service_app, name="service")
 
 
 # ============================================================================
@@ -3484,12 +3487,364 @@ def chat(
             break
 
 
+# ============================================================================
+# Service Management (aiops service start|stop|status|restart|logs)
+# ============================================================================
+
+_SERVICE_PID_FILE = settings.data_dir / "service.pid"
+_FRONTEND_PID_FILE = settings.data_dir / "frontend.pid"
+_SERVICE_LOG_DIR = settings.data_dir.parent / "logs"
+_SERVICE_LOG_FILE = _SERVICE_LOG_DIR / "backend.log"  # default log for service start
+_FRONTEND_DIR = Path(__file__).parent.parent / "web" / "frontend"
+
+
+def _read_pid() -> Optional[int]:
+    """Read PID from file. Returns None if missing or stale."""
+    import signal
+    if not _SERVICE_PID_FILE.exists():
+        return None
+    try:
+        pid = int(_SERVICE_PID_FILE.read_text().strip())
+        os.kill(pid, 0)  # signal 0 = check if alive
+        return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        _SERVICE_PID_FILE.unlink(missing_ok=True)
+        return None
+
+
+def _write_pid(pid: int) -> None:
+    _SERVICE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SERVICE_PID_FILE.write_text(str(pid))
+
+
+def _start_backend(host: str, port: int) -> int:
+    """Spawn uvicorn as a detached background process. Returns PID."""
+    import subprocess
+
+    _SERVICE_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_fd = open(_SERVICE_LOG_FILE, "a")
+
+    cmd = [
+        sys.executable, "-m", "uvicorn",
+        "agenticops.web.app:app",
+        "--host", host,
+        "--port", str(port),
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log_fd,
+        stderr=log_fd,
+        start_new_session=True,
+    )
+    _write_pid(proc.pid)
+    return proc.pid
+
+
+def _start_frontend_dev(backend_port: int) -> int:
+    """Spawn vite dev server as a detached background process. Returns PID."""
+    import subprocess
+
+    _SERVICE_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_fd = open(_SERVICE_LOG_DIR / "frontend.log", "a")
+
+    proc = subprocess.Popen(
+        ["npm", "run", "dev", "--", "--clearScreen", "false"],
+        cwd=str(_FRONTEND_DIR),
+        stdout=log_fd,
+        stderr=log_fd,
+        start_new_session=True,
+        env={**os.environ, "VITE_API_TARGET": f"http://127.0.0.1:{backend_port}"},
+    )
+    _FRONTEND_PID_FILE.write_text(str(proc.pid))
+    return proc.pid
+
+
+def _read_frontend_pid() -> Optional[int]:
+    """Read frontend dev PID. Returns None if missing or stale."""
+    if not _FRONTEND_PID_FILE.exists():
+        return None
+    try:
+        pid = int(_FRONTEND_PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        _FRONTEND_PID_FILE.unlink(missing_ok=True)
+        return None
+
+
+def _stop_frontend() -> None:
+    """Stop the frontend dev server if running."""
+    import signal
+    pid = _read_frontend_pid()
+    if not pid:
+        return
+    try:
+        pgid = os.getpgid(pid)
+        os.killpg(pgid, signal.SIGINT)
+        for _ in range(20):
+            time.sleep(0.1)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+        else:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    except ProcessLookupError:
+        pass
+    _FRONTEND_PID_FILE.unlink(missing_ok=True)
+
+
+@service_app.command("start")
+def service_start(
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind"),
+    daemon: bool = typer.Option(True, "--daemon/--foreground", help="Run as background daemon (default) or foreground"),
+    frontend: bool = typer.Option(False, "--frontend", help="Also start Vite dev server (hot-reload, port 5173)"),
+):
+    """Start web dashboard + IM WebSocket services.
+
+    Modes:
+      --daemon (default)  Backend runs as background daemon
+      --foreground        Backend runs in foreground (blocking)
+      --frontend          Also start Vite dev server for frontend hot-reload
+    """
+    existing = _read_pid()
+    if existing:
+        console.print(f"[yellow]Service already running (PID {existing}).[/yellow]")
+        console.print("Use [bold]aiops service stop[/bold] first, or [bold]aiops service restart[/bold].")
+        raise typer.Exit(1)
+
+    if not daemon:
+        # Foreground mode — blocking
+        from agenticops.web.app import run_server
+
+        if frontend:
+            fe_pid = _start_frontend_dev(port)
+            console.print(f"[bold green]Frontend dev server started (PID {fe_pid})[/bold green]")
+            console.print(f"  Vite dev      : http://localhost:5173/app/")
+
+        _write_pid(os.getpid())
+        console.print(f"[bold green]Starting AgenticOps services (foreground)...[/bold green]")
+        _print_service_info(host, port, frontend=frontend)
+        try:
+            run_server(host=host, port=port)
+        finally:
+            _SERVICE_PID_FILE.unlink(missing_ok=True)
+            if frontend:
+                _stop_frontend()
+        return
+
+    # Daemon mode — spawn background processes
+    be_pid = _start_backend(host, port)
+
+    console.print(f"[bold green]AgenticOps services started (PID {be_pid})[/bold green]")
+
+    if frontend:
+        fe_pid = _start_frontend_dev(port)
+        console.print(f"[bold green]Frontend dev server started (PID {fe_pid})[/bold green]")
+
+    _print_service_info(host, port, frontend=frontend)
+
+
+def _print_service_info(host: str, port: int, *, frontend: bool = False) -> None:
+    """Print service startup summary."""
+    console.print(f"  Backend API   : http://{host}:{port}")
+    if frontend:
+        console.print(f"  Vite dev      : http://localhost:5173/app/  (hot-reload)")
+    else:
+        console.print(f"  Web dashboard : http://{host}:{port}/app/")
+    console.print(f"  Feishu WS     : {'enabled' if settings.feishu_ws_enabled else 'disabled'}")
+    console.print(f"  Slack WS      : {'enabled' if settings.slack_ws_enabled else 'disabled'}")
+    console.print(f"  PID file      : {_SERVICE_PID_FILE}")
+    console.print(f"  Logs:")
+    console.print(f"    backend.log   : {_SERVICE_LOG_DIR / 'backend.log'}")
+    if frontend:
+        console.print(f"    frontend.log  : {_SERVICE_LOG_DIR / 'frontend.log'}")
+    if settings.feishu_ws_enabled:
+        console.print(f"    feishu_ws.log : {_SERVICE_LOG_DIR / 'feishu_ws.log'}")
+    if settings.slack_ws_enabled:
+        console.print(f"    slack_ws.log  : {_SERVICE_LOG_DIR / 'slack_ws.log'}")
+
+
+@service_app.command("stop")
+def service_stop():
+    """Stop running services (backend + frontend dev if running)."""
+    import signal
+
+    # Stop frontend dev server first
+    fe_pid = _read_frontend_pid()
+    if fe_pid:
+        console.print(f"Stopping frontend dev server (PID {fe_pid})...")
+        _stop_frontend()
+        console.print("[green]Frontend dev server stopped.[/green]")
+
+    pid = _read_pid()
+    if not pid:
+        if not fe_pid:
+            console.print("[yellow]No running service found.[/yellow]")
+        return
+
+    console.print(f"Stopping backend service (PID {pid})...")
+    try:
+        pgid = os.getpgid(pid)
+        # SIGINT triggers uvicorn's graceful shutdown
+        os.killpg(pgid, signal.SIGINT)
+        # Wait up to 3 seconds — WS daemon threads may block longer, SIGKILL is fine
+        for _ in range(30):
+            time.sleep(0.1)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+        else:
+            console.print("[yellow]Graceful shutdown timed out, sending SIGKILL...[/yellow]")
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    except ProcessLookupError:
+        pass
+
+    _SERVICE_PID_FILE.unlink(missing_ok=True)
+    console.print("[green]Service stopped.[/green]")
+
+
+@service_app.command("status")
+def service_status():
+    """Show service status."""
+    import urllib.request
+
+    pid = _read_pid()
+    fe_pid = _read_frontend_pid()
+
+    if not pid and not fe_pid:
+        console.print("[dim]Service:[/dim] [red]not running[/red]")
+        return
+
+    if pid:
+        console.print(f"[dim]Backend: [/dim] [green]running[/green] (PID {pid})")
+    else:
+        console.print(f"[dim]Backend: [/dim] [red]not running[/red]")
+
+    if fe_pid:
+        console.print(f"[dim]Frontend:[/dim] [green]running[/green] (PID {fe_pid}) → http://localhost:5173/app/")
+    else:
+        console.print(f"[dim]Frontend:[/dim] [dim]not started[/dim]")
+
+    # Show log files that exist
+    if _SERVICE_LOG_DIR.exists():
+        log_files = sorted(f for f in _SERVICE_LOG_DIR.glob("*.log") if f.stat().st_size > 0)
+        if log_files:
+            console.print(f"[dim]Log dir: [/dim] {_SERVICE_LOG_DIR}")
+            for lf in log_files:
+                size = lf.stat().st_size
+                label = f"{size / 1024:.1f}KB" if size < 1024 * 1024 else f"{size / 1024 / 1024:.1f}MB"
+                console.print(f"  [dim]{lf.name:20s}[/dim] {label}")
+
+    if not pid:
+        return
+
+    # Try to reach the health endpoint
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=3) as resp:
+            data = json.loads(resp.read())
+            status_color = {"healthy": "green", "degraded": "yellow"}.get(data.get("status", ""), "red")
+            console.print(f"[dim]Health:  [/dim] [{status_color}]{data.get('status', 'unknown')}[/{status_color}]")
+
+            checks = data.get("checks", {})
+            for name, info in checks.items():
+                c = "green" if info.get("status") == "ok" else "yellow" if info.get("status") == "error" else "red"
+                detail = ""
+                if name == "aws" and info.get("details", {}).get("account_id"):
+                    detail = f" (account: {info['details']['account_id']})"
+                elif name == "disk" and info.get("details", {}).get("used_pct"):
+                    detail = f" ({info['details']['used_pct']:.0f}% used, {info['details']['free_gb']:.1f}GB free)"
+                console.print(f"  [dim]{name:>10}:[/dim] [{c}]{info.get('status', '?')}[/{c}]{detail}")
+    except Exception:
+        console.print("[dim]Health:  [/dim] [yellow]unreachable[/yellow] (service may still be starting)")
+
+
+@service_app.command("restart")
+def service_restart(
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind"),
+    frontend: bool = typer.Option(False, "--frontend", help="Also start Vite dev server"),
+):
+    """Restart services (stop + start)."""
+    pid = _read_pid()
+    fe_pid = _read_frontend_pid()
+    if pid or fe_pid:
+        service_stop()
+        time.sleep(0.5)
+    service_start(host=host, port=port, frontend=frontend)
+
+
+@service_app.command("logs")
+def service_logs(
+    component: Optional[str] = typer.Argument(
+        None,
+        help="Log component: backend, frontend, feishu_ws, slack_ws (default: all)",
+    ),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow log output (like tail -f)"),
+    lines: int = typer.Option(50, "--lines", "-n", help="Number of lines to show"),
+):
+    """View service logs.
+
+    Examples:
+      aiops service logs              # show recent backend logs
+      aiops service logs backend -f   # follow backend log
+      aiops service logs feishu_ws    # show Feishu WS logs
+      aiops service logs slack_ws -f  # follow Slack WS log
+      aiops service logs frontend     # show HTTP access logs
+    """
+    import subprocess as sp
+
+    _LOG_MAP = {
+        "backend": "backend.log",
+        "frontend": "frontend.log",
+        "feishu_ws": "feishu_ws.log",
+        "feishu": "feishu_ws.log",
+        "slack_ws": "slack_ws.log",
+        "slack": "slack_ws.log",
+    }
+
+    if component and component not in _LOG_MAP:
+        console.print(f"[red]Unknown component: {component}[/red]")
+        console.print(f"[dim]Available: {', '.join(sorted(set(_LOG_MAP.values()), key=lambda x: x))}[/dim]")
+        raise typer.Exit(1)
+
+    # Default to backend if no component given
+    log_name = _LOG_MAP.get(component, "backend.log") if component else "backend.log"
+    log_file = _SERVICE_LOG_DIR / log_name
+
+    if not log_file.exists():
+        console.print(f"[yellow]Log file not found: {log_file}[/yellow]")
+        # Show which logs exist
+        existing = [f.name for f in _SERVICE_LOG_DIR.glob("*.log")] if _SERVICE_LOG_DIR.exists() else []
+        if existing:
+            console.print(f"[dim]Available logs: {', '.join(sorted(existing))}[/dim]")
+        return
+
+    if follow:
+        console.print(f"[dim]Following {log_file} (Ctrl+C to stop)...[/dim]")
+        try:
+            sp.run(["tail", "-f", "-n", str(lines), str(log_file)])
+        except KeyboardInterrupt:
+            pass
+    else:
+        sp.run(["tail", "-n", str(lines), str(log_file)])
+
+
 @app.command()
 def web(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind"),
     port: int = typer.Option(8080, "--port", "-p", help="Port to bind"),
 ):
-    """Start the web dashboard."""
+    """Start the web dashboard (foreground). Prefer 'aiops service start'."""
     from agenticops.web.app import run_server
 
     console.print(f"[bold]Starting AgenticAIOps Web Dashboard...[/bold]")

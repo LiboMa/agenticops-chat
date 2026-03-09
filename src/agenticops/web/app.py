@@ -648,9 +648,37 @@ _executor_service = ExecutorService(poll_interval=settings.executor_poll_interva
 # ============================================================================
 
 
+def _setup_service_logging() -> None:
+    """Configure file-based logging for backend + frontend (access) logs."""
+    import logging.handlers
+
+    log_dir = Path(__file__).parent.parent.parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+
+    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+
+    # backend.log — application errors, startup, agent activity
+    backend_handler = logging.handlers.RotatingFileHandler(
+        log_dir / "backend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
+    backend_handler.setLevel(logging.DEBUG)
+    backend_handler.setFormatter(fmt)
+    for name in ("agenticops", "uvicorn.error", "uvicorn"):
+        logging.getLogger(name).addHandler(backend_handler)
+
+    # frontend.log — HTTP access logs (asset + API requests)
+    access_handler = logging.handlers.RotatingFileHandler(
+        log_dir / "frontend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
+    access_handler.setLevel(logging.INFO)
+    access_handler.setFormatter(fmt)
+    logging.getLogger("uvicorn.access").addHandler(access_handler)
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup."""
+    _setup_service_logging()
     init_db()
     _chat_sessions.start_cleanup()
     _executor_service.start()

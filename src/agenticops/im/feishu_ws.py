@@ -35,7 +35,7 @@ def _setup_file_logging() -> None:
     """Configure file logging for the Feishu WS service and related modules."""
     log_dir = PROJECT_ROOT / "logs"
     log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / "service_wss.log"
+    log_file = log_dir / "feishu_ws.log"
 
     handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=10 * 1024 * 1024, backupCount=5,
