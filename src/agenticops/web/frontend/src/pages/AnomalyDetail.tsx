@@ -119,6 +119,15 @@ export default function AnomalyDetail() {
             </span>
             <SeverityBadge severity={a.severity} />
             <IssueStatusBadge status={a.status} />
+            {a.trace_id && (
+              <button
+                onClick={() => navigator.clipboard.writeText(a.trace_id!)}
+                title="Click to copy trace ID"
+                className="font-mono text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-200 hover:bg-indigo-100 transition-colors cursor-pointer"
+              >
+                {a.trace_id}
+              </button>
+            )}
             <h1 className="text-2xl font-semibold text-slate-900">{a.title}</h1>
           </div>
           <div
@@ -525,6 +534,11 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                       {ev.duration_ms >= 1000
                         ? `${(ev.duration_ms / 1000).toFixed(1)}s`
                         : `${ev.duration_ms}ms`}
+                    </span>
+                  )}
+                  {ev.trace_id && (
+                    <span className="text-[10px] font-mono text-indigo-400">
+                      {ev.trace_id}
                     </span>
                   )}
                 </div>

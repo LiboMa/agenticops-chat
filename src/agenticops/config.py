@@ -1,6 +1,7 @@
 """Configuration management for AgenticOps."""
 
 import contextvars
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -425,3 +426,25 @@ def set_im_origin(origin: Optional[dict]) -> contextvars.Token:
         origin: dict with 'platform' and 'chat_id' keys, or None to clear.
     """
     return _im_origin_var.set(origin)
+
+
+# ── Pipeline Trace ID (set at alert entry, propagates through pipeline) ──
+
+_trace_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "pipeline_trace_id", default=None
+)
+
+
+def generate_trace_id() -> str:
+    """Generate a new pipeline trace ID (TRC-{8 hex chars})."""
+    return f"TRC-{uuid.uuid4().hex[:8]}"
+
+
+def get_trace_id() -> Optional[str]:
+    """Get the current pipeline trace ID from context."""
+    return _trace_id_var.get()
+
+
+def set_trace_id(trace_id: Optional[str]) -> contextvars.Token:
+    """Set the pipeline trace ID in context."""
+    return _trace_id_var.set(trace_id)

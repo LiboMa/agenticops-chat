@@ -17,16 +17,25 @@ Follows the same pattern as rca_service.py.
 import logging
 import threading
 from datetime import datetime
+from typing import Optional
 
 from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
 
+def _restore_trace_id(trace_id: Optional[str]) -> None:
+    """Restore trace_id in ContextVar as fallback (ThreadingInstrumentor may already propagate)."""
+    if trace_id:
+        from agenticops.config import set_trace_id, get_trace_id
+        if not get_trace_id():
+            set_trace_id(trace_id)
+
+
 # ── Stage 1: Auto-SRE (after RCA completes) ──────────────────────────
 
 
-def trigger_auto_sre(health_issue_id: int) -> None:
+def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     """Fire-and-forget: spawn SRE agent to generate a fix plan after RCA.
 
     Called from save_rca_result() when an RCA result is persisted.
@@ -38,7 +47,7 @@ def trigger_auto_sre(health_issue_id: int) -> None:
 
     thread = threading.Thread(
         target=_run_auto_sre,
-        args=(health_issue_id,),
+        args=(health_issue_id, trace_id),
         daemon=True,
         name=f"auto-sre-{health_issue_id}",
     )
@@ -46,8 +55,9 @@ def trigger_auto_sre(health_issue_id: int) -> None:
     logger.info("Auto-SRE spawned for HealthIssue #%d", health_issue_id)
 
 
-def _run_auto_sre(health_issue_id: int) -> None:
+def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     """Run sre_agent for the given issue to generate a fix plan."""
+    _restore_trace_id(trace_id)
     try:
         from agenticops.agents.sre_agent import sre_agent
 
@@ -63,7 +73,7 @@ def _run_auto_sre(health_issue_id: int) -> None:
 # ── Stage 2: Auto-Approve (after fix plan saved) ─────────────────────
 
 
-def trigger_auto_approve(fix_plan_id: int) -> None:
+def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
     """Auto-approve L0/L1 fix plans. Synchronous — no agent needed.
 
     Called from save_fix_plan() when a new plan is persisted.
@@ -110,6 +120,13 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
             risk_level = plan.risk_level
             health_issue_id = plan.health_issue_id
 
+            # Resolve trace_id from param or HealthIssue
+            resolved_tid = trace_id
+            if not resolved_tid:
+                issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+                if issue:
+                    resolved_tid = issue.trace_id
+
             # Update HealthIssue status
             issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
             if issue:
@@ -126,12 +143,12 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
             from agenticops.services.pipeline_events import log_event
             log_event(health_issue_id, "fix_approved", "approval",
                       detail={"plan_id": fix_plan_id, "approved_by": "agent:auto-pipeline", "risk_level": risk_level},
-                      actor="agent:auto-pipeline")
+                      actor="agent:auto-pipeline", trace_id=resolved_tid)
         except Exception:
             pass
 
         # Chain: trigger execution
-        trigger_auto_execute(fix_plan_id)
+        trigger_auto_execute(fix_plan_id, trace_id=resolved_tid)
 
     except Exception:
         logger.exception("Auto-approve failed for FixPlan #%d", fix_plan_id)
@@ -140,7 +157,7 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
 # ── Stage 3: Auto-Execute (after plan approved) ──────────────────────
 
 
-def trigger_auto_execute(fix_plan_id: int) -> None:
+def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
     """Fire-and-forget: spawn executor agent to run an approved fix plan.
 
     Called from trigger_auto_approve() (L0/L1 auto path) or from
@@ -156,7 +173,7 @@ def trigger_auto_execute(fix_plan_id: int) -> None:
 
     thread = threading.Thread(
         target=_run_auto_execute,
-        args=(fix_plan_id,),
+        args=(fix_plan_id, trace_id),
         daemon=True,
         name=f"auto-execute-{fix_plan_id}",
     )
@@ -164,8 +181,10 @@ def trigger_auto_execute(fix_plan_id: int) -> None:
     logger.info("Auto-execute spawned for FixPlan #%d", fix_plan_id)
 
 
-def _run_auto_execute(fix_plan_id: int) -> None:
+def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
     """Run executor_agent for the given fix plan."""
+    _restore_trace_id(trace_id)
+
     # Look up health_issue_id for event logging
     _issue_id = None
     try:
@@ -180,7 +199,8 @@ def _run_auto_execute(fix_plan_id: int) -> None:
     if _issue_id:
         from agenticops.services.pipeline_events import log_event
         log_event(_issue_id, "execution_started", "execution", "started",
-                  detail={"plan_id": fix_plan_id, "executor": "agent:executor"})
+                  detail={"plan_id": fix_plan_id, "executor": "agent:executor"},
+                  trace_id=trace_id)
 
     try:
         from agenticops.agents.executor_agent import executor_agent
@@ -192,6 +212,7 @@ def _run_auto_execute(fix_plan_id: int) -> None:
         )
     except Exception:
         if _issue_id:
+            from agenticops.services.pipeline_events import log_event
             log_event(_issue_id, "execution_completed", "execution", "failed",
-                      detail={"plan_id": fix_plan_id})
+                      detail={"plan_id": fix_plan_id}, trace_id=trace_id)
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)

@@ -14,6 +14,35 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _resolve_trace_id(
+    trace_id: Optional[str], health_issue_id: int
+) -> Optional[str]:
+    """Resolve trace_id: param → ContextVar → DB lookup (best-effort)."""
+    if trace_id:
+        return trace_id
+
+    # Try ContextVar
+    try:
+        from agenticops.config import get_trace_id
+        ctx_tid = get_trace_id()
+        if ctx_tid:
+            return ctx_tid
+    except Exception:
+        pass
+
+    # Fallback: read from HealthIssue DB record
+    try:
+        from agenticops.models import HealthIssue, get_db_session
+        with get_db_session() as session:
+            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+            if issue and issue.trace_id:
+                return issue.trace_id
+    except Exception:
+        pass
+
+    return None
+
+
 def log_event(
     health_issue_id: int,
     event_type: str,
@@ -22,10 +51,13 @@ def log_event(
     detail: Optional[dict] = None,
     actor: str = "system",
     duration_ms: Optional[int] = None,
+    trace_id: Optional[str] = None,
 ) -> None:
     """Log a pipeline event (best-effort, never raises)."""
     try:
         from agenticops.models import PipelineEvent, get_db_session
+
+        resolved_tid = _resolve_trace_id(trace_id, health_issue_id)
 
         with get_db_session() as session:
             event = PipelineEvent(
@@ -36,6 +68,7 @@ def log_event(
                 detail=json.dumps(detail) if detail else None,
                 actor=actor,
                 duration_ms=duration_ms,
+                trace_id=resolved_tid,
             )
             session.add(event)
     except Exception:
@@ -63,6 +96,7 @@ def get_timeline(health_issue_id: int) -> list[dict]:
                 "actor": e.actor,
                 "duration_ms": e.duration_ms,
                 "created_at": e.created_at.isoformat() if e.created_at else None,
+                "trace_id": e.trace_id,
             }
             for e in events
         ]

@@ -46,6 +46,7 @@ export interface Anomaly {
   status: IssueStatus;
   detected_at: string;
   resolved_at: string | null;
+  trace_id: string | null;
 }
 
 export interface RCAResult {
@@ -655,6 +656,7 @@ export interface PipelineEvent {
   actor: string;
   duration_ms: number | null;
   created_at: string;
+  trace_id: string | null;
 }
 
 /* ------------------------------------------------------------------ */

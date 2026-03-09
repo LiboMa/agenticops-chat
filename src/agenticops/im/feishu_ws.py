@@ -43,8 +43,12 @@ def _setup_file_logging() -> None:
     )
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(name)s %(levelname)s %(message)s"
+        "%(asctime)s %(name)s %(levelname)s [%(trace_id)s] %(message)s"
     ))
+
+    # Add trace_id filter
+    from agenticops.web.app import TraceIdFilter
+    handler.addFilter(TraceIdFilter())
 
     # Attach to relevant loggers
     for name in (
@@ -287,11 +291,13 @@ class FeishuWSService:
                     len(agent_input),
                 )
                 logger.debug(">>> Agent input (first 500): %s", agent_input[:500])
-                # Set IM origin context so create_health_issue stores it
-                from agenticops.config import set_im_origin
+                # Set IM origin + trace_id context
+                from agenticops.config import set_im_origin, generate_trace_id, set_trace_id
                 _im_token = set_im_origin({"platform": "feishu", "chat_id": chat_id})
+                _trace_token = set_trace_id(generate_trace_id())
                 result = agent(agent_input)
                 set_im_origin(None)  # clear after agent completes
+                set_trace_id(None)
                 response_text = str(result)
                 logger.info(
                     ">>> Agent response (first 300): %s", response_text[:300]
