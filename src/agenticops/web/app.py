@@ -678,7 +678,10 @@ def _setup_service_logging() -> None:
     backend_handler.setFormatter(fmt)
     backend_handler.addFilter(_trace_filter)
     for name in ("agenticops", "uvicorn.error", "uvicorn"):
-        logging.getLogger(name).addHandler(backend_handler)
+        _logger = logging.getLogger(name)
+        _logger.addHandler(backend_handler)
+        if _logger.level == logging.NOTSET:
+            _logger.setLevel(logging.DEBUG)
 
     # frontend.log — HTTP access logs (asset + API requests)
     access_handler = logging.handlers.RotatingFileHandler(
