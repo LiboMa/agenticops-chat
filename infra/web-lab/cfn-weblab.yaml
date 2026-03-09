@@ -19,7 +19,7 @@ Parameters:
     Default: rds-ec2-db-subnet-group-1
   AcmCertArn:
     Type: String
-    Default: arn:aws:acm:ap-southeast-1:533267047935:certificate/0b71f1a8-2d41-4a2e-872b-92533a8b2d96
+    Default: ""  # Set your ACM certificate ARN here
   AmiId:
     Type: AWS::EC2::Image::Id
     Default: ami-0c80974c4cc7acd8d
