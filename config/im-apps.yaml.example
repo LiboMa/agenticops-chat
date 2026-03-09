@@ -29,3 +29,16 @@ wecom:
     # For bidirectional chat (Phase 2):
     # callback_token: "${WECOM_CALLBACK_TOKEN}"
     # encoding_aes_key: "${WECOM_ENCODING_AES_KEY}"
+
+# Slack: https://api.slack.com/apps
+# Socket Mode requires an App-Level Token (xapp-...) + Bot Token (xoxb-...)
+# Enable Socket Mode: App Settings → Socket Mode → Enable
+# Event Subscriptions: message.channels, message.groups, app_mention
+slack:
+  default:
+    bot_token: "${SLACK_BOT_TOKEN}"
+    app_token: "${SLACK_APP_TOKEN}"
+    signing_secret: "${SLACK_SIGNING_SECRET}"
+    # "mentions_only" (default): respond only when @mentioned
+    # "all": respond to all messages (use for alert channels)
+    respond_to: "mentions_only"

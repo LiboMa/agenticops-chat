@@ -9,7 +9,7 @@ from typing import Dict, Optional
 from strands import Agent
 
 from agenticops.agents.main_agent import create_main_agent
-from agenticops.notify.notifier import IMNotifier, FeishuNotifier, DingTalkNotifier, WeComNotifier
+from agenticops.notify.notifier import IMNotifier, FeishuNotifier, DingTalkNotifier, WeComNotifier, SlackIMNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ _NOTIFIER_MAP = {
     "feishu": FeishuNotifier,
     "dingtalk": DingTalkNotifier,
     "wecom": WeComNotifier,
+    "slack": SlackIMNotifier,
 }
 
 

@@ -681,6 +681,31 @@ async def startup():
                 exc_info=True,
             )
 
+    # Start Slack Socket Mode if enabled
+    if settings.slack_ws_enabled:
+        try:
+            from agenticops.im.slack_ws import start_slack_ws
+            slack_svc = start_slack_ws()
+            if slack_svc:
+                import logging as _logging
+                _logging.getLogger(__name__).info(
+                    "Slack WS: started=%s thread_alive=%s app=%s",
+                    slack_svc._started,
+                    slack_svc._thread.is_alive() if slack_svc._thread else False,
+                    slack_svc._app_name,
+                )
+            else:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Slack WS: start_slack_ws() returned None — check im-apps.yaml"
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Slack WS service failed to start (set AIOPS_SLACK_WS_ENABLED=false to disable)",
+                exc_info=True,
+            )
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -692,6 +717,13 @@ async def shutdown():
     try:
         from agenticops.im.feishu_ws import stop_feishu_ws
         stop_feishu_ws()
+    except Exception:
+        pass
+
+    # Stop Slack Socket Mode service
+    try:
+        from agenticops.im.slack_ws import stop_slack_ws
+        stop_slack_ws()
     except Exception:
         pass
 
@@ -3529,7 +3561,7 @@ async def api_im_bots():
     configured = list_apps()  # {"feishu": ["default"], ...}
 
     # Count active IM sessions per platform from the lazy singleton
-    session_counts: dict[str, int] = {"feishu": 0, "dingtalk": 0, "wecom": 0}
+    session_counts: dict[str, int] = {"feishu": 0, "dingtalk": 0, "wecom": 0, "slack": 0}
     if _im_sessions is not None:
         with _im_sessions._lock:
             for key in _im_sessions._agents:
@@ -3581,6 +3613,52 @@ async def api_im_bots():
             "active_sessions": 0,
             "ws_enabled": False,
             "ws_thread_alive": False,
+        })
+
+    # --- Slack (Socket Mode) ---
+    slack_apps = configured.get("slack", [])
+    if slack_apps:
+        try:
+            from agenticops.im.slack_ws import _slack_ws_service
+            slack_ws_enabled = settings.slack_ws_enabled
+            slack_ws_started = _slack_ws_service is not None and _slack_ws_service._started
+            slack_ws_thread_alive = (
+                _slack_ws_service is not None
+                and _slack_ws_service._thread is not None
+                and _slack_ws_service._thread.is_alive()
+            )
+            if slack_ws_started and slack_ws_thread_alive:
+                slack_status = "connected"
+            elif slack_ws_enabled:
+                slack_status = "disconnected"
+            else:
+                slack_status = "not_configured"
+        except Exception:
+            slack_ws_enabled = False
+            slack_ws_started = False
+            slack_ws_thread_alive = False
+            slack_status = "not_configured"
+
+        bots.append({
+            "platform": "slack",
+            "mode": "websocket",
+            "apps": slack_apps,
+            "status": slack_status,
+            "active_sessions": session_counts["slack"],
+            "ws_enabled": slack_ws_enabled,
+            "ws_thread_alive": slack_ws_thread_alive,
+            "callback_url": "/api/im/slack/callback",
+        })
+    else:
+        bots.append({
+            "platform": "slack",
+            "mode": "websocket",
+            "apps": [],
+            "status": "not_configured",
+            "active_sessions": 0,
+            "ws_enabled": False,
+            "ws_thread_alive": False,
+            "callback_url": "/api/im/slack/callback",
         })
 
     # --- DingTalk / WeCom (callback mode) ---
@@ -3726,6 +3804,33 @@ async def api_feishu_callback(request: Request):
         asyncio.ensure_future(_handle_im_message("feishu", msg))
 
     return {"code": 0}
+
+
+@app.post("/api/im/slack/callback")
+async def api_slack_callback(request: Request):
+    """Slack Events API callback endpoint."""
+    from agenticops.im.slack_gateway import SlackGateway
+
+    body = await request.body()
+    payload = json.loads(body)
+
+    # URL verification challenge
+    if SlackGateway.is_challenge(payload):
+        return SlackGateway.challenge_response(payload)
+
+    gateway = SlackGateway()
+
+    # Verify signature
+    headers = dict(request.headers)
+    if not gateway.verify_callback(body, headers):
+        raise HTTPException(403, "Invalid signature")
+
+    msg = gateway.parse_message(payload)
+    if msg:
+        import asyncio
+        asyncio.ensure_future(_handle_im_message("slack", msg))
+
+    return {"ok": True}
 
 
 @app.post("/api/im/dingtalk/callback")

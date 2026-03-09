@@ -615,12 +615,15 @@ class SNSReportNotifier(Notifier):
                 "Inline HTML too large (%d bytes) — falling back to links only",
                 len(html_body.encode("utf-8")),
             )
+            links_html = "".join(
+                f'<li><a href="{u}">{fmt.upper()}</a></li>' for fmt, u in urls.items()
+            )
             html_body = (
                 f"<h2>{title}</h2>"
                 f"<p>{summary[:1000]}</p>"
                 f"<p>Full report too large for inline delivery. "
                 f"Please use the download links below.</p>"
-                f"<ul>{''.join(f'<li><a href=\"{u}\">{f.upper()}</a></li>' for f, u in urls.items())}</ul>"
+                f"<ul>{links_html}</ul>"
             )
 
         message = {
@@ -1058,6 +1061,89 @@ class WeComNotifier(IMNotifier):
             return True
         except Exception as e:
             logger.error(f"WeCom test failed: {e}")
+            return False
+
+
+# ============================================================================
+# Slack IM Notifier — Bot Token API (bidirectional chat)
+# ============================================================================
+
+
+class SlackIMNotifier(IMNotifier):
+    """Slack notifier via Bot Token API for bidirectional IM chat replies.
+
+    Unlike SlackNotifier (webhook-based, outbound-only), this uses the Bot
+    User OAuth Token (xoxb-...) to send messages via chat.postMessage, which
+    supports bidirectional conversation in channels.
+    """
+
+    API_URL = "https://slack.com/api/chat.postMessage"
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.chat_id = config.get("chat_id", "")
+        self._bot_token: str = ""
+
+    def _ensure_app_config(self) -> None:
+        if self._bot_token:
+            return
+        from agenticops.notify.im_config import get_slack_app
+        app = get_slack_app(self.app_name)
+        if app and app.bot_token:
+            self._bot_token = app.bot_token
+        else:
+            self._bot_token = self.config.get("bot_token", "")
+
+    async def _acquire_token(self) -> None:
+        # Slack bot tokens don't expire — no token refresh needed
+        self._ensure_app_config()
+        if self._bot_token:
+            self._cache_token(self._bot_token, expires_in=86400 * 365)
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Send a message to a Slack channel via Bot API."""
+        self._ensure_app_config()
+        if not self._bot_token or not self.chat_id:
+            logger.error("Slack bot_token or chat_id not configured")
+            return False
+
+        # For IM replies, body is the full response; subject may be empty
+        text = body if body else subject
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    self.API_URL,
+                    headers={"Authorization": f"Bearer {self._bot_token}"},
+                    json={
+                        "channel": self.chat_id,
+                        "text": text,
+                    },
+                    timeout=10.0,
+                )
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.error("Slack IM send error: %s", data.get("error", resp.text))
+                    return False
+                return True
+        except Exception as e:
+            logger.error("Slack IM notification failed: %s", e)
+            return False
+
+    async def test_connection(self) -> bool:
+        """Validate bot token via auth.test API."""
+        self._ensure_app_config()
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {self._bot_token}"},
+                    timeout=10.0,
+                )
+                data = resp.json()
+                return data.get("ok", False)
+        except Exception as e:
+            logger.error("Slack IM test failed: %s", e)
             return False
 
 

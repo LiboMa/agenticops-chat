@@ -167,6 +167,10 @@ class Settings(BaseSettings):
         default=True,
         description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",
     )
+    slack_ws_enabled: bool = Field(
+        default=True,
+        description="Enable Slack Socket Mode (outbound WebSocket, no public URL needed)",
+    )
     skills_draft_dir: Path = Field(
         default=PROJECT_ROOT / "skills" / "draft",
         description="Directory for draft/generated skills (AIOPS_SKILLS_DRAFT_DIR)",

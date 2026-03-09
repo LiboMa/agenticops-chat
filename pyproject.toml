@@ -52,6 +52,7 @@ reports = [
 ]
 im = [
     "lark-oapi>=1.0.0",
+    "slack_sdk>=3.27.0",
     "python-socks[asyncio]>=2.0.0",  # Required when behind SOCKS proxy
 ]
 dev = [
