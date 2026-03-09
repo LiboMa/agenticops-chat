@@ -699,30 +699,27 @@ async def startup():
     _executor_service.start()
 
     # Start Feishu WebSocket long-connection if enabled
+    _startup_log = logging.getLogger(__name__)
     if settings.feishu_ws_enabled:
         try:
             from agenticops.im.feishu_ws import start_feishu_ws
             svc = start_feishu_ws()
             if svc:
-                import logging as _logging
-                _log = _logging.getLogger(__name__)
-                _log.info(
+                _startup_log.info(
                     "Feishu WS: started=%s thread_alive=%s app=%s",
                     svc._started,
                     svc._thread.is_alive() if svc._thread else False,
                     svc._app_name,
                 )
+                print(f"  Feishu WS: started (app={svc._app_name})")
             else:
-                import logging as _logging
-                _logging.getLogger(__name__).error(
-                    "Feishu WS: start_feishu_ws() returned None — check im-apps.yaml"
-                )
-        except Exception:
-            import logging
-            logging.getLogger(__name__).error(
-                "Feishu WS service failed to start (set AIOPS_FEISHU_WS_ENABLED=false to disable)",
-                exc_info=True,
-            )
+                _startup_log.error("Feishu WS: start_feishu_ws() returned None — check im-apps.yaml")
+                print("  Feishu WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
+            print(f"  Feishu WS: FAILED — {e}")
+    else:
+        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
 
     # Start Slack Socket Mode if enabled
     if settings.slack_ws_enabled:
@@ -730,24 +727,21 @@ async def startup():
             from agenticops.im.slack_ws import start_slack_ws
             slack_svc = start_slack_ws()
             if slack_svc:
-                import logging as _logging
-                _logging.getLogger(__name__).info(
+                _startup_log.info(
                     "Slack WS: started=%s thread_alive=%s app=%s",
                     slack_svc._started,
                     slack_svc._thread.is_alive() if slack_svc._thread else False,
                     slack_svc._app_name,
                 )
+                print(f"  Slack WS: started (app={slack_svc._app_name})")
             else:
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "Slack WS: start_slack_ws() returned None — check im-apps.yaml"
-                )
-        except Exception:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Slack WS service failed to start (set AIOPS_SLACK_WS_ENABLED=false to disable)",
-                exc_info=True,
-            )
+                _startup_log.warning("Slack WS: start_slack_ws() returned None — check im-apps.yaml")
+                print("  Slack WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
+            print(f"  Slack WS: FAILED — {e}")
+    else:
+        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
 
 
 @app.on_event("shutdown")

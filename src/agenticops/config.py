@@ -165,12 +165,12 @@ class Settings(BaseSettings):
         description="Path to notification channels YAML (sole source of truth)",
     )
     feishu_ws_enabled: bool = Field(
-        default=True,
-        description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",
+        default=False,
+        description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
-        default=True,
-        description="Enable Slack Socket Mode (outbound WebSocket, no public URL needed)",
+        default=False,
+        description="Enable Slack Socket Mode (AIOPS_SLACK_WS_ENABLED=true)",
     )
     skills_draft_dir: Path = Field(
         default=PROJECT_ROOT / "skills" / "draft",
