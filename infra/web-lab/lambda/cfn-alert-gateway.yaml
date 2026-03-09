@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Alert Gateway: SNS -> Lambda -> multi-channel IM forwarding (Slack, Feishu, Webhook).
+  Deploy infra:  aws cloudformation deploy --template-file cfn-alert-gateway.yaml --stack-name agenticops-alert-gateway --capabilities CAPABILITY_NAMED_IAM --parameter-overrides AlertTargetsJson='{"targets":[...]}'
+  Deploy code:   cd infra/web-lab/lambda && zip alert_gateway.zip alert_gateway.py && aws lambda update-function-code --function-name agenticops-alert-gateway --zip-file fileb://alert_gateway.zip
+
+Parameters:
+  AlertTargetsJson:
+    Type: String
+    NoEcho: true
+    Description: >
+      JSON config string. See alert-targets.json.example for schema.
+
+  ExistingSnsTopic:
+    Type: String
+    Default: ''
+    Description: Existing SNS topic ARN. Leave empty to create a new one.
+
+Conditions:
+  CreateNewTopic: !Equals [!Ref ExistingSnsTopic, '']
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateNewTopic
+    Properties:
+      TopicName: agenticops-alert-gateway
+
+  AlertGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: agenticops-alert-gateway-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AlertGatewayFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: agenticops-alert-gateway
+      Runtime: python3.12
+      Handler: alert_gateway.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !GetAtt AlertGatewayRole.Arn
+      Code:
+        # Placeholder — update with actual code after stack creation:
+        #   zip alert_gateway.zip alert_gateway.py
+        #   aws lambda update-function-code --function-name agenticops-alert-gateway --zip-file fileb://alert_gateway.zip
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 200, "body": "Deploy alert_gateway.py"}
+      Environment:
+        Variables:
+          ALERT_TARGETS: !Ref AlertTargetsJson
+      Tags:
+        - Key: Project
+          Value: agenticops
+
+  SnsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AlertGatewayFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !If
+        - CreateNewTopic
+        - !Ref AlertTopic
+        - !Ref ExistingSnsTopic
+
+  SnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !If
+        - CreateNewTopic
+        - !Ref AlertTopic
+        - !Ref ExistingSnsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt AlertGatewayFunction.Arn
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt AlertGatewayFunction.Arn
+  FunctionName:
+    Value: !Ref AlertGatewayFunction
+  TopicArn:
+    Description: SNS topic ARN — point CloudWatch Alarms here
+    Value: !If
+      - CreateNewTopic
+      - !Ref AlertTopic
+      - !Ref ExistingSnsTopic

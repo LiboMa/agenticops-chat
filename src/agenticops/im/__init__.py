@@ -1,4 +1,4 @@
-"""IM gateway module — bidirectional chat with Feishu/DingTalk/WeCom."""
+"""IM gateway module — bidirectional chat with Feishu/DingTalk/WeCom/Slack."""
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
 
@@ -10,10 +10,21 @@ except ImportError:
     start_feishu_ws = None  # type: ignore[assignment]
     stop_feishu_ws = None  # type: ignore[assignment]
 
+# Slack WS requires slack_sdk — import lazily to avoid hard dependency
+try:
+    from agenticops.im.slack_ws import SlackWSService, start_slack_ws, stop_slack_ws
+except ImportError:
+    SlackWSService = None  # type: ignore[assignment,misc]
+    start_slack_ws = None  # type: ignore[assignment]
+    stop_slack_ws = None  # type: ignore[assignment]
+
 __all__ = [
     "IMGateway",
     "IMInboundMessage",
     "FeishuWSService",
     "start_feishu_ws",
     "stop_feishu_ws",
+    "SlackWSService",
+    "start_slack_ws",
+    "stop_slack_ws",
 ]

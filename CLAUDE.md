@@ -55,6 +55,7 @@ Web Dashboard ──────┘         │
 | `src/agenticops/skills/security.py` | Three-tier security classification for shell + kubectl commands |
 | `src/agenticops/skills/tools.py` | 3 @tool functions: activate_skill, read_skill_reference, list_skills |
 | `src/agenticops/skills/execution.py` | 2 @tool functions: run_on_host (SSM/SSH), run_kubectl (EKS) |
+| `src/agenticops/services/pipeline_events.py` | Pipeline event timeline: `log_event()` + `get_timeline()` (best-effort, never raises) |
 | `src/agenticops/services/pipeline_service.py` | Auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute |
 | `src/agenticops/services/rca_service.py` | Auto-RCA trigger on HealthIssue creation |
 | `src/agenticops/services/executor_service.py` | Background executor polling for pre-queued FixExecutions |
@@ -85,7 +86,7 @@ Web Dashboard ──────┘         │
 | Directory | Contents |
 |-----------|----------|
 | `src/agenticops/web/frontend/src/pages/` | 16 pages: Dashboard, Chat, Resources, Anomalies, AnomalyDetail, FixPlans, FixPlanDetail, Reports, ReportDetail, Network, Schedules, ScheduleDetail, Notifications, NotificationLogs, Accounts, AuditLog |
-| `src/agenticops/web/frontend/src/hooks/` | 22 hooks (TanStack Query): useChat, useChatSessions, useChatSession, useSchedules, useNotifications, useResources, useFixPlans, useAnomalies, useStats, etc. |
+| `src/agenticops/web/frontend/src/hooks/` | 23 hooks (TanStack Query): useChat, useChatSessions, useChatSession, useSchedules, useNotifications, useResources, useFixPlans, useAnomalies, useIssueTimeline, useStats, etc. |
 | `src/agenticops/web/frontend/src/components/chat/` | 5 components: ChatInput, MessageList, SessionList, TokenMetrics, ToolCallChip |
 | `src/agenticops/web/frontend/src/components/layout/` | AppShell, Sidebar, Header |
 | `src/agenticops/web/frontend/src/api/` | `client.ts` (apiFetch), `types.ts` (all TypeScript interfaces) |
@@ -96,7 +97,7 @@ Web Dashboard ──────┘         │
 
 | Group | Count | Base Path |
 |-------|-------|-----------|
-| Health Issues | 7 | `/api/health-issues` |
+| Health Issues | 8 | `/api/health-issues` (includes `/{id}/timeline`) |
 | Fix Plans | 6 | `/api/fix-plans` |
 | Schedules | 7 | `/api/schedules` |
 | Notifications | 7 | `/api/notifications` |
@@ -278,6 +279,28 @@ skills/
 - `skills/kubernetes-admin/SKILL.md` — Fix/Remediation decision trees (8 paths)
 
 ## Recent Changes
+
+### 2026-03-09: Pipeline Lifecycle Tracking — PipelineEvent Timeline
+
+**PipelineEvent model** (`models.py:437-454`): Lightweight event log table with `health_issue_id` as natural trace ID. Fields: `event_type`, `stage`, `status`, `detail` (JSON), `actor`, `duration_ms`, `created_at`. Two indexes on `health_issue_id` and `created_at`.
+
+**Event logger** (`services/pipeline_events.py`): `log_event()` (best-effort, never raises) + `get_timeline()` (returns ordered list of dicts). 12 event types across 6 stages: detection, rca, planning, approval, execution, resolution, notification.
+
+**12 call sites wired**:
+- `metadata_tools.py`: issue_created, issue_deduplicated, rca_completed, fix_plan_created, execution_completed
+- `rca_service.py`: rca_started, rca_completed/failed
+- `pipeline_service.py`: fix_approved, execution_started, execution_completed/failed
+- `notification_service.py`: notification_sent (with channel/sent/failed counts)
+- `resolution_service.py`: resolved, post_resolution
+
+**IM origin context**: `config.py` has `_im_origin_var` ContextVar + `get_im_origin()`/`set_im_origin()`. IM handlers (Slack/Feishu/Web) set origin before agent dispatch. `create_health_issue()` reads it and stores in `metric_data.im_origin`. `notify_im_origin()` sends targeted updates to originating chat at RCA + execution completion.
+
+**API endpoint**: `GET /api/health-issues/{issue_id}/timeline` — returns event list ordered by `created_at ASC`.
+
+**Frontend** (new):
+- `types.ts`: `PipelineEvent` interface
+- `hooks/useIssueTimeline.ts`: TanStack Query hook with 15s auto-refetch
+- `pages/AnomalyDetail.tsx`: `PipelineTimeline` component — vertical timeline with stage-colored dots, status badges, detail chips, duration display. Inserted between Issue Lifecycle stepper and Smart Action Bar.
 
 ### 2026-03-08: Agent-Based IM Alert Routing (Feature A Redesign)
 

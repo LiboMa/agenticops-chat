@@ -91,6 +91,14 @@ class WeComAppConfig:
     encoding_aes_key: str = ""
 
 
+@dataclass(frozen=True)
+class SlackAppConfig:
+    bot_token: str            # xoxb-... Bot User OAuth Token
+    app_token: str            # xapp-... App-Level Token (Socket Mode)
+    signing_secret: str = ""  # For HTTP Events API verification
+    respond_to: str = "mentions_only"  # "mentions_only" | "all"
+
+
 # ── Getters ─────────────────────────────────────────────────────────
 
 
@@ -135,11 +143,25 @@ def get_wecom_app(name: str = "default") -> Optional[WeComAppConfig]:
     )
 
 
+def get_slack_app(name: str = "default") -> Optional[SlackAppConfig]:
+    """Get a Slack app config by name, or None if not found."""
+    data = _load_raw()
+    app = data.get("slack", {}).get(name)
+    if not app or not app.get("bot_token"):
+        return None
+    return SlackAppConfig(
+        bot_token=app["bot_token"],
+        app_token=app.get("app_token", ""),
+        signing_secret=app.get("signing_secret", ""),
+        respond_to=app.get("respond_to", "mentions_only"),
+    )
+
+
 def list_apps() -> Dict[str, list]:
     """List all configured IM app names grouped by platform."""
     data = _load_raw()
     result: Dict[str, list] = {}
-    for platform in ("feishu", "dingtalk", "wecom"):
+    for platform in ("feishu", "dingtalk", "wecom", "slack"):
         names = list(data.get(platform, {}).keys())
         if names:
             result[platform] = names

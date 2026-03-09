@@ -1,0 +1,598 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WebLab 3-tier: ALB (HTTPS/443) -> EC2 (Flask) -> RDS (MySQL) in project-vpc'
+
+Parameters:
+  VpcId:
+    Type: String
+    Default: vpc-028fe79b3785c1aba
+  PublicSubnet1:
+    Type: String
+    Default: subnet-0528a9eddeb9f8f78
+  PublicSubnet2:
+    Type: String
+    Default: subnet-0ba6596ade21d766c
+  PrivateSubnet1:
+    Type: String
+    Default: subnet-0634feb8477a666fa
+  RdsSubnetGroup:
+    Type: String
+    Default: rds-ec2-db-subnet-group-1
+  AcmCertArn:
+    Type: String
+    Default: ""  # Set your ACM certificate ARN here
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0c80974c4cc7acd8d
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: key-malibo-sa
+  InstanceType:
+    Type: String
+    Default: t3.micro
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Default: WebLab2026!
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  AppBucket:
+    Type: String
+    Default: agenticops-reports-533267047935
+  DomainName:
+    Type: String
+    Default: agentic-ops.tinyboat.blog
+  HostedZoneId:
+    Type: String
+    Default: Z02657523IKMDPFJE34YX
+  FeishuAppId:
+    Type: String
+    Default: cli_a9273c9877385bc0
+  FeishuAppSecret:
+    Type: String
+    NoEcho: true
+    Default: JlFINM3yjJQGOxQRmOAyghch1yVdrxGU
+  FeishuAlertChatId:
+    Type: String
+    Default: oc_aa7c42972267ca070bf3977ec8e222bd
+
+Resources:
+  # ================================================================
+  # Security Groups (3-tier isolation)
+  # ================================================================
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: WebLab ALB - HTTPS 443 only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: weblab-alb-sg
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: WebLab EC2 - from ALB only on port 5000
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: weblab-ec2-sg
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: WebLab RDS - from EC2 only on port 3306
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: weblab-rds-sg
+
+  # ================================================================
+  # RDS MySQL (private, single-AZ for test)
+  # ================================================================
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: weblab-mysql
+      Engine: mysql
+      EngineVersion: '8.0'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      MasterUsername: weblab
+      MasterUserPassword: !Ref DBPassword
+      DBName: weblab
+      DBSubnetGroupName: !Ref RdsSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: weblab-mysql
+
+  # ================================================================
+  # IAM Role for EC2 (SSM + S3 read)
+  # ================================================================
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weblab-ec2-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: weblab-s3-read
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${AppBucket}/weblab/*'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # ================================================================
+  # EC2 Instance (private subnet)
+  # ================================================================
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: RDSInstance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -ex
+          exec > /var/log/weblab-userdata.log 2>&1
+
+          echo "=== WebLab UserData start: $(date) ==="
+
+          # Install dependencies
+          dnf install -y python3.11 python3.11-pip tar
+
+          # Download app from S3
+          mkdir -p /opt/weblab
+          cd /opt/weblab
+          aws s3 cp s3://${AppBucket}/weblab/app.tar.gz /tmp/app.tar.gz --region ${AWS::Region}
+          tar xzf /tmp/app.tar.gz -C /opt/weblab/
+
+          # Install Python deps
+          python3.11 -m pip install -r /opt/weblab/requirements.txt
+
+          # Write environment config
+          cat > /opt/weblab/.env << 'ENVEOF'
+          DB_HOST=${RDSInstance.Endpoint.Address}
+          DB_PORT=3306
+          DB_NAME=weblab
+          DB_USER=weblab
+          DB_PASS=${DBPassword}
+          FLASK_SECRET_KEY=weblab-secret-key-2026
+          ENVEOF
+
+          # Write run script
+          cat > /opt/weblab/run.sh << 'RUNEOF'
+          #!/bin/bash
+          set -a
+          source /opt/weblab/.env
+          set +a
+          cd /opt/weblab
+          # Init DB tables on first run
+          python3.11 -c "from app import init_db; init_db()" 2>/dev/null || true
+          exec gunicorn -w 2 -b 0.0.0.0:5000 app:app \
+            --timeout 30 \
+            --access-logfile /var/log/weblab-access.log \
+            --error-logfile /var/log/weblab-error.log
+          RUNEOF
+          chmod +x /opt/weblab/run.sh
+
+          # Create systemd service
+          cat > /etc/systemd/system/weblab.service << 'SVCEOF'
+          [Unit]
+          Description=WebLab Flask Application
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/weblab
+          ExecStart=/opt/weblab/run.sh
+          Restart=always
+          RestartSec=5
+          Environment=PYTHONUNBUFFERED=1
+
+          [Install]
+          WantedBy=multi-user.target
+          SVCEOF
+
+          systemctl daemon-reload
+          systemctl enable weblab
+          systemctl start weblab
+
+          echo "=== WebLab UserData done: $(date) ==="
+      Tags:
+        - Key: Name
+          Value: weblab-ec2
+
+  # ================================================================
+  # ALB + Target Group + HTTPS Listener
+  # ================================================================
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: weblab-alb
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: weblab-alb
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: weblab-tg
+      Port: 5000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: instance
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Targets:
+        - Id: !Ref EC2Instance
+          Port: 5000
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ================================================================
+  # Route 53 DNS Record
+  # ================================================================
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        HostedZoneId: Z1LMS91P8CMLE5
+        EvaluateTargetHealth: true
+
+  # ================================================================
+  # CloudWatch Synthetics Canary (URL monitoring)
+  # ================================================================
+  CanaryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weblab-canary-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchSyntheticsFullAccess
+      Policies:
+        - PolicyName: canary-s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AppBucket}/canary/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AppBucket}'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+
+  CanaryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'weblab-canary-${AWS::AccountId}'
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-canary-artifacts
+            Status: Enabled
+            ExpirationInDays: 7
+
+  SyntheticsCanary:
+    Type: AWS::Synthetics::Canary
+    DependsOn:
+      - DNSRecord
+      - HTTPSListener
+    Properties:
+      Name: weblab-health
+      RuntimeVersion: syn-python-selenium-9.0
+      ArtifactS3Location: !Sub 's3://${CanaryBucket}/canary'
+      ExecutionRoleArn: !GetAtt CanaryRole.Arn
+      Schedule:
+        Expression: rate(5 minutes)
+      RunConfig:
+        TimeoutInSeconds: 60
+      StartCanaryAfterCreation: true
+      Code:
+        Handler: canary.handler
+        Script: |
+          from aws_synthetics.selenium import synthetics_webdriver as syn_webdriver
+          from aws_synthetics.common import synthetics_logger as logger
+
+          def verify_health(url):
+              import urllib.request, json, ssl
+              ctx = ssl.create_default_context()
+              resp = urllib.request.urlopen(f"{url}/health", context=ctx, timeout=10)
+              assert resp.status == 200
+              data = json.loads(resp.read())
+              assert data["status"] == "healthy"
+              logger.info(f"Health OK: {data}")
+
+          def verify_login_page(url):
+              import urllib.request, ssl
+              ctx = ssl.create_default_context()
+              resp = urllib.request.urlopen(f"{url}/login", context=ctx, timeout=10)
+              assert resp.status == 200
+              body = resp.read().decode()
+              assert "Sign In" in body
+              logger.info("Login page OK")
+
+          def handler(event, context):
+              url = "https://agentic-ops.tinyboat.blog"
+              verify_health(url)
+              verify_login_page(url)
+              return "Canary passed"
+
+  # ================================================================
+  # Alarm Pipeline: SNS → Lambda → Feishu Alert Group
+  # ================================================================
+  AlarmSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: weblab-alarms
+
+  AlarmLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: weblab-lambda-feishu-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AlarmLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: weblab-cw-to-feishu
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !GetAtt AlarmLambdaRole.Arn
+      Environment:
+        Variables:
+          FEISHU_APP_ID: !Ref FeishuAppId
+          FEISHU_APP_SECRET: !Ref FeishuAppSecret
+          FEISHU_CHAT_ID: !Ref FeishuAlertChatId
+      Code:
+        ZipFile: |
+          import json, logging, os, urllib.request
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          APP_ID = os.environ.get("FEISHU_APP_ID", "")
+          APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
+          CHAT_ID = os.environ.get("FEISHU_CHAT_ID", "")
+          def get_token():
+              data = json.dumps({"app_id": APP_ID, "app_secret": APP_SECRET}).encode()
+              req = urllib.request.Request("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                  data=data, headers={"Content-Type": "application/json"})
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read())["tenant_access_token"]
+          def send_msg(token, text):
+              data = json.dumps({"receive_id": CHAT_ID, "msg_type": "text",
+                  "content": json.dumps({"text": text})}).encode()
+              req = urllib.request.Request(
+                  "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+                  data=data, headers={"Content-Type": "application/json",
+                      "Authorization": f"Bearer {token}"})
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read())
+          def format_alarm(a):
+              state = a.get("NewStateValue", "UNKNOWN")
+              name = a.get("AlarmName", "Unknown")
+              desc = a.get("AlarmDescription", "")
+              reason = a.get("NewStateReason", "")
+              region = a.get("Region", "")
+              trigger = a.get("Trigger", {})
+              metric = trigger.get("MetricName", "")
+              ns = trigger.get("Namespace", "")
+              dims = ", ".join(f'{d.get("name","")}={d.get("value","")}' for d in trigger.get("Dimensions", []) if isinstance(d, dict))
+              lines = [f'{state}: "{name}" in {region}']
+              if desc: lines.append(f"Description: {desc}")
+              if metric: lines.append(f"Metric: {ns}/{metric}")
+              if dims: lines.append(f"Dimensions: {dims}")
+              if reason: lines.append(f"Reason: {reason}")
+              return "\n".join(lines)
+          def handler(event, context):
+              logger.info("Event: %s", json.dumps(event))
+              token = get_token()
+              for rec in event.get("Records", []):
+                  msg = rec.get("Sns", {}).get("Message", "")
+                  try:
+                      alarm = json.loads(msg)
+                      text = format_alarm(alarm)
+                  except Exception:
+                      text = f"[CloudWatch SNS] {msg}"
+                  logger.info("Sending: %s", text[:200])
+                  result = send_msg(token, text)
+                  logger.info("Feishu: %s", json.dumps(result))
+              return {"statusCode": 200}
+
+  AlarmLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AlarmLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref AlarmSNSTopic
+
+  AlarmSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmSNSTopic
+      Protocol: lambda
+      Endpoint: !GetAtt AlarmLambdaFunction.Arn
+
+  # ================================================================
+  # CloudWatch Alarms (with SNS actions)
+  # ================================================================
+  CanaryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: weblab-canary-failed
+      AlarmDescription: WebLab Synthetics canary health check failed
+      AlarmActions:
+        - !Ref AlarmSNSTopic
+      OKActions:
+        - !Ref AlarmSNSTopic
+      Namespace: CloudWatchSynthetics
+      MetricName: SuccessPercent
+      Dimensions:
+        - Name: CanaryName
+          Value: !Ref SyntheticsCanary
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 90
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+
+  ALBUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: weblab-unhealthy-hosts
+      AlarmDescription: WebLab ALB has unhealthy targets
+      AlarmActions:
+        - !Ref AlarmSNSTopic
+      OKActions:
+        - !Ref AlarmSNSTopic
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt ALB.LoadBalancerFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ALB5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: weblab-5xx-errors
+      AlarmDescription: WebLab ALB returning 5XX errors
+      AlarmActions:
+        - !Ref AlarmSNSTopic
+      OKActions:
+        - !Ref AlarmSNSTopic
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ALB.LoadBalancerFullName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  AppUrl:
+    Description: Application URL
+    Value: !Sub 'https://${DomainName}'
+  ALBDnsName:
+    Description: ALB DNS name
+    Value: !GetAtt ALB.DNSName
+  RDSEndpoint:
+    Description: RDS MySQL endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  EC2InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EC2Instance
+  EC2PrivateIp:
+    Description: EC2 private IP
+    Value: !GetAtt EC2Instance.PrivateIp

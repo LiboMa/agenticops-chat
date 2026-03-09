@@ -33,14 +33,32 @@ channels:
     # Optional: specific senders that always send alerts in this chat channel
     # alert_senders: ["bot_prometheus_id", "bot_grafana_id"]
 
-  # Slack example
-  my-slack-alerts:
+  # Slack (Webhook) — outbound-only alerts via Incoming Webhook
+  my-slack-webhook:
     type: slack
     enabled: true
     preferred_format: markdown
     severity_filter: ["critical", "high"]
     webhook_url: "${SLACK_WEBHOOK_URL}"
     channel: "#alerts"
+
+  # Slack (Bot) — bidirectional ops chat (Agent responds as SRE assistant)
+  slack-ops-chat:
+    type: slack
+    role: chat
+    enabled: true
+    preferred_format: markdown
+    app_name: default
+    chat_id: "${SLACK_OPS_CHANNEL_ID}"
+
+  # Slack (Bot) — dedicated alert channel (all messages are alerts)
+  slack-alerts:
+    type: slack
+    role: alert
+    enabled: true
+    preferred_format: markdown
+    app_name: default
+    chat_id: "${SLACK_ALERT_CHANNEL_ID}"
 
   # Email example
   ops-email:

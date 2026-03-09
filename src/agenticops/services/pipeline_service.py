@@ -122,6 +122,14 @@ def trigger_auto_approve(fix_plan_id: int) -> None:
             fix_plan_id, risk_level, health_issue_id,
         )
 
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(health_issue_id, "fix_approved", "approval",
+                      detail={"plan_id": fix_plan_id, "approved_by": "agent:auto-pipeline", "risk_level": risk_level},
+                      actor="agent:auto-pipeline")
+        except Exception:
+            pass
+
         # Chain: trigger execution
         trigger_auto_execute(fix_plan_id)
 
@@ -158,6 +166,22 @@ def trigger_auto_execute(fix_plan_id: int) -> None:
 
 def _run_auto_execute(fix_plan_id: int) -> None:
     """Run executor_agent for the given fix plan."""
+    # Look up health_issue_id for event logging
+    _issue_id = None
+    try:
+        from agenticops.models import FixPlan, get_db_session
+        with get_db_session() as session:
+            plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
+            if plan:
+                _issue_id = plan.health_issue_id
+    except Exception:
+        pass
+
+    if _issue_id:
+        from agenticops.services.pipeline_events import log_event
+        log_event(_issue_id, "execution_started", "execution", "started",
+                  detail={"plan_id": fix_plan_id, "executor": "agent:executor"})
+
     try:
         from agenticops.agents.executor_agent import executor_agent
 
@@ -167,4 +191,7 @@ def _run_auto_execute(fix_plan_id: int) -> None:
             "Auto-execute completed for #%d: %s", fix_plan_id, str(result)[:200]
         )
     except Exception:
+        if _issue_id:
+            log_event(_issue_id, "execution_completed", "execution", "failed",
+                      detail={"plan_id": fix_plan_id})
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)

@@ -1,10 +1,13 @@
 """Skill tools — progressive disclosure of domain knowledge + dynamic tool loading.
 
-Three @tool functions that agents use to discover and load skill content:
+Six @tool functions that agents use to discover, load, and evolve skill content:
 - list_skills: See what's available
 - activate_skill: Load full SKILL.md decision trees and procedures;
   if the skill declares tools, dynamically register them on the calling agent
 - read_skill_reference: Load detailed reference material
+- create_skill: Generate and create a new draft skill from description
+- improve_skill: Self-improve an existing skill based on identified gaps
+- search_skill_registry: Search local and remote skill registries
 """
 
 from __future__ import annotations
@@ -38,12 +41,17 @@ def list_skills() -> str:
     if not skills:
         return "No skills installed. Add skill packages to the skills/ directory."
 
-    lines = [f"Available Skills ({len(skills)}):"]
+    draft_count = sum(1 for s in skills if s.is_draft)
+    header = f"Available Skills ({len(skills)})"
+    if draft_count:
+        header += f" — {draft_count} draft"
+    lines = [f"{header}:"]
     for s in skills:
         refs_dir = s.path / "references"
         ref_count = len(list(refs_dir.glob("*.md"))) if refs_dir.is_dir() else 0
         has_tools = bool(s.tools)
-        lines.append(f"\n  {s.name}")
+        draft_tag = " [DRAFT]" if s.is_draft else ""
+        lines.append(f"\n  {s.name}{draft_tag}")
         lines.append(f"    {s.description[:200]}")
         if ref_count:
             lines.append(f"    References: {ref_count} files")
@@ -149,3 +157,93 @@ def read_skill_reference(skill_name: str, reference_path: str) -> str:
         )
 
     return f"<skill_reference skill=\"{skill_name}\" path=\"{reference_path}\">\n{content}\n</skill_reference>"
+
+
+@tool
+def create_skill(name: str, description: str) -> str:
+    """Create a new draft skill by generating content from a description.
+
+    Uses LLM to generate a complete SKILL.md with decision trees, diagnostic
+    procedures, and command references. The skill is created as a draft and
+    immediately available for activation.
+
+    Args:
+        name: Skill name (lowercase, hyphenated, e.g., 'redis-admin').
+        description: Natural language description of what the skill should cover.
+
+    Returns:
+        Success message with path, or error message.
+    """
+    from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+
+    result = generate_skill_from_description(description)
+    if "error" in result:
+        return f"Failed to generate skill: {result['error']}"
+
+    path = create_draft_skill(
+        name=result.get("name", name),
+        description=result.get("description", description)[:200],
+        content=result.get("content", ""),
+        references=result.get("references"),
+    )
+    _invalidate_skills_cache()
+    return (
+        f"Draft skill '{result.get('name', name)}' created at {path}.\n"
+        f"It is now available — use activate_skill('{result.get('name', name)}') to load it."
+    )
+
+
+@tool
+def improve_skill(skill_name: str, improvement: str) -> str:
+    """Self-improve an existing skill based on an identified gap.
+
+    Creates an improved draft version of the skill. The original published
+    skill is preserved until the draft is reviewed and promoted.
+
+    Args:
+        skill_name: Name of the existing skill to improve.
+        improvement: Description of what's missing or needs improvement.
+
+    Returns:
+        Success message with draft path, or error message.
+    """
+    from agenticops.skills.evolution import auto_improve_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+
+    result = auto_improve_skill(skill_name, improvement)
+    if "error" in result:
+        return f"Failed to improve skill: {result['error']}"
+
+    _invalidate_skills_cache()
+    return (
+        f"Improved draft of '{skill_name}' created at {result['draft_path']}.\n"
+        f"The improved version is available as a draft. "
+        f"Use activate_skill('{skill_name}') to load it."
+    )
+
+
+@tool
+def search_skill_registry(query: str) -> str:
+    """Search for skills across local installation and remote registry.
+
+    Searches both installed skills (published + draft) and ClawHub
+    remote registry (if enabled).
+
+    Args:
+        query: Search query (matches skill names and descriptions).
+
+    Returns:
+        Formatted list of matching skills with source information.
+    """
+    from agenticops.skills.registry import search_skills
+
+    results = search_skills(query)
+    if not results:
+        return f"No skills found matching '{query}'."
+
+    lines = [f"Search results for '{query}' ({len(results)} found):"]
+    for r in results:
+        source = r.get("source", "local")
+        lines.append(f"  {r['name']} [{source}] — {r.get('description', '')[:120]}")
+    return "\n".join(lines)

@@ -53,6 +53,11 @@ def _run_post_resolution(health_issue_id: int) -> None:
             )
             return
 
+    from agenticops.services.pipeline_events import log_event
+
+    log_event(health_issue_id, "resolved", "resolution",
+              detail={"auto_resolved": True})
+
     # Step 1: RAG pipeline (SOP generation/upgrade)
     rag_result = None
     try:
@@ -71,6 +76,7 @@ def _run_post_resolution(health_issue_id: int) -> None:
         logger.exception("RAG pipeline failed for HealthIssue #%d", health_issue_id)
 
     # Step 2: Case distillation
+    case_id = None
     try:
         from agenticops.tools.kb_tools import distill_case_study
 
@@ -79,6 +85,14 @@ def _run_post_resolution(health_issue_id: int) -> None:
         logger.info("Case distillation for #%d: %s", health_issue_id, distill_result[:200])
     except Exception:
         logger.exception("Case distillation failed for HealthIssue #%d", health_issue_id)
+
+    # Log post-resolution pipeline event
+    log_event(health_issue_id, "post_resolution", "resolution",
+              "completed" if rag_result and rag_result.success else "failed",
+              detail={
+                  "sop": rag_result.sop_filename if rag_result else None,
+                  "rag_action": rag_result.action if rag_result else None,
+              })
 
     # Step 3: Record pipeline run in DB (for observability)
     try:

@@ -5,6 +5,7 @@ import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueExecutions } from "@/hooks/useIssueExecutions";
+import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useCancelExecution } from "@/hooks/useFixExecutions";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -18,7 +19,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { apiFetch } from "@/api/client";
-import type { IssueStatus } from "@/api/types";
+import type { IssueStatus, PipelineEvent } from "@/api/types";
 
 export default function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -28,6 +29,7 @@ export default function AnomalyDetail() {
   const rca = useAnomalyRca(anomalyId);
   const fixPlans = useFixPlans({ health_issue_id: anomalyId });
   const executions = useIssueExecutions(anomalyId);
+  const timeline = useIssueTimeline(anomalyId);
   const updateStatusMut = useUpdateIssueStatus();
   const cancelExecMut = useCancelExecution();
 
@@ -181,6 +183,18 @@ export default function AnomalyDetail() {
           <IssueStatusStepper status={a.status} />
         </CardBody>
       </Card>
+
+      {/* Pipeline Event Timeline */}
+      {timeline.data && timeline.data.length > 0 && (
+        <Card>
+          <CardBody>
+            <h2 className="text-sm font-medium text-slate-500 mb-4 uppercase tracking-wider">
+              Pipeline Timeline
+            </h2>
+            <PipelineTimeline events={timeline.data} />
+          </CardBody>
+        </Card>
+      )}
 
       {/* Smart Action Bar */}
       <IssueActionBar
@@ -448,6 +462,96 @@ export default function AnomalyDetail() {
           </CardBody>
         </Card>
       )}
+    </div>
+  );
+}
+
+/* ── Pipeline Timeline Component ────────────────────────────────── */
+
+const STAGE_COLORS: Record<string, string> = {
+  detection: "bg-blue-500",
+  rca: "bg-amber-500",
+  planning: "bg-violet-500",
+  approval: "bg-emerald-500",
+  execution: "bg-orange-500",
+  resolution: "bg-green-600",
+  notification: "bg-slate-400",
+};
+
+const STATUS_ICONS: Record<string, string> = {
+  completed: "✓",
+  started: "▶",
+  failed: "✗",
+  skipped: "–",
+};
+
+function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
+  return (
+    <div className="relative">
+      {/* Vertical line */}
+      <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-200" />
+      <div className="space-y-3">
+        {events.map((ev, i) => {
+          const color = STAGE_COLORS[ev.stage] || "bg-slate-400";
+          const icon = STATUS_ICONS[ev.status] || "•";
+          const isFailed = ev.status === "failed";
+          return (
+            <div key={ev.id ?? i} className="relative flex items-start gap-3 pl-0">
+              {/* Dot */}
+              <div
+                className={`relative z-10 flex-shrink-0 w-[31px] h-[31px] rounded-full flex items-center justify-center text-white text-xs font-bold ${color} ${isFailed ? "ring-2 ring-red-300" : ""}`}
+              >
+                {icon}
+              </div>
+              {/* Content */}
+              <div className="flex-1 min-w-0 pb-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-slate-900">
+                    {ev.event_type.replace(/_/g, " ")}
+                  </span>
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${
+                    isFailed
+                      ? "bg-red-100 text-red-700"
+                      : ev.status === "started"
+                        ? "bg-blue-100 text-blue-700"
+                        : ev.status === "skipped"
+                          ? "bg-slate-100 text-slate-500"
+                          : "bg-green-100 text-green-700"
+                  }`}>
+                    {ev.status}
+                  </span>
+                  {ev.duration_ms != null && ev.duration_ms > 0 && (
+                    <span className="text-[10px] text-slate-400">
+                      {ev.duration_ms >= 1000
+                        ? `${(ev.duration_ms / 1000).toFixed(1)}s`
+                        : `${ev.duration_ms}ms`}
+                    </span>
+                  )}
+                </div>
+                {/* Detail chips */}
+                {ev.detail && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {Object.entries(ev.detail).map(([k, v]) =>
+                      v != null ? (
+                        <span
+                          key={k}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600 font-mono"
+                        >
+                          {k}: {typeof v === "object" ? JSON.stringify(v) : String(v).slice(0, 80)}
+                        </span>
+                      ) : null,
+                    )}
+                  </div>
+                )}
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {ev.actor !== "system" && <span className="mr-2">{ev.actor}</span>}
+                  {formatFullDate(ev.created_at)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -279,3 +279,157 @@ async def post_change_simulation(
     except Exception as e:
         logger.exception("Change simulation failed")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── World Graph (persisted) Endpoints ─────────────────────────────
+
+
+@router.get("/search")
+async def search_graph_nodes(
+    q: str = Query("", description="Search query (matches label or ID)"),
+    node_type: str = Query("", description="Filter by node type"),
+    region: str = Query("", description="Filter by region"),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict]:
+    """Search persisted graph nodes by label/type/region."""
+    try:
+        from agenticops.graph.store import GraphStore
+        store = GraphStore()
+        return store.search_nodes(query=q, node_type=node_type, region=region, limit=limit)
+    except Exception as e:
+        logger.exception("Graph search failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/node/{node_id}/context")
+async def get_node_context(node_id: str) -> dict:
+    """Get full neighborhood context for a node (for RCA enrichment)."""
+    try:
+        from agenticops.graph.context import get_alert_context
+        ctx = get_alert_context(node_id)
+        if ctx is None:
+            return JSONResponse({"error": "Node not found"}, status_code=404)
+        return ctx
+    except Exception as e:
+        logger.exception("Node context lookup failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/node/{node_id}/blast-radius")
+async def get_node_blast_radius(
+    node_id: str,
+    depth: int = Query(2, ge=1, le=5, description="Neighborhood depth"),
+) -> dict:
+    """Get blast radius / impact analysis from the stored graph."""
+    try:
+        from agenticops.graph.store import GraphStore
+        from agenticops.graph.algorithms import dependency_chain_analysis
+
+        store = GraphStore()
+        graph = store.get_node_neighborhood(node_id, depth=depth)
+        if node_id not in graph.graph:
+            return JSONResponse({"error": "Node not found"}, status_code=404)
+
+        result = dependency_chain_analysis(graph, node_id)
+        return result.model_dump()
+    except Exception as e:
+        logger.exception("Blast radius analysis failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/stats")
+async def get_graph_stats() -> dict:
+    """Get graph statistics: node/edge counts, last sync, staleness."""
+    try:
+        from sqlalchemy import text
+        from agenticops.models import get_engine
+        from agenticops.config import settings
+
+        engine = get_engine()
+        with engine.connect() as conn:
+            node_count = conn.execute(text("SELECT COUNT(*) FROM graph_nodes")).scalar() or 0
+            edge_count = conn.execute(text("SELECT COUNT(*) FROM graph_edges")).scalar() or 0
+
+            # Counts by type
+            type_rows = conn.execute(
+                text("SELECT node_type, COUNT(*) as cnt FROM graph_nodes GROUP BY node_type ORDER BY cnt DESC")
+            ).fetchall()
+            type_counts = {r[0]: r[1] for r in type_rows}
+
+            # Last sync
+            last_snapshot = conn.execute(
+                text("SELECT scope, snapshot_at, node_count, edge_count, nodes_added, nodes_updated, nodes_removed "
+                     "FROM graph_snapshots ORDER BY id DESC LIMIT 1")
+            ).fetchone()
+
+            last_sync = None
+            if last_snapshot:
+                last_sync = {
+                    "scope": last_snapshot[0],
+                    "snapshot_at": last_snapshot[1],
+                    "node_count": last_snapshot[2],
+                    "edge_count": last_snapshot[3],
+                    "nodes_added": last_snapshot[4],
+                    "nodes_updated": last_snapshot[5],
+                    "nodes_removed": last_snapshot[6],
+                }
+
+            # Stale nodes count
+            from datetime import datetime, timedelta, timezone
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=settings.graph_node_ttl_hours)).strftime("%Y-%m-%d %H:%M:%S")
+            stale_count = conn.execute(
+                text("SELECT COUNT(*) FROM graph_nodes WHERE updated_at < :cutoff"),
+                {"cutoff": cutoff},
+            ).scalar() or 0
+
+        return {
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "type_counts": type_counts,
+            "last_sync": last_sync,
+            "stale_node_count": stale_count,
+            "graph_sync_enabled": settings.graph_sync_enabled,
+            "graph_sync_interval_minutes": settings.graph_sync_interval_minutes,
+            "graph_node_ttl_hours": settings.graph_node_ttl_hours,
+        }
+    except Exception as e:
+        logger.exception("Graph stats failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/diff")
+async def get_graph_diff(
+    limit: int = Query(10, ge=1, le=50, description="Number of recent snapshots"),
+) -> list[dict]:
+    """Compare recent graph snapshots to show sync history."""
+    try:
+        from sqlalchemy import text
+        from agenticops.models import get_engine
+
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, scope, snapshot_at, node_count, edge_count, "
+                    "nodes_added, nodes_updated, nodes_removed "
+                    "FROM graph_snapshots ORDER BY id DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            ).fetchall()
+
+        return [
+            {
+                "id": r[0],
+                "scope": r[1],
+                "snapshot_at": r[2],
+                "node_count": r[3],
+                "edge_count": r[4],
+                "nodes_added": r[5],
+                "nodes_updated": r[6],
+                "nodes_removed": r[7],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.exception("Graph diff failed")
+        return JSONResponse({"error": str(e)}, status_code=500)

@@ -167,6 +167,10 @@ class Settings(BaseSettings):
         default=True,
         description="Enable Feishu WebSocket long-connection (outbound, no public URL needed)",
     )
+    slack_ws_enabled: bool = Field(
+        default=True,
+        description="Enable Slack Socket Mode (outbound WebSocket, no public URL needed)",
+    )
     skills_draft_dir: Path = Field(
         default=PROJECT_ROOT / "skills" / "draft",
         description="Directory for draft/generated skills (AIOPS_SKILLS_DRAFT_DIR)",
@@ -400,3 +404,24 @@ def set_detail_level(level: str) -> contextvars.Token:
     if level not in VALID_DETAIL_LEVELS:
         raise ValueError(f"Invalid detail level '{level}'. Must be one of: {', '.join(VALID_DETAIL_LEVELS)}")
     return _detail_level_var.set(level)
+
+
+# ── IM Origin context (set by IM handlers, read by create_health_issue) ──
+
+_im_origin_var: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
+    "im_origin", default=None
+)
+
+
+def get_im_origin() -> Optional[dict]:
+    """Get the current IM origin context (platform + chat_id)."""
+    return _im_origin_var.get()
+
+
+def set_im_origin(origin: Optional[dict]) -> contextvars.Token:
+    """Set IM origin context for the current agent invocation.
+
+    Args:
+        origin: dict with 'platform' and 'chat_id' keys, or None to clear.
+    """
+    return _im_origin_var.set(origin)

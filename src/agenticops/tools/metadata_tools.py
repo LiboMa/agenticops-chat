@@ -285,11 +285,27 @@ def create_health_issue(
             if severity.lower() in ("critical", "high") and existing.severity in ("medium", "low"):
                 existing.severity = severity.lower()
             session.commit()
+
+            try:
+                from agenticops.services.pipeline_events import log_event
+                log_event(existing.id, "issue_deduplicated", "detection", "skipped",
+                          detail={"existing_id": existing.id, "count": existing.occurrence_count})
+            except Exception:
+                pass
+
             return (
                 f"Deduplicated: updated existing HealthIssue #{existing.id} "
                 f"(count={existing.occurrence_count}): "
                 f"[{existing.severity.upper()}] {existing.title}"
             )
+
+        # Inject IM origin if called from an IM agent context
+        from agenticops.config import get_im_origin
+        im_origin = get_im_origin()
+        if im_origin and isinstance(metric_data_parsed, dict):
+            metric_data_parsed["im_origin"] = im_origin
+        elif im_origin and not metric_data_parsed:
+            metric_data_parsed = {"im_origin": im_origin}
 
         issue = HealthIssue(
             resource_id=resource_id,
@@ -309,6 +325,14 @@ def create_health_issue(
         )
         session.add(issue)
         session.commit()
+
+        # Log pipeline event
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(issue.id, "issue_created", "detection",
+                      detail={"severity": severity, "fingerprint": fingerprint, "source": source})
+        except Exception:
+            pass
 
         # Auto-trigger RCA for newly created issues
         from agenticops.services.rca_service import trigger_auto_rca
@@ -575,6 +599,14 @@ def save_rca_result(
         issue.status = "root_cause_identified"
         session.commit()
 
+        # Log pipeline event
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(health_issue_id, "rca_completed", "rca",
+                      detail={"rca_id": rca.id, "confidence": rca.confidence, "root_cause": root_cause[:200]})
+        except Exception:
+            pass
+
         # Auto-trigger SRE fix plan generation
         try:
             from agenticops.services.pipeline_service import trigger_auto_sre
@@ -582,10 +614,14 @@ def save_rca_result(
         except Exception as e:
             logger.warning("Failed to trigger auto-SRE: %s", e)
 
-        # Auto-notify
+        # Auto-notify + IM origin update
         try:
-            from agenticops.services.notification_service import notify_rca_completed
+            from agenticops.services.notification_service import notify_rca_completed, notify_im_origin
             notify_rca_completed(health_issue_id, root_cause, rca.confidence)
+            notify_im_origin(
+                health_issue_id, "rca_completed",
+                f"RCA completed for Issue #{health_issue_id}: {root_cause[:200]}. Confidence: {rca.confidence:.0%}",
+            )
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
@@ -728,6 +764,14 @@ def save_fix_plan(
 
         issue.status = "fix_planned"
         session.commit()
+
+        # Log pipeline event
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(health_issue_id, "fix_plan_created", "planning",
+                      detail={"plan_id": plan.id, "risk_level": risk_level})
+        except Exception:
+            pass
 
         # Auto-approve L0/L1 plans
         try:
@@ -999,6 +1043,15 @@ def save_execution_result(
 
         session.commit()
 
+        # Log pipeline event
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(health_issue_id, "execution_completed", "execution", status,
+                      detail={"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved},
+                      duration_ms=duration_ms)
+        except Exception:
+            pass
+
         # Trigger post-resolution pipeline (RAG + case distillation) in background
         if auto_resolved:
             try:
@@ -1007,10 +1060,15 @@ def save_execution_result(
             except Exception as e:
                 logger.warning("Failed to trigger post-resolution pipeline: %s", e)
 
-        # Auto-notify
+        # Auto-notify + IM origin update
         try:
-            from agenticops.services.notification_service import notify_execution_result
+            from agenticops.services.notification_service import notify_execution_result, notify_im_origin
             notify_execution_result(fix_plan_id, health_issue_id, status, error_message)
+            notify_im_origin(
+                health_issue_id, "execution_completed",
+                f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{health_issue_id} (Plan #{fix_plan_id})"
+                + (f": {error_message[:200]}" if error_message else ""),
+            )
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 

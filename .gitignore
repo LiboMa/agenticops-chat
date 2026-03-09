@@ -39,6 +39,7 @@ data/
 reports/
 config/im-apps.yaml
 config/channels.yaml
+infra/web-lab/lambda/alert-targets.json
 
 # OS
 .DS_Store
@@ -58,3 +59,4 @@ htmlcov/
 # Frontend
 node_modules/
 src/agenticops/web/frontend/dist/
+docs/use-cases/test.html

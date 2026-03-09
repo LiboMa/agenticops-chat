@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - WebLab</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,.08); width: 400px; }
+        .card h1 { font-size: 24px; margin-bottom: 8px; color: #1a1a2e; }
+        .card p.sub { color: #666; margin-bottom: 24px; font-size: 14px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; }
+        .form-group input { width: 100%; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; font-size: 14px; transition: border-color .2s; }
+        .form-group input:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+        .btn { width: 100%; padding: 10px; background: #4f46e5; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s; }
+        .btn:hover { background: #4338ca; }
+        .link { text-align: center; margin-top: 16px; font-size: 13px; color: #666; }
+        .link a { color: #4f46e5; text-decoration: none; font-weight: 500; }
+        .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+        .flash.error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .flash.success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+        .logo { text-align: center; margin-bottom: 24px; font-size: 32px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">&#x1f4dd;</div>
+        <h1>Create Account</h1>
+        <p class="sub">Register for WebLab Dashboard</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+        {% endfor %}
+        {% endwith %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="username" placeholder="Choose a username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email" placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="At least 6 characters" required minlength="6">
+            </div>
+            <button type="submit" class="btn">Create Account</button>
+        </form>
+        <div class="link">Already have an account? <a href="/login">Sign In</a></div>
+    </div>
+</body>
+</html>

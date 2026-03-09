@@ -2687,6 +2687,95 @@ def _slash_channel(ctx: ChatContext, args: list) -> str:
     return f"[yellow]{result.message}[/yellow]"
 
 
+def _slash_skill(ctx: ChatContext, args: list) -> str:
+    """Handle /skill commands for skill management."""
+    if not args:
+        return """[bold]Skill Commands:[/bold]
+
+  /skill list                         List all skills (published + draft)
+  /skill search <query>               Search local + registry skills
+  /skill create <name> <description>  Create a draft skill from description
+  /skill review <name>                Review a draft skill
+  /skill promote <name>               Promote draft to published
+  /skill reject <name>                Delete a draft skill"""
+
+    sub = args[0].lower()
+
+    if sub == "list":
+        from agenticops.skills.loader import discover_skills
+        skills = discover_skills()
+        if not skills:
+            return "[yellow]No skills found.[/yellow]"
+        lines = [f"[bold]Skills ({len(skills)}):[/bold]"]
+        for s in skills:
+            tag = " [magenta][DRAFT][/magenta]" if s.is_draft else ""
+            lines.append(f"  {s.name}{tag} — {s.description[:80]}")
+        return "\n".join(lines)
+
+    elif sub == "search":
+        if len(args) < 2:
+            return "[yellow]Usage: /skill search <query>[/yellow]"
+        query = " ".join(args[1:])
+        from agenticops.skills.registry import search_skills
+        results = search_skills(query)
+        if not results:
+            return f"[yellow]No skills found matching '{query}'[/yellow]"
+        lines = [f"[bold]Search results for '{query}':[/bold]"]
+        for r in results:
+            source = r.get("source", "local")
+            lines.append(f"  {r['name']} [{source}] — {r.get('description', '')[:80]}")
+        return "\n".join(lines)
+
+    elif sub == "create":
+        if len(args) < 3:
+            return "[yellow]Usage: /skill create <name> <description...>[/yellow]"
+        name = args[1]
+        description = " ".join(args[2:])
+        from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
+        result = generate_skill_from_description(description)
+        if "error" in result:
+            return f"[red]Generation failed: {result['error']}[/red]"
+        path = create_draft_skill(
+            name=result.get("name", name),
+            description=result.get("description", description),
+            content=result.get("content", ""),
+            references=result.get("references"),
+        )
+        return f"[green]Draft skill created at {path}[/green]"
+
+    elif sub == "review":
+        if len(args) < 2:
+            return "[yellow]Usage: /skill review <name>[/yellow]"
+        from agenticops.skills.review import review_draft_skill
+        info = review_draft_skill(args[1])
+        if info is None:
+            return f"[yellow]Draft skill '{args[1]}' not found[/yellow]"
+        lines = [f"[bold]Draft Review: {info['name']}[/bold]"]
+        lines.append(f"  {info['diff_summary']}")
+        lines.append(f"  New skill: {'yes' if info['is_new'] else 'no (has published version)'}")
+        lines.append(f"\n  Use /skill promote {args[1]} to publish, or /skill reject {args[1]} to delete.")
+        return "\n".join(lines)
+
+    elif sub == "promote":
+        if len(args) < 2:
+            return "[yellow]Usage: /skill promote <name>[/yellow]"
+        from agenticops.skills.review import promote_skill
+        if promote_skill(args[1]):
+            return f"[green]Skill '{args[1]}' promoted to published.[/green]"
+        return f"[red]Draft skill '{args[1]}' not found.[/red]"
+
+    elif sub == "reject":
+        if len(args) < 2:
+            return "[yellow]Usage: /skill reject <name>[/yellow]"
+        from agenticops.skills.review import reject_draft_skill
+        if reject_draft_skill(args[1]):
+            return f"[green]Draft skill '{args[1]}' deleted.[/green]"
+        return f"[red]Draft skill '{args[1]}' not found.[/red]"
+
+    else:
+        return f"[yellow]Unknown subcommand '{sub}'. Use /skill for help.[/yellow]"
+
+
 def _slash_export(ctx: ChatContext, args: list) -> str:
     """Handle /export command - quick data export."""
     if not args:
@@ -2882,6 +2971,10 @@ SLASH_COMMANDS = {
     # Channel management
     "channel": _slash_channel,
     "channels": _slash_channel,
+
+    # Skills
+    "skill": _slash_skill,
+    "skills": _slash_skill,
 
     # Export
     "export": _slash_export,

@@ -643,6 +643,21 @@ export interface ChangeSimulationResult {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Pipeline Event Timeline                                            */
+/* ------------------------------------------------------------------ */
+
+export interface PipelineEvent {
+  id: number;
+  event_type: string;
+  stage: string;
+  status: string;
+  detail: Record<string, unknown> | null;
+  actor: string;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Report Publishing & Subscriptions                                  */
 /* ------------------------------------------------------------------ */
 

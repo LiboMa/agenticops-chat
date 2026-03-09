@@ -33,6 +33,10 @@ def trigger_auto_rca(health_issue_id: int) -> None:
 
 def _run_auto_rca(health_issue_id: int) -> None:
     """Run rca_agent for the given issue."""
+    from agenticops.services.pipeline_events import log_event
+
+    log_event(health_issue_id, "rca_started", "rca", "started",
+              detail={"model_id": settings.bedrock_model_id})
     try:
         from agenticops.agents.rca_agent import rca_agent
 
@@ -42,4 +46,5 @@ def _run_auto_rca(health_issue_id: int) -> None:
             "Auto-RCA completed for #%d: %s", health_issue_id, str(result)[:200]
         )
     except Exception:
+        log_event(health_issue_id, "rca_completed", "rca", "failed")
         logger.exception("Auto-RCA failed for HealthIssue #%d", health_issue_id)

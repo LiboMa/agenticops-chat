@@ -287,7 +287,11 @@ class FeishuWSService:
                     len(agent_input),
                 )
                 logger.debug(">>> Agent input (first 500): %s", agent_input[:500])
+                # Set IM origin context so create_health_issue stores it
+                from agenticops.config import set_im_origin
+                _im_token = set_im_origin({"platform": "feishu", "chat_id": chat_id})
                 result = agent(agent_input)
+                set_im_origin(None)  # clear after agent completes
                 response_text = str(result)
                 logger.info(
                     ">>> Agent response (first 300): %s", response_text[:300]

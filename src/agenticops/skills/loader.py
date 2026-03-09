@@ -1,8 +1,9 @@
 """Skill discovery, YAML parsing, XML generation, and prompt helper.
 
-Scans the skills/ directory for valid SKILL.md packages, parses YAML
-frontmatter, and generates XML summaries for agent system prompts.
+Scans the skills/ directory (and skills/draft/) for valid SKILL.md packages,
+parses YAML frontmatter, and generates XML summaries for agent system prompts.
 Supports dynamic tool registration via the ``tools`` frontmatter field.
+Uses mtime-based cache invalidation (same pattern as notify/im_config.py).
 """
 
 from __future__ import annotations
@@ -20,10 +21,39 @@ from agenticops.config import get_detail_level, settings
 
 logger = logging.getLogger(__name__)
 
-# ── Module-level cache ───────────────────────────────────────────────
+# ── Module-level mtime cache ────────────────────────────────────────
 
 _cached_skills: list[SkillMetadata] | None = None
+_cached_mtime: float = 0.0
 _cached_xml: str | None = None
+
+
+def _get_max_mtime(*directories: Path) -> float:
+    """Return the max mtime of SKILL.md files across given directories.
+
+    Also considers directory mtime itself (detects skill additions/removals).
+    """
+    max_mt = 0.0
+    for directory in directories:
+        if not directory.is_dir():
+            continue
+        # Directory mtime changes when children are added/removed
+        max_mt = max(max_mt, directory.stat().st_mtime)
+        for skill_dir in directory.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            skill_md = skill_dir / "SKILL.md"
+            if skill_md.is_file():
+                max_mt = max(max_mt, skill_md.stat().st_mtime)
+    return max_mt
+
+
+def _invalidate_skills_cache() -> None:
+    """Force cache invalidation."""
+    global _cached_skills, _cached_mtime, _cached_xml
+    _cached_skills = None
+    _cached_mtime = 0.0
+    _cached_xml = None
 
 
 @dataclass
@@ -37,6 +67,7 @@ class SkillMetadata:
     compatibility: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     tools: list[str] = field(default_factory=list)  # dotted paths to @tool functions
+    is_draft: bool = False
 
 
 # ── YAML Frontmatter Parsing ────────────────────────────────────────
@@ -70,30 +101,12 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
 # ── Skill Discovery ─────────────────────────────────────────────────
 
 
-def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
-    """Scan for valid skill directories containing SKILL.md.
-
-    Args:
-        skills_dir: Override skills directory (defaults to settings.skills_dir).
-
-    Returns:
-        List of SkillMetadata for each valid skill found.
-    """
-    global _cached_skills
-    if _cached_skills is not None:
-        return _cached_skills
-
-    if not settings.skills_enabled:
-        _cached_skills = []
-        return _cached_skills
-
-    directory = skills_dir or settings.skills_dir
-    if not directory.is_dir():
-        logger.debug("Skills directory does not exist: %s", directory)
-        _cached_skills = []
-        return _cached_skills
-
+def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetadata]:
+    """Scan a single directory for valid skill packages."""
     skills: list[SkillMetadata] = []
+    if not directory.is_dir():
+        return skills
+
     for skill_dir in sorted(directory.iterdir()):
         if not skill_dir.is_dir():
             continue
@@ -121,13 +134,66 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
                     compatibility=fm.get("compatibility"),
                     metadata=fm.get("metadata", {}),
                     tools=fm.get("tools", []),
+                    is_draft=is_draft,
                 )
             )
         except Exception as e:
             logger.warning("Failed to load skill from %s: %s", skill_dir, e)
 
+    return skills
+
+
+def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
+    """Scan for valid skill directories containing SKILL.md.
+
+    Checks both the main skills/ directory and the draft/ subdirectory.
+    Uses mtime-based cache invalidation — reloads when any SKILL.md changes.
+
+    Args:
+        skills_dir: Override skills directory (defaults to settings.skills_dir).
+
+    Returns:
+        List of SkillMetadata for each valid skill found.
+    """
+    global _cached_skills, _cached_mtime, _cached_xml
+
+    if not settings.skills_enabled:
+        if _cached_skills is None:
+            _cached_skills = []
+        return _cached_skills
+
+    directory = skills_dir or settings.skills_dir
+    draft_dir = settings.skills_draft_dir
+
+    # Check mtime for cache invalidation
+    current_mtime = _get_max_mtime(directory, draft_dir)
+    if _cached_skills is not None and current_mtime == _cached_mtime:
+        return _cached_skills
+
+    # Cache miss or stale — reload
+    # Also invalidate XML cache since skills changed
+    _cached_xml = None
+
+    skills = _scan_directory(directory, is_draft=False)
+    draft_skills = _scan_directory(draft_dir, is_draft=True)
+
+    # Merge: draft skills with same name as published are skipped
+    published_names = {s.name for s in skills}
+    for ds in draft_skills:
+        if ds.name not in published_names:
+            skills.append(ds)
+        else:
+            logger.debug(
+                "Draft skill '%s' shadowed by published skill", ds.name
+            )
+
     _cached_skills = skills
-    logger.info("Discovered %d skills", len(skills))
+    _cached_mtime = current_mtime
+    logger.info(
+        "Discovered %d skills (%d draft)",
+        len(skills),
+        sum(1 for s in skills if s.is_draft),
+    )
     return _cached_skills
 
 
@@ -136,6 +202,8 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
 
 def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
     """Generate <available_skills> XML block for agent system prompts.
+
+    Draft skills are marked with [DRAFT] prefix in their description.
 
     Args:
         skills: List of discovered skill metadata.
@@ -148,7 +216,8 @@ def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
 
     lines = ["<available_skills>"]
     for s in skills:
-        lines.append(f'  <skill name="{s.name}">{s.description}</skill>')
+        desc = f"[DRAFT] {s.description}" if s.is_draft else s.description
+        lines.append(f'  <skill name="{s.name}">{desc}</skill>')
     lines.append("</available_skills>")
     return "\n".join(lines)
 
