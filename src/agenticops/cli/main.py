@@ -3894,8 +3894,7 @@ def _print_service_info(host: str, port: int, *, frontend: bool = False) -> None
     console.print(f"  PID file      : {_SERVICE_PID_FILE}")
     console.print(f"  Logs:")
     console.print(f"    backend.log   : {_SERVICE_LOG_DIR / 'backend.log'}")
-    if frontend:
-        console.print(f"    frontend.log  : {_SERVICE_LOG_DIR / 'frontend.log'}")
+    console.print(f"    frontend.log  : {_SERVICE_LOG_DIR / 'frontend.log'}")
     if settings.feishu_ws_enabled:
         console.print(f"    feishu_ws.log : {_SERVICE_LOG_DIR / 'feishu_ws.log'}")
     if settings.slack_ws_enabled:
