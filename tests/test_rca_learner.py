@@ -164,48 +164,51 @@ class TestRCALearner:
         assert summary["reflected"] is False
 
     def test_skill_revision_path(self, learner, good_result):
-        """When existing skill found, revision path taken."""
+        """When no gap detected, revision path taken."""
         mock_detector = MagicMock()
-        mock_detector.find_skill_for_category.return_value = "memory_diagnosis"
-        mock_module = MagicMock()
-        mock_module.SkillGapDetector.return_value = mock_detector
+        mock_detector.analyze_incident.return_value = None  # No gap
 
-        import sys
-        original = sys.modules.get("agenticops.skills.evolution")
-        sys.modules["agenticops.skills.evolution"] = mock_module
-        try:
-            summary = run(learner.learn(good_result))
-        finally:
-            if original:
-                sys.modules["agenticops.skills.evolution"] = original
-            else:
-                sys.modules.pop("agenticops.skills.evolution", None)
+        with patch(
+            "agenticops.skills.iteration.gap_detector.SkillGapDetector",
+            return_value=mock_detector,
+        ):
+            # Force re-import by clearing cached module reference
+            import agenticops.skills.iteration.gap_detector
+            original_cls = agenticops.skills.iteration.gap_detector.SkillGapDetector
+            agenticops.skills.iteration.gap_detector.SkillGapDetector = MagicMock(return_value=mock_detector)
+            try:
+                summary = run(learner.learn(good_result))
+            finally:
+                agenticops.skills.iteration.gap_detector.SkillGapDetector = original_cls
 
         assert summary["skill_action"] == "revised"
 
         memories = run(learner.memory.recall(
-            "SKILL_REVISION",
+            "SKILL_OK",
             memory_type=MemoryType.SEMANTIC,
         ))
         assert len(memories) >= 1
 
     def test_skill_gap_detection(self, learner, good_result):
-        """When no existing skill, gap detection triggers."""
-        mock_detector = MagicMock()
-        mock_detector.find_skill_for_category.return_value = None
-        mock_module = MagicMock()
-        mock_module.SkillGapDetector.return_value = mock_detector
+        """When gap detected, creation path triggers."""
+        from agenticops.skills.iteration.gap_detector import SkillGap
 
-        import sys
-        original = sys.modules.get("agenticops.skills.evolution")
-        sys.modules["agenticops.skills.evolution"] = mock_module
+        mock_gap = SkillGap(
+            gap_type="detection_miss",
+            incident_id="test",
+            description="No automated detection for oom",
+            suggested_skill_domain="memory",
+        )
+        mock_detector = MagicMock()
+        mock_detector.analyze_incident.return_value = mock_gap
+
+        import agenticops.skills.iteration.gap_detector
+        original_cls = agenticops.skills.iteration.gap_detector.SkillGapDetector
+        agenticops.skills.iteration.gap_detector.SkillGapDetector = MagicMock(return_value=mock_detector)
         try:
             summary = run(learner.learn(good_result))
         finally:
-            if original:
-                sys.modules["agenticops.skills.evolution"] = original
-            else:
-                sys.modules.pop("agenticops.skills.evolution", None)
+            agenticops.skills.iteration.gap_detector.SkillGapDetector = original_cls
 
         assert summary["skill_action"] == "created"
 

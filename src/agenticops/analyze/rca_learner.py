@@ -102,52 +102,84 @@ class RCALearner:
         """Revision-first skill update (LearnAct pattern).
 
         Try to revise existing skill before creating a new one.
+        Uses SkillGapDetector for gap analysis + evolution.create_draft_skill for creation.
         """
         try:
-            from agenticops.skills.evolution import SkillGapDetector
+            from agenticops.skills.iteration import gap_detector as _gd
 
-            detector = SkillGapDetector()
-
-            # Check if existing skill covers this pattern
+            detector = _gd.SkillGapDetector()
             root_cause_category = self._categorize_root_cause(
                 result.analysis.root_cause
             )
-            existing = detector.find_skill_for_category(root_cause_category)
 
-            if existing:
-                # Revision-first: enhance existing skill
-                logger.info(
-                    "RCA Learner: revising skill '%s' with new learnings",
-                    existing,
-                )
-                # Store as semantic memory for skill improvement
+            # Use SkillGapDetector to analyze the incident
+            rca_dict = {
+                "confidence": result.analysis.confidence_score,
+                "affected_service": root_cause_category,
+                "detection_source": "rca_agent",
+                "similar_incident_count": len(result.memory_hits),
+            }
+            gap = detector.analyze_incident(
+                incident=getattr(result, "anomaly_title", root_cause_category),
+                rca_result=rca_dict,
+                resolution_log=[
+                    r[:80] for r in (result.analysis.recommendations or [])
+                ],
+            )
+
+            if gap:
+                logger.info("RCA Learner: gap detected — %s", gap.gap_type)
+                # Record gap in memory
                 await self.memory.remember(
                     content=(
-                        f"SKILL_REVISION: Skill '{existing}' should handle "
-                        f"'{result.analysis.root_cause[:100]}'. "
-                        f"Evidence: {len(result.evidence_chain)} items. "
+                        f"SKILL_GAP ({gap.gap_type}): {gap.description}. "
+                        f"Root cause: '{result.analysis.root_cause[:100]}'. "
+                        f"Domain: {gap.suggested_skill_domain}"
+                    ),
+                    memory_type=MemoryType.SEMANTIC,
+                    source=f"skill_gap:{gap.gap_type}",
+                    confidence=result.analysis.confidence_score,
+                )
+
+                # Create draft skill if confidence is high enough
+                if self._should_create_skill(result):
+                    try:
+                        from agenticops.skills.evolution import create_draft_skill
+
+                        skill_content = (
+                            f"# {root_cause_category} Troubleshooting\n\n"
+                            f"## Root Cause Pattern\n{result.analysis.root_cause}\n\n"
+                            f"## Evidence\n"
+                            + "\n".join(
+                                f"- {e.content[:100]}" for e in result.evidence_chain[:5]
+                            )
+                            + f"\n\n## Recommendations\n"
+                            + "\n".join(
+                                f"- {r}" for r in (result.analysis.recommendations or [])
+                            )
+                        )
+                        create_draft_skill(
+                            name=f"auto_{root_cause_category}_{gap.gap_type}",
+                            description=f"Auto-generated skill for {root_cause_category} ({gap.gap_type})",
+                            content=skill_content,
+                        )
+                        logger.info("Draft skill created for %s", root_cause_category)
+                    except Exception as e:
+                        logger.warning("Draft skill creation failed: %s", e)
+
+                return "created"
+            else:
+                # No gap — existing skills cover this pattern, record revision note
+                await self.memory.remember(
+                    content=(
+                        f"SKILL_OK: Existing skills cover '{root_cause_category}'. "
                         f"Confidence: {result.analysis.confidence_score:.2f}"
                     ),
                     memory_type=MemoryType.SEMANTIC,
-                    source=f"skill_revision:{existing}",
+                    source="skill_coverage_ok",
                     confidence=result.analysis.confidence_score,
                 )
                 return "revised"
-
-            elif self._should_create_skill(result):
-                logger.info("RCA Learner: skill gap detected, draft needed")
-                await self.memory.remember(
-                    content=(
-                        f"SKILL_GAP: No skill covers "
-                        f"'{result.analysis.root_cause[:100]}'. "
-                        f"Recommend creating new skill for "
-                        f"'{root_cause_category}'"
-                    ),
-                    memory_type=MemoryType.SEMANTIC,
-                    source="skill_gap_detected",
-                    confidence=result.analysis.confidence_score,
-                )
-                return "created"
 
         except ImportError:
             logger.debug("SkillGapDetector not available, skipping skill update")
