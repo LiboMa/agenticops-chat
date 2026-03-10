@@ -18,7 +18,7 @@ const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
-const Accounts = lazy(() => import("@/pages/Accounts"));
+const Settings = lazy(() => import("@/pages/Settings"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
 
@@ -150,10 +150,10 @@ export default function App() {
               }
             />
             <Route
-              path="accounts"
+              path="settings"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <Accounts />
+                  <Settings />
                 </Suspense>
               }
             />

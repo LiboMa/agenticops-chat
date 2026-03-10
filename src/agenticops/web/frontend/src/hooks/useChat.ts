@@ -21,7 +21,7 @@ export function useChat(sessionId: string | null) {
   const qc = useQueryClient();
 
   const sendMessage = useCallback(
-    async (content: string, file?: File, detailLevel?: string, scanFocus?: string) => {
+    async (content: string, file?: File, detailLevel?: string) => {
       if (!sessionId || streaming) return;
 
       setStreaming(true);
@@ -42,9 +42,6 @@ export function useChat(sessionId: string | null) {
           if (detailLevel && detailLevel !== "medium") {
             formData.append("detail_level", detailLevel);
           }
-          if (scanFocus && scanFocus !== "all") {
-            formData.append("scan_focus", scanFocus);
-          }
 
           res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
             method: "POST",
@@ -55,9 +52,6 @@ export function useChat(sessionId: string | null) {
           const body: Record<string, string> = { content };
           if (detailLevel && detailLevel !== "medium") {
             body.detail_level = detailLevel;
-          }
-          if (scanFocus && scanFocus !== "all") {
-            body.scan_focus = scanFocus;
           }
 
           res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
