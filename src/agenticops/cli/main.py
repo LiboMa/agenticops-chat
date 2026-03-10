@@ -1255,17 +1255,30 @@ def logs_entity(
 def init(
     yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
     profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to setup.json for zero-prompt setup"),
+    generate_config: bool = typer.Option(False, "--generate-config", help="Generate setup.json.example template and exit"),
 ):
     """Interactive setup wizard for AgenticOps.
 
-    Guides you through 7 steps: dependency check, Bedrock config, deployment
-    profile, AWS accounts, pipeline behavior, notifications, and integrations.
+    Guides you through 5 steps: dependency check, Bedrock config, deployment
+    profile, AWS accounts, pipeline behavior, and notifications.
+
+    For advanced users, use --config setup.json to load everything with zero prompts.
+    Generate a template with --generate-config.
     """
     from agenticops.config import PROJECT_ROOT
-    from agenticops.cli.init_helpers import run_init_wizard
+    from agenticops.cli.init_helpers import run_init_wizard, generate_config_template
+
+    if generate_config:
+        output = Path("setup.json.example")
+        generate_config_template(output)
+        console.print(f"[green]Template written to[/green] [cyan]{output}[/cyan]")
+        console.print("Edit and rename to setup.json, then run: [cyan]aiops init --config setup.json[/cyan]")
+        return
 
     env_path = PROJECT_ROOT / ".env"
-    env_vars = run_init_wizard(yes=yes, profile=profile)
+    config_path = Path(config) if config else None
+    env_vars = run_init_wizard(yes=yes, profile=profile, config_path=config_path)
     _init_finalize(env_path, env_vars)
 
 
@@ -1273,6 +1286,7 @@ def init(
 def quickstart(
     yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
     profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to setup.json for zero-prompt setup"),
     start: bool = typer.Option(True, "--start/--no-start", help="Start services after init"),
     scan: bool = typer.Option(False, "--scan", help="Run initial resource scan after start"),
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind"),
@@ -1284,10 +1298,11 @@ def quickstart(
     an initial resource scan.
 
     Examples:
-      aiops quickstart --yes               # fully automated local setup
-      aiops quickstart --yes --no-start     # init only, don't start services
-      aiops quickstart --yes --scan         # init, start, and scan
-      aiops quickstart --profile cloud      # interactive cloud setup
+      aiops quickstart --yes                     # fully automated local setup
+      aiops quickstart --config setup.json       # zero-prompt from JSON config
+      aiops quickstart --yes --no-start          # init only, don't start services
+      aiops quickstart --yes --scan              # init, start, and scan
+      aiops quickstart --profile cloud           # interactive cloud setup
     """
     import time as _time
     from agenticops.config import PROJECT_ROOT
@@ -1305,7 +1320,8 @@ def quickstart(
         raise typer.Exit(1)
 
     # Step 2: Full init wizard
-    env_vars = run_init_wizard(yes=yes, profile=profile)
+    config_path = Path(config) if config else None
+    env_vars = run_init_wizard(yes=yes, profile=profile, config_path=config_path)
     _init_finalize(env_path, env_vars)
 
     if not start:

@@ -2,6 +2,8 @@
 
 Extracted from main.py to keep it lean. Contains:
 - Dependency checking
+- JSON config file loading (--config setup.json)
+- Auto-detect + propose setup (minimal user input)
 - Deployment profile wizard (local/cloud)
 - AWS account registration
 - Notification channel guided config
@@ -9,6 +11,7 @@ Extracted from main.py to keep it lean. Contains:
 """
 
 import importlib
+import json
 import logging
 import re
 import shutil
@@ -24,6 +27,182 @@ from rich.box import SIMPLE
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+# ============================================================================
+# JSON Config File Support
+# ============================================================================
+
+_CONFIG_TEMPLATE = {
+    "bedrock": {
+        "region": "us-east-1",
+        "model": "sonnet",  # "opus", "sonnet", "haiku", or full model ID
+    },
+    "profile": "local",  # "local" or "cloud"
+    "cloud": {
+        "database": "rds",  # "rds", "sqlite-efs", "dynamodb"
+        "rds_host": "",
+        "rds_port": 5432,
+        "rds_name": "agenticops",
+        "rds_user": "agenticops",
+        "rds_password": "",
+        "efs_path": "/data/agenticops",
+        "vector_storage": "rds",  # "rds" or "s3"
+        "s3_bucket": "",  # auto-generated if empty: agenticops-{account_id}
+        "s3_region": "us-east-1",
+    },
+    "accounts": [
+        # {"name": "prod", "account_id": "123456789012", "role_arn": "", "regions": ["us-east-1"]}
+    ],
+    "pipeline": {
+        "auto_fix": True,
+        "auto_approve_l0_l1": True,
+        "notifications": True,
+    },
+    "channels": [
+        # {"name": "slack-alerts", "type": "slack", "webhook_url": "https://hooks.slack.com/..."},
+        # {"name": "feishu-ops", "type": "feishu", "app_name": "default", "chat_id": "oc_xxx"},
+        # {"name": "email-oncall", "type": "email", "smtp_host": "...", "smtp_port": 587, "smtp_user": "...", "smtp_password": "...", "from_addr": "...", "to_addr": "..."},
+        # {"name": "sns-critical", "type": "sns", "topic_arn": "arn:aws:sns:...", "region": "us-east-1"},
+        # {"name": "webhook-pd", "type": "webhook", "url": "https://...", "method": "POST"},
+    ],
+    "integrations": {
+        "datadog": {
+            "enabled": False,
+            "api_key": "",
+            "app_key": "",
+            "site": "datadoghq.com",
+        },
+    },
+}
+
+# Model ID shortcuts
+_MODEL_SHORTCUTS = {
+    "opus": "global.anthropic.claude-opus-4-6-v1",
+    "sonnet": "global.anthropic.claude-sonnet-4-6-v1",
+    "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+}
+_HAIKU_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+_SONNET_ID = "global.anthropic.claude-sonnet-4-6-v1"
+_OPUS_ID = "global.anthropic.claude-opus-4-6-v1"
+
+
+def generate_config_template(output_path: Path) -> None:
+    """Write a setup.json template file."""
+    output_path.write_text(json.dumps(_CONFIG_TEMPLATE, indent=2) + "\n")
+    console.print(f"[green]Generated config template:[/green] {output_path}")
+    console.print("[dim]Edit the file, then run: aiops init --config setup.json[/dim]")
+
+
+def load_config_file(config_path: Path) -> dict[str, str]:
+    """Load a JSON config file and return env_vars dict.
+
+    This is the zero-prompt path for advanced users.
+    """
+    cfg = json.loads(config_path.read_text())
+    env_vars: dict[str, str] = {}
+
+    # ── Bedrock ──
+    bedrock = cfg.get("bedrock", {})
+    region = bedrock.get("region", "us-east-1")
+    env_vars["AIOPS_BEDROCK_REGION"] = region
+
+    model = bedrock.get("model", "sonnet")
+    model_id = _MODEL_SHORTCUTS.get(model, model)
+    env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
+    if model == "haiku":
+        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = _HAIKU_ID
+        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = _SONNET_ID
+    else:
+        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = _HAIKU_ID
+        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = _OPUS_ID
+
+    # ── Profile ──
+    profile = cfg.get("profile", "local")
+    env_vars["AIOPS_DEPLOYMENT_PROFILE"] = profile
+
+    if profile == "cloud":
+        cloud = cfg.get("cloud", {})
+
+        # Database
+        db_type = cloud.get("database", "rds")
+        if db_type == "rds":
+            host = cloud.get("rds_host", "")
+            port = cloud.get("rds_port", 5432)
+            name = cloud.get("rds_name", "agenticops")
+            user = cloud.get("rds_user", "agenticops")
+            pwd = cloud.get("rds_password", "")
+            if host:
+                url = f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{name}"
+                env_vars["AIOPS_DATABASE_URL"] = url
+        elif db_type == "sqlite-efs":
+            efs_path = cloud.get("efs_path", "/data/agenticops")
+            env_vars["AIOPS_DATABASE_URL"] = f"sqlite:///{efs_path}/agenticops.db"
+            env_vars["AIOPS_DATA_DIR"] = efs_path
+
+        # Vector storage
+        vec = cloud.get("vector_storage", "rds")
+        env_vars["AIOPS_VECTOR_STORAGE"] = vec
+        if vec == "rds" and "AIOPS_DATABASE_URL" in env_vars:
+            db_url = env_vars["AIOPS_DATABASE_URL"]
+            if db_url.startswith("postgresql"):
+                env_vars["AIOPS_VECTOR_RDS_URL"] = db_url
+        elif vec == "s3":
+            bucket = cloud.get("s3_bucket", "")
+            s3_region = cloud.get("s3_region", region)
+            if bucket:
+                env_vars["AIOPS_VECTOR_S3_BUCKET"] = bucket
+                env_vars["AIOPS_VECTOR_S3_REGION"] = s3_region
+
+        # S3 file storage (reports + KB)
+        bucket = cloud.get("s3_bucket", "")
+        s3_region = cloud.get("s3_region", region)
+        if bucket:
+            env_vars["AIOPS_REPORT_STORAGE"] = "s3"
+            env_vars["AIOPS_REPORT_S3_BUCKET"] = bucket
+            env_vars["AIOPS_REPORT_S3_PREFIX"] = "reports/"
+            env_vars["AIOPS_REPORT_S3_REGION"] = s3_region
+            env_vars["AIOPS_KB_STORAGE"] = "s3"
+            env_vars["AIOPS_KB_S3_BUCKET"] = bucket
+            env_vars["AIOPS_KB_S3_PREFIX"] = "knowledge_base/"
+            env_vars["AIOPS_KB_S3_REGION"] = s3_region
+
+    # ── Pipeline ──
+    pipeline = cfg.get("pipeline", {})
+    env_vars["AIOPS_AUTO_FIX_ENABLED"] = str(pipeline.get("auto_fix", True)).lower()
+    env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = str(pipeline.get("auto_approve_l0_l1", True)).lower()
+    env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = str(pipeline.get("notifications", True)).lower()
+
+    # ── Accounts ──
+    for acct in cfg.get("accounts", []):
+        _register_account(acct)
+        console.print(f"  [green]Registered account:[/green] {acct.get('name', 'default')} ({acct.get('account_id', '?')})")
+
+    # ── Notification Channels ──
+    for ch in cfg.get("channels", []):
+        ch_name = ch.pop("name", "unnamed")
+        ch_type = ch.pop("type", "webhook")
+        sev = ch.pop("severity_filter", None)
+        save_data = {"type": ch_type, "enabled": True, **ch}
+        if sev:
+            save_data["severity_filter"] = sev
+        try:
+            from agenticops.notify.im_config import save_channel
+            save_channel(ch_name, save_data)
+            console.print(f"  [green]Saved channel:[/green] {ch_name} ({ch_type})")
+        except Exception as e:
+            console.print(f"  [yellow]Channel {ch_name} failed: {e}[/yellow]")
+
+    # ── Integrations ──
+    integrations = cfg.get("integrations", {})
+    dd = integrations.get("datadog", {})
+    if dd.get("enabled"):
+        env_vars["AIOPS_MONITORING_PROVIDERS"] = "datadog"
+        env_vars["AIOPS_DATADOG_API_KEY"] = dd.get("api_key", "")
+        env_vars["AIOPS_DATADOG_APP_KEY"] = dd.get("app_key", "")
+        env_vars["AIOPS_DATADOG_SITE"] = dd.get("site", "datadoghq.com")
+
+    return env_vars
+
 
 # ============================================================================
 # Phase 1: Dependency Check
@@ -104,29 +283,18 @@ def _offer_install_missing(missing: list[str]) -> bool:
 
 
 def check_dependencies(verbose: bool = True) -> dict[str, bool]:
-    """Check all dependencies, render Rich table, return pass/fail dict.
-
-    Args:
-        verbose: If True, print the results table.
-
-    Returns:
-        Dict mapping check names to pass/fail booleans.
-    """
+    """Check all dependencies, render Rich table, return pass/fail dict."""
     results: dict[str, bool] = {}
 
-    # Python version
     py_ok, py_ver = _check_python_version()
     results["python"] = py_ok
 
-    # Pip packages
     pkgs_ok, missing = _check_pip_packages()
     results["pip_packages"] = pkgs_ok
 
-    # Optional binaries
     for binary in OPTIONAL_BINARIES:
         results[binary] = _check_binary(binary)
 
-    # AWS credentials
     aws_ok, aws_info = _check_aws_credentials("us-east-1")
     results["aws_credentials"] = aws_ok
 
@@ -141,11 +309,7 @@ def check_dependencies(verbose: bool = True) -> dict[str, bool]:
                 return "[green]PASS[/green]"
             return "[red]FAIL[/red]" if required else "[yellow]WARN[/yellow]"
 
-        table.add_row(
-            "Python >= 3.11",
-            _icon(py_ok),
-            f"v{py_ver}",
-        )
+        table.add_row("Python >= 3.11", _icon(py_ok), f"v{py_ver}")
         table.add_row(
             "Core pip packages",
             _icon(pkgs_ok),
@@ -164,7 +328,6 @@ def check_dependencies(verbose: bool = True) -> dict[str, bool]:
         )
         console.print(table)
 
-    # Offer to install missing packages
     if missing and verbose:
         if _offer_install_missing(missing):
             results["pip_packages"] = True
@@ -173,7 +336,37 @@ def check_dependencies(verbose: bool = True) -> dict[str, bool]:
 
 
 # ============================================================================
-# Phase 2: Deployment Profile
+# Auto-Detect Helpers
+# ============================================================================
+
+
+def _detect_aws_context(region: str = "us-east-1") -> dict:
+    """Auto-detect AWS account, region, caller identity.
+
+    Returns dict with keys: account_id, arn, region, ok.
+    """
+    try:
+        import boto3
+
+        sts = boto3.client("sts", region_name=region)
+        identity = sts.get_caller_identity()
+        return {
+            "ok": True,
+            "account_id": identity["Account"],
+            "arn": identity["Arn"],
+            "region": region,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "region": region}
+
+
+def _propose_s3_bucket(account_id: str) -> str:
+    """Generate a proposed S3 bucket name from account ID."""
+    return f"agenticops-{account_id}"
+
+
+# ============================================================================
+# Phase 2: Deployment Profile (Propose + Confirm)
 # ============================================================================
 
 
@@ -196,24 +389,50 @@ def init_deployment_profile(env_vars: dict[str, str], yes: bool = False) -> str:
         console.print("  [green]Local profile selected.[/green]")
         return "local"
 
-    # Cloud profile
+    # Cloud profile — auto-propose as much as possible
     env_vars["AIOPS_DEPLOYMENT_PROFILE"] = "cloud"
+    region = env_vars.get("AIOPS_BEDROCK_REGION", "us-east-1")
+    ctx = _detect_aws_context(region)
+    account_id = ctx.get("account_id", "")
 
-    # Sub-step: Database backend
+    # Database
     _init_cloud_database(env_vars)
 
-    # Sub-step: Vector storage
-    _init_cloud_vector_storage(env_vars)
+    # Vector storage — auto-derive from DB choice
+    db_url = env_vars.get("AIOPS_DATABASE_URL", "")
+    if db_url.startswith("postgresql"):
+        env_vars["AIOPS_VECTOR_STORAGE"] = "rds"
+        env_vars["AIOPS_VECTOR_RDS_URL"] = db_url
+        console.print("    [green]Vector storage: pgvector (same RDS instance)[/green]")
+    else:
+        env_vars["AIOPS_VECTOR_STORAGE"] = "s3"
+        console.print("    [green]Vector storage: S3 (no RDS available)[/green]")
 
-    # Sub-step: File storage (S3 for reports + KB)
-    _init_cloud_file_storage(env_vars)
+    # S3 file storage — propose bucket name
+    proposed_bucket = _propose_s3_bucket(account_id) if account_id else "agenticops-data"
+    bucket = Prompt.ask("  S3 bucket for reports + KB", default=proposed_bucket)
+    _create_s3_bucket_if_needed(bucket, region)
 
+    env_vars["AIOPS_REPORT_STORAGE"] = "s3"
+    env_vars["AIOPS_REPORT_S3_BUCKET"] = bucket
+    env_vars["AIOPS_REPORT_S3_PREFIX"] = "reports/"
+    env_vars["AIOPS_REPORT_S3_REGION"] = region
+    env_vars["AIOPS_KB_STORAGE"] = "s3"
+    env_vars["AIOPS_KB_S3_BUCKET"] = bucket
+    env_vars["AIOPS_KB_S3_PREFIX"] = "knowledge_base/"
+    env_vars["AIOPS_KB_S3_REGION"] = region
+
+    if env_vars.get("AIOPS_VECTOR_STORAGE") == "s3":
+        env_vars["AIOPS_VECTOR_S3_BUCKET"] = bucket
+        env_vars["AIOPS_VECTOR_S3_REGION"] = region
+
+    console.print(f"    [green]S3 storage: s3://{bucket}/ (reports/ + knowledge_base/)[/green]")
     console.print("  [green]Cloud profile configured.[/green]")
     return "cloud"
 
 
 def _init_cloud_database(env_vars: dict[str, str]) -> None:
-    """Cloud database sub-choice: SQLite-on-EFS, RDS, or DynamoDB."""
+    """Cloud database sub-choice: RDS or SQLite-on-EFS."""
     from rich.prompt import Prompt
 
     console.print("\n  Database backend:")
@@ -247,70 +466,6 @@ def _init_cloud_database(env_vars: dict[str, str]) -> None:
         _create_dynamodb_tables(region)
         env_vars["AIOPS_DATABASE_BACKEND"] = "dynamodb"
         console.print("    [yellow]DynamoDB tables created. Data access layer coming in a future release.[/yellow]")
-
-
-def _init_cloud_vector_storage(env_vars: dict[str, str]) -> None:
-    """Cloud vector storage sub-choice: RDS pgvector or S3."""
-    from rich.prompt import Prompt
-
-    console.print("\n  Vector storage backend:")
-    console.print("    [bold][1][/bold] RDS PostgreSQL (pgvector)  [dim]<- recommended, native cosine search[/dim]")
-    console.print("    [bold][2][/bold] S3  [dim](numpy blobs, zero DB dependency)[/dim]")
-    v_choice = Prompt.ask("  Choice", choices=["1", "2"], default="1")
-
-    if v_choice == "1":
-        env_vars["AIOPS_VECTOR_STORAGE"] = "rds"
-        # Reuse DB URL if already set, or prompt
-        rds_url = env_vars.get("AIOPS_DATABASE_URL", "")
-        if rds_url.startswith("postgresql"):
-            env_vars["AIOPS_VECTOR_RDS_URL"] = rds_url
-            console.print(f"    [green]Using same RDS instance for vectors.[/green]")
-            if _test_pgvector(rds_url):
-                console.print("    [green]pgvector extension verified.[/green]")
-            else:
-                console.print("    [yellow]pgvector check failed — will attempt CREATE EXTENSION at runtime.[/yellow]")
-        else:
-            url = Prompt.ask("    PostgreSQL URL for vectors")
-            env_vars["AIOPS_VECTOR_RDS_URL"] = url
-
-    elif v_choice == "2":
-        env_vars["AIOPS_VECTOR_STORAGE"] = "s3"
-        bucket = Prompt.ask("    S3 bucket for vectors")
-        region = Prompt.ask("    S3 region", default="us-east-1")
-        env_vars["AIOPS_VECTOR_S3_BUCKET"] = bucket
-        env_vars["AIOPS_VECTOR_S3_REGION"] = region
-        console.print(f"    [green]S3 vector storage: s3://{bucket}/vectors/[/green]")
-
-
-def _init_cloud_file_storage(env_vars: dict[str, str]) -> None:
-    """Cloud file storage: S3 bucket for reports + KB files."""
-    from rich.prompt import Prompt
-
-    console.print("\n  File storage (reports + knowledge base):")
-    bucket = Prompt.ask("    S3 bucket name")
-    region = Prompt.ask("    S3 region", default="us-east-1")
-
-    # Create bucket if needed
-    _create_s3_bucket_if_needed(bucket, region)
-
-    # Reports
-    env_vars["AIOPS_REPORT_STORAGE"] = "s3"
-    env_vars["AIOPS_REPORT_S3_BUCKET"] = bucket
-    env_vars["AIOPS_REPORT_S3_PREFIX"] = "reports/"
-    env_vars["AIOPS_REPORT_S3_REGION"] = region
-
-    # KB files
-    env_vars["AIOPS_KB_STORAGE"] = "s3"
-    env_vars["AIOPS_KB_S3_BUCKET"] = bucket
-    env_vars["AIOPS_KB_S3_PREFIX"] = "knowledge_base/"
-    env_vars["AIOPS_KB_S3_REGION"] = region
-
-    # Also use same bucket for vectors if S3 vector chosen
-    if env_vars.get("AIOPS_VECTOR_STORAGE") == "s3":
-        env_vars["AIOPS_VECTOR_S3_BUCKET"] = bucket
-        env_vars["AIOPS_VECTOR_S3_REGION"] = region
-
-    console.print(f"    [green]S3 file storage: s3://{bucket}/ (reports/ + knowledge_base/)[/green]")
 
 
 def _create_s3_bucket_if_needed(bucket: str, region: str) -> bool:
@@ -521,7 +676,6 @@ def _create_dynamodb_tables(region: str) -> None:
     for table_def in tables:
         table_name = table_def["TableName"]
         try:
-            # Check if table already exists
             dynamodb.describe_table(TableName=table_name)
             console.print(f"    [dim]{table_name} already exists, skipping.[/dim]")
             continue
@@ -540,19 +694,18 @@ def _create_dynamodb_tables(region: str) -> None:
         dynamodb.create_table(**create_kwargs)
         console.print(f"    [green]Created {table_name}[/green]")
 
-    # Wait for tables to be active
     for table_def in tables:
         waiter = dynamodb.get_waiter("table_exists")
         waiter.wait(TableName=table_def["TableName"], WaiterConfig={"MaxAttempts": 25})
 
 
 # ============================================================================
-# Phase 3: AWS Account Registration
+# Phase 3: AWS Account Registration (Auto-Detect + Propose)
 # ============================================================================
 
 
 def init_aws_accounts(env_vars: dict[str, str], yes: bool = False) -> int:
-    """Register AWS accounts. Returns count registered."""
+    """Register AWS accounts. Auto-detects current caller and proposes."""
     from rich.prompt import Prompt, Confirm
 
     region = env_vars.get("AIOPS_BEDROCK_REGION", "us-east-1")
@@ -560,44 +713,72 @@ def init_aws_accounts(env_vars: dict[str, str], yes: bool = False) -> int:
     if yes:
         return _auto_register_caller(region)
 
-    console.print("  Register AWS accounts for scanning and monitoring.\n")
+    # Auto-detect and propose
+    ctx = _detect_aws_context(region)
+    if ctx["ok"]:
+        console.print(f"  Detected AWS account: [cyan]{ctx['account_id']}[/cyan] ({ctx['arn']})")
+        if Confirm.ask("  Register this account?", default=True):
+            name = Prompt.ask("    Account name", default="default")
+            _register_account({
+                "name": name,
+                "account_id": ctx["account_id"],
+                "role_arn": "",
+                "external_id": "",
+                "regions": [region],
+            })
+            console.print(f"    [green]Registered: {name} ({ctx['account_id']})[/green]")
 
-    count = 0
-    while True:
-        if count > 0:
-            if not Confirm.ask("  Add another account?", default=False):
-                break
-
-        details = _prompt_account_details(region)
-        if details is None:
-            break
-
-        ok, msg = _validate_account(
-            details["account_id"],
-            details["role_arn"],
-            details.get("external_id", ""),
-            details["regions"][0] if details["regions"] else region,
-        )
-        if ok:
-            console.print(f"    [green]Validated: {msg}[/green]")
+            # Offer cross-account
+            count = 1
+            while Confirm.ask("\n  Add a cross-account role?", default=False):
+                details = _prompt_cross_account(region)
+                if details:
+                    _register_account(details)
+                    console.print(f"    [green]Registered: {details['name']} ({details['account_id']})[/green]")
+                    count += 1
+            return count
         else:
-            console.print(f"    [yellow]Validation failed: {msg}[/yellow]")
-            if not Confirm.ask("    Save anyway?", default=True):
-                continue
+            console.print("  [dim]Skipped account registration.[/dim]")
+            return 0
+    else:
+        console.print(f"  [yellow]No AWS credentials detected: {ctx.get('error', 'unknown')}[/yellow]")
+        if Confirm.ask("  Register an account manually?", default=False):
+            details = _prompt_account_details(region)
+            if details:
+                _register_account(details)
+                console.print(f"    [green]Registered: {details['name']} ({details['account_id']})[/green]")
+                return 1
+        return 0
 
-        _register_account(details)
-        console.print(f"    [green]Registered: {details['name']} ({details['account_id']})[/green]")
-        count += 1
 
-    return count
+def _prompt_cross_account(default_region: str) -> Optional[dict]:
+    """Prompt for cross-account role details (minimal: name + role ARN)."""
+    from rich.prompt import Prompt
+
+    name = Prompt.ask("    Account name")
+    role_arn = Prompt.ask("    Role ARN (arn:aws:iam::ACCOUNT:role/NAME)")
+    if not role_arn:
+        return None
+
+    # Extract account_id from ARN
+    match = re.match(r"^arn:aws:iam::(\d{12}):role/.+$", role_arn)
+    account_id = match.group(1) if match else Prompt.ask("    Account ID (12 digits)")
+
+    external_id = Prompt.ask("    External ID (optional, press Enter to skip)", default="")
+    regions = Prompt.ask("    Regions", default=default_region)
+
+    return {
+        "name": name,
+        "account_id": account_id,
+        "role_arn": role_arn,
+        "external_id": external_id,
+        "regions": [r.strip() for r in regions.split(",") if r.strip()],
+    }
 
 
 def _prompt_account_details(default_region: str) -> Optional[dict]:
-    """Prompt for account details. Returns dict or None to skip."""
-    from rich.prompt import Prompt, Confirm
-
-    if not Confirm.ask("  Register an AWS account?", default=True):
-        return None
+    """Prompt for manual account details."""
+    from rich.prompt import Prompt
 
     name = Prompt.ask("    Account name", default="default")
     account_id = Prompt.ask("    Account ID (12 digits)")
@@ -606,29 +787,25 @@ def _prompt_account_details(default_region: str) -> Optional[dict]:
         account_id = Prompt.ask("    Account ID (12 digits)")
 
     role_arn = Prompt.ask("    Role ARN (empty for direct credentials)", default="")
-    if role_arn and not re.match(r"^arn:aws:iam::\d{12}:role/.+$", role_arn):
-        console.print("    [yellow]Warning: Role ARN format looks unusual.[/yellow]")
-
     external_id = ""
     if role_arn:
         external_id = Prompt.ask("    External ID (optional)", default="")
 
-    regions_str = Prompt.ask("    Regions (comma-separated)", default=default_region)
-    regions = [r.strip() for r in regions_str.split(",") if r.strip()]
+    regions_str = Prompt.ask("    Regions", default=default_region)
 
     return {
         "name": name,
         "account_id": account_id,
         "role_arn": role_arn,
         "external_id": external_id,
-        "regions": regions,
+        "regions": [r.strip() for r in regions_str.split(",") if r.strip()],
     }
 
 
 def _validate_account(
     account_id: str, role_arn: str, external_id: str, region: str
 ) -> tuple[bool, str]:
-    """Validate AWS account access. Returns (ok, message)."""
+    """Validate AWS account access."""
     try:
         import boto3
 
@@ -716,23 +893,18 @@ def init_notification_channels(yes: bool = False) -> int:
 
     if yes:
         console.print("  [dim]Skipping notification channel setup (--yes mode).[/dim]")
+        console.print("  [dim]Tip: use --config setup.json to pre-configure channels.[/dim]")
         return 0
 
-    console.print("  Configure notification channels for alerts and reports.\n")
+    if not Confirm.ask("  Configure a notification channel?", default=False):
+        console.print("  [dim]Skipped. Configure later via /channel command or setup.json.[/dim]")
+        return 0
 
     count = 0
     while True:
-        if count > 0:
-            if not Confirm.ask("\n  Add another channel?", default=False):
-                break
-
         console.print("  Channel type:")
-        console.print("    [bold][1][/bold] Slack")
-        console.print("    [bold][2][/bold] Feishu")
-        console.print("    [bold][3][/bold] Email (SMTP)")
-        console.print("    [bold][4][/bold] SNS")
-        console.print("    [bold][5][/bold] Webhook")
-        console.print("    [bold][6][/bold] Skip")
+        console.print("    [bold][1][/bold] Slack     [bold][2][/bold] Feishu    [bold][3][/bold] Email")
+        console.print("    [bold][4][/bold] SNS       [bold][5][/bold] Webhook   [bold][6][/bold] Done")
         choice = Prompt.ask("  Choice", choices=["1", "2", "3", "4", "5", "6"], default="6")
 
         if choice == "6":
@@ -747,18 +919,11 @@ def init_notification_channels(yes: bool = False) -> int:
         }
         name, channel_type, config = handlers[choice]()
 
-        # Severity filter
-        severity_filter = _prompt_severity_filter()
-
-        # Save channel
         try:
             from agenticops.notify.im_config import save_channel
-
             save_data = {"type": channel_type, "enabled": True, **config}
-            if severity_filter:
-                save_data["severity_filter"] = severity_filter
             save_channel(name, save_data)
-            console.print(f"    [green]Channel '{name}' saved to channels.yaml[/green]")
+            console.print(f"    [green]Channel '{name}' saved.[/green]")
             count += 1
         except Exception as e:
             console.print(f"    [red]Failed to save channel: {e}[/red]")
@@ -767,66 +932,49 @@ def init_notification_channels(yes: bool = False) -> int:
 
 
 def _init_slack_channel() -> tuple[str, str, dict]:
-    """Collect Slack channel config."""
     from rich.prompt import Prompt
-
     name = Prompt.ask("    Channel name", default="slack-alerts")
     webhook_url = Prompt.ask("    Webhook URL")
-    channel = Prompt.ask("    Slack channel (optional)", default="")
     config: dict = {"webhook_url": webhook_url}
-    if channel:
-        config["channel"] = channel
     return name, "slack", config
 
 
 def _init_feishu_channel() -> tuple[str, str, dict]:
-    """Collect Feishu channel config."""
     from rich.prompt import Prompt
+    from agenticops.config import PROJECT_ROOT
 
     name = Prompt.ask("    Channel name", default="feishu-alerts")
     app_name = Prompt.ask("    App name (from im-apps.yaml)", default="default")
     chat_id = Prompt.ask("    Chat ID (oc_...)")
 
-    # Offer to copy im-apps template
-    from agenticops.config import PROJECT_ROOT
-
     im_apps_path = PROJECT_ROOT / "config" / "im-apps.yaml"
     im_apps_example = PROJECT_ROOT / "config" / "im-apps.yaml.example"
     if not im_apps_path.exists() and im_apps_example.exists():
-        import shutil
-
         im_apps_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(im_apps_example, im_apps_path)
-        console.print("    [green]Copied im-apps.yaml template — fill in your Feishu credentials.[/green]")
+        console.print("    [green]Copied im-apps.yaml template — fill in credentials.[/green]")
 
     return name, "feishu", {"app_name": app_name, "chat_id": chat_id}
 
 
 def _init_email_channel() -> tuple[str, str, dict]:
-    """Collect Email/SMTP channel config."""
     from rich.prompt import Prompt
-
     name = Prompt.ask("    Channel name", default="email-alerts")
     smtp_host = Prompt.ask("    SMTP host")
     smtp_port = Prompt.ask("    SMTP port", default="587")
     smtp_user = Prompt.ask("    SMTP username")
-    smtp_password = Prompt.ask("    SMTP password (input hidden)", password=True)
+    smtp_password = Prompt.ask("    SMTP password", password=True)
     from_addr = Prompt.ask("    From address")
-    to_addr = Prompt.ask("    To address(es) (comma-separated)")
+    to_addr = Prompt.ask("    To address(es)")
     return name, "email", {
-        "smtp_host": smtp_host,
-        "smtp_port": int(smtp_port),
-        "smtp_user": smtp_user,
-        "smtp_password": smtp_password,
-        "from_addr": from_addr,
-        "to_addr": to_addr,
+        "smtp_host": smtp_host, "smtp_port": int(smtp_port),
+        "smtp_user": smtp_user, "smtp_password": smtp_password,
+        "from_addr": from_addr, "to_addr": to_addr,
     }
 
 
 def _init_sns_channel() -> tuple[str, str, dict]:
-    """Collect SNS channel config."""
     from rich.prompt import Prompt
-
     name = Prompt.ask("    Channel name", default="sns-alerts")
     topic_arn = Prompt.ask("    SNS Topic ARN")
     region = Prompt.ask("    Region", default="us-east-1")
@@ -834,31 +982,10 @@ def _init_sns_channel() -> tuple[str, str, dict]:
 
 
 def _init_webhook_channel() -> tuple[str, str, dict]:
-    """Collect Webhook channel config."""
     from rich.prompt import Prompt
-
     name = Prompt.ask("    Channel name", default="webhook-alerts")
     url = Prompt.ask("    Webhook URL")
-    method = Prompt.ask("    HTTP method", choices=["POST", "PUT"], default="POST")
-    return name, "webhook", {"url": url, "method": method}
-
-
-def _prompt_severity_filter() -> Optional[list[str]]:
-    """Prompt for severity filter. Returns list or None for all."""
-    from rich.prompt import Prompt
-
-    choice = Prompt.ask(
-        "    Severity filter",
-        choices=["all", "critical,high", "custom"],
-        default="all",
-    )
-    if choice == "all":
-        return None
-    if choice == "critical,high":
-        return ["critical", "high"]
-    # custom
-    custom = Prompt.ask("    Severities (comma-separated)")
-    return [s.strip() for s in custom.split(",") if s.strip()]
+    return name, "webhook", {"url": url, "method": "POST"}
 
 
 # ============================================================================
@@ -866,18 +993,33 @@ def _prompt_severity_filter() -> Optional[list[str]]:
 # ============================================================================
 
 
-def run_init_wizard(yes: bool = False, profile: str = "local") -> dict[str, str]:
+def run_init_wizard(
+    yes: bool = False,
+    profile: str = "local",
+    config_path: Optional[Path] = None,
+) -> dict[str, str]:
     """Full init wizard, returns env_vars dict.
 
     Args:
         yes: Accept all defaults (non-interactive).
         profile: Deployment profile hint ('local' or 'cloud').
+        config_path: Path to setup.json for zero-prompt mode.
 
     Returns:
         Dictionary of AIOPS_ env vars to write to .env.
     """
-    from rich.prompt import Prompt, Confirm
     from agenticops.config import PROJECT_ROOT
+
+    # ── JSON config file path — zero prompts ──────────────────────────
+    if config_path:
+        console.print()
+        console.print(Rule("[bold blue]AgenticOps Setup (from config)[/bold blue]"))
+        console.print(f"  Loading: [cyan]{config_path}[/cyan]\n")
+        env_vars = load_config_file(config_path)
+        _print_config_summary(env_vars)
+        return env_vars
+
+    from rich.prompt import Confirm
 
     env_path = PROJECT_ROOT / ".env"
     env_vars: dict[str, str] = {}
@@ -887,7 +1029,8 @@ def run_init_wizard(yes: bool = False, profile: str = "local") -> dict[str, str]
     console.print(Rule("[bold blue]AgenticOps Setup Wizard[/bold blue]"))
     console.print()
     console.print("  This wizard will guide you through essential configuration.")
-    console.print("  Settings are saved to [cyan].env[/cyan] — edit anytime.\n")
+    console.print("  Settings are saved to [cyan].env[/cyan] — edit anytime.")
+    console.print("  [dim]Tip: use --config setup.json to skip all prompts.[/dim]\n")
 
     if env_path.exists():
         console.print("[yellow]Existing .env detected.[/yellow]")
@@ -896,7 +1039,7 @@ def run_init_wizard(yes: bool = False, profile: str = "local") -> dict[str, str]
             if not reconfigure:
                 return env_vars
 
-    console.print(Rule("[bold]Step 0/7 — Dependency Check[/bold]"))
+    console.print(Rule("[bold]Step 0/5 — Dependency Check[/bold]"))
     console.print()
     results = check_dependencies(verbose=True)
     if not results.get("python"):
@@ -907,14 +1050,14 @@ def run_init_wizard(yes: bool = False, profile: str = "local") -> dict[str, str]
         raise SystemExit(1)
     console.print()
 
-    # ── Step 1: AWS Bedrock (Essential) ───────────────────────────────
-    console.print(Rule("[bold]Step 1/7 — AWS Bedrock[/bold]"))
+    # ── Step 1: AWS Bedrock ───────────────────────────────────────────
+    console.print(Rule("[bold]Step 1/5 — AWS Bedrock[/bold]"))
     console.print()
     _init_bedrock(env_vars, yes)
 
-    # ── Step 2: Deployment Profile ────────────────────────────────────
+    # ── Step 2: Deployment Profile + Storage ──────────────────────────
     console.print()
-    console.print(Rule("[bold]Step 2/7 — Deployment Profile[/bold]"))
+    console.print(Rule("[bold]Step 2/5 — Deployment Profile[/bold]"))
     console.print()
     if profile == "cloud" and yes:
         env_vars["AIOPS_DEPLOYMENT_PROFILE"] = "cloud"
@@ -922,51 +1065,45 @@ def run_init_wizard(yes: bool = False, profile: str = "local") -> dict[str, str]
     else:
         init_deployment_profile(env_vars, yes)
 
-    # ── Step 3: AWS Account Registration ──────────────────────────────
+    # ── Step 3: AWS Account + Pipeline ────────────────────────────────
     console.print()
-    console.print(Rule("[bold]Step 3/7 — AWS Accounts[/bold]"))
+    console.print(Rule("[bold]Step 3/5 — AWS Account & Pipeline[/bold]"))
     console.print()
     init_aws_accounts(env_vars, yes)
-
-    # ── Step 4: Pipeline Behavior ─────────────────────────────────────
-    console.print()
-    console.print(Rule("[bold]Step 4/7 — Pipeline Behavior[/bold]"))
     console.print()
     _init_pipeline(env_vars, yes)
 
-    # ── Step 5: Report Storage ────────────────────────────────────────
-    # Only if not already configured by cloud profile
-    if "AIOPS_REPORT_STORAGE" not in env_vars:
-        console.print()
-        console.print(Rule("[bold]Step 5/7 — Report Storage[/bold]"))
-        console.print()
-        _init_report_storage_step(env_vars, yes)
-
-    # ── Step 6: Notification Channels ─────────────────────────────────
+    # ── Step 4: Notification Channels ─────────────────────────────────
     console.print()
-    console.print(Rule("[bold]Step 6/7 — Notification Channels[/bold]"))
+    console.print(Rule("[bold]Step 4/5 — Notification Channels[/bold]"))
     console.print()
     init_notification_channels(yes)
 
-    # ── Step 7: Optional Integrations ─────────────────────────────────
+    # ── Step 5: Optional Integrations ─────────────────────────────────
     console.print()
-    console.print(Rule("[bold]Step 7/7 — Optional Integrations[/bold]"))
+    console.print(Rule("[bold]Step 5/5 — Optional Integrations[/bold]"))
     console.print()
     _init_integrations(env_vars, yes)
 
+    _print_config_summary(env_vars)
     return env_vars
 
 
 def _init_bedrock(env_vars: dict[str, str], yes: bool) -> None:
-    """Step 1: Bedrock model configuration."""
+    """Step 1: Bedrock model configuration — auto-detect region from credentials."""
     from rich.prompt import Prompt, Confirm
 
-    haiku_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    sonnet_id = "global.anthropic.claude-sonnet-4-6-v1"
-    opus_id = "global.anthropic.claude-opus-4-6-v1"
-
-    # Region
+    # Try to auto-detect region from AWS config
     default_region = "us-east-1"
+    try:
+        import boto3
+        session = boto3.Session()
+        detected = session.region_name
+        if detected:
+            default_region = detected
+    except Exception:
+        pass
+
     if yes:
         region = default_region
     else:
@@ -976,112 +1113,63 @@ def _init_bedrock(env_vars: dict[str, str], yes: bool) -> None:
             region = Prompt.ask("Bedrock region", default=default_region)
     env_vars["AIOPS_BEDROCK_REGION"] = region
 
-    # Model picker
-    models = {
-        "1": ("Claude Opus 4.6", opus_id),
-        "2": ("Claude Sonnet 4.6", sonnet_id),
-        "3": ("Claude Haiku 4.5", haiku_id),
-    }
-
     if yes:
         choice = "2"
     else:
         console.print("\n  Select primary Bedrock model:")
-        console.print("    [bold][1][/bold] Claude Opus 4.6    (strongest reasoning, higher cost)")
-        console.print("    [bold][2][/bold] Claude Sonnet 4.6  (balanced performance/cost)  [dim]<- default[/dim]")
-        console.print("    [bold][3][/bold] Claude Haiku 4.5   (fastest, lowest cost)")
+        console.print("    [bold][1][/bold] Opus 4.6    (strongest, higher cost)")
+        console.print("    [bold][2][/bold] Sonnet 4.6  (balanced)  [dim]<- default[/dim]")
+        console.print("    [bold][3][/bold] Haiku 4.5   (fastest, lowest cost)")
         console.print("    [bold][4][/bold] Custom model ID")
         choice = Prompt.ask("\n  Choice", choices=["1", "2", "3", "4"], default="2")
 
     if choice == "4":
         model_id = Prompt.ask("Custom model ID")
         env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
-        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
+        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = _HAIKU_ID
+        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = _OPUS_ID
     else:
-        _, model_id = models[choice]
-        env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
-        if choice == "3":  # Haiku as primary
-            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = sonnet_id
+        models = {"1": _OPUS_ID, "2": _SONNET_ID, "3": _HAIKU_ID}
+        env_vars["AIOPS_BEDROCK_MODEL_ID"] = models[choice]
+        if choice == "3":
+            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = _HAIKU_ID
+            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = _SONNET_ID
         else:
-            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
+            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = _HAIKU_ID
+            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = _OPUS_ID
 
     console.print(f"\n  [green]Primary:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID']}")
     console.print(f"  [green]Economy:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID_CHEAP']}")
     console.print(f"  [green]Strong:[/green]  {env_vars['AIOPS_BEDROCK_MODEL_ID_STRONG']}")
 
-    # Optional AWS connectivity test
-    if not yes:
-        if Confirm.ask("\n  Test AWS connectivity?", default=False):
-            ok, info = _check_aws_credentials(region)
-            if ok:
-                console.print(f"  [green]OK[/green] — Account: {info}")
-            else:
-                console.print(f"  [yellow]AWS check failed: {info}[/yellow]")
-                console.print("  [dim]You can fix credentials later.[/dim]")
-
 
 def _init_pipeline(env_vars: dict[str, str], yes: bool) -> None:
-    """Step 4: Pipeline behavior configuration."""
+    """Pipeline behavior — defaults are good, just confirm."""
     from rich.prompt import Confirm
 
     if yes:
         env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
         env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
         env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
-        console.print("  [dim]Using defaults: auto-fix=true, auto-approve L0/L1=true, notifications=true[/dim]")
+        console.print("  [dim]Pipeline: auto-fix=true, auto-approve L0/L1=true, notifications=true[/dim]")
+        return
+
+    console.print("  Pipeline defaults: auto-fix [green]ON[/green], auto-approve L0/L1 [green]ON[/green], notifications [green]ON[/green]")
+    if Confirm.ask("  Accept pipeline defaults?", default=True):
+        env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
+        env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
+        env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
     else:
-        skip = Confirm.ask("  Skip pipeline config? (use defaults)", default=False)
-        if skip:
-            env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
-            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
-            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
-            console.print("  [dim]Using defaults.[/dim]")
-        else:
-            auto_fix = Confirm.ask("  Enable auto-fix pipeline (RCA -> SRE -> Approve -> Execute)?", default=True)
-            env_vars["AIOPS_AUTO_FIX_ENABLED"] = str(auto_fix).lower()
-
-            auto_approve = Confirm.ask("  Auto-approve L0/L1 fix plans?", default=True)
-            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = str(auto_approve).lower()
-
-            notifications = Confirm.ask("  Enable auto-notifications on pipeline events?", default=True)
-            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = str(notifications).lower()
-
-
-def _init_report_storage_step(env_vars: dict[str, str], yes: bool) -> None:
-    """Step 5: Report storage configuration."""
-    from rich.prompt import Prompt, Confirm
-    from agenticops.config import settings
-
-    if yes:
-        env_vars["AIOPS_REPORT_STORAGE"] = "local"
-        console.print(f"  [dim]Using default: local storage ({settings.reports_dir})[/dim]")
-    else:
-        skip = Confirm.ask("  Skip report storage config? (use local)", default=True)
-        if skip:
-            env_vars["AIOPS_REPORT_STORAGE"] = "local"
-        else:
-            console.print("  Reports can be stored locally or on S3.")
-            console.print("  S3 is recommended for production.\n")
-            choice = Prompt.ask("  Storage backend", choices=["local", "s3"], default="local")
-            if choice == "s3":
-                bucket = Prompt.ask("  S3 bucket name")
-                prefix = Prompt.ask("  S3 key prefix", default="reports/")
-                region = Prompt.ask("  S3 region", default="us-east-1")
-                env_vars["AIOPS_REPORT_STORAGE"] = "s3"
-                env_vars["AIOPS_REPORT_S3_BUCKET"] = bucket
-                env_vars["AIOPS_REPORT_S3_PREFIX"] = prefix
-                env_vars["AIOPS_REPORT_S3_REGION"] = region
-                console.print(f"  [green]S3 storage configured: s3://{bucket}/{prefix}[/green]")
-            else:
-                env_vars["AIOPS_REPORT_STORAGE"] = "local"
-                console.print(f"  [green]Local storage: {settings.reports_dir}[/green]")
+        auto_fix = Confirm.ask("  Enable auto-fix pipeline?", default=True)
+        env_vars["AIOPS_AUTO_FIX_ENABLED"] = str(auto_fix).lower()
+        auto_approve = Confirm.ask("  Auto-approve L0/L1 fix plans?", default=True)
+        env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = str(auto_approve).lower()
+        notifications = Confirm.ask("  Enable auto-notifications?", default=True)
+        env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = str(notifications).lower()
 
 
 def _init_integrations(env_vars: dict[str, str], yes: bool) -> None:
-    """Step 7: Optional integrations (IM, Datadog)."""
+    """Optional integrations (IM, Datadog) — skip by default."""
     from rich.prompt import Prompt, Confirm
     from agenticops.config import PROJECT_ROOT
 
@@ -1089,30 +1177,6 @@ def _init_integrations(env_vars: dict[str, str], yes: bool) -> None:
         console.print("  [dim]Skipping optional integrations.[/dim]")
         return
 
-    # IM Integration
-    if Confirm.ask("  Configure an IM platform (Feishu/Slack/DingTalk/WeCom)?", default=False):
-        im_choice = Prompt.ask(
-            "    Platform",
-            choices=["feishu", "slack", "dingtalk", "wecom"],
-            default="feishu",
-        )
-        src = PROJECT_ROOT / "config" / "im-apps.yaml.example"
-        dest = PROJECT_ROOT / "config" / "im-apps.yaml"
-        if not dest.exists() and src.exists():
-            import shutil
-
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-        console.print(f"\n    [green]Edit[/green] config/im-apps.yaml with your {im_choice} credentials.")
-        docs = {
-            "feishu": "https://open.feishu.cn/app",
-            "slack": "https://api.slack.com/apps",
-            "dingtalk": "https://open-dev.dingtalk.com",
-            "wecom": "https://work.weixin.qq.com/wework_admin",
-        }
-        console.print(f"    [dim]Docs: {docs[im_choice]}[/dim]")
-
-    # Datadog
     if Confirm.ask("  Configure Datadog integration?", default=False):
         dd_api_key = Prompt.ask("    Datadog API key")
         dd_app_key = Prompt.ask("    Datadog Application key")
@@ -1122,3 +1186,21 @@ def _init_integrations(env_vars: dict[str, str], yes: bool) -> None:
         env_vars["AIOPS_DATADOG_APP_KEY"] = dd_app_key
         env_vars["AIOPS_DATADOG_SITE"] = dd_site
         console.print("    [green]Datadog configured.[/green]")
+    else:
+        console.print("  [dim]No additional integrations configured.[/dim]")
+
+
+def _print_config_summary(env_vars: dict[str, str]) -> None:
+    """Print a summary table of configured env vars."""
+    if not env_vars:
+        return
+    console.print()
+    console.print(Rule("[bold green]Configuration Summary[/bold green]"))
+    summary = Table(show_header=True, box=SIMPLE)
+    summary.add_column("Setting", style="cyan")
+    summary.add_column("Value")
+    sensitive = ("secret", "password", "token", "api_key", "app_key")
+    for key, value in env_vars.items():
+        display = "****" if any(s in key.lower() for s in sensitive) else value
+        summary.add_row(key, display)
+    console.print(summary)
