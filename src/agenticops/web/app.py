@@ -1663,6 +1663,21 @@ async def api_trigger_fix_plan(issue_id: int):
         if not rca:
             raise HTTPException(status_code=400, detail="No RCA result found. Run RCA first.")
 
+        # Guard: reject if issue has a locked fix plan (pending_approval/approved/executing)
+        from agenticops.models import FIXPLAN_LOCKED_STATUSES
+        locked = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=issue_id)
+            .filter(FixPlan.status.in_(FIXPLAN_LOCKED_STATUSES))
+            .first()
+        )
+        if locked:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Issue #{issue_id} already has FixPlan #{locked.id} in '{locked.status}' state. "
+                       f"Wait for it to complete or reject it first.",
+            )
+
     def _run_fix_plan():
         try:
             from agenticops.agents.sre_agent import sre_agent
@@ -1842,6 +1857,21 @@ async def api_create_fix_plan(data: FixPlanCreate):
         rca = session.query(RCAResult).filter_by(id=data.rca_result_id).first()
         if not rca:
             raise HTTPException(status_code=400, detail="RCA result not found")
+
+        # Guard: reject if issue already has a non-terminal fix plan
+        from agenticops.models import FIXPLAN_TERMINAL_STATUSES
+        active = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=data.health_issue_id)
+            .filter(FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES))
+            .first()
+        )
+        if active:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Issue #{data.health_issue_id} already has active FixPlan #{active.id} ({active.status}). "
+                       f"Complete or reject it before creating a new one.",
+            )
 
         plan = FixPlan(
             health_issue_id=data.health_issue_id,

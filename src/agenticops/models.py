@@ -330,6 +330,7 @@ class HealthIssue(Base):
     __table_args__ = (
         Index("idx_health_issue_severity_status", "severity", "status"),
         Index("idx_health_issue_fingerprint", "fingerprint"),
+        Index("idx_health_issue_resource_status", "resource_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -394,6 +395,12 @@ class FixPlan(Base):
     health_issue: Mapped["HealthIssue"] = relationship(back_populates="fix_plans")
     rca_result: Mapped["RCAResult"] = relationship()
     fix_executions: Mapped[list["FixExecution"]] = relationship(back_populates="fix_plan")
+
+
+# FixPlan status sets for dedup/replace logic
+FIXPLAN_TERMINAL_STATUSES = {"executed", "failed", "rejected"}
+FIXPLAN_REPLACEABLE_STATUSES = {"draft"}
+FIXPLAN_LOCKED_STATUSES = {"pending_approval", "approved", "executing"}
 
 
 # ============================================================================
@@ -744,6 +751,15 @@ def init_db():
                 conn.execute(text("ALTER TABLE health_issues ADD COLUMN last_seen DATETIME"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_health_issue_fingerprint ON health_issues(fingerprint)"))
                 conn.commit()
+
+    # Migration: add composite index for resource-based dedup
+    if insp.has_table("health_issues"):
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_status "
+                "ON health_issues(resource_id, status)"
+            ))
+            conn.commit()
 
     # Migration: add trace_id columns to health_issues, pipeline_events, alert_events
     for tbl in ("health_issues", "pipeline_events", "alert_events"):

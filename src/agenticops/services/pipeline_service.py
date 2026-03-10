@@ -45,6 +45,25 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
         logger.info("Auto-fix pipeline disabled — skipping SRE for issue #%d", health_issue_id)
         return
 
+    # Guard: skip if issue already has a non-terminal FixPlan
+    try:
+        from agenticops.models import FixPlan, FIXPLAN_TERMINAL_STATUSES, get_db_session
+        with get_db_session() as session:
+            active = (
+                session.query(FixPlan)
+                .filter_by(health_issue_id=health_issue_id)
+                .filter(FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES))
+                .first()
+            )
+            if active:
+                logger.info(
+                    "Issue #%d already has active FixPlan #%d (%s) — skipping auto-SRE",
+                    health_issue_id, active.id, active.status,
+                )
+                return
+    except Exception:
+        logger.debug("FixPlan guard check failed, proceeding with auto-SRE", exc_info=True)
+
     thread = threading.Thread(
         target=_run_auto_sre,
         args=(health_issue_id, trace_id),
