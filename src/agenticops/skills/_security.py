@@ -231,9 +231,8 @@ def _check_injection(kwargs: Dict[str, Any]) -> None:
 def _check_approval(tier: SecurityTier, kwargs: Dict[str, Any], tool_name: str) -> None:
     """Layer 5: Approval gate for T2+ operations — HMAC verified."""
     try:
-        from agenticops.approval_token import verify as verify_token
+        from agenticops.skills.approval_token import verify as verify_token
     except ImportError:
-        # Approval token module not yet available — block T2+ until configured
         raise SecurityViolation(
             "APPROVAL_GATE",
             f"Tool '{tool_name}' requires T2+ approval but approval_token module not configured",
