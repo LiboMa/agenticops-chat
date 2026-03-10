@@ -238,13 +238,16 @@ class AgentMemory:
 
     # ── Reflect ────────────────────────────────────────────────
 
-    async def reflect(self) -> str:
-        """End-of-day consolidation and summary.
+    async def reflect(self, llm=None) -> str:
+        """End-of-day consolidation with self-questioning (Generative Agents pattern).
 
         1. Gather today's memories
-        2. Generate summary (patterns, lessons)
-        3. Store as REFLECTION type
-        4. Prune low-value entries
+        2. Self-questioning: ask LLM for 3 high-level questions
+        3. For each question, search memories and generate insight
+        4. Store insights as REFLECTION type
+        5. Prune low-value entries
+
+        If no LLM is available, falls back to text-based summary.
         """
         today = datetime.utcnow().strftime("%Y-%m-%d")
         conn = self._get_conn()
@@ -264,6 +267,84 @@ class AgentMemory:
 
         entries = [self._row_to_entry(row) for row in rows]
 
+        # Try LLM-powered self-questioning reflection
+        if llm is not None:
+            try:
+                return await self._reflect_with_llm(entries, today, llm)
+            except Exception as e:
+                logger.warning("LLM reflection failed, falling back: %s", e)
+
+        # Fallback: text-based summary
+        return await self._reflect_basic(entries, today)
+
+    async def _reflect_with_llm(
+        self, entries: list[MemoryEntry], today: str, llm
+    ) -> str:
+        """LLM-powered self-questioning reflection (Stanford Generative Agents)."""
+        # Step 1: Format memories for LLM
+        memories_text = "\n".join(
+            f"- [{e.memory_type.value}] {e.content[:150]}" for e in entries[:20]
+        )
+
+        # Step 2: Self-questioning — ask for high-level questions
+        question_prompt = (
+            f"Given these recent agent memories from the past 24 hours:\n"
+            f"{memories_text}\n\n"
+            f"What are the 3 most important high-level questions about patterns, "
+            f"recurring issues, or lessons learned that these experiences suggest?\n"
+            f'Return as JSON: ["question1", "question2", "question3"]'
+        )
+        response = llm.invoke(question_prompt, max_tokens=512)
+        questions = self._parse_json_list(response)
+
+        if not questions:
+            questions = [
+                "What recurring patterns appeared in today's incidents?",
+                "What was the most effective fix applied today?",
+                "What should I watch for tomorrow based on today's events?",
+            ]
+
+        # Step 3: For each question, search memories and generate insight
+        insights = []
+        for question in questions[:3]:
+            # Search for related memories
+            related = await self.recall(question, top_k=5)
+            related_text = "\n".join(
+                f"- {m.content[:150]}" for m in related
+            ) or "No closely related memories found."
+
+            insight_prompt = (
+                f"Question: {question}\n\n"
+                f"Relevant memories:\n{related_text}\n\n"
+                f"Based on these memories, provide a concise insight or pattern observation. "
+                f"Focus on actionable conclusions for future incident response."
+            )
+            insight = llm.invoke(insight_prompt, max_tokens=256)
+            insights.append(f"Q: {question}\nA: {insight.strip()}")
+
+        # Step 4: Combine into reflection summary
+        summary = (
+            f"Reflection for {today} ({len(entries)} memories):\n\n"
+            + "\n\n".join(insights)
+        )
+
+        # Store reflection
+        await self.remember(
+            content=summary,
+            memory_type=MemoryType.REFLECTION,
+            source="daily_reflect_llm",
+            confidence=1.0,
+        )
+
+        # Prune
+        pruned = await self.prune()
+        if pruned > 0:
+            summary += f"\n\nPruned {pruned} low-value memories."
+
+        return summary
+
+    async def _reflect_basic(self, entries: list[MemoryEntry], today: str) -> str:
+        """Basic text-based reflection (no LLM needed)."""
         # Generate summary
         summary_parts = [f"Today ({today}) I processed {len(entries)} memories:"]
         by_type: dict[str, list[str]] = {}
@@ -369,6 +450,22 @@ class AgentMemory:
             conn.close()
 
     # ── Private helpers ────────────────────────────────────────
+
+    @staticmethod
+    def _parse_json_list(text: str) -> list[str]:
+        """Extract a JSON list of strings from LLM response."""
+        import json as _json
+        import re
+        # Try to find a JSON array in the response
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if match:
+            try:
+                result = _json.loads(match.group())
+                if isinstance(result, list):
+                    return [str(item) for item in result]
+            except _json.JSONDecodeError:
+                pass
+        return []
 
     async def _embed(self, text: str) -> list[float] | None:
         """Embed text using the KB embedding client."""

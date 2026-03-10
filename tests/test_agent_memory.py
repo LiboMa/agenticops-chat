@@ -280,6 +280,43 @@ class TestAgentMemory:
         reflections = run(memory.recall_recent(memory_type=MemoryType.REFLECTION))
         assert len(reflections) >= 1
 
+    def test_reflect_with_llm(self, memory):
+        """reflect(llm=...) uses self-questioning pattern."""
+        run(memory.remember("incident: CPU spike on i-abc123"))
+        run(memory.remember("fix: scaled ASG from 2 to 4"))
+        run(memory.remember("incident: OOM on pod frontend-xyz"))
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = [
+            # Question generation
+            '["What recurring resource issues appeared?", "Which fixes were most effective?", "What should be monitored?"]',
+            # Insight 1
+            "CPU and memory pressure are the dominant patterns.",
+            # Insight 2
+            "ASG scaling resolved CPU issues quickly.",
+            # Insight 3
+            "Monitor resource utilization proactively.",
+        ]
+
+        summary = run(memory.reflect(llm=mock_llm))
+        assert "What recurring" in summary
+        assert mock_llm.invoke.call_count == 4  # 1 question + 3 insights
+
+        # Reflection stored
+        reflections = run(memory.recall_recent(memory_type=MemoryType.REFLECTION))
+        assert any("daily_reflect_llm" in r.source for r in reflections)
+
+    def test_reflect_llm_fallback(self, memory):
+        """reflect(llm=...) falls back to basic if LLM fails."""
+        run(memory.remember("incident: disk full"))
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = RuntimeError("LLM unavailable")
+
+        summary = run(memory.reflect(llm=mock_llm))
+        # Should still produce a basic summary
+        assert "1 memories" in summary or "processed" in summary
+
     def test_get_stats(self, memory):
         """get_stats returns correct counts."""
         run(memory.remember("ep1", memory_type=MemoryType.EPISODIC))
