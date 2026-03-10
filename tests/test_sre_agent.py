@@ -143,6 +143,7 @@ class TestSaveFixPlan:
 
         assert "FixPlan #" in result
         assert "L1" in result
+        # Return message says "fix_planned" (initial state before auto-approve runs)
         assert "fix_planned" in result
 
         plan = db_session.query(FixPlan).first()
@@ -151,7 +152,9 @@ class TestSaveFixPlan:
         assert len(plan.steps) == 1
 
         db_session.refresh(health_issue)
-        assert health_issue.status == "fix_planned"
+        # L1 plans are auto-approved by trigger_auto_approve() — the stable
+        # state is "fix_approved", not the transient "fix_planned".
+        assert health_issue.status == "fix_approved"
 
     def test_invalid_risk_level(self, db_session, health_issue, rca_result):
         """Test that invalid risk levels are rejected."""

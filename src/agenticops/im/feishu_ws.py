@@ -16,13 +16,37 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import (
-    CreateMessageRequest,
-    CreateMessageRequestBody,
-    P2ImMessageReceiveV1,
-)
-from lark_oapi.ws import Client as WSClient
+# lark-oapi is an optional dependency — lazy import to avoid polluting
+# the core import chain when Feishu integration is not installed.
+lark = None
+CreateMessageRequest = None
+CreateMessageRequestBody = None
+P2ImMessageReceiveV1 = None
+WSClient = None
+
+
+def _ensure_lark():
+    """Lazy-load lark-oapi SDK; raises ImportError with install hint if missing."""
+    global lark, CreateMessageRequest, CreateMessageRequestBody, P2ImMessageReceiveV1, WSClient
+    if lark is not None:
+        return
+    try:
+        import lark_oapi as _lark
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest as _CMR,
+            CreateMessageRequestBody as _CMRB,
+            P2ImMessageReceiveV1 as _P2,
+        )
+        from lark_oapi.ws import Client as _WSC
+    except ImportError:
+        raise ImportError(
+            "lark-oapi is required for Feishu integration: pip install lark-oapi"
+        )
+    lark = _lark
+    CreateMessageRequest = _CMR
+    CreateMessageRequestBody = _CMRB
+    P2ImMessageReceiveV1 = _P2
+    WSClient = _WSC
 
 from agenticops.config import PROJECT_ROOT, settings
 from agenticops.im.session_manager import IMChatSessionManager
@@ -147,6 +171,7 @@ class FeishuWSService:
     """
 
     def __init__(self, app_name: str = "default"):
+        _ensure_lark()
         self._app_name = app_name
         self._app_config = get_feishu_app(app_name)
         if not self._app_config:
