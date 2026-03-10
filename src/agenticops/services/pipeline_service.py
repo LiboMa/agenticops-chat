@@ -23,6 +23,11 @@ from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Track in-flight tasks to prevent duplicate executions
+_inflight_lock = threading.Lock()
+_inflight_sre: set[int] = set()      # health_issue_id → SRE
+_inflight_execute: set[int] = set()  # fix_plan_id → Execute
+
 
 def _restore_trace_id(trace_id: Optional[str]) -> None:
     """Restore trace_id in ContextVar as fallback (ThreadingInstrumentor may already propagate)."""
@@ -40,6 +45,7 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
 
     Called from save_rca_result() when an RCA result is persisted.
     Safe to call from any context (agent tool, API handler, etc.).
+    Dedup: only one SRE per health_issue_id at a time.
     """
     if not settings.auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping SRE for issue #%d", health_issue_id)
@@ -87,6 +93,9 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         )
     except Exception:
         logger.exception("Auto-SRE failed for HealthIssue #%d", health_issue_id)
+    finally:
+        with _inflight_lock:
+            _inflight_sre.discard(health_issue_id)
 
 
 # ── Stage 2: Auto-Approve (after fix plan saved) ─────────────────────
@@ -181,6 +190,7 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
 
     Called from trigger_auto_approve() (L0/L1 auto path) or from
     approve_fix_plan() (manual/human approval path).
+    Dedup: only one execution per fix_plan_id at a time.
     """
     if not settings.auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping execute for plan #%d", fix_plan_id)
@@ -189,6 +199,12 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     if not settings.executor_enabled:
         logger.info("Executor disabled — skipping auto-execute for plan #%d", fix_plan_id)
         return
+
+    with _inflight_lock:
+        if fix_plan_id in _inflight_execute:
+            logger.info("Auto-execute already in-flight for plan #%d — skipping duplicate", fix_plan_id)
+            return
+        _inflight_execute.add(fix_plan_id)
 
     thread = threading.Thread(
         target=_run_auto_execute,
@@ -235,3 +251,6 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
             log_event(_issue_id, "execution_completed", "execution", "failed",
                       detail={"plan_id": fix_plan_id}, trace_id=trace_id)
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)
+    finally:
+        with _inflight_lock:
+            _inflight_execute.discard(fix_plan_id)
