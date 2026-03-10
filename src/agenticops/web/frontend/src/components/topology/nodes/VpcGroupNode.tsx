@@ -21,7 +21,7 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
       <div
         className={cn(
           "absolute left-0 top-3 bottom-3 w-1 rounded-full",
-          isExternal ? "bg-gray-300" : "bg-emerald-400"
+          isExternal ? "bg-[#424242]" : "bg-emerald-400"
         )}
       />
       <Handle type="target" position={Position.Top} className="!bg-emerald-500" />
@@ -30,7 +30,7 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
         <div
           className={cn(
             "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-            isExternal ? "bg-gray-200" : "bg-emerald-200",
+            isExternal ? "bg-[#383838]" : "bg-emerald-200",
           )}
         >
           <svg

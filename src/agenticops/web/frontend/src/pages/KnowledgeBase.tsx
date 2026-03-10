@@ -35,9 +35,9 @@ function QualityBar({ score }: { score: number }) {
 function SOPStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     draft: "bg-[#383838] text-[#9b9b9b]",
-    review: "bg-amber-100 text-amber-700",
-    active: "bg-emerald-100 text-emerald-700",
-    deprecated: "bg-orange-100 text-orange-700",
+    review: "bg-amber-900/30 text-amber-400",
+    active: "bg-emerald-900/30 text-emerald-400",
+    deprecated: "bg-orange-900/30 text-orange-400",
     archived: "bg-[#383838] text-[#666]",
   };
   return (
@@ -158,7 +158,7 @@ function SOPDetailPanel({
           )}
 
           {actionError && (
-            <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded">
+            <div className="text-sm text-red-400 bg-red-50 px-3 py-2 rounded">
               {actionError}
             </div>
           )}
@@ -443,7 +443,7 @@ export default function KnowledgeBase() {
                         <button
                           onClick={() => deprecateMut.mutate(sop.id)}
                           disabled={deprecateMut.isPending}
-                          className="px-3 py-1 text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-md transition-colors disabled:opacity-50"
+                          className="px-3 py-1 text-sm font-medium text-orange-400 hover:text-orange-800 hover:bg-orange-50 rounded-md transition-colors disabled:opacity-50"
                         >
                           Deprecate
                         </button>
@@ -507,7 +507,7 @@ export default function KnowledgeBase() {
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             c.status === "resolved"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-green-900/30 text-green-400"
                               : "bg-[#383838] text-[#9b9b9b]"
                           }`}
                         >

@@ -55,7 +55,7 @@ export default function ScheduleDetail() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-semibold text-[#ececec]">{s.name}</h1>
               {s.is_enabled ? (
-                <Badge className="bg-green-100 text-green-700">Enabled</Badge>
+                <Badge className="bg-green-900/30 text-green-400">Enabled</Badge>
               ) : (
                 <Badge className="bg-[#383838] text-[#9b9b9b]">Disabled</Badge>
               )}
@@ -72,7 +72,7 @@ export default function ScheduleDetail() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-[#9b9b9b] block">Pipeline</span>
-              <Badge className="bg-blue-100 text-blue-700">{s.pipeline_name}</Badge>
+              <Badge className="bg-blue-900/30 text-blue-400">{s.pipeline_name}</Badge>
             </div>
             <div>
               <span className="text-[#9b9b9b] block">Cron</span>
@@ -164,7 +164,7 @@ export default function ScheduleDetail() {
                           ? `${(ex.duration_ms / 1000).toFixed(1)}s`
                           : "-"}
                       </td>
-                      <td className="px-4 py-2 text-sm text-red-600 max-w-xs truncate">
+                      <td className="px-4 py-2 text-sm text-red-400 max-w-xs truncate">
                         {ex.error || "-"}
                       </td>
                     </tr>

@@ -24,7 +24,7 @@ function NATNodeInner({ data, selected }: NodeProps) {
       <div className="flex items-center gap-2 pl-1.5">
         {/* Arrow-right-from-bracket icon */}
         <svg
-          className="w-5 h-5 text-orange-600 flex-shrink-0"
+          className="w-5 h-5 text-orange-400 flex-shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"

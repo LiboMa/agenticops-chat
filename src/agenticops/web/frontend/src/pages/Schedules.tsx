@@ -197,7 +197,7 @@ const columns: Column<Schedule>[] = [
     key: "pipeline_name",
     header: "Pipeline",
     render: (r) => (
-      <Badge className="bg-blue-100 text-blue-700">{r.pipeline_name}</Badge>
+      <Badge className="bg-blue-900/30 text-blue-400">{r.pipeline_name}</Badge>
     ),
   },
   {
@@ -210,7 +210,7 @@ const columns: Column<Schedule>[] = [
     header: "Enabled",
     render: (r) =>
       r.is_enabled ? (
-        <Badge className="bg-green-100 text-green-700">Enabled</Badge>
+        <Badge className="bg-green-900/30 text-green-400">Enabled</Badge>
       ) : (
         <Badge className="bg-[#383838] text-[#9b9b9b]">Disabled</Badge>
       ),
@@ -289,7 +289,7 @@ export default function Schedules() {
                       e.stopPropagation();
                       setDeleting(r);
                     }}
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-red-400 hover:underline"
                   >
                     Delete
                   </button>

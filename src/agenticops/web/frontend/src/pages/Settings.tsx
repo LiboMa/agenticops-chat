@@ -187,7 +187,7 @@ const accountColumns: Column<Account>[] = [
   { key: "account_id", header: "Account ID", render: (r) => <span className="font-mono text-sm">{r.account_id}</span> },
   { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-[#9b9b9b] truncate max-w-[200px] block">{r.role_arn}</span> },
   { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-[#383838] text-[#9b9b9b]">{reg}</Badge>)}</div> },
-  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-[#383838] text-[#9b9b9b]">Inactive</Badge> },
+  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-900/30 text-green-400">Active</Badge> : <Badge className="bg-[#383838] text-[#9b9b9b]">Inactive</Badge> },
   { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-[#9b9b9b]">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 
@@ -329,7 +329,7 @@ export default function Settings() {
                 render: (r) => (
                   <div className="flex gap-2">
                     <button onClick={(e) => { e.stopPropagation(); setEditing(r); setFormOpen(true); }} className="text-xs text-blue-400 hover:underline">Edit</button>
-                    <button onClick={(e) => { e.stopPropagation(); setDeleting(r); }} className="text-xs text-red-600 hover:underline">Delete</button>
+                    <button onClick={(e) => { e.stopPropagation(); setDeleting(r); }} className="text-xs text-red-400 hover:underline">Delete</button>
                   </div>
                 ),
               },

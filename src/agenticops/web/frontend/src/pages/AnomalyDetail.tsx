@@ -410,9 +410,9 @@ export default function AnomalyDetail() {
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             ex.status === "succeeded"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-green-900/30 text-green-400"
                               : ex.status === "failed"
-                                ? "bg-red-100 text-red-700"
+                                ? "bg-red-900/30 text-red-400"
                                 : "bg-[#383838] text-[#9b9b9b]"
                           }`}
                         >
@@ -442,7 +442,7 @@ export default function AnomalyDetail() {
                               });
                             }}
                             disabled={cancelExecMut.isPending}
-                            className="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                            className="px-3 py-1 text-xs font-medium text-red-400 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
                             Cancel
                           </button>
@@ -460,7 +460,7 @@ export default function AnomalyDetail() {
                   .map((ex) => (
                     <div
                       key={ex.id}
-                      className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 mb-2"
+                      className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-400 mb-2"
                     >
                       <strong>Execution #{ex.id} error:</strong>{" "}
                       {ex.error_message}
@@ -520,12 +520,12 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                   </span>
                   <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${
                     isFailed
-                      ? "bg-red-100 text-red-700"
+                      ? "bg-red-900/30 text-red-400"
                       : ev.status === "started"
-                        ? "bg-blue-100 text-blue-700"
+                        ? "bg-blue-900/30 text-blue-400"
                         : ev.status === "skipped"
                           ? "bg-[#383838] text-[#9b9b9b]"
-                          : "bg-green-100 text-green-700"
+                          : "bg-green-900/30 text-green-400"
                   }`}>
                     {ev.status}
                   </span>

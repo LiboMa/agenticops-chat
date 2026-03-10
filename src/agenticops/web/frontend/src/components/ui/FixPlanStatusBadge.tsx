@@ -4,12 +4,12 @@ import type { FixPlanStatus } from "@/api/types";
 
 const STATUS_STYLES: Record<FixPlanStatus, string> = {
   draft: "bg-[#383838] text-[#9b9b9b]",
-  pending_approval: "bg-amber-100 text-amber-700",
-  approved: "bg-green-100 text-green-700",
-  executing: "bg-blue-100 text-blue-700",
-  executed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  rejected: "bg-red-50 text-red-600",
+  pending_approval: "bg-amber-900/30 text-amber-400",
+  approved: "bg-green-900/30 text-green-400",
+  executing: "bg-blue-900/30 text-blue-400",
+  executed: "bg-emerald-900/30 text-emerald-400",
+  failed: "bg-red-900/30 text-red-400",
+  rejected: "bg-red-50 text-red-400",
 };
 
 const STATUS_LABELS: Record<FixPlanStatus, string> = {

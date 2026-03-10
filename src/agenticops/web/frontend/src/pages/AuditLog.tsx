@@ -75,14 +75,14 @@ export default function AuditLog() {
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <StatCard label="Total Events" value={stats.total_events} />
-          <StatCard label="Creates" value={stats.creates} colorClass="text-green-600" />
-          <StatCard label="Updates" value={stats.updates} colorClass="text-blue-600" />
-          <StatCard label="Deletes" value={stats.deletes} colorClass="text-red-600" />
+          <StatCard label="Creates" value={stats.creates} colorClass="text-green-400" />
+          <StatCard label="Updates" value={stats.updates} colorClass="text-blue-400" />
+          <StatCard label="Deletes" value={stats.deletes} colorClass="text-red-400" />
           <StatCard label="Logins" value={stats.logins} colorClass="text-[#ececec]" />
           <StatCard
             label="Login Failures"
             value={stats.login_failures}
-            colorClass="text-orange-600"
+            colorClass="text-orange-400"
           />
         </div>
       )}

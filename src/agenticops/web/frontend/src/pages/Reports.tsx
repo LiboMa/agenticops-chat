@@ -10,9 +10,9 @@ import { formatShortDate } from "@/lib/formatDate";
 import type { Report } from "@/api/types";
 
 const TYPE_COLORS: Record<string, string> = {
-  daily: "bg-blue-100 text-blue-700",
-  incident: "bg-red-100 text-red-700",
-  inventory: "bg-emerald-100 text-emerald-700",
+  daily: "bg-blue-900/30 text-blue-400",
+  incident: "bg-red-900/30 text-red-400",
+  inventory: "bg-emerald-900/30 text-emerald-400",
   weekly: "bg-purple-100 text-purple-700",
 };
 

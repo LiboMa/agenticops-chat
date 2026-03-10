@@ -16,75 +16,75 @@ body {
   overflow: hidden;
 }
 
-/* ── Clean scrollbar ── */
+/* ── Clean scrollbar (dark) ── */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: #424242;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #666;
 }
 
-/* ── Report Markdown Styles ── */
+/* ── Report Markdown Styles (dark) ── */
 .report-content .md-h1 {
-  @apply text-2xl font-semibold text-slate-900 mt-8 mb-4 pb-2 border-b border-slate-200;
+  @apply text-2xl font-semibold text-[#ececec] mt-8 mb-4 pb-2 border-b border-[#424242];
 }
 .report-content .md-h1:first-child { @apply mt-0; }
 .report-content .md-h2 {
-  @apply text-xl font-semibold text-slate-900 mt-6 mb-3;
+  @apply text-xl font-semibold text-[#ececec] mt-6 mb-3;
 }
 .report-content .md-h3 {
-  @apply text-lg font-semibold text-slate-700 mt-5 mb-2;
+  @apply text-lg font-semibold text-[#ececec] mt-5 mb-2;
 }
 .report-content .md-h4 {
-  @apply text-base font-semibold text-slate-700 mt-4 mb-2;
+  @apply text-base font-semibold text-[#ececec] mt-4 mb-2;
 }
 .report-content .md-h5,
 .report-content .md-h6 {
-  @apply text-sm font-semibold text-slate-500 mt-3 mb-1;
+  @apply text-sm font-semibold text-[#9b9b9b] mt-3 mb-1;
 }
 .report-content .md-p {
-  @apply text-sm text-slate-600 leading-relaxed mb-3;
+  @apply text-sm text-[#9b9b9b] leading-relaxed mb-3;
 }
 .report-content .md-ul {
-  @apply list-disc list-inside text-sm text-slate-600 space-y-1 mb-4 ml-2;
+  @apply list-disc list-inside text-sm text-[#9b9b9b] space-y-1 mb-4 ml-2;
 }
 .report-content .md-ol {
-  @apply list-decimal list-inside text-sm text-slate-600 space-y-1 mb-4 ml-2;
+  @apply list-decimal list-inside text-sm text-[#9b9b9b] space-y-1 mb-4 ml-2;
 }
 .report-content .md-hr {
-  @apply my-6 border-slate-200;
+  @apply my-6 border-[#424242];
 }
 .report-content .md-code {
-  @apply bg-slate-100 text-primary-600 px-1.5 py-0.5 text-xs font-mono rounded;
+  @apply bg-[#383838] text-blue-400 px-1.5 py-0.5 text-xs font-mono rounded;
 }
 .report-content .md-pre {
-  @apply bg-slate-900 text-slate-100 p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg;
+  @apply bg-[#171717] text-[#ececec] p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg;
 }
 .report-content .md-link {
-  @apply text-primary-600 hover:text-primary-700 underline;
+  @apply text-blue-400 hover:text-blue-300 underline;
 }
 .report-content .md-table-wrap {
-  @apply overflow-x-auto mb-4 border border-slate-200 rounded-lg;
+  @apply overflow-x-auto mb-4 border border-[#424242] rounded-lg;
 }
 .report-content .md-table {
   @apply w-full text-sm;
 }
 .report-content .md-table th {
-  @apply bg-slate-50 text-left px-4 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wider border-b border-slate-200;
+  @apply bg-[#2f2f2f] text-left px-4 py-2.5 text-xs font-medium text-[#666] uppercase tracking-wider border-b border-[#424242];
 }
 .report-content .md-table td {
-  @apply px-4 py-2 text-slate-600 border-b border-slate-100;
+  @apply px-4 py-2 text-[#9b9b9b] border-b border-[#424242]/50;
 }
 .report-content .md-table tr:last-child td {
   @apply border-b-0;
 }
 .report-content .md-table tr:hover td {
-  background-color: #f8fafc;
+  background-color: #383838;
 }

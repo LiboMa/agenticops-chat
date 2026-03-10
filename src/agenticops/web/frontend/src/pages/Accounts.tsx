@@ -239,7 +239,7 @@ const columns: Column<Account>[] = [
     header: "Status",
     render: (r) =>
       r.is_active ? (
-        <Badge className="bg-green-100 text-green-700">Active</Badge>
+        <Badge className="bg-green-900/30 text-green-400">Active</Badge>
       ) : (
         <Badge className="bg-[#383838] text-[#9b9b9b]">Inactive</Badge>
       ),
@@ -308,7 +308,7 @@ export default function Accounts() {
                       e.stopPropagation();
                       setDeleting(r);
                     }}
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-red-400 hover:underline"
                   >
                     Delete
                   </button>

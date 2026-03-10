@@ -227,7 +227,7 @@ export default function Network() {
                   <span>{multiRegionGraph.data.metadata.node_count} Nodes</span>
                   <span>{multiRegionGraph.data.metadata.edge_count} Connections</span>
                   {multiRegionGraph.data.metadata.anomaly_count > 0 && (
-                    <span className="text-red-600 font-medium">
+                    <span className="text-red-400 font-medium">
                       {multiRegionGraph.data.metadata.anomaly_count} Anomalies
                     </span>
                   )}
@@ -311,7 +311,7 @@ export default function Network() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-red-600">
+                  <h2 className="text-lg font-semibold text-red-400">
                     Topology Anomalies ({anomalies.data.total_anomalies})
                   </h2>
                   <span className="text-xs text-[#666]">
@@ -337,10 +337,10 @@ export default function Network() {
                         className={cn(
                           "px-1.5 py-0.5 text-xs rounded font-medium uppercase",
                           anomaly.severity === "critical"
-                            ? "bg-red-100 text-red-700"
+                            ? "bg-red-900/30 text-red-400"
                             : anomaly.severity === "high"
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-amber-100 text-amber-700"
+                              ? "bg-orange-900/30 text-orange-400"
+                              : "bg-amber-900/30 text-amber-400"
                         )}
                       >
                         {anomaly.severity}

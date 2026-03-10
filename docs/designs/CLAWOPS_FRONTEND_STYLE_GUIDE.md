@@ -110,6 +110,47 @@ Sidebar:    260px 宽, 固定左侧, #171717 背景
 5. **Issue Detail** — 单栏布局，Timeline 简洁展示
 6. **其他页面** — 逐步统一
 
+## 第二轮优化 — 设计质量（不是换色）
+
+> Ma Ronnie: "太烂了" — 第一轮只做了颜色替换，没做设计打磨
+
+### 布局
+- **单栏居中**: `max-w-4xl mx-auto` 用于详情页（AnomalyDetail, FixPlanDetail）
+- **内边距统一**: 页面 `p-6`，卡片 `p-4`
+- **卡片间距**: `gap-4`（16px）
+- **呼吸感**: 区块间用 `mt-8` 或 `mb-8` 分隔
+
+### AnomalyDetail（核心页面）
+- 顶部: 标题 + severity dot + 状态，一行搞定
+- RCA 结论: 单独大卡片，根因加粗，confidence 小字灰色
+- Timeline: 垂直线 + 小圆点，每个事件一行，不要卡片
+- Recommendations: 简单编号列表
+- 去掉所有信息密度过高的区域
+
+### FixPlanDetail（核心页面）
+- 步骤: 编号 + 描述，不要嵌套卡片
+- 执行状态: 顶部 banner（绿/红/灰）
+- 审批按钮: 底部固定，Primary + Secondary 样式
+
+### 表格/列表
+- 行高: `py-3`（不要太紧凑）
+- 列宽: 第一列（标题）占 60%，其余均分
+- 空表格: 居中 "No data" 灰色文字
+
+### 表单/输入
+- 输入框: `rounded-[20px]` pill 形，`bg-[#383838]` 背景
+- 按钮间距: `gap-3`
+- Label: 12px uppercase 灰色，`mb-1`
+
+### 动画/过渡
+- 只保留: `transition-colors duration-150`（hover 背景色）
+- 去掉: `hover:-translate-y-0.5`、`hover:shadow-lg`、所有 scale/transform
+
+### 拓扑图（Network）
+- 节点 shadow 保留（功能性，区分层级）
+- 但 `from-purple-50` 等 light 渐变 → 改成 dark 渐变（`from-purple-900/20`）
+- highlighted ring 可以保留
+
 ## 参考
 
 - ChatGPT (chatgpt.com) — 主要参考

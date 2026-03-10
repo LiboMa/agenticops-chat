@@ -208,7 +208,7 @@ export default function FixPlanDetail() {
             )}
 
             {actionError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-400">
                 {actionError}
               </div>
             )}
@@ -248,7 +248,7 @@ export default function FixPlanDetail() {
               <button
                 onClick={handleReject}
                 disabled={rejectMut.isPending}
-                className="px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 border border-red-200 text-red-400 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
                 {rejectMut.isPending ? "Rejecting..." : "Reject"}
               </button>
@@ -266,7 +266,7 @@ export default function FixPlanDetail() {
             </h2>
 
             {actionError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-400">
                 {actionError}
               </div>
             )}
@@ -323,9 +323,9 @@ export default function FixPlanDetail() {
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             ex.status === "succeeded"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-green-900/30 text-green-400"
                               : ex.status === "failed"
-                                ? "bg-red-100 text-red-700"
+                                ? "bg-red-900/30 text-red-400"
                                 : "bg-[#383838] text-[#9b9b9b]"
                           }`}
                         >
@@ -355,7 +355,7 @@ export default function FixPlanDetail() {
                               });
                             }}
                             disabled={cancelExecMut.isPending}
-                            className="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                            className="px-3 py-1 text-xs font-medium text-red-400 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
                             Cancel
                           </button>
@@ -373,7 +373,7 @@ export default function FixPlanDetail() {
                   .map((ex) => (
                     <div
                       key={ex.id}
-                      className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 mb-2"
+                      className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-400 mb-2"
                     >
                       <strong>Execution #{ex.id} error:</strong>{" "}
                       {ex.error_message}

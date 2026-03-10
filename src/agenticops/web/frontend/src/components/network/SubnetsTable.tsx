@@ -43,7 +43,7 @@ export function SubnetsTable({ subnets }: SubnetsTableProps) {
                       public
                     </Badge>
                   ) : (
-                    <Badge className="bg-gray-200 text-[#ececec]">
+                    <Badge className="bg-[#383838] text-[#ececec]">
                       private
                     </Badge>
                   )}

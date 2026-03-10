@@ -32,10 +32,10 @@ const columns: Column<NotificationLog>[] = [
     render: (r) => {
       if (!r.severity) return <span className="text-[#666]">-</span>;
       const colors: Record<string, string> = {
-        critical: "bg-red-100 text-red-700",
-        high: "bg-orange-100 text-orange-700",
-        medium: "bg-yellow-100 text-yellow-700",
-        low: "bg-blue-100 text-blue-700",
+        critical: "bg-red-900/30 text-red-400",
+        high: "bg-orange-900/30 text-orange-400",
+        medium: "bg-yellow-900/30 text-yellow-400",
+        low: "bg-blue-900/30 text-blue-400",
       };
       return (
         <Badge className={colors[r.severity] ?? "bg-[#383838] text-[#ececec]"}>
@@ -49,9 +49,9 @@ const columns: Column<NotificationLog>[] = [
     header: "Status",
     render: (r) =>
       r.status === "sent" ? (
-        <Badge className="bg-green-100 text-green-700">sent</Badge>
+        <Badge className="bg-green-900/30 text-green-400">sent</Badge>
       ) : (
-        <Badge className="bg-red-100 text-red-700">{r.status}</Badge>
+        <Badge className="bg-red-900/30 text-red-400">{r.status}</Badge>
       ),
   },
   {
@@ -68,7 +68,7 @@ const columns: Column<NotificationLog>[] = [
     header: "Error",
     render: (r) =>
       r.error ? (
-        <span className="text-sm text-red-600 max-w-xs truncate block">{r.error}</span>
+        <span className="text-sm text-red-400 max-w-xs truncate block">{r.error}</span>
       ) : (
         <span className="text-[#666]">-</span>
       ),

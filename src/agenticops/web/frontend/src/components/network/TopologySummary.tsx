@@ -13,7 +13,7 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "Internet Gateway",
       value: rs.has_internet_gateway ? "Yes" : "No",
-      color: rs.has_internet_gateway ? "text-green-600" : "text-[#666]",
+      color: rs.has_internet_gateway ? "text-green-400" : "text-[#666]",
     },
     {
       label: "Public Subnets",
@@ -28,7 +28,7 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "NAT Gateways",
       value: rs.nat_gateway_count,
-      color: "text-orange-600",
+      color: "text-orange-400",
     },
     {
       label: "Transit Gateways",
@@ -48,7 +48,7 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "Issues",
       value: rs.issues.length,
-      color: rs.issues.length > 0 ? "text-red-600" : "text-green-600",
+      color: rs.issues.length > 0 ? "text-red-400" : "text-green-400",
     },
   ];
 

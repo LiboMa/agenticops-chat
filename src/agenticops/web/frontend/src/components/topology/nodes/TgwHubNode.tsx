@@ -39,7 +39,7 @@ function TgwHubNodeInner({ data, selected }: NodeProps) {
           </div>
           <div className="text-[10px] text-[#666] mt-0.5">
             {d.attachmentCount} attachments ·{" "}
-            <span className={isHealthy ? "text-green-600" : "text-yellow-600"}>
+            <span className={isHealthy ? "text-green-400" : "text-yellow-600"}>
               {d.state}
             </span>
           </div>

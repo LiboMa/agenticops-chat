@@ -50,7 +50,7 @@ export function VpcSelector({
           {isLoadingRegionTopology ? "Scanning..." : "Scan Region"}
         </button>
       )}
-      <div className="w-px h-8 bg-gray-300" />
+      <div className="w-px h-8 bg-[#424242]" />
       <div>
         <label className="block text-sm text-[#9b9b9b] mb-1">VPC ID</label>
         <input

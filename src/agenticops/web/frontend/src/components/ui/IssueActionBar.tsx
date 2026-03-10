@@ -49,7 +49,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
           </svg>
           <span className="font-medium">This issue has been resolved</span>
           {issue.resolved_at && (
-            <span className="text-sm text-green-600 ml-2">
+            <span className="text-sm text-green-400 ml-2">
               {new Date(issue.resolved_at).toLocaleDateString()}
             </span>
           )}

@@ -4,9 +4,9 @@ import type { RiskLevel } from "@/api/types";
 
 const RISK_STYLES: Record<RiskLevel, string> = {
   L0: "bg-[#383838] text-[#9b9b9b]",
-  L1: "bg-blue-100 text-blue-700",
-  L2: "bg-orange-100 text-orange-700",
-  L3: "bg-red-100 text-red-700",
+  L1: "bg-blue-900/30 text-blue-400",
+  L2: "bg-orange-900/30 text-orange-400",
+  L3: "bg-red-900/30 text-red-400",
 };
 
 export const RiskLevelBadge = React.memo(function RiskLevelBadge({

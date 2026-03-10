@@ -140,7 +140,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
           </button>
 
           {spof.error && (
-            <p className="text-xs text-red-600">{spof.error.message}</p>
+            <p className="text-xs text-red-400">{spof.error.message}</p>
           )}
 
           {spof.data && (
@@ -158,7 +158,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                         key={item.node_id}
                         className="flex items-start gap-2 p-2.5 rounded-md bg-red-50 border border-red-200 text-sm"
                       >
-                        <span className="px-1.5 py-0.5 text-[10px] rounded font-mono bg-red-100 text-red-700">
+                        <span className="px-1.5 py-0.5 text-[10px] rounded font-mono bg-red-900/30 text-red-400">
                           {item.node_type}
                         </span>
                         <div className="flex-1 min-w-0">
@@ -169,7 +169,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                             {item.impact_description}
                           </div>
                         </div>
-                        <span className="text-[10px] text-red-600 font-medium whitespace-nowrap">
+                        <span className="text-[10px] text-red-400 font-medium whitespace-nowrap">
                           {item.affected_components} affected
                         </span>
                       </div>
@@ -205,7 +205,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
               )}
 
               {spof.data.total_spofs === 0 && (
-                <div className="text-xs text-green-600 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
+                <div className="text-xs text-green-400 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -236,7 +236,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
           </button>
 
           {capacity.error && (
-            <p className="text-xs text-red-600">{capacity.error.message}</p>
+            <p className="text-xs text-red-400">{capacity.error.message}</p>
           )}
 
           {capacity.data && (
@@ -287,7 +287,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                   ))}
                 </div>
               ) : (
-                <div className="text-xs text-green-600 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
+                <div className="text-xs text-green-400 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -336,7 +336,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
           </div>
 
           {depChain.error && (
-            <p className="text-xs text-red-600">
+            <p className="text-xs text-red-400">
               {depChain.error instanceof Error ? depChain.error.message : "Analysis failed"}
             </p>
           )}
@@ -397,7 +397,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 ))}
 
               {depChain.data.total_affected === 0 && (
-                <div className="text-xs text-green-600 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
+                <div className="text-xs text-green-400 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -463,7 +463,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
           </div>
 
           {changeSim.error && (
-            <p className="text-xs text-red-600">
+            <p className="text-xs text-red-400">
               {changeSim.error instanceof Error
                 ? changeSim.error.message
                 : "Simulation failed"}
@@ -487,7 +487,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                   className={cn(
                     "px-1.5 py-0.5 rounded text-[10px] font-medium",
                     changeSim.data.edge_existed
-                      ? "bg-amber-100 text-amber-700"
+                      ? "bg-amber-900/30 text-amber-400"
                       : "bg-[#383838] text-[#9b9b9b]",
                   )}
                 >
@@ -502,7 +502,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
               </p>
 
               {changeSim.data.total_connections_lost > 0 && (
-                <div className="text-xs font-medium text-red-600">
+                <div className="text-xs font-medium text-red-400">
                   {changeSim.data.total_connections_lost} connection(s) would be
                   lost
                 </div>
@@ -545,7 +545,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
               )}
 
               {changeSim.data.total_connections_lost === 0 && (
-                <div className="text-xs text-green-600 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
+                <div className="text-xs text-green-400 flex items-center gap-1.5 p-2 bg-green-50 rounded-md border border-green-200">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>

@@ -5,9 +5,9 @@ interface ErrorBannerProps {
 
 export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
   return (
-    <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+    <div className="bg-red-900/20 border border-red-900/50 rounded-lg p-4 flex items-start gap-3">
       <svg
-        className="h-5 w-5 text-red-500 mt-0.5 shrink-0"
+        className="h-5 w-5 text-red-400 mt-0.5 shrink-0"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -20,12 +20,12 @@ export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
         />
       </svg>
       <div className="flex-1">
-        <p className="text-sm text-red-700">{message}</p>
+        <p className="text-sm text-red-400">{message}</p>
       </div>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="text-sm font-medium text-red-600 hover:text-red-800 px-3 py-1 rounded-md border border-red-200 hover:bg-red-100 transition-colors"
+          className="text-sm font-medium text-red-400 hover:text-red-300 px-3 py-1 rounded-md border border-red-900/50 hover:bg-red-900/30 transition-colors duration-150"
         >
           Retry
         </button>

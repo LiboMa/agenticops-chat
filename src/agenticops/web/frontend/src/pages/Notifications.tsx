@@ -119,7 +119,7 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
               className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {configError && (
-              <p className="text-xs text-red-600 mt-1">{configError}</p>
+              <p className="text-xs text-red-400 mt-1">{configError}</p>
             )}
           </div>
           <div>
@@ -234,9 +234,9 @@ interface IMBotStatus {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    connected: "bg-green-100 text-green-700",
-    ready: "bg-blue-100 text-blue-700",
-    disconnected: "bg-red-100 text-red-700",
+    connected: "bg-green-900/30 text-green-400",
+    ready: "bg-blue-900/30 text-blue-400",
+    disconnected: "bg-red-900/30 text-red-400",
     not_configured: "bg-[#383838] text-[#9b9b9b]",
   };
   const labels: Record<string, string> = {
@@ -303,7 +303,7 @@ function PlatformBadge({ platform }: { platform: string }) {
   const colors: Record<string, string> = {
     feishu: "bg-teal-100 text-teal-700",
     dingtalk: "bg-sky-100 text-sky-700",
-    wecom: "bg-emerald-100 text-emerald-700",
+    wecom: "bg-emerald-900/30 text-emerald-400",
   };
   return <Badge className={colors[platform] ?? "bg-[#383838] text-[#ececec]"}>{platform}</Badge>;
 }
@@ -315,11 +315,11 @@ function PlatformBadge({ platform }: { platform: string }) {
 function ChannelTypeBadge({ type }: { type: string }) {
   const colors: Record<string, string> = {
     slack: "bg-purple-100 text-purple-700",
-    email: "bg-blue-100 text-blue-700",
-    sns: "bg-orange-100 text-orange-700",
+    email: "bg-blue-900/30 text-blue-400",
+    sns: "bg-orange-900/30 text-orange-400",
     feishu: "bg-teal-100 text-teal-700",
     dingtalk: "bg-sky-100 text-sky-700",
-    wecom: "bg-emerald-100 text-emerald-700",
+    wecom: "bg-emerald-900/30 text-emerald-400",
     webhook: "bg-[#383838] text-[#ececec]",
   };
   return <Badge className={colors[type] ?? "bg-[#383838] text-[#ececec]"}>{type}</Badge>;
@@ -347,7 +347,7 @@ const columns: Column<NotificationChannel>[] = [
     header: "Enabled",
     render: (r) =>
       r.is_enabled ? (
-        <Badge className="bg-green-100 text-green-700">Enabled</Badge>
+        <Badge className="bg-green-900/30 text-green-400">Enabled</Badge>
       ) : (
         <Badge className="bg-[#383838] text-[#9b9b9b]">Disabled</Badge>
       ),
@@ -426,7 +426,7 @@ export default function Notifications() {
                       testMut.mutate(r.name);
                     }}
                     disabled={testMut.isPending}
-                    className="text-xs text-blue-600 hover:underline"
+                    className="text-xs text-blue-400 hover:underline"
                   >
                     Test
                   </button>
@@ -445,7 +445,7 @@ export default function Notifications() {
                       e.stopPropagation();
                       setDeleting(r);
                     }}
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-red-400 hover:underline"
                   >
                     Delete
                   </button>
