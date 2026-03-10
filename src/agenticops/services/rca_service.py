@@ -13,14 +13,26 @@ from agenticops.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Track in-flight RCA tasks to prevent duplicate runs for the same issue
+_inflight_lock = threading.Lock()
+_inflight: set[int] = set()
+
+
 def trigger_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     """Fire-and-forget: spawn a daemon thread to run RCA on a newly created issue.
 
     Safe to call from any context (metadata tool, API handler, etc.).
+    Dedup: only one RCA runs per health_issue_id at a time.
     """
     if not settings.auto_rca_enabled:
         logger.info("Auto-RCA disabled — skipping for issue #%d", health_issue_id)
         return
+
+    with _inflight_lock:
+        if health_issue_id in _inflight:
+            logger.info("Auto-RCA already in-flight for #%d — skipping duplicate", health_issue_id)
+            return
+        _inflight.add(health_issue_id)
 
     thread = threading.Thread(
         target=_run_auto_rca,
@@ -55,3 +67,6 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     except Exception:
         log_event(health_issue_id, "rca_completed", "rca", "failed", trace_id=trace_id)
         logger.exception("Auto-RCA failed for HealthIssue #%d", health_issue_id)
+    finally:
+        with _inflight_lock:
+            _inflight.discard(health_issue_id)
