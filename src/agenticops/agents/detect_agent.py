@@ -146,7 +146,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """
     try:
         model = BedrockModel(
-            model_id=settings.bedrock_model_id_cheap,
+            model_id=settings.bedrock_model_id_sonnet,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
         )
