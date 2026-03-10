@@ -23,6 +23,28 @@ class EvidenceItem:
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_data: dict = field(default_factory=dict)
 
+    # Evidence source weights (Researcher's hierarchy)
+    SOURCE_WEIGHTS: dict = field(default=None, init=False, repr=False)
+
+    def __post_init__(self):
+        self.SOURCE_WEIGHTS = {
+            "cloudwatch": 0.9,   # Metrics — most objective
+            "trace": 0.9,        # Distributed traces — objective
+            "logs": 0.8,         # Semi-structured
+            "cloudtrail": 0.8,   # Audit trail — factual
+            "memory": 0.7,       # Historical experience
+            "network": 0.6,      # Graph/topology inference
+            "llm": 0.5,          # LLM reasoning
+            "kb": 0.4,           # External knowledge base
+            "self_verification": 0.5,  # CriticAgent output
+        }
+
+    @property
+    def weighted_delta(self) -> float:
+        """Confidence delta weighted by source reliability."""
+        weight = self.SOURCE_WEIGHTS.get(self.source, 0.5)
+        return self.confidence_delta * weight
+
     def summary(self, max_len: int = 200) -> str:
         sign = "+" if self.confidence_delta >= 0 else ""
         return (
