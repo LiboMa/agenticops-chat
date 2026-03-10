@@ -1,70 +1,73 @@
 # AgenticOps
 
-Agent-First Cloud Observability Platform for AWS — multi-agent AI operations with interactive CLI, React dashboard, and autonomous remediation.
+Agent-First Cloud Operations Platform — multi-agent AI operations with interactive CLI, React dashboard, IM integration, and autonomous remediation.
+
+> **Version**: 1.0.0-MVP | **Detailed Release Notes**: [docs/MVP-1.0.0-RELEASE.md](docs/MVP-1.0.0-RELEASE.md)
 
 ## Overview
 
-AgenticOps (`aiops`) is a production-grade platform that uses 7 specialized AI agents (built on [Strands Agents SDK](https://github.com/strands-agents/strands-agents) + AWS Bedrock Claude) to scan, monitor, detect, analyze, and remediate issues across your AWS infrastructure. It provides a kubectl-style CLI with an interactive chat REPL, a full-stack React SPA dashboard, and 60+ REST API endpoints.
+AgenticOps (`aiops`) uses 7 specialized AI agents (built on [Strands Agents SDK](https://github.com/strands-agents/strands-agents) + AWS Bedrock Claude 4.5/4.6) to scan, monitor, detect, analyze, and remediate issues across AWS infrastructure — fully automated, from alert to resolution.
+
+**Three access points**: CLI (`aiops chat`), React Web Dashboard, IM Bots (Feishu/Slack/DingTalk/WeCom)
 
 ## Key Capabilities
 
 | Capability | Description |
 |------------|-------------|
-| **Scan** | Discover EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPCs, subnets, SGs, route tables, NAT gateways, Transit Gateways, and Load Balancers |
-| **Monitor** | CloudWatch metrics, alarms, and log insights |
-| **Detect** | Statistical anomaly detection (Z-score) and rule-based evaluation |
-| **Analyze** | LLM-powered Root Cause Analysis with CloudTrail correlation, network topology, and Knowledge Base search |
-| **Remediate** | Structured fix plans (L0-L3 risk levels) with approval workflow and autonomous execution |
-| **Report** | Daily, incident, and inventory reports with KB case study distillation |
-| **Network Topology** | VPC topology analysis, blackhole route detection, security group dependency mapping, reachability queries |
-| **Knowledge Base** | Hybrid vector (Titan V2) + keyword search over SOPs, case studies, and runbook patterns |
-| **Schedule** | Cron-based task scheduling for recurring operations |
-| **Notify** | Multi-channel notifications (Slack, Email, SNS, Webhook) |
-| **Auth** | User authentication (JWT sessions + API keys) |
-| **Audit** | Complete audit trail for all operations |
+| **Scan** | 20+ AWS service types: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPCs, subnets, SGs, route tables, NAT/TGW, Load Balancers |
+| **Monitor & Detect** | CloudWatch alarms/metrics, Z-score anomaly detection, Prometheus/CloudWatch/Datadog webhook intake |
+| **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, network topology, Knowledge Base search |
+| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — fully autonomous for low-risk fixes |
+| **Agent Skills** | 10 domain skills (Linux, Network, K8s, DB, Elasticsearch, Monitoring, Log, AWS Compute/Storage, Local OS) |
+| **Network Topology** | VPC graph engine with SPOF detection, capacity risk, dependency chain, change simulation |
+| **Knowledge Base** | Hybrid vector (Titan V2) + keyword search; auto-distills resolved cases into reusable SOPs |
+| **Report** | Daily/weekly/incident/inventory reports with multi-channel distribution |
+| **Notify** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook — YAML-configured |
+| **IM Bots** | Feishu/Slack WebSocket bots with alert channel routing (agent-verified, not regex) |
 
 ## Multi-Agent Architecture
 
 ```
-                        ┌─────────────────┐
-                        │   Main Agent    │  Orchestrator
-                        │  (routes tasks) │
-                        └────────┬────────┘
-               ┌────────┬───────┼───────┬────────┬────────┐
-               v        v       v       v        v        v
-          ┌────────┐ ┌──────┐ ┌─────┐ ┌─────┐ ┌────────┐ ┌──────────┐
-          │  Scan  │ │Detect│ │ RCA │ │ SRE │ │Execute │ │ Reporter │
-          │ Agent  │ │Agent │ │Agent│ │Agent│ │ Agent  │ │  Agent   │
-          └────────┘ └──────┘ └─────┘ └─────┘ └────────┘ └──────────┘
-          Resource    Health   Root    Fix Plan  Approved   Report
-          discovery   monitor  cause   generation execution  generation
-                                analysis (READ-ONLY) (L4 Auto)
+CLI (aiops chat)  ──┐
+                    ├──► Main Agent (orchestrator) ──► Sub-Agents
+Web Dashboard ──────┤         │
+  (React + SSE)     │         ├──► Scan Agent ──► AWS service APIs
+IM Bots ────────────┘         ├──► Detect Agent ──► CloudWatch, Prometheus
+  (Feishu/Slack)              ├──► RCA Agent ──► CloudTrail, KB, Skills
+                              ├──► SRE Agent ──► Fix plan generation (READ-ONLY)
+                              ├──► Executor Agent ──► AWS CLI, SSM/SSH, kubectl
+                              └──► Reporter Agent ──► Reports, KB distillation
 ```
 
-| Agent | Role | Key Tools |
-|-------|------|-----------|
-| **Scan Agent** | Resource discovery and inventory | AWS service APIs (EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS), VPC/network describe |
-| **Detect Agent** | Health monitoring via CloudWatch | List alarms, get metrics, query logs, Z-score detection, rule evaluation |
-| **RCA Agent** | Root Cause Analysis | CloudWatch metrics/logs, CloudTrail events, network topology, Knowledge Base search |
-| **SRE Agent** | Fix plan generation (READ-ONLY, never executes) | Metadata tools, KB search, AWS read-only CLI |
-| **Executor Agent** | Autonomous fix execution (L4 Auto Operation) | AWS CLI (write), 7-step safety protocol: verify -> gate -> pre-check -> execute -> post-check -> verify-fix -> record |
-| **Reporter Agent** | Report generation and KB distillation | Report tools, metadata queries, case study writer |
-| **Main Agent** | Orchestrator routing tasks to specialists | All sub-agents exposed as tools |
+| Agent | Model Tier | Role |
+|-------|------------|------|
+| **Main** | Opus 4.6 | Pure router — dispatches to specialists |
+| **RCA** | Opus 4.6 | Root cause analysis with Skills + KB |
+| **SRE** | Opus 4.6 | Fix plan generation (never executes) |
+| **Executor** | Opus 4.6 | Multi-backend execution (AWS/SSM/kubectl) |
+| **Scan** | Haiku 4.5 | Resource discovery (cost-optimized) |
+| **Detect** | Haiku 4.5 | Health monitoring (cost-optimized) |
+| **Reporter** | Haiku 4.5 | Report generation (cost-optimized) |
+
+### Auto-Fix Pipeline
+
+```
+Alert ──► HealthIssue ──► RCA Agent ──► SRE Agent ──► Auto-Approve (L0/L1) ──► Executor ──► Resolve
+                                                       ↓ L2/L3: Human Approval
+```
+
+**Three independent gates**: `auto_fix_enabled` (master), `executor_auto_approve_l0_l1`, `executor_enabled`
+
+**FixPlan dedup**: One issue → one active plan. Draft=update-in-place, Locked=reject, Terminal=allow new.
 
 ### HealthIssue Lifecycle
 
 ```
-open -> investigating -> root_cause_identified -> fix_planned -> fix_approved -> fix_executed -> resolved
+open → investigating → acknowledged → root_cause_identified → fix_planned
+  → fix_approved → fix_executing → fix_executed → resolved
 ```
 
-### Fix Plan Risk Levels
-
-| Level | Description | Approval |
-|-------|-------------|----------|
-| **L0** | Informational (no changes) | Auto-approved |
-| **L1** | Safe read-only diagnostics | Auto-approved |
-| **L2** | Low-risk changes (restart, scale) | Manual approval required |
-| **L3** | High-risk changes (config, IAM) | Manual approval + review required |
+State machine enforced — invalid transitions return 409.
 
 ## Quick Start
 
@@ -72,474 +75,275 @@ open -> investigating -> root_cause_identified -> fix_planned -> fix_approved ->
 
 ```bash
 pip install -e .
+# Optional cloud backends:
+pip install -e ".[cloud]"    # pgvector + psycopg2
 ```
 
-### 2. Initialize
+### 2. Initialize (3 options)
 
 ```bash
+# Interactive guided setup
 aiops init
+
+# Non-interactive local setup
+aiops init --yes
+
+# Zero-prompt from JSON config
+aiops init --config setup.json
+
+# One-click: init + start + optional scan
+aiops quickstart --yes
 ```
 
-### 3. Add AWS Account
+### 3. Start Services
 
 ```bash
-aiops create account my-account \
-  --account-id 123456789012 \
-  --role-arn arn:aws:iam::123456789012:role/AgenticOpsRole \
-  --regions us-east-1,us-west-2
-```
+# Service mode (background daemon)
+aiops service start
 
-> Only one account can be active at a time. Creating a new account automatically activates it and deactivates others.
-
-### 4. Basic Operations
-
-```bash
-# Scan resources
-aiops run scan --services EC2,Lambda,RDS,S3
-
-# Run anomaly detection
-aiops run detect
-
-# View health issues
-aiops issues
-
-# Analyze a specific issue
-aiops run analyze 1
-
-# Generate daily report
-aiops run report --type daily
-```
-
-### 5. Start Web Dashboard
-
-```bash
+# Or direct web dashboard
 aiops web
 # Dashboard at http://localhost:8000
 ```
 
-### 6. Interactive AI Chat
+### 4. Interactive Chat
 
 ```bash
+# Interactive REPL with 30+ slash commands
 aiops chat
-# Or with account context:
-aiops chat --account production
+
+# Headless mode
+aiops chat "check health of prod"
+aiops chat -q "scan us-east-1" -d concise
+echo "list issues" | aiops chat
+
+# With file attachment
+aiops chat "analyze this log @/tmp/error.log"
+
+# With issue/resource references
+aiops chat "deep dive on I#42 and check R#17"
+```
+
+### 5. Basic Operations
+
+```bash
+aiops run scan --services EC2,Lambda,RDS,S3
+aiops run detect
+aiops issues
+aiops run analyze 1
+aiops run report --type daily
 ```
 
 ## CLI Reference
-
-### Command Structure
-
-```
-aiops <verb> <resource> [options]
-```
 
 ### Core Commands
 
 | Command | Description |
 |---------|-------------|
-| `aiops init` | Initialize database |
-| `aiops chat [--account NAME]` | Start interactive AI chat |
-| `aiops web [--host HOST]` | Launch web dashboard |
+| `aiops init [--config FILE]` | Initialize — guided wizard or JSON config |
+| `aiops quickstart [--yes]` | One-click: init + start + optional scan |
+| `aiops chat [QUERY] [-d LEVEL] [-f FOCUS]` | Interactive/headless AI chat |
+| `aiops service start\|stop\|status\|restart\|logs` | Background service management |
+| `aiops web [--host H] [--port P]` | Launch web dashboard |
 | `aiops issues [--severity S] [--status S]` | List health issues |
-| `aiops issue <id>` | Get specific health issue |
-| `aiops manage <resource_id>` | Mark resource as managed |
-| `aiops unmanage <resource_id>` | Unmark managed resource |
-| `aiops arch [-o FORMAT]` | Show system architecture (tree/markdown/json) |
-| `aiops export <entity> [-o FORMAT]` | Export data (resources, issues, accounts, reports) |
-| `aiops test_account <name>` | Test AWS account credentials |
+| `aiops issue <id>` | Show issue detail |
+| `aiops arch [-o FORMAT]` | System architecture (tree/markdown/json) |
+| `aiops export <entity> [-o FORMAT]` | Export data |
 | `aiops version` | Show version |
 
-### Get Resources
-
-| Command | Description |
-|---------|-------------|
-| `aiops get accounts` | List all AWS accounts |
-| `aiops get resources [-t TYPE]` | List resources (filterable by type) |
-| `aiops get anomalies [--status STATUS]` | List anomalies (legacy) |
-| `aiops get reports` | List generated reports |
-| `aiops get schedules` | List scheduled tasks |
-| `aiops get channels` | List notification channels |
-
-### Create / Update Resources
-
-| Command | Description |
-|---------|-------------|
-| `aiops create account <name> -a <id> -r <arn>` | Create AWS account |
-| `aiops create schedule <name> <pipeline> <cron>` | Create scheduled task |
-| `aiops create channel <name> -t <type> -c <config>` | Create notification channel |
-| `aiops update account <name> --enable/--disable` | Activate/deactivate account |
-| `aiops update anomaly <id> --acknowledge/--resolve` | Update anomaly status |
-
-### Run Operations
-
-| Command | Description |
-|---------|-------------|
-| `aiops run scan [--services SVC]` | Scan AWS resources |
-| `aiops run detect` | Run anomaly detection |
-| `aiops run analyze <issue_id>` | Run RCA on issue |
-| `aiops run report [--type TYPE]` | Generate report |
-| `aiops run schedule <name>` | Trigger scheduled task |
-| `aiops run notify <subject>` | Send notification |
-
-### Output Formatting
+### CRUD Commands
 
 ```bash
-# Output formats
-aiops get resources -o table   # Default table view
-aiops get resources -o json    # JSON with syntax highlighting
-aiops get resources -o wide    # Extended table with more columns
-
-# Architecture views
-aiops arch              # Tree view (default)
-aiops arch -o markdown  # Markdown tables
-aiops arch -o json      # JSON
-
-# Table styles (via env var)
-export AIOPS_TABLE_STYLE=simple   # simple | minimal | double | ascii | default
+aiops get accounts|resources|issues|reports|schedules|channels
+aiops describe account|resource|issue|report <id>
+aiops create account|schedule|channel <name> [options]
+aiops update account|issue|schedule <id> [options]
+aiops delete account|schedule <id>
+aiops run scan|detect|analyze|report|schedule|notify [options]
 ```
 
-## Chat Mode
-
-`aiops chat` provides an interactive REPL with 30+ slash commands, AI-powered natural language queries, animated thinking display, and smart output paging.
-
-### Thinking Display
-
-Real-time progress indicators (Claude Code-style):
+### Chat Slash Commands (30+)
 
 ```
-  ✓ Understanding request (245ms)
-  ⚙ Calling scan_resources (EC2, Lambda) (1.2s)
-  ✓ Processing results (89ms)
-  ⠹ Generating response...
-```
-
-Braille spinner animates smoothly. Token usage tracked per request: `↑3.8K ↓216 Σ4.1K | Requests: 1`.
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| ↑ / ↓ | Navigate command history |
-| Ctrl+R | Reverse search history |
-| Tab | Auto-complete slash commands |
-| Ctrl+A / Ctrl+E | Move to line start/end |
-| Ctrl+W | Delete word |
-| Ctrl+U | Clear line |
-| Ctrl+C | Cancel input (press twice to exit) |
-
-### Slash Commands
-
-```
-# Help & Info
-/help                              Show all commands
-/status                            System status overview
-/arch                              Show system architecture
-
-# Resources
-/account list|show|activate|delete Account management
-/resource list|show                Resource queries
-/issue list|show                   Health issue queries
-/report list                       Report queries
-
-# Operations
-/scan                              Scan resources
-/detect                            Run detection
-/analyze <id>                      Run RCA
-/ack <id>                          Acknowledge issue
-/resolve <id>                      Resolve issue
-
-# Workflows
-/workflow full-scan                Full scan pipeline
-/workflow daily                    Scan -> detect -> analyze -> report
-/workflow incident <id>            RCA + notify workflow
-/workflow health                   Health check
-
-# Session & Context
-/session save|load|delete|list     Session management
-/context account <name>            Switch account context
-/output json|table|wide            Set output format
-/style <style>                     Set table style
-
-# Display & Paging
-/pager on|off|auto|<N>            Smart output truncation
-/less                              View full last output (markdown rendered)
-/scroll                            Scroll back through history
-/clear                             Clear screen
-
-# Token Tracking
-/tokens                            Show token usage stats
-/verbose                           Toggle verbose mode
-
-# Export
-/export resources|anomalies        Export data
-
-/exit                              Exit chat
-```
-
-### Example Session
-
-```
-You: /account activate production
-You: /workflow full-scan
-You: /issue list
-You: /analyze 1
-You: What are the top issues in my infrastructure?
-You: Can you generate a fix plan for issue #3?
-You: /export resources --json
-You: /exit
+/help                    Show all commands
+/scan                    Scan resources
+/detect                  Run detection
+/analyze <id>            Run RCA
+/fix <id>                Generate fix plan
+/approve <id>            Approve fix plan
+/execute <id>            Execute approved plan
+/focus <categories>      Set scan focus (computing,networking,databases,...)
+/detail concise|medium|detailed  Output detail level
+/model opus|sonnet|haiku Runtime model switch
+/skill list|activate     Agent Skills management
+/workflow full-scan|daily|incident  Multi-step workflows
+/channel list|show|test|set  Notification channel management
+/send_to <target> <content>  Send to IM/notification channel
+/tokens                  Token usage stats
+/export                  Export data
 ```
 
 ## Web Dashboard
 
-Modern React SPA with 8 pages, served by FastAPI at `http://localhost:8000`.
+React SPA with 16 pages, served by FastAPI at `http://localhost:8000`.
 
-**Tech stack:** React 18, TypeScript, Tailwind CSS, React Flow (topology visualization), TanStack Query
-
-### Pages
+**Tech stack**: React 18, TypeScript, Tailwind CSS, TanStack Query, React Flow
 
 | Page | Description |
 |------|-------------|
 | **Dashboard** | Overview stats, critical issues, recent activity |
-| **Resources** | Managed AWS resource inventory with filtering |
+| **Chat** | SSE streaming chat with file upload, session management |
+| **Resources** | AWS resource inventory with type filtering |
 | **Anomalies** | Health issue list with severity/status badges |
-| **Anomaly Detail** | Single issue view with RCA results |
+| **Anomaly Detail** | Issue detail + pipeline timeline + action bar |
+| **Fix Plans** | Fix plan list + runbook UI |
+| **Fix Plan Detail** | Steps, pre/post checks, execution history |
+| **Network** | Interactive VPC topology with SRE analysis panel |
+| **Reports** | Report browser with detail view |
+| **Schedules** | CRUD + execution history + "Run Now" |
+| **Notifications** | Channel management + test-send + log viewer |
 | **Accounts** | AWS account management |
-| **Network** | Interactive VPC/region topology with graph visualization, dynamic AWS region dropdown |
-| **Reports** | Generated report browser |
 | **Audit Log** | Complete operation audit trail |
-
-### Network Topology Features
-
-- **Region-level overview**: VPCs, Transit Gateways, peering connections
-- **VPC drill-down**: Subnets, route tables, NAT gateways, Internet gateways, endpoints
-- **Interactive graph view**: React Flow with clickable nodes (VPC -> subnet -> reachability)
-- **Anomaly detection**: Blackhole routes, orphaned resources, missing gateways
-- **Security group dependency map**: Visual SG reference chain
-- **Dynamic region selector**: Populated from AWS regional-table API (37+ regions)
+| **Settings** | Runtime configuration |
 
 ## API Reference
 
-60+ REST API endpoints served by FastAPI. Full OpenAPI docs at `http://localhost:8000/docs`.
+~70 REST API endpoints served by FastAPI. Full OpenAPI docs at `http://localhost:8000/docs`.
 
-### Endpoints by Category
+| Category | Base Path | Count |
+|----------|-----------|-------|
+| Health Issues | `/api/health-issues` | 8 |
+| Fix Plans | `/api/fix-plans` | 6 |
+| Chat (SSE) | `/api/chat/sessions` | 5 |
+| Resources | `/api/resources` | 5 |
+| Schedules | `/api/schedules` | 7 |
+| Notifications | `/api/notifications` | 7 |
+| Graph/Topology | `/api/graph`, `/api/network` | 18 |
+| Accounts | `/api/accounts` | 5 |
+| Auth | `/api/auth` | 3 |
+| Audit | `/api/audit` | 3 |
+| Stats/Health | `/api/stats`, `/api/health` | 3 |
+| IM/Webhooks | `/api/im` | 8+ |
 
-| Category | Endpoints | Description |
-|----------|-----------|-------------|
-| **System** | `GET /api/health`, `GET /api/stats`, `GET /api/regions` | Health check, dashboard stats, AWS region list |
-| **Accounts** | `GET/POST /api/accounts`, `GET/PUT/DELETE /api/accounts/{id}` | AWS account CRUD |
-| **Resources** | `GET /api/resources`, `GET /api/resources/{id}` | Resource inventory |
-| **Health Issues** | `GET/POST /api/health-issues`, `GET/PUT/DELETE /api/health-issues/{id}`, `GET .../rca`, `GET .../fix-plans` | Issue lifecycle management |
-| **Fix Plans** | `GET/POST /api/fix-plans`, `GET/PUT/DELETE /api/fix-plans/{id}`, `PUT .../approve`, `POST .../execute` | Remediation plan management |
-| **Fix Executions** | `GET /api/fix-executions`, `GET /api/fix-executions/{id}` | Execution result history |
-| **Reports** | `GET /api/reports`, `GET /api/reports/{id}`, `POST /api/reports/generate` | Report management |
-| **Schedules** | `GET/POST /api/schedules`, `GET/PUT/DELETE /api/schedules/{id}`, `POST .../run`, `GET .../executions` | Cron scheduling |
-| **Notifications** | `GET/POST /api/notifications/channels`, `PUT/DELETE .../channels/{id}`, `POST .../test`, `GET .../logs` | Notification channels |
-| **Auth** | `POST /api/auth/register/login/logout`, `GET /api/users/me`, `PUT /api/users/me/password`, API key CRUD | Authentication |
-| **Audit** | `GET /api/audit/logs`, `GET /api/audit/entity/{type}/{id}`, `GET /api/audit/stats` | Audit trail |
-| **Network** | `GET /api/network/vpcs`, `GET /api/network/vpc-topology`, `GET /api/network/region-topology` | Live AWS network queries |
-| **Graph** | `GET /api/graph/vpc/{id}`, `GET /api/graph/region/{region}`, reachability, anomalies | Topology graph engine |
-| **Anomalies** | `GET/PUT /api/anomalies`, `GET .../rca` | Legacy compatibility endpoints |
+## Agent Skills
+
+10 domain skills loaded on demand (~636 tokens in system prompt, ~3-5K per activation):
+
+| Skill | Domain |
+|-------|--------|
+| `linux-admin` | Process, disk, memory, network diagnostics |
+| `network-engineer` | CCIE-level routing, firewall, TCP, VPN, MTU |
+| `kubernetes-admin` | Pods, nodes, CNI, CoreDNS, PVC, HPA |
+| `database-admin` | RDS, DynamoDB, ElastiCache, slow queries |
+| `elasticsearch` | Cluster health, DSL, JVM, ILM, snapshots |
+| `monitoring` | CloudWatch, Prometheus, SLI/SLO |
+| `log-analysis` | CloudWatch Insights, pod/system logs |
+| `aws-compute` | EC2, ECS, EKS, Lambda troubleshooting |
+| `aws-storage` | S3, EBS, EFS, FSx troubleshooting |
+| `local-os-operator` | Local file read/search/tail (dynamic tools) |
+
+Add new skills with zero code changes — see `skills/ADDING_SKILLS.md`.
 
 ## Graph Engine
 
-Built on NetworkX, the graph engine models AWS infrastructure as a directed graph for topology analysis and anomaly detection.
+NetworkX-based infrastructure graph with SRE analysis algorithms:
 
-**Node types:** VPC, Subnet, Route Table, Internet Gateway, NAT Gateway, Transit Gateway, Security Group, Load Balancer
+| Algorithm | Purpose |
+|-----------|---------|
+| `dependency_chain_analysis` | Reverse BFS — all upstream dependents of a fault node |
+| `detect_spof` | Articulation points + bridges |
+| `capacity_risk_analysis` | Subnet IP exhaustion + EKS pod limits |
+| `simulate_change` | Before/after reachability diff |
 
-**Edge types:** contains, routes_to, associated, attached_to, peers_with, hosted_in, references, serves
+12 compute node types (EC2, RDS, Lambda, EKS, ECS, ElastiCache, etc.) with SG-inferred connectivity edges.
 
-**Algorithms:**
-- Reachability analysis (subnet -> internet path tracing)
-- Impact radius computation (blast radius of a change)
-- Network path finding (shortest path between resources)
-- Anomaly detection (blackhole routes, orphaned resources, missing gateways)
+## Dual Alert Intake
 
-## Knowledge Base
+| Pipeline | Flow | LLM Cost |
+|----------|------|----------|
+| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA pipeline | None |
+| **IM Agent** | IM message → Main Agent (5-step verification) → `create_health_issue` → same pipeline | Yes |
 
-Hybrid search system for SOPs, case studies, and runbook patterns.
+HealthIssue fingerprint (SHA-256) prevents duplicates across both pipelines.
 
-- **Vector search**: AWS Titan Text Embeddings V2 (1024-dim) via Bedrock
-- **Keyword fallback**: When embeddings are unavailable
-- **Reranking**: 60% cosine similarity + 20% efficiency score + 20% base score
-- **Verified boost**: Verified case studies get 1.2x ranking boost
-- **Case distillation**: Reporter agent automatically distills resolved incidents into KB case studies
+## Validated: 10/10 Cases Passed
 
-## EKS Chaos Lab
+Closed-loop validation on EKS Lab (2026-03-06):
 
-Infrastructure-as-code for testing AgenticOps against real EKS failures.
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Auto-fix rate | ≥7/10 | **10/10** |
+| Detection time | ≤3 min | **~2 min** |
+| MTTR | ≤10 min | **~6.3 min** |
+| Cost/cycle | ≤$3 | **~$2-3** |
 
-**Location:** `infra/eks-chaos-lab/`
-
-```bash
-# Setup cluster + workloads + monitoring
-./infra/eks-chaos-lab/setup.sh
-
-# Inject chaos
-./infra/eks-chaos-lab/chaos/pod-kill.sh
-./infra/eks-chaos-lab/chaos/node-drain.sh
-./infra/eks-chaos-lab/chaos/network-chaos.sh
-./infra/eks-chaos-lab/chaos/resource-stress.sh
-./infra/eks-chaos-lab/chaos/config-break.sh
-
-# Restore
-./infra/eks-chaos-lab/chaos/restore-all.sh
-
-# Verify setup
-./infra/eks-chaos-lab/verify/verify-agenticops.sh
-
-# Cleanup
-./infra/eks-chaos-lab/cleanup.sh
-```
-
-Includes IAM role creation, CloudWatch alarm setup, and Kubernetes workload manifests (deployments, HPA, PDB, ConfigMaps).
-
-## Account Management
-
-Only one account can be active at a time.
-
-```bash
-# Create and activate (deactivates others)
-aiops create account prod \
-  --account-id 123456789012 \
-  --role-arn arn:aws:iam::123456789012:role/AgenticOpsRole
-
-# Create without activating
-aiops create account staging \
-  --account-id 987654321098 \
-  --role-arn arn:aws:iam::987654321098:role/AgenticOpsRole \
-  --no-activate
-
-# Switch active account
-aiops update account staging --enable
-
-# In chat mode
-/account activate staging
-/account active    # Show current
-```
-
-## AWS IAM Role Setup
-
-Create an IAM role in each AWS account you want to monitor:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ec2:Describe*",
-        "lambda:List*", "lambda:Get*",
-        "rds:Describe*",
-        "s3:List*", "s3:GetBucket*",
-        "ecs:List*", "ecs:Describe*",
-        "eks:List*", "eks:Describe*",
-        "dynamodb:List*", "dynamodb:Describe*",
-        "sqs:List*", "sqs:Get*",
-        "sns:List*",
-        "elasticloadbalancing:Describe*",
-        "cloudwatch:GetMetricData", "cloudwatch:ListMetrics",
-        "cloudwatch:DescribeAlarms", "cloudwatch:GetMetricStatistics",
-        "logs:DescribeLogGroups", "logs:StartQuery", "logs:GetQueryResults",
-        "cloudtrail:LookupEvents"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-Trust policy for cross-account access:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::YOUR_MAIN_ACCOUNT:root"
-      },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "sts:ExternalId": "your-external-id"
-        }
-      }
-    }
-  ]
-}
-```
+Cases: OOM Kill, Bad Image, Network Policy, DiskPressure, Pod Pending, Unhealthy Targets, CoreDNS Down, PVC Pending, HPA Maxed, Service Deleted.
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AIOPS_DATABASE_URL` | Database URL | `sqlite:///data/agenticops.db` |
-| `AIOPS_BEDROCK_REGION` | AWS region for Bedrock LLM calls | `us-east-1` |
-| `AIOPS_BEDROCK_MODEL_ID` | Bedrock model ID | `global.anthropic.claude-opus-4-6-v1` |
-| `AIOPS_EMBEDDING_MODEL_ID` | Text embedding model | `amazon.titan-embed-text-v2:0` |
-| `AIOPS_EMBEDDING_DIMENSION` | Embedding vector dimension | `1024` |
-| `AIOPS_EMBEDDING_ENABLED` | Enable vector embeddings | `true` |
-| `AIOPS_DEFAULT_METRICS_PERIOD` | CloudWatch metrics period (seconds) | `300` |
-| `AIOPS_ANOMALY_DETECTION_WINDOW` | Anomaly detection window (seconds) | `3600` |
-| `AIOPS_DEFAULT_LIST_LIMIT` | Default list query limit | `50` |
-| `AIOPS_MAX_LIST_LIMIT` | Maximum list query limit | `500` |
-| `AIOPS_EXECUTOR_ENABLED` | Enable autonomous fix execution | `false` |
-| `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | Auto-approve L0/L1 fix plans | `true` |
-| `AIOPS_EXECUTOR_STEP_TIMEOUT` | Per-step execution timeout (seconds) | `300` |
-| `AIOPS_EXECUTOR_TOTAL_TIMEOUT` | Total execution timeout (seconds) | `1800` |
-| `AIOPS_TABLE_STYLE` | CLI table border style | `default` |
-| `AIOPS_DEV_MODE` | Enable CORS dev mode (localhost origins) | `false` |
+All settings use `AIOPS_` prefix. Key ones:
 
-## Architecture
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-opus-4-6-v1` | Default model (Opus 4.6) |
+| `AIOPS_BEDROCK_MODEL_ID_CHEAP` | `...claude-haiku-4-5-20251001-v1:0` | Economy model (Haiku 4.5) |
+| `AIOPS_BEDROCK_REGION` | `us-east-1` | AWS Bedrock region |
+| `AIOPS_DATABASE_URL` | `sqlite:///...agenticops.db` | Database URL |
+| `AIOPS_AUTO_FIX_ENABLED` | `true` | Auto-fix pipeline master switch |
+| `AIOPS_AUTO_RCA_ENABLED` | `true` | Auto-trigger RCA on new issues |
+| `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | `true` | Auto-approve low-risk plans |
+| `AIOPS_EXECUTOR_ENABLED` | `true` | Enable fix execution |
+| `AIOPS_NOTIFICATIONS_ENABLED` | `true` | Auto-notifications |
+| `AIOPS_SKILLS_ENABLED` | `true` | Agent Skills integration |
+| `AIOPS_SCAN_FOCUS` | `all` | Resource categories filter |
+| `AIOPS_AGENT_OUTPUT_DETAIL` | `medium` | Output detail level |
+| `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` or `cloud` |
+| `AIOPS_API_AUTH_ENABLED` | `false` | API authentication middleware |
+
+## Project Structure
 
 ```
 src/agenticops/
-├── agents/      # 7 Strands agents (scan, detect, rca, sre, executor, reporter, main)
-├── tools/       # 10 tool modules (AWS, network, EKS, CloudWatch, CloudTrail, KB, metadata, reporting, detect, CLI)
-├── graph/       # Infrastructure topology engine (NetworkX) + graph algorithms + API router
-├── kb/          # Knowledge Base (vector embeddings + keyword search + case studies)
-├── cli/         # kubectl-style CLI + interactive chat (30+ slash commands)
-├── web/         # FastAPI backend (60+ endpoints) + React SPA frontend
-├── models.py    # SQLAlchemy ORM (12+ models)
-├── config.py    # Pydantic settings
-├── scan/        # AWS resource scanning
-├── monitor/     # CloudWatch metrics & logs
-├── detect/      # Anomaly detection (Z-score + rules)
-├── analyze/     # Root Cause Analysis
-├── report/      # Report generation
-├── pipeline/    # Multi-step workflow orchestration
-├── scheduler/   # Cron-based task scheduling
-├── notify/      # Notifications (Slack/Email/SNS/Webhook)
-├── auth/        # Authentication (JWT sessions + API keys)
-└── audit/       # Complete audit logging
+├── agents/          # 7 Strands agents (main, scan, detect, rca, sre, executor, reporter)
+├── tools/           # Agent tools (metadata, AWS CLI, file tools)
+├── services/        # Pipeline services (auto-fix, RCA, notifications, events)
+├── graph/           # Infrastructure graph engine + SRE algorithms
+├── skills/          # Skill loader, security, execution, evolution
+├── kb/              # Knowledge Base (vector store: SQLite/pgvector/S3)
+├── cli/             # CLI entry + chat + init wizard + display
+├── web/             # FastAPI backend + React SPA frontend
+├── chat/            # Message preprocessing, file reader, /send_to, /channel
+├── notify/          # Multi-channel notifications (YAML config)
+├── im/              # IM bots (Feishu/Slack WebSocket)
+├── integrations/    # Alert processor, source parsers
+├── pipeline/        # RAG pipeline, orchestrator, health patrol
+├── storage/         # Storage backends (local/S3)
+├── scheduler/       # Cron-based task scheduling
+├── auth/            # Authentication (JWT + API keys)
+├── models.py        # SQLAlchemy ORM models
+└── config.py        # Pydantic settings (AIOPS_ env prefix)
+
+skills/              # 10 domain skill packages (SKILL.md + references/)
+config/              # channels.yaml, im-apps.yaml, setup.json.example
+infra/               # CloudFormation, EKS lab, deploy scripts
+docs/                # WORKFLOW.md, MVP release notes, cases, use-cases
 ```
-
-### Dependencies
-
-- **Agent/LLM**: `strands-agents` (Strands SDK) + AWS Bedrock (Claude)
-- **AWS**: `boto3`
-- **Web**: `fastapi`, `uvicorn`, `jinja2`
-- **CLI**: `typer`, `rich`, `prompt-toolkit`
-- **Database**: `sqlalchemy`, `pydantic`
-- **Graph**: `networkx`
-- **Data**: `pandas`, `numpy`
-
-**Python**: 3.11+
 
 ## Development
 
 ```bash
-# Install with dev dependencies
+# Install
 pip install -e ".[dev]"
 
 # Run tests
-pytest tests/
+pytest tests/ -v
 
 # Syntax check
-python3 -m py_compile src/agenticops/cli/main.py
 python3 -m py_compile src/agenticops/web/app.py
+
+# Frontend type check + build
+cd src/agenticops/web/frontend
+npx tsc --noEmit && npm run build
 
 # Run API server (dev)
 uvicorn agenticops.web.app:app --reload --port 8000

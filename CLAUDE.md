@@ -9,7 +9,9 @@ AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent arch
 ## Protected Files
 
 - **`RAW-Idea-latest-v3.md`** — Core idea document. **NEVER delete, move, or modify.**
+- **`RAW-Creative-Idea.md`** — Core idea document. **NEVER delete, move, or modify.**
 - **`docs/use-cases/*`** — Hand-written use cases. Do not remove.
+- **`docs/MVP-1.0.0-RELEASE.md`** — Important MV release files, always refer to this file when reading the project! **NEVER delete**
 
 ## Architecture
 
