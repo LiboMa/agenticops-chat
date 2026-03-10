@@ -132,52 +132,6 @@ class Settings(BaseSettings):
         description="S3 region for report storage (AIOPS_REPORT_S3_REGION)",
     )
 
-    # Deployment profile
-    deployment_profile: str = Field(
-        default="local",
-        description="Deployment profile: local or cloud (AIOPS_DEPLOYMENT_PROFILE)",
-    )
-
-    # Vector storage backend
-    vector_storage: str = Field(
-        default="sqlite",
-        description="Vector backend: sqlite, rds, or s3 (AIOPS_VECTOR_STORAGE)",
-    )
-    vector_rds_url: str = Field(
-        default="",
-        description="PostgreSQL connection URL for pgvector (AIOPS_VECTOR_RDS_URL)",
-    )
-    vector_s3_bucket: str = Field(
-        default="",
-        description="S3 bucket for vector storage (AIOPS_VECTOR_S3_BUCKET)",
-    )
-    vector_s3_prefix: str = Field(
-        default="vectors/",
-        description="S3 prefix for vectors (AIOPS_VECTOR_S3_PREFIX)",
-    )
-    vector_s3_region: str = Field(
-        default="us-east-1",
-        description="S3 region for vectors (AIOPS_VECTOR_S3_REGION)",
-    )
-
-    # KB file storage (markdown SOPs/cases)
-    kb_storage: str = Field(
-        default="local",
-        description="KB file backend: local or s3 (AIOPS_KB_STORAGE)",
-    )
-    kb_s3_bucket: str = Field(
-        default="",
-        description="S3 bucket for KB files (AIOPS_KB_S3_BUCKET)",
-    )
-    kb_s3_prefix: str = Field(
-        default="knowledge_base/",
-        description="S3 prefix for KB files (AIOPS_KB_S3_PREFIX)",
-    )
-    kb_s3_region: str = Field(
-        default="us-east-1",
-        description="S3 region for KB files (AIOPS_KB_S3_REGION)",
-    )
-
     knowledge_base_dir: Path = Field(
         default=PROJECT_ROOT / "data" / "knowledge_base",
         description="Directory for RCA knowledge base",
@@ -211,11 +165,11 @@ class Settings(BaseSettings):
         description="Path to notification channels YAML (sole source of truth)",
     )
     feishu_ws_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable Slack Socket Mode (AIOPS_SLACK_WS_ENABLED=true)",
     )
     skills_draft_dir: Path = Field(
