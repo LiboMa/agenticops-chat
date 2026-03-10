@@ -34,7 +34,7 @@ export default function Diagnose() {
 
       <div className="grid grid-cols-12 gap-4 h-[calc(100vh-10rem)]">
         {/* Anomaly List (left) */}
-        <div className="col-span-4 bg-gray-800 rounded-xl p-4 overflow-y-auto ">
+        <div className="col-span-4 bg-[#2f2f2f] rounded-xl p-4 overflow-y-auto ">
           <h2 className="text-xs font-semibold text-[#666] uppercase tracking-wider mb-3">
             Anomalies ({items.length})
           </h2>
@@ -66,7 +66,7 @@ export default function Diagnose() {
         </div>
 
         {/* Detail (right) */}
-        <div className="col-span-8 bg-gray-800 rounded-xl p-5 overflow-y-auto ">
+        <div className="col-span-8 bg-[#2f2f2f] rounded-xl p-5 overflow-y-auto ">
           {!selectedId ? (
             <div className="flex items-center justify-center h-full text-[#9b9b9b]">
               Select an anomaly to view details
@@ -86,9 +86,9 @@ export default function Diagnose() {
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                     d?.severity === "critical" ? "bg-red-900/50 text-red-300" :
                     d?.severity === "high" ? "bg-orange-900/50 text-orange-300" :
-                    "bg-gray-700 text-[#666]"
+                    "bg-[#383838] text-[#666]"
                   }`}>{d?.severity}</span>
-                  <span className="px-2 py-0.5 rounded text-xs bg-gray-700 text-[#666]">
+                  <span className="px-2 py-0.5 rounded text-xs bg-[#383838] text-[#666]">
                     {d?.status}
                   </span>
                 </div>
@@ -108,7 +108,7 @@ export default function Diagnose() {
                   <h3 className="text-xs font-semibold text-[#666] uppercase">Root Cause Analysis</h3>
 
                   {r.root_cause && (
-                    <div className="bg-gray-900/50 rounded-lg p-4">
+                    <div className="bg-[#171717] rounded-lg p-4">
                       <p className="text-sm font-medium text-orange-300">Root Cause</p>
                       <p className="text-sm text-[#666] mt-1">{r.root_cause}</p>
                     </div>
@@ -117,7 +117,7 @@ export default function Diagnose() {
                   {r.confidence !== undefined && (
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-[#666]">Confidence</span>
-                      <div className="w-32 bg-gray-700 rounded-full h-2">
+                      <div className="w-32 bg-[#383838] rounded-full h-2">
                         <div
                           className={`h-2 rounded-full ${
                             r.confidence >= 0.8 ? "bg-green-500" :
