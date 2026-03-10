@@ -129,22 +129,30 @@ class TestSaveFixPlan:
     """Tests for save_fix_plan metadata tool."""
 
     def test_save_basic_plan(self, db_session, health_issue, rca_result):
-        """Test saving a basic fix plan."""
+        """Test saving a basic fix plan.
+
+        We mock trigger_auto_approve to prevent it from opening a second
+        DB session (which would corrupt the test's in-memory SQLite via
+        the shared _engine singleton).  Auto-approve behaviour is tested
+        separately in test_auto_fix_pipeline.py.
+        """
+        from unittest.mock import patch
         from agenticops.tools.metadata_tools import save_fix_plan
 
-        result = save_fix_plan(
-            health_issue_id=health_issue.id,
-            rca_result_id=rca_result.id,
-            risk_level="L1",
-            title="Adjust CPU alarm threshold",
-            summary="Lower the CPU alarm threshold from 90% to 80%",
-            steps='[{"action": "Update alarm", "command": "aws cloudwatch put-metric-alarm --alarm-name cpu-high --threshold 80"}]',
-        )
+        with patch("agenticops.services.pipeline_service.trigger_auto_approve") as mock_approve:
+            result = save_fix_plan(
+                health_issue_id=health_issue.id,
+                rca_result_id=rca_result.id,
+                risk_level="L1",
+                title="Adjust CPU alarm threshold",
+                summary="Lower the CPU alarm threshold from 90% to 80%",
+                steps='[{"action": "Update alarm", "command": "aws cloudwatch put-metric-alarm --alarm-name cpu-high --threshold 80"}]',
+            )
 
-        assert "FixPlan #" in result
-        assert "L1" in result
-        # Return message says "fix_planned" (initial state before auto-approve runs)
-        assert "fix_planned" in result
+            assert "FixPlan #" in result
+            assert "L1" in result
+            assert "fix_planned" in result
+            mock_approve.assert_called_once()
 
         plan = db_session.query(FixPlan).first()
         assert plan is not None
@@ -152,9 +160,8 @@ class TestSaveFixPlan:
         assert len(plan.steps) == 1
 
         db_session.refresh(health_issue)
-        # L1 plans are auto-approved by trigger_auto_approve() — the stable
-        # state is "fix_approved", not the transient "fix_planned".
-        assert health_issue.status == "fix_approved"
+        # With trigger_auto_approve mocked, issue stays at fix_planned
+        assert health_issue.status == "fix_planned"
 
     def test_invalid_risk_level(self, db_session, health_issue, rca_result):
         """Test that invalid risk levels are rejected."""

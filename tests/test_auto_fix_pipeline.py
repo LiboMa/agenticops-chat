@@ -184,7 +184,7 @@ class TestPipelineServiceTriggers:
 
             trigger_auto_sre(issue_id)
             time.sleep(0.2)  # Let daemon thread start
-            mock_run.assert_called_once_with(issue_id)
+            mock_run.assert_called_once_with(issue_id, None)
 
     def test_trigger_auto_sre_disabled(self, db_session, disable_pipeline):
         """trigger_auto_sre should be a no-op when pipeline is disabled."""
@@ -218,7 +218,7 @@ class TestPipelineServiceTriggers:
             assert issue.status == "fix_approved"
 
             # Verify execution was triggered
-            mock_exec.assert_called_once_with(plan_id)
+            mock_exec.assert_called_once_with(plan_id, trace_id=None)
 
     def test_trigger_auto_approve_l1(self, db_session, enable_pipeline):
         """L1 plans should also be auto-approved."""
@@ -234,7 +234,7 @@ class TestPipelineServiceTriggers:
             db_session.expire_all()
             plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
             assert plan.status == "approved"
-            mock_exec.assert_called_once_with(plan_id)
+            mock_exec.assert_called_once_with(plan_id, trace_id=None)
 
     def test_trigger_auto_approve_l2_skipped(self, db_session, enable_pipeline):
         """L2 plans should NOT be auto-approved (require human approval)."""
@@ -275,7 +275,7 @@ class TestPipelineServiceTriggers:
 
             trigger_auto_execute(42)
             time.sleep(0.2)
-            mock_run.assert_called_once_with(42)
+            mock_run.assert_called_once_with(42, None)
 
     def test_trigger_auto_execute_disabled(self, db_session):
         """trigger_auto_execute should be a no-op when executor is disabled."""
@@ -320,7 +320,7 @@ class TestMetadataToolHooks:
 
             assert "RCAResult" in result
             assert "root_cause_identified" in result
-            mock_trigger.assert_called_once_with(issue_id)
+            mock_trigger.assert_called_once_with(issue_id, trace_id=None)
 
     def test_save_fix_plan_triggers_auto_approve(self, db_session, enable_pipeline):
         """save_fix_plan() should call trigger_auto_approve."""
@@ -362,7 +362,7 @@ class TestMetadataToolHooks:
             result = approve_fix_plan(fix_plan_id=plan_id, approved_by="operator:admin")
 
             assert "approved" in result
-            mock_trigger.assert_called_once_with(plan_id)
+            mock_trigger.assert_called_once_with(plan_id, trace_id=None)
 
 
 class TestFullE2EPipeline:
@@ -405,7 +405,7 @@ class TestFullE2EPipeline:
                 fix_plan='{"steps": [{"action": "host_command", "command": "kill -9 PID"}]}',
                 fix_risk_level="medium",
             )
-            mock_sre.assert_called_once_with(issue_id)
+            mock_sre.assert_called_once_with(issue_id, trace_id=None)
             print(f"[2] RCA saved: {rca_result}")
 
         # Verify RCA state
@@ -454,7 +454,7 @@ class TestFullE2EPipeline:
             from agenticops.services.pipeline_service import trigger_auto_approve
 
             trigger_auto_approve(plan_id)
-            mock_exec.assert_called_once_with(plan_id)
+            mock_exec.assert_called_once_with(plan_id, trace_id=None)
 
         # Verify approval state
         db_session.expire_all()

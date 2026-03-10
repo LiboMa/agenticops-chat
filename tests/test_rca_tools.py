@@ -53,15 +53,18 @@ class TestSaveRCAResult:
 
     def test_save_basic_rca(self, db_session, health_issue):
         """Test saving a basic RCA result."""
+        from unittest.mock import patch
         from agenticops.tools.metadata_tools import save_rca_result
 
-        result = save_rca_result(
-            health_issue_id=health_issue.id,
-            root_cause="Runaway process causing CPU spike",
-            confidence=0.85,
-            contributing_factors='["No CPU limits", "Auto-scaling disabled"]',
-            recommendations='["Set CPU limits", "Enable auto-scaling"]',
-        )
+        # Mock trigger_auto_sre to prevent second DB session (session isolation)
+        with patch("agenticops.services.pipeline_service.trigger_auto_sre"):
+            result = save_rca_result(
+                health_issue_id=health_issue.id,
+                root_cause="Runaway process causing CPU spike",
+                confidence=0.85,
+                contributing_factors='["No CPU limits", "Auto-scaling disabled"]',
+                recommendations='["Set CPU limits", "Enable auto-scaling"]',
+            )
 
         assert f"RCAResult #" in result
         assert "root_cause_identified" in result
@@ -82,20 +85,23 @@ class TestSaveRCAResult:
 
     def test_save_full_rca(self, db_session, health_issue):
         """Test saving RCA with all fields populated."""
+        from unittest.mock import patch
         from agenticops.tools.metadata_tools import save_rca_result
 
-        result = save_rca_result(
-            health_issue_id=health_issue.id,
-            root_cause="Disk full on /var/log",
-            confidence=0.95,
-            contributing_factors='["Log rotation disabled", "Debug logging enabled"]',
-            recommendations='["Enable log rotation", "Reduce log verbosity"]',
-            fix_plan='{"steps": ["SSH to host", "Clean /var/log", "Enable logrotate"]}',
-            fix_risk_level="low",
-            sop_used="ec2-disk-full.md",
-            similar_cases='["case-2024-disk-full.md"]',
-            model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
-        )
+        # Mock trigger_auto_sre to prevent second DB session (session isolation)
+        with patch("agenticops.services.pipeline_service.trigger_auto_sre"):
+            result = save_rca_result(
+                health_issue_id=health_issue.id,
+                root_cause="Disk full on /var/log",
+                confidence=0.95,
+                contributing_factors='["Log rotation disabled", "Debug logging enabled"]',
+                recommendations='["Enable log rotation", "Reduce log verbosity"]',
+                fix_plan='{"steps": ["SSH to host", "Clean /var/log", "Enable logrotate"]}',
+                fix_risk_level="low",
+                sop_used="ec2-disk-full.md",
+                similar_cases='["case-2024-disk-full.md"]',
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+            )
 
         assert "RCAResult #" in result
 
