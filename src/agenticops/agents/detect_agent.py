@@ -43,6 +43,13 @@ from agenticops.tools.integration_tools import (
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 DETECT_SYSTEM_PROMPT = """You are the Detect Agent for AgenticOps.
 Your job is to check the health of resources in the active account.
 
@@ -112,6 +119,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     Returns:
         Health check summary with issues found, severity breakdown, and monitoring gaps.
     """
+    set_current_agent("detect_agent")
+
     try:
         model = BedrockModel(
             model_id=settings.bedrock_model_id_cheap,
@@ -149,6 +158,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 # External monitoring providers
                 list_provider_alerts,
                 query_provider_metrics,
+                # Memory tools (per-agent persistent memory)
+                remember_this,
+                recall_memories,
             ],
         )
 

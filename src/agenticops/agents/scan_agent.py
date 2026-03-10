@@ -42,6 +42,13 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 SCAN_SYSTEM_PROMPT = """You are the Scan Agent for AgenticOps.
 Your job is to discover and inventory AWS resources in the active account.
 
@@ -79,6 +86,8 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
     Returns:
         Summary of discovered resources with counts by service and region.
     """
+    set_current_agent("scan_agent")
+
     try:
         model = BedrockModel(
             model_id=settings.bedrock_model_id_cheap,
@@ -119,6 +128,9 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
                 get_active_account,
                 # AWS CLI (read-only, for uncovered services or precision queries)
                 run_aws_cli_readonly,
+                # Memory tools (per-agent persistent memory)
+                remember_this,
+                recall_memories,
             ],
         )
 

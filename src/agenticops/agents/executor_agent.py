@@ -48,6 +48,13 @@ from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 EXECUTOR_SYSTEM_PROMPT = f"""You are the Executor Agent for AgenticOps (L4 Auto Operation).
 Your job is to execute APPROVED fix plans — and ONLY approved plans.
 
@@ -164,6 +171,8 @@ def executor_agent(fix_plan_id: int) -> str:
             "Set AIOPS_EXECUTOR_ENABLED=true to enable execution."
         )
 
+    set_current_agent("executor_agent")
+
     try:
         model = BedrockModel(
             model_id=settings.bedrock_model_id,
@@ -210,6 +219,9 @@ def executor_agent(fix_plan_id: int) -> str:
                 # Agent Skills (domain knowledge + dynamic tool loading)
                 activate_skill,
                 read_skill_reference,
+                # Memory tools (per-agent persistent memory)
+                remember_this,
+                recall_memories,
             ],
         )
 

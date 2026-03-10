@@ -45,6 +45,13 @@ from agenticops.tools.integration_tools import list_monitoring_providers
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 MAIN_SYSTEM_PROMPT = """You are AgenticOps, an AI-powered AWS cloud operations assistant.
 
 YOUR ROLE: You are a ROUTER and SUMMARIZER. You dispatch tasks to specialized agents and
@@ -148,6 +155,7 @@ IMPORTANT — YOUR BOUNDARIES:
 
 
 def create_main_agent() -> Agent:
+    set_current_agent("main_agent")
     """Create and return the Main Agent (Orchestrator).
 
     Returns:

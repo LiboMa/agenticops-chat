@@ -60,6 +60,13 @@ from agenticops.skills.loader import build_prompt_with_skills
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 SRE_SYSTEM_PROMPT = """You are the SRE Agent for AgenticOps.
 You have TWO modes of operation:
   A) Fix Plan generation — structured plans from RCA results.
@@ -268,6 +275,8 @@ def sre_agent(issue_id: int) -> str:
     Returns:
         Fix plan summary with risk level, steps, and rollback plan.
     """
+    set_current_agent("sre_agent")
+
     try:
         agent = _create_sre_agent()
         result = agent(

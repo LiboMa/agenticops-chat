@@ -25,6 +25,13 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 
 logger = logging.getLogger(__name__)
 
+# Memory tools import (Phase 2)
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
+
 REPORTER_SYSTEM_PROMPT = """You are the Reporter Agent for AgenticOps.
 Your job is to generate structured operations reports from health issues,
 RCA results, and resource inventory data.
@@ -105,6 +112,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
     Returns:
         Report summary with ID and file path.
     """
+    set_current_agent("reporter_agent")
+
     try:
         model = BedrockModel(
             model_id=settings.bedrock_model_id_cheap,
@@ -132,6 +141,9 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 distill_case_study,
                 activate_skill,
                 read_skill_reference,
+                # Memory tools (per-agent persistent memory)
+                remember_this,
+                recall_memories,
             ],
         )
 
