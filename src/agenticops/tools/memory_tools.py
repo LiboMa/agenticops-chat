@@ -6,19 +6,19 @@ remember important learnings and recall past experiences.
 
 import asyncio
 import logging
+from contextvars import ContextVar
 
 from strands import tool
 
 logger = logging.getLogger(__name__)
 
-# Agent name is resolved from context at call time
-_current_agent_name: str = "default_agent"
+# Agent name resolved from context at call time (thread-safe)
+_current_agent: ContextVar[str] = ContextVar("memory_agent", default="default_agent")
 
 
 def set_current_agent(name: str) -> None:
     """Set the current agent name for memory tools."""
-    global _current_agent_name
-    _current_agent_name = name
+    _current_agent.set(name)
 
 
 @tool
@@ -50,7 +50,7 @@ def remember_this(
     except ValueError:
         mtype = MemoryType.EPISODIC
 
-    memory = get_agent_memory(_current_agent_name)
+    memory = get_agent_memory(_current_agent.get())
 
     # Run async in sync context (Strands tools are sync)
     try:
@@ -89,7 +89,7 @@ def recall_memories(
     """
     from agenticops.memory import get_agent_memory
 
-    memory = get_agent_memory(_current_agent_name)
+    memory = get_agent_memory(_current_agent.get())
 
     # Run async in sync context
     try:
