@@ -4,23 +4,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Spinner";
 
-const Dashboard = lazy(() => import("@/pages/Dashboard"));
+// New 5-view pages
+const OpsHub = lazy(() => import("@/pages/OpsHub"));
+const Diagnose = lazy(() => import("@/pages/Diagnose"));
+const AICenter = lazy(() => import("@/pages/AICenter"));
+const Knowledge = lazy(() => import("@/pages/Knowledge"));
+const System = lazy(() => import("@/pages/System"));
+
+// Legacy pages (still accessible)
 const Chat = lazy(() => import("@/pages/Chat"));
-const Resources = lazy(() => import("@/pages/Resources"));
-const Issues = lazy(() => import("@/pages/Anomalies"));
 const IssueDetail = lazy(() => import("@/pages/AnomalyDetail"));
-const FixPlans = lazy(() => import("@/pages/FixPlans"));
 const FixPlanDetail = lazy(() => import("@/pages/FixPlanDetail"));
+const Network = lazy(() => import("@/pages/Network"));
+const Resources = lazy(() => import("@/pages/Resources"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
-const Network = lazy(() => import("@/pages/Network"));
-const Schedules = lazy(() => import("@/pages/Schedules"));
-const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
-const Notifications = lazy(() => import("@/pages/Notifications"));
-const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
-const Settings = lazy(() => import("@/pages/Settings"));
-const AuditLog = lazy(() => import("@/pages/AuditLog"));
-const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,148 +29,31 @@ const queryClient = new QueryClient({
   },
 });
 
+function S({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<Spinner />}>{children}</Suspense>;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
           <Route path="/app" element={<AppShell />}>
-            <Route
-              index
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Dashboard />
-                </Suspense>
-              }
-            />
-            <Route
-              path="chat"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Chat />
-                </Suspense>
-              }
-            />
-            <Route
-              path="resources"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Resources />
-                </Suspense>
-              }
-            />
-            <Route
-              path="issues"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Issues />
-                </Suspense>
-              }
-            />
-            <Route
-              path="issues/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <IssueDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="fix-plans"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <FixPlans />
-                </Suspense>
-              }
-            />
-            <Route
-              path="fix-plans/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <FixPlanDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="reports"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Reports />
-                </Suspense>
-              }
-            />
-            <Route
-              path="reports/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <ReportDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="network"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Network />
-                </Suspense>
-              }
-            />
-            <Route
-              path="schedules"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Schedules />
-                </Suspense>
-              }
-            />
-            <Route
-              path="schedules/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <ScheduleDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="notifications"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Notifications />
-                </Suspense>
-              }
-            />
-            <Route
-              path="notifications/logs"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <NotificationLogs />
-                </Suspense>
-              }
-            />
-            <Route
-              path="settings"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Settings />
-                </Suspense>
-              }
-            />
-            <Route
-              path="audit"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <AuditLog />
-                </Suspense>
-              }
-            />
-            <Route
-              path="kb"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <KnowledgeBase />
-                </Suspense>
-              }
-            />
+            {/* 5 main views */}
+            <Route index element={<S><OpsHub /></S>} />
+            <Route path="diagnose" element={<S><Diagnose /></S>} />
+            <Route path="ai" element={<S><AICenter /></S>} />
+            <Route path="knowledge" element={<S><Knowledge /></S>} />
+            <Route path="system" element={<S><System /></S>} />
+
+            {/* Detail/legacy routes */}
+            <Route path="chat" element={<S><Chat /></S>} />
+            <Route path="issues/:id" element={<S><IssueDetail /></S>} />
+            <Route path="fix-plans/:id" element={<S><FixPlanDetail /></S>} />
+            <Route path="network" element={<S><Network /></S>} />
+            <Route path="resources" element={<S><Resources /></S>} />
+            <Route path="reports" element={<S><Reports /></S>} />
+            <Route path="reports/:id" element={<S><ReportDetail /></S>} />
           </Route>
         </Routes>
       </BrowserRouter>

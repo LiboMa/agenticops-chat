@@ -664,6 +664,12 @@ app = FastAPI(
 # Graph API router
 app.include_router(graph_router)
 
+# L5 API routers (Memory / Proactive / Learning)
+from agenticops.web.api_l5 import memory_router, proactive_router, learning_router
+app.include_router(memory_router)
+app.include_router(proactive_router)
+app.include_router(learning_router)
+
 # Chat session manager
 _chat_sessions = ChatSessionManager(ttl_minutes=30)
 _executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)

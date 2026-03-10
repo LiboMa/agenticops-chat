@@ -32,3 +32,17 @@ export async function apiFetch<T>(
 
   return res.json();
 }
+
+/** Simple fetch wrapper for full URL paths (e.g. /api/memory/agents). */
+export async function api<T = any>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(res.status, body.detail ?? body.error ?? res.statusText);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}

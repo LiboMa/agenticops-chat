@@ -59,12 +59,16 @@ def enable_pipeline():
     orig_executor = settings.executor_enabled
     orig_auto_rca = settings.auto_rca_enabled
     orig_auto_resolve = settings.executor_auto_resolve
+    orig_notifications = settings.notifications_enabled
 
     settings.auto_fix_enabled = True
     settings.executor_auto_approve_l0_l1 = True
     settings.executor_enabled = True
     settings.auto_rca_enabled = False  # Disable auto-RCA to control flow manually
     settings.executor_auto_resolve = True
+    # Disable notifications to prevent daemon threads from accessing the
+    # StaticPool SQLite connection concurrently (race condition).
+    settings.notifications_enabled = False
 
     yield
 
@@ -73,6 +77,7 @@ def enable_pipeline():
     settings.executor_enabled = orig_executor
     settings.auto_rca_enabled = orig_auto_rca
     settings.executor_auto_resolve = orig_auto_resolve
+    settings.notifications_enabled = orig_notifications
 
 
 @pytest.fixture
