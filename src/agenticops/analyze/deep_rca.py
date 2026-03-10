@@ -4,17 +4,21 @@ Enhances the base RCAEngine with:
 1. Memory recall: check past experiences before invoking LLM
 2. Graph context: topology-aware analysis via GraphStore
 3. KB search: find similar past incidents from CaseStudy knowledge base
-4. Auto-remember: store RCA results as episodic memory (WAL principle)
-5. CaseStudy capture: auto-generate KB entries from successful RCAs
+4. Iterative investigation: loop until confidence >= threshold
+5. Self-verification: challenge conclusions (Voyager CriticAgent pattern)
+6. Auto-remember: store RCA results as episodic memory (WAL principle)
+7. CaseStudy capture: auto-generate KB entries from successful RCAs
 """
 
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from agenticops.analyze.evidence import EvidenceItem, gather_evidence
 from agenticops.analyze.rca import BedrockLLM, RCAAnalysis, RCAEngine
 from agenticops.memory import AgentMemory, MemoryType, get_agent_memory
 
@@ -23,15 +27,20 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DeepRCAResult:
-    """Extended RCA result with memory + graph enrichments."""
+    """Extended RCA result with memory + graph + iteration enrichments."""
 
     analysis: RCAAnalysis
     memory_hits: list[dict] = field(default_factory=list)
     graph_context: dict | None = None
     kb_matches: list[dict] = field(default_factory=list)
-    confidence_boost: float = 0.0  # Added confidence from memory/KB
-    memory_id: int | None = None  # ID of stored memory entry
-    is_known_pattern: bool = False  # True if matched from memory/KB
+    evidence_chain: list[EvidenceItem] = field(default_factory=list)
+    confidence_boost: float = 0.0
+    memory_id: int | None = None
+    is_known_pattern: bool = False
+    iterations: int = 1
+    iteration_history: list[dict] = field(default_factory=list)
+    duration_ms: int = 0
+    verified: bool = False  # Self-verification passed
 
 
 class DeepRCAEngine:
@@ -47,16 +56,25 @@ class DeepRCAEngine:
     """
 
     KNOWN_PATTERN_THRESHOLD = 0.85  # Skip LLM if memory confidence above this
+    CONFIDENCE_THRESHOLD = 0.7      # Stop iterating when reached
+    MAX_ITERATIONS = 3              # Max investigation loops
+    TIMEOUT_SECONDS = 120           # Max wall-clock per investigation
     AGENT_NAME = "rca_agent"
 
     def __init__(
         self,
         base_engine: RCAEngine | None = None,
         memory: AgentMemory | None = None,
+        max_iterations: int | None = None,
+        confidence_threshold: float | None = None,
     ):
         self.base_engine = base_engine or RCAEngine()
         self.memory = memory or get_agent_memory(self.AGENT_NAME)
         self._llm = self.base_engine.llm
+        if max_iterations is not None:
+            self.MAX_ITERATIONS = max_iterations
+        if confidence_threshold is not None:
+            self.CONFIDENCE_THRESHOLD = confidence_threshold
 
     async def analyze(
         self,
@@ -68,16 +86,24 @@ class DeepRCAEngine:
         context: dict | None = None,
         save_to_kb: bool = True,
     ) -> DeepRCAResult:
-        """Perform deep RCA with memory + graph + KB enrichment.
+        """Perform deep RCA with memory + graph + KB + iteration loop.
 
-        This is the main entry point. Implements the 6-step flow.
+        7-step flow:
+        1. Recall from memory (Fast Path check)
+        2. Graph context enrichment
+        3. KB search
+        4. Iterative LLM analysis (loop until confidence >= threshold)
+        5. Self-verification (Voyager CriticAgent pattern)
+        6. WAL write (remember result)
+        7. CaseStudy capture
         """
+        start_time = time.monotonic()
         context = context or {}
         result = DeepRCAResult(
             analysis=RCAAnalysis(root_cause="", confidence_score=0.0)
         )
 
-        # ── Step 1: Recall from memory ────────────────────────
+        # ── Step 1: Recall from memory (Fast Path) ───────────
         query = f"{anomaly_title} {anomaly_description} {resource_type}"
         memory_hits = await self.memory.recall(query, top_k=3)
 
@@ -93,7 +119,7 @@ class DeepRCAEngine:
                 for m in memory_hits
             ]
 
-            # Check if this is a known pattern
+            # Fast Path: known pattern → skip LLM entirely
             best = memory_hits[0]
             if best.confidence >= self.KNOWN_PATTERN_THRESHOLD:
                 result.is_known_pattern = True
@@ -106,10 +132,15 @@ class DeepRCAEngine:
                     ],
                 )
                 result.confidence_boost = 0.1
+                result.verified = True  # Known patterns are pre-verified
                 logger.info(
-                    "Deep RCA: known pattern matched (confidence=%.2f)",
+                    "Deep RCA Fast Path: known pattern (confidence=%.2f)",
                     best.confidence,
                 )
+                # Skip to Step 6 (WAL)
+                await self._wal_write(result, anomaly_title, resource_id, resource_type, severity)
+                result.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return result
 
         # ── Step 2: Graph context enrichment ──────────────────
         if resource_id:
@@ -133,10 +164,7 @@ class DeepRCAEngine:
         try:
             from agenticops.kb.search import hybrid_search
 
-            kb_results = hybrid_search(
-                query=query,
-                limit=3,
-            )
+            kb_results = hybrid_search(query=query, limit=3)
             if kb_results:
                 result.kb_matches = [
                     {
@@ -146,7 +174,6 @@ class DeepRCAEngine:
                     }
                     for r in kb_results
                 ]
-                # Add KB context to LLM prompt
                 context["past_incidents"] = [
                     f"- {r.get('title', '')}: {r.get('root_cause', '')[:150]}"
                     for r in kb_results[:3]
@@ -155,8 +182,16 @@ class DeepRCAEngine:
         except Exception as e:
             logger.warning("KB search unavailable: %s", e)
 
-        # ── Step 4: LLM analysis (skip if known pattern) ─────
-        if not result.is_known_pattern:
+        # ── Step 4: Iterative LLM analysis ────────────────────
+        for iteration in range(1, self.MAX_ITERATIONS + 1):
+            result.iterations = iteration
+
+            # Check timeout
+            elapsed = time.monotonic() - start_time
+            if elapsed > self.TIMEOUT_SECONDS:
+                logger.warning("Deep RCA timeout after %ds", elapsed)
+                break
+
             try:
                 prompt = self._build_deep_prompt(
                     title=anomaly_title,
@@ -166,6 +201,8 @@ class DeepRCAEngine:
                     severity=severity,
                     context=context,
                     memory_hints=result.memory_hits,
+                    evidence_chain=result.evidence_chain,
+                    iteration=iteration,
                 )
                 response = self._llm.invoke(prompt)
                 result.analysis = self._parse_response(response)
@@ -178,10 +215,42 @@ class DeepRCAEngine:
                         1.0,
                         result.analysis.confidence_score + result.confidence_boost,
                     )
+
+                # Record iteration history
+                result.iteration_history.append({
+                    "iteration": iteration,
+                    "confidence": result.analysis.confidence_score,
+                    "evidence_count": len(result.evidence_chain),
+                    "root_cause_preview": result.analysis.root_cause[:100],
+                })
+
+                # Check if confidence is sufficient
+                if result.analysis.confidence_score >= self.CONFIDENCE_THRESHOLD:
+                    logger.info(
+                        "Deep RCA: confidence %.2f >= %.2f after %d iterations",
+                        result.analysis.confidence_score,
+                        self.CONFIDENCE_THRESHOLD,
+                        iteration,
+                    )
+                    break
+
+                # ── Evidence gap detection ────────────────────
+                if iteration < self.MAX_ITERATIONS:
+                    gaps = await self._detect_evidence_gaps(
+                        result.analysis, result.evidence_chain, resource_id
+                    )
+                    for gap in gaps:
+                        evidence = await gather_evidence(
+                            gap, resource_id=resource_id, context=context
+                        )
+                        if evidence:
+                            result.evidence_chain.append(evidence)
+                            # Update context with new evidence
+                            context[f"evidence_{evidence.source}"] = evidence.content
+
             except Exception as e:
-                logger.error("LLM analysis failed: %s", e)
+                logger.error("LLM analysis failed (iteration %d): %s", iteration, e)
                 if result.memory_hits:
-                    # Fallback to memory
                     best = result.memory_hits[0]
                     result.analysis = RCAAnalysis(
                         root_cause=f"[Memory Fallback] {best['content']}",
@@ -192,30 +261,19 @@ class DeepRCAEngine:
                         root_cause=f"Analysis failed: {e}",
                         confidence_score=0.0,
                     )
+                break
 
-        # ── Step 5: Remember (WAL — write before respond) ────
-        memory_content = (
-            f"RCA for {anomaly_title}: {result.analysis.root_cause[:200]}"
-        )
-        if result.analysis.recommendations:
-            memory_content += f" | Fix: {result.analysis.recommendations[0][:100]}"
+        # ── Step 5: Self-verification ─────────────────────────
+        if (
+            result.analysis.confidence_score >= 0.5
+            and not result.is_known_pattern
+        ):
+            result.verified = await self._self_verify(result)
 
-        entry = await self.memory.remember(
-            content=memory_content,
-            memory_type=MemoryType.EPISODIC,
-            context={
-                "resource_id": resource_id,
-                "resource_type": resource_type,
-                "severity": severity,
-                "confidence": result.analysis.confidence_score,
-                "is_known_pattern": result.is_known_pattern,
-            },
-            source=f"deep_rca:{resource_id or 'unknown'}",
-            confidence=result.analysis.confidence_score,
-        )
-        result.memory_id = entry.id
+        # ── Step 6: WAL write ─────────────────────────────────
+        await self._wal_write(result, anomaly_title, resource_id, resource_type, severity)
 
-        # ── Step 6: CaseStudy capture ─────────────────────────
+        # ── Step 7: CaseStudy capture ─────────────────────────
         if save_to_kb and result.analysis.confidence_score >= 0.6:
             try:
                 await self._save_case_study(
@@ -228,6 +286,7 @@ class DeepRCAEngine:
             except Exception as e:
                 logger.warning("CaseStudy capture failed: %s", e)
 
+        result.duration_ms = int((time.monotonic() - start_time) * 1000)
         return result
 
     def _build_deep_prompt(
@@ -239,6 +298,8 @@ class DeepRCAEngine:
         severity: str,
         context: dict,
         memory_hints: list[dict],
+        evidence_chain: list[EvidenceItem] | None = None,
+        iteration: int = 1,
     ) -> str:
         """Build enriched RCA prompt with memory + graph + KB context."""
         sections = [
@@ -292,6 +353,15 @@ class DeepRCAEngine:
                 f"\n## Additional Context\n{json.dumps(extra, indent=2, default=str)}"
             )
 
+        # Evidence chain from previous iterations
+        if evidence_chain:
+            sections.append("\n## Collected Evidence")
+            for i, ev in enumerate(evidence_chain, 1):
+                sections.append(f"{i}. {ev.summary()}")
+
+        if iteration > 1:
+            sections.append(f"\n*This is iteration {iteration}. Previous attempts had insufficient confidence.*")
+
         sections.append("""
 ## Instructions
 Analyze this incident using ALL available context (memory, topology, past incidents).
@@ -326,6 +396,120 @@ Provide your response as JSON:
         except (json.JSONDecodeError, ValueError):
             pass
         return RCAAnalysis(root_cause=response[:500], confidence_score=0.5)
+
+    async def _detect_evidence_gaps(
+        self,
+        analysis: RCAAnalysis,
+        evidence_chain: list[EvidenceItem],
+        resource_id: str,
+    ) -> list[dict]:
+        """Ask LLM what additional evidence would help."""
+        try:
+            evidence_summary = "; ".join(e.summary(100) for e in evidence_chain) or "None yet"
+            prompt = (
+                f"Current RCA confidence: {analysis.confidence_score:.2f}\n"
+                f"Root cause hypothesis: {analysis.root_cause[:200]}\n"
+                f"Evidence so far: {evidence_summary}\n"
+                f"Resource: {resource_id}\n\n"
+                "What additional evidence would most help determine the root cause?\n"
+                'Return a JSON list: [{"type": "cloudtrail"|"cloudwatch"|"network"|"trace"|"logs", '
+                '"params": {...}}]'
+            )
+            response = self._llm.invoke(prompt, max_tokens=512)
+            json_start = response.find("[")
+            json_end = response.rfind("]") + 1
+            if json_start >= 0 and json_end > json_start:
+                gaps = json.loads(response[json_start:json_end])
+                return gaps[:3]  # Cap at 3 evidence requests per iteration
+        except Exception as e:
+            logger.warning("Evidence gap detection failed: %s", e)
+        return []
+
+    async def _self_verify(self, result: DeepRCAResult) -> bool:
+        """Challenge the RCA conclusion (Voyager CriticAgent pattern).
+
+        Returns True if verification passes, False if challenged.
+        """
+        try:
+            evidence_summary = "; ".join(
+                e.summary(100) for e in result.evidence_chain
+            ) or "No formal evidence collected"
+
+            prompt = (
+                "You are a critical reviewer of RCA conclusions.\n"
+                f"Root cause: {result.analysis.root_cause[:300]}\n"
+                f"Evidence: {evidence_summary}\n"
+                f"Confidence: {result.analysis.confidence_score:.2f}\n"
+                f"Memory matches: {len(result.memory_hits)}\n\n"
+                "Questions:\n"
+                "1. Does the evidence support this root cause, or is it merely correlated?\n"
+                "2. Are there alternative explanations missed?\n"
+                "3. Is the confidence score justified?\n\n"
+                'Return JSON: {"valid": true/false, "critique": "...", "adjusted_confidence": 0.X}'
+            )
+            response = self._llm.invoke(prompt, max_tokens=512)
+            json_start = response.find("{")
+            json_end = response.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                data = json.loads(response[json_start:json_end])
+                valid = data.get("valid", True)
+                adjusted = float(data.get("adjusted_confidence", result.analysis.confidence_score))
+                result.analysis.confidence_score = min(1.0, max(0.0, adjusted))
+
+                if not valid and data.get("critique"):
+                    # Store critique as evidence
+                    result.evidence_chain.append(EvidenceItem(
+                        source="self_verification",
+                        content=f"Critique: {data['critique'][:200]}",
+                        confidence_delta=adjusted - result.analysis.confidence_score,
+                    ))
+                    logger.info("Self-verification challenged: %s", data["critique"][:100])
+                return valid
+        except Exception as e:
+            logger.warning("Self-verification failed: %s", e)
+        return True  # Default to valid if verification fails
+
+    async def _wal_write(
+        self,
+        result: DeepRCAResult,
+        anomaly_title: str,
+        resource_id: str,
+        resource_type: str,
+        severity: str,
+    ) -> None:
+        """Write-Ahead Log: store result in memory before returning."""
+        memory_content = (
+            f"RCA for {anomaly_title}: {result.analysis.root_cause[:200]}"
+        )
+        if result.analysis.recommendations:
+            memory_content += f" | Fix: {result.analysis.recommendations[0][:100]}"
+
+        entry = await self.memory.remember(
+            content=memory_content,
+            memory_type=MemoryType.EPISODIC,
+            context={
+                "resource_id": resource_id,
+                "resource_type": resource_type,
+                "severity": severity,
+                "confidence": result.analysis.confidence_score,
+                "is_known_pattern": result.is_known_pattern,
+                "iterations": result.iterations,
+                "verified": result.verified,
+            },
+            source=f"deep_rca:{resource_id or 'unknown'}",
+            confidence=result.analysis.confidence_score,
+        )
+        result.memory_id = entry.id
+
+        # If high confidence, also store as PROCEDURAL
+        if result.analysis.confidence_score >= 0.8:
+            factors = ", ".join(result.analysis.contributing_factors[:3]) if result.analysis.contributing_factors else "unknown"
+            await self.memory.remember(
+                content=f"PATTERN: {factors} → {result.analysis.root_cause[:150]}",
+                memory_type=MemoryType.PROCEDURAL,
+                source=f"rca:pattern:{resource_id or 'unknown'}",
+                confidence=result.analysis.confidence_score,
+            )
 
     async def _save_case_study(
         self,

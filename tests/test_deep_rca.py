@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agenticops.analyze.deep_rca import DeepRCAEngine, DeepRCAResult
-from agenticops.analyze.rca import RCAAnalysis
+from agenticops.analyze.evidence import EvidenceItem
+from agenticops.analyze.rca import RCAAnalysis, RCAEngine
 from agenticops.memory import AgentMemory, MemoryType
 from agenticops.memory.agent_memory import _NullEmbeddingClient
 
@@ -315,3 +316,151 @@ class TestDeepPromptBuilding:
         )
         assert "Similar Past Incidents" in prompt
         assert "missing index" in prompt
+
+    def test_evidence_chain_in_prompt(self, engine):
+        """Evidence chain from previous iterations appears in prompt."""
+        evidence = [
+            EvidenceItem(source="cloudtrail", content="ModifyDBInstance at 14:00", confidence_delta=0.1),
+        ]
+        prompt = engine._build_deep_prompt(
+            title="DB Slow",
+            description="Slow",
+            resource_id="rds-1",
+            resource_type="rds",
+            severity="medium",
+            context={},
+            memory_hints=[],
+            evidence_chain=evidence,
+            iteration=2,
+        )
+        assert "Collected Evidence" in prompt
+        assert "ModifyDBInstance" in prompt
+        assert "iteration 2" in prompt
+
+
+class TestIteration:
+    """Test the iteration loop behavior."""
+
+    def test_iterates_on_low_confidence(self, tmp_db, tmp_path):
+        """Engine iterates when confidence < threshold."""
+        mem = AgentMemory("rca_agent", db_path=tmp_db)
+        mem._memory_md_path = tmp_path / "rca_MEMORY.md"
+        mem._embedding_client = _NullEmbeddingClient()
+
+        mock_llm = MagicMock()
+        # First call returns low confidence, second returns high
+        mock_llm.invoke.side_effect = [
+            # Iteration 1: analysis
+            json.dumps({"root_cause": "Maybe memory leak", "confidence_score": 0.4,
+                        "contributing_factors": [], "recommendations": [], "related_resources": []}),
+            # Iteration 1: evidence gap detection
+            '[]',
+            # Iteration 2: analysis
+            json.dumps({"root_cause": "Confirmed memory leak in pod", "confidence_score": 0.8,
+                        "contributing_factors": ["No limits"], "recommendations": ["Set limits"],
+                        "related_resources": []}),
+            # Self-verification
+            json.dumps({"valid": True, "adjusted_confidence": 0.8}),
+        ]
+
+        base = RCAEngine()
+        base.llm = mock_llm
+        eng = DeepRCAEngine(base_engine=base, memory=mem, max_iterations=3)
+
+        result = run(eng.analyze(
+            anomaly_title="Pod OOM",
+            anomaly_description="Pod killed",
+        ))
+
+        assert result.iterations >= 2
+        assert result.analysis.confidence_score >= 0.7
+        assert len(result.iteration_history) >= 2
+
+    def test_stops_at_max_iterations(self, tmp_db, tmp_path):
+        """Engine stops after max_iterations even with low confidence."""
+        mem = AgentMemory("rca_agent", db_path=tmp_db)
+        mem._memory_md_path = tmp_path / "rca_MEMORY.md"
+        mem._embedding_client = _NullEmbeddingClient()
+
+        mock_llm = MagicMock()
+        # Always return low confidence
+        mock_llm.invoke.return_value = json.dumps({
+            "root_cause": "Unclear", "confidence_score": 0.3,
+            "contributing_factors": [], "recommendations": [], "related_resources": [],
+        })
+
+        base = RCAEngine()
+        base.llm = mock_llm
+        eng = DeepRCAEngine(base_engine=base, memory=mem, max_iterations=2)
+
+        result = run(eng.analyze(
+            anomaly_title="Mystery",
+            anomaly_description="Unknown issue",
+        ))
+
+        assert result.iterations == 2  # Hit max
+        assert result.analysis.confidence_score < 0.7
+
+    def test_duration_tracked(self, engine):
+        """duration_ms is recorded."""
+        result = run(engine.analyze(
+            anomaly_title="Test",
+            anomaly_description="Test",
+        ))
+        assert result.duration_ms > 0
+
+
+class TestSelfVerification:
+    """Test the Voyager CriticAgent pattern."""
+
+    def test_verification_adjusts_confidence(self, tmp_db, tmp_path):
+        """Self-verification can lower confidence."""
+        mem = AgentMemory("rca_agent", db_path=tmp_db)
+        mem._memory_md_path = tmp_path / "rca_MEMORY.md"
+        mem._embedding_client = _NullEmbeddingClient()
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = [
+            # Analysis
+            json.dumps({"root_cause": "Network issue", "confidence_score": 0.8,
+                        "contributing_factors": [], "recommendations": ["Check SG"],
+                        "related_resources": []}),
+            # Self-verification: challenge it
+            json.dumps({"valid": False, "critique": "Correlation not causation",
+                        "adjusted_confidence": 0.6}),
+        ]
+
+        base = RCAEngine()
+        base.llm = mock_llm
+        eng = DeepRCAEngine(base_engine=base, memory=mem)
+
+        result = run(eng.analyze(
+            anomaly_title="Latency Spike",
+            anomaly_description="P99 latency > 5s",
+        ))
+
+        assert not result.verified
+        assert result.analysis.confidence_score == 0.6  # Adjusted down
+
+
+class TestEvidenceModel:
+    """Test evidence data model."""
+
+    def test_evidence_item_summary(self):
+        ev = EvidenceItem(
+            source="cloudtrail",
+            content="ModifyDBInstance called at 14:00",
+            confidence_delta=0.15,
+        )
+        s = ev.summary()
+        assert "[cloudtrail]" in s
+        assert "+0.15" in s
+
+    def test_negative_confidence_delta(self):
+        ev = EvidenceItem(
+            source="cloudwatch",
+            content="No anomaly in metrics",
+            confidence_delta=-0.1,
+        )
+        s = ev.summary()
+        assert "-0.10" in s
