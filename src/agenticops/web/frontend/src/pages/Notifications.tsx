@@ -80,26 +80,26 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-4">
           {isEdit ? "Edit Channel" : "New Channel"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Name</label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Type</label>
             <select
               value={channelType}
               onChange={(e) => setChannelType(e.target.value as NotificationChannelType)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {CHANNEL_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -109,21 +109,21 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[#ececec] mb-1">
               Config (JSON)
             </label>
             <textarea
               value={configJson}
               onChange={(e) => setConfigJson(e.target.value)}
               rows={4}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {configError && (
               <p className="text-xs text-red-600 mt-1">{configError}</p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[#ececec] mb-1">
               Severity Filter
             </label>
             <div className="flex gap-2">
@@ -133,7 +133,7 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
                     type="checkbox"
                     checked={severityFilter.includes(s)}
                     onChange={() => toggleSeverity(s)}
-                    className="rounded border-slate-200"
+                    className="rounded border-[#424242]"
                   />
                   {s}
                 </label>
@@ -146,9 +146,9 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
               type="checkbox"
               checked={isEnabled}
               onChange={(e) => setIsEnabled(e.target.checked)}
-              className="rounded border-slate-200"
+              className="rounded border-[#424242]"
             />
-            <label htmlFor="channel-enabled" className="text-sm text-slate-700">
+            <label htmlFor="channel-enabled" className="text-sm text-[#ececec]">
               Enabled
             </label>
           </div>
@@ -156,14 +156,14 @@ function ChannelFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+              className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -191,16 +191,16 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Channel</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-sm p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-2">Delete Channel</h3>
+        <p className="text-sm text-[#9b9b9b] mb-4">
           Are you sure you want to delete <strong>{channel.name}</strong>? This action
           cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+            className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]"
           >
             Cancel
           </button>
@@ -237,7 +237,7 @@ function StatusBadge({ status }: { status: string }) {
     connected: "bg-green-100 text-green-700",
     ready: "bg-blue-100 text-blue-700",
     disconnected: "bg-red-100 text-red-700",
-    not_configured: "bg-slate-100 text-slate-500",
+    not_configured: "bg-[#383838] text-[#9b9b9b]",
   };
   const labels: Record<string, string> = {
     connected: "Connected",
@@ -246,7 +246,7 @@ function StatusBadge({ status }: { status: string }) {
     not_configured: "Not Configured",
   };
   return (
-    <Badge className={styles[status] ?? "bg-slate-100 text-slate-500"}>
+    <Badge className={styles[status] ?? "bg-[#383838] text-[#9b9b9b]"}>
       {labels[status] ?? status}
     </Badge>
   );
@@ -262,14 +262,14 @@ function IMBotsCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-slate-900">IM Bots</h2>
+        <h2 className="text-lg font-semibold text-[#ececec]">IM Bots</h2>
       </CardHeader>
       {isLoading ? (
         <div className="p-4"><Spinner /></div>
       ) : error ? (
         <div className="p-4"><ErrorBanner message={(error as Error).message} /></div>
       ) : (
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-[#424242]/50">
           {(bots ?? []).map((bot) => (
             <div key={bot.platform} className="flex items-center justify-between px-6 py-3">
               <div className="flex items-center gap-3">
@@ -277,16 +277,16 @@ function IMBotsCard() {
                 <div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={bot.status} />
-                    <span className="text-xs text-slate-400 uppercase">{bot.mode}</span>
+                    <span className="text-xs text-[#666] uppercase">{bot.mode}</span>
                   </div>
                   {bot.apps.length > 0 && (
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="text-xs text-[#9b9b9b] mt-0.5">
                       Apps: {bot.apps.join(", ")}
                     </p>
                   )}
                 </div>
               </div>
-              <div className="text-right text-sm text-slate-500">
+              <div className="text-right text-sm text-[#9b9b9b]">
                 {bot.active_sessions > 0 && (
                   <span>{bot.active_sessions} active session{bot.active_sessions !== 1 ? "s" : ""}</span>
                 )}
@@ -305,7 +305,7 @@ function PlatformBadge({ platform }: { platform: string }) {
     dingtalk: "bg-sky-100 text-sky-700",
     wecom: "bg-emerald-100 text-emerald-700",
   };
-  return <Badge className={colors[platform] ?? "bg-slate-100 text-slate-700"}>{platform}</Badge>;
+  return <Badge className={colors[platform] ?? "bg-[#383838] text-[#ececec]"}>{platform}</Badge>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -320,9 +320,9 @@ function ChannelTypeBadge({ type }: { type: string }) {
     feishu: "bg-teal-100 text-teal-700",
     dingtalk: "bg-sky-100 text-sky-700",
     wecom: "bg-emerald-100 text-emerald-700",
-    webhook: "bg-slate-100 text-slate-700",
+    webhook: "bg-[#383838] text-[#ececec]",
   };
-  return <Badge className={colors[type] ?? "bg-slate-100 text-slate-700"}>{type}</Badge>;
+  return <Badge className={colors[type] ?? "bg-[#383838] text-[#ececec]"}>{type}</Badge>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,7 +335,7 @@ const columns: Column<NotificationChannel>[] = [
     header: "Name",
     sortable: true,
     sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-slate-900">{r.name}</span>,
+    render: (r) => <span className="font-medium text-[#ececec]">{r.name}</span>,
   },
   {
     key: "channel_type",
@@ -349,7 +349,7 @@ const columns: Column<NotificationChannel>[] = [
       r.is_enabled ? (
         <Badge className="bg-green-100 text-green-700">Enabled</Badge>
       ) : (
-        <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
+        <Badge className="bg-[#383838] text-[#9b9b9b]">Disabled</Badge>
       ),
   },
   {
@@ -359,13 +359,13 @@ const columns: Column<NotificationChannel>[] = [
       r.severity_filter.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {r.severity_filter.map((s) => (
-            <Badge key={s} className="bg-slate-100 text-slate-600">
+            <Badge key={s} className="bg-[#383838] text-[#9b9b9b]">
               {s}
             </Badge>
           ))}
         </div>
       ) : (
-        <span className="text-sm text-slate-400">all</span>
+        <span className="text-sm text-[#666]">all</span>
       ),
   },
 ];
@@ -392,12 +392,12 @@ export default function Notifications() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-[#ececec]">
               Notification Channels
             </h2>
             <button
               onClick={() => navigate("/app/notifications/logs")}
-              className="px-3 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              className="px-3 py-1.5 text-xs text-[#9b9b9b] border border-[#424242] rounded-lg hover:bg-[#383838] transition-colors"
             >
               View Logs
             </button>
@@ -407,7 +407,7 @@ export default function Notifications() {
               setEditing(null);
               setFormOpen(true);
             }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500"
           >
             New Channel
           </button>
@@ -436,7 +436,7 @@ export default function Notifications() {
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="text-xs text-primary-600 hover:underline"
+                    className="text-xs text-blue-400 hover:underline"
                   >
                     Edit
                   </button>

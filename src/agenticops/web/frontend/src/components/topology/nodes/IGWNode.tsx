@@ -10,7 +10,7 @@ function IGWNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-lg border-2 border-blue-400 bg-gradient-to-br from-blue-50 to-sky-50 px-3 py-2 min-w-[180px] shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
+        "relative rounded-lg border-2 border-blue-400 bg-gradient-to-br from-blue-50 to-sky-50 px-3 py-2 min-w-[180px]  transition-all duration-200 hover: hover:-translate-y-0.5",
         d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
         d.dimmed && "opacity-40 transition-opacity duration-300",
         selected && !d.highlighted && "ring-2 ring-pd-green-500"

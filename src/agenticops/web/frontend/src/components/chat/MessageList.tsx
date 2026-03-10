@@ -34,7 +34,7 @@ export function MessageList({
   if (messages.length === 0 && !streamingContent) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-center text-slate-400">
+        <div className="text-center text-[#666]">
           <p className="text-lg font-medium">Start a conversation</p>
           <p className="text-sm mt-1">
             Ask about your AWS resources, health issues, or request a report.
@@ -77,7 +77,7 @@ export function MessageList({
               </div>
             )}
             <div
-              className="text-sm text-slate-700 leading-relaxed report-content max-w-none"
+              className="text-sm text-[#ececec] leading-relaxed report-content max-w-none"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
             />
             {msg.role === "assistant" && msg.token_usage && (
@@ -102,7 +102,7 @@ export function MessageList({
               </div>
             )}
             {streamingContent && (
-              <div className="text-sm text-slate-700 leading-relaxed report-content max-w-none">
+              <div className="text-sm text-[#ececec] leading-relaxed report-content max-w-none">
                 <span dangerouslySetInnerHTML={{ __html: streamingHtml }} />
                 {streaming && (
                   <span className="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 align-text-bottom" />

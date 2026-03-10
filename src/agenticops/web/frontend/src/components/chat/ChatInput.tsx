@@ -31,7 +31,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
   };
 
   return (
-    <div className="border-t border-slate-200 p-4 bg-slate-50">
+    <div className="border-t border-[#424242] p-4 bg-[#383838]">
       {/* File attachment indicator */}
       {selectedFile && (
         <div className="flex items-center gap-2 mb-2 max-w-4xl mx-auto">
@@ -44,7 +44,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
           </span>
           <button
             onClick={() => setSelectedFile(null)}
-            className="text-xs text-slate-400 hover:text-red-500 transition-colors"
+            className="text-xs text-[#666] hover:text-red-500 transition-colors"
           >
             Remove
           </button>
@@ -67,7 +67,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
             value={detailLevel ?? "medium"}
             onChange={(e) => onDetailLevelChange(e.target.value)}
             disabled={disabled}
-            className="self-end text-xs border border-slate-200 rounded-lg px-2 py-2.5 text-slate-600 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+            className="self-end text-xs border border-[#424242] rounded-lg px-2 py-2.5 text-[#9b9b9b] bg-[#2f2f2f] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             title="Response detail level"
           >
             <option value="concise">Concise</option>
@@ -80,7 +80,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="self-end px-2.5 py-2.5 text-slate-400 hover:text-primary-600 disabled:opacity-50 transition-colors rounded-lg hover:bg-slate-100"
+          className="self-end px-2.5 py-2.5 text-[#666] hover:text-blue-400 disabled:opacity-50 transition-colors rounded-lg hover:bg-[#383838]"
           title="Attach file"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -100,7 +100,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
           placeholder="Ask about AWS resources, health issues, or reports... (use I#42 for issues, R#17 for resources)"
           disabled={disabled}
           rows={2}
-          className="flex-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none disabled:opacity-50 transition-shadow"
+          className="flex-1 bg-[#2f2f2f] border border-[#424242] rounded-lg px-4 py-2.5 text-sm text-[#ececec] placeholder-[#666] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:opacity-50 transition-shadow"
         />
         {streaming ? (
           <button
@@ -113,7 +113,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
           <button
             onClick={handleSend}
             disabled={(!input.trim() && !selectedFile) || disabled}
-            className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors self-end"
+            className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-[#383838] disabled:text-[#666] disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors self-end"
           >
             Send
           </button>

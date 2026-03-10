@@ -135,7 +135,7 @@ function TopologyEdgeInner({
             className={`text-[10px] font-mono px-1.5 py-0.5 rounded backdrop-blur-sm ${
               isBlackhole
                 ? "bg-red-100/90 text-red-700 border border-red-300"
-                : "bg-white/80 text-gray-500 border border-gray-200"
+                : "bg-[#2f2f2f]/80 text-[#9b9b9b] border border-[#424242]"
             }`}
           >
             {label}

@@ -22,7 +22,7 @@ const columns: Column<Report>[] = [
     header: "Type",
     render: (r) => (
       <Badge
-        className={TYPE_COLORS[r.report_type] ?? "bg-slate-100 text-slate-600"}
+        className={TYPE_COLORS[r.report_type] ?? "bg-[#383838] text-[#9b9b9b]"}
       >
         {r.report_type}
       </Badge>
@@ -33,14 +33,14 @@ const columns: Column<Report>[] = [
     key: "title",
     header: "Title",
     render: (r) => (
-      <span className="text-sm font-medium text-slate-900">{r.title}</span>
+      <span className="text-sm font-medium text-[#ececec]">{r.title}</span>
     ),
   },
   {
     key: "summary",
     header: "Summary",
     render: (r) => (
-      <span className="text-sm text-slate-600 line-clamp-2">
+      <span className="text-sm text-[#9b9b9b] line-clamp-2">
         {r.summary}
       </span>
     ),
@@ -51,7 +51,7 @@ const columns: Column<Report>[] = [
     sortable: true,
     sortValue: (r) => new Date(r.created_at).getTime(),
     render: (r) => (
-      <span className="text-sm text-slate-500">
+      <span className="text-sm text-[#9b9b9b]">
         {formatShortDate(r.created_at)}
       </span>
     ),
@@ -83,16 +83,16 @@ export default function Reports() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Reports</h2>
+          <h2 className="text-lg font-semibold text-[#ececec]">Reports</h2>
           <div className="flex items-center gap-3">
             <input
               type="text"
               placeholder="Search reports..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="text-sm border border-[#424242] rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <span className="text-sm text-slate-400">
+            <span className="text-sm text-[#666]">
               {filtered.length} reports
             </span>
           </div>

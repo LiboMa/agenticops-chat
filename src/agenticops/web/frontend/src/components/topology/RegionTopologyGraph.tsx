@@ -107,7 +107,7 @@ export default function RegionTopologyGraph({
   );
 
   return (
-    <div className="relative w-full h-[600px] bg-gray-50 rounded-lg border border-gray-200">
+    <div className="relative w-full h-[600px] bg-[#383838] rounded-lg border border-[#424242]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -139,18 +139,18 @@ export default function RegionTopologyGraph({
 
         <Controls
           showInteractive={false}
-          className="!bg-white !border-gray-200 !shadow-sm"
+          className="!bg-[#2f2f2f] !border-[#424242] !"
         />
         <MiniMap
           nodeColor={miniMapColor}
           maskColor="rgba(0,0,0,0.08)"
-          className="!bg-white !border-gray-200"
+          className="!bg-[#2f2f2f] !border-[#424242]"
         />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e5e7eb" />
       </ReactFlow>
 
       {/* Legend */}
-      <div className="absolute bottom-3 left-3 bg-white/90 border border-gray-200 rounded-md px-3 py-2 text-[10px] text-gray-500 flex gap-4">
+      <div className="absolute bottom-3 left-3 bg-[#2f2f2f]/90 border border-[#424242] rounded-md px-3 py-2 text-[10px] text-[#9b9b9b] flex gap-4">
         <span className="flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-emerald-200 border border-emerald-400 inline-block" />
           VPC
@@ -160,10 +160,10 @@ export default function RegionTopologyGraph({
           Transit GW
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-gray-100 border-dashed border border-gray-300 inline-block" />
+          <span className="w-3 h-3 rounded bg-[#383838] border-dashed border border-[#424242] inline-block" />
           External VPC
         </span>
-        <span className="text-gray-400">Click VPC to drill in</span>
+        <span className="text-[#666]">Click VPC to drill in</span>
       </div>
     </div>
   );

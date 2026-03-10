@@ -27,8 +27,8 @@ export function SessionList({ selectedId, onSelect }: Props) {
   };
 
   return (
-    <div className="w-56 flex-shrink-0 border-r border-slate-200 flex flex-col bg-slate-50">
-      <div className="p-3 border-b border-slate-200">
+    <div className="w-56 flex-shrink-0 border-r border-[#424242] flex flex-col bg-[#383838]">
+      <div className="p-3 border-b border-[#424242]">
         <button
           onClick={handleNew}
           disabled={createMut.isPending}
@@ -39,9 +39,9 @@ export function SessionList({ selectedId, onSelect }: Props) {
       </div>
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <p className="p-3 text-xs text-slate-400">Loading...</p>
+          <p className="p-3 text-xs text-[#666]">Loading...</p>
         ) : !sessions || sessions.length === 0 ? (
-          <p className="p-3 text-xs text-slate-400">No sessions yet</p>
+          <p className="p-3 text-xs text-[#666]">No sessions yet</p>
         ) : (
           <div className="p-1 space-y-0.5">
             {sessions.map((s) => (
@@ -51,16 +51,16 @@ export function SessionList({ selectedId, onSelect }: Props) {
                 className={`group relative px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
                   selectedId === s.session_id
                     ? "bg-primary-50 text-primary-700 border border-primary-200"
-                    : "text-slate-600 hover:bg-slate-100"
+                    : "text-[#9b9b9b] hover:bg-[#383838]"
                 }`}
               >
                 <p className="text-sm font-medium truncate pr-5">{s.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-[#666] mt-0.5">
                   {s.message_count} msgs &middot; {formatShortDate(s.last_activity_at)}
                 </p>
                 <button
                   onClick={(e) => handleDelete(s.session_id, e)}
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity"
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-[#666] hover:text-red-500 transition-opacity"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

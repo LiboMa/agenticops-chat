@@ -29,19 +29,19 @@ export function TopBar() {
   const isDetail = location.pathname.match(/\/app\/issues\/(\d+)/);
 
   return (
-    <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
+    <header className="h-14 bg-[#2f2f2f] border-b border-[#424242] flex items-center justify-between px-6 sticky top-0 z-20">
       <nav className="flex items-center gap-1.5 text-sm">
-        <span className="text-slate-400">AgenticAIOps</span>
-        <span className="text-slate-300">/</span>
-        <span className="font-medium text-slate-900">{pageLabel}</span>
+        <span className="text-[#666]">AgenticAIOps</span>
+        <span className="text-[#666]">/</span>
+        <span className="font-medium text-[#ececec]">{pageLabel}</span>
         {isDetail && (
           <>
-            <span className="text-slate-300">/</span>
-            <span className="text-slate-500">#{isDetail[1]}</span>
+            <span className="text-[#666]">/</span>
+            <span className="text-[#9b9b9b]">#{isDetail[1]}</span>
           </>
         )}
       </nav>
-      <div className="text-sm text-slate-400 font-mono">
+      <div className="text-sm text-[#666] font-mono">
         {formatUtcClock(now)}
       </div>
     </header>

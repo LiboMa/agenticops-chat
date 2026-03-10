@@ -11,9 +11,9 @@ interface NodeDetailPanelProps {
 function DetailRow({ label, value }: { label: string; value: string | number | boolean | null | undefined }) {
   if (value === null || value === undefined) return null;
   return (
-    <div className="flex justify-between gap-2 py-1 border-b border-gray-100 last:border-0">
-      <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
-      <span className="text-xs font-mono text-gray-800 text-right truncate">
+    <div className="flex justify-between gap-2 py-1 border-b border-[#424242]/50 last:border-0">
+      <span className="text-xs text-[#9b9b9b] flex-shrink-0">{label}</span>
+      <span className="text-xs font-mono text-[#ececec] text-right truncate">
         {String(value)}
       </span>
     </div>
@@ -37,16 +37,16 @@ function NodeDetailPanelInner({ node, onClose }: NodeDetailPanelProps) {
   );
 
   return (
-    <div className="absolute top-0 right-0 w-72 h-full bg-white border-l border-gray-200 shadow-lg overflow-y-auto z-10">
+    <div className="absolute top-0 right-0 w-72 h-full bg-[#2f2f2f] border-l border-[#424242] shadow-lg overflow-y-auto z-10">
       {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+      <div className="sticky top-0 bg-[#2f2f2f] border-b border-[#424242] px-4 py-3 flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold text-gray-900">{d.label}</div>
-          <div className="text-xs text-gray-500">{d.resourceType}</div>
+          <div className="text-sm font-semibold text-[#ececec]">{d.label}</div>
+          <div className="text-xs text-[#9b9b9b]">{d.resourceType}</div>
         </div>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-[#666] hover:text-[#9b9b9b] transition-colors"
           aria-label="Close panel"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -64,7 +64,7 @@ function NodeDetailPanelInner({ node, onClose }: NodeDetailPanelProps) {
 
       {/* Scalar fields */}
       <div className="px-4 py-3">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        <h4 className="text-xs font-semibold text-[#666] uppercase tracking-wider mb-2">
           Properties
         </h4>
         {entries.map(([key, value]) => (
@@ -75,17 +75,17 @@ function NodeDetailPanelInner({ node, onClose }: NodeDetailPanelProps) {
       {/* Array fields */}
       {arrayEntries.length > 0 && (
         <div className="px-4 pb-3">
-          <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-semibold text-[#666] uppercase tracking-wider mb-2">
             Associations
           </h4>
           {arrayEntries.map(([key, value]) => (
             <div key={key} className="mb-2">
-              <div className="text-xs text-gray-500 mb-1">{key}</div>
+              <div className="text-xs text-[#9b9b9b] mb-1">{key}</div>
               <div className="flex flex-wrap gap-1">
                 {(value as string[]).map((item) => (
                   <span
                     key={item}
-                    className="text-[10px] font-mono bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
+                    className="text-[10px] font-mono bg-[#383838] text-[#ececec] px-1.5 py-0.5 rounded"
                   >
                     {item}
                   </span>

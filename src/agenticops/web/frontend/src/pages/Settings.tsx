@@ -38,27 +38,27 @@ function FocusToggle({
       onClick={onClick}
       className={`group flex items-start gap-3 p-3 rounded-lg border transition-all text-left ${
         active
-          ? "bg-primary-50 border-primary-300 shadow-sm"
-          : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+          ? "bg-primary-50 border-primary-300 "
+          : "bg-[#2f2f2f] border-[#424242] hover:border-[#424242] hover:bg-[#383838]"
       }`}
     >
       <div className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-        active ? "bg-primary-100 text-primary-600" : "bg-slate-100 text-slate-400 group-hover:text-slate-500"
+        active ? "bg-primary-100 text-blue-400" : "bg-[#383838] text-[#666] group-hover:text-[#9b9b9b]"
       }`}>
         {icon}
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium ${active ? "text-primary-700" : "text-slate-700"}`}>
+          <span className={`text-sm font-medium ${active ? "text-primary-700" : "text-[#ececec]"}`}>
             {label}
           </span>
           <div className={`w-7 h-4 rounded-full transition-colors flex items-center ${
-            active ? "bg-primary-500 justify-end" : "bg-slate-300 justify-start"
+            active ? "bg-blue-500 justify-end" : "bg-[#666] justify-start"
           }`}>
-            <div className="w-3 h-3 mx-0.5 rounded-full bg-white shadow-sm" />
+            <div className="w-3 h-3 mx-0.5 rounded-full bg-[#2f2f2f] " />
           </div>
         </div>
-        <p className="text-xs text-slate-400 mt-0.5 leading-tight">{description}</p>
+        <p className="text-xs text-[#666] mt-0.5 leading-tight">{description}</p>
       </div>
     </button>
   );
@@ -72,19 +72,19 @@ function SettingToggle({
   label: string; description: string; enabled: boolean; onChange: (v: boolean) => void; saving?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
+    <div className="flex items-center justify-between py-3 border-b border-[#424242]/50 last:border-b-0">
       <div>
-        <span className="text-sm font-medium text-slate-700">{label}</span>
-        <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+        <span className="text-sm font-medium text-[#ececec]">{label}</span>
+        <p className="text-xs text-[#666] mt-0.5">{description}</p>
       </div>
       <button
         onClick={() => onChange(!enabled)}
         disabled={saving}
         className={`relative w-10 h-5 rounded-full transition-colors ${
-          enabled ? "bg-primary-500" : "bg-slate-300"
+          enabled ? "bg-blue-500" : "bg-[#666]"
         } ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
       >
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-[#2f2f2f]  transition-transform ${
           enabled ? "translate-x-5" : "translate-x-0.5"
         }`} />
       </button>
@@ -120,38 +120,38 @@ function AccountFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Name</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Account ID</label>
-            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-100" />
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Account ID</label>
+            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-[#383838]" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Role ARN</label>
-            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Role ARN</label>
+            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">External ID (optional)</label>
-            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-[#ececec] mb-1">External ID (optional)</label>
+            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Regions (comma-separated)</label>
-            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Regions (comma-separated)</label>
+            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex items-center gap-2">
-            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-slate-200" />
-            <label htmlFor="is-active" className="text-sm text-slate-700">Active</label>
+            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-[#424242]" />
+            <label htmlFor="is-active" className="text-sm text-[#ececec]">Active</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
           </div>
         </form>
       </div>
@@ -166,13 +166,13 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Account</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-sm p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-2">Delete Account</h3>
+        <p className="text-sm text-[#9b9b9b] mb-4">
           Are you sure you want to delete <strong>{account.name}</strong> ({account.account_id})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]">Cancel</button>
           <button onClick={onConfirm} disabled={deleting} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50">{deleting ? "Deleting..." : "Delete"}</button>
         </div>
       </div>
@@ -183,12 +183,12 @@ function DeleteModal({
 /* ── Accounts columns ───────────────────────────────────────────── */
 
 const accountColumns: Column<Account>[] = [
-  { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+  { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-[#ececec]">{r.name}</span> },
   { key: "account_id", header: "Account ID", render: (r) => <span className="font-mono text-sm">{r.account_id}</span> },
-  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-slate-500 truncate max-w-[200px] block">{r.role_arn}</span> },
-  { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-slate-100 text-slate-600">{reg}</Badge>)}</div> },
-  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-slate-100 text-slate-500">Inactive</Badge> },
-  { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-slate-500">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
+  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-[#9b9b9b] truncate max-w-[200px] block">{r.role_arn}</span> },
+  { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-[#383838] text-[#9b9b9b]">{reg}</Badge>)}</div> },
+  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-[#383838] text-[#9b9b9b]">Inactive</Badge> },
+  { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-[#9b9b9b]">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 
 /* ── Main Settings page ─────────────────────────────────────────── */
@@ -215,18 +215,18 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
+      <h1 className="text-2xl font-semibold text-[#ececec]">Settings</h1>
 
       {/* ── Scan Focus ────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Scan Focus</h2>
-          <span className="text-xs text-slate-400">
+          <h2 className="text-lg font-semibold text-[#ececec]">Scan Focus</h2>
+          <span className="text-xs text-[#666]">
             {focusValue === "all" ? "All categories" : focusValue.split(",").join(", ")}
           </span>
         </CardHeader>
         <CardBody>
-          <p className="text-sm text-slate-500 mb-4">
+          <p className="text-sm text-[#9b9b9b] mb-4">
             Select which resource categories to focus on when scanning and detecting health issues.
             This applies globally to Chat, CLI, and agent dispatches.
           </p>
@@ -255,7 +255,7 @@ export default function Settings() {
       {/* ── Pipeline & Automation ─────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Pipeline & Automation</h2>
+          <h2 className="text-lg font-semibold text-[#ececec]">Pipeline & Automation</h2>
         </CardHeader>
         <CardBody>
           {settingsQ.isLoading ? (
@@ -307,10 +307,10 @@ export default function Settings() {
       {/* ── Accounts ──────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">AWS Accounts</h2>
+          <h2 className="text-lg font-semibold text-[#ececec]">AWS Accounts</h2>
           <button
             onClick={() => { setEditing(null); setFormOpen(true); }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500"
           >
             New Account
           </button>
@@ -328,7 +328,7 @@ export default function Settings() {
                 header: "",
                 render: (r) => (
                   <div className="flex gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); setEditing(r); setFormOpen(true); }} className="text-xs text-primary-600 hover:underline">Edit</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditing(r); setFormOpen(true); }} className="text-xs text-blue-400 hover:underline">Edit</button>
                     <button onClick={(e) => { e.stopPropagation(); setDeleting(r); }} className="text-xs text-red-600 hover:underline">Delete</button>
                   </div>
                 ),

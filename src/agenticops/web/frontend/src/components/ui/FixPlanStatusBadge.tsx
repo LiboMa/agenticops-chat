@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import type { FixPlanStatus } from "@/api/types";
 
 const STATUS_STYLES: Record<FixPlanStatus, string> = {
-  draft: "bg-slate-100 text-slate-600",
+  draft: "bg-[#383838] text-[#9b9b9b]",
   pending_approval: "bg-amber-100 text-amber-700",
   approved: "bg-green-100 text-green-700",
   executing: "bg-blue-100 text-blue-700",

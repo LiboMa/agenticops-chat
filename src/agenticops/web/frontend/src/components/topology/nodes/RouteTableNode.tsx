@@ -11,7 +11,7 @@ function RouteTableNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded border-2 border-slate-300 bg-gradient-to-br from-slate-50 to-gray-50 px-2.5 py-1.5 min-w-[150px] shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
+        "relative rounded border-2 border-[#424242] bg-gradient-to-br from-[#2f2f2f] to-[#383838] px-2.5 py-1.5 min-w-[150px]  transition-all duration-200 hover: hover:-translate-y-0.5",
         d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
         d.dimmed && "opacity-40 transition-opacity duration-300",
         selected && !d.highlighted && "ring-2 ring-pd-green-500",
@@ -19,15 +19,15 @@ function RouteTableNodeInner({ data, selected }: NodeProps) {
       )}
     >
       {/* Slate accent bar */}
-      <div className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-slate-400" />
+      <div className="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-[#666]" />
       <StatusBadge status={d.status} />
-      <Handle type="target" position={Position.Top} className="!bg-slate-400" />
+      <Handle type="target" position={Position.Top} className="!bg-[#666]" />
       <div className="flex items-center gap-1.5 pl-1.5">
         {/* Table icon */}
         <svg
           className={cn(
             "w-4 h-4 flex-shrink-0",
-            d.hasIssue ? "text-red-500" : "text-slate-500"
+            d.hasIssue ? "text-red-500" : "text-[#9b9b9b]"
           )}
           fill="none"
           viewBox="0 0 24 24"
@@ -38,10 +38,10 @@ function RouteTableNodeInner({ data, selected }: NodeProps) {
           <path d="M3 9h18M3 15h18M9 3v18" />
         </svg>
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-slate-700 truncate">
+          <div className="text-[11px] font-semibold text-[#ececec] truncate">
             {d.label}
           </div>
-          <div className="text-[10px] text-slate-400">
+          <div className="text-[10px] text-[#666]">
             {raw.is_main ? "Main" : "Custom"} &middot;{" "}
             {raw.routes?.length ?? 0} routes
           </div>
@@ -50,7 +50,7 @@ function RouteTableNodeInner({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-slate-400"
+        className="!bg-[#666]"
       />
     </div>
   );

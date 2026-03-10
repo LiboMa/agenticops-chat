@@ -57,7 +57,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
         <button
           onClick={handleReopen}
           disabled={statusUpdating}
-          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-[#424242] text-[#9b9b9b] bg-[#2f2f2f] hover:bg-[#383838] disabled:opacity-50 transition-colors"
         >
           {statusUpdating ? "Updating..." : "Reopen"}
         </button>
@@ -66,13 +66,13 @@ export const IssueActionBar = React.memo(function IssueActionBar({
   }
 
   return (
-    <div className="flex items-center gap-3 p-4 rounded-lg bg-slate-50 border border-slate-200">
+    <div className="flex items-center gap-3 p-4 rounded-lg bg-[#383838] border border-[#424242]">
       {/* Primary action based on status */}
       {(status === "open" || status === "investigating" || status === "acknowledged") && (
         <button
           onClick={onRunRca}
           disabled={rcaLoading}
-          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           {rcaLoading ? (
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
@@ -152,7 +152,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
         <button
           onClick={handleResolve}
           disabled={statusUpdating}
-          className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-[#424242] text-[#9b9b9b] bg-[#2f2f2f] hover:bg-[#383838] disabled:opacity-50 transition-colors"
         >
           {statusUpdating ? "Updating..." : "Resolve"}
         </button>

@@ -225,7 +225,7 @@ export default function TopologyGraph({
   }, []);
 
   return (
-    <div className="relative w-full h-[700px] bg-gray-50 rounded-lg border border-gray-200">
+    <div className="relative w-full h-[700px] bg-[#383838] rounded-lg border border-[#424242]">
       {/* Blackhole animation keyframes */}
       <style>{`
         @keyframes blackhole-flow {
@@ -279,12 +279,12 @@ export default function TopologyGraph({
 
         <Controls
           showInteractive={false}
-          className="!bg-white !border-gray-200 !shadow-sm"
+          className="!bg-[#2f2f2f] !border-[#424242] !"
         />
         <MiniMap
           nodeColor={miniMapColor}
           maskColor="rgba(0,0,0,0.08)"
-          className="!bg-white !border-gray-200"
+          className="!bg-[#2f2f2f] !border-[#424242]"
         />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e5e7eb" />
       </ReactFlow>

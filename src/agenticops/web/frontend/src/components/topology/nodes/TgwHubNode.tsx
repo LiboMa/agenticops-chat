@@ -10,7 +10,7 @@ function TgwHubNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-xl border-2 border-purple-400 bg-gradient-to-br from-purple-50 to-fuchsia-50 px-5 py-4 min-w-[220px] shadow-md transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
+        "relative rounded-xl border-2 border-purple-400 bg-gradient-to-br from-purple-50 to-fuchsia-50 px-5 py-4 min-w-[220px]  transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
         selected && "ring-2 ring-pd-green-500",
       )}
     >
@@ -37,7 +37,7 @@ function TgwHubNodeInner({ data, selected }: NodeProps) {
           <div className="text-xs text-purple-500">
             Transit Gateway
           </div>
-          <div className="text-[10px] text-gray-400 mt-0.5">
+          <div className="text-[10px] text-[#666] mt-0.5">
             {d.attachmentCount} attachments ·{" "}
             <span className={isHealthy ? "text-green-600" : "text-yellow-600"}>
               {d.state}

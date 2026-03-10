@@ -10,7 +10,7 @@ const STATUS_STYLES: Record<string, { dot: string; label: string }> = {
   available: { dot: "bg-green-500", label: "text-green-700" },
 };
 
-const DEFAULT_STYLE = { dot: "bg-slate-400", label: "text-slate-500" };
+const DEFAULT_STYLE = { dot: "bg-[#666]", label: "text-[#9b9b9b]" };
 
 interface StatusIndicatorProps {
   status: string;

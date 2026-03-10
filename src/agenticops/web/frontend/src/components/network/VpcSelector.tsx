@@ -28,11 +28,11 @@ export function VpcSelector({
   return (
     <div className="flex flex-wrap items-end gap-4">
       <div>
-        <label className="block text-sm text-gray-600 mb-1">Region</label>
+        <label className="block text-sm text-[#9b9b9b] mb-1">Region</label>
         <select
           value={region}
           onChange={(e) => onRegionChange(e.target.value)}
-          className="border border-gray-300 rounded-md px-3 py-2 w-64 text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+          className="border border-[#424242] rounded-md px-3 py-2 w-64 text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
         >
           {regions.map((r) => (
             <option key={r.code} value={r.code}>
@@ -52,12 +52,12 @@ export function VpcSelector({
       )}
       <div className="w-px h-8 bg-gray-300" />
       <div>
-        <label className="block text-sm text-gray-600 mb-1">VPC ID</label>
+        <label className="block text-sm text-[#9b9b9b] mb-1">VPC ID</label>
         <input
           type="text"
           value={vpcId}
           onChange={(e) => onVpcIdChange(e.target.value)}
-          className="border border-gray-300 rounded-md px-3 py-2 w-64 text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
+          className="border border-[#424242] rounded-md px-3 py-2 w-64 text-sm focus:outline-none focus:ring-2 focus:ring-pd-green-500"
           placeholder="vpc-0abc123..."
         />
       </div>
@@ -71,7 +71,7 @@ export function VpcSelector({
       <button
         onClick={onListVpcs}
         disabled={isLoadingVpcs}
-        className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-500 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-[#383838]0 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isLoadingVpcs ? "Loading..." : "List VPCs"}
       </button>

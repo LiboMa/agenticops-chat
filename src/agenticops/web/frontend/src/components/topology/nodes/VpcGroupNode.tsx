@@ -10,9 +10,9 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-xl border-2 px-5 py-4 min-w-[220px] shadow-md transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
+        "relative rounded-xl border-2 px-5 py-4 min-w-[220px]  transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
         isExternal
-          ? "border-dashed border-gray-300 bg-gradient-to-br from-gray-50 to-slate-50"
+          ? "border-dashed border-[#424242] bg-gradient-to-br from-[#2f2f2f] to-[#383838]"
           : "border-emerald-400 bg-gradient-to-br from-emerald-50 to-green-50",
         selected && "ring-2 ring-pd-green-500",
       )}
@@ -34,7 +34,7 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
           )}
         >
           <svg
-            className={cn("w-6 h-6", isExternal ? "text-gray-500" : "text-emerald-700")}
+            className={cn("w-6 h-6", isExternal ? "text-[#9b9b9b]" : "text-emerald-700")}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -48,10 +48,10 @@ function VpcGroupNodeInner({ data, selected }: NodeProps) {
           </svg>
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-800 truncate">{d.label}</div>
-          <div className="text-xs text-gray-500 font-mono">{d.cidr}</div>
+          <div className="text-sm font-semibold text-[#ececec] truncate">{d.label}</div>
+          <div className="text-xs text-[#9b9b9b] font-mono">{d.cidr}</div>
           {!isExternal && (
-            <div className="text-[10px] text-gray-400 mt-0.5">
+            <div className="text-[10px] text-[#666] mt-0.5">
               {d.subnetCount} subnets{d.isDefault ? " · default" : ""}
             </div>
           )}

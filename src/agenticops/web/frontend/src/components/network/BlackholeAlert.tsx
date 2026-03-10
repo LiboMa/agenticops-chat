@@ -8,7 +8,7 @@ export function BlackholeAlert({ routes }: BlackholeAlertProps) {
   if (routes.length === 0) return null;
 
   return (
-    <div className="bg-red-50 border border-red-300 rounded-lg shadow-card p-6">
+    <div className="bg-red-50 border border-red-300 rounded-lg  p-6">
       <h3 className="text-lg font-semibold text-red-800 mb-3">
         Blackhole Routes
       </h3>

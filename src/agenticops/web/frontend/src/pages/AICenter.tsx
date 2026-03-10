@@ -10,7 +10,7 @@ function MemoryCard({ agent }: { agent: any }) {
       <p className="text-2xl font-bold text-blue-400 mt-1">{total}</p>
       <div className="flex gap-2 mt-2">
         {Object.entries(types).map(([k, v]) => (
-          <span key={k} className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded">
+          <span key={k} className="text-xs bg-gray-700 text-[#666] px-2 py-0.5 rounded">
             {k}: {v as number}
           </span>
         ))}
@@ -33,9 +33,9 @@ export default function AICenter() {
       <h1 className="text-2xl font-bold text-white">🧠 AI Center</h1>
 
       {/* Memory Overview */}
-      <div className="bg-gray-800/50 rounded-xl p-5 shadow-lg">
+      <div className="bg-gray-800/50 rounded-xl p-5 ">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider">
             Agent Memory
           </h2>
           <span className="text-xl font-bold text-blue-400">{totalMem} total</span>
@@ -46,7 +46,7 @@ export default function AICenter() {
           ))}
         </div>
         {agents.every((a: any) => !a.total) && (
-          <p className="text-sm text-gray-500 text-center py-4">
+          <p className="text-sm text-[#9b9b9b] text-center py-4">
             No memories yet — agents will learn from incidents
           </p>
         )}
@@ -54,8 +54,8 @@ export default function AICenter() {
 
       <div className="grid grid-cols-2 gap-6">
         {/* Proactive Predictions */}
-        <div className="bg-gray-800/50 rounded-xl p-5 shadow-lg">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">
+        <div className="bg-gray-800/50 rounded-xl p-5 ">
+          <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             🔮 Proactive Predictions
           </h2>
           {proPatterns.data?.patterns?.length > 0 ? (
@@ -64,7 +64,7 @@ export default function AICenter() {
                 <div key={i} className="flex items-center justify-between py-2 px-3 bg-gray-800 rounded-lg">
                   <div>
                     <span className="text-sm font-medium text-gray-200">{p.category}</span>
-                    <span className="text-xs text-gray-500 ml-2">×{p.occurrences}</span>
+                    <span className="text-xs text-[#9b9b9b] ml-2">×{p.occurrences}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-20 bg-gray-700 rounded-full h-1.5">
@@ -72,12 +72,12 @@ export default function AICenter() {
                         className={`h-1.5 rounded-full ${
                           p.score >= 0.85 ? "bg-red-500" :
                           p.score >= 0.65 ? "bg-orange-500" :
-                          p.score >= 0.3 ? "bg-yellow-500" : "bg-gray-500"
+                          p.score >= 0.3 ? "bg-yellow-500" : "bg-[#383838]0"
                         }`}
                         style={{ width: `${Math.min(p.score * 100, 100)}%` }}
                       />
                     </div>
-                    <span className="text-xs text-gray-400 w-10 text-right">
+                    <span className="text-xs text-[#666] w-10 text-right">
                       {(p.score * 100).toFixed(0)}%
                     </span>
                   </div>
@@ -85,17 +85,17 @@ export default function AICenter() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500 text-center py-4">
+            <p className="text-sm text-[#9b9b9b] text-center py-4">
               No recurring patterns detected
             </p>
           )}
 
           {/* Proactive Alerts */}
           {proAlerts.data?.count > 0 && (
-            <div className="mt-4 pt-4 border-t border-gray-700">
-              <h3 className="text-xs text-gray-400 uppercase mb-2">Recent Alerts</h3>
+            <div className="mt-4 pt-4 border-t border-[#424242]">
+              <h3 className="text-xs text-[#666] uppercase mb-2">Recent Alerts</h3>
               {proAlerts.data.alerts.slice(0, 5).map((a: any) => (
-                <div key={a.id} className="py-1.5 text-xs text-gray-400 truncate">
+                <div key={a.id} className="py-1.5 text-xs text-[#666] truncate">
                   {a.content?.substring(0, 120)}
                 </div>
               ))}
@@ -104,8 +104,8 @@ export default function AICenter() {
         </div>
 
         {/* Learning Timeline */}
-        <div className="bg-gray-800/50 rounded-xl p-5 shadow-lg">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">
+        <div className="bg-gray-800/50 rounded-xl p-5 ">
+          <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             📈 Learning Timeline
           </h2>
           {timeline.data?.events?.length > 0 ? (
@@ -120,7 +120,7 @@ export default function AICenter() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-200 truncate">{e.content?.substring(0, 100)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-[#9b9b9b] mt-0.5">
                       {e.agent} · {e.type} · {e.confidence ? `${(e.confidence * 100).toFixed(0)}%` : ""}
                     </p>
                   </div>
@@ -128,7 +128,7 @@ export default function AICenter() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500 text-center py-4">
+            <p className="text-sm text-[#9b9b9b] text-center py-4">
               No learning events yet
             </p>
           )}

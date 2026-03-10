@@ -72,7 +72,7 @@ export default function ReportDetail() {
       {/* Back link */}
       <Link
         to="/app/reports"
-        className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 transition-colors"
+        className="inline-flex items-center text-sm text-[#9b9b9b] hover:text-[#ececec] transition-colors"
       >
         <svg
           className="h-4 w-4 mr-1"
@@ -96,16 +96,16 @@ export default function ReportDetail() {
           <div className="flex items-start gap-3 mb-4">
             <Badge
               className={
-                TYPE_COLORS[report.report_type] ?? "bg-slate-100 text-slate-600"
+                TYPE_COLORS[report.report_type] ?? "bg-[#383838] text-[#9b9b9b]"
               }
             >
               {report.report_type}
             </Badge>
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-semibold text-slate-900 leading-tight">
+              <h1 className="text-2xl font-semibold text-[#ececec] leading-tight">
                 {report.title}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-sm text-[#9b9b9b]">
                 Generated {formatFullDate(report.created_at)}
               </p>
             </div>
@@ -125,11 +125,11 @@ export default function ReportDetail() {
           </div>
 
           {/* Summary callout */}
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">
+          <div className="rounded-lg bg-[#383838] border border-[#424242] p-4">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-[#666] mb-2">
               Summary
             </h3>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+            <p className="text-sm text-[#ececec] leading-relaxed whitespace-pre-line">
               {report.summary}
             </p>
           </div>
@@ -140,20 +140,20 @@ export default function ReportDetail() {
       {showPublish && (
         <Card>
           <CardBody>
-            <h3 className="text-sm font-semibold text-slate-900 mb-3">
+            <h3 className="text-sm font-semibold text-[#ececec] mb-3">
               Publish to Channel
             </h3>
 
             <div className="space-y-4">
               {/* Channel select */}
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">
+                <label className="block text-xs font-medium text-[#9b9b9b] mb-1">
                   Channel
                 </label>
                 <select
                   value={selectedChannel}
                   onChange={(e) => setSelectedChannel(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-lg border border-[#424242] px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 >
                   <option value="">Select a channel...</option>
                   {snsReportChannels.map((ch) => (
@@ -166,17 +166,17 @@ export default function ReportDetail() {
 
               {/* Format checkboxes */}
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">
+                <label className="block text-xs font-medium text-[#9b9b9b] mb-1">
                   Formats
                 </label>
                 <div className="flex gap-3">
                   {AVAILABLE_FORMATS.map((fmt) => (
-                    <label key={fmt} className="flex items-center gap-1.5 text-sm text-slate-700">
+                    <label key={fmt} className="flex items-center gap-1.5 text-sm text-[#ececec]">
                       <input
                         type="checkbox"
                         checked={selectedFormats.includes(fmt)}
                         onChange={() => toggleFormat(fmt)}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        className="rounded border-[#424242] text-indigo-600 focus:ring-indigo-500"
                       />
                       {fmt.toUpperCase()}
                     </label>

@@ -58,32 +58,32 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-4">
           {isEdit ? "Edit Schedule" : "New Schedule"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Name</label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Pipeline</label>
+            <label className="block text-sm font-medium text-[#ececec] mb-1">Pipeline</label>
             <input
               required
               value={pipelineName}
               onChange={(e) => setPipelineName(e.target.value)}
               placeholder="scan, detect, report"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[#ececec] mb-1">
               Cron Expression
             </label>
             <input
@@ -91,17 +91,17 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               value={cronExpression}
               onChange={(e) => setCronExpression(e.target.value)}
               placeholder="0 */6 * * *"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[#ececec] mb-1">
               Account Name (optional)
             </label>
             <input
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 py-2 border border-[#424242] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -110,9 +110,9 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               type="checkbox"
               checked={isEnabled}
               onChange={(e) => setIsEnabled(e.target.checked)}
-              className="rounded border-slate-200"
+              className="rounded border-[#424242]"
             />
-            <label htmlFor="schedule-enabled" className="text-sm text-slate-700">
+            <label htmlFor="schedule-enabled" className="text-sm text-[#ececec]">
               Enabled
             </label>
           </div>
@@ -120,14 +120,14 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+              className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -155,16 +155,16 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Schedule</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div className="bg-[#2f2f2f] rounded-lg  w-full max-w-sm p-6">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-2">Delete Schedule</h3>
+        <p className="text-sm text-[#9b9b9b] mb-4">
           Are you sure you want to delete <strong>{schedule.name}</strong>? This action
           cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+            className="px-4 py-2 text-sm text-[#ececec] border border-[#424242] rounded-lg hover:bg-[#383838]"
           >
             Cancel
           </button>
@@ -191,7 +191,7 @@ const columns: Column<Schedule>[] = [
     header: "Name",
     sortable: true,
     sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-slate-900">{r.name}</span>,
+    render: (r) => <span className="font-medium text-[#ececec]">{r.name}</span>,
   },
   {
     key: "pipeline_name",
@@ -212,7 +212,7 @@ const columns: Column<Schedule>[] = [
       r.is_enabled ? (
         <Badge className="bg-green-100 text-green-700">Enabled</Badge>
       ) : (
-        <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
+        <Badge className="bg-[#383838] text-[#9b9b9b]">Disabled</Badge>
       ),
   },
   {
@@ -221,7 +221,7 @@ const columns: Column<Schedule>[] = [
     sortable: true,
     sortValue: (r) => r.last_run_at ?? "",
     render: (r) => (
-      <span className="text-sm text-slate-500">
+      <span className="text-sm text-[#9b9b9b]">
         {r.last_run_at ? formatShortDate(r.last_run_at) : "Never"}
       </span>
     ),
@@ -230,7 +230,7 @@ const columns: Column<Schedule>[] = [
     key: "next_run_at",
     header: "Next Run",
     render: (r) => (
-      <span className="text-sm text-slate-500">
+      <span className="text-sm text-[#9b9b9b]">
         {r.next_run_at ? formatShortDate(r.next_run_at) : "-"}
       </span>
     ),
@@ -255,13 +255,13 @@ export default function Schedules() {
     <>
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Schedules</h2>
+          <h2 className="text-lg font-semibold text-[#ececec]">Schedules</h2>
           <button
             onClick={() => {
               setEditing(null);
               setFormOpen(true);
             }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-500"
           >
             New Schedule
           </button>
@@ -280,7 +280,7 @@ export default function Schedules() {
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="text-xs text-primary-600 hover:underline"
+                    className="text-xs text-blue-400 hover:underline"
                   >
                     Edit
                   </button>

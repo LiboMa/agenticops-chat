@@ -8,14 +8,14 @@ interface VpcListTableProps {
 
 export function VpcListTable({ region, vpcs, onUseVpc }: VpcListTableProps) {
   return (
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-2">
+    <div className="bg-[#383838] rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-[#ececec] mb-2">
         VPCs in {region} ({vpcs.length})
       </h3>
       {vpcs.length > 0 ? (
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-500">
+            <tr className="text-left text-[#9b9b9b]">
               <th className="pb-2 pr-4">VPC ID</th>
               <th className="pb-2 pr-4">CIDR</th>
               <th className="pb-2 pr-4">Name</th>
@@ -26,7 +26,7 @@ export function VpcListTable({ region, vpcs, onUseVpc }: VpcListTableProps) {
           </thead>
           <tbody>
             {vpcs.map((v) => (
-              <tr key={v.VpcId} className="border-t border-gray-200">
+              <tr key={v.VpcId} className="border-t border-[#424242]">
                 <td className="py-2 pr-4 font-mono">{v.VpcId}</td>
                 <td className="py-2 pr-4">{v.CidrBlock}</td>
                 <td className="py-2 pr-4">{v.Name ?? "-"}</td>
@@ -45,7 +45,7 @@ export function VpcListTable({ region, vpcs, onUseVpc }: VpcListTableProps) {
           </tbody>
         </table>
       ) : (
-        <p className="text-gray-500 text-sm">No VPCs found in this region.</p>
+        <p className="text-[#9b9b9b] text-sm">No VPCs found in this region.</p>
       )}
     </div>
   );

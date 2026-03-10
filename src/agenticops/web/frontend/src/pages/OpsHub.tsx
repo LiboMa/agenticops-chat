@@ -3,10 +3,10 @@ import { api } from "@/api/client";
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color: string }) {
   return (
-    <div className="bg-gray-800 rounded-xl p-5 shadow-lg">
-      <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">{label}</p>
+    <div className="bg-gray-800 rounded-xl p-5 ">
+      <p className="text-xs text-[#666] uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
-      {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-[#9b9b9b] mt-1">{sub}</p>}
     </div>
   );
 }
@@ -56,8 +56,8 @@ export default function OpsHub() {
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">
         {/* Alert Feed */}
-        <div className="col-span-2 bg-gray-800 rounded-xl p-5 shadow-lg">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">
+        <div className="col-span-2 bg-gray-800 rounded-xl p-5 ">
+          <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             Recent Anomalies
           </h2>
           <div className="space-y-2">
@@ -65,7 +65,7 @@ export default function OpsHub() {
               <a
                 key={a.id}
                 href={`/app/issues/${a.id}`}
-                className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-700/50 transition-colors"
+                className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[#383838]/50 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <span className={`w-2 h-2 rounded-full ${
@@ -77,32 +77,32 @@ export default function OpsHub() {
                     {a.title || a.anomaly_type}
                   </span>
                 </div>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-[#9b9b9b]">
                   {a.created_at ? new Date(a.created_at).toLocaleTimeString() : ""}
                 </span>
               </a>
             )) ?? (
-              <p className="text-sm text-gray-500">No recent anomalies</p>
+              <p className="text-sm text-[#9b9b9b]">No recent anomalies</p>
             )}
           </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="bg-gray-800 rounded-xl p-5 shadow-lg">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">
+        <div className="bg-gray-800 rounded-xl p-5 ">
+          <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             Quick Actions
           </h2>
           <div className="space-y-2">
-            <a href="/app/diagnose" className="block py-2 px-3 text-sm text-gray-300 hover:bg-gray-700/50 rounded-lg transition-colors">
+            <a href="/app/diagnose" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
               🔍 View Diagnose Center
             </a>
-            <a href="/app/ai" className="block py-2 px-3 text-sm text-gray-300 hover:bg-gray-700/50 rounded-lg transition-colors">
+            <a href="/app/ai" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
               🧠 AI Center
             </a>
-            <a href="/app/knowledge" className="block py-2 px-3 text-sm text-gray-300 hover:bg-gray-700/50 rounded-lg transition-colors">
+            <a href="/app/knowledge" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
               📚 Knowledge Base
             </a>
-            <a href="/app/network" className="block py-2 px-3 text-sm text-gray-300 hover:bg-gray-700/50 rounded-lg transition-colors">
+            <a href="/app/network" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
               🌐 Network Topology
             </a>
           </div>
@@ -110,11 +110,11 @@ export default function OpsHub() {
           {/* Proactive Alerts Preview */}
           {alertCount > 0 && (
             <>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-5 mb-2">
+              <h3 className="text-xs font-semibold text-[#666] uppercase tracking-wider mt-5 mb-2">
                 Proactive Alerts
               </h3>
               {proactive.data?.alerts?.slice(0, 3).map((a: any) => (
-                <div key={a.id} className="py-1.5 px-3 text-xs text-gray-400 truncate">
+                <div key={a.id} className="py-1.5 px-3 text-xs text-[#666] truncate">
                   🔮 {a.content?.substring(0, 80)}
                 </div>
               ))}

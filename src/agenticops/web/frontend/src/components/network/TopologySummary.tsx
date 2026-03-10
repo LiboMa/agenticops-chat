@@ -13,7 +13,7 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "Internet Gateway",
       value: rs.has_internet_gateway ? "Yes" : "No",
-      color: rs.has_internet_gateway ? "text-green-600" : "text-gray-400",
+      color: rs.has_internet_gateway ? "text-green-600" : "text-[#666]",
     },
     {
       label: "Public Subnets",
@@ -23,7 +23,7 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "Private Subnets",
       value: rs.private_subnet_count,
-      color: "text-gray-700",
+      color: "text-[#ececec]",
     },
     {
       label: "NAT Gateways",
@@ -33,17 +33,17 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
     {
       label: "Transit Gateways",
       value: rs.transit_gateway_attachments,
-      color: "text-gray-600",
+      color: "text-[#9b9b9b]",
     },
     {
       label: "VPC Peering",
       value: rs.vpc_peering_count,
-      color: "text-gray-600",
+      color: "text-[#9b9b9b]",
     },
     {
       label: "VPC Endpoints",
       value: rs.vpc_endpoint_count,
-      color: "text-gray-600",
+      color: "text-[#9b9b9b]",
     },
     {
       label: "Issues",
@@ -55,14 +55,14 @@ export function TopologySummary({ topology }: TopologySummaryProps) {
   return (
     <Card>
       <CardBody>
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 className="text-lg font-semibold text-[#ececec] mb-4">
           Reachability Summary
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {cards.map((c) => (
-            <div key={c.label} className="text-center p-3 bg-gray-50 rounded-lg">
+            <div key={c.label} className="text-center p-3 bg-[#383838] rounded-lg">
               <div className={cn("text-2xl font-bold", c.color)}>{c.value}</div>
-              <div className="text-xs text-gray-500 mt-1">{c.label}</div>
+              <div className="text-xs text-[#9b9b9b] mt-1">{c.label}</div>
             </div>
           ))}
         </div>

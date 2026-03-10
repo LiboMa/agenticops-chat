@@ -12,10 +12,10 @@ function SubnetNodeInner({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative rounded-lg border-2 px-3 py-2 min-w-[180px] shadow-sm bg-white transition-all duration-200 hover:shadow-md hover:-translate-y-0.5",
+        "relative rounded-lg border-2 px-3 py-2 min-w-[180px]  bg-[#2f2f2f] transition-all duration-200 hover: hover:-translate-y-0.5",
         isPublic
           ? "border-green-400 bg-gradient-to-br from-green-50 to-emerald-50"
-          : "border-gray-300 bg-gradient-to-br from-gray-50 to-slate-50",
+          : "border-[#424242] bg-gradient-to-br from-[#2f2f2f] to-[#383838]",
         d.highlighted && "ring-2 ring-green-400 shadow-lg shadow-green-200/50",
         d.dimmed && "opacity-40 transition-opacity duration-300",
         selected && !d.highlighted && "ring-2 ring-pd-green-500",
@@ -39,10 +39,10 @@ function SubnetNodeInner({ data, selected }: NodeProps) {
           )}
         />
         <div className="min-w-0">
-          <div className="text-xs font-semibold text-gray-800 truncate">
+          <div className="text-xs font-semibold text-[#ececec] truncate">
             {d.label}
           </div>
-          <div className="text-[10px] text-gray-500 font-mono">
+          <div className="text-[10px] text-[#9b9b9b] font-mono">
             {raw.az} &middot; {raw.cidr}
           </div>
         </div>

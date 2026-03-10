@@ -31,7 +31,7 @@ export default function System() {
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               tab === t.key
                 ? "bg-gray-700 text-white"
-                : "text-gray-400 hover:text-gray-200"
+                : "text-[#666] hover:text-gray-200"
             }`}
           >
             {t.label}

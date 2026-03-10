@@ -45,7 +45,7 @@ export default function Knowledge() {
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               tab === t.key
                 ? "bg-gray-700 text-white"
-                : "text-gray-400 hover:text-gray-200"
+                : "text-[#666] hover:text-gray-200"
             }`}
           >
             {t.icon} {t.label}
@@ -61,13 +61,13 @@ export default function Knowledge() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search knowledge base..."
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="w-full bg-gray-800 border border-[#424242] rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
           />
           {kbResults.data?.results?.map((r: any, i: number) => (
-            <div key={i} className="bg-gray-800 rounded-xl p-4 shadow-lg">
+            <div key={i} className="bg-gray-800 rounded-xl p-4 ">
               <p className="text-sm text-gray-200">{r.content || r.text}</p>
               {r.score && (
-                <span className="text-xs text-gray-500 mt-2 inline-block">
+                <span className="text-xs text-[#9b9b9b] mt-2 inline-block">
                   relevance: {(r.score * 100).toFixed(0)}%
                 </span>
               )}
@@ -81,16 +81,16 @@ export default function Knowledge() {
         <div className="space-y-3">
           {sops.data?.sops?.length > 0 ? (
             sops.data.sops.map((s: any, i: number) => (
-              <div key={i} className="bg-gray-800 rounded-xl p-4 shadow-lg">
+              <div key={i} className="bg-gray-800 rounded-xl p-4 ">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-200">{s.filename}</span>
-                  <span className="text-xs text-gray-500">{s.size} bytes</span>
+                  <span className="text-xs text-[#9b9b9b]">{s.size} bytes</span>
                 </div>
-                <p className="text-xs text-gray-400 mt-2 whitespace-pre-wrap">{s.preview?.substring(0, 300)}</p>
+                <p className="text-xs text-[#666] mt-2 whitespace-pre-wrap">{s.preview?.substring(0, 300)}</p>
               </div>
             ))
           ) : (
-            <p className="text-sm text-gray-500 text-center py-8">
+            <p className="text-sm text-[#9b9b9b] text-center py-8">
               No auto-generated SOPs yet — SOPAutoWriter will create them after RCA
             </p>
           )}
@@ -102,18 +102,18 @@ export default function Knowledge() {
         <div className="space-y-3">
           {skills.data?.skills?.length > 0 ? (
             skills.data.skills.map((s: any, i: number) => (
-              <div key={i} className="bg-gray-800 rounded-xl p-4 shadow-lg">
+              <div key={i} className="bg-gray-800 rounded-xl p-4 ">
                 <p className="text-sm text-gray-200">{s.content?.substring(0, 200)}</p>
                 <div className="flex gap-3 mt-2">
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-[#9b9b9b]">
                     confidence: {(s.confidence * 100).toFixed(0)}%
                   </span>
-                  <span className="text-xs text-gray-500">{s.created_at}</span>
+                  <span className="text-xs text-[#9b9b9b]">{s.created_at}</span>
                 </div>
               </div>
             ))
           ) : (
-            <p className="text-sm text-gray-500 text-center py-8">
+            <p className="text-sm text-[#9b9b9b] text-center py-8">
               No skill gaps detected yet — SkillGapDetector runs after RCA
             </p>
           )}

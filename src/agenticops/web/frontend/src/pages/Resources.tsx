@@ -67,7 +67,7 @@ export default function Resources() {
       header: "Region",
       sortable: true,
       sortValue: (r) => r.region,
-      render: (r) => <span className="text-sm text-slate-500">{r.region}</span>,
+      render: (r) => <span className="text-sm text-[#9b9b9b]">{r.region}</span>,
     },
     {
       key: "status",
@@ -86,14 +86,14 @@ export default function Resources() {
 
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">
+          <h2 className="text-lg font-semibold text-[#ececec]">
             Resources{data ? ` (${data.length})` : ""}
           </h2>
           <div className="flex gap-2">
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="border border-[#424242] rounded-lg px-3 py-1.5 text-sm bg-[#2f2f2f] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Types</option>
               {types.map((t) => (
@@ -105,7 +105,7 @@ export default function Resources() {
             <select
               value={regionFilter}
               onChange={(e) => setRegionFilter(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="border border-[#424242] rounded-lg px-3 py-1.5 text-sm bg-[#2f2f2f] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Regions</option>
               {regions.map((r) => (

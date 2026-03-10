@@ -34,16 +34,16 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
+    <div className="border border-[#424242] rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 w-full px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+        className="flex items-center gap-2 w-full px-4 py-3 text-sm font-medium text-[#ececec] hover:bg-[#383838] transition-colors"
       >
         {icon}
         <span className="flex-1 text-left">{title}</span>
         <svg
           className={cn(
-            "w-4 h-4 text-slate-400 transition-transform",
+            "w-4 h-4 text-[#666] transition-transform",
             open && "rotate-180",
           )}
           fill="none"
@@ -72,7 +72,7 @@ function riskColor(level: string) {
     case "medium":
       return "text-amber-700 bg-amber-100";
     default:
-      return "text-slate-700 bg-slate-100";
+      return "text-[#ececec] bg-[#383838]";
   }
 }
 
@@ -106,9 +106,9 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-[#ececec] flex items-center gap-2">
           <svg
-            className="w-5 h-5 text-primary-500"
+            className="w-5 h-5 text-blue-400"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -145,11 +145,11 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
 
           {spof.data && (
             <div className="space-y-3">
-              <p className="text-xs text-slate-500">{spof.data.summary}</p>
+              <p className="text-xs text-[#9b9b9b]">{spof.data.summary}</p>
 
               {spof.data.articulation_points.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-semibold text-slate-700 mb-1.5">
+                  <h4 className="text-xs font-semibold text-[#ececec] mb-1.5">
                     Articulation Points ({spof.data.articulation_points.length})
                   </h4>
                   <div className="space-y-2">
@@ -162,10 +162,10 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                           {item.node_type}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-slate-800 truncate">
+                          <div className="text-xs font-medium text-[#ececec] truncate">
                             {item.label}
                           </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
+                          <div className="text-[10px] text-[#9b9b9b] mt-0.5">
                             {item.impact_description}
                           </div>
                         </div>
@@ -180,7 +180,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
 
               {spof.data.bridges.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-semibold text-slate-700 mb-1.5">
+                  <h4 className="text-xs font-semibold text-[#ececec] mb-1.5">
                     Bridge Connections ({spof.data.bridges.length})
                   </h4>
                   <div className="space-y-1.5">
@@ -189,13 +189,13 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                         key={`${bridge.source}-${bridge.target}-${i}`}
                         className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-xs"
                       >
-                        <span className="font-medium text-slate-700 truncate">
+                        <span className="font-medium text-[#ececec] truncate">
                           {bridge.source_label}
                         </span>
-                        <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-3 h-3 text-[#666] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path d="M13 7l5 5m0 0l-5 5m5-5H6" />
                         </svg>
-                        <span className="font-medium text-slate-700 truncate">
+                        <span className="font-medium text-[#ececec] truncate">
                           {bridge.target_label}
                         </span>
                       </div>
@@ -241,21 +241,21 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
 
           {capacity.data && (
             <div className="space-y-3">
-              <p className="text-xs text-slate-500">{capacity.data.summary}</p>
+              <p className="text-xs text-[#9b9b9b]">{capacity.data.summary}</p>
 
               {capacity.data.items.length > 0 ? (
                 <div className="space-y-2">
                   {capacity.data.items.map((item) => (
                     <div
                       key={`${item.node_id}-${item.metric}`}
-                      className="p-2.5 rounded-md border border-slate-200 bg-white"
+                      className="p-2.5 rounded-md border border-[#424242] bg-[#2f2f2f]"
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-xs font-medium text-slate-800 truncate">
+                          <span className="text-xs font-medium text-[#ececec] truncate">
                             {item.label}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400">
+                          <span className="text-[10px] font-mono text-[#666]">
                             {item.metric}
                           </span>
                         </div>
@@ -269,13 +269,13 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                         </span>
                       </div>
                       {/* Utilization bar */}
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                      <div className="w-full bg-[#383838] rounded-full h-2 overflow-hidden">
                         <div
                           className={cn("h-full rounded-full transition-all", utilBarColor(item.utilization_pct))}
                           style={{ width: `${Math.min(item.utilization_pct, 100)}%` }}
                         />
                       </div>
-                      <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
+                      <div className="flex items-center justify-between mt-1 text-[10px] text-[#9b9b9b]">
                         <span>
                           {item.current} / {item.maximum}
                         </span>
@@ -304,14 +304,14 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
         <Section
           title="Dependency Chain Analysis"
           icon={
-            <svg className="w-4 h-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
             </svg>
           }
         >
           <div className="flex items-end gap-2">
             <div className="flex-1">
-              <label className="block text-[10px] text-slate-500 mb-1">
+              <label className="block text-[10px] text-[#9b9b9b] mb-1">
                 Fault Node ID
               </label>
               <input
@@ -319,7 +319,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 value={faultNodeId}
                 onChange={(e) => setFaultNodeId(e.target.value)}
                 placeholder="e.g. i-0abc123def456"
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+                className="w-full px-2.5 py-1.5 text-xs border border-[#424242] rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
               />
             </div>
             <button
@@ -344,9 +344,9 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
           {depChain.data && (
             <div className="space-y-3">
               <div className="flex items-center gap-3 text-xs">
-                <span className="text-slate-500">
+                <span className="text-[#9b9b9b]">
                   Fault:{" "}
-                  <span className="font-mono font-medium text-slate-700">
+                  <span className="font-mono font-medium text-[#ececec]">
                     {depChain.data.fault_node_id}
                   </span>
                 </span>
@@ -358,7 +358,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 >
                   {depChain.data.severity}
                 </span>
-                <span className="text-slate-500">
+                <span className="text-[#9b9b9b]">
                   {depChain.data.total_affected} affected
                 </span>
               </div>
@@ -368,7 +368,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 .sort(([a], [b]) => Number(a) - Number(b))
                 .map(([depth, nodeIds]) => (
                   <div key={depth}>
-                    <h4 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                    <h4 className="text-[10px] font-semibold text-[#9b9b9b] uppercase tracking-wide mb-1">
                       Depth {depth}
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
@@ -379,13 +379,13 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                         return (
                           <span
                             key={nodeId}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-slate-100 border border-slate-200"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-[#383838] border border-[#424242]"
                           >
-                            <span className="font-mono text-slate-600">
+                            <span className="font-mono text-[#9b9b9b]">
                               {node?.label ?? nodeId}
                             </span>
                             {node?.node_type && (
-                              <span className="text-slate-400">
+                              <span className="text-[#666]">
                                 ({node.node_type})
                               </span>
                             )}
@@ -421,7 +421,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
         >
           <div className="flex items-end gap-2">
             <div className="flex-1">
-              <label className="block text-[10px] text-slate-500 mb-1">
+              <label className="block text-[10px] text-[#9b9b9b] mb-1">
                 Edge Source
               </label>
               <input
@@ -429,11 +429,11 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 value={edgeSource}
                 onChange={(e) => setEdgeSource(e.target.value)}
                 placeholder="e.g. subnet-abc123"
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+                className="w-full px-2.5 py-1.5 text-xs border border-[#424242] rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
               />
             </div>
             <div className="flex-1">
-              <label className="block text-[10px] text-slate-500 mb-1">
+              <label className="block text-[10px] text-[#9b9b9b] mb-1">
                 Edge Target
               </label>
               <input
@@ -441,7 +441,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 value={edgeTarget}
                 onChange={(e) => setEdgeTarget(e.target.value)}
                 placeholder="e.g. igw-def456"
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+                className="w-full px-2.5 py-1.5 text-xs border border-[#424242] rounded-md focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
               />
             </div>
             <button
@@ -472,14 +472,14 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
 
           {changeSim.data && (
             <div className="space-y-3">
-              <div className="flex items-center gap-3 text-xs text-slate-500">
+              <div className="flex items-center gap-3 text-xs text-[#9b9b9b]">
                 <span>
                   Edge:{" "}
-                  <span className="font-mono text-slate-700">
+                  <span className="font-mono text-[#ececec]">
                     {changeSim.data.edge_source}
                   </span>
                   {" -> "}
-                  <span className="font-mono text-slate-700">
+                  <span className="font-mono text-[#ececec]">
                     {changeSim.data.edge_target}
                   </span>
                 </span>
@@ -488,7 +488,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                     "px-1.5 py-0.5 rounded text-[10px] font-medium",
                     changeSim.data.edge_existed
                       ? "bg-amber-100 text-amber-700"
-                      : "bg-slate-100 text-slate-600",
+                      : "bg-[#383838] text-[#9b9b9b]",
                   )}
                 >
                   {changeSim.data.edge_existed
@@ -497,7 +497,7 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                 </span>
               </div>
 
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-[#9b9b9b]">
                 {changeSim.data.impact_summary}
               </p>
 
@@ -513,9 +513,9 @@ export function SreAnalysisPanel({ region, vpcId }: SreAnalysisPanelProps) {
                   {changeSim.data.lost_reachability.map((diff) => (
                     <div
                       key={diff.node_id}
-                      className="p-2.5 rounded-md border border-slate-200 bg-white"
+                      className="p-2.5 rounded-md border border-[#424242] bg-[#2f2f2f]"
                     >
-                      <div className="text-xs font-mono font-medium text-slate-700 mb-1.5">
+                      <div className="text-xs font-mono font-medium text-[#ececec] mb-1.5">
                         {diff.node_id}
                       </div>
                       {diff.lost.length > 0 && (

@@ -12,14 +12,14 @@ export function SubnetsTable({ subnets }: SubnetsTableProps) {
   return (
     <Card>
       <CardHeader>
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="text-lg font-semibold text-[#ececec]">
           Subnets ({subnets.length})
         </h3>
       </CardHeader>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wider">
+            <tr className="bg-[#383838] text-left text-[#9b9b9b] text-xs uppercase tracking-wider">
               <th className="px-4 py-3">Subnet ID</th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">AZ</th>
@@ -32,7 +32,7 @@ export function SubnetsTable({ subnets }: SubnetsTableProps) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {subnets.map((s) => (
-              <tr key={s.subnet_id} className="hover:bg-gray-50">
+              <tr key={s.subnet_id} className="hover:bg-[#383838]">
                 <td className="px-4 py-2 font-mono">{s.subnet_id}</td>
                 <td className="px-4 py-2">{s.name ?? "-"}</td>
                 <td className="px-4 py-2">{s.az}</td>
@@ -43,7 +43,7 @@ export function SubnetsTable({ subnets }: SubnetsTableProps) {
                       public
                     </Badge>
                   ) : (
-                    <Badge className="bg-gray-200 text-gray-700">
+                    <Badge className="bg-gray-200 text-[#ececec]">
                       private
                     </Badge>
                   )}
