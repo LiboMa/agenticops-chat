@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 
 const MAIN_NAV = [
   { to: "/app", label: "Ops Hub", end: true, icon: "🏠" },
+  { to: "/app/issues", label: "Issues", end: false, icon: "⚠️" },
   { to: "/app/diagnose", label: "Diagnose", end: false, icon: "🔍" },
   { to: "/app/ai", label: "AI Center", end: false, icon: "🧠" },
   { to: "/app/knowledge", label: "Knowledge", end: false, icon: "📚" },
