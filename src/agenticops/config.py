@@ -210,6 +210,12 @@ class Settings(BaseSettings):
         description="Default agent output detail level: concise, medium, or detailed",
     )
 
+    # Scan focus — resource category filter
+    scan_focus: str = Field(
+        default="all",
+        description="Default resource focus for scan/detect: computing,networking,databases,storage,security,billing,all (AIOPS_SCAN_FOCUS)",
+    )
+
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
         #default=False,
@@ -239,6 +245,12 @@ class Settings(BaseSettings):
     auto_fix_enabled: bool = Field(
         default=True,
         description="Enable auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute",
+    )
+
+    # Resource-Based Dedup
+    resource_dedup_enabled: bool = Field(
+        default=True,
+        description="Enable resource-based similar issue merging (AIOPS_RESOURCE_DEDUP_ENABLED)",
     )
 
     # Notifications
@@ -405,6 +417,70 @@ def set_detail_level(level: str) -> contextvars.Token:
     if level not in VALID_DETAIL_LEVELS:
         raise ValueError(f"Invalid detail level '{level}'. Must be one of: {', '.join(VALID_DETAIL_LEVELS)}")
     return _detail_level_var.set(level)
+
+
+# ── Scan Focus (resource category filter) ─────────────────────────────
+
+VALID_SCAN_FOCUS = ("computing", "networking", "databases", "storage", "security", "billing", "all")
+
+SCAN_FOCUS_SERVICES = {
+    "computing": "EC2,Lambda,ECS,EKS,AutoScaling",
+    "networking": "VPC,Subnet,SecurityGroup,RouteTable,NATGateway,TransitGateway,ELB,CloudFront,Route53",
+    "databases": "RDS,DynamoDB,ElastiCache,Redshift,OpenSearch",
+    "storage": "S3,EBS,EFS,Backup",
+    "security": "security",
+    "billing": "billing",
+    "all": "all",
+}
+
+_scan_focus_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "scan_focus", default=settings.scan_focus
+)
+
+
+def get_scan_focus() -> str:
+    """Get the current scan focus from context."""
+    return _scan_focus_var.get()
+
+
+def set_scan_focus(focus: str) -> contextvars.Token:
+    """Set the scan focus in context.
+
+    Args:
+        focus: Comma-separated values from VALID_SCAN_FOCUS (e.g., 'computing,security').
+
+    Returns:
+        Token that can be used to reset to the previous value.
+
+    Raises:
+        ValueError: If any value is not valid.
+    """
+    parts = [p.strip() for p in focus.lower().split(",") if p.strip()]
+    for p in parts:
+        if p not in VALID_SCAN_FOCUS:
+            raise ValueError(f"Invalid scan focus '{p}'. Must be one of: {', '.join(VALID_SCAN_FOCUS)}")
+    normalised = ",".join(parts) if parts else "all"
+    return _scan_focus_var.set(normalised)
+
+
+def resolve_scan_services(focus: str) -> str:
+    """Resolve a scan focus string to a comma-joined service list.
+
+    Args:
+        focus: Comma-separated focus categories (e.g., 'computing,databases').
+
+    Returns:
+        Comma-joined AWS service names.
+    """
+    parts = [p.strip() for p in focus.lower().split(",") if p.strip()]
+    if not parts or "all" in parts:
+        return "all"
+    services: list[str] = []
+    for p in parts:
+        svc = SCAN_FOCUS_SERVICES.get(p)
+        if svc and svc not in services:
+            services.append(svc)
+    return ",".join(services) if services else "all"
 
 
 # ── IM Origin context (set by IM handlers, read by create_health_issue) ──

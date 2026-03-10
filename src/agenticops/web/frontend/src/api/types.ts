@@ -20,6 +20,8 @@ export interface Resource {
   updated_at: string;
 }
 
+export type ScanFocus = "computing" | "networking" | "databases" | "storage" | "security" | "billing" | "all";
+
 export type IssueStatus =
   | "open"
   | "investigating"
@@ -29,6 +31,15 @@ export type IssueStatus =
   | "fix_executed"
   | "resolved"
   | "acknowledged"; // legacy fallback
+
+export interface MergedAlert {
+  timestamp: string;
+  source: string;
+  title: string;
+  description: string;
+  severity: string;
+  fingerprint?: string;
+}
 
 export interface Anomaly {
   id: number;
@@ -47,6 +58,8 @@ export interface Anomaly {
   detected_at: string;
   resolved_at: string | null;
   trace_id: string | null;
+  occurrence_count?: number;
+  merged_alerts?: MergedAlert[];
 }
 
 export interface RCAResult {

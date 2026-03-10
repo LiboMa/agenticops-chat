@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
-from agenticops.config import VALID_DETAIL_LEVELS
+from agenticops.config import VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
 
 MODEL_ALIASES = {
     "opus": "global.anthropic.claude-opus-4-6-v1",
@@ -23,6 +23,7 @@ class ChatContext:
         self.table_style = os.environ.get("AIOPS_TABLE_STYLE", "default")
         self.account = None
         self.detail_level = "medium"  # concise, medium, detailed
+        self.scan_focus = "all"  # computing, networking, databases, storage, security, billing, all
         self.current_model = "sonnet"  # friendly name — default matches settings.bedrock_model_id
         self.agent = None  # set after agent creation; enables /model runtime switching
         self.output_history: List[Dict[str, str]] = []  # Store conversation history
@@ -43,6 +44,15 @@ class ChatContext:
             self.detail_level = level
             return True
         return False
+
+    def set_scan_focus(self, focus: str) -> bool:
+        """Set scan focus (comma-separated categories or 'all')."""
+        parts = [p.strip().lower() for p in focus.split(",") if p.strip()]
+        for p in parts:
+            if p not in VALID_SCAN_FOCUS:
+                return False
+        self.scan_focus = ",".join(parts) if parts else "all"
+        return True
 
     def set_model(self, alias: str) -> bool:
         """Switch the agent's Bedrock model at runtime."""

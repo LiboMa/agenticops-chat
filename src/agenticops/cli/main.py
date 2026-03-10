@@ -3267,6 +3267,16 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
         ctx.set_detail(levels[idx])
         return f"[green]Detail level: {ctx.detail_level}[/green]"
 
+    # Scan focus command
+    if cmd in ("focus", "scan_focus"):
+        from agenticops.config import VALID_SCAN_FOCUS
+        if args:
+            focus = args[0].lower()
+            if ctx.set_scan_focus(focus):
+                return f"[green]Scan focus set to: {ctx.scan_focus}[/green]"
+            return f"[yellow]Invalid focus '{focus}'. Use: {', '.join(VALID_SCAN_FOCUS)}[/yellow]"
+        return f"[cyan]Current scan focus: {ctx.scan_focus}[/cyan]\n  Options: {', '.join(VALID_SCAN_FOCUS)}\n  Combine: /focus computing,security"
+
     # Model switching command
     if cmd == "model":
         from agenticops.cli.context import MODEL_ALIASES
@@ -3528,6 +3538,7 @@ def chat(
     query_flag: Optional[str] = typer.Option(None, "--query", "-q", help="Query string (headless mode)"),
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
     detail: Optional[str] = typer.Option(None, "--detail", "-d", help="Output detail level: concise, medium, detailed"),
+    focus: Optional[str] = typer.Option(None, "--focus", "-f", help="Resource focus: computing,networking,databases,storage,security,billing,all"),
 ):
     """Start an interactive chat, or run a single query in headless mode.
 
@@ -3539,9 +3550,11 @@ def chat(
       aiops chat "analyze I#42 and check R#17"
       aiops chat "review this log @/tmp/error.log"
       aiops chat -d concise "quick status"    # concise output
+      aiops chat -f security "scan my account"  # security-only scan
     """
     import sys
     from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
+    from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
 
     # Apply detail level if specified
     if detail:
@@ -3549,6 +3562,15 @@ def chat(
             console.print(f"[red]Invalid detail level '{detail}'. Use: {', '.join(VALID_DETAIL_LEVELS)}[/red]")
             raise typer.Exit(1)
         set_detail_level(detail)
+
+    # Apply scan focus if specified
+    if focus:
+        parts = [p.strip().lower() for p in focus.split(",") if p.strip()]
+        invalid = [p for p in parts if p not in VALID_SCAN_FOCUS]
+        if invalid:
+            console.print(f"[red]Invalid scan focus '{','.join(invalid)}'. Use: {', '.join(VALID_SCAN_FOCUS)}[/red]")
+            raise typer.Exit(1)
+        set_scan_focus(focus)
 
     # Determine headless input
     headless_input = query or query_flag or None
@@ -3573,6 +3595,8 @@ def chat(
     ctx = ChatContext()
     ctx.agent = agent  # Enable /model to swap model at runtime
     ctx.account = account
+    if focus:
+        ctx.scan_focus = focus.lower()
 
     # Detect initial model alias from settings
     from agenticops.cli.context import MODEL_ALIASES
@@ -3667,9 +3691,10 @@ def chat(
                 if media_count:
                     console.print(f"[dim]Attached {media_count} media file(s) for analysis[/dim]")
 
-            # Set detail level from context before each agent call
-            from agenticops.config import set_detail_level as _set_dl
+            # Set detail level and scan focus from context before each agent call
+            from agenticops.config import set_detail_level as _set_dl, set_scan_focus as _set_sf
             _set_dl(ctx.detail_level)
+            _set_sf(ctx.scan_focus)
 
             # Call agent with simple spinner
             display = ThinkingDisplay(console)
