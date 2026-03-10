@@ -3,9 +3,9 @@ import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen bg-[#212121] text-[#ececec]">
       <Sidebar />
-      <div className="pl-56">
+      <div className="pl-[260px]">
         <main className="p-6">
           <Outlet />
         </main>
