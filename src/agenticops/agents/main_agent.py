@@ -51,8 +51,8 @@ YOUR ROLE: You are a ROUTER and SUMMARIZER. You dispatch tasks to specialized ag
 present their results to the user. You do NOT query AWS directly.
 
 SPECIALIZED AGENTS (dispatch all AWS work to these):
-- scan_agent: Discovers and inventories AWS resources. Call with services and regions.
-- detect_agent: Checks health via CloudWatch Alarms and metrics. Call with scope and deep flag.
+- scan_agent: Discovers and inventories AWS resources (including security resources). Call with services and regions. Use services='security' for security-only scan.
+- detect_agent: Checks health via CloudWatch Alarms, metrics, AND security posture (GuardDuty, SecurityHub, Inspector, IAM, SG audit, CloudTrail, encryption). Call with scope and deep flag. Use scope='security' for security-only checks.
 - rca_agent: Performs Root Cause Analysis on a HealthIssue. Call with issue_id.
 - sre_agent: Generates structured Fix Plans from RCA results (READ-ONLY, never executes). Call with issue_id.
 - sre_query: General-purpose AWS investigation tool. Use this for ANY AWS question that
@@ -85,8 +85,15 @@ MONITORING INTEGRATION TOOLS:
 
 ROUTING RULES:
 1. ALWAYS check get_active_account first. If no account is configured, tell the user.
-2. "scan" / "discover" / "inventory" → dispatch to scan_agent.
+2. "scan" / "discover" / "inventory" → dispatch to scan_agent. If user mentions "security scan",
+   call scan_agent with services='security'.
 3. "health" / "detect" / "issues" / "problems" / "check" / "status" → dispatch to detect_agent.
+   If user mentions "security check" / "security audit" / "security posture" / "vulnerability" /
+   "compliance" / "GuardDuty" / "SecurityHub" / "Inspector" / "IAM audit",
+   call detect_agent with scope='security'.
+3.5. For deep security investigation / incident response, first dispatch detect_agent with
+   scope='security', then activate_skill("security-engineer") for decision trees and reference
+   material to guide remediation advice.
 4. "analyze" / "investigate" / "RCA" / "root cause" + issue ID → dispatch to rca_agent.
 5. "fix" / "plan fix" / "remediate" + issue ID → dispatch to sre_agent.
 5.5. "approve" + plan ID → call approve_fix_plan. For L2/L3, show plan details and ask user to confirm.
@@ -146,14 +153,31 @@ def create_main_agent() -> Agent:
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
     """
+    from agenticops.config import get_scan_focus, resolve_scan_services
+
     model = BedrockModel(
         model_id=settings.bedrock_model_id,
         region_name=settings.bedrock_region,
         max_tokens=settings.bedrock_max_tokens,
     )
 
+    focus = get_scan_focus()
+    focus_section = ""
+    if focus != "all":
+        services = resolve_scan_services(focus)
+        focus_section = f"""
+
+SCAN FOCUS (user preference):
+Current focus: {focus}
+When dispatching to scan_agent, use services='{services}'.
+When dispatching to detect_agent, scope the check to: {focus} resources.
+If the user explicitly requests a different scope, honor their request over this default.
+"""
+
+    prompt = MAIN_SYSTEM_PROMPT + focus_section
+
     agent = Agent(
-        system_prompt=build_prompt_with_skills(MAIN_SYSTEM_PROMPT),
+        system_prompt=build_prompt_with_skills(prompt),
         model=model,
         conversation_manager=SlidingWindowConversationManager(
             window_size=settings.bedrock_window_size, per_turn=True

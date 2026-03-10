@@ -277,9 +277,34 @@ class HealthIssueResponse(BaseModel):
     detected_by: str
     resolved_at: Optional[datetime]
     trace_id: Optional[str] = None
+    occurrence_count: int = 1
+    merged_alerts: List = Field(default_factory=list)
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def from_issue(cls, issue) -> "HealthIssueResponse":
+        """Build response, extracting merged_alerts from metric_data."""
+        md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
+        return cls(
+            id=issue.id,
+            resource_id=issue.resource_id,
+            severity=issue.severity,
+            source=issue.source,
+            title=issue.title,
+            description=issue.description,
+            alarm_name=issue.alarm_name,
+            metric_data=issue.metric_data or {},
+            related_changes=issue.related_changes or [],
+            status=issue.status,
+            detected_at=issue.detected_at,
+            detected_by=issue.detected_by,
+            resolved_at=issue.resolved_at,
+            trace_id=getattr(issue, "trace_id", None),
+            occurrence_count=issue.occurrence_count or 1,
+            merged_alerts=md.get("merged_alerts", []),
+        )
 
 
 # ============================================================================
@@ -518,6 +543,7 @@ class ChatSessionCreate(BaseModel):
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     detail_level: Optional[str] = Field(None, description="Agent output detail: concise, medium, or detailed")
+    scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
 
 
 class ChatMessageResponse(BaseModel):
@@ -959,6 +985,17 @@ async def api_vpc_topology(
 # ============================================================================
 
 
+@app.get("/api/settings/scan-focus-options")
+async def api_scan_focus_options():
+    """Return valid scan focus options and default."""
+    from agenticops.config import VALID_SCAN_FOCUS, SCAN_FOCUS_SERVICES
+    return {
+        "options": list(VALID_SCAN_FOCUS),
+        "default": settings.scan_focus,
+        "services": SCAN_FOCUS_SERVICES,
+    }
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def api_health():
     """Health check endpoint."""
@@ -1384,7 +1421,7 @@ async def api_list_health_issues(
             query = query.filter_by(trace_id=trace_id)
 
         issues = query.offset(offset).limit(limit).all()
-        return [HealthIssueResponse.model_validate(i) for i in issues]
+        return [HealthIssueResponse.from_issue(i) for i in issues]
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -1394,7 +1431,7 @@ async def api_get_health_issue(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
-        return HealthIssueResponse.model_validate(issue)
+        return HealthIssueResponse.from_issue(issue)
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
@@ -1960,7 +1997,7 @@ async def api_get_trace(trace_id: str):
         # Find linked HealthIssues
         issues = session.query(HealthIssue).filter_by(trace_id=trace_id).all()
         issue_ids = [i.id for i in issues]
-        issues_data = [HealthIssueResponse.model_validate(i).model_dump(mode="json") for i in issues]
+        issues_data = [HealthIssueResponse.from_issue(i).model_dump(mode="json") for i in issues]
 
         # Find linked AlertEvents
         alert_events = session.query(AlertEvent).filter_by(trace_id=trace_id).all()
@@ -3267,11 +3304,13 @@ async def api_send_chat_message(session_id: str, request: Request):
     attachments: list[dict] | None = None
 
     detail_level_req: Optional[str] = None
+    scan_focus_req: Optional[str] = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
         detail_level_req = str(form.get("detail_level", "")).strip() or None
+        scan_focus_req = str(form.get("scan_focus", "")).strip() or None
         upload = form.get("file")
 
         if upload and hasattr(upload, "filename") and upload.filename:
@@ -3314,6 +3353,7 @@ async def api_send_chat_message(session_id: str, request: Request):
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
         detail_level_req = payload.detail_level
+        scan_focus_req = payload.scan_focus
 
     # Intercept /channel command before agent dispatch
     if user_content.strip().lower().startswith(("/channel", "/channels")):
@@ -3379,6 +3419,12 @@ async def api_send_chat_message(session_id: str, request: Request):
             from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
             if detail_level_req in VALID_DETAIL_LEVELS:
                 set_detail_level(detail_level_req)
+        # Set scan focus for this request if provided
+        if scan_focus_req:
+            from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
+            parts = [p.strip().lower() for p in scan_focus_req.split(",") if p.strip()]
+            if all(p in VALID_SCAN_FOCUS for p in parts):
+                set_scan_focus(scan_focus_req)
         agent = _chat_sessions.get_or_create(session_id)
         accumulated = ""
         tool_calls = []
