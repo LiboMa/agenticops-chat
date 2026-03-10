@@ -173,6 +173,7 @@ All settings use `pydantic-settings` with `AIOPS_` env prefix. Defaults in code,
 | `skills_dir` | `PROJECT_ROOT / "skills"` | Directory containing Agent Skills packages |
 | `skills_enabled` | `true` | Enable Agent Skills integration |
 | `agent_output_detail` | `medium` | Default agent output detail level: concise, medium, or detailed |
+| `scan_focus` | `all` | Resource focus for scan/detect: computing,networking,databases,storage,security,billing,all |
 | `auto_rca_enabled` | `true` | Auto-trigger RCA on new HealthIssue |
 | `auto_fix_enabled` | `true` | Auto-fix pipeline: RCA → SRE → Approve → Execute |
 | `notifications_enabled` | `true` | Auto-notifications on pipeline events |
@@ -279,6 +280,24 @@ skills/
 - `skills/kubernetes-admin/SKILL.md` — Fix/Remediation decision trees (8 paths)
 
 ## Recent Changes
+
+### 2026-03-10: Configurable Scan Focus — Resource Category Filter
+
+**Persistent `scan_focus` setting** that controls which resource categories scan/detect agents focus on.
+
+**Categories**: `computing` (EC2,Lambda,ECS,EKS,AutoScaling), `networking` (VPC,Subnet,SG,RouteTable,NAT,TGW,ELB,CloudFront,Route53), `databases` (RDS,DynamoDB,ElastiCache,Redshift,OpenSearch), `storage` (S3,EBS,EFS,Backup), `security`, `billing`, `all` (default). Comma-separated multi-select.
+
+**Backend** (`config.py`): `VALID_SCAN_FOCUS`, `SCAN_FOCUS_SERVICES` mapping, ContextVar `_scan_focus_var`, `get_scan_focus()`, `set_scan_focus()`, `resolve_scan_services()`. Pydantic setting: `scan_focus` (env: `AIOPS_SCAN_FOCUS`).
+
+**CLI** (`cli/main.py`, `cli/context.py`): `/focus [category,...]` slash command, `--focus / -f` flag on `aiops chat`, `ChatContext.scan_focus` field with `set_scan_focus()` validation. ContextVar synced before each agent call.
+
+**Agent** (`agents/main_agent.py`): `create_main_agent()` reads `get_scan_focus()`, appends `SCAN FOCUS` section to system prompt when focus ≠ `all`, instructing scan_agent services and detect_agent scope.
+
+**Web** (`web/app.py`): `ChatMessageCreate.scan_focus` field, parsed from JSON/multipart, ContextVar set in SSE generator. New endpoint: `GET /api/settings/scan-focus-options`.
+
+**Frontend**: `ScanFocus` type in `types.ts`, `scanFocus` param in `useChat.ts`, pill/chip selector in `ChatInput.tsx` (7 toggleable pills), `scanFocus` state in `Chat.tsx`.
+
+**Pattern**: Follows exact same ContextVar + ChatContext + CLI flag + Web field + frontend selector pattern as `detail_level`.
 
 ### 2026-03-09: Pipeline Lifecycle Tracking — PipelineEvent Timeline
 
