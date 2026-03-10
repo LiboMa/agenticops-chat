@@ -28,7 +28,7 @@ async def memory_agents():
         for aid in agent_ids:
             try:
                 mem = get_agent_memory(aid)
-                stats = await mem.get_stats()
+                stats = mem.get_stats()
                 results.append({"agent_id": aid, **stats})
             except Exception:
                 results.append({"agent_id": aid, "total": 0, "by_type": {}})
@@ -149,7 +149,7 @@ async def proactive_stats():
     try:
         from agenticops.memory import get_agent_memory
         mem = get_agent_memory("proactive_agent")
-        stats = await mem.get_stats()
+        stats = mem.get_stats()
         entries = await mem.recall_recent(limit=200)
         alert_count = sum(1 for e in entries if "PROACTIVE_ALERT" in e.content)
         return {
