@@ -14,7 +14,6 @@ const NAV_ITEMS = [
 const MANAGE_ITEMS = [
   { to: "/app/schedules", label: "Schedules", end: false, icon: "calendar" },
   { to: "/app/notifications", label: "Notifications", end: false, icon: "bell" },
-  { to: "/app/settings", label: "Settings", end: false, icon: "cog" },
   { to: "/app/audit", label: "Audit Log", end: false, icon: "clipboard" },
   { to: "/app/kb", label: "Knowledge Base", end: false, icon: "book" },
 ] as const;
@@ -162,9 +161,25 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-200">
-        <span className="text-xs text-slate-400">AgenticAIOps v0.1.0</span>
+      {/* Footer — Settings + Version */}
+      <div className="border-t border-slate-200 px-3 py-3 space-y-1">
+        <NavLink
+          to="/app/settings"
+          className={({ isActive }) =>
+            cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors",
+              isActive
+                ? "bg-primary-50 text-primary-700"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+            )
+          }
+        >
+          <NavIcon icon="cog" />
+          Settings
+        </NavLink>
+        <div className="px-3 pt-1">
+          <span className="text-xs text-slate-400">AgenticAIOps v0.1.0</span>
+        </div>
       </div>
     </aside>
   );

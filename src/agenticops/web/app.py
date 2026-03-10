@@ -2164,10 +2164,30 @@ async def api_distill_case(health_issue_id: int):
 
 @app.get("/api/kb/sops")
 async def api_list_sops(status: Optional[str] = None):
-    """List SOPs with lifecycle metadata."""
+    """List SOPs with lifecycle metadata. Auto-backfills from filesystem if DB is empty."""
     from agenticops.tools.kb_tools import _parse_frontmatter
 
     with get_db_session() as session:
+        # Auto-backfill: if DB has no records but SOP files exist on disk, import them
+        db_count = session.query(func.count(SOPRecord.id)).scalar() or 0
+        if db_count == 0 and settings.sops_dir.exists():
+            for f in sorted(settings.sops_dir.glob("*.md")):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    metadata, _ = _parse_frontmatter(content)
+                    record = SOPRecord(
+                        filename=f.name,
+                        resource_type=metadata.get("resource_type", ""),
+                        issue_pattern=(metadata.get("issue_pattern", "") or "")[:500],
+                        severity=metadata.get("severity", "medium"),
+                        status="review",
+                        quality_score=0.5,
+                        file_path=str(f),
+                    )
+                    session.add(record)
+                except Exception:
+                    pass
+
         query = session.query(SOPRecord).order_by(SOPRecord.updated_at.desc())
         if status:
             query = query.filter_by(status=status)
@@ -2366,9 +2386,28 @@ async def api_kb_stats():
         except Exception:
             embedding_status = "error"
 
-    # SOP lifecycle counts
+    # SOP lifecycle counts — auto-backfill if DB empty but files exist
     sop_by_status = {"draft": 0, "review": 0, "active": 0, "deprecated": 0, "archived": 0}
     with get_db_session() as session:
+        db_count = session.query(func.count(SOPRecord.id)).scalar() or 0
+        if db_count == 0 and sop_count > 0:
+            from agenticops.tools.kb_tools import _parse_frontmatter as _pf
+            for f in sorted(settings.sops_dir.glob("*.md")):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    metadata, _ = _pf(content)
+                    record = SOPRecord(
+                        filename=f.name,
+                        resource_type=metadata.get("resource_type", ""),
+                        issue_pattern=(metadata.get("issue_pattern", "") or "")[:500],
+                        severity=metadata.get("severity", "medium"),
+                        status="review",
+                        quality_score=0.5,
+                        file_path=str(f),
+                    )
+                    session.add(record)
+                except Exception:
+                    pass
         for row in session.query(SOPRecord.status, func.count()).group_by(SOPRecord.status).all():
             if row[0] in sop_by_status:
                 sop_by_status[row[0]] = row[1]
