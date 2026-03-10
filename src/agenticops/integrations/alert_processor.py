@@ -137,6 +137,22 @@ def process_alert(
                     )
 
                 existing_issue = dedup_query.first()
+
+                # Resource-based cross-source dedup
+                if not existing_issue and settings.resource_dedup_enabled and alert.resource_hint:
+                    from agenticops.tools.metadata_tools import RESOURCE_DEDUP_STATUSES
+                    existing_issue = (
+                        session.query(HealthIssue)
+                        .filter(
+                            HealthIssue.resource_id == alert.resource_hint,
+                            HealthIssue.status.in_(RESOURCE_DEDUP_STATUSES),
+                        )
+                        .order_by(HealthIssue.detected_at.desc())
+                        .first()
+                    )
+                    if existing_issue:
+                        _merge_into_webhook_issue(session, existing_issue, alert)
+
                 if existing_issue:
                     health_issue_id = existing_issue.id
                 else:
@@ -197,3 +213,48 @@ def process_alert(
         health_issue_id=health_issue_id,
         message=f"Alert event #{event_id} from {alert.source}, issue={health_issue_id}",
     )
+
+
+def _merge_into_webhook_issue(session, existing, alert) -> None:
+    """Merge a webhook alert into an existing HealthIssue for the same resource.
+
+    Mirrors _merge_into_existing_issue() in metadata_tools but operates on
+    AlertPayload objects to avoid circular imports.
+    """
+    from datetime import datetime
+
+    _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    _MERGED_ALERTS_CAP = 50
+
+    now = datetime.utcnow()
+
+    snapshot = {
+        "timestamp": now.isoformat(),
+        "source": f"webhook_{alert.source}",
+        "title": alert.title,
+        "description": (alert.description or "")[:500],
+        "severity": alert.severity,
+        "fingerprint": alert.external_id or "",
+    }
+
+    md = existing.metric_data if isinstance(existing.metric_data, dict) else {}
+    merged = md.get("merged_alerts", [])
+    merged.append(snapshot)
+    if len(merged) > _MERGED_ALERTS_CAP:
+        merged = merged[-_MERGED_ALERTS_CAP:]
+    md["merged_alerts"] = merged
+    existing.metric_data = md
+
+    existing.description = alert.description
+    if _SEVERITY_RANK.get(alert.severity, 0) > _SEVERITY_RANK.get(existing.severity, 0):
+        existing.severity = alert.severity
+    existing.occurrence_count = (existing.occurrence_count or 1) + 1
+    existing.last_seen = now
+
+    try:
+        from agenticops.services.pipeline_events import log_event
+        log_event(existing.id, "issue_resource_merged", "detection", "completed",
+                  detail={"source": f"webhook_{alert.source}", "title": alert.title,
+                          "severity": alert.severity, "merged_count": len(merged)})
+    except Exception:
+        pass

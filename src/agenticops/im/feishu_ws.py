@@ -160,7 +160,7 @@ class FeishuWSService:
         self._chat_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
         # Build event dispatcher (handles decryption + signature verification)
-        handler = (
+        self._event_handler = (
             lark.EventDispatcherHandler.builder(
                 self._app_config.encrypt_key or "",
                 self._app_config.verification_token or "",
@@ -169,14 +169,9 @@ class FeishuWSService:
             .build()
         )
 
-        # WebSocket client (outbound, auto-reconnect)
-        self._ws_client = WSClient(
-            app_id=self._app_config.app_id,
-            app_secret=self._app_config.app_secret,
-            event_handler=handler,
-            log_level=lark.LogLevel.DEBUG,
-            auto_reconnect=True,
-        )
+        # WSClient deferred to _run_ws() — lark_oapi captures asyncio loop
+        # at construction time, which conflicts with uvicorn's running loop.
+        self._ws_client = None
 
         # REST client for sending replies
         self._rest_client = (
@@ -414,11 +409,37 @@ class FeishuWSService:
         logger.info("Feishu WebSocket service started (app: %s)", self._app_name)
 
     def _run_ws(self) -> None:
-        """Run WS client (blocking — runs in daemon thread)."""
+        """Run WS client (blocking — runs in daemon thread).
+
+        lark_oapi.ws.client stores ``loop = asyncio.get_event_loop()``
+        at **module** level (line 26).  When imported inside uvicorn this
+        captures the already-running ASGI event loop, so every subsequent
+        ``loop.run_until_complete()`` in ``Client.start()`` raises
+        ``RuntimeError: This event loop is already running``.
+
+        Fix: create a fresh event loop for this thread AND patch the
+        module-level ``loop`` variable so ``Client.start()`` uses it.
+        """
+        import asyncio
+        import lark_oapi.ws.client as _ws_mod
+
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        _ws_mod.loop = new_loop          # patch module-level loop
+
         try:
+            self._ws_client = WSClient(
+                app_id=self._app_config.app_id,
+                app_secret=self._app_config.app_secret,
+                event_handler=self._event_handler,
+                log_level=lark.LogLevel.DEBUG,
+                auto_reconnect=True,
+            )
             self._ws_client.start()
         except Exception:
             logger.exception("Feishu WebSocket client exited with error")
+        finally:
+            new_loop.close()
 
     def stop(self) -> None:
         """Stop the service."""

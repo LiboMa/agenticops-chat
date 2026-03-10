@@ -102,6 +102,14 @@ READONLY_PREFIXES = [
     # Security Hub
     "aws securityhub get-", "aws securityhub list-",
     "aws securityhub describe-",
+    # IAM Access Analyzer
+    "aws accessanalyzer list-", "aws accessanalyzer get-",
+    # Macie
+    "aws macie2 get-", "aws macie2 list-", "aws macie2 describe-",
+    # Firewall Manager
+    "aws fms get-", "aws fms list-",
+    # Shield
+    "aws shield describe-", "aws shield list-", "aws shield get-",
     # Service Quotas
     "aws service-quotas get-", "aws service-quotas list-",
     # Health

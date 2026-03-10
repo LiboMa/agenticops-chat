@@ -76,41 +76,73 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
      (Datadog, Grafana, etc.) that are configured.
    - Call query_provider_metrics to get cross-platform metrics for a resource.
    - Cross-reference external alerts with CloudWatch findings for corroboration.
-7. For confirmed problems, call create_health_issue with:
+7. SECURITY HEALTH CHECKS (always run when scope='all' or scope='security'):
+   Use run_aws_cli_readonly for all security checks:
+   a) **GuardDuty Threats**:
+      - `aws guardduty list-detectors` → get detector ID
+      - `aws guardduty list-findings --detector-id DID --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`
+      - `aws guardduty get-findings --detector-id DID --finding-ids [IDs]` for details
+      - Create HealthIssue for severity >= 7 (HIGH/CRITICAL): source="guardduty", severity based on finding severity
+   b) **Security Hub Critical Findings**:
+      - `aws securityhub get-findings --filters '{"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}],"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'`
+      - Create HealthIssue for CRITICAL findings: source="security_hub"
+   c) **Inspector Vulnerabilities**:
+      - `aws inspector2 list-findings --filter-criteria '{"severity":[{"comparison":"EQUALS","value":"CRITICAL"}],"findingStatus":[{"comparison":"EQUALS","value":"ACTIVE"}]}'`
+      - Create HealthIssue for CRITICAL CVEs on network-reachable resources: source="inspector"
+   d) **Open Security Groups** (0.0.0.0/0 on sensitive ports):
+      - `aws ec2 describe-security-groups` and filter for IpRanges containing 0.0.0.0/0
+      - Flag ports 22, 3389, 3306, 5432, 6379, 27017, 9200 open to world
+      - Create HealthIssue: source="security_audit", severity=high
+   e) **IAM Credential Hygiene** (global, run once):
+      - `aws iam generate-credential-report` then `aws iam get-credential-report`
+      - Flag: root access keys, users without MFA, stale credentials (>90 days)
+      - Create HealthIssue for root access keys or root without MFA: source="iam_audit", severity=critical
+   f) **CloudTrail Integrity**:
+      - `aws cloudtrail describe-trails` → check multi-region trail exists
+      - `aws cloudtrail get-trail-status --name TRAIL` → check IsLogging
+      - Create HealthIssue if no trail or logging disabled: source="cloudtrail_audit", severity=critical
+   g) **Encryption Gaps**:
+      - `aws ec2 describe-volumes --query 'Volumes[?!Encrypted]'` → unencrypted EBS
+      - `aws rds describe-db-instances --query 'DBInstances[?!StorageEncrypted]'` → unencrypted RDS
+      - Create HealthIssue if critical data resources are unencrypted: source="encryption_audit", severity=high
+
+8. For confirmed problems, call create_health_issue with:
    - severity, source, title, description, alarm_name, metric_data, related_changes.
 
 SEVERITY CLASSIFICATION:
-- critical: Service down, data loss risk, security breach
-- high: Significant degradation, approaching limits
-- medium: Performance anomaly, non-critical errors
-- low: Informational, minor deviations
+- critical: Service down, data loss risk, security breach, root account compromise, logging disabled
+- high: Significant degradation, open security groups, unencrypted data, GuardDuty HIGH findings
+- medium: Performance anomaly, non-critical errors, stale credentials, missing alarms
+- low: Informational, minor deviations, non-critical compliance gaps
 
 RULES:
 - Only READ operations on AWS. The only write is create_health_issue in our metadata DB.
 - Always include related_changes (CloudTrail) in HealthIssue records when available.
 - Do NOT call LLM for simple alarm state checks - use tools directly.
-- Return a structured summary: total resources checked, alarms found, issues created.
+- Return a structured summary: total resources checked, alarms found, issues created,
+  AND security findings summary (threats, vulnerabilities, misconfigurations, compliance gaps).
 TOOL SELECTION — accuracy first:
 - Use specialized tools (list_alarms, get_metrics, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool, OR (b) the CLI
-  gives more precise/complete data for the specific query (e.g., specific --query filters,
-  fields not exposed by specialized tools).
+- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., security services),
+  OR (b) the CLI gives more precise/complete data for the specific query (e.g., specific --query
+  filters, fields not exposed by specialized tools).
 - Choose whichever tool produces the most accurate result for the task at hand.
 - When using run_aws_cli_readonly, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
+- 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
 """
 
 
 @tool
 def detect_agent(scope: str = "all", deep: bool = False) -> str:
-    """Check health of resources via CloudWatch Alarms and metrics.
+    """Check health of resources via CloudWatch Alarms, metrics, and security posture.
 
     Args:
-        scope: Resource type filter (e.g., 'EC2', 'RDS') or 'all' for all resources
+        scope: Resource type filter (e.g., 'EC2', 'RDS', 'security') or 'all' for all resources including security. Use 'security' for security-only checks (GuardDuty, SecurityHub, Inspector, IAM, SG audit, CloudTrail, encryption).
         deep: If True, pull detailed metrics/logs even for OK resources
 
     Returns:
-        Health check summary with issues found, severity breakdown, and monitoring gaps.
+        Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
     """
     try:
         model = BedrockModel(

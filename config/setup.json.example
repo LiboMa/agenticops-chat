@@ -1,0 +1,53 @@
+{
+  "bedrock": {
+    "region": "us-east-1",
+    "model": "sonnet"
+  },
+  "profile": "local",
+  "cloud": {
+    "database": "rds",
+    "rds_host": "agenticops-db.xxxx.us-east-1.rds.amazonaws.com",
+    "rds_port": 5432,
+    "rds_name": "agenticops",
+    "rds_user": "agenticops",
+    "rds_password": "",
+    "efs_path": "/data/agenticops",
+    "vector_storage": "rds",
+    "s3_bucket": "",
+    "s3_region": "us-east-1"
+  },
+  "accounts": [
+    {
+      "name": "prod",
+      "account_id": "123456789012",
+      "role_arn": "arn:aws:iam::123456789012:role/AgenticOpsRole",
+      "regions": ["us-east-1"]
+    }
+  ],
+  "pipeline": {
+    "auto_fix": true,
+    "auto_approve_l0_l1": true,
+    "notifications": true
+  },
+  "channels": [
+    {
+      "name": "slack-alerts",
+      "type": "slack",
+      "webhook_url": "https://hooks.slack.com/services/T.../B.../xxx"
+    },
+    {
+      "name": "feishu-ops",
+      "type": "feishu",
+      "app_name": "default",
+      "chat_id": "oc_xxx"
+    }
+  ],
+  "integrations": {
+    "datadog": {
+      "enabled": false,
+      "api_key": "",
+      "app_key": "",
+      "site": "datadoghq.com"
+    }
+  }
+}

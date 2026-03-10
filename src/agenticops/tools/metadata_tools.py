@@ -205,6 +205,74 @@ def save_resources(resources_json: str) -> str:
         session.close()
 
 
+_SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
+_MERGED_ALERTS_CAP = 50
+
+
+def _merge_into_existing_issue(
+    session, existing, source, title, description, severity, fingerprint, metric_data_parsed, changes_parsed,
+):
+    """Merge a new alert into an existing HealthIssue for the same resource.
+
+    Appends a snapshot to metric_data["merged_alerts"], escalates severity,
+    updates description, bumps occurrence_count, and merges related_changes.
+    """
+    now = datetime.utcnow()
+
+    # Build alert snapshot
+    snapshot = {
+        "timestamp": now.isoformat(),
+        "source": source,
+        "title": title,
+        "description": (description or "")[:500],
+        "severity": severity.lower(),
+        "fingerprint": fingerprint,
+    }
+
+    # Append to merged_alerts (capped)
+    md = existing.metric_data if isinstance(existing.metric_data, dict) else {}
+    merged = md.get("merged_alerts", [])
+    merged.append(snapshot)
+    if len(merged) > _MERGED_ALERTS_CAP:
+        merged = merged[-_MERGED_ALERTS_CAP:]
+    md["merged_alerts"] = merged
+    existing.metric_data = md
+
+    # Update description to latest
+    existing.description = description
+
+    # Escalate severity
+    if _SEVERITY_RANK.get(severity.lower(), 0) > _SEVERITY_RANK.get(existing.severity, 0):
+        existing.severity = severity.lower()
+
+    # Bump occurrence_count and last_seen
+    existing.occurrence_count = (existing.occurrence_count or 1) + 1
+    existing.last_seen = now
+
+    # Merge related_changes
+    if changes_parsed:
+        existing_changes = existing.related_changes if isinstance(existing.related_changes, list) else []
+        existing.related_changes = existing_changes + changes_parsed
+
+    session.commit()
+
+    # Log pipeline event
+    try:
+        from agenticops.services.pipeline_events import log_event
+        log_event(existing.id, "issue_resource_merged", "detection", "completed",
+                  detail={"source": source, "title": title, "severity": severity,
+                          "merged_count": len(merged)})
+    except Exception:
+        pass
+
+    return (
+        f"Resource-merged: updated existing HealthIssue #{existing.id} "
+        f"(resource={existing.resource_id}, merged_count={len(merged)}): "
+        f"[{existing.severity.upper()}] {existing.title}"
+    )
+
+
 def _compute_fingerprint(source: str, resource_id: str, title: str) -> str:
     """Compute a SHA-256 fingerprint for HealthIssue deduplication.
 
@@ -282,7 +350,7 @@ def create_health_issue(
             existing.description = description
             existing.metric_data = metric_data_parsed
             existing.related_changes = changes_parsed
-            if severity.lower() in ("critical", "high") and existing.severity in ("medium", "low"):
+            if _SEVERITY_RANK.get(severity.lower(), 0) > _SEVERITY_RANK.get(existing.severity, 0):
                 existing.severity = severity.lower()
             session.commit()
 
@@ -298,6 +366,23 @@ def create_health_issue(
                 f"(count={existing.occurrence_count}): "
                 f"[{existing.severity.upper()}] {existing.title}"
             )
+
+        # Resource-based dedup: merge into existing open issue for the same resource
+        if settings.resource_dedup_enabled and resource_id and resource_id != "unknown":
+            resource_match = (
+                session.query(HealthIssue)
+                .filter(
+                    HealthIssue.resource_id == resource_id,
+                    HealthIssue.status.in_(RESOURCE_DEDUP_STATUSES),
+                )
+                .order_by(HealthIssue.detected_at.desc())
+                .first()
+            )
+            if resource_match:
+                return _merge_into_existing_issue(
+                    session, resource_match, source, title, description,
+                    severity, fingerprint, metric_data_parsed, changes_parsed,
+                )
 
         # Inject trace_id from ContextVar
         from agenticops.config import get_im_origin, get_trace_id
@@ -752,20 +837,60 @@ def save_fix_plan(
         if not rca:
             return f"RCAResult #{rca_result_id} not found."
 
-        plan = FixPlan(
-            health_issue_id=health_issue_id,
-            rca_result_id=rca_result_id,
-            risk_level=risk_level,
-            title=title,
-            summary=summary,
-            steps=steps_parsed,
-            rollback_plan=rollback_parsed,
-            estimated_impact=estimated_impact,
-            pre_checks=pre_parsed,
-            post_checks=post_parsed,
-            status="draft",
+        # --- Dedup: one issue → one fix plan (replace mode) ---
+        from agenticops.models import (
+            FIXPLAN_TERMINAL_STATUSES,
+            FIXPLAN_REPLACEABLE_STATUSES,
+            FIXPLAN_LOCKED_STATUSES,
         )
-        session.add(plan)
+
+        existing = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=health_issue_id)
+            .filter(FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES))
+            .order_by(FixPlan.created_at.desc())
+            .first()
+        )
+
+        if existing and existing.status in FIXPLAN_LOCKED_STATUSES:
+            return (
+                f"HealthIssue #{health_issue_id} already has FixPlan #{existing.id} "
+                f"in '{existing.status}' state. Cannot create a new plan while one is "
+                f"in progress. Wait for it to complete or reject it first."
+            )
+
+        is_update = existing and existing.status in FIXPLAN_REPLACEABLE_STATUSES
+
+        if is_update:
+            # Update existing draft plan in place
+            plan = existing
+            plan.rca_result_id = rca_result_id
+            plan.risk_level = risk_level
+            plan.title = title
+            plan.summary = summary
+            plan.steps = steps_parsed
+            plan.rollback_plan = rollback_parsed
+            plan.estimated_impact = estimated_impact
+            plan.pre_checks = pre_parsed
+            plan.post_checks = post_parsed
+            event_type = "fix_plan_updated"
+        else:
+            # Create new plan (no existing, or all existing are terminal)
+            plan = FixPlan(
+                health_issue_id=health_issue_id,
+                rca_result_id=rca_result_id,
+                risk_level=risk_level,
+                title=title,
+                summary=summary,
+                steps=steps_parsed,
+                rollback_plan=rollback_parsed,
+                estimated_impact=estimated_impact,
+                pre_checks=pre_parsed,
+                post_checks=post_parsed,
+                status="draft",
+            )
+            session.add(plan)
+            event_type = "fix_plan_created"
 
         issue.status = "fix_planned"
         session.commit()
@@ -773,7 +898,7 @@ def save_fix_plan(
         # Log pipeline event
         try:
             from agenticops.services.pipeline_events import log_event
-            log_event(health_issue_id, "fix_plan_created", "planning",
+            log_event(health_issue_id, event_type, "planning",
                       detail={"plan_id": plan.id, "risk_level": risk_level})
         except Exception:
             pass
@@ -792,8 +917,9 @@ def save_fix_plan(
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
+        action = "UPDATED" if is_update else "saved"
         return (
-            f"FixPlan #{plan.id} saved for HealthIssue #{health_issue_id}. "
+            f"FixPlan #{plan.id} {action} for HealthIssue #{health_issue_id}. "
             f"Risk: {risk_level}. Title: {title}. "
             f"Issue status updated to 'fix_planned'."
         )

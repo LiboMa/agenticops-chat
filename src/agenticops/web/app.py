@@ -1663,6 +1663,21 @@ async def api_trigger_fix_plan(issue_id: int):
         if not rca:
             raise HTTPException(status_code=400, detail="No RCA result found. Run RCA first.")
 
+        # Guard: reject if issue has a locked fix plan (pending_approval/approved/executing)
+        from agenticops.models import FIXPLAN_LOCKED_STATUSES
+        locked = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=issue_id)
+            .filter(FixPlan.status.in_(FIXPLAN_LOCKED_STATUSES))
+            .first()
+        )
+        if locked:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Issue #{issue_id} already has FixPlan #{locked.id} in '{locked.status}' state. "
+                       f"Wait for it to complete or reject it first.",
+            )
+
     def _run_fix_plan():
         try:
             from agenticops.agents.sre_agent import sre_agent
@@ -1842,6 +1857,21 @@ async def api_create_fix_plan(data: FixPlanCreate):
         rca = session.query(RCAResult).filter_by(id=data.rca_result_id).first()
         if not rca:
             raise HTTPException(status_code=400, detail="RCA result not found")
+
+        # Guard: reject if issue already has a non-terminal fix plan
+        from agenticops.models import FIXPLAN_TERMINAL_STATUSES
+        active = (
+            session.query(FixPlan)
+            .filter_by(health_issue_id=data.health_issue_id)
+            .filter(FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES))
+            .first()
+        )
+        if active:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Issue #{data.health_issue_id} already has active FixPlan #{active.id} ({active.status}). "
+                       f"Complete or reject it before creating a new one.",
+            )
 
         plan = FixPlan(
             health_issue_id=data.health_issue_id,
@@ -2164,41 +2194,63 @@ async def api_distill_case(health_issue_id: int):
 
 @app.get("/api/kb/sops")
 async def api_list_sops(status: Optional[str] = None):
-    """List SOPs with lifecycle metadata."""
+    """List SOPs with lifecycle metadata. Auto-backfills from filesystem if DB is empty."""
     from agenticops.tools.kb_tools import _parse_frontmatter
 
+    sops = []
     with get_db_session() as session:
+        # Auto-backfill: import any SOP files on disk that are missing from DB
+        if settings.sops_dir.exists():
+            existing_names = {r[0] for r in session.query(SOPRecord.filename).all()}
+            for f in sorted(settings.sops_dir.glob("*.md")):
+                if f.name in existing_names:
+                    continue
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    metadata, _ = _parse_frontmatter(content)
+                    record = SOPRecord(
+                        filename=f.name,
+                        resource_type=metadata.get("resource_type", ""),
+                        issue_pattern=(metadata.get("issue_pattern", "") or "")[:500],
+                        severity=metadata.get("severity", "medium"),
+                        status="review",
+                        quality_score=0.5,
+                        file_path=str(f),
+                    )
+                    session.add(record)
+                except Exception:
+                    pass
+
         query = session.query(SOPRecord).order_by(SOPRecord.updated_at.desc())
         if status:
             query = query.filter_by(status=status)
         records = query.all()
 
-    sops = []
-    for r in records:
-        preview = ""
-        try:
-            path = Path(r.file_path)
-            if path.exists():
-                content = path.read_text(encoding="utf-8")
-                _, body = _parse_frontmatter(content)
-                preview = body[:200] if body else ""
-        except Exception:
-            pass
-        sops.append({
-            "id": r.id,
-            "filename": r.filename,
-            "resource_type": r.resource_type,
-            "issue_pattern": r.issue_pattern,
-            "severity": r.severity,
-            "status": r.status,
-            "quality_score": r.quality_score,
-            "application_count": r.application_count,
-            "success_count": r.success_count,
-            "approved_by": r.approved_by,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            "preview": preview,
-        })
+        for r in records:
+            preview = ""
+            try:
+                path = Path(r.file_path)
+                if path.exists():
+                    content = path.read_text(encoding="utf-8")
+                    _, body = _parse_frontmatter(content)
+                    preview = body[:200] if body else ""
+            except Exception:
+                pass
+            sops.append({
+                "id": r.id,
+                "filename": r.filename,
+                "resource_type": r.resource_type,
+                "issue_pattern": r.issue_pattern,
+                "severity": r.severity,
+                "status": r.status,
+                "quality_score": r.quality_score,
+                "application_count": r.application_count,
+                "success_count": r.success_count,
+                "approved_by": r.approved_by,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "preview": preview,
+            })
     return {"count": len(sops), "sops": sops}
 
 
@@ -2207,32 +2259,32 @@ async def api_get_sop(sop_id: int):
     """Get SOP detail with full content."""
     with get_db_session() as session:
         record = session.query(SOPRecord).filter_by(id=sop_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="SOP not found")
-    content = ""
-    try:
-        path = Path(record.file_path)
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-    except Exception:
-        pass
-    return {
-        "id": record.id,
-        "filename": record.filename,
-        "resource_type": record.resource_type,
-        "issue_pattern": record.issue_pattern,
-        "severity": record.severity,
-        "status": record.status,
-        "quality_score": record.quality_score,
-        "application_count": record.application_count,
-        "success_count": record.success_count,
-        "source_issue_id": record.source_issue_id,
-        "approved_by": record.approved_by,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-        "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
-        "content": content,
-    }
+        if not record:
+            raise HTTPException(status_code=404, detail="SOP not found")
+        content = ""
+        try:
+            path = Path(record.file_path)
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        return {
+            "id": record.id,
+            "filename": record.filename,
+            "resource_type": record.resource_type,
+            "issue_pattern": record.issue_pattern,
+            "severity": record.severity,
+            "status": record.status,
+            "quality_score": record.quality_score,
+            "application_count": record.application_count,
+            "success_count": record.success_count,
+            "source_issue_id": record.source_issue_id,
+            "approved_by": record.approved_by,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+            "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
+            "content": content,
+        }
 
 
 @app.post("/api/kb/sops/{sop_id}/approve")
@@ -2366,9 +2418,31 @@ async def api_kb_stats():
         except Exception:
             embedding_status = "error"
 
-    # SOP lifecycle counts
+    # SOP lifecycle counts — auto-backfill if DB empty but files exist
     sop_by_status = {"draft": 0, "review": 0, "active": 0, "deprecated": 0, "archived": 0}
     with get_db_session() as session:
+        # Backfill any SOP files missing from DB
+        if sop_count > 0:
+            from agenticops.tools.kb_tools import _parse_frontmatter as _pf
+            existing_names = {r[0] for r in session.query(SOPRecord.filename).all()}
+            for f in sorted(settings.sops_dir.glob("*.md")):
+                if f.name in existing_names:
+                    continue
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    metadata, _ = _pf(content)
+                    record = SOPRecord(
+                        filename=f.name,
+                        resource_type=metadata.get("resource_type", ""),
+                        issue_pattern=(metadata.get("issue_pattern", "") or "")[:500],
+                        severity=metadata.get("severity", "medium"),
+                        status="review",
+                        quality_score=0.5,
+                        file_path=str(f),
+                    )
+                    session.add(record)
+                except Exception:
+                    pass
         for row in session.query(SOPRecord.status, func.count()).group_by(SOPRecord.status).all():
             if row[0] in sop_by_status:
                 sop_by_status[row[0]] = row[1]
