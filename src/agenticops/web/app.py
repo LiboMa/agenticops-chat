@@ -2167,11 +2167,14 @@ async def api_list_sops(status: Optional[str] = None):
     """List SOPs with lifecycle metadata. Auto-backfills from filesystem if DB is empty."""
     from agenticops.tools.kb_tools import _parse_frontmatter
 
+    sops = []
     with get_db_session() as session:
-        # Auto-backfill: if DB has no records but SOP files exist on disk, import them
-        db_count = session.query(func.count(SOPRecord.id)).scalar() or 0
-        if db_count == 0 and settings.sops_dir.exists():
+        # Auto-backfill: import any SOP files on disk that are missing from DB
+        if settings.sops_dir.exists():
+            existing_names = {r[0] for r in session.query(SOPRecord.filename).all()}
             for f in sorted(settings.sops_dir.glob("*.md")):
+                if f.name in existing_names:
+                    continue
                 try:
                     content = f.read_text(encoding="utf-8")
                     metadata, _ = _parse_frontmatter(content)
@@ -2193,32 +2196,31 @@ async def api_list_sops(status: Optional[str] = None):
             query = query.filter_by(status=status)
         records = query.all()
 
-    sops = []
-    for r in records:
-        preview = ""
-        try:
-            path = Path(r.file_path)
-            if path.exists():
-                content = path.read_text(encoding="utf-8")
-                _, body = _parse_frontmatter(content)
-                preview = body[:200] if body else ""
-        except Exception:
-            pass
-        sops.append({
-            "id": r.id,
-            "filename": r.filename,
-            "resource_type": r.resource_type,
-            "issue_pattern": r.issue_pattern,
-            "severity": r.severity,
-            "status": r.status,
-            "quality_score": r.quality_score,
-            "application_count": r.application_count,
-            "success_count": r.success_count,
-            "approved_by": r.approved_by,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            "preview": preview,
-        })
+        for r in records:
+            preview = ""
+            try:
+                path = Path(r.file_path)
+                if path.exists():
+                    content = path.read_text(encoding="utf-8")
+                    _, body = _parse_frontmatter(content)
+                    preview = body[:200] if body else ""
+            except Exception:
+                pass
+            sops.append({
+                "id": r.id,
+                "filename": r.filename,
+                "resource_type": r.resource_type,
+                "issue_pattern": r.issue_pattern,
+                "severity": r.severity,
+                "status": r.status,
+                "quality_score": r.quality_score,
+                "application_count": r.application_count,
+                "success_count": r.success_count,
+                "approved_by": r.approved_by,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "preview": preview,
+            })
     return {"count": len(sops), "sops": sops}
 
 
@@ -2227,32 +2229,32 @@ async def api_get_sop(sop_id: int):
     """Get SOP detail with full content."""
     with get_db_session() as session:
         record = session.query(SOPRecord).filter_by(id=sop_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="SOP not found")
-    content = ""
-    try:
-        path = Path(record.file_path)
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-    except Exception:
-        pass
-    return {
-        "id": record.id,
-        "filename": record.filename,
-        "resource_type": record.resource_type,
-        "issue_pattern": record.issue_pattern,
-        "severity": record.severity,
-        "status": record.status,
-        "quality_score": record.quality_score,
-        "application_count": record.application_count,
-        "success_count": record.success_count,
-        "source_issue_id": record.source_issue_id,
-        "approved_by": record.approved_by,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-        "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
-        "content": content,
-    }
+        if not record:
+            raise HTTPException(status_code=404, detail="SOP not found")
+        content = ""
+        try:
+            path = Path(record.file_path)
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        return {
+            "id": record.id,
+            "filename": record.filename,
+            "resource_type": record.resource_type,
+            "issue_pattern": record.issue_pattern,
+            "severity": record.severity,
+            "status": record.status,
+            "quality_score": record.quality_score,
+            "application_count": record.application_count,
+            "success_count": record.success_count,
+            "source_issue_id": record.source_issue_id,
+            "approved_by": record.approved_by,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+            "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
+            "content": content,
+        }
 
 
 @app.post("/api/kb/sops/{sop_id}/approve")
@@ -2389,10 +2391,13 @@ async def api_kb_stats():
     # SOP lifecycle counts — auto-backfill if DB empty but files exist
     sop_by_status = {"draft": 0, "review": 0, "active": 0, "deprecated": 0, "archived": 0}
     with get_db_session() as session:
-        db_count = session.query(func.count(SOPRecord.id)).scalar() or 0
-        if db_count == 0 and sop_count > 0:
+        # Backfill any SOP files missing from DB
+        if sop_count > 0:
             from agenticops.tools.kb_tools import _parse_frontmatter as _pf
+            existing_names = {r[0] for r in session.query(SOPRecord.filename).all()}
             for f in sorted(settings.sops_dir.glob("*.md")):
+                if f.name in existing_names:
+                    continue
                 try:
                     content = f.read_text(encoding="utf-8")
                     metadata, _ = _pf(content)
