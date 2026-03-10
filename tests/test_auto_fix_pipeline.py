@@ -408,13 +408,15 @@ class TestFullE2EPipeline:
             mock_sre.assert_called_once_with(issue_id, trace_id=None)
             print(f"[2] RCA saved: {rca_result}")
 
-        # Verify RCA state
-        db_session.expire_all()
-        issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
+        # Verify RCA state (use fresh session — save_rca_result commits on its own session)
+        verify = get_session()
+        issue = verify.query(HealthIssue).filter_by(id=issue_id).first()
+        assert issue is not None, f"HealthIssue #{issue_id} not found in fresh session"
         assert issue.status == "root_cause_identified"
-        rca = db_session.query(RCAResult).filter_by(health_issue_id=issue_id).first()
+        rca = verify.query(RCAResult).filter_by(health_issue_id=issue_id).first()
         assert rca is not None
         rca_id = rca.id
+        verify.close()
         print(f"[2] Issue status: root_cause_identified, RCA #{rca_id}")
 
         # ── Step 3: Simulate SRE completion (save fix plan) ──────────
@@ -440,13 +442,14 @@ class TestFullE2EPipeline:
             plan_id = mock_approve.call_args[0][0]
             print(f"[3] FixPlan saved: {plan_result}")
 
-        # Verify plan state
-        db_session.expire_all()
-        issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
+        # Verify plan state (fresh session)
+        verify = get_session()
+        issue = verify.query(HealthIssue).filter_by(id=issue_id).first()
         assert issue.status == "fix_planned"
-        plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
+        plan = verify.query(FixPlan).filter_by(id=plan_id).first()
         assert plan.status == "draft"
         assert plan.risk_level == "L1"
+        verify.close()
         print(f"[3] Issue status: fix_planned, FixPlan #{plan_id} (L1, draft)")
 
         # ── Step 4: Simulate auto-approve (L1) ──────────────────────
@@ -456,13 +459,14 @@ class TestFullE2EPipeline:
             trigger_auto_approve(plan_id)
             mock_exec.assert_called_once_with(plan_id, trace_id=None)
 
-        # Verify approval state
-        db_session.expire_all()
-        plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
+        # Verify approval state (fresh session)
+        verify = get_session()
+        plan = verify.query(FixPlan).filter_by(id=plan_id).first()
         assert plan.status == "approved"
         assert plan.approved_by == "agent:auto-pipeline"
-        issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
+        issue = verify.query(HealthIssue).filter_by(id=issue_id).first()
         assert issue.status == "fix_approved"
+        verify.close()
         print(f"[4] Auto-approved: FixPlan #{plan_id} approved by agent:auto-pipeline")
         print(f"[4] Issue status: fix_approved")
 
@@ -484,20 +488,21 @@ class TestFullE2EPipeline:
         print(f"[5] Execution saved: {exec_result}")
 
         # ── Verify final state ───────────────────────────────────────
-        db_session.expire_all()
-        issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
+        verify = get_session()
+        issue = verify.query(HealthIssue).filter_by(id=issue_id).first()
         assert issue.status == "resolved", f"Expected 'resolved' but got '{issue.status}'"
         assert issue.resolved_at is not None
 
-        plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
+        plan = verify.query(FixPlan).filter_by(id=plan_id).first()
         assert plan.status == "executed"
 
-        execution = db_session.query(FixExecution).filter_by(fix_plan_id=plan_id).first()
+        execution = verify.query(FixExecution).filter_by(fix_plan_id=plan_id).first()
         assert execution is not None
         assert execution.status == "succeeded"
         assert len(execution.step_results) == 2
         assert len(execution.pre_check_results) == 1
         assert len(execution.post_check_results) == 1
+        verify.close()
 
         print(f"[5] Issue status: resolved (resolved_at={issue.resolved_at})")
         print(f"[5] FixPlan status: executed")
