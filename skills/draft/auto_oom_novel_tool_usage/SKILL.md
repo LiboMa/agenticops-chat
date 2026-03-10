@@ -6,10 +6,12 @@ description: "Auto-generated skill for oom (novel_tool_usage)"
 # oom Troubleshooting
 
 ## Root Cause Pattern
-EKS pod OOMKilled due to memory limit too low
+Memory leak in checkout-service caused OOM kills
 
 ## Evidence
-
+- Memory usage 95% before OOM
+- Deployment v2.3 at 14:00
 
 ## Recommendations
-- Increase memory limit to 512Mi
+- Set memory limits to 512Mi
+- Fix leak in v2.4
