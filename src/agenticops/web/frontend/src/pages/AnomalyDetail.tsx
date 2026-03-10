@@ -19,7 +19,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { apiFetch } from "@/api/client";
-import type { IssueStatus, PipelineEvent } from "@/api/types";
+import type { IssueStatus, PipelineEvent, MergedAlert } from "@/api/types";
 
 export default function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -203,6 +203,11 @@ export default function AnomalyDetail() {
             <PipelineTimeline events={timeline.data} />
           </CardBody>
         </Card>
+      )}
+
+      {/* Merged Alerts */}
+      {a.merged_alerts && a.merged_alerts.length > 0 && (
+        <MergedAlertsSection alerts={a.merged_alerts} occurrenceCount={a.occurrence_count} />
       )}
 
       {/* Smart Action Bar */}
@@ -472,6 +477,62 @@ export default function AnomalyDetail() {
         </Card>
       )}
     </div>
+  );
+}
+
+/* ── Merged Alerts Component ────────────────────────────────────── */
+
+const SEV_CHIP: Record<string, string> = {
+  critical: "bg-red-100 text-red-700",
+  high: "bg-orange-100 text-orange-700",
+  medium: "bg-yellow-100 text-yellow-700",
+  low: "bg-slate-100 text-slate-600",
+};
+
+function MergedAlertsSection({ alerts, occurrenceCount }: { alerts: MergedAlert[]; occurrenceCount?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const displayed = expanded ? alerts : alerts.slice(-5);
+
+  return (
+    <Card>
+      <CardBody>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 w-full text-left"
+        >
+          <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+            Merged Alerts ({alerts.length})
+          </h2>
+          {occurrenceCount && occurrenceCount > 1 && (
+            <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+              {occurrenceCount} occurrences
+            </span>
+          )}
+          <span className="ml-auto text-slate-400 text-xs">{expanded ? "▲ Collapse" : "▼ Expand"}</span>
+        </button>
+        <div className="mt-3 space-y-2">
+          {displayed.map((alert, i) => (
+            <div key={i} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded bg-slate-50">
+              <span className="text-xs text-slate-400 whitespace-nowrap font-mono">
+                {new Date(alert.timestamp).toLocaleString()}
+              </span>
+              <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">
+                {alert.source}
+              </span>
+              <span className={`text-xs px-1.5 py-0.5 rounded ${SEV_CHIP[alert.severity] || SEV_CHIP.low}`}>
+                {alert.severity}
+              </span>
+              <span className="text-slate-700 truncate flex-1">{alert.title}</span>
+            </div>
+          ))}
+          {!expanded && alerts.length > 5 && (
+            <div className="text-xs text-slate-400 text-center">
+              Showing last 5 of {alerts.length} — click to expand
+            </div>
+          )}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
