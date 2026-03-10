@@ -72,7 +72,7 @@ export function Sidebar() {
           <NavItem key={item.to} {...item} />
         ))}
 
-        <SectionLabel>L5</SectionLabel>
+        <SectionLabel>AI Ops</SectionLabel>
         {L5_ITEMS.map((item) => (
           <NavItem key={item.to} {...item} />
         ))}

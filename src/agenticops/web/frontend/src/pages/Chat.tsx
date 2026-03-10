@@ -23,7 +23,7 @@ export default function Chat() {
     useChat(selectedId);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-[#2f2f2f] -m-6 rounded-xl overflow-hidden border border-[#424242] ">
+    <div className="flex h-[calc(100vh-4rem)] bg-[#2f2f2f] -mx-8 -my-8 rounded-xl overflow-hidden border border-[#424242] ">
       <SessionList selectedId={selectedId} onSelect={setSelectedId} />
 
       <div className="flex-1 flex flex-col min-w-0">

@@ -6,7 +6,7 @@ export function AppShell() {
     <div className="min-h-screen bg-[#212121] text-[#ececec]">
       <Sidebar />
       <div className="pl-[260px]">
-        <main className="p-6">
+        <main className="mx-auto max-w-5xl px-8 py-8">
           <Outlet />
         </main>
       </div>
