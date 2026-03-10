@@ -54,6 +54,11 @@ from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
 )
+from agenticops.tools.memory_tools import (
+    remember_this,
+    recall_memories,
+    set_current_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,8 @@ Your job is to perform Root Cause Analysis on a specific HealthIssue.
 
 INVESTIGATION PROTOCOL — follow this order strictly:
 
+0. RECALL MEMORY: FIRST, call recall_memories with the issue symptoms to check if you've
+   seen similar issues before. Past experience can save significant investigation time.
 1. SETUP: Call get_active_account and assume_role to get AWS credentials.
 1.5. ACTIVATE DOMAIN SKILLS: Based on the issue type, call activate_skill to load
      domain-specific troubleshooting knowledge BEFORE investigating:
@@ -127,6 +134,10 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    - Create a fix plan with step-by-step remediation.
    - Assess fix risk level: low, medium, high, or critical.
 8. SAVE: Call save_rca_result with all findings.
+8.1. REMEMBER: Call remember_this with key learnings from this investigation:
+     - The root cause pattern (memory_type="procedural")
+     - The fix that worked (memory_type="procedural")
+     - Any surprising findings (memory_type="episodic")
 8.5. EXTENDED INVESTIGATION: Use run_aws_cli_readonly for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 8.6. LOCAL FILE INSPECTION (when you need to check configs, logs, or templates):
@@ -189,6 +200,9 @@ def rca_agent(issue_id: int) -> str:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
     try:
+        # Set memory context for this agent
+        set_current_agent("rca_agent")
+
         model = BedrockModel(
             model_id=settings.bedrock_model_id,
             region_name=settings.bedrock_region,
@@ -244,6 +258,9 @@ def rca_agent(issue_id: int) -> str:
                 # External monitoring providers
                 query_provider_metrics,
                 query_provider_logs,
+                # Memory tools (per-agent persistent memory)
+                remember_this,
+                recall_memories,
             ],
         )
 
