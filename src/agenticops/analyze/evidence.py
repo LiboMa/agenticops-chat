@@ -28,10 +28,10 @@ class EvidenceItem:
 
     def __post_init__(self):
         self.SOURCE_WEIGHTS = {
-            "cloudwatch": 0.9,   # Metrics — most objective
+            "cloudwatch": 0.85,   # Metrics — objective, but correlative
             "trace": 0.9,        # Distributed traces — objective
             "logs": 0.8,         # Semi-structured
-            "cloudtrail": 0.8,   # Audit trail — factual
+            "cloudtrail": 0.95,  # Audit trail — strongest causal evidence
             "memory": 0.7,       # Historical experience
             "network": 0.6,      # Graph/topology inference
             "llm": 0.5,          # LLM reasoning
