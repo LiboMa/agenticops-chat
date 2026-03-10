@@ -1,0 +1,580 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AgenticOps — AI operations assistant with multi-agent architecture.
+  Deploys EC2, ALB, optional RDS (PostgreSQL + pgvector), EFS, and S3.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet (EC2 + RDS)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet (RDS multi-AZ)
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First public subnet (ALB)
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second public subnet (ALB)
+
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: EC2 AMI (default Amazon Linux 2023)
+
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    Description: EC2 instance type
+
+  KeyName:
+    Type: String
+    Default: ""
+    Description: EC2 key pair name (leave empty for SSM-only access)
+
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for Bedrock API calls
+
+  BedrockModelId:
+    Type: String
+    Default: global.anthropic.claude-sonnet-4-6-v1
+    Description: Default Bedrock model ID
+
+  DatabaseBackend:
+    Type: String
+    Default: rds
+    AllowedValues:
+      - rds
+      - sqlite-efs
+    Description: Database backend — RDS PostgreSQL or SQLite on EFS
+
+  VectorStorage:
+    Type: String
+    Default: rds
+    AllowedValues:
+      - rds
+      - s3
+    Description: Vector storage backend — pgvector in RDS or S3
+
+  RDSInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    Description: RDS instance class
+
+  RDSPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: RDS master password (min 8 characters)
+
+  S3BucketName:
+    Type: String
+    Default: ""
+    Description: S3 bucket name (empty = agenticops-{AccountId})
+
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Custom domain name (e.g. ops.example.com)
+
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: Route53 hosted zone ID for the domain
+
+  AcmCertArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate ARN for HTTPS
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  UseRDS: !Equals [!Ref DatabaseBackend, "rds"]
+  UseEFS: !Equals [!Ref DatabaseBackend, "sqlite-efs"]
+  UseRDSVector: !Equals [!Ref VectorStorage, "rds"]
+  UseS3Vector: !Equals [!Ref VectorStorage, "s3"]
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasCert: !Not [!Equals [!Ref AcmCertArn, ""]]
+  HasKeyName: !Not [!Equals [!Ref KeyName, ""]]
+  UseBucketDefault: !Equals [!Ref S3BucketName, ""]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Security Groups
+  # -------------------------------------------------------------------------
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AgenticOps ALB — allow HTTP/HTTPS from internet
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: agenticops-alb-sg
+
+  AgenticOpsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AgenticOps EC2 — allow traffic from ALB on port 8000
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: agenticops-ec2-sg
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: UseRDS
+    Properties:
+      GroupDescription: AgenticOps RDS — allow PostgreSQL from EC2
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AgenticOpsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: agenticops-rds-sg
+
+  # -------------------------------------------------------------------------
+  # EFS (conditional — sqlite-efs backend)
+  # -------------------------------------------------------------------------
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Condition: UseEFS
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: agenticops-efs
+
+  EFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Condition: UseEFS
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroups:
+        - !Ref AgenticOpsSecurityGroup
+
+  EFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Condition: UseEFS
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref AgenticOpsSecurityGroup
+
+  # -------------------------------------------------------------------------
+  # RDS (conditional — rds backend)
+  # -------------------------------------------------------------------------
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: UseRDS
+    Properties:
+      DBSubnetGroupDescription: AgenticOps RDS subnets
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: agenticops-rds-subnet-group
+
+  RDSParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Condition: UseRDS
+    Properties:
+      Family: postgres16
+      Description: AgenticOps PostgreSQL 16 with pgvector
+      Parameters:
+        shared_preload_libraries: pgvector
+      Tags:
+        - Key: Name
+          Value: agenticops-rds-params
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Condition: UseRDS
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: agenticops
+      Engine: postgres
+      EngineVersion: "16"
+      DBInstanceClass: !Ref RDSInstanceClass
+      AllocatedStorage: 50
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: agenticops
+      MasterUserPassword: !Ref RDSPassword
+      DBName: agenticops
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      DBParameterGroupName: !Ref RDSParamGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: agenticops-rds
+
+  # -------------------------------------------------------------------------
+  # S3 Bucket
+  # -------------------------------------------------------------------------
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - UseBucketDefault
+        - !Sub "agenticops-${AWS::AccountId}"
+        - !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireVectors90d
+            Prefix: vectors/
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Name
+          Value: agenticops-s3
+
+  # -------------------------------------------------------------------------
+  # IAM
+  # -------------------------------------------------------------------------
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "agenticops-ec2-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: agenticops-bedrock
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+        - PolicyName: agenticops-s3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt S3Bucket.Arn
+                  - !Sub "${S3Bucket.Arn}/*"
+        - PolicyName: agenticops-readonly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:Describe*
+                  - rds:Describe*
+                  - lambda:List*
+                  - lambda:Get*
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - ecs:Describe*
+                  - ecs:List*
+                  - eks:Describe*
+                  - eks:List*
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - elasticache:Describe*
+                  - dynamodb:Describe*
+                  - dynamodb:List*
+                  - sts:GetCallerIdentity
+                  - sts:AssumeRole
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: agenticops-ec2-role
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  # -------------------------------------------------------------------------
+  # EC2 Instance
+  # -------------------------------------------------------------------------
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - S3Bucket
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref "AWS::NoValue"]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref AgenticOpsSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          # --- System packages ---
+          dnf install -y python3.11 python3.11-pip git
+
+          # --- EFS mount (sqlite-efs backend) ---
+          if [ "${DatabaseBackend}" = "sqlite-efs" ]; then
+            dnf install -y amazon-efs-utils
+            mkdir -p /data/agenticops
+            mount -t efs ${EFSFileSystem}:/ /data/agenticops || true
+            echo "${EFSFileSystem}:/ /data/agenticops efs defaults,_netdev 0 0" >> /etc/fstab
+          fi
+
+          # --- Application ---
+          mkdir -p /opt/agenticops
+          cd /opt/agenticops
+          git clone https://github.com/LiboMa/agenticops-chat.git .
+          python3.11 -m pip install --upgrade pip
+          python3.11 -m pip install .
+
+          # --- pgvector + psycopg2 for RDS vector storage ---
+          if [ "${VectorStorage}" = "rds" ]; then
+            python3.11 -m pip install pgvector psycopg2-binary
+          fi
+
+          # --- Environment file ---
+          cat > /opt/agenticops/.env <<'ENVEOF'
+          AIOPS_BEDROCK_REGION=${BedrockRegion}
+          AIOPS_BEDROCK_MODEL_ID=${BedrockModelId}
+          AIOPS_BEDROCK_MODEL_ID_CHEAP=global.anthropic.claude-haiku-4-5-20251001-v1:0
+          AIOPS_BEDROCK_MODEL_ID_STRONG=global.anthropic.claude-opus-4-6-v1
+          ENVEOF
+
+          # Database URL
+          if [ "${DatabaseBackend}" = "rds" ]; then
+            echo "AIOPS_DATABASE_URL=postgresql+psycopg2://agenticops:${RDSPassword}@${RDSInstance.Endpoint.Address}:5432/agenticops" >> /opt/agenticops/.env
+          else
+            echo "AIOPS_DATABASE_URL=sqlite:////data/agenticops/agenticops.db" >> /opt/agenticops/.env
+          fi
+
+          # S3 bucket
+          echo "AIOPS_S3_BUCKET=${S3Bucket}" >> /opt/agenticops/.env
+
+          # Vector storage
+          if [ "${VectorStorage}" = "rds" ]; then
+            echo "AIOPS_VECTOR_BACKEND=pgvector" >> /opt/agenticops/.env
+            echo "AIOPS_VECTOR_DATABASE_URL=postgresql+psycopg2://agenticops:${RDSPassword}@${RDSInstance.Endpoint.Address}:5432/agenticops" >> /opt/agenticops/.env
+          else
+            echo "AIOPS_VECTOR_BACKEND=s3" >> /opt/agenticops/.env
+          fi
+
+          # --- Initialize ---
+          cd /opt/agenticops
+          python3.11 -m agenticops init --yes || true
+
+          # --- Systemd service ---
+          cat > /etc/systemd/system/agenticops.service <<'SVCEOF'
+          [Unit]
+          Description=AgenticOps API Server
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/agenticops
+          EnvironmentFile=/opt/agenticops/.env
+          ExecStart=/usr/bin/python3.11 -m uvicorn agenticops.web.app:app --host 0.0.0.0 --port 8000
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+          SVCEOF
+
+          systemctl daemon-reload
+          systemctl enable agenticops
+          systemctl start agenticops
+      Tags:
+        - Key: Name
+          Value: agenticops-ec2
+
+  # -------------------------------------------------------------------------
+  # Application Load Balancer
+  # -------------------------------------------------------------------------
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: agenticops-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: agenticops-alb
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: agenticops-tg
+      Port: 8000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+          Port: 8000
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: agenticops-tg
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - !If
+          - HasCert
+          - Type: redirect
+            RedirectConfig:
+              Protocol: HTTPS
+              Port: "443"
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref TargetGroup
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCert
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # -------------------------------------------------------------------------
+  # DNS
+  # -------------------------------------------------------------------------
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ALB.DNSName
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  AppUrl:
+    Description: Application URL
+    Value: !If
+      - HasDomain
+      - !If
+        - HasCert
+        - !Sub "https://${DomainName}"
+        - !Sub "http://${DomainName}"
+      - !Sub "http://${ALB.DNSName}"
+
+  APIEndpoint:
+    Description: API health endpoint
+    Value: !If
+      - HasDomain
+      - !If
+        - HasCert
+        - !Sub "https://${DomainName}/api/health"
+        - !Sub "http://${DomainName}/api/health"
+      - !Sub "http://${ALB.DNSName}/api/health"
+
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Condition: UseRDS
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  S3BucketName:
+    Description: S3 bucket for reports and KB
+    Value: !Ref S3Bucket
+
+  EC2InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref EC2Instance

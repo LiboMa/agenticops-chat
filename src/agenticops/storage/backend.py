@@ -158,3 +158,24 @@ def get_storage_backend() -> StorageBackend:
         else:
             _backend = LocalBackend(base_dir=settings.reports_dir)
     return _backend
+
+
+# ── KB File Storage Factory ──────────────────────────────────────────
+
+_kb_backend: StorageBackend | None = None
+
+
+def get_kb_backend() -> StorageBackend:
+    """KB file storage backend (local dir or S3) for markdown SOPs/cases."""
+    global _kb_backend
+    if _kb_backend is None:
+        from agenticops.config import settings
+        if settings.kb_storage == "s3":
+            _kb_backend = S3Backend(
+                bucket=settings.kb_s3_bucket,
+                prefix=settings.kb_s3_prefix,
+                region=settings.kb_s3_region,
+            )
+        else:
+            _kb_backend = LocalBackend(base_dir=settings.knowledge_base_dir)
+    return _kb_backend

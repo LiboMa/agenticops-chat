@@ -1254,188 +1254,137 @@ def logs_entity(
 @app.command()
 def init(
     yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
+    profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
 ):
-    """Interactive setup wizard for AgenticOps."""
-    import re
-    import shutil
-    from rich.prompt import Prompt, Confirm
+    """Interactive setup wizard for AgenticOps.
+
+    Guides you through 7 steps: dependency check, Bedrock config, deployment
+    profile, AWS accounts, pipeline behavior, notifications, and integrations.
+    """
     from agenticops.config import PROJECT_ROOT
+    from agenticops.cli.init_helpers import run_init_wizard
 
     env_path = PROJECT_ROOT / ".env"
-    env_vars: dict[str, str] = {}
-
-    # ── Step 0: Welcome Banner ───────────────────────────────────────────
-    console.print()
-    console.print(Rule("[bold blue]AgenticOps Setup Wizard[/bold blue]"))
-    console.print()
-    console.print("  This wizard will guide you through essential configuration.")
-    console.print("  Settings are saved to [cyan].env[/cyan] — edit anytime.\n")
-
-    if env_path.exists():
-        console.print("[yellow]Existing .env detected.[/yellow]")
-        if not yes:
-            reconfigure = Confirm.ask("Reconfigure? (No = skip to DB init)", default=False)
-            if not reconfigure:
-                console.print("[dim]Skipping configuration steps...[/dim]")
-                _init_finalize(env_path, env_vars)
-                return
-        else:
-            console.print("[dim]--yes: reconfiguring with defaults...[/dim]")
-
-    # ── Step 1: AWS Bedrock (Essential) ──────────────────────────────────
-    console.print(Rule("[bold]Step 1/4 — AWS Bedrock[/bold]"))
-    console.print()
-
-    # Region
-    default_region = "us-east-1"
-    if yes:
-        region = default_region
-    else:
-        region = Prompt.ask("Bedrock region", default=default_region)
-        while not re.match(r"^[a-z]{2}-[a-z]+-\d+$", region):
-            console.print("[red]Invalid region format (e.g., us-east-1)[/red]")
-            region = Prompt.ask("Bedrock region", default=default_region)
-    env_vars["AIOPS_BEDROCK_REGION"] = region
-
-    # Model picker
-    models = {
-        "1": ("Claude Opus 4.6", "global.anthropic.claude-opus-4-6-v1"),
-        "2": ("Claude Sonnet 4.6", "global.anthropic.claude-sonnet-4-6-v1"),
-        "3": ("Claude Haiku 4.5", "global.anthropic.claude-haiku-4-5-20251001-v1:0"),
-    }
-    haiku_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    sonnet_id = "global.anthropic.claude-sonnet-4-6-v1"
-    opus_id = "global.anthropic.claude-opus-4-6-v1"
-
-    if yes:
-        choice = "2"
-    else:
-        console.print("\n  Select primary Bedrock model:")
-        console.print("    [bold][1][/bold] Claude Opus 4.6    (strongest reasoning, higher cost)")
-        console.print("    [bold][2][/bold] Claude Sonnet 4.6  (balanced performance/cost)  [dim]← default[/dim]")
-        console.print("    [bold][3][/bold] Claude Haiku 4.5   (fastest, lowest cost)")
-        console.print("    [bold][4][/bold] Custom model ID")
-        choice = Prompt.ask("\n  Choice", choices=["1", "2", "3", "4"], default="2")
-
-    if choice == "4":
-        model_id = Prompt.ask("Custom model ID")
-        env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
-        env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-        env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
-    else:
-        _, model_id = models[choice]
-        env_vars["AIOPS_BEDROCK_MODEL_ID"] = model_id
-        # Auto-derive cheap + strong
-        if choice == "1":  # Opus
-            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
-        elif choice == "2":  # Sonnet
-            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = opus_id
-        else:  # Haiku
-            env_vars["AIOPS_BEDROCK_MODEL_ID_CHEAP"] = haiku_id
-            env_vars["AIOPS_BEDROCK_MODEL_ID_STRONG"] = sonnet_id
-
-    console.print(f"\n  [green]Primary:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID']}")
-    console.print(f"  [green]Economy:[/green] {env_vars['AIOPS_BEDROCK_MODEL_ID_CHEAP']}")
-    console.print(f"  [green]Strong:[/green]  {env_vars['AIOPS_BEDROCK_MODEL_ID_STRONG']}")
-
-    # Optional AWS connectivity test
-    if not yes:
-        if Confirm.ask("\n  Test AWS connectivity?", default=False):
-            try:
-                import boto3
-                sts = boto3.client("sts", region_name=region)
-                identity = sts.get_caller_identity()
-                console.print(f"  [green]OK[/green] — Account: {identity['Account']}, ARN: {identity['Arn']}")
-            except Exception as e:
-                console.print(f"  [yellow]AWS check failed: {e}[/yellow]")
-                console.print("  [dim]You can fix credentials later.[/dim]")
-
-    # ── Step 2: Pipeline Behavior (Recommended) ─────────────────────────
-    console.print()
-    console.print(Rule("[bold]Step 2/4 — Pipeline Behavior[/bold]"))
-    console.print()
-
-    if yes:
-        env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
-        env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
-        env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
-        console.print("  [dim]Using defaults: auto-fix=true, auto-approve L0/L1=true, notifications=true[/dim]")
-    else:
-        skip = Confirm.ask("  Skip pipeline config? (use defaults)", default=False)
-        if skip:
-            env_vars["AIOPS_AUTO_FIX_ENABLED"] = "true"
-            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = "true"
-            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = "true"
-            console.print("  [dim]Using defaults.[/dim]")
-        else:
-            auto_fix = Confirm.ask("  Enable auto-fix pipeline (RCA → SRE → Approve → Execute)?", default=True)
-            env_vars["AIOPS_AUTO_FIX_ENABLED"] = str(auto_fix).lower()
-
-            auto_approve = Confirm.ask("  Auto-approve L0/L1 fix plans?", default=True)
-            env_vars["AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1"] = str(auto_approve).lower()
-
-            notifications = Confirm.ask("  Enable auto-notifications on pipeline events?", default=True)
-            env_vars["AIOPS_NOTIFICATIONS_ENABLED"] = str(notifications).lower()
-
-    # ── Step 3: Report Storage (Recommended) ─────────────────────────────
-    console.print()
-    console.print(Rule("[bold]Step 3/4 — Report Storage[/bold]"))
-    console.print()
-
-    if yes:
-        env_vars["AIOPS_REPORT_STORAGE"] = "local"
-        console.print(f"  [dim]Using default: local storage ({settings.reports_dir})[/dim]")
-    else:
-        skip = Confirm.ask("  Skip report storage config? (use local)", default=True)
-        if skip:
-            env_vars["AIOPS_REPORT_STORAGE"] = "local"
-        else:
-            _init_report_storage(env_vars)
-
-    # ── Step 4: Optional Integrations ────────────────────────────────────
-    console.print()
-    console.print(Rule("[bold]Step 4/4 — Optional Integrations[/bold]"))
-    console.print()
-
-    if yes:
-        console.print("  [dim]Skipping optional integrations.[/dim]")
-    else:
-        # IM Integration
-        if Confirm.ask("  Configure an IM platform (Feishu/Slack/DingTalk/WeCom)?", default=False):
-            im_choice = Prompt.ask(
-                "    Platform",
-                choices=["feishu", "slack", "dingtalk", "wecom"],
-                default="feishu",
-            )
-            _init_copy_template(
-                PROJECT_ROOT / "config" / "im-apps.yaml.example",
-                PROJECT_ROOT / "config" / "im-apps.yaml",
-            )
-            console.print(f"\n    [green]Copied[/green] config/im-apps.yaml — fill in your {im_choice} credentials.")
-            if im_choice == "feishu":
-                console.print("    [dim]Docs: https://open.feishu.cn/app[/dim]")
-            elif im_choice == "slack":
-                console.print("    [dim]Docs: https://api.slack.com/apps[/dim]")
-            elif im_choice == "dingtalk":
-                console.print("    [dim]Docs: https://open-dev.dingtalk.com[/dim]")
-            elif im_choice == "wecom":
-                console.print("    [dim]Docs: https://work.weixin.qq.com/wework_admin[/dim]")
-
-        # Datadog
-        if Confirm.ask("  Configure Datadog integration?", default=False):
-            dd_api_key = Prompt.ask("    Datadog API key")
-            dd_app_key = Prompt.ask("    Datadog Application key")
-            dd_site = Prompt.ask("    Datadog site", default="datadoghq.com")
-            env_vars["AIOPS_MONITORING_PROVIDERS"] = "datadog"
-            env_vars["AIOPS_DATADOG_API_KEY"] = dd_api_key
-            env_vars["AIOPS_DATADOG_APP_KEY"] = dd_app_key
-            env_vars["AIOPS_DATADOG_SITE"] = dd_site
-            console.print("    [green]Datadog configured.[/green]")
-
-    # ── Finalize ─────────────────────────────────────────────────────────
+    env_vars = run_init_wizard(yes=yes, profile=profile)
     _init_finalize(env_path, env_vars)
+
+
+@app.command()
+def quickstart(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
+    profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
+    start: bool = typer.Option(True, "--start/--no-start", help="Start services after init"),
+    scan: bool = typer.Option(False, "--scan", help="Run initial resource scan after start"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind"),
+):
+    """One-click setup: init + start + optional scan.
+
+    Runs the full init wizard, starts the service, and optionally triggers
+    an initial resource scan.
+
+    Examples:
+      aiops quickstart --yes               # fully automated local setup
+      aiops quickstart --yes --no-start     # init only, don't start services
+      aiops quickstart --yes --scan         # init, start, and scan
+      aiops quickstart --profile cloud      # interactive cloud setup
+    """
+    import time as _time
+    from agenticops.config import PROJECT_ROOT
+    from agenticops.cli.init_helpers import run_init_wizard, check_dependencies
+
+    env_path = PROJECT_ROOT / ".env"
+
+    # Step 1: Dependency check
+    console.print()
+    console.print(Rule("[bold blue]AgenticOps Quickstart[/bold blue]"))
+    console.print()
+    results = check_dependencies(verbose=True)
+    if not results.get("python") or not results.get("pip_packages"):
+        console.print("[red]Critical dependencies missing. Aborting.[/red]")
+        raise typer.Exit(1)
+
+    # Step 2: Full init wizard
+    env_vars = run_init_wizard(yes=yes, profile=profile)
+    _init_finalize(env_path, env_vars)
+
+    if not start:
+        console.print()
+        console.print("[green]Setup complete.[/green] Run [cyan]aiops service start[/cyan] when ready.")
+        return
+
+    # Step 3: Start service
+    console.print()
+    console.print(Rule("[bold]Starting Services[/bold]"))
+    console.print()
+
+    # Check for existing service
+    existing = _read_pid()
+    if existing:
+        console.print(f"[yellow]Service already running (PID {existing}). Skipping start.[/yellow]")
+    else:
+        be_pid = _start_backend(host, port)
+        console.print(f"[bold green]Service started (PID {be_pid})[/bold green]")
+        _print_service_info(host, port)
+
+        # Wait for readiness
+        console.print("\n  Waiting for service readiness...", end="")
+        import httpx
+
+        ready = False
+        for _ in range(30):
+            try:
+                resp = httpx.get(f"http://{host}:{port}/api/health", timeout=2)
+                if resp.status_code == 200:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            _time.sleep(0.5)
+            console.print(".", end="")
+
+        if ready:
+            console.print(" [green]ready![/green]")
+        else:
+            console.print(" [yellow]timeout — service may still be starting.[/yellow]")
+
+    # Step 4: Optional scan
+    if scan:
+        console.print()
+        console.print(Rule("[bold]Initial Resource Scan[/bold]"))
+        console.print()
+        try:
+            import httpx
+
+            # Create a quickstart chat session
+            resp = httpx.post(
+                f"http://{host}:{port}/api/chat/sessions",
+                json={"name": "quickstart"},
+                timeout=10,
+            )
+            if resp.status_code in (200, 201):
+                session_id = resp.json().get("session_id") or resp.json().get("id")
+                console.print(f"  Created chat session: {session_id}")
+                console.print("  Sending scan command... (check web dashboard for results)")
+                httpx.post(
+                    f"http://{host}:{port}/api/chat/sessions/{session_id}/messages",
+                    json={"content": "scan all resources"},
+                    timeout=10,
+                )
+                console.print("  [green]Scan triggered.[/green]")
+            else:
+                console.print(f"  [yellow]Could not create session: {resp.status_code}[/yellow]")
+        except Exception as e:
+            console.print(f"  [yellow]Scan trigger failed: {e}[/yellow]")
+
+    # Summary
+    console.print()
+    console.print(Rule("[bold green]Quickstart Complete[/bold green]"))
+    console.print()
+    console.print(f"  Dashboard : http://{host}:{port}/app/")
+    console.print(f"  API       : http://{host}:{port}/api/health")
+    console.print(f"  CLI chat  : [cyan]aiops chat[/cyan]")
+    console.print()
 
 
 def _init_finalize(env_path: Path, env_vars: dict[str, str]) -> None:
