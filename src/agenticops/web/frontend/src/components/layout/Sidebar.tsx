@@ -6,6 +6,7 @@ const NAV_SECTIONS = [
     label: "Ops Hub",
     items: [
       { to: "/app", label: "Overview", end: true, icon: "🏠" },
+      { to: "/app/chat", label: "Chat", end: false, icon: "💬" },
       { to: "/app/dashboard", label: "Dashboard", end: false, icon: "📊" },
       { to: "/app/issues", label: "Issues", end: false, icon: "🚨" },
       { to: "/app/notifications", label: "Notifications", end: false, icon: "🔔" },
@@ -25,7 +26,6 @@ const NAV_SECTIONS = [
     label: "AI Center",
     items: [
       { to: "/app/ai", label: "Memory & Proactive", end: false, icon: "🧠" },
-      { to: "/app/chat", label: "Chat", end: false, icon: "💬" },
     ],
   },
   {
