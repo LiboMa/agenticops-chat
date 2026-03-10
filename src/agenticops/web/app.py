@@ -996,6 +996,58 @@ async def api_scan_focus_options():
     }
 
 
+@app.get("/api/settings")
+async def api_get_settings():
+    """Return all toggleable runtime settings."""
+    return {
+        "scan_focus": settings.scan_focus,
+        "executor_enabled": settings.executor_enabled,
+        "auto_fix_enabled": settings.auto_fix_enabled,
+        "auto_rca_enabled": settings.auto_rca_enabled,
+        "notifications_enabled": settings.notifications_enabled,
+        "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
+    }
+
+
+@app.patch("/api/settings")
+async def api_update_settings(body: dict = Body(...)):
+    """Update runtime settings (non-persistent, resets on restart)."""
+    from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
+
+    BOOL_KEYS = {
+        "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
+        "notifications_enabled", "executor_auto_approve_l0_l1",
+    }
+    ALL_KEYS = BOOL_KEYS | {"scan_focus"}
+    unknown = set(body.keys()) - ALL_KEYS
+    if unknown:
+        raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
+
+    for key in BOOL_KEYS:
+        if key in body:
+            if not isinstance(body[key], bool):
+                raise HTTPException(400, f"{key} must be a boolean")
+            setattr(settings, key, body[key])
+
+    if "scan_focus" in body:
+        val = body["scan_focus"]
+        parts = [p.strip() for p in val.split(",")]
+        for p in parts:
+            if p not in VALID_SCAN_FOCUS:
+                raise HTTPException(400, f"Invalid scan_focus value: {p}")
+        settings.scan_focus = val
+        set_scan_focus(val)
+
+    return {
+        "scan_focus": settings.scan_focus,
+        "executor_enabled": settings.executor_enabled,
+        "auto_fix_enabled": settings.auto_fix_enabled,
+        "auto_rca_enabled": settings.auto_rca_enabled,
+        "notifications_enabled": settings.notifications_enabled,
+        "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
+    }
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def api_health():
     """Health check endpoint."""

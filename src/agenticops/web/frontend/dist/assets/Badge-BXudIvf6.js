@@ -1,1 +1,0 @@
-import{R as r,j as s}from"./vendor-DllwiKej.js";import{c as o}from"./index-DSrps5Oh.js";const x=r.memo(function({children:e,className:t}){return s.jsx("span",{className:o("inline-flex items-center px-2.5 py-0.5 rounded-full border border-slate-200 text-xs font-medium",t),children:e})});export{x as B};

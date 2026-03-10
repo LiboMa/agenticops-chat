@@ -152,21 +152,9 @@ export default function FixPlanDetail() {
             Remediation Steps
           </h2>
           {p.steps.length > 0 ? (
-            <ol className="space-y-3">
+            <ol className="space-y-4">
               {p.steps.map((step, i) => (
-                <li key={i} className="flex gap-3">
-                  <span className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-semibold">
-                    {i + 1}
-                  </span>
-                  <div
-                    className="text-slate-700 text-sm leading-relaxed pt-0.5 report-content"
-                    dangerouslySetInnerHTML={{
-                      __html: renderMarkdown(
-                        typeof step === "string" ? step : JSON.stringify(step),
-                      ),
-                    }}
-                  />
-                </li>
+                <RunbookStep key={i} index={i + 1} step={step} />
               ))}
             </ol>
           ) : (
@@ -177,9 +165,9 @@ export default function FixPlanDetail() {
           {p.pre_checks.length > 0 && (
             <div className="mt-6">
               <h3 className="font-semibold text-slate-900 mb-2">Pre-checks</h3>
-              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
+              <ul className="space-y-1.5">
                 {p.pre_checks.map((c, i) => (
-                  <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  <CheckItem key={i} item={c} />
                 ))}
               </ul>
             </div>
@@ -189,9 +177,9 @@ export default function FixPlanDetail() {
           {p.post_checks.length > 0 && (
             <div className="mt-6">
               <h3 className="font-semibold text-slate-900 mb-2">Post-checks</h3>
-              <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
+              <ul className="space-y-1.5">
                 {p.post_checks.map((c, i) => (
-                  <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  <CheckItem key={i} item={c} />
                 ))}
               </ul>
             </div>
@@ -199,14 +187,7 @@ export default function FixPlanDetail() {
 
           {/* Rollback plan */}
           {Object.keys(p.rollback_plan).length > 0 && (
-            <div className="mt-6">
-              <h3 className="font-semibold text-slate-900 mb-2">
-                Rollback Plan
-              </h3>
-              <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-sm font-mono overflow-x-auto">
-                {JSON.stringify(p.rollback_plan, null, 2)}
-              </pre>
-            </div>
+            <RollbackPlan plan={p.rollback_plan} />
           )}
         </CardBody>
       </Card>
@@ -403,6 +384,127 @@ export default function FixPlanDetail() {
           </CardBody>
         </Card>
       )}
+    </div>
+  );
+}
+
+/* ── Runbook Components ─────────────────────────────────────────── */
+
+function RunbookStep({ index, step }: { index: number; step: unknown }) {
+  const isObj = typeof step === "object" && step !== null && !Array.isArray(step);
+  const s = isObj ? (step as Record<string, unknown>) : null;
+  const action = s?.action ?? s?.description ?? s?.step;
+  const command = s?.command as string | undefined;
+  const text = typeof step === "string" ? step : (typeof action === "string" ? action : null);
+
+  return (
+    <li className="border border-slate-200 rounded-lg p-4 bg-white">
+      <div className="flex gap-3">
+        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-semibold">
+          {index}
+        </span>
+        <div className="flex-1 min-w-0">
+          {text ? (
+            <div
+              className="text-slate-700 text-sm leading-relaxed report-content"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+            />
+          ) : (
+            <pre className="text-slate-700 text-sm whitespace-pre-wrap">
+              {JSON.stringify(step, null, 2)}
+            </pre>
+          )}
+          {command && <CommandBlock command={command} />}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function CommandBlock({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="mt-3 relative group">
+      <div className="bg-slate-900 text-slate-100 rounded-lg p-3 text-sm font-mono overflow-x-auto">
+        <span className="text-slate-500 select-none">$ </span>
+        {command}
+      </div>
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+function CheckItem({ item }: { item: unknown }) {
+  const isObj = typeof item === "object" && item !== null && !Array.isArray(item);
+  const s = isObj ? (item as Record<string, unknown>) : null;
+  const text = typeof item === "string" ? item : (s?.check ?? s?.description ?? s?.action);
+  const command = s?.command as string | undefined;
+
+  return (
+    <li className="flex items-start gap-2 text-sm text-slate-600">
+      <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <div className="flex-1 min-w-0">
+        <span>{typeof text === "string" ? text : JSON.stringify(item)}</span>
+        {command && <CommandBlock command={command} />}
+      </div>
+    </li>
+  );
+}
+
+function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
+  const trigger = plan.trigger as string | undefined;
+  const steps = Array.isArray(plan.steps) ? plan.steps : null;
+
+  return (
+    <div className="mt-6 border border-amber-200 rounded-lg bg-amber-50 overflow-hidden">
+      <div className="px-4 py-3 border-b border-amber-200">
+        <h3 className="font-semibold text-slate-900">Rollback Plan</h3>
+      </div>
+      <div className="p-4 space-y-3">
+        {trigger && (
+          <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-100 rounded-lg px-3 py-2">
+            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span><strong>Trigger:</strong> {trigger}</span>
+          </div>
+        )}
+        {steps ? (
+          <ol className="space-y-3">
+            {steps.map((step: unknown, i: number) => (
+              <RunbookStep key={i} index={i + 1} step={step} />
+            ))}
+          </ol>
+        ) : (
+          <dl className="space-y-2 text-sm">
+            {Object.entries(plan)
+              .filter(([k]) => k !== "trigger" && k !== "steps")
+              .map(([k, v]) => (
+                <div key={k}>
+                  <dt className="font-medium text-slate-700 capitalize">{k.replace(/_/g, " ")}</dt>
+                  <dd className="text-slate-600 mt-0.5">
+                    {typeof v === "string" ? v : <pre className="bg-slate-900 text-slate-100 rounded-lg p-3 text-sm font-mono overflow-x-auto mt-1">{JSON.stringify(v, null, 2)}</pre>}
+                  </dd>
+                </div>
+              ))}
+          </dl>
+        )}
+      </div>
     </div>
   );
 }

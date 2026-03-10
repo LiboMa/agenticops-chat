@@ -7,23 +7,11 @@ interface Props {
   streaming?: boolean;
   detailLevel?: string;
   onDetailLevelChange?: (level: string) => void;
-  scanFocus?: string;
-  onScanFocusChange?: (focus: string) => void;
 }
-
-const FOCUS_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "computing", label: "Compute" },
-  { value: "networking", label: "Network" },
-  { value: "databases", label: "Database" },
-  { value: "storage", label: "Storage" },
-  { value: "security", label: "Security" },
-  { value: "billing", label: "Billing" },
-] as const;
 
 const ACCEPTED_TYPES = ".txt,.log,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.png,.jpg,.jpeg,.py,.sh,.xml,.tf";
 
-export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, onDetailLevelChange, scanFocus, onScanFocusChange }: Props) {
+export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, onDetailLevelChange }: Props) {
   const [input, setInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,30 +74,6 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
             <option value="medium">Medium</option>
             <option value="detailed">Detailed</option>
           </select>
-        )}
-
-        {/* Scan focus selector */}
-        {onScanFocusChange && (
-          <div className="self-end flex flex-wrap gap-1 max-w-[200px]">
-            {FOCUS_OPTIONS.map((opt) => {
-              const selected = scanFocus === opt.value || (!scanFocus && opt.value === "all");
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => onScanFocusChange(opt.value)}
-                  disabled={disabled}
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
-                    selected
-                      ? "bg-primary-100 border-primary-400 text-primary-700 font-medium"
-                      : "bg-white border-slate-200 text-slate-500 hover:border-primary-300 hover:text-primary-600"
-                  }`}
-                  title={`Focus: ${opt.label}`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
         )}
 
         {/* Paperclip / attach button */}

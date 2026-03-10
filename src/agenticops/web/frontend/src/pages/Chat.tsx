@@ -10,7 +10,6 @@ export default function Chat() {
   const { data: sessions } = useChatSessions();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailLevel, setDetailLevel] = useState("medium");
-  const [scanFocus, setScanFocus] = useState("all");
 
   // Auto-select first session
   useEffect(() => {
@@ -47,14 +46,12 @@ export default function Chat() {
               </div>
             )}
             <ChatInput
-              onSend={(msg, file) => sendMessage(msg, file, detailLevel, scanFocus)}
+              onSend={(msg, file) => sendMessage(msg, file, detailLevel)}
               onCancel={cancel}
               disabled={streaming}
               streaming={streaming}
               detailLevel={detailLevel}
               onDetailLevelChange={setDetailLevel}
-              scanFocus={scanFocus}
-              onScanFocusChange={setScanFocus}
             />
           </>
         )}
