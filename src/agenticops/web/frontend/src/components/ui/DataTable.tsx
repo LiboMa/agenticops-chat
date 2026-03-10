@@ -55,7 +55,7 @@ function DataTableInner<T>({
 
   if (data.length === 0) {
     return (
-      <div className="p-8 text-center text-slate-400 text-sm">
+      <div className="p-8 text-center text-[#666] text-sm">
         {emptyMessage}
       </div>
     );
@@ -65,13 +65,13 @@ function DataTableInner<T>({
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
-          <tr className="border-b border-slate-200">
+          <tr className="border-b border-[#424242]">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  "px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider",
-                  col.sortable && "cursor-pointer select-none hover:text-slate-700",
+                  "px-6 py-3 text-left text-[11px] font-medium text-[#666] uppercase tracking-wider",
+                  col.sortable && "cursor-pointer select-none hover:text-[#9b9b9b]",
                   col.className,
                 )}
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
@@ -86,18 +86,18 @@ function DataTableInner<T>({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {sorted.map((row) => (
             <tr
               key={rowKey(row)}
               className={cn(
-                "hover:bg-slate-50 transition-colors",
+                "border-b border-[#424242]/50 hover:bg-[#383838] transition-colors duration-150",
                 onRowClick && "cursor-pointer",
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (
-                <td key={col.key} className={cn("px-6 py-3 text-sm text-slate-600", col.className)}>
+                <td key={col.key} className={cn("px-6 py-3 text-sm text-[#9b9b9b]", col.className)}>
                   {col.render(row)}
                 </td>
               ))}

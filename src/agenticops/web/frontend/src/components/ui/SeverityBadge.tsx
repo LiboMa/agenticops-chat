@@ -1,23 +1,23 @@
 import React from "react";
-import { colors } from "@/theme/colors";
 import { cn } from "@/lib/cn";
 
 interface SeverityBadgeProps {
   severity: "critical" | "high" | "medium" | "low";
 }
 
+const DOT_COLORS: Record<string, string> = {
+  critical: "bg-red-500",
+  high: "bg-orange-500",
+  medium: "bg-yellow-500",
+  low: "bg-[#9b9b9b]",
+};
+
 export const SeverityBadge = React.memo(function SeverityBadge({
   severity,
 }: SeverityBadgeProps) {
-  const style = colors.severity[severity];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider",
-        style.bg,
-        style.text,
-      )}
-    >
+    <span className="inline-flex items-center gap-1.5 text-xs text-[#9b9b9b]">
+      <span className={cn("w-2 h-2 rounded-full", DOT_COLORS[severity] ?? "bg-[#9b9b9b]")} />
       {severity}
     </span>
   );

@@ -27,7 +27,7 @@ export default function Anomalies() {
       sortable: true,
       sortValue: (a) => a.id,
       render: (a) => (
-        <span className="font-mono text-sm text-primary-600 font-medium">
+        <span className="font-mono text-sm text-blue-400 font-medium">
           I#{a.id}
         </span>
       ),
@@ -48,14 +48,14 @@ export default function Anomalies() {
       sortable: true,
       sortValue: (a) => a.title,
       render: (a) => (
-        <span className="font-medium text-slate-900">{a.title}</span>
+        <span className="font-medium text-[#ececec]">{a.title}</span>
       ),
     },
     {
       key: "resource",
       header: "Resource",
       render: (a) => (
-        <span className="text-sm text-slate-500 font-mono">
+        <span className="text-sm text-[#9b9b9b] font-mono">
           {a.resource_type}/{a.resource_id.slice(0, 20)}
         </span>
       ),
@@ -65,7 +65,7 @@ export default function Anomalies() {
       header: "Region",
       sortable: true,
       sortValue: (a) => a.region,
-      render: (a) => <span className="text-sm text-slate-500">{a.region}</span>,
+      render: (a) => <span className="text-sm text-[#9b9b9b]">{a.region}</span>,
     },
     {
       key: "status",
@@ -80,7 +80,7 @@ export default function Anomalies() {
       sortable: true,
       sortValue: (a) => a.detected_at,
       render: (a) => (
-        <span className="text-sm text-slate-500">
+        <span className="text-sm text-[#9b9b9b]">
           {formatShortDate(a.detected_at)}
         </span>
       ),
@@ -95,14 +95,14 @@ export default function Anomalies() {
 
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">
+          <h2 className="text-lg font-semibold text-[#ececec]">
             Issues{data ? ` (${data.length})` : ""}
           </h2>
           <div className="flex items-center gap-2">
             <select
               value={severity}
               onChange={(e) => setSeverity(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="border border-[#424242] rounded-lg px-3 py-1.5 text-sm bg-[#2f2f2f] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Severities</option>
               <option value="critical">Critical</option>
@@ -113,7 +113,7 @@ export default function Anomalies() {
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="border border-[#424242] rounded-lg px-3 py-1.5 text-sm bg-[#2f2f2f] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Statuses</option>
               <option value="open">Open</option>

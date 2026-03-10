@@ -2,15 +2,15 @@ import React from "react";
 import { cn } from "@/lib/cn";
 import type { IssueStatus } from "@/api/types";
 
-const STATUS_STYLES: Record<IssueStatus, string> = {
-  open: "bg-red-100 text-red-700",
-  investigating: "bg-amber-100 text-amber-700",
-  root_cause_identified: "bg-orange-100 text-orange-700",
-  fix_planned: "bg-blue-100 text-blue-700",
-  fix_approved: "bg-indigo-100 text-indigo-700",
-  fix_executed: "bg-emerald-100 text-emerald-700",
-  resolved: "bg-green-100 text-green-700",
-  acknowledged: "bg-amber-100 text-amber-700",
+const DOT_COLORS: Record<IssueStatus, string> = {
+  open: "bg-red-500",
+  investigating: "bg-amber-500",
+  root_cause_identified: "bg-orange-500",
+  fix_planned: "bg-blue-500",
+  fix_approved: "bg-indigo-500",
+  fix_executed: "bg-emerald-500",
+  resolved: "bg-green-500",
+  acknowledged: "bg-amber-400",
 };
 
 const STATUS_LABELS: Record<IssueStatus, string> = {
@@ -30,12 +30,8 @@ export const IssueStatusBadge = React.memo(function IssueStatusBadge({
   status: IssueStatus;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-        STATUS_STYLES[status] ?? STATUS_STYLES.open,
-      )}
-    >
+    <span className="inline-flex items-center gap-1.5 text-xs text-[#9b9b9b]">
+      <span className={cn("w-2 h-2 rounded-full", DOT_COLORS[status] ?? "bg-[#666]")} />
       {STATUS_LABELS[status] ?? status}
     </span>
   );
