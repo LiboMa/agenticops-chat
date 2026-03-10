@@ -270,6 +270,44 @@ class DeepRCAEngine:
         ):
             result.verified = await self._self_verify(result)
 
+            # Re-iteration on verification failure (Voyager CriticAgent pattern)
+            if not result.verified and result.iterations < self.MAX_ITERATIONS + 1:
+                critique = next(
+                    (e.content for e in result.evidence_chain
+                     if e.source == "self_verification"),
+                    "Verification failed",
+                )
+                context["self_verification_critique"] = critique
+                logger.info("Self-verify failed, re-iterating with critique")
+
+                try:
+                    prompt = self._build_deep_prompt(
+                        title=anomaly_title,
+                        description=anomaly_description,
+                        resource_id=resource_id,
+                        resource_type=resource_type,
+                        severity=severity,
+                        context=context,
+                        memory_hints=result.memory_hits,
+                        evidence_chain=result.evidence_chain,
+                        iteration=result.iterations + 1,
+                    )
+                    response = self._llm.invoke(prompt)
+                    result.analysis = self._parse_response(response)
+                    result.analysis.llm_response = response
+                    result.iterations += 1
+                    result.iteration_history.append({
+                        "iteration": result.iterations,
+                        "confidence": result.analysis.confidence_score,
+                        "evidence_count": len(result.evidence_chain),
+                        "root_cause_preview": result.analysis.root_cause[:100],
+                        "trigger": "self_verify_re_iteration",
+                    })
+                    # Re-verify
+                    result.verified = await self._self_verify(result)
+                except Exception as e:
+                    logger.warning("Re-iteration after verify failed: %s", e)
+
         # ── Step 6: WAL write ─────────────────────────────────
         await self._wal_write(result, anomaly_title, resource_id, resource_type, severity)
 
@@ -361,6 +399,11 @@ class DeepRCAEngine:
 
         if iteration > 1:
             sections.append(f"\n*This is iteration {iteration}. Previous attempts had insufficient confidence.*")
+
+        # Self-verification critique (re-iteration)
+        if context.get("self_verification_critique"):
+            sections.append(f"\n## Self-Verification Critique\n{context['self_verification_critique']}")
+            sections.append("*Address this critique in your revised analysis.*")
 
         sections.append("""
 ## Instructions

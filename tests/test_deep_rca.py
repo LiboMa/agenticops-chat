@@ -428,6 +428,12 @@ class TestSelfVerification:
             # Self-verification: challenge it
             json.dumps({"valid": False, "critique": "Correlation not causation",
                         "adjusted_confidence": 0.6}),
+            # Re-iteration with critique
+            json.dumps({"root_cause": "SG misconfiguration confirmed", "confidence_score": 0.85,
+                        "contributing_factors": ["SG rule"], "recommendations": ["Fix SG"],
+                        "related_resources": []}),
+            # Re-verify: accept
+            json.dumps({"valid": True, "adjusted_confidence": 0.85}),
         ]
 
         base = RCAEngine()
@@ -439,8 +445,12 @@ class TestSelfVerification:
             anomaly_description="P99 latency > 5s",
         ))
 
-        assert not result.verified
-        assert result.analysis.confidence_score == 0.6  # Adjusted down
+        # Should have re-iterated and now be verified
+        assert result.verified
+        assert result.iterations >= 2  # Original + re-iteration
+        # Check iteration history has re-iteration entry
+        re_iters = [h for h in result.iteration_history if h.get("trigger") == "self_verify_re_iteration"]
+        assert len(re_iters) >= 1
 
 
 class TestEvidenceModel:
