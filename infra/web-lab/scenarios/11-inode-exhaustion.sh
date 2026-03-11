@@ -122,25 +122,37 @@ df -h ${MOUNT_POINT} | tail -1"
             echo "  Request $i: HTTP $code"
         done
 
-        # === Phase 3: Rotate logs + restart gunicorn → guaranteed crash ===
+        # === Phase 3: Stop service, seal all inodes, restart → guaranteed crash ===
+        # The mv-and-restart approach doesn't reliably exhaust inodes because
+        # the initial fill may leave a few inodes free. Instead:
+        # 1. Stop gunicorn (graceful)
+        # 2. Delete log files (frees 2+ inodes)
+        # 3. Fill those freed inodes with junk
+        # 4. Start gunicorn → can't create log files → ENOSPC → crash
         log ""
-        log "=== Phase 3: Log rotation + service restart ==="
-        log "Rotating gunicorn logs (rename current → .rotated)..."
-        ssm_run_wait "mv ${LOG_DIR}/access.log ${LOG_DIR}/access.log.rotated 2>/dev/null; \
-mv ${LOG_DIR}/error.log ${LOG_DIR}/error.log.rotated 2>/dev/null; \
-echo 'Logs rotated. Old handles still open for running process.'; \
-ls -la ${LOG_DIR}/"
+        log "=== Phase 3: Stop service + seal inodes + restart → guaranteed crash ==="
+
+        log "Stopping gunicorn..."
+        ssm_run_wait 'systemctl stop weblab; echo "Stopped"'
+
+        log "Deleting log files to free inodes, then filling them..."
+        ssm_run_wait "rm -f ${LOG_DIR}/access.log ${LOG_DIR}/error.log ${LOG_DIR}/access.log.rotated ${LOG_DIR}/error.log.rotated 2>/dev/null; \
+cd ${FILL_DIR} && i=70000; while touch \$i 2>/dev/null; do i=\$((i+1)); done; \
+echo \"Filled to file \$((i-1))\"; \
+df -i ${MOUNT_POINT} | tail -1; \
+touch ${MOUNT_POINT}/verify-sealed 2>&1 || echo 'CONFIRMED: 0 free inodes'"
 
         log ""
-        log "Restarting weblab service..."
-        log "gunicorn will try to create new log files → ENOSPC → crash"
-        ssm_run_wait "systemctl restart weblab 2>&1; echo 'Exit code:' \$?"
+        log "Starting weblab service..."
+        log "gunicorn will try to create log files → ENOSPC → crash"
+        ssm_run_wait "systemctl start weblab 2>&1; echo 'Exit code:' \$?"
 
-        # Wait a moment for service to fail
-        sleep 5
+        # Wait for systemd to retry and give up (RestartSec=5, StartLimitBurst=5)
+        log "Waiting 30s for systemd restart retries to exhaust..."
+        sleep 30
 
         log ""
-        log "Service status after restart attempt:"
+        log "Service status after restart attempts:"
         ssm_run_wait 'systemctl status weblab --no-pager 2>&1 | head -20'
         ssm_run_wait 'journalctl -u weblab --no-pager -n 20 --since "2 min ago" 2>/dev/null | tail -15'
 
@@ -270,10 +282,10 @@ ls -la ${LOG_DIR}/"
         log "File creation test:"
         ssm_run_wait "touch ${MOUNT_POINT}/test-recovery && echo 'File creation OK' && rm -f ${MOUNT_POINT}/test-recovery || echo 'STILL BLOCKED'"
 
-        # Step 4: Restart weblab
+        # Step 4: Reset systemd failure counter and restart weblab
         log ""
-        log "Restarting weblab service..."
-        ssm_run_wait 'systemctl restart weblab'
+        log "Resetting systemd failure counter and restarting weblab..."
+        ssm_run_wait 'systemctl reset-failed weblab 2>/dev/null; systemctl restart weblab'
 
         sleep 5
         wait_for_health 200 90

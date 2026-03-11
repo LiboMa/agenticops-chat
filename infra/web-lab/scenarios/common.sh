@@ -38,10 +38,13 @@ for item in data:
 ssm_run() {
     local cmd="$1"
     local timeout="${2:-30}"
+    # Build JSON properly to handle double quotes, newlines, etc. in commands
+    local params_json
+    params_json=$(python3 -c "import json,sys; print(json.dumps({'commands':[sys.stdin.read()]}))" <<< "$cmd")
     aws ssm send-command \
         --instance-ids "$INSTANCE_ID" \
         --document-name "AWS-RunShellScript" \
-        --parameters "commands=[\"$cmd\"]" \
+        --parameters "$params_json" \
         --timeout-seconds "$timeout" \
         --region "$REGION" \
         --query 'Command.CommandId' --output text
