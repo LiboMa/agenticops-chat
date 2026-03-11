@@ -1,0 +1,51 @@
+# MCP (Model Context Protocol) Servers
+# Copy this file to mcp-servers.yaml and configure your MCP servers.
+#
+# Each server entry:
+#   name:      Unique name (used as tool prefix: name_toolname)
+#   enabled:   true/false (default: true)
+#   transport: "stdio" or "sse" (default: stdio)
+#   prefix:    Add name prefix to tool names (default: true)
+#
+# Stdio transport (subprocess):
+#   command:   Executable path or command
+#   args:      List of arguments
+#   env:       Extra environment variables (optional)
+#
+# SSE transport (HTTP):
+#   url:       SSE endpoint URL
+#   headers:   HTTP headers (optional)
+
+servers:
+  # Example: Filesystem MCP server (read-only access to /tmp)
+  # filesystem:
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  #   enabled: true
+
+  # Example: GitHub MCP server
+  # github:
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-github"]
+  #   env:
+  #     GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+  #   enabled: true
+
+  # Example: Remote MCP server via SSE
+  # remote-tools:
+  #   transport: sse
+  #   url: "http://localhost:3001/sse"
+  #   headers:
+  #     Authorization: "Bearer ${MCP_TOKEN}"
+  #   enabled: true
+
+  # Example: AWS Documentation MCP server
+  # aws-docs:
+  #   transport: stdio
+  #   command: uvx
+  #   args: ["awslabs.aws-documentation-mcp-server@latest"]
+  #   env:
+  #     FASTMCP_LOG_LEVEL: "ERROR"
+  #   enabled: true
