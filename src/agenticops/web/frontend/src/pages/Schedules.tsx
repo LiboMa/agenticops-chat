@@ -11,8 +11,13 @@ import {
   useCreateSchedule,
   useUpdateSchedule,
   useDeleteSchedule,
+  useSkills,
+  useNotificationChannels,
 } from "@/hooks/useSchedules";
 import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
+
+const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;
+const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Schedule form modal                                                */
@@ -28,107 +33,145 @@ interface FormModalProps {
 function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps) {
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? "");
-  const [pipelineName, setPipelineName] = useState(initial?.pipeline_name ?? "");
+  const [pipelineName, setPipelineName] = useState(initial?.pipeline_name ?? "FullScan");
   const [cronExpression, setCronExpression] = useState(initial?.cron_expression ?? "");
   const [accountName, setAccountName] = useState(initial?.account_name ?? "");
   const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
 
+  // AgentChain fields (stored in config)
+  const initConfig = initial?.config ?? {};
+  const [prompt, setPrompt] = useState((initConfig.prompt as string) ?? "");
+  const [selectedSkills, setSelectedSkills] = useState<string[]>((initConfig.skills as string[]) ?? []);
+  const [reportType, setReportType] = useState((initConfig.report_type as string) ?? "");
+  const [selectedChannels, setSelectedChannels] = useState<string[]>((initConfig.notify_channels as string[]) ?? []);
+  const [timeout, setTimeout] = useState((initConfig.timeout_seconds as number) ?? 300);
+
+  const { data: skills } = useSkills();
+  const { data: channels } = useNotificationChannels();
+
+  const isAgentChain = pipelineName === "AgentChain";
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isEdit) {
-      const data: ScheduleUpdate = {
-        name,
-        pipeline_name: pipelineName,
-        cron_expression: cronExpression,
-        account_name: accountName || undefined,
-        is_enabled: isEnabled,
-      };
-      onSave(data);
-    } else {
-      const data: ScheduleCreate = {
-        name,
-        pipeline_name: pipelineName,
-        cron_expression: cronExpression,
-        account_name: accountName || undefined,
-        is_enabled: isEnabled,
-      };
-      onSave(data);
+    const config: Record<string, unknown> = {};
+    if (isAgentChain) {
+      config.prompt = prompt;
+      if (selectedSkills.length > 0) config.skills = selectedSkills;
+      if (reportType) config.report_type = reportType;
+      if (selectedChannels.length > 0) config.notify_channels = selectedChannels;
+      if (timeout !== 300) config.timeout_seconds = timeout;
     }
+    const base = {
+      name,
+      pipeline_name: pipelineName,
+      cron_expression: cronExpression,
+      account_name: accountName || undefined,
+      is_enabled: isEnabled,
+      config,
+    };
+    onSave(isEdit ? (base as ScheduleUpdate) : (base as ScheduleCreate));
   }
 
+  function toggleItem(list: string[], item: string, setter: (v: string[]) => void) {
+    setter(list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  }
+
+  const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 overflow-y-auto py-8">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">
           {isEdit ? "Edit Schedule" : "New Schedule"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Pipeline</label>
-            <input
-              required
-              value={pipelineName}
-              onChange={(e) => setPipelineName(e.target.value)}
-              placeholder="scan, detect, report"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <select value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} className={inputCls}>
+              {PIPELINE_OPTIONS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Cron Expression
-            </label>
-            <input
-              required
-              value={cronExpression}
-              onChange={(e) => setCronExpression(e.target.value)}
-              placeholder="0 */6 * * *"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <label className="block text-sm font-medium text-slate-700 mb-1">Cron Expression</label>
+            <input required value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} placeholder="0 */6 * * *" className={`${inputCls} font-mono`} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Account Name (optional)
-            </label>
-            <input
-              value={accountName}
-              onChange={(e) => setAccountName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <label className="block text-sm font-medium text-slate-700 mb-1">Account Name (optional)</label>
+            <input value={accountName} onChange={(e) => setAccountName(e.target.value)} className={inputCls} />
           </div>
+
+          {/* AgentChain-specific fields */}
+          {isAgentChain && (
+            <div className="space-y-3 border-t border-slate-200 pt-3 mt-3">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">AgentChain Config</p>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Prompt *</label>
+                <textarea
+                  required
+                  rows={3}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Describe the task chain..."
+                  className={inputCls}
+                />
+              </div>
+              {skills && skills.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Skills</label>
+                  <div className="flex flex-wrap gap-2">
+                    {skills.map((s) => (
+                      <label key={s.name} className="inline-flex items-center gap-1 text-xs bg-slate-50 px-2 py-1 rounded cursor-pointer hover:bg-slate-100" title={s.description}>
+                        <input type="checkbox" checked={selectedSkills.includes(s.name)} onChange={() => toggleItem(selectedSkills, s.name, setSelectedSkills)} className="rounded border-slate-300" />
+                        {s.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {channels && channels.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Notify Channels</label>
+                  <div className="flex flex-wrap gap-2">
+                    {channels.map((c) => (
+                      <label key={c.name} className="inline-flex items-center gap-1 text-xs bg-slate-50 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
+                        <input type="checkbox" checked={selectedChannels.includes(c.name)} onChange={() => toggleItem(selectedChannels, c.name, setSelectedChannels)} className="rounded border-slate-300" />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Report Type</label>
+                  <select value={reportType} onChange={(e) => setReportType(e.target.value)} className={inputCls}>
+                    <option value="">None</option>
+                    {REPORT_TYPES.filter(Boolean).map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-28">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Timeout (s)</label>
+                  <input type="number" min={30} max={3600} value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} className={inputCls} />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
-            <input
-              id="schedule-enabled"
-              type="checkbox"
-              checked={isEnabled}
-              onChange={(e) => setIsEnabled(e.target.checked)}
-              className="rounded border-slate-200"
-            />
-            <label htmlFor="schedule-enabled" className="text-sm text-slate-700">
-              Enabled
-            </label>
+            <input id="schedule-enabled" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-slate-200" />
+            <label htmlFor="schedule-enabled" className="text-sm text-slate-700">Enabled</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">
               {saving ? "Saving..." : "Save"}
             </button>
           </div>

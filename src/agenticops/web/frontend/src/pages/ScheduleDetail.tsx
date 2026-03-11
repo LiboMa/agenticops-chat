@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSchedule, useScheduleExecutions, useRunSchedule } from "@/hooks/useSchedules";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -13,6 +14,7 @@ export default function ScheduleDetail() {
   const schedule = useSchedule(scheduleId);
   const executions = useScheduleExecutions(scheduleId);
   const runMut = useRunSchedule();
+  const [expandedExec, setExpandedExec] = useState<number | null>(null);
 
   if (schedule.isLoading) return <Spinner label="Loading schedule..." />;
   if (schedule.error)
@@ -99,9 +101,58 @@ export default function ScheduleDetail() {
           {Object.keys(s.config).length > 0 && (
             <div className="mt-4">
               <span className="text-slate-500 block text-sm mb-1">Config</span>
-              <pre className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 overflow-x-auto">
-                {JSON.stringify(s.config, null, 2)}
-              </pre>
+              {s.pipeline_name === "AgentChain" ? (
+                (() => {
+                  const cfg = s.config as Record<string, unknown>;
+                  const prompt = cfg.prompt as string | undefined;
+                  const skills = Array.isArray(cfg.skills) ? (cfg.skills as string[]) : [];
+                  const channels = Array.isArray(cfg.notify_channels) ? (cfg.notify_channels as string[]) : [];
+                  const reportType = cfg.report_type as string | undefined;
+                  const timeout = cfg.timeout_seconds as number | undefined;
+                  return (
+                    <div className="bg-slate-50 rounded-lg p-4 space-y-2 text-sm">
+                      {prompt && (
+                        <div>
+                          <span className="font-medium text-slate-700">Prompt:</span>
+                          <p className="mt-1 text-slate-600 whitespace-pre-wrap">{prompt}</p>
+                        </div>
+                      )}
+                      {skills.length > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-slate-700">Skills:</span>
+                          {skills.map((sk) => (
+                            <Badge key={sk} className="bg-purple-100 text-purple-700">{sk}</Badge>
+                          ))}
+                        </div>
+                      )}
+                      {channels.length > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-slate-700">Channels:</span>
+                          {channels.map((ch) => (
+                            <Badge key={ch} className="bg-blue-100 text-blue-700">{ch}</Badge>
+                          ))}
+                        </div>
+                      )}
+                      {reportType && (
+                        <div>
+                          <span className="font-medium text-slate-700">Report Type:</span>{" "}
+                          <span className="text-slate-600">{reportType}</span>
+                        </div>
+                      )}
+                      {timeout && (
+                        <div>
+                          <span className="font-medium text-slate-700">Timeout:</span>{" "}
+                          <span className="text-slate-600">{timeout}s</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <pre className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 overflow-x-auto">
+                  {JSON.stringify(s.config, null, 2)}
+                </pre>
+              )}
             </div>
           )}
         </CardBody>
@@ -135,40 +186,64 @@ export default function ScheduleDetail() {
                     <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
                       Error
                     </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">
+                      Output
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {executions.data.map((ex) => (
-                    <tr key={ex.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-2 text-sm font-mono">#{ex.id}</td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            ex.status === "succeeded"
-                              ? "bg-green-100 text-green-800"
-                              : ex.status === "failed"
-                                ? "bg-red-100 text-red-800"
-                                : ex.status === "running"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {ex.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-sm text-slate-500">
-                        {formatFullDate(ex.started_at)}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">
-                        {ex.duration_ms != null && ex.duration_ms > 0
-                          ? `${(ex.duration_ms / 1000).toFixed(1)}s`
-                          : "-"}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-red-600 max-w-xs truncate">
-                        {ex.error || "-"}
-                      </td>
-                    </tr>
-                  ))}
+                  {executions.data.map((ex) => {
+                    const agentOutput = (ex.result as Record<string, unknown>)?.agent_output as string | undefined;
+                    const isExpanded = expandedExec === ex.id;
+                    return (
+                      <tr key={ex.id} className="hover:bg-slate-50 align-top">
+                        <td className="px-4 py-2 text-sm font-mono">#{ex.id}</td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              ex.status === "completed" || ex.status === "succeeded"
+                                ? "bg-green-100 text-green-800"
+                                : ex.status === "failed"
+                                  ? "bg-red-100 text-red-800"
+                                  : ex.status === "running"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {ex.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-slate-500">
+                          {formatFullDate(ex.started_at)}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-slate-600">
+                          {ex.duration_ms != null && ex.duration_ms > 0
+                            ? `${(ex.duration_ms / 1000).toFixed(1)}s`
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-red-600 max-w-xs truncate">
+                          {ex.error || "-"}
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          {agentOutput ? (
+                            <button
+                              onClick={() => setExpandedExec(isExpanded ? null : ex.id)}
+                              className="text-primary-600 hover:underline text-xs"
+                            >
+                              {isExpanded ? "Hide" : "Show"}
+                            </button>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                          {isExpanded && agentOutput && (
+                            <pre className="mt-2 bg-slate-50 rounded p-3 text-xs text-slate-700 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                              {agentOutput}
+                            </pre>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

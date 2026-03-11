@@ -240,6 +240,11 @@ class Scheduler:
             session.flush()
             execution_id = execution.id
 
+        # AgentChain: prompt-driven execution via Main Agent
+        if schedule.pipeline_name == "AgentChain":
+            self._execute_agent_chain(schedule, execution_id)
+            return
+
         try:
             # Get account
             account = None
@@ -324,6 +329,77 @@ class Scheduler:
                 notify_schedule_result(schedule.name, False, str(e))
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
+
+    def _execute_agent_chain(self, schedule: Schedule, execution_id: int):
+        """Execute an AgentChain schedule by sending a prompt to the Main Agent."""
+        from agenticops.agents.main_agent import create_main_agent
+
+        config = schedule.config or {}
+        prompt = config.get("prompt", "")
+        if not prompt:
+            with get_db_session() as session:
+                ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                if ex:
+                    ex.status = "failed"
+                    ex.completed_at = datetime.utcnow()
+                    ex.error = "AgentChain config missing required 'prompt' field"
+            return
+
+        skills = config.get("skills", [])
+        report_type = config.get("report_type")
+        notify_channels = config.get("notify_channels", [])
+        timeout_seconds = config.get("timeout_seconds", 300)
+
+        # Build enhanced prompt
+        parts = []
+        if skills:
+            parts.append(f"First activate these skills: {', '.join(skills)}.")
+        parts.append(prompt)
+        if report_type:
+            parts.append(f"Generate a {report_type} type report.")
+        if notify_channels:
+            parts.append(f"Send the report to notification channels: {', '.join(notify_channels)}.")
+        enhanced_prompt = " ".join(parts)
+
+        response_text = ""
+        timed_out = False
+
+        def _run():
+            nonlocal response_text
+            try:
+                agent = create_main_agent()
+                result = agent(enhanced_prompt)
+                response_text = str(result)
+            except Exception as e:
+                raise e
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+
+        if thread.is_alive():
+            timed_out = True
+            logger.warning(f"AgentChain '{schedule.name}' timed out after {timeout_seconds}s")
+
+        with get_db_session() as session:
+            ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+            if ex:
+                ex.completed_at = datetime.utcnow()
+                ex.duration_ms = int((ex.completed_at - ex.started_at).total_seconds() * 1000)
+                if timed_out:
+                    ex.status = "failed"
+                    ex.error = f"Timed out after {timeout_seconds}s"
+                    ex.result = {"agent_output": response_text or "(partial)", "prompt": prompt}
+                else:
+                    ex.status = "completed"
+                    ex.result = {"agent_output": response_text, "prompt": prompt}
+
+        # Notify
+        try:
+            from agenticops.services.notification_service import notify_schedule_result
+            notify_schedule_result(schedule.name, not timed_out)
+        except Exception:
+            logger.debug("Notification trigger failed", exc_info=True)
 
     @staticmethod
     def add_schedule(

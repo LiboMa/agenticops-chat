@@ -4,11 +4,11 @@ import os
 from datetime import datetime
 from typing import Dict, Optional, List
 
-from fastapi import FastAPI, Request, Query, HTTPException, Body
+from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from sqlalchemy import func
 
@@ -396,6 +396,12 @@ class ScheduleCreate(BaseModel):
     account_name: Optional[str] = Field(None, max_length=100)
     is_enabled: bool = True
     config: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_agent_chain(self):
+        if self.pipeline_name == "AgentChain" and not self.config.get("prompt"):
+            raise ValueError("AgentChain requires a 'prompt' field in config")
+        return self
 
 
 class ScheduleUpdate(BaseModel):
@@ -3020,6 +3026,21 @@ async def api_list_schedules():
         return [ScheduleResponse.model_validate(s) for s in schedules]
 
 
+@app.get("/api/schedules/pipeline-options")
+async def api_pipeline_options():
+    """Return available pipeline names and AgentChain config schema."""
+    return {
+        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"],
+        "agent_chain_config": {
+            "prompt": {"type": "string", "required": True, "description": "Task description for the agent"},
+            "skills": {"type": "array", "required": False, "description": "Skills to activate"},
+            "report_type": {"type": "string", "required": False, "enum": ["daily", "incident", "inventory"]},
+            "notify_channels": {"type": "array", "required": False, "description": "Notification channels"},
+            "timeout_seconds": {"type": "integer", "required": False, "default": 300},
+        },
+    }
+
+
 @app.get("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
 async def api_get_schedule(schedule_id: int):
     """Get schedule by ID."""
@@ -3035,13 +3056,12 @@ async def api_get_schedule(schedule_id: int):
 @app.post("/api/schedules", response_model=ScheduleResponse, status_code=201)
 async def api_create_schedule(data: ScheduleCreate):
     """Create a new schedule."""
-    from agenticops.scheduler.scheduler import Schedule
+    from agenticops.scheduler.scheduler import Schedule, CronParser
 
     # Validate cron expression
     try:
-        from croniter import croniter
-        croniter(data.cron_expression)
-    except (ImportError, ValueError) as e:
+        CronParser(data.cron_expression)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}")
 
     with get_db_session() as session:
@@ -3065,7 +3085,7 @@ async def api_create_schedule(data: ScheduleCreate):
 @app.put("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
 async def api_update_schedule(schedule_id: int, data: ScheduleUpdate):
     """Update a schedule."""
-    from agenticops.scheduler.scheduler import Schedule
+    from agenticops.scheduler.scheduler import Schedule, CronParser
 
     with get_db_session() as session:
         schedule = session.query(Schedule).filter_by(id=schedule_id).first()
@@ -3077,9 +3097,8 @@ async def api_update_schedule(schedule_id: int, data: ScheduleUpdate):
         # Validate cron if being updated
         if "cron_expression" in update_data:
             try:
-                from croniter import croniter
-                croniter(update_data["cron_expression"])
-            except (ImportError, ValueError) as e:
+                CronParser(update_data["cron_expression"])
+            except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}")
 
         for key, value in update_data.items():
@@ -3101,44 +3120,26 @@ async def api_delete_schedule(schedule_id: int):
         session.delete(schedule)
 
 
-@app.post("/api/schedules/{schedule_id}/run", response_model=ScheduleExecutionResponse)
-async def api_run_schedule(schedule_id: int):
-    """Run a schedule immediately."""
-    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
+@app.post("/api/schedules/{schedule_id}/run", status_code=202)
+async def api_run_schedule(schedule_id: int, background_tasks: BackgroundTasks):
+    """Run a schedule immediately in the background."""
+    from agenticops.scheduler.scheduler import Schedule, Scheduler
 
     with get_db_session() as session:
         schedule = session.query(Schedule).filter_by(id=schedule_id).first()
         if not schedule:
             raise HTTPException(status_code=404, detail="Schedule not found")
-
-        # Create execution record
-        execution = ScheduleExecution(
-            schedule_id=schedule_id,
-            status="running",
-        )
-        session.add(execution)
-        session.flush()
-
-        # Update schedule last_run_at
+        schedule_name = schedule.name
         schedule.last_run_at = datetime.utcnow()
 
+    def _run_in_background():
         try:
-            from agenticops.scheduler.scheduler import Scheduler
-            scheduler = Scheduler()
-            result = scheduler.run_pipeline(schedule.pipeline_name, schedule.account_name, schedule.config)
-
-            execution.status = "completed"
-            execution.completed_at = datetime.utcnow()
-            execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
-            execution.result = {"output": str(result)} if result else {}
+            Scheduler().run_now(schedule_name)
         except Exception as e:
-            execution.status = "failed"
-            execution.completed_at = datetime.utcnow()
-            execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
-            execution.error = str(e)
+            logger.error(f"Background run_now failed for schedule {schedule_name}: {e}")
 
-        session.flush()
-        return ScheduleExecutionResponse.model_validate(execution)
+    background_tasks.add_task(_run_in_background)
+    return {"schedule_id": schedule_id, "status": "accepted"}
 
 
 @app.get("/api/schedules/{schedule_id}/executions", response_model=List[ScheduleExecutionResponse])
@@ -3164,6 +3165,15 @@ async def api_list_schedule_executions(
             .all()
         )
         return [ScheduleExecutionResponse.model_validate(e) for e in executions]
+
+
+@app.get("/api/skills")
+async def api_list_skills():
+    """Return available agent skills."""
+    from agenticops.skills.loader import discover_skills
+
+    skills = discover_skills()
+    return [{"name": s.name, "description": s.description} for s in skills]
 
 
 # ============================================================================
@@ -3605,6 +3615,16 @@ async def api_send_chat_message(session_id: str, request: Request):
             }
         except Exception as e:
             logger.exception("Chat stream error for session %s", session_id)
+            # Persist partial assistant reply so it isn't lost on error/refresh
+            if accumulated:
+                with get_db_session() as db:
+                    db.add(ChatMessage(
+                        session_id=db_session_pk,
+                        role="assistant",
+                        content=accumulated,
+                        tool_calls=tool_calls if tool_calls else None,
+                        token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
+                    ))
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
     return EventSourceResponse(_generate())
