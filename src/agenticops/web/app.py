@@ -1145,11 +1145,17 @@ async def api_health():
 @app.get("/api/stats")
 async def api_stats():
     """API endpoint for dashboard stats."""
+    CLOSED_STATUSES = ("resolved", "closed")
     with get_db_session() as session:
         return {
             "total_resources": session.query(AWSResource).count(),
-            "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
-            "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
+            "open_anomalies": session.query(HealthIssue).filter(
+                ~HealthIssue.status.in_(CLOSED_STATUSES)
+            ).count(),
+            "critical_anomalies": session.query(HealthIssue).filter(
+                HealthIssue.severity == "critical",
+                ~HealthIssue.status.in_(CLOSED_STATUSES),
+            ).count(),
             "total_accounts": session.query(AWSAccount).count(),
         }
 
