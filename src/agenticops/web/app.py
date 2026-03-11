@@ -725,13 +725,23 @@ def _setup_service_logging() -> None:
     logging.getLogger("uvicorn.access").addHandler(access_handler)
 
 
+_scheduler_instance = None
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup."""
+    global _scheduler_instance
     _setup_service_logging()
     init_db()
     _chat_sessions.start_cleanup()
     _executor_service.start()
+
+    # Start background cron scheduler
+    from agenticops.scheduler.scheduler import Scheduler
+    _scheduler_instance = Scheduler()
+    _scheduler_instance.start()
+    logger.info("Cron scheduler started")
 
     # Start Feishu WebSocket long-connection if enabled
     _startup_log = logging.getLogger(__name__)
@@ -784,6 +794,9 @@ async def shutdown():
     """Cleanup on shutdown."""
     _chat_sessions.stop_cleanup()
     _executor_service.stop()
+    if _scheduler_instance:
+        _scheduler_instance.stop()
+        logger.info("Cron scheduler stopped")
 
     # Stop Feishu WebSocket service
     try:
