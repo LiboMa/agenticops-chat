@@ -177,7 +177,7 @@ class Settings(BaseSettings):
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable Slack Socket Mode (AIOPS_SLACK_WS_ENABLED=true)",
     )
     skills_draft_dir: Path = Field(
