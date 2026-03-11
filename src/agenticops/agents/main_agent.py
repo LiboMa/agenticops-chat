@@ -9,8 +9,10 @@ import logging
 from strands import Agent
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
+from strands.models.model import CacheConfig
 
 from agenticops.config import settings
+from agenticops.mcp import get_mcp_clients
 from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
@@ -155,10 +157,17 @@ def create_main_agent() -> Agent:
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
 
+    cache_kwargs = {}
+    if settings.bedrock_cache_enabled:
+        cache_kwargs = {
+            "cache_config": CacheConfig(strategy="auto"),
+            "cache_tools": "default",
+        }
     model = BedrockModel(
         model_id=settings.bedrock_model_id,
         region_name=settings.bedrock_region,
         max_tokens=settings.bedrock_max_tokens,
+        **cache_kwargs,
     )
 
     focus = get_scan_focus()
@@ -217,6 +226,8 @@ If the user explicitly requests a different scope, honor their request over this
             search_skill_registry,
             # Monitoring integrations
             list_monitoring_providers,
+            # MCP tool providers (external servers)
+            *get_mcp_clients(),
         ],
     )
 

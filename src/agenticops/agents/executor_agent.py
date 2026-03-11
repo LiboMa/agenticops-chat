@@ -13,6 +13,7 @@ import logging
 from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
+from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import (
@@ -165,10 +166,17 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
     try:
+        cache_kwargs = {}
+        if settings.bedrock_cache_enabled:
+            cache_kwargs = {
+                "cache_config": CacheConfig(strategy="auto"),
+                "cache_tools": "default",
+            }
         model = BedrockModel(
             model_id=settings.bedrock_model_id,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
+            **cache_kwargs,
         )
 
         agent = Agent(

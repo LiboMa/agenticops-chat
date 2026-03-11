@@ -9,6 +9,7 @@ import logging
 from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
+from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import assume_role
@@ -145,10 +146,17 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
     """
     try:
+        cache_kwargs = {}
+        if settings.bedrock_cache_enabled:
+            cache_kwargs = {
+                "cache_config": CacheConfig(strategy="auto"),
+                "cache_tools": "default",
+            }
         model = BedrockModel(
-            model_id=settings.bedrock_model_id_sonnet,
+            model_id=settings.bedrock_model_id_cheap,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
+            **cache_kwargs,
         )
 
         agent = Agent(

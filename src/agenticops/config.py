@@ -55,6 +55,10 @@ class Settings(BaseSettings):
         default=40,
         description="Conversation manager sliding window size for agents",
     )
+    bedrock_cache_enabled: bool = Field(
+        default=True,
+        description="Enable Bedrock prompt caching (cache_config=auto + cache_tools=default)",
+    )
 
     # CORS
     cors_origins: str = Field(
@@ -155,6 +159,10 @@ class Settings(BaseSettings):
     skills_dir: Path = Field(
         default=PROJECT_ROOT / "skills",
         description="Directory containing Agent Skills packages (SKILL.md format)",
+    )
+    mcp_servers_config: Path = Field(
+        default=PROJECT_ROOT / "config" / "mcp-servers.json",
+        description="Path to MCP servers JSON config (standard mcpServers format)",
     )
     im_apps_config: Path = Field(
         default=PROJECT_ROOT / "config" / "im-apps.yaml",

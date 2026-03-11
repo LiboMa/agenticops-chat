@@ -737,6 +737,15 @@ async def startup():
     _chat_sessions.start_cleanup()
     _executor_service.start()
 
+    # Start MCP servers
+    try:
+        from agenticops.mcp import start_mcp_clients
+        mcp_clients = start_mcp_clients()
+        if mcp_clients:
+            logger.info("MCP: %d server(s) started", len(mcp_clients))
+    except Exception as e:
+        logger.warning("MCP startup failed: %s", e)
+
     # Start background cron scheduler
     from agenticops.scheduler.scheduler import Scheduler
     _scheduler_instance = Scheduler()
@@ -797,6 +806,13 @@ async def shutdown():
     if _scheduler_instance:
         _scheduler_instance.stop()
         logger.info("Cron scheduler stopped")
+
+    # Stop MCP clients
+    try:
+        from agenticops.mcp import stop_mcp_clients
+        stop_mcp_clients()
+    except Exception:
+        pass
 
     # Stop Feishu WebSocket service
     try:
@@ -1065,6 +1081,43 @@ async def api_update_settings(body: dict = Body(...)):
         "notifications_enabled": settings.notifications_enabled,
         "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
     }
+
+
+# ============================================================================
+# MCP Servers
+# ============================================================================
+
+
+@app.get("/api/settings/mcp-servers")
+async def api_list_mcp_servers():
+    """List all configured MCP servers."""
+    from agenticops.mcp import list_mcp_servers
+    return list_mcp_servers()
+
+
+@app.put("/api/settings/mcp-servers/{name}")
+async def api_upsert_mcp_server(name: str, body: dict = Body(...)):
+    """Create or update an MCP server config."""
+    from agenticops.mcp import upsert_mcp_server
+    if "command" not in body and "url" not in body:
+        raise HTTPException(400, "MCP server must have 'command' (stdio) or 'url' (SSE)")
+    return upsert_mcp_server(name, body)
+
+
+@app.delete("/api/settings/mcp-servers/{name}", status_code=204)
+async def api_delete_mcp_server(name: str):
+    """Delete an MCP server config."""
+    from agenticops.mcp import delete_mcp_server
+    if not delete_mcp_server(name):
+        raise HTTPException(404, f"MCP server '{name}' not found")
+
+
+@app.post("/api/settings/mcp-servers/reload")
+async def api_reload_mcp_servers():
+    """Reload MCP clients from config (stop + start)."""
+    from agenticops.mcp import reload_mcp_clients
+    clients = reload_mcp_clients()
+    return {"reloaded": len(clients)}
 
 
 @app.get("/api/health", response_model=HealthResponse)

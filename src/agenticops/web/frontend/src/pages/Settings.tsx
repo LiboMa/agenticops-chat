@@ -13,8 +13,14 @@ import {
   useUpdateAccount,
   useDeleteAccount,
 } from "@/hooks/useAccounts";
+import {
+  useMcpServers,
+  useUpsertMcpServer,
+  useDeleteMcpServer,
+  useReloadMcpServers,
+} from "@/hooks/useMcpServers";
 import type { ScanFocus } from "@/api/types";
-import type { Account, AccountCreate, AccountUpdate } from "@/api/types";
+import type { Account, AccountCreate, AccountUpdate, McpServerConfig } from "@/api/types";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
@@ -191,6 +197,78 @@ const accountColumns: Column<Account>[] = [
   { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-slate-500">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 
+/* ── MCP Server form modal ────────────────────────────────────────── */
+
+function McpServerFormModal({
+  initial, onClose, onSave, saving,
+}: {
+  initial: { name: string; config: McpServerConfig } | null;
+  onClose: () => void;
+  onSave: (name: string, config: McpServerConfig) => void;
+  saving: boolean;
+}) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.name ?? "");
+  const [command, setCommand] = useState(initial?.config.command ?? "");
+  const [args, setArgs] = useState((initial?.config.args ?? []).join(" "));
+  const [envText, setEnvText] = useState(
+    Object.entries(initial?.config.env ?? {}).map(([k, v]) => `${k}=${v}`).join("\n"),
+  );
+  const [disabled, setDisabled] = useState(initial?.config.disabled ?? false);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const argList = args.trim() ? args.trim().split(/\s+/) : [];
+    const env: Record<string, string> = {};
+    envText.split("\n").filter(Boolean).forEach((line) => {
+      const eq = line.indexOf("=");
+      if (eq > 0) env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    });
+    onSave(name, {
+      command: command || undefined,
+      args: argList.length ? argList : undefined,
+      env: Object.keys(env).length ? env : undefined,
+      disabled,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+          {isEdit ? "Edit MCP Server" : "New MCP Server"}
+        </h3>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Server Name</label>
+            <input required disabled={isEdit} value={name} onChange={(e) => setName(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-100 font-mono" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Command</label>
+            <input required value={command} onChange={(e) => setCommand(e.target.value)} placeholder="uvx" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Args (space-separated)</label>
+            <input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server@latest" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Environment (KEY=VALUE per line)</label>
+            <textarea rows={3} value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder={"FASTMCP_LOG_LEVEL=ERROR\nAWS_DOCUMENTATION_PARTITION=aws"} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+          </div>
+          <div className="flex items-center gap-2">
+            <input id="mcp-disabled" type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} className="rounded border-slate-200" />
+            <label htmlFor="mcp-disabled" className="text-sm text-slate-700">Disabled</label>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Settings page ─────────────────────────────────────────── */
 
 export default function Settings() {
@@ -206,6 +284,15 @@ export default function Settings() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
+
+  // MCP Servers
+  const mcpQ = useMcpServers();
+  const upsertMcp = useUpsertMcpServer();
+  const deleteMcp = useDeleteMcpServer();
+  const reloadMcp = useReloadMcpServers();
+  const [mcpFormOpen, setMcpFormOpen] = useState(false);
+  const [mcpEditing, setMcpEditing] = useState<{ name: string; config: McpServerConfig } | null>(null);
+  const [mcpDeleting, setMcpDeleting] = useState<string | null>(null);
 
   const s = settingsQ.data;
 
@@ -340,6 +427,104 @@ export default function Settings() {
           />
         )}
       </Card>
+
+      {/* ── MCP Servers ─────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-slate-900">MCP Servers</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => reloadMcp.mutate()}
+              disabled={reloadMcp.isPending}
+              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              {reloadMcp.isPending ? "Reloading..." : "Reload"}
+            </button>
+            <button
+              onClick={() => { setMcpEditing(null); setMcpFormOpen(true); }}
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            >
+              Add Server
+            </button>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {mcpQ.isLoading ? (
+            <Spinner />
+          ) : mcpQ.error ? (
+            <ErrorBanner message={(mcpQ.error as Error).message} onRetry={() => mcpQ.refetch()} />
+          ) : (
+            <div className="space-y-2">
+              {Object.keys(mcpQ.data ?? {}).length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center">No MCP servers configured.</p>
+              ) : (
+                Object.entries(mcpQ.data ?? {}).map(([name, cfg]) => (
+                  <div key={name} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-900">{name}</span>
+                        {cfg.disabled ? (
+                          <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
+                        ) : (
+                          <Badge className="bg-green-100 text-green-700">Active</Badge>
+                        )}
+                        <Badge className="bg-blue-50 text-blue-600">
+                          {cfg.url ? "SSE" : "stdio"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-[400px]">
+                        {cfg.url ?? `${cfg.command ?? ""} ${(cfg.args ?? []).join(" ")}`}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => { setMcpEditing({ name, config: cfg }); setMcpFormOpen(true); }}
+                        className="text-xs text-primary-600 hover:underline"
+                      >Edit</button>
+                      <button
+                        onClick={() => setMcpDeleting(name)}
+                        className="text-xs text-red-600 hover:underline"
+                      >Delete</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* MCP Modals */}
+      {mcpFormOpen && (
+        <McpServerFormModal
+          initial={mcpEditing}
+          saving={upsertMcp.isPending}
+          onClose={() => { setMcpFormOpen(false); setMcpEditing(null); }}
+          onSave={async (name, config) => {
+            await upsertMcp.mutateAsync({ name, config });
+            setMcpFormOpen(false);
+            setMcpEditing(null);
+          }}
+        />
+      )}
+      {mcpDeleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete MCP Server</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              Are you sure you want to delete <strong>{mcpDeleting}</strong>?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setMcpDeleting(null)} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+              <button
+                onClick={async () => { await deleteMcp.mutateAsync(mcpDeleting); setMcpDeleting(null); }}
+                disabled={deleteMcp.isPending}
+                className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50"
+              >{deleteMcp.isPending ? "Deleting..." : "Delete"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       {formOpen && (
