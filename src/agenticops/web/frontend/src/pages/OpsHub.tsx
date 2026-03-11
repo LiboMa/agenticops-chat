@@ -3,7 +3,7 @@ import { api } from "@/api/client";
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color: string }) {
   return (
-    <div className="bg-gray-800 rounded-xl p-5 ">
+    <div className="bg-[#2f2f2f] rounded-xl p-5 ">
       <p className="text-xs text-[#666] uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
       {sub && <p className="text-xs text-[#9b9b9b] mt-1">{sub}</p>}
@@ -30,13 +30,13 @@ export default function OpsHub() {
       {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-4">
         <StatCard
-          label="Active Alerts"
-          value={stats.data?.active_anomalies ?? "—"}
+          label="Open Issues"
+          value={stats.data?.open_anomalies ?? "—"}
           color="text-red-400"
         />
         <StatCard
-          label="Open RCA"
-          value={stats.data?.pending_rca ?? "—"}
+          label="Critical"
+          value={stats.data?.critical_anomalies ?? "—"}
           color="text-orange-400"
         />
         <StatCard
@@ -56,7 +56,7 @@ export default function OpsHub() {
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">
         {/* Alert Feed */}
-        <div className="col-span-2 bg-gray-800 rounded-xl p-5 ">
+        <div className="col-span-2 bg-[#2f2f2f] rounded-xl p-5 ">
           <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             Recent Anomalies
           </h2>
@@ -88,22 +88,22 @@ export default function OpsHub() {
         </div>
 
         {/* Quick Actions */}
-        <div className="bg-gray-800 rounded-xl p-5 ">
+        <div className="bg-[#2f2f2f] rounded-xl p-5 ">
           <h2 className="text-sm font-semibold text-[#666] uppercase tracking-wider mb-4">
             Quick Actions
           </h2>
           <div className="space-y-2">
             <a href="/app/diagnose" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
-              🔍 View Diagnose Center
+              View Diagnose Center
             </a>
             <a href="/app/ai" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
-              🧠 AI Center
+              AI Center
             </a>
             <a href="/app/knowledge" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
-              📚 Knowledge Base
+              Knowledge Base
             </a>
             <a href="/app/network" className="block py-2 px-3 text-sm text-[#666] hover:bg-[#383838]/50 rounded-lg transition-colors">
-              🌐 Network Topology
+              Network Topology
             </a>
           </div>
 
@@ -115,7 +115,7 @@ export default function OpsHub() {
               </h3>
               {proactive.data?.alerts?.slice(0, 3).map((a: any) => (
                 <div key={a.id} className="py-1.5 px-3 text-xs text-[#666] truncate">
-                  🔮 {a.content?.substring(0, 80)}
+                  {a.content?.substring(0, 80)}
                 </div>
               ))}
             </>
