@@ -1104,6 +1104,28 @@ async def api_upsert_mcp_server(name: str, body: dict = Body(...)):
     return upsert_mcp_server(name, body)
 
 
+@app.post("/api/settings/mcp-servers/import")
+async def api_import_mcp_servers(body: dict = Body(...)):
+    """Bulk import MCP servers from standard mcpServers JSON format.
+
+    Accepts: {"mcpServers": {"name": {...}, ...}}
+    Merges into existing config (upsert semantics).
+    """
+    from agenticops.mcp import upsert_mcp_server
+    servers = body.get("mcpServers", {})
+    if not isinstance(servers, dict) or not servers:
+        raise HTTPException(400, "Expected {\"mcpServers\": {\"name\": {...}, ...}}")
+    imported = []
+    for name, cfg in servers.items():
+        if not isinstance(cfg, dict):
+            continue
+        if "command" not in cfg and "url" not in cfg:
+            continue
+        upsert_mcp_server(name, cfg)
+        imported.append(name)
+    return {"imported": imported, "count": len(imported)}
+
+
 @app.delete("/api/settings/mcp-servers/{name}", status_code=204)
 async def api_delete_mcp_server(name: str):
     """Delete an MCP server config."""

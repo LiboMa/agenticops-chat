@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
@@ -18,6 +18,7 @@ import {
   useUpsertMcpServer,
   useDeleteMcpServer,
   useReloadMcpServers,
+  useImportMcpServers,
 } from "@/hooks/useMcpServers";
 import type { ScanFocus } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, McpServerConfig } from "@/api/types";
@@ -290,9 +291,34 @@ export default function Settings() {
   const upsertMcp = useUpsertMcpServer();
   const deleteMcp = useDeleteMcpServer();
   const reloadMcp = useReloadMcpServers();
+  const importMcp = useImportMcpServers();
+  const mcpFileRef = useRef<HTMLInputElement>(null);
   const [mcpFormOpen, setMcpFormOpen] = useState(false);
   const [mcpEditing, setMcpEditing] = useState<{ name: string; config: McpServerConfig } | null>(null);
   const [mcpDeleting, setMcpDeleting] = useState<string | null>(null);
+  const [mcpImportError, setMcpImportError] = useState<string | null>(null);
+
+  function handleMcpImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMcpImportError(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (!data.mcpServers || typeof data.mcpServers !== "object") {
+          setMcpImportError("Invalid format: expected {\"mcpServers\": {...}}");
+          return;
+        }
+        await importMcp.mutateAsync(data);
+      } catch (err) {
+        setMcpImportError(err instanceof SyntaxError ? "Invalid JSON file" : String(err));
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-imported
+    e.target.value = "";
+  }
 
   const s = settingsQ.data;
 
@@ -433,6 +459,14 @@ export default function Settings() {
         <CardHeader>
           <h2 className="text-lg font-semibold text-slate-900">MCP Servers</h2>
           <div className="flex gap-2">
+            <input ref={mcpFileRef} type="file" accept=".json" onChange={handleMcpImport} className="hidden" />
+            <button
+              onClick={() => mcpFileRef.current?.click()}
+              disabled={importMcp.isPending}
+              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              {importMcp.isPending ? "Importing..." : "Import JSON"}
+            </button>
             <button
               onClick={() => reloadMcp.mutate()}
               disabled={reloadMcp.isPending}
@@ -449,6 +483,12 @@ export default function Settings() {
           </div>
         </CardHeader>
         <CardBody>
+          {mcpImportError && (
+            <div className="mb-3 p-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center justify-between">
+              <span>{mcpImportError}</span>
+              <button onClick={() => setMcpImportError(null)} className="text-red-400 hover:text-red-600 ml-2">&times;</button>
+            </div>
+          )}
           {mcpQ.isLoading ? (
             <Spinner />
           ) : mcpQ.error ? (

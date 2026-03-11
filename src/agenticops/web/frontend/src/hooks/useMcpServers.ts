@@ -34,6 +34,18 @@ export function useDeleteMcpServer() {
   });
 }
 
+export function useImportMcpServers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { mcpServers: Record<string, McpServerConfig> }) =>
+      apiFetch<{ imported: string[]; count: number }>(
+        "/api/settings/mcp-servers/import",
+        { method: "POST", body: JSON.stringify(data) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
 export function useReloadMcpServers() {
   const qc = useQueryClient();
   return useMutation({
