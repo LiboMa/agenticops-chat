@@ -11,9 +11,9 @@ import {
   useCreateSchedule,
   useUpdateSchedule,
   useDeleteSchedule,
-  useSkills,
   useNotificationChannels,
 } from "@/hooks/useSchedules";
+import { useSkills } from "@/hooks/useSkills";
 import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
 
 const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;

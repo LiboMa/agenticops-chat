@@ -21,6 +21,7 @@ const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
+const Skills = lazy(() => import("@/pages/Skills"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -170,6 +171,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <KnowledgeBase />
+                </Suspense>
+              }
+            />
+            <Route
+              path="skills"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Skills />
                 </Suspense>
               }
             />

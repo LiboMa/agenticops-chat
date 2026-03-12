@@ -5,7 +5,6 @@ import type {
   ScheduleCreate,
   ScheduleUpdate,
   ScheduleExecution,
-  Skill,
   NotificationChannel,
 } from "@/api/types";
 
@@ -65,14 +64,6 @@ export function useDeleteSchedule() {
     mutationFn: (id: number) =>
       apiFetch<void>(`/schedules/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["schedules"] }),
-  });
-}
-
-export function useSkills() {
-  return useQuery({
-    queryKey: ["skills"],
-    queryFn: () => apiFetch<Skill[]>("/skills"),
-    staleTime: 60_000,
   });
 }
 
