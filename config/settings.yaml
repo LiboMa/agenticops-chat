@@ -6,7 +6,7 @@ model_aliases:
   sonnet: global.anthropic.claude-sonnet-4-6
   haiku: global.anthropic.claude-haiku-4-5-20251001-v1:0
 agent_main_model_id: global.anthropic.claude-opus-4-6-v1
-agent_scan_model_id: global.anthropic.claude-sonnet-4-6
+agent_scan_model_id: global.anthropic.claude-haiku-4-5-20251001-v1:0
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_model_id: global.anthropic.claude-opus-4-6-v1
 agent_sre_model_id: global.anthropic.claude-opus-4-6-v1
