@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from agenticops.models import (
     AlertEvent,
@@ -1068,7 +1068,7 @@ async def api_health():
     db_start = time.time()
     try:
         with get_db_session() as session:
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
         checks["database"] = HealthCheckResult(
             status="ok",
             latency_ms=int((time.time() - db_start) * 1000),
