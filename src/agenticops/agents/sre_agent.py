@@ -195,17 +195,12 @@ TOOL SELECTION — accuracy first:
 
 def _create_sre_agent() -> Agent:
     """Create a reusable SRE Agent instance."""
-    cache_kwargs = {}
-    if settings.bedrock_cache_enabled:
-        cache_kwargs = {
-            "cache_config": CacheConfig(strategy="auto"),
-            "cache_tools": "default",
-        }
     model = BedrockModel(
         model_id=settings.bedrock_model_id,
         region_name=settings.bedrock_region,
         max_tokens=settings.bedrock_max_tokens,
-        **cache_kwargs,
+        cache_config=CacheConfig(strategy="auto"),
+        cache_tools="default",
     )
     return Agent(
         system_prompt=build_prompt_with_skills(SRE_SYSTEM_PROMPT, agent_type="sre"),

@@ -42,6 +42,8 @@ REPORT GENERATION PROTOCOL:
      Call search_similar_cases if patterns repeat.
    - **inventory**: Call get_managed_resources (scope filter if provided).
      Call list_health_issues to cross-reference issues against resources.
+   - **conversation**: Use the above tools as needed to answer user queries about health issues, RCA, or inventory.
+   
 3. FORMAT: Generate a well-structured markdown report with these sections:
    - **Header**: Report type, date, account info.
    - **Executive Summary**: Key metrics (total issues, by severity, resolved vs open).
@@ -107,17 +109,12 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        cache_kwargs = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {
-                "cache_config": CacheConfig(strategy="auto"),
-                "cache_tools": "default",
-            }
         model = BedrockModel(
             model_id=settings.bedrock_model_id_cheap,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
-            **cache_kwargs,
+            cache_config=CacheConfig(strategy="auto"),
+            cache_tools="default",
         )
 
         agent = Agent(

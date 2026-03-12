@@ -102,17 +102,12 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         Summary of discovered resources with counts by service and region.
     """
     try:
-        cache_kwargs = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {
-                "cache_config": CacheConfig(strategy="auto"),
-                "cache_tools": "default",
-            }
         model = BedrockModel(
             model_id=settings.bedrock_model_id_cheap,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
-            **cache_kwargs,
+            cache_config=CacheConfig(strategy="auto"),
+            cache_tools="default",
         )
 
         agent = Agent(

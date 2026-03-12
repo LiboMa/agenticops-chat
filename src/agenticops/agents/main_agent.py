@@ -44,6 +44,7 @@ from agenticops.skills.tools import (
 )
 from agenticops.skills.loader import build_prompt_with_skills
 from agenticops.tools.integration_tools import list_monitoring_providers
+from agenticops.tools.notification_tools import share_content
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,10 @@ ROUTING RULES:
      to load notification tools (list_notification_channels, send_to_channel, distribute_report).
      Then use list_notification_channels to discover targets, send_to_channel for single-channel
      text/issue/file sends, or distribute_report for batch format-aware report distribution.
+9.7.1. Sharing content to channels: Use share_content(subject, body, channel_names) to deliver
+     text content directly to notification channels. For long content (>4000 chars), it auto-uploads
+     to S3 and sends a presigned download URL. Use this for scheduled job outputs, reports, or any
+     content that needs reliable delivery to channels.
 9.8. Monitoring providers: Use list_monitoring_providers to show configured external monitoring
      integrations. For querying Datadog/external metrics or alerts, dispatch to detect_agent or rca_agent
      (they have cross-platform provider tools).
@@ -157,17 +162,12 @@ def create_main_agent() -> Agent:
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
 
-    cache_kwargs = {}
-    if settings.bedrock_cache_enabled:
-        cache_kwargs = {
-            "cache_config": CacheConfig(strategy="auto"),
-            "cache_tools": "default",
-        }
     model = BedrockModel(
         model_id=settings.bedrock_model_id,
         region_name=settings.bedrock_region,
         max_tokens=settings.bedrock_max_tokens,
-        **cache_kwargs,
+        cache_config=CacheConfig(strategy="auto"),
+        cache_tools="default",
     )
 
     focus = get_scan_focus()
@@ -226,6 +226,8 @@ If the user explicitly requests a different scope, honor their request over this
             search_skill_registry,
             # Monitoring integrations
             list_monitoring_providers,
+            # Notification tools (direct, no skill activation needed)
+            share_content,
             # MCP tool providers (external servers)
             *get_mcp_clients(),
         ],

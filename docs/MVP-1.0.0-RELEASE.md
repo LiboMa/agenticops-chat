@@ -54,13 +54,22 @@ AgenticOps（`aiops`）是一个基于多智能体架构的 **AI 运维助手**�
 
 ### 模型分层策略
 
-| 层级 | 模型 | 用途 | 成本 |
-|------|------|------|------|
-| **Default** | Opus 4.6 | Main/SRE/RCA/Executor — 需要强推理 | ~$15/M tokens |
-| **Cheap** | Haiku 4.5 | Scan/Detect/Reporter — 工具编排为主 | ~$0.25/M tokens |
-| **Strong** | Opus 4.6 | 预留（当前与 Default 相同） | — |
+| 层级 | 模型 | 用途 | Input $/M | Output $/M |
+|------|------|------|-----------|------------|
+| **Default** | Opus 4.6 | Main/SRE/RCA/Executor — 需要强推理 | $15.00 | $75.00 |
+| **Mid-tier** | Sonnet 4.6 | Main(路由)/Executor — 均衡性价比 | $3.00 | $15.00 |
+| **Cheap** | Haiku 4.5 | Scan/Detect/Reporter — 工具编排为主 | $0.80 | $4.00 |
+| **Strong** | Opus 4.6 | RCA/SRE — 复杂推理 | $15.00 | $75.00 |
 
-> 分层后单次修复周期成本从 ~$14 降至 ~$2-3（降低 80%）
+可用 Model ID:
+- Opus 4.6: `anthropic.claude-opus-4-6-v1` / `global.anthropic.claude-opus-4-6-v1`
+- Sonnet 4.6: `anthropic.claude-sonnet-4-6` / `global.anthropic.claude-sonnet-4-6`
+- Haiku 4.5: `anthropic.claude-haiku-4-5-20251001-v1:0` / `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+
+> 当前分层 (Opus+Haiku): 单次修复 ~$1.36
+> 优化分层 (Opus+Sonnet+Haiku): 单次修复 ~$0.58 (降低 57%)
+> 优化分层 + Prompt Caching: 单次修复 ~$0.25 (降低 82%)
+> 详见 `docs/PERFORMANCE-OPTIMIZATION-CN.md`
 
 ---
 
