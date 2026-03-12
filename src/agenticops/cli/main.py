@@ -1640,7 +1640,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Other:[/cyan]
   /clear                           Clear screen
   /detail [concise|medium|detailed] Set agent output detail level
-  /model [agent] [opus|sonnet|haiku] Switch agent model (or /model reset)
+  /model [agent] [alias]             Switch agent model (or /model reset)
   /help [topic]                    Show help
 
 [cyan]Exit:[/cyan]
@@ -3326,24 +3326,28 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
     # Model switching command
     if cmd == "model":
         from agenticops.cli.context import MODEL_ALIASES
-        from agenticops.config import AGENT_NAMES, get_agent_model_config
+        from agenticops.config import AGENT_NAMES, get_agent_model_config, save_to_yaml
         if args:
-            # /model reset — clear all per-agent overrides
+            # /model reset — reset all agents to YAML defaults
             if args[0].lower() == "reset":
                 ctx.reset_agent_models()
-                return "[green]All per-agent model overrides cleared.[/green]"
-            # /model <agent> <alias> — set per-agent override
+                save_to_yaml({f"agent_{n}_model_id": "" for n in AGENT_NAMES}
+                             | {f"agent_{n}_max_tokens": 0 for n in AGENT_NAMES})
+                return "[green]All agent models reset to tier defaults (saved).[/green]"
+            # /model <agent> <alias> — set per-agent model and persist
             if len(args) >= 2 and args[0].lower() in AGENT_NAMES:
                 agent_name = args[0].lower()
                 alias = args[1].lower()
                 if ctx.set_agent_model(agent_name, alias):
-                    return f"[green]{agent_name} agent model set to: {MODEL_ALIASES[alias]}[/green]"
+                    save_to_yaml({f"agent_{agent_name}_model_id": MODEL_ALIASES[alias]})
+                    return f"[green]{agent_name} → {MODEL_ALIASES[alias]} (saved)[/green]"
                 valid = ", ".join(MODEL_ALIASES.keys())
                 return f"[yellow]Invalid model '{alias}'. Use: {valid}[/yellow]"
-            # /model <alias> — switch main agent (backward compat)
+            # /model <alias> — switch main agent and persist
             alias = args[0].lower()
             if ctx.set_model(alias):
-                return f"[green]Model switched to: {MODEL_ALIASES[alias]}[/green]"
+                save_to_yaml({"agent_main_model_id": MODEL_ALIASES[alias]})
+                return f"[green]main → {MODEL_ALIASES[alias]} (saved)[/green]"
             valid = ", ".join(f"{k} ({v})" for k, v in MODEL_ALIASES.items())
             return f"[yellow]Invalid model '{alias}'. Use:[/yellow]\n  {valid}"
         # No args — show all agents with resolved models
@@ -3355,9 +3359,19 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
             # Shorten model_id for display
             short = model_id.split(".")[-1] if "." in model_id else model_id
             lines.append(f"  {name:10s} {short}{marker}")
-        header = f"[cyan]Main agent: {MODEL_ALIASES.get(ctx.current_model, ctx.current_model)}[/cyan]"
+        # Resolve actual main agent model for header
+        main_model_id, _ = get_agent_model_config("main")
+        main_short = main_model_id.split(".")[-1] if "." in main_model_id else main_model_id
+        header = f"[cyan]Main agent: {main_short}[/cyan]"
         table = "\n".join(lines)
-        return f"{header}\n\n[cyan]All agents:[/cyan]\n{table}\n\n  /model <opus|sonnet|haiku>          Switch main agent\n  /model <agent> <opus|sonnet|haiku>  Switch specific agent\n  /model reset                        Clear all overrides\n  (* = per-agent override active)"
+        aliases = "|".join(MODEL_ALIASES.keys())
+        return (
+            f"{header}\n\n[cyan]All agents:[/cyan]\n{table}\n\n"
+            f"  /model <{aliases}>          Switch main agent\n"
+            f"  /model <agent> <{aliases}>  Switch specific agent\n"
+            f"  /model reset                        Clear all overrides\n"
+            f"  (* = per-agent override active)"
+        )
 
     handler = SLASH_COMMANDS.get(cmd)
     if handler:
@@ -3795,8 +3809,10 @@ def chat(
             print_with_truncation(console, response, ctx, header="Agent")
 
             # Show session token summary in status bar
-            from agenticops.cli.context import MODEL_ALIASES
-            console.print(f"[dim]─── {MODEL_ALIASES.get(ctx.current_model, ctx.current_model)} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
+            from agenticops.config import get_agent_model_config
+            _main_mid, _ = get_agent_model_config("main")
+            _main_short = _main_mid.split(".")[-1] if "." in _main_mid else _main_mid
+            console.print(f"[dim]─── {_main_short} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Press Ctrl+C again to exit, or continue typing.[/yellow]")

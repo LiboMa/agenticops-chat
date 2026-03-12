@@ -1031,10 +1031,17 @@ async def api_scan_focus_options():
     }
 
 
+def _model_version_label(model_id: str) -> str:
+    """Extract a short version label from a Bedrock model ID (e.g., '4.6', '4.5')."""
+    import re
+    m = re.search(r"(\d+[\.\-]\d+)", model_id.split("claude-")[-1] if "claude-" in model_id else model_id)
+    return m.group(1).replace("-", ".") if m else ""
+
+
 @app.get("/api/settings")
 async def api_get_settings():
     """Return all toggleable runtime settings."""
-    from agenticops.config import AGENT_NAMES, AGENT_TIER_DEFAULTS, get_agent_model_config
+    from agenticops.config import AGENT_NAMES, MODEL_ALIASES, get_agent_model_config
 
     agent_models = {}
     for name in AGENT_NAMES:
@@ -1042,9 +1049,13 @@ async def api_get_settings():
         agent_models[name] = {
             "model_id": model_id,
             "max_tokens": max_tokens,
-            "is_override": bool(getattr(settings, f"agent_{name}_model_id", "")),
-            "tier_default": AGENT_TIER_DEFAULTS[name],
         }
+
+    # Model presets for frontend dropdowns (single source of truth from config)
+    model_presets = [
+        {"label": alias.capitalize() + " " + _model_version_label(model_id), "value": model_id}
+        for alias, model_id in MODEL_ALIASES.items()
+    ]
 
     return {
         "scan_focus": settings.scan_focus,
@@ -1056,12 +1067,13 @@ async def api_get_settings():
         "notifications_consolidated": settings.notifications_consolidated,
         "bedrock_cache_enabled": settings.bedrock_cache_enabled,
         "agent_models": agent_models,
+        "model_presets": model_presets,
     }
 
 
 @app.patch("/api/settings")
 async def api_update_settings(body: dict = Body(...)):
-    """Update runtime settings (non-persistent, resets on restart)."""
+    """Update runtime settings (session-level, resets on restart)."""
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus
 
     BOOL_KEYS = {

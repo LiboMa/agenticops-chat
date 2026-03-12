@@ -75,15 +75,13 @@ _CONFIG_TEMPLATE = {
     },
 }
 
-# Model ID shortcuts
-_MODEL_SHORTCUTS = {
-    "opus": "global.anthropic.claude-opus-4-6-v1",
-    "sonnet": "global.anthropic.claude-sonnet-4-6-v1",
-    "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-}
-_HAIKU_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-_SONNET_ID = "global.anthropic.claude-sonnet-4-6-v1"
-_OPUS_ID = "global.anthropic.claude-opus-4-6-v1"
+from agenticops.config import MODEL_ALIASES, settings
+
+# Derive from config's single source of truth
+_MODEL_SHORTCUTS = MODEL_ALIASES
+_HAIKU_ID = settings.bedrock_model_id_cheap
+_SONNET_ID = settings.bedrock_model_id
+_OPUS_ID = settings.bedrock_model_id_strong
 
 
 def generate_config_template(output_path: Path) -> None:

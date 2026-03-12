@@ -620,8 +620,6 @@ export type McpServersMap = Record<string, McpServerConfig>;
 export interface AgentModelConfig {
   model_id: string;
   max_tokens: number;
-  is_override: boolean;
-  tier_default: string;
 }
 
 /* ------------------------------------------------------------------ */

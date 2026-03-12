@@ -466,10 +466,11 @@ function McpImportDialog({
 
 /* ── Agent Models Card ──────────────────────────────────────────── */
 
-const MODEL_PRESETS = [
-  { label: "Opus 4.6", value: "global.anthropic.claude-opus-4-6-v1" },
-  { label: "Sonnet 4.6", value: "anthropic.claude-sonnet-4-6" },
-  { label: "Haiku 4.5", value: "global.anthropic.claude-haiku-4-5-20251001-v1:0" },
+// MODEL_PRESETS loaded from GET /api/settings → s.model_presets (single source: config.py)
+const MODEL_PRESETS_FALLBACK = [
+  { label: "Opus", value: "opus" },
+  { label: "Sonnet", value: "sonnet" },
+  { label: "Haiku", value: "haiku" },
 ];
 
 const AGENT_LABELS: Record<string, { label: string; tier: string }> = {
@@ -510,6 +511,7 @@ function AgentModelsCard() {
   if (!s) return null;
 
   const agents = s.agent_models ?? {};
+  const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
 
   return (
     <Card>
@@ -532,7 +534,7 @@ function AgentModelsCard() {
             <tbody>
               {Object.entries(agents).map(([name, cfg]: [string, AgentModelConfig]) => {
                 const meta = AGENT_LABELS[name] ?? { label: name, tier: "default" };
-                const currentPreset = MODEL_PRESETS.find((p) => p.value === cfg.model_id);
+                const currentPreset = presets.find((p) => p.value === cfg.model_id);
                 return (
                   <tr key={name} className="border-b border-slate-50">
                     <td className="py-2.5 pr-4 font-medium text-slate-700">{meta.label}</td>
@@ -548,7 +550,7 @@ function AgentModelsCard() {
                         disabled={updateMut.isPending}
                         className="px-2 py-1 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[260px]"
                       >
-                        {MODEL_PRESETS.map((p) => (
+                        {presets.map((p) => (
                           <option key={p.value} value={p.value}>{p.label}</option>
                         ))}
                         {!currentPreset && <option value={cfg.model_id}>{cfg.model_id}</option>}
@@ -564,14 +566,12 @@ function AgentModelsCard() {
                       />
                     </td>
                     <td className="py-2.5">
-                      {cfg.is_override && (
-                        <button
-                          onClick={() => handleReset(name)}
-                          disabled={updateMut.isPending}
-                          className="text-xs text-slate-400 hover:text-red-600 disabled:opacity-50"
-                          title="Reset to tier default"
-                        >Reset</button>
-                      )}
+                      <button
+                        onClick={() => handleReset(name)}
+                        disabled={updateMut.isPending}
+                        className="text-xs text-slate-400 hover:text-red-600 disabled:opacity-50"
+                        title="Reset to tier default"
+                      >Reset</button>
                     </td>
                   </tr>
                 );

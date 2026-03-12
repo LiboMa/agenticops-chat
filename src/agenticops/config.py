@@ -1,25 +1,79 @@
-"""Configuration management for AgenticOps."""
+"""Configuration management for AgenticOps.
+
+Settings are loaded with the following priority (highest wins):
+  1. Environment variables (AIOPS_* prefix)
+  2. .env file
+  3. config/settings.yaml
+  4. Field defaults (bare-minimum fallbacks)
+"""
 
 import contextvars
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Tuple, Type
 
-from pydantic import Field, computed_field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+from pydantic import Field
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # Project root directory (where pyproject.toml is located)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
+# Default YAML config path (can be overridden via AIOPS_CONFIG_FILE env var)
+_YAML_CONFIG_PATH = Path(__import__("os").environ.get(
+    "AIOPS_CONFIG_FILE",
+    str(PROJECT_ROOT / "config" / "settings.yaml"),
+))
+
+
+class YamlSettingsSource(PydanticBaseSettingsSource):
+    """Load settings from a YAML file."""
+
+    def __init__(self, settings_cls: Type[BaseSettings]):
+        super().__init__(settings_cls)
+        self._yaml_data: dict[str, Any] = {}
+        if _YAML_CONFIG_PATH.is_file():
+            with open(_YAML_CONFIG_PATH) as f:
+                data = yaml.safe_load(f)
+                if isinstance(data, dict):
+                    self._yaml_data = data
+
+    def get_field_value(self, field: Any, field_name: str) -> Tuple[Any, str, bool]:
+        val = self._yaml_data.get(field_name)
+        return val, field_name, val is not None
+
+    def __call__(self) -> dict[str, Any]:
+        return {k: v for k, v in self._yaml_data.items()}
+
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment or .env file."""
+    """Application settings.
+
+    Loaded from: env vars > .env > config/settings.yaml > Field defaults.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="AIOPS_",
         case_sensitive=False,
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> Tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlSettingsSource(settings_cls),
+            file_secret_settings,
+        )
 
     # Database - use absolute path based on project root
     database_url: str = Field(
@@ -36,7 +90,7 @@ class Settings(BaseSettings):
         description="AWS region for Bedrock",
     )
     bedrock_model_id: str = Field(
-        default="anthropic.claude-sonnet-4-6",
+        default="global.anthropic.claude-sonnet-4-6",
         description="Bedrock model ID — default tier for main agent router and executor",
     )
     bedrock_model_id_cheap: str = Field(
@@ -56,23 +110,35 @@ class Settings(BaseSettings):
         description="Conversation manager sliding window size for agents",
     )
 
-    # Per-agent model overrides (empty = use tier default)
-    agent_main_model_id: str = Field(default="", description="Override model for main agent (empty = bedrock_model_id)")
-    agent_scan_model_id: str = Field(default="", description="Override model for scan agent (empty = bedrock_model_id_cheap)")
-    agent_detect_model_id: str = Field(default="", description="Override model for detect agent (empty = bedrock_model_id_cheap)")
-    agent_rca_model_id: str = Field(default="", description="Override model for RCA agent (empty = bedrock_model_id_strong)")
-    agent_sre_model_id: str = Field(default="", description="Override model for SRE agent (empty = bedrock_model_id_strong)")
-    agent_executor_model_id: str = Field(default="", description="Override model for executor agent (empty = bedrock_model_id)")
-    agent_reporter_model_id: str = Field(default="", description="Override model for reporter agent (empty = bedrock_model_id_cheap)")
+    # Model aliases — friendly names for /model command and Settings UI dropdowns
+    # These are INDEPENDENT of tier defaults. Changing bedrock_model_id does NOT
+    # change what "sonnet" means.
+    model_aliases: dict[str, str] = Field(
+        default={
+            "opus": "global.anthropic.claude-opus-4-6-v1",
+            "sonnet": "global.anthropic.claude-sonnet-4-6",
+            "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        },
+        description="Friendly name → model ID mapping for /model command and UI dropdowns",
+    )
 
-    # Per-agent max_tokens overrides (0 = use bedrock_max_tokens)
-    agent_main_max_tokens: int = Field(default=0, description="Override max_tokens for main agent (0 = bedrock_max_tokens)")
-    agent_scan_max_tokens: int = Field(default=0, description="Override max_tokens for scan agent")
-    agent_detect_max_tokens: int = Field(default=0, description="Override max_tokens for detect agent")
-    agent_rca_max_tokens: int = Field(default=0, description="Override max_tokens for RCA agent")
-    agent_sre_max_tokens: int = Field(default=0, description="Override max_tokens for SRE agent")
-    agent_executor_max_tokens: int = Field(default=0, description="Override max_tokens for executor agent")
-    agent_reporter_max_tokens: int = Field(default=0, description="Override max_tokens for reporter agent")
+    # Per-agent model configuration (set explicitly in settings.yaml)
+    agent_main_model_id: str = Field(default="", description="Model for main agent")
+    agent_scan_model_id: str = Field(default="", description="Model for scan agent")
+    agent_detect_model_id: str = Field(default="", description="Model for detect agent")
+    agent_rca_model_id: str = Field(default="", description="Model for RCA agent")
+    agent_sre_model_id: str = Field(default="", description="Model for SRE agent")
+    agent_executor_model_id: str = Field(default="", description="Model for executor agent")
+    agent_reporter_model_id: str = Field(default="", description="Model for reporter agent")
+
+    # Per-agent max_tokens (0 = use bedrock_max_tokens)
+    agent_main_max_tokens: int = Field(default=0, description="Max tokens for main agent (0 = bedrock_max_tokens)")
+    agent_scan_max_tokens: int = Field(default=0, description="Max tokens for scan agent")
+    agent_detect_max_tokens: int = Field(default=0, description="Max tokens for detect agent")
+    agent_rca_max_tokens: int = Field(default=0, description="Max tokens for RCA agent")
+    agent_sre_max_tokens: int = Field(default=0, description="Max tokens for SRE agent")
+    agent_executor_max_tokens: int = Field(default=0, description="Max tokens for executor agent")
+    agent_reporter_max_tokens: int = Field(default=0, description="Max tokens for reporter agent")
 
     # Prompt caching toggle
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
@@ -200,7 +266,7 @@ class Settings(BaseSettings):
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable Slack Socket Mode (AIOPS_SLACK_WS_ENABLED=true)",
     )
     skills_draft_dir: Path = Field(
@@ -423,6 +489,11 @@ settings = Settings()
 
 AGENT_NAMES = ("main", "scan", "detect", "rca", "sre", "executor", "reporter")
 
+# Friendly name → model ID aliases (from settings.model_aliases, loaded via YAML)
+# Independent of tier defaults — "sonnet" always means Sonnet regardless of bedrock_model_id
+MODEL_ALIASES: dict[str, str] = dict(settings.model_aliases)
+
+# Tier fallback — only used when agent_X_model_id is empty (safety net)
 AGENT_TIER_DEFAULTS: dict[str, str] = {
     "main": "bedrock_model_id",
     "scan": "bedrock_model_id_cheap",
@@ -435,13 +506,38 @@ AGENT_TIER_DEFAULTS: dict[str, str] = {
 
 
 def get_agent_model_config(agent_name: str) -> tuple[str, int]:
-    """Return (model_id, max_tokens) for a given agent, respecting per-agent overrides."""
-    override_model = getattr(settings, f"agent_{agent_name}_model_id", "")
-    override_tokens = getattr(settings, f"agent_{agent_name}_max_tokens", 0)
-    tier_field = AGENT_TIER_DEFAULTS.get(agent_name, "bedrock_model_id")
-    model_id = override_model if override_model else getattr(settings, tier_field)
-    max_tokens = override_tokens if override_tokens > 0 else settings.bedrock_max_tokens
+    """Return (model_id, max_tokens) for a given agent.
+
+    Reads from agent_X_model_id (set in settings.yaml).
+    Falls back to tier default only if the field is empty.
+    """
+    model_id = getattr(settings, f"agent_{agent_name}_model_id", "")
+    if not model_id:
+        tier_field = AGENT_TIER_DEFAULTS.get(agent_name, "bedrock_model_id")
+        model_id = getattr(settings, tier_field)
+    max_tokens = getattr(settings, f"agent_{agent_name}_max_tokens", 0)
+    if max_tokens <= 0:
+        max_tokens = settings.bedrock_max_tokens
     return model_id, max_tokens
+
+
+def save_to_yaml(keys: dict[str, Any]) -> None:
+    """Persist specific settings back to config/settings.yaml (CLI use only).
+
+    Reads the existing YAML, merges the provided keys, and writes back.
+    Web API should NOT call this — Web changes are session-level only.
+    """
+    yaml_path = _YAML_CONFIG_PATH
+    data: dict[str, Any] = {}
+    if yaml_path.is_file():
+        with open(yaml_path) as f:
+            loaded = yaml.safe_load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+    data.update(keys)
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(yaml_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 # ── Agent Detail Level ──────────────────────────────────────────────

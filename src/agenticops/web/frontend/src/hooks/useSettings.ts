@@ -12,6 +12,7 @@ export interface AppSettings {
   notifications_consolidated: boolean;
   bedrock_cache_enabled: boolean;
   agent_models: Record<string, AgentModelConfig>;
+  model_presets: { label: string; value: string }[];
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number };

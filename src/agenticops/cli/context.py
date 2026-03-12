@@ -6,13 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
-from agenticops.config import AGENT_NAMES, VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
-
-MODEL_ALIASES = {
-    "opus": "global.anthropic.claude-opus-4-6-v1",
-    "sonnet": "global.anthropic.claude-sonnet-4-6-v1",
-    "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-}
+from agenticops.config import AGENT_NAMES, MODEL_ALIASES, VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
 
 
 class ChatContext:
@@ -55,18 +49,21 @@ class ChatContext:
         return True
 
     def set_model(self, alias: str) -> bool:
-        """Switch the agent's Bedrock model at runtime."""
+        """Switch the main agent's Bedrock model at runtime."""
         if alias not in MODEL_ALIASES:
             return False
         if self.agent is None:
             return False
         from strands.models.bedrock import BedrockModel
         from agenticops.config import settings
+        model_id = MODEL_ALIASES[alias]
         self.agent.model = BedrockModel(
-            model_id=MODEL_ALIASES[alias],
+            model_id=model_id,
             region_name=settings.bedrock_region,
             max_tokens=settings.bedrock_max_tokens,
         )
+        # Also update settings so get_agent_model_config("main") reflects the change
+        settings.agent_main_model_id = model_id
         self.current_model = alias
         return True
 
