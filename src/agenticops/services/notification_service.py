@@ -18,6 +18,47 @@ from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ── Consolidated notification buffer ───────────────────────────────
+
+_consolidated_buffer: dict[int, list[dict]] = {}
+_buffer_lock = threading.Lock()
+
+
+def _buffer_or_send(
+    issue_id: int | None,
+    event_type: str,
+    subject: str,
+    body: str,
+    severity: str | None = None,
+) -> None:
+    """Buffer the notification if consolidation is on, otherwise send immediately."""
+    if not settings.notifications_consolidated or issue_id is None:
+        notify_event(event_type, subject, body, severity)
+        return
+    with _buffer_lock:
+        _consolidated_buffer.setdefault(issue_id, []).append({
+            "event_type": event_type,
+            "subject": subject,
+            "body": body,
+            "severity": severity,
+        })
+
+
+def flush_consolidated(issue_id: int) -> None:
+    """Flush buffered notifications for an issue as a single pipeline summary."""
+    with _buffer_lock:
+        events = _consolidated_buffer.pop(issue_id, [])
+    if not events:
+        return
+    severity_order = ["low", "medium", "high", "critical"]
+    max_sev = max(
+        (e["severity"] or "low" for e in events),
+        key=lambda s: severity_order.index(s) if s in severity_order else 0,
+    )
+    subject = f"[{max_sev.upper()}] Pipeline Summary: Issue #{issue_id} ({len(events)} stages)"
+    body = "\n\n".join(f"## {e['event_type']}\n{e['body']}" for e in events)
+    notify_event("pipeline_summary", subject, body, max_sev)
+
 
 def notify_event(
     event_type: str,
@@ -109,7 +150,8 @@ def notify_issue_created(
     issue_id: int, severity: str, title: str, resource_id: str
 ) -> None:
     """Notify: new HealthIssue created."""
-    notify_event(
+    _buffer_or_send(
+        issue_id=issue_id,
         event_type="issue_created",
         subject=f"[{severity.upper()}] New Issue #{issue_id}: {title}",
         body=(
@@ -126,7 +168,8 @@ def notify_rca_completed(
     issue_id: int, root_cause: str, confidence: float
 ) -> None:
     """Notify: RCA completed for an issue."""
-    notify_event(
+    _buffer_or_send(
+        issue_id=issue_id,
         event_type="rca_completed",
         subject=f"RCA Completed for Issue #{issue_id}",
         body=(
@@ -141,7 +184,8 @@ def notify_fix_planned(
     issue_id: int, plan_id: int, risk_level: str, title: str
 ) -> None:
     """Notify: fix plan generated."""
-    notify_event(
+    _buffer_or_send(
+        issue_id=issue_id,
         event_type="fix_planned",
         subject=f"Fix Plan #{plan_id} ({risk_level}) for Issue #{issue_id}",
         body=(
@@ -153,10 +197,11 @@ def notify_fix_planned(
 
 
 def notify_fix_approved(
-    plan_id: int, approved_by: str, risk_level: str
+    plan_id: int, approved_by: str, risk_level: str, issue_id: int | None = None
 ) -> None:
     """Notify: fix plan approved."""
-    notify_event(
+    _buffer_or_send(
+        issue_id=issue_id,
         event_type="fix_approved",
         subject=f"Fix Plan #{plan_id} Approved ({risk_level})",
         body=(
@@ -178,12 +223,15 @@ def notify_execution_result(
     )
     if error:
         body += f"\nError: {error[:300]}"
-    notify_event(
+    _buffer_or_send(
+        issue_id=issue_id,
         event_type="execution_result",
         subject=f"Execution {status.upper()}: Plan #{plan_id}",
         body=body,
         severity=severity,
     )
+    # Execution is the last pipeline stage — flush consolidated buffer
+    flush_consolidated(issue_id)
 
 
 def notify_report_saved(

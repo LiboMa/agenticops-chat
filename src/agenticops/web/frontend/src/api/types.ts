@@ -443,6 +443,35 @@ export interface AwsRegion {
 export interface Skill {
   name: string;
   description: string;
+  is_draft: boolean;
+  domain: string;
+  tools: string[];
+  ref_count: number;
+}
+
+export interface SkillDetail extends Skill {
+  references: string[];
+  body_markdown: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface SkillGenerateRequest {
+  description: string;
+}
+
+export interface SkillGenerateResponse {
+  name: string;
+  description: string;
+  body_preview: string;
+  full_content: string;
+  references: Record<string, string>;
+}
+
+export interface SkillDraftRequest {
+  name: string;
+  description: string;
+  content: string;
+  references?: Record<string, string>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -583,6 +612,17 @@ export interface McpServerConfig {
 }
 
 export type McpServersMap = Record<string, McpServerConfig>;
+
+/* ------------------------------------------------------------------ */
+/*  Agent Model Config                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface AgentModelConfig {
+  model_id: string;
+  max_tokens: number;
+  is_override: boolean;
+  tier_default: string;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Chat                                                               */

@@ -235,3 +235,11 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
             log_event(_issue_id, "execution_completed", "execution", "failed",
                       detail={"plan_id": fix_plan_id}, trace_id=trace_id)
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)
+    finally:
+        # Safety net: flush any consolidated notifications for this issue
+        if _issue_id:
+            try:
+                from agenticops.services.notification_service import flush_consolidated
+                flush_consolidated(_issue_id)
+            except Exception:
+                pass

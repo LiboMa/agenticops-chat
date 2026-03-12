@@ -99,6 +99,10 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `auto_fix_enabled` | `true` | Auto-fix pipeline |
 | `executor_auto_approve_l0_l1` | `true` | Auto-approve L0/L1 |
 | `notifications_enabled` | `true` | Auto-notifications |
+| `notifications_consolidated` | `false` | Single pipeline summary instead of per-stage |
+| `bedrock_cache_enabled` | `true` | Prompt caching on all agents |
+| `agent_{name}_model_id` | `""` | Per-agent model override (7 agents: main/scan/detect/rca/sre/executor/reporter) |
+| `agent_{name}_max_tokens` | `0` | Per-agent max_tokens override (0 = use bedrock_max_tokens) |
 | `deployment_profile` | `local` | local or cloud |
 | `skills_enabled` | `true` | Agent Skills |
 | `scan_focus` | `all` | Resource categories filter |

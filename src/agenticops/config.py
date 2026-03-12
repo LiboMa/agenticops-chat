@@ -27,17 +27,17 @@ class Settings(BaseSettings):
         description="SQLite database URL",
     )
 
-    # AWS Bedrock — Tiered Model Configuration
-    # Default (Opus 4.6) for main agent, RCA, SRE, executor agents
+    # AWS Bedrock — Three-Tier Model Configuration
+    # Default (Sonnet 4.6) for main agent router and executor
     # Cheap (Haiku 4.5) for tool-orchestration agents (scan, detect, reporter)
-    # Strong (Opus 4.6) same as default; override via env for future stronger models
+    # Strong (Opus 4.6) for complex reasoning agents (RCA, SRE)
     bedrock_region: str = Field(
         default="us-east-1",
         description="AWS region for Bedrock",
     )
     bedrock_model_id: str = Field(
-        default="global.anthropic.claude-opus-4-6-v1",
-        description="Bedrock model ID — default tier for main agent and reasoning sub-agents",
+        default="anthropic.claude-sonnet-4-6",
+        description="Bedrock model ID — default tier for main agent router and executor",
     )
     bedrock_model_id_cheap: str = Field(
         default="global.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -55,9 +55,32 @@ class Settings(BaseSettings):
         default=40,
         description="Conversation manager sliding window size for agents",
     )
-    bedrock_cache_enabled: bool = Field(
-        default=True,
-        description="Enable Bedrock prompt caching (cache_config=auto + cache_tools=default)",
+
+    # Per-agent model overrides (empty = use tier default)
+    agent_main_model_id: str = Field(default="", description="Override model for main agent (empty = bedrock_model_id)")
+    agent_scan_model_id: str = Field(default="", description="Override model for scan agent (empty = bedrock_model_id_cheap)")
+    agent_detect_model_id: str = Field(default="", description="Override model for detect agent (empty = bedrock_model_id_cheap)")
+    agent_rca_model_id: str = Field(default="", description="Override model for RCA agent (empty = bedrock_model_id_strong)")
+    agent_sre_model_id: str = Field(default="", description="Override model for SRE agent (empty = bedrock_model_id_strong)")
+    agent_executor_model_id: str = Field(default="", description="Override model for executor agent (empty = bedrock_model_id)")
+    agent_reporter_model_id: str = Field(default="", description="Override model for reporter agent (empty = bedrock_model_id_cheap)")
+
+    # Per-agent max_tokens overrides (0 = use bedrock_max_tokens)
+    agent_main_max_tokens: int = Field(default=0, description="Override max_tokens for main agent (0 = bedrock_max_tokens)")
+    agent_scan_max_tokens: int = Field(default=0, description="Override max_tokens for scan agent")
+    agent_detect_max_tokens: int = Field(default=0, description="Override max_tokens for detect agent")
+    agent_rca_max_tokens: int = Field(default=0, description="Override max_tokens for RCA agent")
+    agent_sre_max_tokens: int = Field(default=0, description="Override max_tokens for SRE agent")
+    agent_executor_max_tokens: int = Field(default=0, description="Override max_tokens for executor agent")
+    agent_reporter_max_tokens: int = Field(default=0, description="Override max_tokens for reporter agent")
+
+    # Prompt caching toggle
+    bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
+
+    # Notification consolidation
+    notifications_consolidated: bool = Field(
+        default=False,
+        description="Send single pipeline summary instead of per-stage notifications",
     )
 
     # CORS
@@ -173,7 +196,7 @@ class Settings(BaseSettings):
         description="Path to notification channels YAML (sole source of truth)",
     )
     feishu_ws_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
@@ -395,6 +418,31 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+# ── Per-Agent Model Config ─────────────────────────────────────────
+
+AGENT_NAMES = ("main", "scan", "detect", "rca", "sre", "executor", "reporter")
+
+AGENT_TIER_DEFAULTS: dict[str, str] = {
+    "main": "bedrock_model_id",
+    "scan": "bedrock_model_id_cheap",
+    "detect": "bedrock_model_id_cheap",
+    "rca": "bedrock_model_id_strong",
+    "sre": "bedrock_model_id_strong",
+    "executor": "bedrock_model_id",
+    "reporter": "bedrock_model_id_cheap",
+}
+
+
+def get_agent_model_config(agent_name: str) -> tuple[str, int]:
+    """Return (model_id, max_tokens) for a given agent, respecting per-agent overrides."""
+    override_model = getattr(settings, f"agent_{agent_name}_model_id", "")
+    override_tokens = getattr(settings, f"agent_{agent_name}_max_tokens", 0)
+    tier_field = AGENT_TIER_DEFAULTS.get(agent_name, "bedrock_model_id")
+    model_id = override_model if override_model else getattr(settings, tier_field)
+    max_tokens = override_tokens if override_tokens > 0 else settings.bedrock_max_tokens
+    return model_id, max_tokens
+
 
 # ── Agent Detail Level ──────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
-from agenticops.config import VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
+from agenticops.config import AGENT_NAMES, VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
 
 MODEL_ALIASES = {
     "opus": "global.anthropic.claude-opus-4-6-v1",
@@ -69,6 +69,21 @@ class ChatContext:
         )
         self.current_model = alias
         return True
+
+    def set_agent_model(self, agent_name: str, alias: str) -> bool:
+        """Set a per-agent model override at runtime."""
+        if alias not in MODEL_ALIASES or agent_name not in AGENT_NAMES:
+            return False
+        from agenticops.config import settings
+        setattr(settings, f"agent_{agent_name}_model_id", MODEL_ALIASES[alias])
+        return True
+
+    def reset_agent_models(self) -> None:
+        """Clear all per-agent model overrides."""
+        from agenticops.config import settings
+        for name in AGENT_NAMES:
+            setattr(settings, f"agent_{name}_model_id", "")
+            setattr(settings, f"agent_{name}_max_tokens", 0)
 
     def set_table_style(self, style: str) -> bool:
         """Set table style (default, simple, minimal, double, ascii)."""

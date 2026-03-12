@@ -162,12 +162,17 @@ def create_main_agent() -> Agent:
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
 
+    from agenticops.config import get_agent_model_config
+
+    model_id, max_tokens = get_agent_model_config("main")
+    cache_kwargs: dict = {}
+    if settings.bedrock_cache_enabled:
+        cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
     model = BedrockModel(
-        model_id=settings.bedrock_model_id,
+        model_id=model_id,
         region_name=settings.bedrock_region,
-        max_tokens=settings.bedrock_max_tokens,
-        cache_config=CacheConfig(strategy="auto"),
-        cache_tools="default",
+        max_tokens=max_tokens,
+        **cache_kwargs,
     )
 
     focus = get_scan_focus()

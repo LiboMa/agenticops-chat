@@ -146,12 +146,17 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
     """
     try:
+        from agenticops.config import get_agent_model_config
+
+        model_id, max_tokens = get_agent_model_config("detect")
+        cache_kwargs: dict = {}
+        if settings.bedrock_cache_enabled:
+            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
         model = BedrockModel(
-            model_id=settings.bedrock_model_id_cheap,
+            model_id=model_id,
             region_name=settings.bedrock_region,
-            max_tokens=settings.bedrock_max_tokens,
-            cache_config=CacheConfig(strategy="auto"),
-            cache_tools="default",
+            max_tokens=max_tokens,
+            **cache_kwargs,
         )
 
         agent = Agent(

@@ -1640,7 +1640,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Other:[/cyan]
   /clear                           Clear screen
   /detail [concise|medium|detailed] Set agent output detail level
-  /model [opus|sonnet|haiku]       Switch Bedrock model at runtime
+  /model [agent] [opus|sonnet|haiku] Switch agent model (or /model reset)
   /help [topic]                    Show help
 
 [cyan]Exit:[/cyan]
@@ -2893,7 +2893,9 @@ def _slash_skill(ctx: ChatContext, args: list) -> str:
         return """[bold]Skill Commands:[/bold]
 
   /skill list                         List all skills (published + draft)
+  /skill show <name>                  Show full skill detail
   /skill search <query>               Search local + registry skills
+  /skill create                       Interactive skill creator
   /skill create <name> <description>  Create a draft skill from description
   /skill review <name>                Review a draft skill
   /skill promote <name>               Promote draft to published
@@ -2912,6 +2914,41 @@ def _slash_skill(ctx: ChatContext, args: list) -> str:
             lines.append(f"  {s.name}{tag} — {s.description[:80]}")
         return "\n".join(lines)
 
+    elif sub == "show":
+        if len(args) < 2:
+            return "[yellow]Usage: /skill show <name>[/yellow]"
+        skill_name = args[1]
+        from agenticops.skills.loader import discover_skills, load_skill_body
+        skills = discover_skills()
+        skill = None
+        for s in skills:
+            if s.name == skill_name:
+                skill = s
+                break
+        if not skill:
+            return f"[yellow]Skill '{skill_name}' not found[/yellow]"
+        body = load_skill_body(skill_name) or "(empty)"
+        refs_dir = skill.path / "references"
+        refs = [f.name for f in sorted(refs_dir.glob("*.md"))] if refs_dir.is_dir() else []
+        tag = " [magenta][DRAFT][/magenta]" if skill.is_draft else " [green][Published][/green]"
+        lines = [
+            f"[bold]{skill.name}[/bold]{tag}",
+            f"  {skill.description}",
+        ]
+        if skill.tools:
+            lines.append(f"  Tools: {', '.join(t.rsplit('.', 1)[-1] for t in skill.tools)}")
+        if refs:
+            lines.append(f"  References: {', '.join(refs)}")
+        if skill.metadata:
+            domain = skill.metadata.get("domain", "")
+            if domain:
+                lines.append(f"  Domain: {domain}")
+        lines.append("")
+        lines.append(body[:3000])
+        if len(body) > 3000:
+            lines.append("\n[dim]... truncated (use WebUI for full view)[/dim]")
+        return "\n".join(lines)
+
     elif sub == "search":
         if len(args) < 2:
             return "[yellow]Usage: /skill search <query>[/yellow]"
@@ -2928,7 +2965,51 @@ def _slash_skill(ctx: ChatContext, args: list) -> str:
 
     elif sub == "create":
         if len(args) < 3:
-            return "[yellow]Usage: /skill create <name> <description...>[/yellow]"
+            # Interactive mode
+            from rich.prompt import Prompt, Confirm
+            from rich.console import Console
+            console = Console()
+            console.print("\n[bold]Interactive Skill Creator[/bold]\n")
+            name = Prompt.ask("  Skill name", default="").strip()
+            if not name:
+                return "[yellow]Cancelled — no name provided.[/yellow]"
+            description = Prompt.ask("  Description", default="").strip()
+            if not description:
+                return "[yellow]Cancelled — no description provided.[/yellow]"
+            console.print("  [dim]Generating skill via LLM...[/dim]")
+            from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
+            result = generate_skill_from_description(description)
+            if "error" in result:
+                return f"[red]Generation failed: {result['error']}[/red]"
+            content = result.get("content", "")
+            preview = content[:1500]
+            console.print(f"\n[bold]Preview:[/bold]\n")
+            console.print(f"  Name: {result.get('name', name)}")
+            console.print(f"  Description: {result.get('description', description)}")
+            console.print(f"  Content ({len(content)} chars):\n")
+            for line in preview.split("\n")[:30]:
+                console.print(f"    {line}")
+            if len(content) > 1500:
+                console.print("    [dim]... (truncated)[/dim]")
+            console.print()
+            action = Prompt.ask("  Action", choices=["save", "regenerate", "cancel"], default="save")
+            if action == "cancel":
+                return "[yellow]Cancelled.[/yellow]"
+            if action == "regenerate":
+                console.print("  [dim]Regenerating...[/dim]")
+                result = generate_skill_from_description(description)
+                if "error" in result:
+                    return f"[red]Regeneration failed: {result['error']}[/red]"
+                content = result.get("content", "")
+                if not Confirm.ask("  Save this version?", default=True):
+                    return "[yellow]Cancelled.[/yellow]"
+            path = create_draft_skill(
+                name=result.get("name", name),
+                description=result.get("description", description),
+                content=result.get("content", ""),
+                references=result.get("references"),
+            )
+            return f"[green]Draft skill created at {path}[/green]"
         name = args[1]
         description = " ".join(args[2:])
         from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
@@ -3245,18 +3326,38 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
     # Model switching command
     if cmd == "model":
         from agenticops.cli.context import MODEL_ALIASES
+        from agenticops.config import AGENT_NAMES, get_agent_model_config
         if args:
+            # /model reset — clear all per-agent overrides
+            if args[0].lower() == "reset":
+                ctx.reset_agent_models()
+                return "[green]All per-agent model overrides cleared.[/green]"
+            # /model <agent> <alias> — set per-agent override
+            if len(args) >= 2 and args[0].lower() in AGENT_NAMES:
+                agent_name = args[0].lower()
+                alias = args[1].lower()
+                if ctx.set_agent_model(agent_name, alias):
+                    return f"[green]{agent_name} agent model set to: {MODEL_ALIASES[alias]}[/green]"
+                valid = ", ".join(MODEL_ALIASES.keys())
+                return f"[yellow]Invalid model '{alias}'. Use: {valid}[/yellow]"
+            # /model <alias> — switch main agent (backward compat)
             alias = args[0].lower()
             if ctx.set_model(alias):
                 return f"[green]Model switched to: {MODEL_ALIASES[alias]}[/green]"
             valid = ", ".join(f"{k} ({v})" for k, v in MODEL_ALIASES.items())
             return f"[yellow]Invalid model '{alias}'. Use:[/yellow]\n  {valid}"
-        # No args — show current model and options
-        lines = "\n".join(
-            f"  {'→' if k == ctx.current_model else ' '} {k:8s} {v}"
-            for k, v in MODEL_ALIASES.items()
-        )
-        return f"[cyan]Current model: {MODEL_ALIASES[ctx.current_model]}[/cyan]\n{lines}\n  Usage: /model <opus|sonnet|haiku>"
+        # No args — show all agents with resolved models
+        lines = []
+        for name in AGENT_NAMES:
+            model_id, max_tokens = get_agent_model_config(name)
+            is_override = bool(getattr(settings, f"agent_{name}_model_id", ""))
+            marker = " *" if is_override else ""
+            # Shorten model_id for display
+            short = model_id.split(".")[-1] if "." in model_id else model_id
+            lines.append(f"  {name:10s} {short}{marker}")
+        header = f"[cyan]Main agent: {MODEL_ALIASES.get(ctx.current_model, ctx.current_model)}[/cyan]"
+        table = "\n".join(lines)
+        return f"{header}\n\n[cyan]All agents:[/cyan]\n{table}\n\n  /model <opus|sonnet|haiku>          Switch main agent\n  /model <agent> <opus|sonnet|haiku>  Switch specific agent\n  /model reset                        Clear all overrides\n  (* = per-agent override active)"
 
     handler = SLASH_COMMANDS.get(cmd)
     if handler:

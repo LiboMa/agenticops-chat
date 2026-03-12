@@ -166,12 +166,17 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
     try:
+        from agenticops.config import get_agent_model_config
+
+        model_id, max_tokens = get_agent_model_config("executor")
+        cache_kwargs: dict = {}
+        if settings.bedrock_cache_enabled:
+            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
         model = BedrockModel(
-            model_id=settings.bedrock_model_id,
+            model_id=model_id,
             region_name=settings.bedrock_region,
-            max_tokens=settings.bedrock_max_tokens,
-            cache_config=CacheConfig(strategy="auto"),
-            cache_tools="default",
+            max_tokens=max_tokens,
+            **cache_kwargs,
         )
 
         agent = Agent(

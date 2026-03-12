@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
@@ -20,7 +20,7 @@ import {
   useReloadMcpServers,
   useImportMcpServers,
 } from "@/hooks/useMcpServers";
-import type { ScanFocus } from "@/api/types";
+import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, McpServerConfig } from "@/api/types";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
@@ -270,6 +270,320 @@ function McpServerFormModal({
   );
 }
 
+/* ── MCP Import Dialog ──────────────────────────────────────────── */
+
+interface McpValidationResult {
+  valid: boolean;
+  servers: string[];
+  error?: string;
+}
+
+function validateMcpJson(text: string): McpValidationResult {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { valid: false, servers: [], error: "Invalid JSON syntax" };
+  }
+  if (!data || typeof data !== "object") {
+    return { valid: false, servers: [], error: "Expected a JSON object" };
+  }
+  const obj = data as Record<string, unknown>;
+  if (!obj.mcpServers || typeof obj.mcpServers !== "object" || Array.isArray(obj.mcpServers)) {
+    return { valid: false, servers: [], error: 'Missing or invalid "mcpServers" key. Expected {"mcpServers": {...}}' };
+  }
+  const entries = Object.entries(obj.mcpServers as Record<string, unknown>);
+  if (entries.length === 0) {
+    return { valid: false, servers: [], error: "mcpServers is empty" };
+  }
+  const invalid: string[] = [];
+  for (const [name, cfg] of entries) {
+    if (!cfg || typeof cfg !== "object") {
+      invalid.push(name);
+      continue;
+    }
+    const c = cfg as Record<string, unknown>;
+    if (!c.command && !c.url) {
+      invalid.push(name);
+    }
+  }
+  if (invalid.length > 0) {
+    return { valid: false, servers: [], error: `Servers missing "command" or "url": ${invalid.join(", ")}` };
+  }
+  return { valid: true, servers: entries.map(([n]) => n) };
+}
+
+function McpImportDialog({
+  onClose,
+  onImport,
+  importing,
+}: {
+  onClose: () => void;
+  onImport: (data: unknown) => Promise<void>;
+  importing: boolean;
+}) {
+  const [mode, setMode] = useState<"file" | "paste">("file");
+  const [jsonText, setJsonText] = useState("");
+  const [validation, setValidation] = useState<McpValidationResult | null>(null);
+  const [importResult, setImportResult] = useState<{ success: boolean; servers: string[] } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const validate = useCallback((text: string) => {
+    setJsonText(text);
+    setImportResult(null);
+    if (!text.trim()) {
+      setValidation(null);
+      return;
+    }
+    setValidation(validateMcpJson(text));
+  }, []);
+
+  function handleFileLoad(file: File) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      validate(text);
+    };
+    reader.readAsText(file);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith(".json")) handleFileLoad(file);
+  }
+
+  async function handleImport() {
+    if (!validation?.valid) return;
+    try {
+      const data = JSON.parse(jsonText);
+      await onImport(data);
+      setImportResult({ success: true, servers: validation.servers });
+      setTimeout(onClose, 2000);
+    } catch (err) {
+      setImportResult({ success: false, servers: [] });
+      setValidation({ valid: false, servers: [], error: String(err) });
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Import MCP Servers</h3>
+
+        {/* Mode tabs */}
+        <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
+          <button
+            onClick={() => { setMode("file"); setJsonText(""); setValidation(null); setImportResult(null); }}
+            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "file" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+          >Upload File</button>
+          <button
+            onClick={() => { setMode("paste"); setJsonText(""); setValidation(null); setImportResult(null); }}
+            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "paste" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+          >Paste JSON</button>
+        </div>
+
+        {/* File upload zone */}
+        {mode === "file" && (
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              dragOver ? "border-primary-400 bg-primary-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileLoad(file);
+                e.target.value = "";
+              }}
+            />
+            <p className="text-sm text-slate-500">Drop a .json file here or click to browse</p>
+            <p className="text-xs text-slate-400 mt-1">{'Expected format: {"mcpServers": {...}}'}</p>
+          </div>
+        )}
+
+        {/* Paste textarea */}
+        {mode === "paste" && (
+          <textarea
+            rows={8}
+            value={jsonText}
+            onChange={(e) => validate(e.target.value)}
+            placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "command": "uvx",\n      "args": ["my-mcp-server"]\n    }\n  }\n}'}
+            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        )}
+
+        {/* Validation result */}
+        {validation && (
+          <div className={`mt-3 p-3 rounded-lg border text-sm ${
+            validation.valid
+              ? "bg-green-50 border-green-200 text-green-700"
+              : "bg-red-50 border-red-200 text-red-700"
+          }`}>
+            {validation.valid ? (
+              <div>
+                <span className="font-medium">{validation.servers.length} server{validation.servers.length > 1 ? "s" : ""} found</span>
+                <ul className="mt-1 ml-4 list-disc text-xs">
+                  {validation.servers.map((s) => <li key={s} className="font-mono">{s}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <span>{validation.error}</span>
+            )}
+          </div>
+        )}
+
+        {/* Import success feedback */}
+        {importResult?.success && (
+          <div className="mt-3 p-3 rounded-lg border bg-green-50 border-green-200 text-sm text-green-700">
+            Imported {importResult.servers.length} server{importResult.servers.length > 1 ? "s" : ""} successfully. Closing...
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={handleImport}
+            disabled={!validation?.valid || importing || !!importResult?.success}
+            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+          >{importing ? "Importing..." : "Import"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Agent Models Card ──────────────────────────────────────────── */
+
+const MODEL_PRESETS = [
+  { label: "Opus 4.6", value: "global.anthropic.claude-opus-4-6-v1" },
+  { label: "Sonnet 4.6", value: "anthropic.claude-sonnet-4-6" },
+  { label: "Haiku 4.5", value: "global.anthropic.claude-haiku-4-5-20251001-v1:0" },
+];
+
+const AGENT_LABELS: Record<string, { label: string; tier: string }> = {
+  main:     { label: "Main (Router)",  tier: "default" },
+  scan:     { label: "Scan",           tier: "cheap" },
+  detect:   { label: "Detect",         tier: "cheap" },
+  rca:      { label: "RCA",            tier: "strong" },
+  sre:      { label: "SRE",            tier: "strong" },
+  executor: { label: "Executor",       tier: "default" },
+  reporter: { label: "Reporter",       tier: "cheap" },
+};
+
+const TIER_COLORS: Record<string, string> = {
+  default: "bg-blue-100 text-blue-700",
+  cheap:   "bg-green-100 text-green-700",
+  strong:  "bg-purple-100 text-purple-700",
+};
+
+function AgentModelsCard() {
+  const settingsQ = useSettings();
+  const updateMut = useUpdateSettings();
+  const s = settingsQ.data;
+
+  function handleModelChange(agentName: string, modelId: string) {
+    updateMut.mutate({ agent_models: { [agentName]: { model_id: modelId } } });
+  }
+
+  function handleMaxTokensChange(agentName: string, maxTokens: number) {
+    updateMut.mutate({ agent_models: { [agentName]: { max_tokens: maxTokens } } });
+  }
+
+  function handleReset(agentName: string) {
+    updateMut.mutate({ agent_models: { [agentName]: { model_id: "", max_tokens: 0 } } });
+  }
+
+  if (settingsQ.isLoading) return <Card><CardBody><Spinner /></CardBody></Card>;
+  if (settingsQ.error) return <Card><CardBody><ErrorBanner message={settingsQ.error.message} onRetry={() => settingsQ.refetch()} /></CardBody></Card>;
+  if (!s) return null;
+
+  const agents = s.agent_models ?? {};
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-slate-900">Agent Models</h2>
+        <span className="text-xs text-slate-400">Per-agent model & token configuration</span>
+      </CardHeader>
+      <CardBody>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs text-slate-500 uppercase">
+                <th className="pb-2 pr-4">Agent</th>
+                <th className="pb-2 pr-4">Tier</th>
+                <th className="pb-2 pr-4">Model</th>
+                <th className="pb-2 pr-4">Max Tokens</th>
+                <th className="pb-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(agents).map(([name, cfg]: [string, AgentModelConfig]) => {
+                const meta = AGENT_LABELS[name] ?? { label: name, tier: "default" };
+                const currentPreset = MODEL_PRESETS.find((p) => p.value === cfg.model_id);
+                return (
+                  <tr key={name} className="border-b border-slate-50">
+                    <td className="py-2.5 pr-4 font-medium text-slate-700">{meta.label}</td>
+                    <td className="py-2.5 pr-4">
+                      <Badge className={TIER_COLORS[meta.tier] ?? "bg-slate-100 text-slate-600"}>
+                        {meta.tier}
+                      </Badge>
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <select
+                        value={cfg.model_id}
+                        onChange={(e) => handleModelChange(name, e.target.value)}
+                        disabled={updateMut.isPending}
+                        className="px-2 py-1 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[260px]"
+                      >
+                        {MODEL_PRESETS.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                        {!currentPreset && <option value={cfg.model_id}>{cfg.model_id}</option>}
+                      </select>
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <input
+                        type="number"
+                        value={cfg.max_tokens}
+                        onChange={(e) => handleMaxTokensChange(name, parseInt(e.target.value) || 0)}
+                        disabled={updateMut.isPending}
+                        className="w-24 px-2 py-1 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                      />
+                    </td>
+                    <td className="py-2.5">
+                      {cfg.is_override && (
+                        <button
+                          onClick={() => handleReset(name)}
+                          disabled={updateMut.isPending}
+                          className="text-xs text-slate-400 hover:text-red-600 disabled:opacity-50"
+                          title="Reset to tier default"
+                        >Reset</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── Main Settings page ─────────────────────────────────────────── */
 
 export default function Settings() {
@@ -292,33 +606,10 @@ export default function Settings() {
   const deleteMcp = useDeleteMcpServer();
   const reloadMcp = useReloadMcpServers();
   const importMcp = useImportMcpServers();
-  const mcpFileRef = useRef<HTMLInputElement>(null);
   const [mcpFormOpen, setMcpFormOpen] = useState(false);
   const [mcpEditing, setMcpEditing] = useState<{ name: string; config: McpServerConfig } | null>(null);
   const [mcpDeleting, setMcpDeleting] = useState<string | null>(null);
-  const [mcpImportError, setMcpImportError] = useState<string | null>(null);
-
-  function handleMcpImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMcpImportError(null);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const data = JSON.parse(ev.target?.result as string);
-        if (!data.mcpServers || typeof data.mcpServers !== "object") {
-          setMcpImportError("Invalid format: expected {\"mcpServers\": {...}}");
-          return;
-        }
-        await importMcp.mutateAsync(data);
-      } catch (err) {
-        setMcpImportError(err instanceof SyntaxError ? "Invalid JSON file" : String(err));
-      }
-    };
-    reader.readAsText(file);
-    // Reset so the same file can be re-imported
-    e.target.value = "";
-  }
+  const [mcpImportOpen, setMcpImportOpen] = useState(false);
 
   const s = settingsQ.data;
 
@@ -412,10 +703,27 @@ export default function Settings() {
                 onChange={(v) => patchSetting("notifications_enabled", v)}
                 saving={updateMut.isPending}
               />
+              <SettingToggle
+                label="Consolidated Notifications"
+                description="Send a single pipeline summary instead of per-stage notifications"
+                enabled={s.notifications_consolidated}
+                onChange={(v) => patchSetting("notifications_consolidated", v)}
+                saving={updateMut.isPending}
+              />
+              <SettingToggle
+                label="Prompt Caching"
+                description="Enable Bedrock prompt caching on all agents (reduces latency & cost)"
+                enabled={s.bedrock_cache_enabled}
+                onChange={(v) => patchSetting("bedrock_cache_enabled", v)}
+                saving={updateMut.isPending}
+              />
             </div>
           ) : null}
         </CardBody>
       </Card>
+
+      {/* ── Agent Models ─────────────────────────────────────── */}
+      <AgentModelsCard />
 
       {/* ── Accounts ──────────────────────────────────────────── */}
       <Card>
@@ -459,13 +767,11 @@ export default function Settings() {
         <CardHeader>
           <h2 className="text-lg font-semibold text-slate-900">MCP Servers</h2>
           <div className="flex gap-2">
-            <input ref={mcpFileRef} type="file" accept=".json" onChange={handleMcpImport} className="hidden" />
             <button
-              onClick={() => mcpFileRef.current?.click()}
-              disabled={importMcp.isPending}
-              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => setMcpImportOpen(true)}
+              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
             >
-              {importMcp.isPending ? "Importing..." : "Import JSON"}
+              Import JSON
             </button>
             <button
               onClick={() => reloadMcp.mutate()}
@@ -483,12 +789,6 @@ export default function Settings() {
           </div>
         </CardHeader>
         <CardBody>
-          {mcpImportError && (
-            <div className="mb-3 p-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center justify-between">
-              <span>{mcpImportError}</span>
-              <button onClick={() => setMcpImportError(null)} className="text-red-400 hover:text-red-600 ml-2">&times;</button>
-            </div>
-          )}
           {mcpQ.isLoading ? (
             <Spinner />
           ) : mcpQ.error ? (
@@ -535,6 +835,13 @@ export default function Settings() {
       </Card>
 
       {/* MCP Modals */}
+      {mcpImportOpen && (
+        <McpImportDialog
+          importing={importMcp.isPending}
+          onClose={() => setMcpImportOpen(false)}
+          onImport={async (data) => { await importMcp.mutateAsync(data as { mcpServers: Record<string, McpServerConfig> }); }}
+        />
+      )}
       {mcpFormOpen && (
         <McpServerFormModal
           initial={mcpEditing}

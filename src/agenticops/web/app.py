@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from typing import Dict, Optional, List
 
-from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks
+from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -1034,6 +1034,18 @@ async def api_scan_focus_options():
 @app.get("/api/settings")
 async def api_get_settings():
     """Return all toggleable runtime settings."""
+    from agenticops.config import AGENT_NAMES, AGENT_TIER_DEFAULTS, get_agent_model_config
+
+    agent_models = {}
+    for name in AGENT_NAMES:
+        model_id, max_tokens = get_agent_model_config(name)
+        agent_models[name] = {
+            "model_id": model_id,
+            "max_tokens": max_tokens,
+            "is_override": bool(getattr(settings, f"agent_{name}_model_id", "")),
+            "tier_default": AGENT_TIER_DEFAULTS[name],
+        }
+
     return {
         "scan_focus": settings.scan_focus,
         "executor_enabled": settings.executor_enabled,
@@ -1041,19 +1053,23 @@ async def api_get_settings():
         "auto_rca_enabled": settings.auto_rca_enabled,
         "notifications_enabled": settings.notifications_enabled,
         "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
+        "notifications_consolidated": settings.notifications_consolidated,
+        "bedrock_cache_enabled": settings.bedrock_cache_enabled,
+        "agent_models": agent_models,
     }
 
 
 @app.patch("/api/settings")
 async def api_update_settings(body: dict = Body(...)):
     """Update runtime settings (non-persistent, resets on restart)."""
-    from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
+    from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus
 
     BOOL_KEYS = {
         "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
         "notifications_enabled", "executor_auto_approve_l0_l1",
+        "notifications_consolidated", "bedrock_cache_enabled",
     }
-    ALL_KEYS = BOOL_KEYS | {"scan_focus"}
+    ALL_KEYS = BOOL_KEYS | {"scan_focus", "agent_models"}
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -1073,14 +1089,21 @@ async def api_update_settings(body: dict = Body(...)):
         settings.scan_focus = val
         set_scan_focus(val)
 
-    return {
-        "scan_focus": settings.scan_focus,
-        "executor_enabled": settings.executor_enabled,
-        "auto_fix_enabled": settings.auto_fix_enabled,
-        "auto_rca_enabled": settings.auto_rca_enabled,
-        "notifications_enabled": settings.notifications_enabled,
-        "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
-    }
+    if "agent_models" in body:
+        am = body["agent_models"]
+        if not isinstance(am, dict):
+            raise HTTPException(400, "agent_models must be a dict")
+        for name, cfg in am.items():
+            if name not in AGENT_NAMES:
+                raise HTTPException(400, f"Unknown agent: {name}")
+            if not isinstance(cfg, dict):
+                raise HTTPException(400, f"agent_models.{name} must be a dict")
+            if "model_id" in cfg:
+                setattr(settings, f"agent_{name}_model_id", str(cfg["model_id"]))
+            if "max_tokens" in cfg:
+                setattr(settings, f"agent_{name}_max_tokens", int(cfg["max_tokens"]))
+
+    return await api_get_settings()
 
 
 # ============================================================================
@@ -3257,11 +3280,196 @@ async def api_list_schedule_executions(
 
 @app.get("/api/skills")
 async def api_list_skills():
-    """Return available agent skills."""
+    """Return available agent skills with rich metadata."""
     from agenticops.skills.loader import discover_skills
 
     skills = discover_skills()
-    return [{"name": s.name, "description": s.description} for s in skills]
+    result = []
+    for s in skills:
+        refs_dir = s.path / "references"
+        ref_count = len(list(refs_dir.glob("*.md"))) if refs_dir.is_dir() else 0
+        domain = s.metadata.get("domain", "general")
+        result.append({
+            "name": s.name,
+            "description": s.description,
+            "is_draft": s.is_draft,
+            "domain": domain,
+            "tools": s.tools,
+            "ref_count": ref_count,
+        })
+    return result
+
+
+@app.get("/api/skills/{name}")
+async def api_get_skill(name: str):
+    """Return full skill detail including SKILL.md body and references."""
+    from agenticops.skills.loader import discover_skills, load_skill_body
+
+    skills = discover_skills()
+    skill = None
+    for s in skills:
+        if s.name == name:
+            skill = s
+            break
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+    body = load_skill_body(name) or ""
+    refs_dir = skill.path / "references"
+    references = (
+        [f.name for f in sorted(refs_dir.glob("*.md"))]
+        if refs_dir.is_dir()
+        else []
+    )
+    domain = skill.metadata.get("domain", "general")
+
+    return {
+        "name": skill.name,
+        "description": skill.description,
+        "is_draft": skill.is_draft,
+        "domain": domain,
+        "tools": skill.tools,
+        "ref_count": len(references),
+        "references": references,
+        "body_markdown": body,
+        "metadata": skill.metadata,
+    }
+
+
+@app.post("/api/skills/generate")
+async def api_generate_skill(req: dict):
+    """Generate a skill from a natural language description (LLM call)."""
+    description = req.get("description", "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
+    from agenticops.skills.evolution import generate_skill_from_description
+
+    result = generate_skill_from_description(description)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    content = result.get("content", "")
+    return {
+        "name": result["name"],
+        "description": result["description"],
+        "body_preview": content[:2000],
+        "full_content": content,
+        "references": result.get("references", {}),
+    }
+
+
+@app.post("/api/skills/draft")
+async def api_save_draft_skill(req: dict):
+    """Save a generated or imported skill as a draft."""
+    name = req.get("name", "").strip()
+    description = req.get("description", "").strip()
+    content = req.get("content", "").strip()
+    if not name or not description or not content:
+        raise HTTPException(
+            status_code=400, detail="name, description, and content are required"
+        )
+
+    from agenticops.skills.evolution import create_draft_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+
+    references = req.get("references") or None
+    path = create_draft_skill(name, description, content, references)
+    _invalidate_skills_cache()
+    return {"name": name, "path": str(path)}
+
+
+@app.post("/api/skills/import")
+async def api_import_skill(file: UploadFile = File(...)):
+    """Import a skill from an uploaded .md or .zip file."""
+    import tempfile
+    import zipfile
+
+    from agenticops.skills.evolution import create_draft_skill
+    from agenticops.skills.loader import _invalidate_skills_cache, parse_frontmatter
+
+    filename = file.filename or "upload"
+    content_bytes = await file.read()
+
+    if filename.endswith(".md"):
+        text = content_bytes.decode("utf-8")
+        fm, body = parse_frontmatter(text)
+        name = fm.get("name", filename.replace(".md", "").replace("SKILL", "skill"))
+        description = fm.get("description", name)
+        path = create_draft_skill(name, description, body)
+        _invalidate_skills_cache()
+        return {"name": name, "path": str(path)}
+
+    elif filename.endswith(".zip"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / "upload.zip"
+            zip_path.write_bytes(content_bytes)
+
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for info in zf.infolist():
+                    if info.filename.startswith("/") or ".." in info.filename:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid path in zip: {info.filename}",
+                        )
+                    if not info.filename.endswith(".md") and not info.is_dir():
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Only .md files allowed in zip, found: {info.filename}",
+                        )
+                zf.extractall(tmpdir)
+
+            extracted = Path(tmpdir)
+            skill_md_files = list(extracted.rglob("SKILL.md"))
+            if not skill_md_files:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No SKILL.md found in zip archive",
+                )
+
+            skill_md = skill_md_files[0]
+            skill_dir = skill_md.parent
+            text = skill_md.read_text(encoding="utf-8")
+            fm, body = parse_frontmatter(text)
+            name = fm.get("name", skill_dir.name)
+            description = fm.get("description", name)
+
+            refs_dir = skill_dir / "references"
+            references = None
+            if refs_dir.is_dir():
+                references = {}
+                for ref_file in refs_dir.glob("*.md"):
+                    references[ref_file.name] = ref_file.read_text(encoding="utf-8")
+
+            path = create_draft_skill(name, description, body, references)
+            _invalidate_skills_cache()
+            return {"name": name, "path": str(path)}
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Only .md and .zip files are supported",
+        )
+
+
+@app.delete("/api/skills/{name}")
+async def api_delete_skill(name: str):
+    """Delete a draft skill. Published skills cannot be deleted via API."""
+    from agenticops.skills.loader import discover_skills
+    from agenticops.skills.review import reject_draft_skill
+
+    skills = discover_skills()
+    for s in skills:
+        if s.name == name:
+            if not s.is_draft:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Skill '{name}' is published and cannot be deleted via API",
+                )
+            if reject_draft_skill(name):
+                return {"deleted": True, "name": name}
+            raise HTTPException(status_code=500, detail="Failed to delete skill")
+    raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
 
 
 # ============================================================================
