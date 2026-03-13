@@ -151,7 +151,8 @@ class TestSaveFixPlan:
         assert len(plan.steps) == 1
 
         db_session.refresh(health_issue)
-        assert health_issue.status == "fix_planned"
+        # L1 plans may be auto-approved when executor_auto_approve_l0_l1=True (default)
+        assert health_issue.status in ("fix_planned", "fix_approved")
 
     def test_invalid_risk_level(self, db_session, health_issue, rca_result):
         """Test that invalid risk levels are rejected."""

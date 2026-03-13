@@ -1,17 +1,34 @@
+import { useState, useEffect, useCallback } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { CommandPalette } from "../CommandPalette";
 
 export function AppShell() {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      e.preventDefault();
+      setPaletteOpen((prev) => !prev);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background text-foreground">
       <Sidebar />
-      <div className="pl-60">
-        <TopBar />
+      <div className="pl-56">
+        <TopBar onSearchClick={() => setPaletteOpen(true)} />
         <main className="p-6">
           <Outlet />
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

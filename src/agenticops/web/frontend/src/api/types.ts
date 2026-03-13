@@ -87,6 +87,14 @@ export interface Report {
   created_at: string;
 }
 
+export interface ReportFromSessionRequest {
+  session_id: string;
+  title?: string;
+  summary?: string;
+  message_ids?: number[];
+  format?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Fix Plans & Executions                                             */
 /* ------------------------------------------------------------------ */
@@ -135,157 +143,6 @@ export interface FixExecution {
   error_message: string | null;
   duration_ms: number;
   created_at: string;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Region Topology (multi-VPC view)                                   */
-/* ------------------------------------------------------------------ */
-
-export interface RegionVpc {
-  vpc_id: string;
-  name: string | null;
-  cidr_block: string;
-  state: string;
-  is_default: boolean;
-  subnet_count: number;
-}
-
-export interface RegionTgwAttachment {
-  attachment_id: string;
-  resource_type: string;
-  resource_id: string;
-  state: string;
-}
-
-export interface RegionTransitGateway {
-  transit_gateway_id: string;
-  name: string | null;
-  state: string;
-  attachments: RegionTgwAttachment[];
-}
-
-export interface RegionTopology {
-  region: string;
-  vpcs: RegionVpc[];
-  transit_gateways: RegionTransitGateway[];
-  peering_connections: VpcPeeringConnection[];
-}
-
-/* ------------------------------------------------------------------ */
-/*  VPC List                                                           */
-/* ------------------------------------------------------------------ */
-
-export interface Vpc {
-  VpcId: string;
-  CidrBlock: string;
-  Name: string | null;
-  State: string;
-  IsDefault: boolean;
-  DhcpOptionsId?: string;
-  InstanceTenancy?: string;
-  CidrBlockAssociations?: string[];
-  Tags?: Record<string, string>;
-}
-
-export interface VpcListResponse {
-  region: string;
-  vpcs: Vpc[];
-}
-
-export interface Subnet {
-  subnet_id: string;
-  name: string | null;
-  az: string;
-  cidr: string;
-  type: "public" | "private";
-  available_ips: number;
-  route_table_id: string | null;
-  default_route_target: string | null;
-}
-
-export interface RouteEntry {
-  destination: string;
-  state: string;
-  target: string;
-  origin: string;
-}
-
-export interface RouteTable {
-  route_table_id: string;
-  name: string | null;
-  associated_subnets: string[];
-  is_main: boolean;
-  routes: RouteEntry[];
-}
-
-export interface NatGateway {
-  nat_gateway_id: string;
-  name: string | null;
-  subnet_id: string;
-  state: string;
-  connectivity_type: string;
-  az: string;
-}
-
-export interface InternetGateway {
-  igw_id: string;
-  name: string | null;
-  attachments: { vpc_id: string; state: string }[];
-}
-
-export interface VpcPeeringConnection {
-  pcx_id: string;
-  status: string;
-  requester_vpc: string;
-  requester_cidr: string;
-  requester_owner: string;
-  accepter_vpc: string;
-  accepter_cidr: string;
-  accepter_owner: string;
-}
-
-export interface VpcEndpoint {
-  endpoint_id: string;
-  service_name: string;
-  type: string;
-  state: string;
-  route_table_ids: string[];
-  subnet_ids: string[];
-}
-
-export interface TransitGatewayAttachment {
-  attachment_id: string;
-  transit_gateway_id: string;
-  resource_type: string;
-  state: string;
-}
-
-export interface BlackholeRoute {
-  route_table_id: string;
-  destination: string;
-  target: string;
-  affected_subnets: string[];
-}
-
-export interface SgDependencyEntry {
-  name: string;
-  references: string[];
-  referenced_by: string[];
-}
-
-/** Keyed by security group ID */
-export type SgDependencyMap = Record<string, SgDependencyEntry>;
-
-export interface ReachabilitySummary {
-  has_internet_gateway: boolean;
-  public_subnet_count: number;
-  private_subnet_count: number;
-  nat_gateway_count: number;
-  transit_gateway_attachments: number;
-  vpc_peering_count: number;
-  vpc_endpoint_count: number;
-  blackhole_route_count: number;
-  issues: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -348,83 +205,6 @@ export interface AuditStats {
   deletes: number;
   logins: number;
   login_failures: number;
-}
-
-/* ------------------------------------------------------------------ */
-/*  VPC Topology                                                       */
-/* ------------------------------------------------------------------ */
-
-export interface VpcTopology {
-  vpc_id: string;
-  vpc_cidr: string;
-  vpc_name: string | null;
-  region: string;
-  internet_gateways: InternetGateway[];
-  vpc_peering_connections: VpcPeeringConnection[];
-  vpc_endpoints: VpcEndpoint[];
-  subnets: Subnet[];
-  route_tables: RouteTable[];
-  nat_gateways: NatGateway[];
-  transit_gateway_attachments: TransitGatewayAttachment[];
-  security_group_dependency_map: SgDependencyMap;
-  blackhole_routes: BlackholeRoute[];
-  reachability_summary: ReachabilitySummary;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Graph Engine (serialized from backend graph API)                   */
-/* ------------------------------------------------------------------ */
-
-export interface GraphNode {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: Record<string, unknown>;
-}
-
-export interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  type: string;
-  data: Record<string, unknown>;
-}
-
-export interface GraphMetadata {
-  node_count: number;
-  edge_count: number;
-  node_type_counts: Record<string, number>;
-  has_anomalies: boolean;
-  anomaly_count: number;
-}
-
-export interface SerializedGraph {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  metadata: GraphMetadata;
-}
-
-export interface ReachabilityResult {
-  subnet_id: string;
-  can_reach_internet: boolean;
-  path: string[];
-  path_details: { id: string; type: string; label: string }[];
-  blocking_reason: string | null;
-}
-
-export interface AnomalyItem {
-  type: string;
-  severity: string;
-  node_id: string;
-  node_type: string;
-  description: string;
-  details: Record<string, unknown>;
-}
-
-export interface AnomalyReport {
-  total_anomalies: number;
-  anomalies: AnomalyItem[];
-  summary: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -666,75 +446,6 @@ export interface ChatSessionDetail extends ChatSession {
 }
 
 /* ------------------------------------------------------------------ */
-/*  SRE Analysis (graph engine results)                                */
-/* ------------------------------------------------------------------ */
-
-export interface DependencyNode {
-  node_id: string;
-  node_type: string;
-  label: string;
-  depth: number;
-}
-
-export interface DependencyChainResult {
-  fault_node_id: string;
-  fault_node_type: string;
-  affected_nodes: DependencyNode[];
-  depth_levels: Record<number, string[]>;
-  total_affected: number;
-  severity: string;
-}
-
-export interface SPOFItem {
-  node_id: string;
-  node_type: string;
-  label: string;
-  impact_description: string;
-  affected_components: number;
-  is_bridge: boolean;
-}
-
-export interface SPOFReport {
-  total_spofs: number;
-  articulation_points: SPOFItem[];
-  bridges: { source: string; source_type: string; source_label: string; target: string; target_type: string; target_label: string }[];
-  summary: string;
-}
-
-export interface CapacityRiskItem {
-  node_id: string;
-  node_type: string;
-  label: string;
-  metric: string;
-  current: number;
-  maximum: number;
-  utilization_pct: number;
-  risk_level: string;
-}
-
-export interface CapacityRiskReport {
-  total_risks: number;
-  items: CapacityRiskItem[];
-  summary: string;
-}
-
-export interface ReachabilityDiff {
-  node_id: string;
-  could_reach_before: string[];
-  can_reach_after: string[];
-  lost: string[];
-}
-
-export interface ChangeSimulationResult {
-  edge_source: string;
-  edge_target: string;
-  edge_existed: boolean;
-  lost_reachability: ReachabilityDiff[];
-  total_connections_lost: number;
-  impact_summary: string;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Pipeline Event Timeline                                            */
 /* ------------------------------------------------------------------ */
 
@@ -772,4 +483,29 @@ export interface ReportSubscription {
   protocol: string;
   endpoint: string;
   status: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Global Search                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface SearchResultItem {
+  id: number;
+  title: string;
+  subtitle: string;
+  entity_type: "issue" | "fix_plan" | "report";
+  status?: string;
+  severity?: string;
+  report_type?: string;
+  updated_at?: string;
+  created_at?: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: {
+    issues: SearchResultItem[];
+    fix_plans: SearchResultItem[];
+    reports: SearchResultItem[];
+  };
 }

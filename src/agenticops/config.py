@@ -225,6 +225,52 @@ class Settings(BaseSettings):
         description="S3 region for report storage (AIOPS_REPORT_S3_REGION)",
     )
 
+    # Deployment profile
+    deployment_profile: str = Field(
+        default="local",
+        description="Deployment profile: 'local' or 'cloud'",
+    )
+
+    # Vector store backend
+    vector_storage: str = Field(
+        default="sqlite",
+        description="Vector storage backend: 'sqlite', 'rds', or 's3'",
+    )
+    vector_rds_url: str = Field(
+        default="",
+        description="PostgreSQL URL for vector storage (when vector_storage=rds)",
+    )
+    vector_s3_bucket: str = Field(
+        default="",
+        description="S3 bucket for vector storage",
+    )
+    vector_s3_prefix: str = Field(
+        default="vectors/",
+        description="S3 key prefix for vector storage",
+    )
+    vector_s3_region: str = Field(
+        default="us-east-1",
+        description="S3 region for vector storage",
+    )
+
+    # Knowledge base storage backend
+    kb_storage: str = Field(
+        default="local",
+        description="KB storage backend: 'local' or 's3'",
+    )
+    kb_s3_bucket: str = Field(
+        default="",
+        description="S3 bucket for KB storage",
+    )
+    kb_s3_prefix: str = Field(
+        default="knowledge_base/",
+        description="S3 key prefix for KB storage",
+    )
+    kb_s3_region: str = Field(
+        default="us-east-1",
+        description="S3 region for KB storage",
+    )
+
     knowledge_base_dir: Path = Field(
         default=PROJECT_ROOT / "data" / "knowledge_base",
         description="Directory for RCA knowledge base",
@@ -348,6 +394,10 @@ class Settings(BaseSettings):
     resource_dedup_enabled: bool = Field(
         default=True,
         description="Enable resource-based similar issue merging (AIOPS_RESOURCE_DEDUP_ENABLED)",
+    )
+    dedup_resolved_cooldown_minutes: int = Field(
+        default=60,
+        description="Minutes after issue resolution before same fingerprint can create new issue (AIOPS_DEDUP_RESOLVED_COOLDOWN_MINUTES)",
     )
 
     # Notifications

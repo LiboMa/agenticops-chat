@@ -191,7 +191,7 @@ class ReportResponse(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     """Schema for report generation request."""
-    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter)$")
+    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter|conversation|incident)$")
     account_name: Optional[str] = None
 
 
@@ -559,6 +559,31 @@ class ReportUnsubscribeRequest(BaseModel):
 # ============================================================================
 
 
+class SearchResultItem(BaseModel):
+    id: int
+    title: str
+    subtitle: str = ""
+    entity_type: str
+    status: Optional[str] = None
+    severity: Optional[str] = None
+    report_type: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: dict
+
+
+class ReportFromSessionRequest(BaseModel):
+    session_id: str
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    message_ids: Optional[List[int]] = None
+    format: str = Field(default="markdown", pattern="^(markdown|html|pdf|docx)$")
+
+
 class ChatSessionCreate(BaseModel):
     name: Optional[str] = None
 
@@ -876,11 +901,6 @@ async def reports_redirect():
     return RedirectResponse(url="/app/reports", status_code=302)
 
 
-@app.get("/network")
-async def network_redirect():
-    return RedirectResponse(url="/app/network", status_code=302)
-
-
 # ============================================================================
 # Dynamic AWS Region Data
 # ============================================================================
@@ -976,60 +996,6 @@ async def _fetch_aws_regions() -> list[dict]:
 async def api_list_regions():
     """Return the list of AWS regions with display names (fetched dynamically)."""
     return await _fetch_aws_regions()
-
-
-# ============================================================================
-# Network API Endpoints
-# ============================================================================
-
-
-@app.get("/api/network/vpcs")
-async def api_list_vpcs(request: Request, region: str = Query("us-east-1")):
-    """List VPCs in a region (live AWS API call)."""
-    try:
-        _ensure_aws_session(region)
-        from agenticops.tools.network_tools import describe_vpcs
-
-        result = describe_vpcs(region=region)
-        vpcs = json.loads(result)
-        return JSONResponse({"region": region, "vpcs": vpcs})
-    except Exception as e:
-        logger.exception("Failed to list VPCs")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.get("/api/network/region-topology")
-async def api_region_topology(request: Request, region: str = Query("us-east-1")):
-    """Get region-level topology: VPCs, Transit Gateways, Peering connections."""
-    try:
-        _ensure_aws_session(region)
-        from agenticops.tools.network_tools import describe_region_topology
-
-        result = describe_region_topology(region=region)
-        topology = json.loads(result)
-        return JSONResponse(topology)
-    except Exception as e:
-        logger.exception("Failed to get region topology")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.get("/api/network/vpc-topology")
-async def api_vpc_topology(
-    request: Request,
-    region: str = Query(...),
-    vpc_id: str = Query(...),
-):
-    """Analyze VPC topology (live AWS API call)."""
-    try:
-        _ensure_aws_session(region)
-        from agenticops.tools.network_tools import analyze_vpc_topology
-
-        result = analyze_vpc_topology(region=region, vpc_id=vpc_id)
-        topology = json.loads(result)
-        return JSONResponse(topology)
-    except Exception as e:
-        logger.exception("Failed to analyze VPC topology")
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ============================================================================
@@ -2674,6 +2640,52 @@ async def api_generate_report(request: ReportGenerateRequest):
             raise HTTPException(status_code=500, detail="Report generation failed")
 
 
+@app.post("/api/reports/from-session", response_model=ReportResponse, status_code=201)
+async def api_report_from_session(request: ReportFromSessionRequest):
+    """Create a report from a chat session's messages."""
+    with get_db_session() as db:
+        chat_session = db.query(ChatSession).filter_by(session_id=request.session_id).first()
+        if not chat_session:
+            raise HTTPException(status_code=404, detail=f"Chat session {request.session_id} not found")
+
+        query = (
+            db.query(ChatMessage)
+            .filter_by(session_id=chat_session.id)
+            .order_by(ChatMessage.created_at.asc())
+        )
+        if request.message_ids:
+            query = query.filter(ChatMessage.id.in_(request.message_ids))
+
+        messages = query.all()
+        if not messages:
+            raise HTTPException(status_code=404, detail="No messages found for this session")
+
+        markdown_parts = []
+        for msg in messages:
+            ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S") if msg.created_at else ""
+            role_label = msg.role.capitalize() if msg.role else "Unknown"
+            markdown_parts.append(f"**{role_label}** ({ts}):\n{msg.content}\n")
+        markdown_content = "\n".join(markdown_parts)
+
+        title = request.title or chat_session.name
+        summary = request.summary or markdown_content[:200]
+
+        report = Report(
+            report_type="conversation",
+            title=title,
+            summary=summary,
+            content_markdown=markdown_content,
+            report_metadata={
+                "source_session_id": request.session_id,
+                "message_count": len(messages),
+                "message_ids": [m.id for m in messages],
+            },
+        )
+        db.add(report)
+        db.flush()
+        return ReportResponse.model_validate(report)
+
+
 # ============================================================================
 # Report Publishing & Subscription API Endpoints
 # ============================================================================
@@ -3728,6 +3740,83 @@ async def api_list_im_apps():
     """Diagnostic endpoint — list configured IM app names (no secrets)."""
     from agenticops.notify.im_config import list_apps
     return list_apps()
+
+
+# ============================================================================
+# Search API Endpoint
+# ============================================================================
+
+
+@app.get("/api/search", response_model=SearchResponse)
+async def api_search(
+    q: str = Query(..., min_length=1),
+    types: str = Query(default="issues,fix_plans,reports"),
+    limit: int = Query(default=5, le=10),
+):
+    """Global search across issues, fix plans, and reports."""
+    search_types = {t.strip() for t in types.split(",")}
+    search_term = f"%{q.lower()}%"
+    results: dict = {}
+
+    with get_db_session() as db:
+        if "issues" in search_types:
+            rows = (
+                db.query(HealthIssue)
+                .filter(
+                    func.lower(HealthIssue.title).like(search_term)
+                    | func.lower(HealthIssue.description).like(search_term)
+                )
+                .limit(limit)
+                .all()
+            )
+            results["issues"] = [
+                SearchResultItem(
+                    id=r.id, title=r.title,
+                    subtitle=(r.description or "")[:100],
+                    entity_type="issue", status=r.status,
+                    severity=r.severity, created_at=r.detected_at,
+                ).model_dump()
+                for r in rows
+            ]
+
+        if "fix_plans" in search_types:
+            rows = (
+                db.query(FixPlan)
+                .filter(func.lower(FixPlan.title).like(search_term))
+                .limit(limit)
+                .all()
+            )
+            results["fix_plans"] = [
+                SearchResultItem(
+                    id=r.id, title=r.title,
+                    subtitle=(r.summary or "")[:100],
+                    entity_type="fix_plan", status=r.status,
+                    created_at=r.created_at,
+                ).model_dump()
+                for r in rows
+            ]
+
+        if "reports" in search_types:
+            rows = (
+                db.query(Report)
+                .filter(
+                    func.lower(Report.title).like(search_term)
+                    | func.lower(Report.summary).like(search_term)
+                )
+                .limit(limit)
+                .all()
+            )
+            results["reports"] = [
+                SearchResultItem(
+                    id=r.id, title=r.title,
+                    subtitle=(r.summary or "")[:100],
+                    entity_type="report", report_type=r.report_type,
+                    created_at=r.created_at,
+                ).model_dump()
+                for r in rows
+            ]
+
+    return SearchResponse(query=q, results=results)
 
 
 # ============================================================================
