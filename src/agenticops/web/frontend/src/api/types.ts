@@ -493,7 +493,7 @@ export interface SearchResultItem {
   id: number;
   title: string;
   subtitle: string;
-  entity_type: "issue" | "fix_plan" | "report";
+  entity_type: "issue" | "fix_plan" | "report" | "resource";
   status?: string;
   severity?: string;
   report_type?: string;
@@ -507,5 +507,96 @@ export interface SearchResponse {
     issues: SearchResultItem[];
     fix_plans: SearchResultItem[];
     reports: SearchResultItem[];
+    resources: SearchResultItem[];
   };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Dashboard Trends                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface TrendDay {
+  date: string;
+  opened?: number;
+  resolved?: number;
+}
+
+export interface SeverityDay {
+  date: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface ResourceDay {
+  date: string;
+  added: number;
+}
+
+export interface MttrDay {
+  date: string;
+  avg_hours: number;
+}
+
+export interface FixRateDay {
+  date: string;
+  total: number;
+  succeeded: number;
+  rate: number;
+}
+
+export interface TrendSummary {
+  issues_opened: number;
+  issues_resolved: number;
+  resource_net_change: number;
+  mttr_avg_hours: number;
+  mttr_trend: "up" | "down" | "flat";
+  fix_rate_pct: number;
+  fix_rate_trend: "up" | "down" | "flat";
+}
+
+export interface DashboardTrends {
+  issues: TrendDay[];
+  severity: SeverityDay[];
+  resources: ResourceDay[];
+  mttr: MttrDay[];
+  fix_rate: FixRateDay[];
+  summary: TrendSummary;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Resource Detail — Related Resources                                */
+/* ------------------------------------------------------------------ */
+
+export interface RelatedResourceItem {
+  id: number | null;
+  resource_id: string;
+  resource_type: string;
+  resource_name: string | null;
+  status: string | null;
+  detail: string | null;
+}
+
+export interface RelatedResources {
+  network: RelatedResourceItem[];
+  contains: RelatedResourceItem[];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Fix Plan with Executions (Resource Detail)                         */
+/* ------------------------------------------------------------------ */
+
+export interface FixPlanWithExecutions {
+  id: number;
+  health_issue_id: number;
+  rca_result_id: number;
+  risk_level: string;
+  title: string;
+  summary: string;
+  steps: unknown[];
+  status: string;
+  approved_by: string | null;
+  created_at: string;
+  executions: FixExecution[];
 }

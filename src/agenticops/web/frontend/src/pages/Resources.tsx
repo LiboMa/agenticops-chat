@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useResources } from "@/hooks/useResources";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -9,6 +10,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { Resource } from "@/api/types";
 
 export default function Resources() {
+  const navigate = useNavigate();
   const [typeFilter, setTypeFilter] = useState("");
   const [regionFilter, setRegionFilter] = useState("");
 
@@ -67,7 +69,7 @@ export default function Resources() {
       header: "Region",
       sortable: true,
       sortValue: (r) => r.region,
-      render: (r) => <span className="text-sm text-slate-500">{r.region}</span>,
+      render: (r) => <span className="text-sm text-muted-foreground">{r.region}</span>,
     },
     {
       key: "status",
@@ -86,14 +88,14 @@ export default function Resources() {
 
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">
+          <h2 className="text-sm font-semibold">
             Resources{data ? ` (${data.length})` : ""}
           </h2>
           <div className="flex gap-2">
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="text-sm border rounded-md px-3 py-1.5 bg-background"
             >
               <option value="">All Types</option>
               {types.map((t) => (
@@ -105,7 +107,7 @@ export default function Resources() {
             <select
               value={regionFilter}
               onChange={(e) => setRegionFilter(e.target.value)}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="text-sm border rounded-md px-3 py-1.5 bg-background"
             >
               <option value="">All Regions</option>
               {regions.map((r) => (
@@ -124,6 +126,7 @@ export default function Resources() {
             columns={columns}
             data={data ?? []}
             rowKey={(r) => r.id}
+            onRowClick={(r) => navigate(`/app/resources/${r.id}`)}
             emptyMessage="No resources found."
           />
         )}

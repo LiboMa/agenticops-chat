@@ -1,7 +1,7 @@
 """Web Dashboard - React SPA + API backend."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
@@ -1260,6 +1260,121 @@ async def api_stats():
         }
 
 
+@app.get("/api/dashboard/trends")
+async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
+    """Dashboard trend data — 5 sparkline datasets."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with get_db_session() as session:
+        # 1) Issue trend: opened/resolved per day
+        issues_opened = (
+            session.query(func.date(HealthIssue.detected_at).label("d"), func.count().label("n"))
+            .filter(HealthIssue.detected_at >= cutoff)
+            .group_by("d").all()
+        )
+        issues_resolved = (
+            session.query(func.date(HealthIssue.resolved_at).label("d"), func.count().label("n"))
+            .filter(HealthIssue.resolved_at >= cutoff, HealthIssue.resolved_at.isnot(None))
+            .group_by("d").all()
+        )
+        opened_map = {str(r.d): r.n for r in issues_opened}
+        resolved_map = {str(r.d): r.n for r in issues_resolved}
+        all_dates = sorted(set(opened_map) | set(resolved_map))
+        issues = [{"date": d, "opened": opened_map.get(d, 0), "resolved": resolved_map.get(d, 0)} for d in all_dates]
+
+        # 2) Severity distribution per day
+        sev_rows = (
+            session.query(func.date(HealthIssue.detected_at).label("d"), HealthIssue.severity, func.count().label("n"))
+            .filter(HealthIssue.detected_at >= cutoff)
+            .group_by("d", HealthIssue.severity).all()
+        )
+        sev_map: dict = {}
+        for r in sev_rows:
+            d = str(r.d)
+            sev_map.setdefault(d, {"date": d, "critical": 0, "high": 0, "medium": 0, "low": 0})
+            if r.severity in sev_map[d]:
+                sev_map[d][r.severity] = r.n
+        severity = [sev_map[d] for d in sorted(sev_map)]
+
+        # 3) Resource changes per day
+        res_rows = (
+            session.query(func.date(AWSResource.created_at).label("d"), func.count().label("n"))
+            .filter(AWSResource.created_at >= cutoff)
+            .group_by("d").all()
+        )
+        resources = [{"date": str(r.d), "added": r.n} for r in res_rows]
+
+        # 4) MTTR per day (resolved issues only)
+        resolved_issues = (
+            session.query(HealthIssue)
+            .filter(HealthIssue.resolved_at >= cutoff, HealthIssue.resolved_at.isnot(None))
+            .all()
+        )
+        mttr_map: dict = {}
+        for iss in resolved_issues:
+            d = str(iss.resolved_at.date())
+            hours = (iss.resolved_at - iss.detected_at).total_seconds() / 3600
+            mttr_map.setdefault(d, []).append(hours)
+        mttr = [{"date": d, "avg_hours": round(sum(v) / len(v), 1)} for d, v in sorted(mttr_map.items())]
+
+        # 5) Fix success rate per day
+        exec_rows = (
+            session.query(func.date(FixExecution.completed_at).label("d"), FixExecution.status, func.count().label("n"))
+            .filter(FixExecution.completed_at >= cutoff, FixExecution.completed_at.isnot(None))
+            .group_by("d", FixExecution.status).all()
+        )
+        fx_map: dict = {}
+        for r in exec_rows:
+            d = str(r.d)
+            fx_map.setdefault(d, {"total": 0, "succeeded": 0})
+            fx_map[d]["total"] += r.n
+            if r.status == "succeeded":
+                fx_map[d]["succeeded"] += r.n
+        fix_rate = [
+            {"date": d, "total": v["total"], "succeeded": v["succeeded"],
+             "rate": round(v["succeeded"] / v["total"] * 100, 1) if v["total"] else 0}
+            for d, v in sorted(fx_map.items())
+        ]
+
+        # Summary
+        total_opened = sum(d["opened"] for d in issues)
+        total_resolved = sum(d["resolved"] for d in issues)
+        all_mttr = [h for vals in mttr_map.values() for h in vals]
+        avg_mttr = round(sum(all_mttr) / len(all_mttr), 1) if all_mttr else 0
+        total_exec = sum(v["total"] for v in fx_map.values())
+        total_succ = sum(v["succeeded"] for v in fx_map.values())
+        net_resources = sum(d["added"] for d in resources)
+
+        def _trend(values: list[float]) -> str:
+            if len(values) < 2:
+                return "flat"
+            mid = len(values) // 2
+            first = sum(values[:mid]) / mid if mid else 0
+            second = sum(values[mid:]) / (len(values) - mid)
+            if second > first * 1.1:
+                return "up"
+            elif second < first * 0.9:
+                return "down"
+            return "flat"
+
+        return {
+            "issues": issues,
+            "severity": severity,
+            "resources": resources,
+            "mttr": mttr,
+            "fix_rate": fix_rate,
+            "summary": {
+                "issues_opened": total_opened,
+                "issues_resolved": total_resolved,
+                "resource_net_change": net_resources,
+                "mttr_avg_hours": avg_mttr,
+                "mttr_trend": _trend([d["avg_hours"] for d in mttr]),
+                "fix_rate_pct": round(total_succ / total_exec * 100, 1) if total_exec else 0,
+                "fix_rate_trend": _trend([d["rate"] for d in fix_rate]),
+            },
+        }
+
+
 # ============================================================================
 # Account API Endpoints
 # ============================================================================
@@ -1386,6 +1501,145 @@ async def api_get_resource(resource_id: int):
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         return ResourceResponse.model_validate(resource)
+
+
+# ── Resource Detail sub-endpoints ──────────────────────────────────────
+
+
+class FixPlanWithExecutionsResponse(BaseModel):
+    """Fix plan with its executions."""
+    id: int
+    health_issue_id: int
+    rca_result_id: int
+    risk_level: str
+    title: str
+    summary: str
+    steps: list
+    status: str
+    approved_by: Optional[str]
+    created_at: datetime
+    executions: List[FixExecutionResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class RelatedResourceItem(BaseModel):
+    id: Optional[int] = None
+    resource_id: str
+    resource_type: str
+    resource_name: Optional[str] = None
+    status: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class RelatedResourcesResponse(BaseModel):
+    network: List[RelatedResourceItem] = []
+    contains: List[RelatedResourceItem] = []
+
+
+_INFRA_TYPES = {"VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "TGW",
+                "InternetGateway", "NATGateway", "TransitGateway"}
+
+
+def _infra_ref_key(resource_type: str) -> Optional[str]:
+    return {"VPC": "vpc_id", "Subnet": "subnet_id", "SecurityGroup": "security_group_id"}.get(resource_type)
+
+
+def _guess_type(resource_id: str) -> str:
+    for prefix, rtype in {"vpc-": "VPC", "subnet-": "Subnet", "sg-": "SecurityGroup",
+                           "igw-": "IGW", "nat-": "NAT", "rtb-": "RouteTable"}.items():
+        if resource_id.startswith(prefix):
+            return rtype
+    return "Unknown"
+
+
+@app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
+async def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
+    """List health issues for a resource."""
+    with get_db_session() as session:
+        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        issues = (
+            session.query(HealthIssue)
+            .filter(HealthIssue.resource_id == resource.resource_id)
+            .order_by(HealthIssue.detected_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [HealthIssueResponse.model_validate(i) for i in issues]
+
+
+@app.get("/api/resources/{resource_id}/fix-plans", response_model=List[FixPlanWithExecutionsResponse])
+async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20, le=100)):
+    """List fix plans for a resource (via linked health issues)."""
+    with get_db_session() as session:
+        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        plans = (
+            session.query(FixPlan)
+            .join(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
+            .filter(HealthIssue.resource_id == resource.resource_id)
+            .order_by(FixPlan.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for p in plans:
+            resp = FixPlanWithExecutionsResponse.model_validate(p)
+            resp.executions = [FixExecutionResponse.model_validate(e) for e in p.fix_executions]
+            result.append(resp)
+        return result
+
+
+@app.get("/api/resources/{resource_id}/related", response_model=RelatedResourcesResponse)
+async def api_resource_related(resource_id: int):
+    """Get related resources — network context or contained resources."""
+    with get_db_session() as session:
+        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        meta = resource.resource_metadata or {}
+        is_infra = resource.resource_type in _INFRA_TYPES
+        network: list[RelatedResourceItem] = []
+        contains: list[RelatedResourceItem] = []
+
+        if is_infra:
+            ref_key = _infra_ref_key(resource.resource_type)
+            if ref_key:
+                all_resources = session.query(AWSResource).filter(AWSResource.id != resource.id).limit(500).all()
+                for c in all_resources:
+                    c_meta = c.resource_metadata or {}
+                    ref_val = c_meta.get(ref_key)
+                    if ref_val == resource.resource_id:
+                        contains.append(RelatedResourceItem(
+                            id=c.id, resource_id=c.resource_id,
+                            resource_type=c.resource_type,
+                            resource_name=c.resource_name, status=c.status,
+                        ))
+        else:
+            for key in ("vpc_id", "subnet_id", "security_groups", "subnet_ids"):
+                val = meta.get(key)
+                if not val:
+                    continue
+                ids = val if isinstance(val, list) else [val]
+                for rid in ids:
+                    if not isinstance(rid, str):
+                        continue
+                    linked = session.query(AWSResource).filter_by(resource_id=rid).first()
+                    if linked:
+                        network.append(RelatedResourceItem(
+                            id=linked.id, resource_id=linked.resource_id,
+                            resource_type=linked.resource_type,
+                            resource_name=linked.resource_name, status=linked.status,
+                        ))
+                    else:
+                        network.append(RelatedResourceItem(resource_id=rid, resource_type=_guess_type(rid)))
+
+        return RelatedResourcesResponse(network=network, contains=contains)
 
 
 # ============================================================================
@@ -3750,10 +4004,10 @@ async def api_list_im_apps():
 @app.get("/api/search", response_model=SearchResponse)
 async def api_search(
     q: str = Query(..., min_length=1),
-    types: str = Query(default="issues,fix_plans,reports"),
+    types: str = Query(default="issues,fix_plans,reports,resources"),
     limit: int = Query(default=5, le=10),
 ):
-    """Global search across issues, fix plans, and reports."""
+    """Global search across issues, fix plans, reports, and resources."""
     search_types = {t.strip() for t in types.split(",")}
     search_term = f"%{q.lower()}%"
     results: dict = {}
@@ -3812,6 +4066,29 @@ async def api_search(
                     subtitle=(r.summary or "")[:100],
                     entity_type="report", report_type=r.report_type,
                     created_at=r.created_at,
+                ).model_dump()
+                for r in rows
+            ]
+
+        if "resources" in search_types:
+            rows = (
+                db.query(AWSResource)
+                .filter(
+                    func.lower(AWSResource.resource_id).like(search_term)
+                    | func.lower(AWSResource.resource_name).like(search_term)
+                    | func.lower(AWSResource.resource_type).like(search_term)
+                )
+                .limit(limit)
+                .all()
+            )
+            results["resources"] = [
+                SearchResultItem(
+                    id=r.id,
+                    title=r.resource_name or r.resource_id,
+                    subtitle=f"{r.resource_type} | {r.region} | {r.resource_id}",
+                    entity_type="resource",
+                    status=r.status,
+                    created_at=r.updated_at,
                 ).model_dump()
                 for r in rows
             ]

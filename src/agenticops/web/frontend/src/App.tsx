@@ -7,13 +7,13 @@ import { Spinner } from "@/components/ui/Spinner";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Resources = lazy(() => import("@/pages/Resources"));
+const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
 const Issues = lazy(() => import("@/pages/Anomalies"));
 const IssueDetail = lazy(() => import("@/pages/AnomalyDetail"));
 const FixPlans = lazy(() => import("@/pages/FixPlans"));
 const FixPlanDetail = lazy(() => import("@/pages/FixPlanDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
-const Network = lazy(() => import("@/pages/Network"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
@@ -55,10 +55,26 @@ export default function App() {
               }
             />
             <Route
+              path="chat/:sessionId"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Chat />
+                </Suspense>
+              }
+            />
+            <Route
               path="resources"
               element={
                 <Suspense fallback={<Spinner />}>
                   <Resources />
+                </Suspense>
+              }
+            />
+            <Route
+              path="resources/:id"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ResourceDetail />
                 </Suspense>
               }
             />
@@ -107,14 +123,6 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <ReportDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="network"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Network />
                 </Suspense>
               }
             />

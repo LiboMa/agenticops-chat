@@ -12,6 +12,7 @@ const ENTITY_STYLES: Record<string, { label: string; badge: string }> = {
   issue: { label: "Issues", badge: "text-red-700 bg-red-100" },
   fix_plan: { label: "Fix Plans", badge: "text-blue-700 bg-blue-100" },
   report: { label: "Reports", badge: "text-emerald-700 bg-emerald-100" },
+  resource: { label: "Resources", badge: "text-cyan-700 bg-cyan-100" },
 };
 
 function entityRoute(item: SearchResultItem): string {
@@ -22,6 +23,8 @@ function entityRoute(item: SearchResultItem): string {
       return `/app/fix-plans/${item.id}`;
     case "report":
       return `/app/reports/${item.id}`;
+    case "resource":
+      return `/app/resources/${item.id}`;
   }
 }
 
@@ -58,6 +61,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       ...data.results.issues,
       ...data.results.fix_plans,
       ...data.results.reports,
+      ...(data.results.resources ?? []),
     ];
   }, [data]);
 
@@ -96,6 +100,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const issues = data?.results.issues ?? [];
   const fixPlans = data?.results.fix_plans ?? [];
   const reports = data?.results.reports ?? [];
+  const resources = data?.results.resources ?? [];
 
   let runningIndex = 0;
 
@@ -150,7 +155,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search issues, fix plans, reports..."
+              placeholder="Search issues, fix plans, reports, resources..."
               className="flex-1 bg-transparent py-3 px-3 text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono border border-border">
@@ -182,6 +187,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                 {renderSection(ENTITY_STYLES.issue.label, issues, "issue")}
                 {renderSection(ENTITY_STYLES.fix_plan.label, fixPlans, "fix_plan")}
                 {renderSection(ENTITY_STYLES.report.label, reports, "report")}
+                {renderSection(ENTITY_STYLES.resource.label, resources, "resource")}
               </div>
             )}
           </div>
