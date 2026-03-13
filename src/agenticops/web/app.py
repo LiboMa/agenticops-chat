@@ -455,7 +455,7 @@ class ScheduleExecutionResponse(BaseModel):
 class NotificationChannelCreate(BaseModel):
     """Schema for creating/updating a notification channel (YAML-backed)."""
     name: str = Field(..., max_length=100)
-    channel_type: str = Field(..., pattern="^(slack|email|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
+    channel_type: str = Field(..., pattern="^(slack|email|ses|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
     config: dict = Field(default_factory=dict)
     severity_filter: List[str] = Field(default_factory=list)
     is_enabled: bool = True
@@ -463,7 +463,7 @@ class NotificationChannelCreate(BaseModel):
 
 class NotificationChannelUpdate(BaseModel):
     """Schema for updating a notification channel (YAML-backed)."""
-    channel_type: Optional[str] = Field(None, pattern="^(slack|email|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
+    channel_type: Optional[str] = Field(None, pattern="^(slack|email|ses|sns|sns-report|feishu|dingtalk|wecom|webhook)$")
     config: Optional[dict] = None
     severity_filter: Optional[List[str]] = None
     is_enabled: Optional[bool] = None
@@ -503,8 +503,25 @@ class NotificationSendRequest(BaseModel):
 # -- Report Publishing Models -----------------------------------------------
 
 
+class ShareContentRequest(BaseModel):
+    """Request to share content to notification channels."""
+    subject: str
+    body: str
+    channel_names: List[str] = Field(default_factory=list)
+    upload_to_s3: bool = False
+    expiry_hours: int = Field(default=72, ge=1, le=168)
+
+
+class ShareContentResponse(BaseModel):
+    """Response from content sharing."""
+    success: bool
+    channels_sent: List[str] = Field(default_factory=list)
+    channels_failed: List[str] = Field(default_factory=list)
+    presigned_url: Optional[str] = None
+
+
 class ReportPublishRequest(BaseModel):
-    """Request to publish a report via an sns-report channel."""
+    """Request to publish a report via an sns-report or ses channel."""
     channel_name: str
     formats: Optional[List[str]] = None  # None = use channel defaults
 
@@ -2662,20 +2679,77 @@ async def api_generate_report(request: ReportGenerateRequest):
 # ============================================================================
 
 
+@app.post("/api/share", response_model=ShareContentResponse)
+async def api_share_content(request: ShareContentRequest):
+    """Share content to notification channels, optionally with S3 presigned URL."""
+    from agenticops.notify.notifier import NotificationManager
+
+    if not request.subject or not request.body:
+        raise HTTPException(status_code=400, detail="subject and body are required")
+
+    presigned_url = None
+    notification_body = request.body
+
+    # Upload to S3 for long content or when forced
+    if len(request.body) > 4000 or request.upload_to_s3:
+        try:
+            from agenticops.storage.backend import get_storage_backend
+
+            backend = get_storage_backend()
+            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.subject[:50])
+            key = f"shared/{ts}_{safe_name}.md"
+            uri = backend.write(key, request.body.encode("utf-8"), content_type="text/markdown")
+            presigned_url = backend.presigned_url(uri, expiry=request.expiry_hours * 3600)
+
+            summary = request.body[:500].rstrip()
+            if len(request.body) > 500:
+                summary += "..."
+            notification_body = summary
+            if presigned_url:
+                notification_body += f"\n\nFull content: {presigned_url}"
+        except Exception as e:
+            logger.warning("S3 upload failed for share_content, sending directly: %s", e)
+            notification_body = request.body[:4000]
+
+    manager = NotificationManager()
+    channels = request.channel_names if request.channel_names else None
+
+    try:
+        results = await manager.send_notification(
+            subject=request.subject,
+            body=notification_body,
+            channel_names=channels,
+        )
+    except Exception as e:
+        logger.error("Share content failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Share failed: {e}")
+
+    sent = [ch for ch, ok in results.items() if ok]
+    failed = [ch for ch, ok in results.items() if not ok]
+
+    return ShareContentResponse(
+        success=len(sent) > 0,
+        channels_sent=sent,
+        channels_failed=failed,
+        presigned_url=presigned_url,
+    )
+
+
 @app.post("/api/reports/{report_id}/publish", response_model=ReportPublishResponse)
 async def api_publish_report(report_id: int, request: ReportPublishRequest):
-    """Publish a report to an sns-report channel (converts to PDF/HTML/DOCX, uploads to S3)."""
+    """Publish a report to an sns-report or ses channel (converts to PDF/HTML/DOCX, uploads to S3)."""
     from agenticops.notify.im_config import get_channel
-    from agenticops.notify.notifier import SNSReportNotifier
+    from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
 
     # Validate channel
     channel = get_channel(request.channel_name)
     if not channel:
         raise HTTPException(status_code=404, detail=f"Channel '{request.channel_name}' not found")
-    if channel.channel_type != "sns-report":
+    if channel.channel_type not in ("sns-report", "ses"):
         raise HTTPException(
             status_code=400,
-            detail=f"Channel '{request.channel_name}' is type '{channel.channel_type}', not 'sns-report'",
+            detail=f"Channel '{request.channel_name}' is type '{channel.channel_type}', expected 'sns-report' or 'ses'",
         )
 
     # Load report
@@ -2689,7 +2763,12 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest):
         report_type = report.report_type
         report_meta = report.report_metadata or {}
 
-    notifier = SNSReportNotifier(channel.config)
+    # Route to appropriate notifier
+    if channel.channel_type == "ses":
+        notifier = SESNotifier(channel.config)
+    else:
+        notifier = SNSReportNotifier(channel.config)
+
     try:
         result = await notifier.send_report(
             report_id=report_id,

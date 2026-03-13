@@ -178,6 +178,7 @@ _DEFAULT_PREFERRED_FORMAT: Dict[str, str] = {
     "wecom": "markdown",
     "slack": "markdown",
     "email": "html",
+    "ses": "html",
     "sns": "text",
     "sns-report": "html",
     "webhook": "markdown",

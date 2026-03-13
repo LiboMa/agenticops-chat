@@ -525,7 +525,7 @@ export interface ScheduleExecution {
 /*  Notification Channels & Logs                                       */
 /* ------------------------------------------------------------------ */
 
-export type NotificationChannelType = "slack" | "email" | "sns" | "sns-report" | "feishu" | "dingtalk" | "wecom" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "ses" | "sns" | "sns-report" | "feishu" | "dingtalk" | "wecom" | "webhook";
 
 export interface NotificationChannel {
   name: string;
@@ -559,6 +559,21 @@ export interface NotificationLog {
   status: string;
   error: string | null;
   sent_at: string;
+}
+
+export interface ShareContentRequest {
+  subject: string;
+  body: string;
+  channel_names?: string[];
+  upload_to_s3?: boolean;
+  expiry_hours?: number;
+}
+
+export interface ShareContentResponse {
+  success: boolean;
+  channels_sent: string[];
+  channels_failed: string[];
+  presigned_url?: string;
 }
 
 /* ------------------------------------------------------------------ */

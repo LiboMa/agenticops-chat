@@ -8,6 +8,8 @@ import type {
   ReportPublishRequest,
   ReportPublishResponse,
   ReportSubscription,
+  ShareContentRequest,
+  ShareContentResponse,
 } from "@/api/types";
 
 export function useNotificationChannels() {
@@ -97,6 +99,18 @@ export function useTestChannel() {
           body: "This is a test notification.",
           severity: "low",
         }),
+      }),
+  });
+}
+
+// -- Share Content hook --
+
+export function useShareContent() {
+  return useMutation({
+    mutationFn: (data: ShareContentRequest) =>
+      apiFetch<ShareContentResponse>("/share", {
+        method: "POST",
+        body: JSON.stringify(data),
       }),
   });
 }

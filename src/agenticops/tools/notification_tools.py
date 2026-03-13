@@ -236,10 +236,10 @@ def distribute_report(
         fmt = ch.preferred_format or "markdown"
         body = formatted_content.get(fmt, content_md[:4000])
 
-        # Special handling for sns-report channels: use the full pipeline
-        if ch.channel_type == "sns-report":
+        # Special handling for sns-report and ses channels: use the full pipeline
+        if ch.channel_type in ("sns-report", "ses"):
             try:
-                result_entry = _distribute_via_sns_report(ch, rid, title, summary, content_md, report_type, report_meta)
+                result_entry = _distribute_via_report_channel(ch, rid, title, summary, content_md, report_type, report_meta)
                 results.append(result_entry)
             except Exception as e:
                 results.append({"channel": ch.name, "format": fmt, "status": "error", "error": str(e)})
@@ -375,11 +375,15 @@ def share_content(
         return json.dumps({"success": False, "message": f"Notification failed: {e}"})
 
 
-def _distribute_via_sns_report(ch, report_id, title, summary, content_md, report_type, report_meta) -> dict:
-    """Handle sns-report channel via the full SNSReportNotifier pipeline."""
-    from agenticops.notify.notifier import SNSReportNotifier
+def _distribute_via_report_channel(ch, report_id, title, summary, content_md, report_type, report_meta) -> dict:
+    """Handle sns-report or ses channel via the full report pipeline."""
+    if ch.channel_type == "ses":
+        from agenticops.notify.notifier import SESNotifier
+        notifier = SESNotifier(ch.config)
+    else:
+        from agenticops.notify.notifier import SNSReportNotifier
+        notifier = SNSReportNotifier(ch.config)
 
-    notifier = SNSReportNotifier(ch.config)
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
@@ -399,10 +403,10 @@ def _distribute_via_sns_report(ch, report_id, title, summary, content_md, report
     if fmts:
         return {
             "channel": ch.name,
-            "format": "sns-report",
+            "format": ch.channel_type,
             "status": "sent",
             "formats_uploaded": fmts,
         }
     if result.get("skipped"):
-        return {"channel": ch.name, "format": "sns-report", "status": "skipped"}
-    return {"channel": ch.name, "format": "sns-report", "status": "failed"}
+        return {"channel": ch.name, "format": ch.channel_type, "status": "skipped"}
+    return {"channel": ch.name, "format": ch.channel_type, "status": "failed"}

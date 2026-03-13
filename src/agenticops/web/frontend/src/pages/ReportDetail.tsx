@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import ShareDialog from "@/components/ShareDialog";
 import type { ReportPublishResponse } from "@/api/types";
 
 const TYPE_COLORS: Record<string, string> = {
@@ -37,8 +38,10 @@ export default function ReportDetail() {
   const { data: channels } = useNotificationChannels();
   const publishMutation = usePublishReport(reportId);
 
-  const snsReportChannels = (channels ?? []).filter(
-    (c) => c.channel_type === "sns-report" && c.is_enabled,
+  const [showShare, setShowShare] = useState(false);
+
+  const publishableChannels = (channels ?? []).filter(
+    (c) => (c.channel_type === "sns-report" || c.channel_type === "ses") && c.is_enabled,
   );
 
   const handlePublish = () => {
@@ -110,18 +113,29 @@ export default function ReportDetail() {
               </p>
             </div>
 
-            {/* Publish button */}
-            {snsReportChannels.length > 0 && (
+            {/* Publish + Share buttons */}
+            <div className="flex items-center gap-2">
+              {publishableChannels.length > 0 && (
+                <button
+                  onClick={() => setShowPublish(!showPublish)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  Publish
+                </button>
+              )}
               <button
-                onClick={() => setShowPublish(!showPublish)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                onClick={() => setShowShare(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                 </svg>
-                Publish
+                Share
               </button>
-            )}
+            </div>
           </div>
 
           {/* Summary callout */}
@@ -156,7 +170,7 @@ export default function ReportDetail() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 >
                   <option value="">Select a channel...</option>
-                  {snsReportChannels.map((ch) => (
+                  {publishableChannels.map((ch) => (
                     <option key={ch.name} value={ch.name}>
                       {ch.name}
                     </option>
@@ -238,6 +252,15 @@ export default function ReportDetail() {
           />
         </CardBody>
       </Card>
+
+      {/* Share Dialog */}
+      {showShare && (
+        <ShareDialog
+          defaultSubject={`Report: ${report.title}`}
+          defaultBody={report.content_markdown || report.summary}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   );
 }

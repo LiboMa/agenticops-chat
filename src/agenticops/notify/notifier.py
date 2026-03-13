@@ -723,6 +723,195 @@ class SNSReportNotifier(Notifier):
 
 
 # ============================================================================
+# SES Notifier — standalone AWS SES email channel
+# ============================================================================
+
+
+class SESNotifier(Notifier):
+    """AWS SES email channel — sends HTML email directly via SES API."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.sender: str = config.get("sender", config.get("from", ""))
+        recipients = config.get("to", [])
+        self.recipients: List[str] = recipients if isinstance(recipients, list) else [recipients] if recipients else []
+        self.region: str = config.get("region", "us-east-1")
+        # Optional S3 for report pipeline
+        self.s3_bucket: str = config.get("s3_bucket", "")
+        self.s3_prefix: str = config.get("s3_prefix", "reports/")
+        self.s3_region: str = config.get("s3_region", self.region)
+        self.url_expiry: int = int(config.get("url_expiry", 604800))
+        self.formats: List[str] = config.get("formats", ["html", "markdown"])
+
+    async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
+        """Send HTML email via SES. Converts markdown body to simple HTML."""
+        if not self.sender or not self.recipients:
+            logger.error("SES sender or recipients not configured")
+            return False
+
+        tag = f"[{severity.upper()}] " if severity else ""
+        html_body = (
+            f"<h2>{tag}{subject}</h2>"
+            f"<div style='white-space:pre-wrap;font-family:sans-serif;'>{body}</div>"
+            f"<hr><p style='color:#999;font-size:12px'>AgenticOps Notification</p>"
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, self._send_email, subject, body, html_body,
+            )
+            return True
+        except Exception as e:
+            logger.error("SES send failed: %s", e)
+            return False
+
+    def _send_email(self, subject: str, plain_body: str, html_body: str) -> str:
+        """Send email via SES (blocking). Returns MessageId."""
+        import boto3
+
+        client = boto3.client("ses", region_name=self.region)
+        resp = client.send_email(
+            Source=self.sender,
+            Destination={"ToAddresses": self.recipients},
+            Message={
+                "Subject": {"Data": f"[AgenticOps] {subject[:100]}", "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {"Data": plain_body, "Charset": "UTF-8"},
+                    "Html": {"Data": html_body, "Charset": "UTF-8"},
+                },
+            },
+        )
+        return resp.get("MessageId", "")
+
+    async def send_report(
+        self,
+        report_id: int,
+        title: str,
+        summary: str,
+        content_markdown: str,
+        report_type: str,
+        formats: Optional[List[str]] = None,
+        report_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Full report pipeline: format, upload to S3, send HTML email with download links."""
+        if not self.sender or not self.recipients:
+            raise ValueError("SES sender and recipients are required")
+
+        from agenticops.notify.report_formatter import format_report
+
+        use_formats = formats or self.formats
+        meta = dict(report_metadata or {})
+        meta["report_type"] = report_type
+        formatted = format_report(
+            title=title,
+            content_markdown=content_markdown,
+            formats=use_formats,
+            report_metadata=meta,
+        )
+
+        if not formatted:
+            logger.warning("No report formats generated for report #%d", report_id)
+            return {"formats": [], "urls": {}, "message_id": None}
+
+        # Extract inline HTML for email body
+        inline_html: str = ""
+        for fr in formatted:
+            if fr.format == "html":
+                inline_html = fr.content.decode("utf-8")
+                break
+
+        loop = asyncio.get_event_loop()
+        urls: Dict[str, str] = {}
+        generated_formats: List[str] = []
+
+        # Upload to S3 if bucket is configured
+        if self.s3_bucket:
+            for fr in formatted:
+                date_str = datetime.utcnow().strftime("%Y-%m-%d")
+                s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
+                url = await loop.run_in_executor(
+                    None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
+                )
+                urls[fr.format] = url
+                generated_formats.append(fr.format)
+        else:
+            generated_formats = [fr.format for fr in formatted]
+
+        # Build HTML email body
+        links_html = "".join(
+            f'<li><a href="{url}">{fmt.upper()}</a></li>'
+            for fmt, url in urls.items()
+        )
+        if inline_html:
+            download_section = (
+                f'<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;">'
+                f'<p style="color:#64748b;font-size:0.85rem;">'
+                f'Download links (valid {self.url_expiry // 86400} days): '
+                f'<ul style="font-size:0.85rem;">{links_html}</ul></p></div>'
+            )
+            html_body = inline_html.replace("</body>", f"{download_section}</body>") if "</body>" in inline_html else inline_html + download_section
+        else:
+            html_body = (
+                f"<h2>{title}</h2>"
+                f"<p><strong>Type:</strong> {report_type} &nbsp; "
+                f"<strong>Report ID:</strong> #{report_id}</p>"
+                f"<h3>Summary</h3><p>{summary[:1000]}</p>"
+                f"<h3>Download Links</h3>"
+                f"<p><em>Valid for {self.url_expiry // 86400} days</em></p>"
+                f"<ul>{links_html}</ul>"
+                f"<hr><p style='color:#999;font-size:12px'>AgenticOps Report Distribution</p>"
+            )
+
+        # Plain text fallback
+        links_text = "\n".join(f"  - {fmt.upper()}: {url}" for fmt, url in urls.items())
+        plain_body = f"Report: {title}\nType: {report_type}\nID: #{report_id}\n\n{summary[:1000]}\n\nDownload:\n{links_text}"
+
+        # Send via SES
+        message_id = await loop.run_in_executor(
+            None, self._send_email, title, plain_body, html_body,
+        )
+
+        return {
+            "formats": generated_formats,
+            "urls": urls,
+            "message_id": message_id,
+        }
+
+    def _upload_to_s3(self, key: str, content: bytes, content_type: str) -> str:
+        """Upload file to S3 and return a presigned download URL."""
+        import boto3
+
+        s3 = boto3.client("s3", region_name=self.s3_region)
+        s3.put_object(
+            Bucket=self.s3_bucket,
+            Key=key,
+            Body=content,
+            ContentType=content_type,
+        )
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.s3_bucket, "Key": key},
+            ExpiresIn=self.url_expiry,
+        )
+        return url
+
+    async def test_connection(self) -> bool:
+        """Verify SES access via get_send_quota()."""
+        if not self.sender:
+            return False
+        try:
+            import boto3
+
+            client = boto3.client("ses", region_name=self.region)
+            client.get_send_quota()
+            return True
+        except Exception as e:
+            logger.error("SES test failed: %s", e)
+            return False
+
+
+# ============================================================================
 # IM Notifier Base Class — shared token caching for Feishu/DingTalk/WeCom
 # ============================================================================
 
@@ -1237,6 +1426,7 @@ class NotificationManager:
     NOTIFIER_CLASSES = {
         "slack": SlackNotifier,
         "email": EmailNotifier,
+        "ses": SESNotifier,
         "sns": SNSNotifier,
         "sns-report": SNSReportNotifier,
         "feishu": FeishuNotifier,

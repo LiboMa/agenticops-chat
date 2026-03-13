@@ -21,7 +21,7 @@ import type {
   NotificationChannelType,
 } from "@/api/types";
 
-const CHANNEL_TYPES: NotificationChannelType[] = ["slack", "email", "sns", "feishu", "dingtalk", "wecom", "webhook"];
+const CHANNEL_TYPES: NotificationChannelType[] = ["slack", "email", "ses", "sns", "sns-report", "feishu", "dingtalk", "wecom", "webhook"];
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "low"];
 
 /* ------------------------------------------------------------------ */
