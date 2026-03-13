@@ -39,7 +39,14 @@ export function SessionList({ selectedId, onSelect }: Props) {
       </div>
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <p className="p-3 text-xs text-slate-400">Loading...</p>
+          <div className="p-2 space-y-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="px-3 py-2.5 rounded-lg">
+                <div className="h-4 bg-slate-200 rounded animate-pulse w-3/4" />
+                <div className="h-3 bg-slate-100 rounded animate-pulse w-1/2 mt-1.5" />
+              </div>
+            ))}
+          </div>
         ) : !sessions || sessions.length === 0 ? (
           <p className="p-3 text-xs text-slate-400">No sessions yet</p>
         ) : (

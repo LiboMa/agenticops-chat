@@ -137,6 +137,8 @@ export function useChat(sessionId: string | null) {
         }
       } finally {
         setStreaming(false);
+        setStreamingContent("");
+        setToolCalls([]);
         abortRef.current = null;
       }
     },

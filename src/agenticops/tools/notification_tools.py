@@ -282,6 +282,99 @@ def distribute_report(
     })
 
 
+@tool
+def share_content(
+    subject: str,
+    body: str,
+    channel_names: str = "",
+    upload_to_s3: bool = False,
+    expiry_hours: int = 72,
+) -> str:
+    """Share text content to notification channels, optionally with S3 presigned URL.
+
+    For short content (<4000 chars), sends directly.
+    For long content or when upload_to_s3=True, uploads to S3 and includes
+    a presigned download URL in the notification.
+
+    Args:
+        subject: Message subject / title.
+        body: The content to share (markdown text).
+        channel_names: Comma-separated channel names. Empty = all enabled.
+        upload_to_s3: Force upload to S3 even for short content.
+        expiry_hours: Presigned URL expiry (default 72h). Max 168h (7 days).
+
+    Returns:
+        JSON with success, channels_sent, presigned_url (if uploaded).
+    """
+    from datetime import datetime
+
+    if not subject or not body:
+        return json.dumps({"success": False, "message": "subject and body are required"})
+
+    expiry_hours = min(max(expiry_hours, 1), 168)
+    presigned_url = None
+    notification_body = body
+
+    # Upload to S3 for long content or when forced
+    if len(body) > 4000 or upload_to_s3:
+        try:
+            from agenticops.storage.backend import get_storage_backend
+
+            backend = get_storage_backend()
+            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in subject[:50])
+            key = f"shared/{ts}_{safe_name}.md"
+            uri = backend.write(key, body.encode("utf-8"), content_type="text/markdown")
+            presigned_url = backend.presigned_url(uri, expiry=expiry_hours * 3600)
+
+            # Build notification body: summary + link
+            summary = body[:500].rstrip()
+            if len(body) > 500:
+                summary += "..."
+            notification_body = summary
+            if presigned_url:
+                notification_body += f"\n\nFull content: {presigned_url}"
+            else:
+                notification_body += f"\n\n(Content saved to storage: {uri})"
+        except Exception as e:
+            logger.warning("S3 upload failed for share_content, sending directly: %s", e)
+            notification_body = body[:4000]
+
+    # Send notification
+    try:
+        from agenticops.notify.notifier import NotificationManager
+
+        manager = NotificationManager()
+        channels = [n.strip() for n in channel_names.split(",") if n.strip()] if channel_names else None
+
+        loop = asyncio.new_event_loop()
+        try:
+            results = loop.run_until_complete(
+                manager.send_notification(
+                    subject=subject,
+                    body=notification_body,
+                    channel_names=channels,
+                )
+            )
+        finally:
+            loop.close()
+
+        sent = [ch for ch, ok in results.items() if ok]
+        failed = [ch for ch, ok in results.items() if not ok]
+
+        result: Dict = {
+            "success": len(sent) > 0,
+            "channels_sent": sent,
+            "channels_failed": failed,
+        }
+        if presigned_url:
+            result["presigned_url"] = presigned_url
+        return json.dumps(result, default=str)
+
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"Notification failed: {e}"})
+
+
 def _distribute_via_sns_report(ch, report_id, title, summary, content_md, report_type, report_meta) -> dict:
     """Handle sns-report channel via the full SNSReportNotifier pipeline."""
     from agenticops.notify.notifier import SNSReportNotifier

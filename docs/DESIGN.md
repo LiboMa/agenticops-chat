@@ -593,7 +593,7 @@ aiops arch -o json      # JSON格式
 |------|------|--------|
 | `AIOPS_DATABASE_URL` | 数据库连接 | `sqlite:///data/agenticops.db` |
 | `AIOPS_BEDROCK_REGION` | Bedrock区域 | `us-east-1` |
-| `AIOPS_BEDROCK_MODEL_ID` | 默认模型 (Sonnet 4.6) | `global.anthropic.claude-sonnet-4-6-v1` |
+| `AIOPS_BEDROCK_MODEL_ID` | 默认模型 (Sonnet 4.6) | `global.anthropic.claude-sonnet-4-6` |
 | `AIOPS_BEDROCK_MODEL_ID_CHEAP` | 经济模型 (Haiku 4.5) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | `AIOPS_BEDROCK_MODEL_ID_STRONG` | 强模型 (Opus 4.6) | `global.anthropic.claude-opus-4-6-v1` |
 | `AIOPS_BEDROCK_MAX_TOKENS` | 最大输出 token | `16384` |

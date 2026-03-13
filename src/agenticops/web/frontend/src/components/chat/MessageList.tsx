@@ -87,9 +87,26 @@ export function MessageList({
         </div>
       ))}
 
+      {/* Thinking indicator — streaming started but no content yet */}
+      {streaming && !streamingContent && (!streamingToolCalls || streamingToolCalls.length === 0) && (
+        <div className="flex gap-3 animate-[fadeIn_0.2s_ease-out]">
+          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">
+            AI
+          </div>
+          <div className="flex items-center gap-2 text-sm text-slate-400">
+            <span className="flex gap-1">
+              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:300ms]" />
+            </span>
+            Thinking...
+          </div>
+        </div>
+      )}
+
       {/* Streaming assistant message */}
-      {(streamingContent || (streamingToolCalls && streamingToolCalls.length > 0)) && (
-        <div className="flex gap-3">
+      {streaming && (streamingContent || (streamingToolCalls && streamingToolCalls.length > 0)) && (
+        <div className="flex gap-3 animate-[fadeIn_0.2s_ease-out]">
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">
             AI
           </div>
@@ -104,9 +121,7 @@ export function MessageList({
             {streamingContent && (
               <div className="text-sm text-slate-700 leading-relaxed report-content max-w-none">
                 <span dangerouslySetInnerHTML={{ __html: streamingHtml }} />
-                {streaming && (
-                  <span className="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 align-text-bottom" />
-                )}
+                <span className="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 align-text-bottom" />
               </div>
             )}
             {streamingTokenMetrics && (

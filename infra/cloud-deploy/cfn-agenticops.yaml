@@ -49,7 +49,7 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: global.anthropic.claude-sonnet-4-6-v1
+    Default: global.anthropic.claude-sonnet-4-6
     Description: Default Bedrock model ID
 
   DatabaseBackend:

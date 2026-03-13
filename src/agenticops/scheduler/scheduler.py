@@ -381,6 +381,26 @@ class Scheduler:
             timed_out = True
             logger.warning(f"AgentChain '{schedule.name}' timed out after {timeout_seconds}s")
 
+        # Upload content to S3 and get presigned URL for delivery
+        presigned_url = None
+        if response_text and not timed_out:
+            try:
+                from agenticops.storage.backend import get_storage_backend
+
+                backend = get_storage_backend()
+                ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                safe_name = "".join(
+                    c if c.isalnum() or c in "-_" else "_"
+                    for c in schedule.name[:50]
+                )
+                key = f"schedule-outputs/{ts}_{safe_name}.md"
+                uri = backend.write(
+                    key, response_text.encode("utf-8"), content_type="text/markdown"
+                )
+                presigned_url = backend.presigned_url(uri, expiry=72 * 3600)
+            except Exception:
+                logger.debug("Failed to upload schedule output to storage", exc_info=True)
+
         with get_db_session() as session:
             ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
             if ex:
@@ -391,15 +411,70 @@ class Scheduler:
                     ex.error = f"Timed out after {timeout_seconds}s"
                     ex.result = {"agent_output": response_text or "(partial)", "prompt": prompt}
                 else:
+                    result_data: Dict[str, Any] = {"agent_output": response_text, "prompt": prompt}
+                    if presigned_url:
+                        result_data["presigned_url"] = presigned_url
                     ex.status = "completed"
-                    ex.result = {"agent_output": response_text, "prompt": prompt}
+                    ex.result = result_data
 
-        # Notify
+        # Notify — include content summary + presigned URL for notify_channels
         try:
             from agenticops.services.notification_service import notify_schedule_result
             notify_schedule_result(schedule.name, not timed_out)
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
+
+        # Deliver full content to configured notify_channels
+        if notify_channels and response_text and not timed_out:
+            self._deliver_content_to_channels(
+                schedule.name, response_text, notify_channels, presigned_url
+            )
+
+    @staticmethod
+    def _deliver_content_to_channels(
+        schedule_name: str,
+        content: str,
+        channel_names: list,
+        presigned_url: str | None = None,
+    ) -> None:
+        """Deliver agent output content to notification channels."""
+        try:
+            from agenticops.notify.notifier import NotificationManager
+
+            subject = f"Schedule '{schedule_name}' — Output"
+            # Build body: summary for notification, link for full content
+            if len(content) > 4000 and presigned_url:
+                summary = content[:500].rstrip()
+                if len(content) > 500:
+                    summary += "..."
+                body = f"{summary}\n\nFull output: {presigned_url}"
+            elif presigned_url:
+                body = f"{content}\n\nDownload: {presigned_url}"
+            else:
+                body = content[:4000]
+
+            manager = NotificationManager()
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    manager.send_notification(
+                        subject=subject,
+                        body=body,
+                        channel_names=channel_names,
+                    )
+                )
+            finally:
+                loop.close()
+
+            logger.info(
+                "Delivered schedule '%s' content to channels: %s",
+                schedule_name, channel_names,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to deliver schedule '%s' content to channels",
+                schedule_name, exc_info=True,
+            )
 
     @staticmethod
     def add_schedule(

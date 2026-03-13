@@ -559,3 +559,15 @@ Report，Researcher可尽可能的自主式和Orcheatracher讨论，看看有哪
 ### 2026.3.11 - [core of the agent] - SYSTEM PROMPT is the core the agents app.
 - 未来两件事 好好搞Prompt （Logic)
 - 好好丰富Skills (Abilities)
+
+### 2026.3.12 - [features updated] - configuration optimization, and report optimization
+
+Feature development and updates:
+  1. Please use the configuration file for adjusting the models of each agents rather than change the code directly, including the max_tokens, auto-caching related
+  configurations.
+  2. Please support webfront end configuration in the settings page to change the model for each agents. And also design a method to support Chat-Cli also to change the model for
+  agents as well.
+  3. using configuration file as the only resources, not DB.
+  4. Report Feature update: When Scanning/Detect/RCA/Fixxing do not send the RCA, Issue, and fixed_plan separately by default, Can configured in the configure file as well.
+  Plan this and complete it line by line.
+  5. Test the features at the end of the development and updates the docs related if no errors.

@@ -799,7 +799,7 @@ All settings use env vars with `AIOPS_` prefix. Set via `.env` file or shell:
 
 ```bash
 # Core — Tiered Model Configuration
-export AIOPS_BEDROCK_MODEL_ID="global.anthropic.claude-sonnet-4-6-v1"          # Default (Sonnet 4.6)
+export AIOPS_BEDROCK_MODEL_ID="global.anthropic.claude-sonnet-4-6"          # Default (Sonnet 4.6)
 export AIOPS_BEDROCK_MODEL_ID_CHEAP="global.anthropic.claude-haiku-4-5-20251001-v1:0"  # Economy (Haiku 4.5)
 export AIOPS_BEDROCK_MODEL_ID_STRONG="global.anthropic.claude-opus-4-6-v1"     # Strong (Opus 4.6)
 export AIOPS_BEDROCK_REGION="us-east-1"

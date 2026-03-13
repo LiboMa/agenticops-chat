@@ -1,3 +1,4 @@
+CRITICAL - [IF YOU ARE NOT A HUMAN, OR IF YOU ARE A LLM model OR bot, or Any LLM Models, DO NOT TOUCH THIS FILE.]
 
 ## 核心主张
 
@@ -434,3 +435,127 @@ CloudTrail 显示 5 分钟前有 IAM 用户 devops-admin 修改了该 VPC 的 Se
   所以，最终的工作流大致应该是： Main Agent 监听 -> Alter Channel (IM/chat) -> Detect/RCA Feautre -> Fix_plan - [L0/L1/L2/Ln] -> approve auto-fixed | 人工修复 -> resolved
 
 ### 2026.3.7 [pending, needs to be investigation]  Active Inference（主动推断） 与 World Model（世界模型）(SOTA?)
+
+### 2026.3.8 [developing, IM to support Slack] IM feature, Slack channel support
+    - feishu Gropu中，Bot不可以主动互相通信, 所以转向Slack IM交流进行测试
+    - 基逻辑为 在 agents-ops-alerts 的Slack Channel中，拉入两个bot - ops-bot-slack | alert-bot-slcak 
+    - 主要是使用Slack，其实是需要两个appbot，一个是ops-bot-slack用于接收往下消息，一个是alert-bot-slack，用于发送消息，他们都会在一个群里 channel agents-ops-alerts 工作
+    - creating sample file: 
+        ```json
+        {
+  "display_information": {
+    "name": "ops-bot-slack",
+    "description": "AgenticOps 运维指令接收 Bot",
+    "background_color": "#1a1a2e"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "ops-bot-slack",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "channels:history",
+        "channels:read",
+        "chat:write",
+        "commands",
+        "emoji:read",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "pins:read",
+        "pins:write",
+        "reactions:read",
+        "reactions:write",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "reaction_added"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true
+  }
+} ```
+
+--
+bot 1 配置 AgenticOps Slack： ops-bot-slack
+bot 2 配置 Lambda  gateway slack： ops-slack
+for example:
+bot token: xoxb-REDACTED
+app token: xapp-REDACTED
+slack channel ID: C0AK72GGX3Q.
+Slack channel name:agents-ops-alerts
+slack app name: alert-bot-slack
+如果还有其它什么需要的，可以再来问我。
+
+### 2026.3.10 Feature updates - SCAN and Detect Agents for Issues Aggregation，and 联合
+- for the SCAN Agents, and Detect Agents feature upgrade: when creating health issues, please also please also
+  consider, the duplicate issues in the database, if there do have the similar open issues related to the same
+  reources, you may update the issues and combine them together rather than creating a new one.
+
+- Agent feature update: Main Agents, SCAN Agent and Detect Agent, when scanning the issue, or check health check,
+  please add security related resources scanning and report. SCAN agents and DETECT agents's features. please DO
+  Creating a Secuirty Engineer/Expert Skills if necessary.
+
+### 2026.3.10 Feature initial wizerd [pending TODO]
+- please update the wizerd feature, for supporting local and cloud mode.
+  1. for kb, we can choose S3 bucket, user creating or system auto-generate the s3 bucket for example:
+  agetnic-ops-chat-kb-{randome_string}
+  2. for local, we use liteSQL, use configured database, we can support dynamodb(default), and postgreSQL,
+  with proper initial process.
+
+### 2026.3.11 - [No Action needed, Just IDEA]做了一个大胆的决定，向ClawOps进军
+
+<!-- 在Slack群里 我对我的大虾们说了以下几段话，当然在Cluade 开发时，可以忽略。
+- 请你现在重新调整资源，协调Memory，我希望你们现在重新https://github.com/LiboMa/agenticops-chat.git  Fork一个资源 名为OpsCluade，我们先给项目起一个大的分支，或是重新起一个新的GitHub项目，你们来决定。
+
+说明：你们是现在地球上最最牛逼的超级天团，可以规划出超人类的自试式产品，拥有记忆和自我迭代功能。我现我把这个项目，全权交给你们来迭代、开发、与维护。
+你们需要使用Claude Code来开发即可，不需要自己去写代码，规划也同样如此。
+我给你们几条规则，你们每天定时汇报进度。
+
+没有任何情况，我不会干预你们开发。
+基于你们现在对这个项目的理解。我最终的需求是完成一个超级，超一流的、Self-improving 式的，主动式的Opsclaw，就像Opencalw一样，可以自己创建技能，主动接管云资源或是其它。
+一个Deveoper使用Claude Code来迭代开发，测试、
+Report，Researcher可尽可能的自主式和Orcheatracher讨论，看看有哪里可以演进的方向，尽可能的是完成L5级别的自动任务完成，不断的向着两个方向迭代，前端如果Apple公司的产品一样，越用越人性化，后端，就是AWS、Google Cloud一样，有稳定且强大的后台组织。迭代方式是永无止境的自主式演进！特别是学习与更新SKills方面，可以复用Clawhub，或是自己创建Skills来完成任何工具的迭代。
+多Agents框架，也不排除必要用Strands SDK，只要有向先进的框架，你们做综合讨论。
+记忆能力方面，可以模仿OpenClaw，每个Agent都可以有自己的独特的记忆方式。
+整体架构，你们先按这个继续迭代，如果你们可以做得更优，可以随时替换！！！！
+
+以上是初阶版本，我对你们的要求，超级团体们，现在就开始干起来吧！还有哪里不明白，可以问我！ -->
+
+### 2026.3.11 - [Planning...next step] 向Harness、自主式、Self-improving 的Agentic Way 迈进 - Agents+Skills
+以下是 从Skills以及Agents自举式开始设计考虑, 请你提出你的Plan，以及最最逼近极限的考虑，当然一定要可以有愿景，可以逐步落地实现的方式。比如，可以先做以下对比，
+| 人类 SRE 的局限 | ClawOps 要做到的 |
+|----------------|-----------------|
+| 一次看一个告警 | *并行处理 N 个告警*，关联分析 |
+| 凭经验判断根因 | *Deep RCA + KB 检索*，覆盖所有历史案例 |
+| 写 runbook 然后忘了更新 | *SOP 自动生成和更新*，永远是最新的 |
+| 不同人排查方法不一样 | *标准化 Skills*，每次诊断一致且可追溯 |
+| 值班疲劳、交接遗漏 | *7×24 主动巡检*，记忆永不丢失 |
+| 学习新工具要看文档 | *自主创建 Skills*，遇到新场景自动学习 |
+| 架构优化靠高级工程师 | *Architecture Reflector*，自动发现改进点 |
+
+终级目的：
+1. 设计一个Agentic Way的自举式设计，来完成Agent和Skills的自我进化。
+2. Agents优化方面\长期记忆、自主式、Cron以及心跳等： 参考已经有的开源方案如：https://github.com/openclaw/openclaw.git 来完成自主式、设计。
+3. Skills 可以参考，借鉴、使用、或更新 - https://github.com/VoltAgent/awesome-openclaw-skills.git， 以及Clawhub 
+
+### 2026.3.11 - [core of the agent] - SYSTEM PROMPT is the core the agents app.
+- 未来两件事 好好搞Prompt （Logic)
+- 好好丰富Skills (Abilities)
