@@ -77,7 +77,7 @@ export default function FixPlanDetail() {
       {/* Back link */}
       <Link
         to="/app/fix-plans"
-        className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 transition-colors"
+        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <svg
           className="h-4 w-4 mr-1"
@@ -101,15 +101,15 @@ export default function FixPlanDetail() {
           <div className="flex items-center gap-3 mb-4">
             <RiskLevelBadge level={p.risk_level} />
             <FixPlanStatusBadge status={p.status} />
-            <h1 className="text-2xl font-semibold text-slate-900">{p.title}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">{p.title}</h1>
           </div>
           <div
-            className="text-slate-600 mb-6 report-content"
+            className="text-muted-foreground mb-6 report-content"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(p.summary) }}
           />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-slate-400 block">Issue</span>
+              <span className="text-muted-foreground block">Issue</span>
               <Link
                 to={`/app/issues/${p.health_issue_id}`}
                 className="font-mono text-primary-600 hover:underline"
@@ -118,27 +118,27 @@ export default function FixPlanDetail() {
               </Link>
             </div>
             <div>
-              <span className="text-slate-400 block">Risk Level</span>
-              <span className="font-medium text-slate-700">{p.risk_level}</span>
+              <span className="text-muted-foreground block">Risk Level</span>
+              <span className="font-medium text-foreground">{p.risk_level}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Impact</span>
-              <span className="text-slate-700">{p.estimated_impact || "-"}</span>
+              <span className="text-muted-foreground block">Impact</span>
+              <span className="text-foreground">{p.estimated_impact || "-"}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Created</span>
-              <span className="text-slate-700">{formatFullDate(p.created_at)}</span>
+              <span className="text-muted-foreground block">Created</span>
+              <span className="text-foreground">{formatFullDate(p.created_at)}</span>
             </div>
             {p.approved_by && (
               <div>
-                <span className="text-slate-400 block">Approved By</span>
-                <span className="font-medium text-slate-700">{p.approved_by}</span>
+                <span className="text-muted-foreground block">Approved By</span>
+                <span className="font-medium text-foreground">{p.approved_by}</span>
               </div>
             )}
             {p.approved_at && (
               <div>
-                <span className="text-slate-400 block">Approved At</span>
-                <span className="text-slate-700">{formatFullDate(p.approved_at)}</span>
+                <span className="text-muted-foreground block">Approved At</span>
+                <span className="text-foreground">{formatFullDate(p.approved_at)}</span>
               </div>
             )}
           </div>
@@ -148,7 +148,7 @@ export default function FixPlanDetail() {
       {/* Steps */}
       <Card>
         <CardBody>
-          <h2 className="text-xl font-semibold text-slate-900 mb-4">
+          <h2 className="text-xl font-semibold text-foreground mb-4">
             Remediation Steps
           </h2>
           {p.steps.length > 0 ? (
@@ -158,13 +158,13 @@ export default function FixPlanDetail() {
               ))}
             </ol>
           ) : (
-            <p className="text-slate-400 text-sm">No steps defined.</p>
+            <p className="text-muted-foreground text-sm">No steps defined.</p>
           )}
 
           {/* Pre-checks */}
           {p.pre_checks.length > 0 && (
             <div className="mt-6">
-              <h3 className="font-semibold text-slate-900 mb-2">Pre-checks</h3>
+              <h3 className="font-semibold text-foreground mb-2">Pre-checks</h3>
               <ul className="space-y-1.5">
                 {p.pre_checks.map((c, i) => (
                   <CheckItem key={i} item={c} />
@@ -176,7 +176,7 @@ export default function FixPlanDetail() {
           {/* Post-checks */}
           {p.post_checks.length > 0 && (
             <div className="mt-6">
-              <h3 className="font-semibold text-slate-900 mb-2">Post-checks</h3>
+              <h3 className="font-semibold text-foreground mb-2">Post-checks</h3>
               <ul className="space-y-1.5">
                 {p.post_checks.map((c, i) => (
                   <CheckItem key={i} item={c} />
@@ -196,7 +196,7 @@ export default function FixPlanDetail() {
       {needsApproval && (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Approval Actions
             </h2>
 
@@ -228,7 +228,7 @@ export default function FixPlanDetail() {
                     placeholder="Your name"
                     value={approverName}
                     onChange={(e) => setApproverName(e.target.value)}
-                    className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className="border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                   <button
                     onClick={handleApprove}
@@ -239,7 +239,7 @@ export default function FixPlanDetail() {
                   </button>
                   <button
                     onClick={() => setShowApproveForm(false)}
-                    className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700"
+                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
                   >
                     Cancel
                   </button>
@@ -261,7 +261,7 @@ export default function FixPlanDetail() {
       {canExecute && (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Execute Plan
             </h2>
 
@@ -286,37 +286,37 @@ export default function FixPlanDetail() {
       {executions.data && executions.data.length > 0 && (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Execution History
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-border">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       ID
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Executed By
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Duration
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Started
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {executions.data.map((ex) => (
-                    <tr key={ex.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-2 text-sm font-mono text-slate-600">
+                    <tr key={ex.id} className="hover:bg-secondary transition-colors">
+                      <td className="px-4 py-2 text-sm font-mono text-muted-foreground">
                         #{ex.id}
                       </td>
                       <td className="px-4 py-2">
@@ -326,21 +326,21 @@ export default function FixPlanDetail() {
                               ? "bg-green-100 text-green-700"
                               : ex.status === "failed"
                                 ? "bg-red-100 text-red-700"
-                                : "bg-slate-100 text-slate-600"
+                                : "bg-secondary text-muted-foreground"
                           }`}
                         >
                           {ex.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.executed_by}
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.duration_ms > 0
                           ? `${(ex.duration_ms / 1000).toFixed(1)}s`
                           : "-"}
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-500">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.started_at
                           ? formatFullDate(ex.started_at)
                           : "-"}
@@ -398,7 +398,7 @@ function RunbookStep({ index, step }: { index: number; step: unknown }) {
   const text = typeof step === "string" ? step : (typeof action === "string" ? action : null);
 
   return (
-    <li className="border border-slate-200 rounded-lg p-4 bg-white">
+    <li className="border border-border rounded-lg p-4 bg-background">
       <div className="flex gap-3">
         <span className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-semibold">
           {index}
@@ -406,11 +406,11 @@ function RunbookStep({ index, step }: { index: number; step: unknown }) {
         <div className="flex-1 min-w-0">
           {text ? (
             <div
-              className="text-slate-700 text-sm leading-relaxed report-content"
+              className="text-foreground text-sm leading-relaxed report-content"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
             />
           ) : (
-            <pre className="text-slate-700 text-sm whitespace-pre-wrap">
+            <pre className="text-foreground text-sm whitespace-pre-wrap">
               {JSON.stringify(step, null, 2)}
             </pre>
           )}
@@ -433,13 +433,14 @@ function CommandBlock({ command }: { command: string }) {
 
   return (
     <div className="mt-3 relative group">
-      <div className="bg-slate-900 text-slate-100 rounded-lg p-3 text-sm font-mono overflow-x-auto">
-        <span className="text-slate-500 select-none">$ </span>
+      <div className="rounded-lg p-3 text-sm font-mono overflow-x-auto" style={{ backgroundColor: "#1e1e2e", color: "#cdd6f4" }}>
+        <span className="select-none" style={{ color: "#a6e3a1" }}>$ </span>
         {command}
       </div>
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ backgroundColor: "#313244", color: "#a6adc8" }}
       >
         {copied ? "Copied" : "Copy"}
       </button>
@@ -454,8 +455,8 @@ function CheckItem({ item }: { item: unknown }) {
   const command = s?.command as string | undefined;
 
   return (
-    <li className="flex items-start gap-2 text-sm text-slate-600">
-      <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <li className="flex items-start gap-2 text-sm text-muted-foreground">
+      <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
       <div className="flex-1 min-w-0">
@@ -473,7 +474,7 @@ function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
   return (
     <div className="mt-6 border border-amber-200 rounded-lg bg-amber-50 overflow-hidden">
       <div className="px-4 py-3 border-b border-amber-200">
-        <h3 className="font-semibold text-slate-900">Rollback Plan</h3>
+        <h3 className="font-semibold text-foreground">Rollback Plan</h3>
       </div>
       <div className="p-4 space-y-3">
         {trigger && (
@@ -496,9 +497,9 @@ function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
               .filter(([k]) => k !== "trigger" && k !== "steps")
               .map(([k, v]) => (
                 <div key={k}>
-                  <dt className="font-medium text-slate-700 capitalize">{k.replace(/_/g, " ")}</dt>
-                  <dd className="text-slate-600 mt-0.5">
-                    {typeof v === "string" ? v : <pre className="bg-slate-900 text-slate-100 rounded-lg p-3 text-sm font-mono overflow-x-auto mt-1">{JSON.stringify(v, null, 2)}</pre>}
+                  <dt className="font-medium text-foreground capitalize">{k.replace(/_/g, " ")}</dt>
+                  <dd className="text-muted-foreground mt-0.5">
+                    {typeof v === "string" ? v : <pre className="rounded-lg p-3 text-sm font-mono overflow-x-auto mt-1" style={{ backgroundColor: "#1e1e2e", color: "#cdd6f4" }}>{JSON.stringify(v, null, 2)}</pre>}
                   </dd>
                 </div>
               ))}

@@ -148,8 +148,12 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-ul { @apply list-disc list-inside text-sm space-y-1 mb-4 ml-2; }
 .report-content .md-ol { @apply list-decimal list-inside text-sm space-y-1 mb-4 ml-2; }
 .report-content .md-hr { @apply my-6; }
-.report-content .md-code { @apply px-1.5 py-0.5 text-xs font-mono rounded bg-gray-100 dark:bg-gray-800; }
-.report-content .md-pre { @apply p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg bg-gray-100 dark:bg-gray-800; }
+.report-content .md-code { @apply px-1.5 py-0.5 text-xs font-mono rounded bg-gray-100 text-pink-600 dark:bg-gray-800 dark:text-pink-400; }
+.report-content .md-pre {
+  @apply p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg;
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+}
 .report-content .md-table-wrap { @apply overflow-x-auto mb-4 border rounded-lg; }
 .report-content .md-table { @apply w-full text-sm; }
 .report-content .md-table th { @apply text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b; }
