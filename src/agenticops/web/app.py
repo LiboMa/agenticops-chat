@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
     AlertEvent,
@@ -1580,6 +1581,7 @@ async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20
             raise HTTPException(status_code=404, detail="Resource not found")
         plans = (
             session.query(FixPlan)
+            .options(joinedload(FixPlan.fix_executions))
             .join(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
             .filter(HealthIssue.resource_id == resource.resource_id)
             .order_by(FixPlan.created_at.desc())
@@ -1610,16 +1612,21 @@ async def api_resource_related(resource_id: int):
         if is_infra:
             ref_key = _infra_ref_key(resource.resource_type)
             if ref_key:
-                all_resources = session.query(AWSResource).filter(AWSResource.id != resource.id).limit(500).all()
-                for c in all_resources:
-                    c_meta = c.resource_metadata or {}
-                    ref_val = c_meta.get(ref_key)
-                    if ref_val == resource.resource_id:
-                        contains.append(RelatedResourceItem(
-                            id=c.id, resource_id=c.resource_id,
-                            resource_type=c.resource_type,
-                            resource_name=c.resource_name, status=c.status,
-                        ))
+                matched = (
+                    session.query(AWSResource)
+                    .filter(
+                        AWSResource.id != resource.id,
+                        func.json_extract(AWSResource.resource_metadata, f"$.{ref_key}") == resource.resource_id,
+                    )
+                    .limit(100)
+                    .all()
+                )
+                for c in matched:
+                    contains.append(RelatedResourceItem(
+                        id=c.id, resource_id=c.resource_id,
+                        resource_type=c.resource_type,
+                        resource_name=c.resource_name, status=c.status,
+                    ))
         else:
             for key in ("vpc_id", "subnet_id", "security_groups", "subnet_ids"):
                 val = meta.get(key)

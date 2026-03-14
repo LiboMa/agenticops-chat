@@ -137,3 +137,23 @@ def test_resource_related_infra(client):
     assert resp.status_code == 200
     data = resp.json()
     assert any(r["resource_id"] == "i-in-vpc" for r in data["contains"])
+
+
+def test_search_includes_resources(client, seed_data):
+    """Global search should return matching resources."""
+    resp = client.get("/api/search?q=web-prod&types=resources")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "resources" in data["results"]
+    assert len(data["results"]["resources"]) >= 1
+    item = data["results"]["resources"][0]
+    assert item["entity_type"] == "resource"
+    assert "web-prod" in item["title"]
+
+
+def test_search_resources_by_id(client, seed_data):
+    """Search by resource_id prefix should find resources."""
+    resp = client.get("/api/search?q=i-&types=resources")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["results"].get("resources", [])) >= 1
