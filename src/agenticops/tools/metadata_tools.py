@@ -206,6 +206,14 @@ def save_resources(resources_json: str) -> str:
 
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+# All states where an issue is still "active" — should NOT create duplicates
+_ACTIVE_ISSUE_STATUSES = (
+    "open", "investigating", "acknowledged",
+    "root_cause_identified", "fix_planned",
+    "fix_approved", "fix_executing", "fix_executed",
+)
+
 RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
 _MERGED_ALERTS_CAP = 50
 
@@ -332,24 +340,26 @@ def create_health_issue(
         now = datetime.utcnow()
         fingerprint = _compute_fingerprint(source, resource_id, title)
 
-        # Fingerprint-based deduplication: find open/investigating issue with same
-        # fingerprint seen within the last 5 minutes.
+        # Fingerprint-based deduplication: match any active (non-resolved) issue
         existing = (
             session.query(HealthIssue)
             .filter(
                 HealthIssue.fingerprint == fingerprint,
-                HealthIssue.status.in_(["open", "investigating"]),
-                HealthIssue.last_seen >= now - timedelta(minutes=5),
+                HealthIssue.status.in_(_ACTIVE_ISSUE_STATUSES),
             )
+            .order_by(HealthIssue.detected_at.desc())
             .first()
         )
 
         if existing:
             existing.occurrence_count += 1
             existing.last_seen = now
-            existing.description = description
-            existing.metric_data = metric_data_parsed
-            existing.related_changes = changes_parsed
+            # Only update description/metrics for early-stage issues
+            if existing.status in ("open", "investigating"):
+                existing.description = description
+                existing.metric_data = metric_data_parsed
+                existing.related_changes = changes_parsed
+            # Always escalate severity
             if _SEVERITY_RANK.get(severity.lower(), 0) > _SEVERITY_RANK.get(existing.severity, 0):
                 existing.severity = severity.lower()
             session.commit()
@@ -363,9 +373,32 @@ def create_health_issue(
 
             return (
                 f"Deduplicated: updated existing HealthIssue #{existing.id} "
-                f"(count={existing.occurrence_count}): "
+                f"(status={existing.status}, count={existing.occurrence_count}): "
                 f"[{existing.severity.upper()}] {existing.title}"
             )
+
+        # Resolved cooldown: avoid flapping re-detection
+        cooldown = settings.dedup_resolved_cooldown_minutes
+        if cooldown > 0:
+            recently_resolved = (
+                session.query(HealthIssue)
+                .filter(
+                    HealthIssue.fingerprint == fingerprint,
+                    HealthIssue.status == "resolved",
+                    HealthIssue.resolved_at >= now - timedelta(minutes=cooldown),
+                )
+                .order_by(HealthIssue.resolved_at.desc())
+                .first()
+            )
+            if recently_resolved:
+                recently_resolved.occurrence_count += 1
+                recently_resolved.last_seen = now
+                session.commit()
+                return (
+                    f"Suppressed: HealthIssue #{recently_resolved.id} was resolved "
+                    f"{int((now - recently_resolved.resolved_at).total_seconds() // 60)}min ago "
+                    f"(cooldown={cooldown}min). Bumped count to {recently_resolved.occurrence_count}."
+                )
 
         # Resource-based dedup: merge into existing open issue for the same resource
         if settings.resource_dedup_enabled and resource_id and resource_id != "unknown":
@@ -799,7 +832,9 @@ def save_fix_plan(
         post_checks: JSON array of checks to verify after completion
 
     Returns:
-        Confirmation with the new FixPlan ID and risk level.
+        - Created: confirmation with new FixPlan ID and risk level
+        - Updated: confirmation that existing draft plan was updated in place
+        - Rejected: error message if a locked plan (approved/executing) already exists
     """
     valid_levels = {"L0", "L1", "L2", "L3"}
     risk_level = risk_level.upper()
@@ -838,6 +873,10 @@ def save_fix_plan(
             return f"RCAResult #{rca_result_id} not found."
 
         # --- Dedup: one issue → one fix plan (replace mode) ---
+        # NOTE: This check-then-act is not atomic. For SQLite (single-writer)
+        # this is safe. For PostgreSQL, a partial unique index on
+        # (health_issue_id) WHERE status NOT IN terminal would be ideal.
+        # The trigger_auto_sre() guard prevents most concurrent scenarios.
         from agenticops.models import (
             FIXPLAN_TERMINAL_STATUSES,
             FIXPLAN_REPLACEABLE_STATUSES,

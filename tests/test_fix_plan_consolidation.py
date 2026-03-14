@@ -143,6 +143,21 @@ class TestSaveFixPlanDedup:
         assert plans[0].id == plan_id
         assert plans[0].title == "Consolidated fix"
 
+    def test_save_rejects_when_pending_approval(self, db_session, issue_and_rca):
+        issue_id, rca_id = issue_and_rca
+
+        self._call_save(issue_id, rca_id)
+        plan = db_session.query(FixPlan).filter_by(health_issue_id=issue_id).first()
+        plan.status = "pending_approval"
+        db_session.commit()
+
+        result = self._call_save(issue_id, rca_id, title="Another plan")
+        assert "Cannot create a new plan" in result
+        assert "pending_approval" in result
+
+        plans = db_session.query(FixPlan).filter_by(health_issue_id=issue_id).all()
+        assert len(plans) == 1
+
     def test_save_rejects_when_approved(self, db_session, issue_and_rca):
         issue_id, rca_id = issue_and_rca
 

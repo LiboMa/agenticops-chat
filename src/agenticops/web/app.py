@@ -2231,7 +2231,9 @@ async def api_create_fix_plan(data: FixPlanCreate):
         if not rca:
             raise HTTPException(status_code=400, detail="RCA result not found")
 
-        # Guard: reject if issue already has a non-terminal fix plan
+        # Guard: reject ANY non-terminal plan (including drafts).
+        # Unlike generate-fix-plan (which delegates to SRE agent with
+        # in-place update), direct API creation should not silently replace.
         from agenticops.models import FIXPLAN_TERMINAL_STATUSES
         active = (
             session.query(FixPlan)
