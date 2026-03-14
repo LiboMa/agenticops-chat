@@ -145,7 +145,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             ],
         )
 
-        result = agent(
+        from agenticops.agents.preamble import invoke_with_retry
+        result = invoke_with_retry(agent,
             f"Generate a {report_type} report. Scope: {scope}. "
             f"Follow the report generation protocol."
         )

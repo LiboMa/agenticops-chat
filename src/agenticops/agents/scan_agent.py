@@ -151,7 +151,8 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             ],
         )
 
-        result = agent(f"Scan services={services} regions={regions}")
+        from agenticops.agents.preamble import invoke_with_retry
+        result = invoke_with_retry(agent, f"Scan services={services} regions={regions}")
         return str(result)
     except Exception as e:
         logger.exception("Scan agent failed")

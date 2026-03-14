@@ -192,7 +192,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
             ],
         )
 
-        result = agent(f"Check health scope={scope} deep={deep}")
+        from agenticops.agents.preamble import invoke_with_retry
+        result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
         return str(result)
     except Exception as e:
         logger.exception("Detect agent failed")

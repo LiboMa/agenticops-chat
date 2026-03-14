@@ -277,8 +277,9 @@ def sre_agent(issue_id: int) -> str:
         Fix plan summary with risk level, steps, and rollback plan.
     """
     try:
+        from agenticops.agents.preamble import invoke_with_retry
         agent = _create_sre_agent()
-        result = agent(
+        result = invoke_with_retry(agent,
             f"Generate a Fix Plan for HealthIssue #{issue_id}. "
             f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."
         )
@@ -306,8 +307,9 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
         Investigation results with resource details.
     """
     try:
+        from agenticops.agents.preamble import invoke_with_retry
         agent = _create_sre_agent()
-        result = agent(
+        result = invoke_with_retry(agent,
             f"General AWS investigation (Mode B). Region: {region}\n"
             f"Query: {query}\n"
             f"Use get_active_account + assume_role first, then use the best tool for this query. "

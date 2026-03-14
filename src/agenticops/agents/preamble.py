@@ -1,4 +1,4 @@
-"""Shared agent prompt preamble blocks and system prompt builder.
+"""Shared agent prompt preamble blocks, system prompt builder, and agent call utilities.
 
 Provides composable prompt fragments that are shared across multiple agents,
 eliminating duplication of account instructions, skill protocols, and output
@@ -7,6 +7,9 @@ were previously in skills/loader.py.
 """
 
 from __future__ import annotations
+
+import logging
+import time
 
 from agenticops.config import get_detail_level, settings
 
@@ -147,3 +150,41 @@ def build_system_prompt(
             parts.append(SKILLS_USAGE_PROTOCOL)
 
     return "\n\n".join(parts)
+
+
+# ── Agent Retry Helper ─────────────────────────────────────────────
+
+_retry_logger = logging.getLogger(__name__)
+
+_TRANSIENT_MARKERS = ("timed out", "read timeout", "connection reset", "throttling")
+
+
+def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: float = 3.0):
+    """Invoke a Strands agent with retry on transient Bedrock errors.
+
+    Args:
+        agent: A Strands Agent instance.
+        prompt: The user message to send.
+        max_retries: Total attempts (default 2 = 1 original + 1 retry).
+        backoff: Seconds to wait between retries.
+
+    Returns:
+        The agent result object.
+
+    Raises:
+        The original exception if all retries are exhausted or error is non-transient.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            return agent(prompt)
+        except Exception as e:
+            err_lower = str(e).lower()
+            is_transient = any(m in err_lower for m in _TRANSIENT_MARKERS)
+            if attempt < max_retries and is_transient:
+                _retry_logger.warning(
+                    "Bedrock transient error (attempt %d/%d), retrying in %.0fs: %s",
+                    attempt, max_retries, backoff, e,
+                )
+                time.sleep(backoff)
+                continue
+            raise

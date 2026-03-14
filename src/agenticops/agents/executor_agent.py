@@ -237,7 +237,8 @@ def executor_agent(fix_plan_id: int) -> str:
             ],
         )
 
-        result = agent(
+        from agenticops.agents.preamble import invoke_with_retry
+        result = invoke_with_retry(agent,
             f"Execute FixPlan #{fix_plan_id}. "
             f"Follow the 7-step execution protocol exactly. "
             f"Start with step 1: call get_approved_fix_plan({fix_plan_id})."

@@ -255,7 +255,8 @@ def rca_agent(issue_id: int) -> str:
             ],
         )
 
-        result = agent(f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
+        from agenticops.agents.preamble import invoke_with_retry
+        result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
         return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")
