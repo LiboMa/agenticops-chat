@@ -109,7 +109,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, get_agent_window_size
 
         model_id, max_tokens = get_agent_model_config("reporter")
         cache_kwargs: dict = {}
@@ -127,7 +127,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=settings.bedrock_window_size, per_turn=True
+                window_size=get_agent_window_size("reporter"), per_turn=True
             ),
             tools=[
                 get_active_account,

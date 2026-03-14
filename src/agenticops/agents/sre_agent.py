@@ -57,7 +57,7 @@ from agenticops.graph.tools import (
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.agents.preamble import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ TOOL SELECTION — accuracy first:
 
 def _create_sre_agent() -> Agent:
     """Create a reusable SRE Agent instance."""
-    from agenticops.config import get_agent_model_config
+    from agenticops.config import get_agent_model_config, get_agent_window_size
 
     model_id, max_tokens = get_agent_model_config("sre")
     cache_kwargs: dict = {}
@@ -208,11 +208,11 @@ def _create_sre_agent() -> Agent:
         **cache_kwargs,
     )
     return Agent(
-        system_prompt=build_prompt_with_skills(SRE_SYSTEM_PROMPT, agent_type="sre"),
+        system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(
-            window_size=settings.bedrock_window_size, per_turn=True
+            window_size=get_agent_window_size("sre"), per_turn=True
         ),
         tools=[
             assume_role,

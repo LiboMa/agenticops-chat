@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import yaml
 
-from agenticops.config import get_detail_level, settings
+from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,9 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
 def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
     """Generate <available_skills> XML block for agent system prompts.
 
-    Draft skills are marked with [DRAFT] prefix in their description.
+    Descriptions are truncated to the first sentence (max 80 chars) to
+    reduce prompt token usage. Full descriptions are available via
+    activate_skill().
 
     Args:
         skills: List of discovered skill metadata.
@@ -216,8 +218,10 @@ def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
 
     lines = ["<available_skills>"]
     for s in skills:
-        desc = f"[DRAFT] {s.description}" if s.is_draft else s.description
-        lines.append(f'  <skill name="{s.name}">{desc}</skill>')
+        # Truncate to first sentence, max 80 chars
+        short_desc = s.description.split(".")[0][:80]
+        tag = "[DRAFT] " if s.is_draft else ""
+        lines.append(f'  <skill name="{s.name}">{tag}{short_desc}</skill>')
     lines.append("</available_skills>")
     return "\n".join(lines)
 
@@ -328,101 +332,23 @@ def resolve_skill_tools(skill_name: str) -> list[Any]:
 
 
 # ── Prompt Helper ────────────────────────────────────────────────────
+# Constants and helpers are now canonical in agents/preamble.py.
+# Re-export for backward compatibility (callers that import from loader).
 
-_SKILLS_USAGE_PROTOCOL = """
-AGENT SKILLS PROTOCOL:
-- You have access to domain knowledge skills. Use list_skills to see them, or check <available_skills> above.
-- When you need deep domain knowledge for troubleshooting, call activate_skill(skill_name) to load the skill's
-  decision trees, command references, and diagnostic procedures.
-- For detailed reference material, call read_skill_reference(skill_name, reference_path).
-- Skills are READ-ONLY knowledge — they guide your tool usage but don't replace your tools.
-- Activate skills BEFORE starting investigation when the domain is clear (e.g., activate 'linux-admin'
-  before running host diagnostics, activate 'kubernetes-admin' before debugging pods).
-"""
-
-
-# ── Output Format Rule Templates ────────────────────────────────────
-
-_OUTPUT_RULES: dict[str, str] = {
-    "concise": """\
-OUTPUT FORMAT RULES (concise mode — target ~500 tokens):
-- Lead with root cause / answer in 1-2 sentences.
-- Bullet points only — no tables, no headings, no paragraphs.
-- Do NOT echo back skill content, tool results, or protocol steps.
-- Do NOT repeat the user's question.
-- Cite resource IDs inline (e.g., "i-0abc123 is running").
-- Omit recommendations and fix plans unless explicitly requested.""",
-
-    "medium": """\
-OUTPUT FORMAT RULES (medium mode — target ~1500 tokens):
-- Keep responses CONCISE. Aim for 500-1500 tokens of output text.
-- Use bullet points and short sentences — not paragraphs.
-- Lead with a 2-3 sentence summary, then key findings as bullets.
-- Include brief recommendations section when relevant.
-- Do NOT echo back full skill content or tool results verbatim. Summarize key findings.
-- Do NOT repeat the user's question or restate the protocol steps.
-- When citing resource IDs, use inline format (e.g., "i-0abc123 is running") not tables.""",
-
-    "detailed": """\
-OUTPUT FORMAT RULES (detailed mode — target ~4000 tokens):
-- Provide a thorough narrative with full evidence chain.
-- Use headings (##) to organize: Summary → Evidence → Analysis → Recommendations.
-- Include resource details with IDs, states, and relevant attributes.
-- Tables are allowed for comparing resources or metrics.
-- Include complete recommendations with specific CLI commands.
-- Still do NOT echo raw tool output or repeat the protocol — synthesize and explain.""",
-}
-
-_RCA_ADDENDA: dict[str, str] = {
-    "concise": """\
-- Structure: Root Cause (1 sentence) → top 3 evidence bullets → confidence score.""",
-    "medium": """\
-- Structure: Root Cause → Evidence → Contributing Factors → Recommendations → Fix Plan (if applicable).""",
-    "detailed": """\
-- Structure: Root Cause → Full Evidence Chain (with timestamps) → Contributing Factors → Detailed Recommendations → Fix Plan → Risk Assessment.
-- Include CloudTrail event names, metric data points, and KB matches when available.""",
-}
-
-_SRE_ADDENDA: dict[str, str] = {
-    "concise": """\
-- For Mode A (fix plans): numbered steps, one line per step, no prose.
-- For Mode B (investigation): 1-sentence answer + key findings bullets.""",
-    "medium": """\
-- For Mode A (fix plans): use numbered steps, one line per step.
-- For Mode B (investigation): lead with a 2-3 sentence summary, then key findings as bullets.""",
-    "detailed": """\
-- For Mode A (fix plans): numbered steps with full CLI commands, pre/post checks, rollback plan, and estimated impact.
-- For Mode B (investigation): comprehensive findings organized by resource, with topology context and capacity data.""",
-}
-
-
-def get_output_rules(agent_type: str = "generic") -> str:
-    """Return the OUTPUT FORMAT RULES block for the current detail level.
-
-    Reads the detail level from the ContextVar set by config.get_detail_level().
-
-    Args:
-        agent_type: One of 'rca', 'sre', or 'generic'.
-
-    Returns:
-        Formatted rules string ready to inject into a system prompt.
-    """
-    level = get_detail_level()
-    rules = _OUTPUT_RULES.get(level, _OUTPUT_RULES["medium"])
-
-    addenda = ""
-    if agent_type == "rca":
-        addenda = _RCA_ADDENDA.get(level, "")
-    elif agent_type == "sre":
-        addenda = _SRE_ADDENDA.get(level, "")
-
-    if addenda:
-        return f"{rules}\n{addenda}"
-    return rules
+from agenticops.agents.preamble import (  # noqa: E402, F401
+    SKILLS_USAGE_PROTOCOL as _SKILLS_USAGE_PROTOCOL,
+    OUTPUT_RULES as _OUTPUT_RULES,
+    RCA_ADDENDA as _RCA_ADDENDA,
+    SRE_ADDENDA as _SRE_ADDENDA,
+    get_output_rules,
+    build_system_prompt,
+)
 
 
 def build_prompt_with_skills(base_prompt: str, agent_type: str = "generic") -> str:
     """Append output rules + skills XML + usage protocol to an agent system prompt.
+
+    Thin wrapper around build_system_prompt() for backward compatibility.
 
     Args:
         base_prompt: The agent's base system prompt.
@@ -431,15 +357,6 @@ def build_prompt_with_skills(base_prompt: str, agent_type: str = "generic") -> s
     Returns:
         Enhanced prompt with output rules and skills information appended.
     """
-    # Always inject output rules (even if skills are disabled)
-    output_rules = get_output_rules(agent_type)
-    prompt = f"{base_prompt}\n\n{output_rules}"
-
-    if not settings.skills_enabled:
-        return prompt
-
-    xml = get_available_skills_xml()
-    if not xml:
-        return prompt
-
-    return f"{prompt}\n\n{xml}\n{_SKILLS_USAGE_PROTOCOL}"
+    return build_system_prompt(
+        base_prompt, include_account=False, include_skills=True, agent_type=agent_type,
+    )

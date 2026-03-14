@@ -102,7 +102,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         Summary of discovered resources with counts by service and region.
     """
     try:
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, get_agent_window_size
 
         model_id, max_tokens = get_agent_model_config("scan")
         cache_kwargs: dict = {}
@@ -120,7 +120,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=settings.bedrock_window_size, per_turn=True
+                window_size=get_agent_window_size("scan"), per_turn=True
             ),
             tools=[
                 assume_role,

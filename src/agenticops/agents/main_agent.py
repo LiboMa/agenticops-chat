@@ -42,7 +42,7 @@ from agenticops.skills.tools import (
     activate_skill, read_skill_reference, list_skills,
     create_skill, improve_skill, search_skill_registry,
 )
-from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
 from agenticops.tools.notification_tools import share_content
 
@@ -161,8 +161,7 @@ def create_main_agent() -> Agent:
         Configured Strands Agent with sub-agents and metadata tools.
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
-
-    from agenticops.config import get_agent_model_config
+    from agenticops.config import get_agent_model_config, get_agent_window_size
 
     model_id, max_tokens = get_agent_model_config("main")
     cache_kwargs: dict = {}
@@ -191,10 +190,10 @@ If the user explicitly requests a different scope, honor their request over this
     prompt = MAIN_SYSTEM_PROMPT + focus_section
 
     agent = Agent(
-        system_prompt=build_prompt_with_skills(prompt),
+        system_prompt=build_system_prompt(prompt, include_account=False),
         model=model,
         conversation_manager=SlidingWindowConversationManager(
-            window_size=settings.bedrock_window_size, per_turn=True
+            window_size=get_agent_window_size("main"), per_turn=True
         ),
         tools=[
             # Sub-agents as tools

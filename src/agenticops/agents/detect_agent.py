@@ -146,7 +146,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
     """
     try:
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, get_agent_window_size
 
         model_id, max_tokens = get_agent_model_config("detect")
         cache_kwargs: dict = {}
@@ -164,7 +164,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=settings.bedrock_window_size, per_turn=True
+                window_size=get_agent_window_size("detect"), per_turn=True
             ),
             tools=[
                 assume_role,
