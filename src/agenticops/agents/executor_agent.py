@@ -45,7 +45,7 @@ from agenticops.graph.tools import (
 from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.agents.preamble import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -166,9 +166,25 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
     try:
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.models import get_db_session, FixPlan
 
+        # Query risk level BEFORE agent creation for smart model selection
         model_id, max_tokens = get_agent_model_config("executor")
+        if settings.executor_smart_model:
+            try:
+                with get_db_session() as db:
+                    plan = db.query(FixPlan).filter(FixPlan.id == fix_plan_id).first()
+                    risk_level = (plan.risk_level or "L3") if plan else "L3"
+                    if risk_level in ("L0", "L1"):
+                        model_id = settings.executor_simple_model_id
+                        logger.info(
+                            "Executor smart model: using %s for %s fix plan #%d",
+                            model_id, risk_level, fix_plan_id,
+                        )
+            except Exception as e:
+                logger.warning("Smart model lookup failed, using default: %s", e)
+
         cache_kwargs: dict = {}
         if settings.bedrock_cache_enabled:
             cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
@@ -180,11 +196,11 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=build_prompt_with_skills(EXECUTOR_SYSTEM_PROMPT, agent_type="executor"),
+            system_prompt=build_system_prompt(EXECUTOR_SYSTEM_PROMPT, include_account=False, agent_type="executor"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=settings.bedrock_window_size, per_turn=True
+                window_size=get_agent_window_size("executor"), per_turn=True
             ),
             tools=[
                 # Plan verification (safety gate)

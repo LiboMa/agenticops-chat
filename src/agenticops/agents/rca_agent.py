@@ -50,7 +50,7 @@ from agenticops.graph.tools import (
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.skills.loader import build_prompt_with_skills
+from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
@@ -190,7 +190,7 @@ def rca_agent(issue_id: int) -> str:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
     try:
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, get_agent_window_size
 
         model_id, max_tokens = get_agent_model_config("rca")
         cache_kwargs: dict = {}
@@ -204,11 +204,11 @@ def rca_agent(issue_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=build_prompt_with_skills(RCA_SYSTEM_PROMPT, agent_type="rca"),
+            system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=settings.bedrock_window_size, per_turn=True
+                window_size=get_agent_window_size("rca"), per_turn=True
             ),
             tools=[
                 assume_role,

@@ -3666,11 +3666,22 @@ def chat(
 
     from agenticops.agents import create_main_agent
     from agenticops.cli.display import StreamingCallbackHandler
-    agent = create_main_agent()
 
-    # Initialize chat context
+    # Start agent creation in background while showing welcome message
+    _agent_container: dict = {}
+    _agent_error: list = []
+
+    def _init_agent():
+        try:
+            _agent_container["agent"] = create_main_agent()
+        except Exception as e:
+            _agent_error.append(e)
+
+    _agent_thread = threading.Thread(target=_init_agent, daemon=True)
+    _agent_thread.start()
+
+    # Initialize chat context (agent will be set after thread completes)
     ctx = ChatContext()
-    ctx.agent = agent  # Enable /model to swap model at runtime
     ctx.account = account
     if focus:
         ctx.scan_focus = focus.lower()
@@ -3725,6 +3736,14 @@ def chat(
         title="Welcome",
         border_style="blue",
     ))
+
+    # Wait for background agent init to complete before first prompt
+    _agent_thread.join()
+    if _agent_error:
+        console.print(f"[red]Failed to initialize agent: {_agent_error[0]}[/red]")
+        raise typer.Exit(1)
+    agent = _agent_container["agent"]
+    ctx.agent = agent  # Enable /model to swap model at runtime
 
     while True:
         try:

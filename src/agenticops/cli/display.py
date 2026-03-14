@@ -80,7 +80,7 @@ class TokenUsage:
 
     def format_detailed(self) -> str:
         """Format detailed token usage with per-agent breakdown and cost estimate."""
-        from agenticops.config import get_agent_model_config
+        from agenticops.config import get_agent_model_config, settings as _settings
         lines = [
             f"Input:       {self.input_tokens:>10,} tokens",
             f"Output:      {self.output_tokens:>10,} tokens",
@@ -92,24 +92,21 @@ class TokenUsage:
         if self.per_agent:
             lines.append("")
             lines.append("Per-Agent Breakdown:")
-            # Cost rates per 1M tokens (input/output)
-            COST_TABLE = {
-                "claude-opus-4-6": (15.0, 75.0, 1.50),      # input, output, cache_read
-                "claude-sonnet-4-6": (3.0, 15.0, 0.30),
-                "claude-haiku-4-5": (0.80, 4.0, 0.08),
-            }
+            cost_table = _settings.token_cost_table
             total_cost = 0.0
             for name, a in self.per_agent.items():
                 model_id, _ = get_agent_model_config(name)
                 short = model_id.split(".")[-1] if "." in model_id else model_id
-                # Match cost tier
-                cost_key = None
-                for k in COST_TABLE:
+                # Match cost tier from config
+                cost_entry = None
+                for k, v in cost_table.items():
                     if k in short:
-                        cost_key = k
+                        cost_entry = v
                         break
-                if cost_key:
-                    inp_rate, out_rate, cache_rate = COST_TABLE[cost_key]
+                if cost_entry:
+                    inp_rate = cost_entry.get("input", 0)
+                    out_rate = cost_entry.get("output", 0)
+                    cache_rate = cost_entry.get("cache_read", 0)
                     cost = (a["input"] * inp_rate + a["output"] * out_rate + a["cache_read"] * cache_rate) / 1_000_000
                     total_cost += cost
                     cost_str = f"  ${cost:.4f}"

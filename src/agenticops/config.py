@@ -140,6 +140,15 @@ class Settings(BaseSettings):
     agent_executor_max_tokens: int = Field(default=0, description="Max tokens for executor agent")
     agent_reporter_max_tokens: int = Field(default=0, description="Max tokens for reporter agent")
 
+    # Per-agent sliding window size (0 = use bedrock_window_size)
+    agent_main_window_size: int = Field(default=0, description="Window size for main agent (0 = bedrock_window_size)")
+    agent_scan_window_size: int = Field(default=0, description="Window size for scan agent")
+    agent_detect_window_size: int = Field(default=0, description="Window size for detect agent")
+    agent_rca_window_size: int = Field(default=0, description="RCA agent window — larger for deep investigations")
+    agent_sre_window_size: int = Field(default=0, description="SRE agent window — larger for referencing RCA findings")
+    agent_executor_window_size: int = Field(default=0, description="Executor agent window")
+    agent_reporter_window_size: int = Field(default=0, description="Reporter agent window")
+
     # Prompt caching toggle
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
 
@@ -361,9 +370,16 @@ class Settings(BaseSettings):
 
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
-        #default=False,
         default=True,
         description="Enable fix execution (AIOPS_EXECUTOR_ENABLED=true to enable)",
+    )
+    executor_smart_model: bool = Field(
+        default=True,
+        description="Use cheaper model for L0/L1 fixes (AIOPS_EXECUTOR_SMART_MODEL)",
+    )
+    executor_simple_model_id: str = Field(
+        default="global.anthropic.claude-sonnet-4-6",
+        description="Model for L0/L1 executor when executor_smart_model=True",
     )
     executor_auto_approve_l0_l1: bool = Field(
         default=True,
@@ -507,6 +523,22 @@ class Settings(BaseSettings):
         description="Auto-resolve HealthIssue after successful fix execution",
     )
 
+    # Session history restoration
+    session_history_depth: int = Field(
+        default=20,
+        description="Number of recent message turns to restore when recreating a chat session agent",
+    )
+
+    # Token cost rates per 1M tokens by model family
+    token_cost_table: dict[str, dict[str, float]] = Field(
+        default={
+            "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_read": 1.50},
+            "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
+            "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.08},
+        },
+        description="Token cost rates per 1M tokens by model family",
+    )
+
     # Search Quality
     search_vector_weight: float = Field(
         default=0.6,
@@ -569,6 +601,16 @@ def get_agent_model_config(agent_name: str) -> tuple[str, int]:
     if max_tokens <= 0:
         max_tokens = settings.bedrock_max_tokens
     return model_id, max_tokens
+
+
+def get_agent_window_size(agent_name: str) -> int:
+    """Return the sliding window size for a given agent.
+
+    Uses agent_X_window_size if set (>0), otherwise falls back to
+    the global bedrock_window_size.
+    """
+    override = getattr(settings, f"agent_{agent_name}_window_size", 0)
+    return override if override > 0 else settings.bedrock_window_size
 
 
 def save_to_yaml(keys: dict[str, Any]) -> None:
