@@ -372,6 +372,7 @@ class TestRAGPipeline:
 
     def test_rag_pipeline_generates_sop(self, seed_data):
         """Test SOP generation from case data (uses fallback, no LLM)."""
+        from unittest.mock import patch
         from agenticops.pipeline.sop_upgrader import generate_new_sop
 
         case_data = {
@@ -391,8 +392,9 @@ class TestRAGPipeline:
             "recommendations": "Add memory monitoring",
         }
 
-        # This will use fallback (no Bedrock available in test)
-        sop = generate_new_sop(case_data)
+        # Mock _call_llm to avoid hanging on boto3 calls in test env
+        with patch("agenticops.pipeline.sop_upgrader._call_llm", return_value=None):
+            sop = generate_new_sop(case_data)
 
         assert sop is not None
         assert len(sop) > 100

@@ -24,21 +24,21 @@ function QualityBar({ score }: { score: number }) {
     pct >= 70 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-red-400";
   return (
     <div className="flex items-center gap-2">
-      <div className="w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
+      <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-xs text-slate-500">{pct}%</span>
+      <span className="text-xs text-muted-foreground">{pct}%</span>
     </div>
   );
 }
 
 function SOPStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    draft: "bg-slate-100 text-slate-600",
+    draft: "bg-secondary text-muted-foreground",
     review: "bg-amber-100 text-amber-700",
     active: "bg-emerald-100 text-emerald-700",
     deprecated: "bg-orange-100 text-orange-700",
-    archived: "bg-slate-100 text-slate-400",
+    archived: "bg-secondary text-muted-foreground",
   };
   return (
     <span
@@ -96,10 +96,10 @@ function SOPDetailPanel({
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative ml-auto w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+      <div className="relative ml-auto w-full max-w-2xl bg-background shadow-xl overflow-y-auto">
+        <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-foreground">
               {sop.filename}
             </h2>
             <div className="flex items-center gap-3 mt-1">
@@ -110,7 +110,7 @@ function SOPDetailPanel({
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+            className="text-muted-foreground hover:text-muted-foreground text-xl leading-none"
           >
             &times;
           </button>
@@ -120,31 +120,31 @@ function SOPDetailPanel({
           {/* Metadata */}
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-slate-400 block">Resource Type</span>
-              <span className="text-slate-700">{sop.resource_type || "N/A"}</span>
+              <span className="text-muted-foreground block">Resource Type</span>
+              <span className="text-foreground">{sop.resource_type || "N/A"}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Issue Pattern</span>
-              <span className="text-slate-700 truncate block">
+              <span className="text-muted-foreground block">Issue Pattern</span>
+              <span className="text-foreground truncate block">
                 {sop.issue_pattern || "N/A"}
               </span>
             </div>
             {sop.source_issue_id && (
               <div>
-                <span className="text-slate-400 block">Source Issue</span>
-                <span className="text-slate-700">I#{sop.source_issue_id}</span>
+                <span className="text-muted-foreground block">Source Issue</span>
+                <span className="text-foreground">I#{sop.source_issue_id}</span>
               </div>
             )}
             <div>
-              <span className="text-slate-400 block">Created</span>
-              <span className="text-slate-700">
+              <span className="text-muted-foreground block">Created</span>
+              <span className="text-foreground">
                 {sop.created_at ? formatShortDate(sop.created_at) : "N/A"}
               </span>
             </div>
             {sop.approved_by && (
               <div>
-                <span className="text-slate-400 block">Approved By</span>
-                <span className="font-medium text-slate-700">{sop.approved_by}</span>
+                <span className="text-muted-foreground block">Approved By</span>
+                <span className="font-medium text-foreground">{sop.approved_by}</span>
               </div>
             )}
           </div>
@@ -152,7 +152,7 @@ function SOPDetailPanel({
           {/* SOP Content */}
           {contentHtml && (
             <div
-              className="prose prose-sm max-w-none text-slate-700 border-t border-slate-100 pt-4"
+              className="prose prose-sm max-w-none text-foreground border-t border-border/50 pt-4"
               dangerouslySetInnerHTML={{ __html: contentHtml }}
             />
           )}
@@ -165,16 +165,16 @@ function SOPDetailPanel({
 
           {/* Actions */}
           {(canApprove || canReject) && (
-            <div className="border-t border-slate-200 pt-4 space-y-3">
+            <div className="border-t border-border pt-4 space-y-3">
               {showApproveForm ? (
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
-                    <label className="text-xs text-slate-500 mb-1 block">
+                    <label className="text-xs text-muted-foreground mb-1 block">
                       Your name
                     </label>
                     <input
                       type="text"
-                      className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                      className="w-full border border-border rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                       placeholder="e.g. alice"
                       value={approverName}
                       onChange={(e) => setApproverName(e.target.value)}
@@ -190,7 +190,7 @@ function SOPDetailPanel({
                   </button>
                   <button
                     onClick={() => setShowApproveForm(false)}
-                    className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700"
+                    className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
                   >
                     Cancel
                   </button>
@@ -259,7 +259,7 @@ export default function KnowledgeBase() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Knowledge Base</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Knowledge Base</h1>
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -281,25 +281,25 @@ export default function KnowledgeBase() {
         <StatCard
           label="Vectors"
           value={s.vector_count}
-          colorClass="text-slate-500"
+          colorClass="text-muted-foreground"
         />
       </div>
 
       {/* Tab Switcher */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 bg-secondary p-1 rounded-lg w-fit">
         {tabDefs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               tab === t.key
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {t.label}
             {t.count !== undefined && (
-              <span className="ml-1.5 text-xs text-slate-400">({t.count})</span>
+              <span className="ml-1.5 text-xs text-muted-foreground">({t.count})</span>
             )}
           </button>
         ))}
@@ -314,49 +314,49 @@ export default function KnowledgeBase() {
             ) : reviewQueue.length > 0 ? (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-border">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Quality
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Resource Type
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Issue Pattern
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Created
                     </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {reviewQueue.map((sop) => (
-                    <tr key={sop.id} className="hover:bg-slate-50 transition-colors">
+                    <tr key={sop.id} className="hover:bg-secondary transition-colors">
                       <td className="px-6 py-3">
                         <QualityBar score={sop.quality_score} />
                       </td>
                       <td className="px-6 py-3">
                         <SOPStatusBadge status={sop.status} />
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.resource_type}
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600 max-w-xs truncate">
+                      <td className="px-6 py-3 text-sm text-muted-foreground max-w-xs truncate">
                         {sop.issue_pattern}
                       </td>
                       <td className="px-6 py-3">
                         <SeverityBadge severity={sop.severity as "critical" | "high" | "medium" | "low"} />
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-500">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.created_at ? formatShortDate(sop.created_at) : ""}
                       </td>
                       <td className="px-6 py-3 text-right">
@@ -372,7 +372,7 @@ export default function KnowledgeBase() {
                 </tbody>
               </table>
             ) : (
-              <div className="p-8 text-center text-slate-400 text-sm">
+              <div className="p-8 text-center text-muted-foreground text-sm">
                 No SOPs pending review. SOPs are generated when health issues are resolved.
               </div>
             )}
@@ -389,34 +389,34 @@ export default function KnowledgeBase() {
             ) : activeSops.data && activeSops.data.sops.length > 0 ? (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-border">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Filename
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Resource Type
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Applied
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Approved By
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Updated
                     </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {activeSops.data.sops.map((sop) => (
-                    <tr key={sop.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-3 text-sm font-mono text-slate-700">
+                    <tr key={sop.id} className="hover:bg-secondary transition-colors">
+                      <td className="px-6 py-3 text-sm font-mono text-foreground">
                         <button
                           onClick={() => setSelectedSopId(sop.id)}
                           className="hover:text-primary-600 hover:underline"
@@ -424,19 +424,19 @@ export default function KnowledgeBase() {
                           {sop.filename}
                         </button>
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.resource_type}
                       </td>
                       <td className="px-6 py-3">
                         <SeverityBadge severity={sop.severity as "critical" | "high" | "medium" | "low"} />
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.application_count}
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.approved_by || "-"}
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-500">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.updated_at ? formatShortDate(sop.updated_at) : ""}
                       </td>
                       <td className="px-6 py-3 text-right">
@@ -453,7 +453,7 @@ export default function KnowledgeBase() {
                 </tbody>
               </table>
             ) : (
-              <div className="p-8 text-center text-slate-400 text-sm">
+              <div className="p-8 text-center text-muted-foreground text-sm">
                 No active SOPs. Approve SOPs from the Review Queue to activate them.
               </div>
             )}
@@ -470,34 +470,34 @@ export default function KnowledgeBase() {
             ) : cases.data && cases.data.cases.length > 0 ? (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-border">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Case ID
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Resource Type
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Created
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Preview
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {cases.data.cases.map((c, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-3 text-sm font-mono text-slate-600">
+                    <tr key={idx} className="hover:bg-secondary transition-colors">
+                      <td className="px-6 py-3 text-sm font-mono text-muted-foreground">
                         {c.case_id}
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-600">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {c.resource_type}
                       </td>
                       <td className="px-6 py-3">
@@ -508,16 +508,16 @@ export default function KnowledgeBase() {
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             c.status === "resolved"
                               ? "bg-green-100 text-green-700"
-                              : "bg-slate-100 text-slate-600"
+                              : "bg-secondary text-muted-foreground"
                           }`}
                         >
                           {c.status}
                         </span>
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-500">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {formatShortDate(c.created_at)}
                       </td>
-                      <td className="px-6 py-3 text-sm text-slate-500 max-w-xs truncate">
+                      <td className="px-6 py-3 text-sm text-muted-foreground max-w-xs truncate">
                         {c.preview && c.preview.length > 80
                           ? c.preview.slice(0, 80) + "..."
                           : c.preview}
@@ -527,7 +527,7 @@ export default function KnowledgeBase() {
                 </tbody>
               </table>
             ) : (
-              <div className="p-8 text-center text-slate-400 text-sm">
+              <div className="p-8 text-center text-muted-foreground text-sm">
                 No cases found. Resolve health issues to populate the knowledge base.
               </div>
             )}

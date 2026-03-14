@@ -46,26 +46,26 @@ function FocusToggle({
       className={`group flex items-start gap-3 p-3 rounded-lg border transition-all text-left ${
         active
           ? "bg-primary-50 border-primary-300 shadow-sm"
-          : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+          : "bg-background border-border hover:border-border hover:bg-secondary"
       }`}
     >
       <div className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-        active ? "bg-primary-100 text-primary-600" : "bg-slate-100 text-slate-400 group-hover:text-slate-500"
+        active ? "bg-primary-100 text-primary-600" : "bg-secondary text-muted-foreground group-hover:text-muted-foreground"
       }`}>
         {icon}
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium ${active ? "text-primary-700" : "text-slate-700"}`}>
+          <span className={`text-sm font-medium ${active ? "text-primary-700" : "text-foreground"}`}>
             {label}
           </span>
           <div className={`w-7 h-4 rounded-full transition-colors flex items-center ${
-            active ? "bg-primary-500 justify-end" : "bg-slate-300 justify-start"
+            active ? "bg-primary-500 justify-end" : "bg-muted-foreground/30 justify-start"
           }`}>
-            <div className="w-3 h-3 mx-0.5 rounded-full bg-white shadow-sm" />
+            <div className="w-3 h-3 mx-0.5 rounded-full bg-background shadow-sm" />
           </div>
         </div>
-        <p className="text-xs text-slate-400 mt-0.5 leading-tight">{description}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 leading-tight">{description}</p>
       </div>
     </button>
   );
@@ -79,19 +79,19 @@ function SettingToggle({
   label: string; description: string; enabled: boolean; onChange: (v: boolean) => void; saving?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
+    <div className="flex items-center justify-between py-3 border-b border-border/50 last:border-b-0">
       <div>
-        <span className="text-sm font-medium text-slate-700">{label}</span>
-        <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
       <button
         onClick={() => onChange(!enabled)}
         disabled={saving}
         className={`relative w-10 h-5 rounded-full transition-colors ${
-          enabled ? "bg-primary-500" : "bg-slate-300"
+          enabled ? "bg-primary-500" : "bg-muted-foreground/30"
         } ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
       >
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-background shadow-sm transition-transform ${
           enabled ? "translate-x-5" : "translate-x-0.5"
         }`} />
       </button>
@@ -127,37 +127,37 @@ function AccountFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-foreground mb-1">Name</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Account ID</label>
-            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-100" />
+            <label className="block text-sm font-medium text-foreground mb-1">Account ID</label>
+            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Role ARN</label>
-            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-foreground mb-1">Role ARN</label>
+            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">External ID (optional)</label>
-            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-foreground mb-1">External ID (optional)</label>
+            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Regions (comma-separated)</label>
-            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <label className="block text-sm font-medium text-foreground mb-1">Regions (comma-separated)</label>
+            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
           <div className="flex items-center gap-2">
-            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-slate-200" />
-            <label htmlFor="is-active" className="text-sm text-slate-700">Active</label>
+            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="is-active" className="text-sm text-foreground">Active</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
           </div>
         </form>
@@ -173,13 +173,13 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Account</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Account</h3>
+        <p className="text-sm text-muted-foreground mb-4">
           Are you sure you want to delete <strong>{account.name}</strong> ({account.account_id})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
           <button onClick={onConfirm} disabled={deleting} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50">{deleting ? "Deleting..." : "Delete"}</button>
         </div>
       </div>
@@ -190,12 +190,12 @@ function DeleteModal({
 /* ── Accounts columns ───────────────────────────────────────────── */
 
 const accountColumns: Column<Account>[] = [
-  { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+  { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-foreground">{r.name}</span> },
   { key: "account_id", header: "Account ID", render: (r) => <span className="font-mono text-sm">{r.account_id}</span> },
-  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-slate-500 truncate max-w-[200px] block">{r.role_arn}</span> },
-  { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-slate-100 text-slate-600">{reg}</Badge>)}</div> },
-  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-slate-100 text-slate-500">Inactive</Badge> },
-  { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-slate-500">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
+  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-muted-foreground truncate max-w-[200px] block">{r.role_arn}</span> },
+  { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-secondary text-muted-foreground">{reg}</Badge>)}</div> },
+  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-secondary text-muted-foreground">Inactive</Badge> },
+  { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-muted-foreground">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 
 /* ── MCP Server form modal ────────────────────────────────────────── */
@@ -235,33 +235,33 @@ function McpServerFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit MCP Server" : "New MCP Server"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Server Name</label>
-            <input required disabled={isEdit} value={name} onChange={(e) => setName(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-slate-100 font-mono" />
+            <label className="block text-sm font-medium text-foreground mb-1">Server Name</label>
+            <input required disabled={isEdit} value={name} onChange={(e) => setName(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary font-mono" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Command</label>
-            <input required value={command} onChange={(e) => setCommand(e.target.value)} placeholder="uvx" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+            <label className="block text-sm font-medium text-foreground mb-1">Command</label>
+            <input required value={command} onChange={(e) => setCommand(e.target.value)} placeholder="uvx" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Args (space-separated)</label>
-            <input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server@latest" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+            <label className="block text-sm font-medium text-foreground mb-1">Args (space-separated)</label>
+            <input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="awslabs.aws-documentation-mcp-server@latest" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Environment (KEY=VALUE per line)</label>
-            <textarea rows={3} value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder={"FASTMCP_LOG_LEVEL=ERROR\nAWS_DOCUMENTATION_PARTITION=aws"} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
+            <label className="block text-sm font-medium text-foreground mb-1">Environment (KEY=VALUE per line)</label>
+            <textarea rows={3} value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder={"FASTMCP_LOG_LEVEL=ERROR\nAWS_DOCUMENTATION_PARTITION=aws"} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono" />
           </div>
           <div className="flex items-center gap-2">
-            <input id="mcp-disabled" type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} className="rounded border-slate-200" />
-            <label htmlFor="mcp-disabled" className="text-sm text-slate-700">Disabled</label>
+            <input id="mcp-disabled" type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="mcp-disabled" className="text-sm text-foreground">Disabled</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
           </div>
         </form>
@@ -370,18 +370,18 @@ function McpImportDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Import MCP Servers</h3>
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-lg p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-4">Import MCP Servers</h3>
 
         {/* Mode tabs */}
-        <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
+        <div className="flex gap-1 mb-4 bg-secondary rounded-lg p-1">
           <button
             onClick={() => { setMode("file"); setJsonText(""); setValidation(null); setImportResult(null); }}
-            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "file" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "file" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
           >Upload File</button>
           <button
             onClick={() => { setMode("paste"); setJsonText(""); setValidation(null); setImportResult(null); }}
-            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "paste" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+            className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "paste" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
           >Paste JSON</button>
         </div>
 
@@ -393,7 +393,7 @@ function McpImportDialog({
             onDrop={handleDrop}
             onClick={() => fileRef.current?.click()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              dragOver ? "border-primary-400 bg-primary-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+              dragOver ? "border-primary-400 bg-primary-50" : "border-border hover:border-border hover:bg-secondary"
             }`}
           >
             <input
@@ -407,8 +407,8 @@ function McpImportDialog({
                 e.target.value = "";
               }}
             />
-            <p className="text-sm text-slate-500">Drop a .json file here or click to browse</p>
-            <p className="text-xs text-slate-400 mt-1">{'Expected format: {"mcpServers": {...}}'}</p>
+            <p className="text-sm text-muted-foreground">Drop a .json file here or click to browse</p>
+            <p className="text-xs text-muted-foreground mt-1">{'Expected format: {"mcpServers": {...}}'}</p>
           </div>
         )}
 
@@ -419,7 +419,7 @@ function McpImportDialog({
             value={jsonText}
             onChange={(e) => validate(e.target.value)}
             placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "command": "uvx",\n      "args": ["my-mcp-server"]\n    }\n  }\n}'}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         )}
 
@@ -452,7 +452,7 @@ function McpImportDialog({
 
         {/* Actions */}
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
           <button
             onClick={handleImport}
             disabled={!validation?.valid || importing || !!importResult?.success}
@@ -516,14 +516,14 @@ function AgentModelsCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-slate-900">Agent Models</h2>
-        <span className="text-xs text-slate-400">Per-agent model & token configuration</span>
+        <h2 className="text-lg font-semibold text-foreground">Agent Models</h2>
+        <span className="text-xs text-muted-foreground">Per-agent model & token configuration</span>
       </CardHeader>
       <CardBody>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs text-slate-500 uppercase">
+              <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
                 <th className="pb-2 pr-4">Agent</th>
                 <th className="pb-2 pr-4">Tier</th>
                 <th className="pb-2 pr-4">Model</th>
@@ -536,10 +536,10 @@ function AgentModelsCard() {
                 const meta = AGENT_LABELS[name] ?? { label: name, tier: "default" };
                 const currentPreset = presets.find((p) => p.value === cfg.model_id);
                 return (
-                  <tr key={name} className="border-b border-slate-50">
-                    <td className="py-2.5 pr-4 font-medium text-slate-700">{meta.label}</td>
+                  <tr key={name} className="border-b border-border">
+                    <td className="py-2.5 pr-4 font-medium text-foreground">{meta.label}</td>
                     <td className="py-2.5 pr-4">
-                      <Badge className={TIER_COLORS[meta.tier] ?? "bg-slate-100 text-slate-600"}>
+                      <Badge className={TIER_COLORS[meta.tier] ?? "bg-secondary text-muted-foreground"}>
                         {meta.tier}
                       </Badge>
                     </td>
@@ -548,7 +548,7 @@ function AgentModelsCard() {
                         value={cfg.model_id}
                         onChange={(e) => handleModelChange(name, e.target.value)}
                         disabled={updateMut.isPending}
-                        className="px-2 py-1 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[260px]"
+                        className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[260px]"
                       >
                         {presets.map((p) => (
                           <option key={p.value} value={p.value}>{p.label}</option>
@@ -562,14 +562,14 @@ function AgentModelsCard() {
                         value={cfg.max_tokens}
                         onChange={(e) => handleMaxTokensChange(name, parseInt(e.target.value) || 0)}
                         disabled={updateMut.isPending}
-                        className="w-24 px-2 py-1 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                        className="w-24 px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                       />
                     </td>
                     <td className="py-2.5">
                       <button
                         onClick={() => handleReset(name)}
                         disabled={updateMut.isPending}
-                        className="text-xs text-slate-400 hover:text-red-600 disabled:opacity-50"
+                        className="text-xs text-muted-foreground hover:text-red-600 disabled:opacity-50"
                         title="Reset to tier default"
                       >Reset</button>
                     </td>
@@ -619,18 +619,18 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
+      <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
 
       {/* ── Scan Focus ────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Scan Focus</h2>
-          <span className="text-xs text-slate-400">
+          <h2 className="text-lg font-semibold text-foreground">Scan Focus</h2>
+          <span className="text-xs text-muted-foreground">
             {focusValue === "all" ? "All categories" : focusValue.split(",").join(", ")}
           </span>
         </CardHeader>
         <CardBody>
-          <p className="text-sm text-slate-500 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Select which resource categories to focus on when scanning and detecting health issues.
             This applies globally to Chat, CLI, and agent dispatches.
           </p>
@@ -659,7 +659,7 @@ export default function Settings() {
       {/* ── Pipeline & Automation ─────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Pipeline & Automation</h2>
+          <h2 className="text-lg font-semibold text-foreground">Pipeline & Automation</h2>
         </CardHeader>
         <CardBody>
           {settingsQ.isLoading ? (
@@ -728,7 +728,7 @@ export default function Settings() {
       {/* ── Accounts ──────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">AWS Accounts</h2>
+          <h2 className="text-lg font-semibold text-foreground">AWS Accounts</h2>
           <button
             onClick={() => { setEditing(null); setFormOpen(true); }}
             className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
@@ -765,18 +765,18 @@ export default function Settings() {
       {/* ── MCP Servers ─────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">MCP Servers</h2>
+          <h2 className="text-lg font-semibold text-foreground">MCP Servers</h2>
           <div className="flex gap-2">
             <button
               onClick={() => setMcpImportOpen(true)}
-              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+              className="px-3 py-1.5 text-sm text-foreground border border-border rounded-lg hover:bg-secondary"
             >
               Import JSON
             </button>
             <button
               onClick={() => reloadMcp.mutate()}
               disabled={reloadMcp.isPending}
-              className="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+              className="px-3 py-1.5 text-sm text-foreground border border-border rounded-lg hover:bg-secondary disabled:opacity-50"
             >
               {reloadMcp.isPending ? "Reloading..." : "Reload"}
             </button>
@@ -796,15 +796,15 @@ export default function Settings() {
           ) : (
             <div className="space-y-2">
               {Object.keys(mcpQ.data ?? {}).length === 0 ? (
-                <p className="text-sm text-slate-400 py-4 text-center">No MCP servers configured.</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">No MCP servers configured.</p>
               ) : (
                 Object.entries(mcpQ.data ?? {}).map(([name, cfg]) => (
-                  <div key={name} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white">
+                  <div key={name} className="flex items-center justify-between p-3 rounded-lg border border-border bg-background">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-900">{name}</span>
+                        <span className="text-sm font-medium text-foreground">{name}</span>
                         {cfg.disabled ? (
-                          <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
+                          <Badge className="bg-secondary text-muted-foreground">Disabled</Badge>
                         ) : (
                           <Badge className="bg-green-100 text-green-700">Active</Badge>
                         )}
@@ -812,7 +812,7 @@ export default function Settings() {
                           {cfg.url ? "SSE" : "stdio"}
                         </Badge>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-[400px]">
+                      <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate max-w-[400px]">
                         {cfg.url ?? `${cfg.command ?? ""} ${(cfg.args ?? []).join(" ")}`}
                       </p>
                     </div>
@@ -856,13 +856,13 @@ export default function Settings() {
       )}
       {mcpDeleting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete MCP Server</h3>
-            <p className="text-sm text-slate-600 mb-4">
+          <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Delete MCP Server</h3>
+            <p className="text-sm text-muted-foreground mb-4">
               Are you sure you want to delete <strong>{mcpDeleting}</strong>?
             </p>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setMcpDeleting(null)} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+              <button onClick={() => setMcpDeleting(null)} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
               <button
                 onClick={async () => { await deleteMcp.mutateAsync(mcpDeleting); setMcpDeleting(null); }}
                 disabled={deleteMcp.isPending}

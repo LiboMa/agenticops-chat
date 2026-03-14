@@ -59,7 +59,7 @@ Web Dashboard ──────┘         │
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | 16 pages: Dashboard, Chat, Resources, Anomalies, AnomalyDetail, FixPlans, FixPlanDetail, Reports, ReportDetail, Network, Schedules, ScheduleDetail, Notifications, NotificationLogs, Accounts, AuditLog |
+| `pages/` | 15 pages: Dashboard, Chat, Resources, Anomalies, AnomalyDetail, FixPlans, FixPlanDetail, Reports, ReportDetail, Schedules, ScheduleDetail, Notifications, NotificationLogs, Accounts, AuditLog |
 | `hooks/` | 23 TanStack Query hooks |
 | `components/` | Chat components, layout (AppShell, Sidebar, Header) |
 | `api/` | `client.ts`, `types.ts` |
@@ -142,3 +142,5 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 
 - Repo: https://github.com/LiboMa/agenticops-chat (private)
 - **Always use `git push --no-verify`** to bypass Code Defender hooks
+- **Always Test the code** before commit it
+

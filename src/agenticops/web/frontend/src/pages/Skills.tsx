@@ -29,7 +29,7 @@ function SkillStatusBadge({ isDraft }: { isDraft: boolean }) {
 
 function DomainBadge({ domain }: { domain: string }) {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground">
       {domain}
     </span>
   );
@@ -66,10 +66,10 @@ function SkillDetailPanel({
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative ml-auto w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+      <div className="relative ml-auto w-full max-w-2xl bg-background shadow-xl overflow-y-auto">
+        <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-foreground">
               {skill.name}
             </h2>
             <div className="flex items-center gap-2 mt-1">
@@ -79,20 +79,20 @@ function SkillDetailPanel({
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+            className="text-muted-foreground hover:text-muted-foreground text-xl leading-none"
           >
             &times;
           </button>
         </div>
 
         <div className="px-6 py-4 space-y-4">
-          <p className="text-sm text-slate-600">{skill.description}</p>
+          <p className="text-sm text-muted-foreground">{skill.description}</p>
 
           {/* Metadata */}
           <div className="grid grid-cols-2 gap-4 text-sm">
             {skill.tools.length > 0 && (
               <div>
-                <span className="text-slate-400 block">Tools</span>
+                <span className="text-muted-foreground block">Tools</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {skill.tools.map((t) => (
                     <span
@@ -107,10 +107,10 @@ function SkillDetailPanel({
             )}
             {skill.references.length > 0 && (
               <div>
-                <span className="text-slate-400 block">References</span>
+                <span className="text-muted-foreground block">References</span>
                 <ul className="mt-1 space-y-0.5">
                   {skill.references.map((r) => (
-                    <li key={r} className="text-xs text-slate-600">
+                    <li key={r} className="text-xs text-muted-foreground">
                       {r}
                     </li>
                   ))}
@@ -122,7 +122,7 @@ function SkillDetailPanel({
           {/* SKILL.md body */}
           {bodyHtml && (
             <div
-              className="prose prose-sm max-w-none text-slate-700 border-t border-slate-100 pt-4"
+              className="prose prose-sm max-w-none text-foreground border-t border-border/50 pt-4"
               dangerouslySetInnerHTML={{ __html: bodyHtml }}
             />
           )}
@@ -135,7 +135,7 @@ function SkillDetailPanel({
 
           {/* Delete (drafts only) */}
           {skill.is_draft && (
-            <div className="border-t border-slate-200 pt-4">
+            <div className="border-t border-border pt-4">
               <button
                 onClick={handleDelete}
                 disabled={deleteMut.isPending}
@@ -184,14 +184,14 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">
+      <div className="relative bg-background rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
             Create Skill
           </h3>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+            className="text-muted-foreground hover:text-muted-foreground text-xl leading-none"
           >
             &times;
           </button>
@@ -201,11 +201,11 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
           {!generated ? (
             <>
               <div>
-                <label className="text-sm font-medium text-slate-700 block mb-1">
+                <label className="text-sm font-medium text-foreground block mb-1">
                   Describe the skill you want to create
                 </label>
                 <textarea
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
                   rows={4}
                   placeholder="e.g. A skill for troubleshooting Redis cluster issues including replication lag, memory pressure, and failover procedures"
                   value={description}
@@ -222,29 +222,29 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
             <>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-700">
+                  <span className="text-sm font-medium text-foreground">
                     {generated.name}
                   </span>
                   <DomainBadge domain="draft" />
                 </div>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-muted-foreground">
                   {generated.description}
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
+                <label className="text-xs text-muted-foreground block mb-1">
                   Content Preview
                 </label>
-                <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 max-h-60 overflow-y-auto whitespace-pre-wrap">
+                <pre className="bg-secondary border border-border rounded-lg p-3 text-xs text-foreground max-h-60 overflow-y-auto whitespace-pre-wrap">
                   {generated.body_preview}
                 </pre>
               </div>
               {Object.keys(generated.references).length > 0 && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">
+                  <label className="text-xs text-muted-foreground block mb-1">
                     References ({Object.keys(generated.references).length})
                   </label>
-                  <ul className="text-xs text-slate-600 space-y-0.5">
+                  <ul className="text-xs text-muted-foreground space-y-0.5">
                     {Object.keys(generated.references).map((r) => (
                       <li key={r}>{r}</li>
                     ))}
@@ -260,10 +260,10 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+        <div className="px-6 py-4 border-t border-border flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200"
+            className="px-4 py-2 text-sm font-medium text-muted-foreground bg-secondary rounded-lg hover:bg-muted"
           >
             Cancel
           </button>
@@ -317,14 +317,14 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">
+      <div className="relative bg-background rounded-xl shadow-xl w-full max-w-md mx-4">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
             Import Skill
           </h3>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+            className="text-muted-foreground hover:text-muted-foreground text-xl leading-none"
           >
             &times;
           </button>
@@ -341,7 +341,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
               dragOver
                 ? "border-primary-400 bg-primary-50"
-                : "border-slate-300 hover:border-slate-400"
+                : "border-border hover:border-muted-foreground"
             }`}
           >
             <input
@@ -358,11 +358,11 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
               <Spinner label="Importing..." />
             ) : (
               <>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-muted-foreground">
                   Drop a <code>.md</code> or <code>.zip</code> file here, or
                   click to browse
                 </p>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   ZIP must contain SKILL.md + optional references/*.md
                 </p>
               </>
@@ -410,9 +410,9 @@ export default function Skills() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-900">
+        <h1 className="text-2xl font-bold text-foreground">
           Skills{" "}
-          <span className="text-base font-normal text-slate-400">
+          <span className="text-base font-normal text-muted-foreground">
             ({skills?.length ?? 0})
           </span>
         </h1>
@@ -425,7 +425,7 @@ export default function Skills() {
           </button>
           <button
             onClick={() => setShowImport(true)}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+            className="px-4 py-2 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
           >
             Import
           </button>
@@ -434,15 +434,15 @@ export default function Skills() {
 
       {/* Filters */}
       <div className="flex items-center gap-4">
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+        <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
           {(["all", "published", "draft"] as Filter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                 filter === f
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {f.charAt(0).toUpperCase() + f.slice(1)}
@@ -454,7 +454,7 @@ export default function Skills() {
           placeholder="Search skills..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 max-w-xs border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+          className="flex-1 max-w-xs border border-border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
         />
       </div>
 
@@ -462,7 +462,7 @@ export default function Skills() {
       {filtered.length === 0 ? (
         <Card>
           <CardBody>
-            <p className="text-sm text-slate-500 text-center py-4">
+            <p className="text-sm text-muted-foreground text-center py-4">
               No skills found.
             </p>
           </CardBody>
@@ -508,15 +508,15 @@ function SkillCard({
       <button onClick={onClick} className="w-full text-left px-5 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-slate-900">{skill.name}</span>
+            <span className="font-medium text-foreground">{skill.name}</span>
             <SkillStatusBadge isDraft={skill.is_draft} />
             <DomainBadge domain={skill.domain} />
           </div>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-muted-foreground">
             {skill.ref_count} ref{skill.ref_count !== 1 ? "s" : ""}
           </span>
         </div>
-        <p className="text-sm text-slate-500 mt-1 line-clamp-2">
+        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
           {skill.description}
         </p>
         {skill.tools.length > 0 && (
@@ -530,7 +530,7 @@ function SkillCard({
               </span>
             ))}
             {skill.tools.length > 5 && (
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-muted-foreground">
                 +{skill.tools.length - 5}
               </span>
             )}

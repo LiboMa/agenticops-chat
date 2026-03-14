@@ -79,9 +79,9 @@ from agenticops.config import MODEL_ALIASES, settings
 
 # Derive from config's single source of truth
 _MODEL_SHORTCUTS = MODEL_ALIASES
-_HAIKU_ID = settings.bedrock_model_id_cheap
-_SONNET_ID = settings.bedrock_model_id
-_OPUS_ID = settings.bedrock_model_id_strong
+_HAIKU_ID = MODEL_ALIASES.get("haiku", settings.bedrock_model_id_cheap)
+_SONNET_ID = MODEL_ALIASES.get("sonnet", settings.bedrock_model_id)
+_OPUS_ID = MODEL_ALIASES.get("opus", settings.bedrock_model_id_strong)
 
 
 def generate_config_template(output_path: Path) -> None:

@@ -33,38 +33,200 @@ class ThinkingState(Enum):
 
 @dataclass
 class TokenUsage:
-    """Track token usage across a session."""
+    """Track token usage across a session, including cache metrics and per-agent breakdown."""
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     requests: int = 0
+    per_agent: dict = field(default_factory=dict)  # agent_name → {input, output, cache_read, cache_write, requests}
 
-    def add(self, input_tok: int = 0, output_tok: int = 0):
-        """Add token counts."""
+    def add(self, input_tok: int = 0, output_tok: int = 0,
+            cache_read: int = 0, cache_write: int = 0, agent_name: str = "main"):
+        """Add token counts with cache and per-agent tracking."""
         self.input_tokens += input_tok
         self.output_tokens += output_tok
         self.total_tokens += input_tok + output_tok
+        self.cache_read_tokens += cache_read
+        self.cache_write_tokens += cache_write
         self.requests += 1
+
+        if agent_name not in self.per_agent:
+            self.per_agent[agent_name] = {
+                "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "requests": 0,
+            }
+        a = self.per_agent[agent_name]
+        a["input"] += input_tok
+        a["output"] += output_tok
+        a["cache_read"] += cache_read
+        a["cache_write"] += cache_write
+        a["requests"] += 1
 
     def reset(self):
         """Reset counters."""
         self.input_tokens = 0
         self.output_tokens = 0
         self.total_tokens = 0
+        self.cache_read_tokens = 0
+        self.cache_write_tokens = 0
         self.requests = 0
+        self.per_agent = {}
 
     def format(self) -> str:
-        """Format token usage for display."""
-        return f"↑{format_number(self.input_tokens)} ↓{format_number(self.output_tokens)} Σ{format_number(self.total_tokens)}"
+        """Format token usage for status bar."""
+        cache_info = f" 🗄{format_number(self.cache_read_tokens)}" if self.cache_read_tokens else ""
+        return f"↑{format_number(self.input_tokens)} ↓{format_number(self.output_tokens)} Σ{format_number(self.total_tokens)}{cache_info}"
 
     def format_detailed(self) -> str:
-        """Format detailed token usage."""
-        return (
-            f"Input: {self.input_tokens:,} tokens\n"
-            f"Output: {self.output_tokens:,} tokens\n"
-            f"Total: {self.total_tokens:,} tokens\n"
-            f"Requests: {self.requests}"
-        )
+        """Format detailed token usage with per-agent breakdown and cost estimate."""
+        from agenticops.config import get_agent_model_config
+        lines = [
+            f"Input:       {self.input_tokens:>10,} tokens",
+            f"Output:      {self.output_tokens:>10,} tokens",
+            f"Total:       {self.total_tokens:>10,} tokens",
+            f"Cache Read:  {self.cache_read_tokens:>10,} tokens",
+            f"Cache Write: {self.cache_write_tokens:>10,} tokens",
+            f"Requests:    {self.requests:>10}",
+        ]
+        if self.per_agent:
+            lines.append("")
+            lines.append("Per-Agent Breakdown:")
+            # Cost rates per 1M tokens (input/output)
+            COST_TABLE = {
+                "claude-opus-4-6": (15.0, 75.0, 1.50),      # input, output, cache_read
+                "claude-sonnet-4-6": (3.0, 15.0, 0.30),
+                "claude-haiku-4-5": (0.80, 4.0, 0.08),
+            }
+            total_cost = 0.0
+            for name, a in self.per_agent.items():
+                model_id, _ = get_agent_model_config(name)
+                short = model_id.split(".")[-1] if "." in model_id else model_id
+                # Match cost tier
+                cost_key = None
+                for k in COST_TABLE:
+                    if k in short:
+                        cost_key = k
+                        break
+                if cost_key:
+                    inp_rate, out_rate, cache_rate = COST_TABLE[cost_key]
+                    cost = (a["input"] * inp_rate + a["output"] * out_rate + a["cache_read"] * cache_rate) / 1_000_000
+                    total_cost += cost
+                    cost_str = f"  ${cost:.4f}"
+                else:
+                    cost_str = ""
+                cache_str = f"  cache_read={a['cache_read']:,}" if a["cache_read"] else ""
+                lines.append(
+                    f"  {name:10s} ↑{a['input']:>8,} ↓{a['output']:>8,}{cache_str}  ({short}){cost_str}"
+                )
+            if total_cost > 0:
+                lines.append(f"\nEstimated Cost: ${total_cost:.4f}")
+        return "\n".join(lines)
+
+
+class StreamingCallbackHandler:
+    """CLI callback: animated spinner during thinking/tools, buffered streaming for text."""
+
+    def __init__(self, console: Console):
+        self.console = console
+        self._phase = "idle"       # idle -> thinking -> streaming -> done
+        self._tool_count = 0
+        self._start_time = 0.0
+        self._step_start = 0.0
+        self._current_step = ""
+        self._live: Optional[Live] = None
+        self._buf: list = []       # text buffer for batched output
+        self._last_flush = 0.0
+
+    def _show_spinner(self, text: str, style: str = "dots"):
+        """Show/update animated spinner via Rich Live."""
+        spinner = Spinner(style, text=Text.from_markup(text))
+        padded = Padding(spinner, (0, 0, 0, 2))
+        if self._live:
+            self._live.update(padded)
+        else:
+            self._live = Live(padded, console=self.console, transient=True, refresh_per_second=10)
+            self._live.start()
+
+    def _complete_step(self):
+        """Stop spinner, print completed step line."""
+        if self._live:
+            self._live.stop()
+            self._live = None
+        if self._current_step:
+            elapsed = time.time() - self._step_start
+            self.console.print(
+                f"  [green]\u2713[/green] {self._current_step} [dim]({format_duration(elapsed)})[/dim]"
+            )
+            self._current_step = ""
+
+    def _flush_buf(self):
+        """Flush buffered text to stdout."""
+        if self._buf:
+            import sys
+            sys.stdout.write("".join(self._buf))
+            sys.stdout.flush()
+            self._buf.clear()
+            self._last_flush = time.time()
+
+    def start(self):
+        """Call before agent() to show initial spinner immediately."""
+        self._phase = "thinking"
+        self._current_step = "Thinking"
+        self._start_time = time.time()
+        self._step_start = time.time()
+        self._show_spinner("[blue]\u25d0 Thinking[/blue]")
+
+    def stop(self):
+        """Cleanup on exception or interruption."""
+        self._flush_buf()
+        if self._live:
+            self._live.stop()
+            self._live = None
+        if self._phase == "streaming":
+            print()  # ensure final newline
+        self._phase = "done"
+
+    def __call__(self, **kwargs):
+        data = kwargs.get("data", "")
+        complete = kwargs.get("complete", False)
+        event = kwargs.get("event") or {}
+        tool_use = event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+
+        # Tool call event -> show as spinner step
+        if tool_use:
+            self._flush_buf()
+            if self._current_step:
+                self._complete_step()
+            name = tool_use.get("name", "unknown")
+            self._tool_count += 1
+            self._current_step = name
+            self._step_start = time.time()
+            self._phase = "thinking"
+            self._show_spinner(f"[yellow]\u2699 {name}[/yellow]", "dots2")
+
+        # Text data -> stream to stdout with buffering
+        if data:
+            if self._phase != "streaming":
+                self._flush_buf()
+                if self._current_step:
+                    self._complete_step()
+                self._phase = "streaming"
+                print()  # blank line before response
+            self._buf.append(data)
+            now = time.time()
+            if now - self._last_flush > 0.05 or "\n" in data:
+                self._flush_buf()
+
+        # Complete
+        if complete:
+            self._flush_buf()
+            if self._live:
+                self._live.stop()
+                self._live = None
+            if self._phase == "streaming":
+                print()  # final newline
+            self._phase = "done"
 
 
 class ThinkingDisplay:

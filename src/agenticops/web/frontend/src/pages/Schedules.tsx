@@ -76,21 +76,21 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
     setter(list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
   }
 
-  const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
+  const inputCls = "w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 overflow-y-auto py-8">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-lg p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit Schedule" : "New Schedule"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Name</label>
             <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Pipeline</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Pipeline</label>
             <select value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} className={inputCls}>
               {PIPELINE_OPTIONS.map((p) => (
                 <option key={p} value={p}>{p}</option>
@@ -98,20 +98,20 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Cron Expression</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Cron Expression</label>
             <input required value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} placeholder="0 */6 * * *" className={`${inputCls} font-mono`} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Account Name (optional)</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Account Name (optional)</label>
             <input value={accountName} onChange={(e) => setAccountName(e.target.value)} className={inputCls} />
           </div>
 
           {/* AgentChain-specific fields */}
           {isAgentChain && (
-            <div className="space-y-3 border-t border-slate-200 pt-3 mt-3">
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">AgentChain Config</p>
+            <div className="space-y-3 border-t border-border pt-3 mt-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">AgentChain Config</p>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Prompt *</label>
+                <label className="block text-sm font-medium text-foreground mb-1">Prompt *</label>
                 <textarea
                   required
                   rows={3}
@@ -123,11 +123,11 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               </div>
               {skills && skills.length > 0 && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Skills</label>
+                  <label className="block text-sm font-medium text-foreground mb-1">Skills</label>
                   <div className="flex flex-wrap gap-2">
                     {skills.map((s) => (
-                      <label key={s.name} className="inline-flex items-center gap-1 text-xs bg-slate-50 px-2 py-1 rounded cursor-pointer hover:bg-slate-100" title={s.description}>
-                        <input type="checkbox" checked={selectedSkills.includes(s.name)} onChange={() => toggleItem(selectedSkills, s.name, setSelectedSkills)} className="rounded border-slate-300" />
+                      <label key={s.name} className="inline-flex items-center gap-1 text-xs bg-secondary px-2 py-1 rounded cursor-pointer hover:bg-secondary" title={s.description}>
+                        <input type="checkbox" checked={selectedSkills.includes(s.name)} onChange={() => toggleItem(selectedSkills, s.name, setSelectedSkills)} className="rounded border-border" />
                         {s.name}
                       </label>
                     ))}
@@ -136,11 +136,11 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               )}
               {channels && channels.length > 0 && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Notify Channels</label>
+                  <label className="block text-sm font-medium text-foreground mb-1">Notify Channels</label>
                   <div className="flex flex-wrap gap-2">
                     {channels.map((c) => (
-                      <label key={c.name} className="inline-flex items-center gap-1 text-xs bg-slate-50 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
-                        <input type="checkbox" checked={selectedChannels.includes(c.name)} onChange={() => toggleItem(selectedChannels, c.name, setSelectedChannels)} className="rounded border-slate-300" />
+                      <label key={c.name} className="inline-flex items-center gap-1 text-xs bg-secondary px-2 py-1 rounded cursor-pointer hover:bg-secondary">
+                        <input type="checkbox" checked={selectedChannels.includes(c.name)} onChange={() => toggleItem(selectedChannels, c.name, setSelectedChannels)} className="rounded border-border" />
                         {c.name}
                       </label>
                     ))}
@@ -149,7 +149,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               )}
               <div className="flex gap-4">
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Report Type</label>
+                  <label className="block text-sm font-medium text-foreground mb-1">Report Type</label>
                   <select value={reportType} onChange={(e) => setReportType(e.target.value)} className={inputCls}>
                     <option value="">None</option>
                     {REPORT_TYPES.filter(Boolean).map((t) => (
@@ -158,7 +158,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
                   </select>
                 </div>
                 <div className="w-28">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Timeout (s)</label>
+                  <label className="block text-sm font-medium text-foreground mb-1">Timeout (s)</label>
                   <input type="number" min={30} max={3600} value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} className={inputCls} />
                 </div>
               </div>
@@ -166,11 +166,11 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
           )}
 
           <div className="flex items-center gap-2">
-            <input id="schedule-enabled" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-slate-200" />
-            <label htmlFor="schedule-enabled" className="text-sm text-slate-700">Enabled</label>
+            <input id="schedule-enabled" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="schedule-enabled" className="text-sm text-foreground">Enabled</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">
               {saving ? "Saving..." : "Save"}
             </button>
@@ -198,16 +198,16 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Delete Schedule</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Schedule</h3>
+        <p className="text-sm text-muted-foreground mb-4">
           Are you sure you want to delete <strong>{schedule.name}</strong>? This action
           cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+            className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary"
           >
             Cancel
           </button>
@@ -234,7 +234,7 @@ const columns: Column<Schedule>[] = [
     header: "Name",
     sortable: true,
     sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-slate-900">{r.name}</span>,
+    render: (r) => <span className="font-medium text-foreground">{r.name}</span>,
   },
   {
     key: "pipeline_name",
@@ -255,7 +255,7 @@ const columns: Column<Schedule>[] = [
       r.is_enabled ? (
         <Badge className="bg-green-100 text-green-700">Enabled</Badge>
       ) : (
-        <Badge className="bg-slate-100 text-slate-500">Disabled</Badge>
+        <Badge className="bg-secondary text-muted-foreground">Disabled</Badge>
       ),
   },
   {
@@ -264,7 +264,7 @@ const columns: Column<Schedule>[] = [
     sortable: true,
     sortValue: (r) => r.last_run_at ?? "",
     render: (r) => (
-      <span className="text-sm text-slate-500">
+      <span className="text-sm text-muted-foreground">
         {r.last_run_at ? formatShortDate(r.last_run_at) : "Never"}
       </span>
     ),
@@ -273,7 +273,7 @@ const columns: Column<Schedule>[] = [
     key: "next_run_at",
     header: "Next Run",
     render: (r) => (
-      <span className="text-sm text-slate-500">
+      <span className="text-sm text-muted-foreground">
         {r.next_run_at ? formatShortDate(r.next_run_at) : "-"}
       </span>
     ),
@@ -298,7 +298,7 @@ export default function Schedules() {
     <>
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-slate-900">Schedules</h2>
+          <h2 className="text-lg font-semibold text-foreground">Schedules</h2>
           <button
             onClick={() => {
               setEditing(null);

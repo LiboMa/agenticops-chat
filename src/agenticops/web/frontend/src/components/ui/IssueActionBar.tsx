@@ -57,7 +57,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
         <button
           onClick={handleReopen}
           disabled={statusUpdating}
-          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-border text-muted-foreground bg-background hover:bg-secondary disabled:opacity-50 transition-colors"
         >
           {statusUpdating ? "Updating..." : "Reopen"}
         </button>
@@ -66,7 +66,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
   }
 
   return (
-    <div className="flex items-center gap-3 p-4 rounded-lg bg-slate-50 border border-slate-200">
+    <div className="flex items-center gap-3 p-4 rounded-lg bg-secondary border border-border">
       {/* Primary action based on status */}
       {(status === "open" || status === "investigating" || status === "acknowledged") && (
         <button
@@ -112,7 +112,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
       {status === "fix_planned" && latestPlan && (
         <Link
           to={`/app/fix-plans/${latestPlan.id}`}
-          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -122,7 +122,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
       )}
 
       {status === "fix_approved" && (
-        <div className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+        <div className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-primary-50 text-primary-700 border border-primary-200">
           <svg className="animate-pulse h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -152,7 +152,7 @@ export const IssueActionBar = React.memo(function IssueActionBar({
         <button
           onClick={handleResolve}
           disabled={statusUpdating}
-          className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-border text-muted-foreground bg-background hover:bg-secondary disabled:opacity-50 transition-colors"
         >
           {statusUpdating ? "Updating..." : "Resolve"}
         </button>

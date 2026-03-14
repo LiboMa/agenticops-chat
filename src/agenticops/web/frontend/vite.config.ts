@@ -30,7 +30,6 @@ export default defineConfig({
             "react-router-dom",
             "@tanstack/react-query",
           ],
-          graph: ["@xyflow/react", "@dagrejs/dagre"],
         },
       },
     },

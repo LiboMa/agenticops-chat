@@ -37,7 +37,7 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
             {i > 0 && (
               <div
                 className={`flex-1 h-0.5 ${
-                  i <= current ? "bg-primary-500" : "bg-slate-200"
+                  i <= current ? "bg-primary-500" : "bg-muted"
                 }`}
               />
             )}
@@ -50,7 +50,7 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
                     ? "bg-primary-500 text-white"
                     : isCurrent
                       ? "bg-primary-500 text-white ring-4 ring-primary-100"
-                      : "bg-slate-200 text-slate-500"
+                      : "bg-muted text-muted-foreground"
                 }`}
               >
                 {isCompleted ? (
@@ -65,7 +65,7 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
                 className={`mt-1.5 text-[10px] leading-tight text-center whitespace-nowrap ${
                   isCompleted || isCurrent
                     ? "text-primary-700 font-medium"
-                    : "text-slate-400"
+                    : "text-muted-foreground"
                 }`}
               >
                 {step.label}

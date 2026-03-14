@@ -2,19 +2,19 @@ import React from "react";
 import { cn } from "@/lib/cn";
 import type { FixPlanStatus } from "@/api/types";
 
-const STATUS_STYLES: Record<FixPlanStatus, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  pending_approval: "bg-amber-100 text-amber-700",
-  approved: "bg-green-100 text-green-700",
-  executing: "bg-blue-100 text-blue-700",
-  executed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  rejected: "bg-red-50 text-red-600",
+const STYLES: Record<FixPlanStatus, { dot: string; text: string }> = {
+  draft: { dot: "bg-muted-foreground", text: "text-muted-foreground" },
+  pending_approval: { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+  approved: { dot: "bg-green-500", text: "text-green-600 dark:text-green-400" },
+  executing: { dot: "bg-blue-500 dark:bg-green-500", text: "text-blue-600 dark:text-green-400" },
+  executed: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  failed: { dot: "bg-red-500", text: "text-red-500 dark:text-red-400" },
+  rejected: { dot: "bg-red-400", text: "text-red-500 dark:text-red-400" },
 };
 
-const STATUS_LABELS: Record<FixPlanStatus, string> = {
+const LABELS: Record<FixPlanStatus, string> = {
   draft: "Draft",
-  pending_approval: "Pending Approval",
+  pending_approval: "Pending",
   approved: "Approved",
   executing: "Executing",
   executed: "Executed",
@@ -27,14 +27,13 @@ export const FixPlanStatusBadge = React.memo(function FixPlanStatusBadge({
 }: {
   status: FixPlanStatus;
 }) {
+  const s = STYLES[status] ?? STYLES.draft;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-        STATUS_STYLES[status] ?? STATUS_STYLES.draft,
-      )}
-    >
-      {STATUS_LABELS[status] ?? status}
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn("h-2 w-2 rounded-full", s.dot)} />
+      <span className={cn("text-xs font-medium", s.text)}>
+        {LABELS[status] ?? status}
+      </span>
     </span>
   );
 });

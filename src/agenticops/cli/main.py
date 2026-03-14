@@ -2508,27 +2508,12 @@ def _slash_less(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_tokens(ctx: ChatContext, args: list) -> str:
-    """Handle /tokens command - show token usage statistics."""
+    """Handle /tokens command - show token usage with per-agent breakdown and cost."""
     if args and args[0] == "reset":
         ctx.reset_tokens()
         return "[green]Token counters reset.[/green]"
 
-    usage = ctx.token_usage
-
-    table = create_table(columns=[
-        {"name": "Metric", "style": "cyan"},
-        {"name": "Value", "justify": "right"},
-    ])
-    table.add_row("Input Tokens", f"{usage.input_tokens:,}")
-    table.add_row("Output Tokens", f"{usage.output_tokens:,}")
-    table.add_row("Total Tokens", f"[bold]{usage.total_tokens:,}[/bold]")
-    table.add_row("API Requests", str(usage.requests))
-
-    console.print("\n[bold]Token Usage (this session)[/bold]")
-    console.print(table)
-
-    # Show compact format
-    return f"\n[dim]Compact: {usage.format()}[/dim]"
+    return f"[bold]Token Usage (this session)[/bold]\n\n{ctx.token_usage.format_detailed()}"
 
 
 # ============================================================================
@@ -3619,6 +3604,7 @@ def chat(
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
     detail: Optional[str] = typer.Option(None, "--detail", "-d", help="Output detail level: concise, medium, detailed"),
     focus: Optional[str] = typer.Option(None, "--focus", "-f", help="Resource focus: computing,networking,databases,storage,security,billing,all"),
+    debug: bool = typer.Option(False, "--debug", help="Show debug logs (default: clean streaming output only)"),
 ):
     """Start an interactive chat, or run a single query in headless mode.
 
@@ -3635,6 +3621,16 @@ def chat(
     import sys
     from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
     from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
+
+    # Suppress log noise by default — only show WARNING+
+    # With --debug, show INFO level for troubleshooting
+    if not debug:
+        logging.getLogger().setLevel(logging.WARNING)
+        # Silence noisy libraries entirely
+        for noisy in ("botocore", "urllib3", "strands", "httpcore", "httpx"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+    else:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Apply detail level if specified
     if detail:
@@ -3669,6 +3665,7 @@ def chat(
     from pathlib import Path
 
     from agenticops.agents import create_main_agent
+    from agenticops.cli.display import StreamingCallbackHandler
     agent = create_main_agent()
 
     # Initialize chat context
@@ -3776,37 +3773,40 @@ def chat(
             _set_dl(ctx.detail_level)
             _set_sf(ctx.scan_focus)
 
-            # Call agent with simple spinner
-            display = ThinkingDisplay(console)
-
-            with display.live_display():
-                display.start("Thinking...")
-
+            # Call agent with streaming output + animated spinner
+            try:
+                handler = StreamingCallbackHandler(console)
+                agent.callback_handler = handler
+                handler.start()
                 try:
                     result = agent(enriched_input)
-                    response = str(result)
-                    display.complete("Done")
-
-                    # Extract token usage from Strands metrics
-                    try:
-                        invocation = result.metrics.latest_agent_invocation
-                        if invocation:
-                            ctx.add_tokens(
-                                input_tokens=invocation.usage.get("inputTokens", 0),
-                                output_tokens=invocation.usage.get("outputTokens", 0),
-                            )
-                    except Exception:
-                        pass  # Don't break chat if metrics extraction fails
-
                 except Exception as e:
-                    display.error(f"Error: {str(e)}")
+                    handler.stop()
+                    console.print(f"[red]Error: {str(e)}[/red]")
                     response = f"Error: {str(e)}"
+                    ctx.add_to_history("assistant", response)
+                    continue
+                response = str(result)
+
+                # Extract token usage from Strands metrics (main + sub-agents)
+                try:
+                    accumulated = result.metrics.accumulated_usage
+                    if accumulated:
+                        ctx.add_tokens(
+                            input_tokens=accumulated.get("inputTokens", 0),
+                            output_tokens=accumulated.get("outputTokens", 0),
+                            cache_read=accumulated.get("cacheReadInputTokens", 0),
+                            cache_write=accumulated.get("cacheWriteInputTokens", 0),
+                        )
+                except Exception:
+                    pass  # Don't break chat if metrics extraction fails
+
+            except Exception as e:
+                console.print(f"[red]Error: {str(e)}[/red]")
+                response = f"Error: {str(e)}"
 
             # Store response in history
             ctx.add_to_history("assistant", response)
-
-            # Display with smart truncation
-            print_with_truncation(console, response, ctx, header="Agent")
 
             # Show session token summary in status bar
             from agenticops.config import get_agent_model_config
@@ -3815,6 +3815,9 @@ def chat(
             console.print(f"[dim]─── {_main_short} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
 
         except KeyboardInterrupt:
+            # Clean up any active spinner from StreamingCallbackHandler
+            if hasattr(agent, 'callback_handler') and hasattr(agent.callback_handler, 'stop'):
+                agent.callback_handler.stop()
             console.print("\n[yellow]Press Ctrl+C again to exit, or continue typing.[/yellow]")
             try:
                 session.prompt([('class:prompt', '❯ ')], default='')

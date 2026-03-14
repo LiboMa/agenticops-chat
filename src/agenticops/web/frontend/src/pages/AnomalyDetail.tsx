@@ -95,7 +95,7 @@ export default function AnomalyDetail() {
       {/* Back link */}
       <Link
         to="/app/issues"
-        className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 transition-colors"
+        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -114,7 +114,7 @@ export default function AnomalyDetail() {
       <Card>
         <CardBody>
           <div className="flex items-center gap-3 mb-4">
-            <span className="font-mono text-sm bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+            <span className="font-mono text-sm bg-secondary text-muted-foreground px-2 py-0.5 rounded">
               I#{a.id}
             </span>
             <SeverityBadge severity={a.severity} />
@@ -123,60 +123,60 @@ export default function AnomalyDetail() {
               <button
                 onClick={() => navigator.clipboard.writeText(a.trace_id!)}
                 title="Click to copy trace ID"
-                className="font-mono text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-200 hover:bg-indigo-100 transition-colors cursor-pointer"
+                className="font-mono text-xs bg-primary-50 text-primary-600 px-2 py-0.5 rounded border border-primary-200 hover:bg-primary-100 transition-colors cursor-pointer"
               >
                 {a.trace_id}
               </button>
             )}
-            <h1 className="text-2xl font-semibold text-slate-900">{a.title}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">{a.title}</h1>
           </div>
           <div
-            className="text-slate-600 mb-6 report-content"
+            className="text-muted-foreground mb-6 report-content"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(a.description) }}
           />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-slate-400 block">Resource</span>
-              <span className="font-mono text-slate-700">{a.resource_id}</span>
+              <span className="text-muted-foreground block">Resource</span>
+              <span className="font-mono text-foreground">{a.resource_id}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Type</span>
-              <span className="text-slate-700">{a.resource_type}</span>
+              <span className="text-muted-foreground block">Type</span>
+              <span className="text-foreground">{a.resource_type}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Region</span>
-              <span className="text-slate-700">{a.region}</span>
+              <span className="text-muted-foreground block">Region</span>
+              <span className="text-foreground">{a.region}</span>
             </div>
             <div>
-              <span className="text-slate-400 block">Detected</span>
-              <span className="text-slate-700">{formatFullDate(a.detected_at)}</span>
+              <span className="text-muted-foreground block">Detected</span>
+              <span className="text-foreground">{formatFullDate(a.detected_at)}</span>
             </div>
           </div>
 
           {a.metric_name && (
-            <div className="mt-6 p-4 bg-slate-50 rounded-lg border border-slate-100">
-              <h3 className="font-semibold text-slate-900 mb-2">
+            <div className="mt-6 p-4 bg-secondary rounded-lg border border-border/50">
+              <h3 className="font-semibold text-foreground mb-2">
                 Metric Details
               </h3>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
-                  <span className="text-slate-400">Metric:</span>{" "}
-                  <span className="text-slate-700">{a.metric_name}</span>
+                  <span className="text-muted-foreground">Metric:</span>{" "}
+                  <span className="text-foreground">{a.metric_name}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400">Expected:</span>{" "}
-                  <span className="text-slate-700">{a.expected_value}</span>
+                  <span className="text-muted-foreground">Expected:</span>{" "}
+                  <span className="text-foreground">{a.expected_value}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400">Actual:</span>{" "}
-                  <span className="text-slate-700">{a.actual_value}</span>
+                  <span className="text-muted-foreground">Actual:</span>{" "}
+                  <span className="text-foreground">{a.actual_value}</span>
                 </div>
               </div>
             </div>
           )}
 
           {a.resolved_at && (
-            <div className="mt-4 text-xs text-slate-400">
+            <div className="mt-4 text-xs text-muted-foreground">
               Resolved {formatFullDate(a.resolved_at)}
             </div>
           )}
@@ -186,7 +186,7 @@ export default function AnomalyDetail() {
       {/* Status Pipeline Stepper */}
       <Card>
         <CardBody>
-          <h2 className="text-sm font-medium text-slate-500 mb-4 uppercase tracking-wider">
+          <h2 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">
             Issue Lifecycle
           </h2>
           <IssueStatusStepper status={a.status} />
@@ -197,7 +197,7 @@ export default function AnomalyDetail() {
       {timeline.data && timeline.data.length > 0 && (
         <Card>
           <CardBody>
-            <h2 className="text-sm font-medium text-slate-500 mb-4 uppercase tracking-wider">
+            <h2 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">
               Pipeline Timeline
             </h2>
             <PipelineTimeline events={timeline.data} />
@@ -230,8 +230,8 @@ export default function AnomalyDetail() {
         <Card>
           <CardBody>
             <div className="text-center py-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-2">No Root Cause Analysis Yet</h2>
-              <p className="text-slate-500 mb-4">
+              <h2 className="text-lg font-semibold text-foreground mb-2">No Root Cause Analysis Yet</h2>
+              <p className="text-muted-foreground mb-4">
                 Run RCA to analyze the root cause of this issue and get recommendations.
               </p>
               <button
@@ -247,19 +247,19 @@ export default function AnomalyDetail() {
       ) : rca.data ? (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Root Cause Analysis
             </h2>
 
             {/* Confidence bar */}
             <div className="mb-6">
               <div className="flex justify-between text-sm mb-1">
-                <span className="text-slate-500">Confidence</span>
-                <span className="font-medium text-slate-700">
+                <span className="text-muted-foreground">Confidence</span>
+                <span className="font-medium text-foreground">
                   {Math.round(rca.data.confidence_score * 100)}%
                 </span>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2">
+              <div className="w-full bg-secondary rounded-full h-2">
                 <div
                   className="bg-primary-500 h-2 rounded-full transition-all"
                   style={{ width: `${rca.data.confidence_score * 100}%` }}
@@ -269,9 +269,9 @@ export default function AnomalyDetail() {
 
             {/* Root Cause */}
             <div className="mb-6">
-              <h3 className="font-semibold text-slate-900 mb-2">Root Cause</h3>
+              <h3 className="font-semibold text-foreground mb-2">Root Cause</h3>
               <div
-                className="text-slate-700 report-content"
+                className="text-foreground report-content"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(rca.data.root_cause) }}
               />
             </div>
@@ -279,10 +279,10 @@ export default function AnomalyDetail() {
             {/* Contributing Factors */}
             {rca.data.contributing_factors.length > 0 && (
               <div className="mb-6">
-                <h3 className="font-semibold text-slate-900 mb-2">
+                <h3 className="font-semibold text-foreground mb-2">
                   Contributing Factors
                 </h3>
-                <ul className="list-disc list-inside text-slate-600 space-y-1">
+                <ul className="list-disc list-inside text-muted-foreground space-y-1">
                   {rca.data.contributing_factors.map((f, i) => (
                     <li key={i}>{f}</li>
                   ))}
@@ -293,10 +293,10 @@ export default function AnomalyDetail() {
             {/* Recommendations */}
             {rca.data.recommendations.length > 0 && (
               <div>
-                <h3 className="font-semibold text-slate-900 mb-2">
+                <h3 className="font-semibold text-foreground mb-2">
                   Recommendations
                 </h3>
-                <ol className="list-decimal list-inside text-slate-600 space-y-1">
+                <ol className="list-decimal list-inside text-muted-foreground space-y-1">
                   {rca.data.recommendations.map((r, i) => (
                     <li key={i}>{r}</li>
                   ))}
@@ -304,7 +304,7 @@ export default function AnomalyDetail() {
               </div>
             )}
 
-            <div className="mt-4 text-xs text-slate-400">
+            <div className="mt-4 text-xs text-muted-foreground">
               Model: {rca.data.llm_model} | Analyzed{" "}
               {formatFullDate(rca.data.created_at)}
             </div>
@@ -317,8 +317,8 @@ export default function AnomalyDetail() {
         <Card>
           <CardBody>
             <div className="text-center py-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-2">No Fix Plan Yet</h2>
-              <p className="text-slate-500 mb-4">
+              <h2 className="text-lg font-semibold text-foreground mb-2">No Fix Plan Yet</h2>
+              <p className="text-muted-foreground mb-4">
                 Generate a fix plan based on the RCA result to remediate this issue.
               </p>
               <button
@@ -335,7 +335,7 @@ export default function AnomalyDetail() {
       {fixPlans.data && fixPlans.data.length > 0 && (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Fix Plans
             </h2>
             <div className="space-y-3">
@@ -343,18 +343,18 @@ export default function AnomalyDetail() {
                 <Link
                   key={fp.id}
                   to={`/app/fix-plans/${fp.id}`}
-                  className="flex items-center justify-between p-3 rounded-lg border border-slate-200 hover:border-primary-300 hover:bg-slate-50 transition-colors"
+                  className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary-300 hover:bg-secondary transition-colors"
                 >
                   <div className="flex items-center gap-3">
                     <RiskLevelBadge level={fp.risk_level} />
-                    <span className="text-sm font-medium text-slate-900">
+                    <span className="text-sm font-medium text-foreground">
                       {fp.title}
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <FixPlanStatusBadge status={fp.status} />
                     <svg
-                      className="w-4 h-4 text-slate-400"
+                      className="w-4 h-4 text-muted-foreground"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -378,37 +378,37 @@ export default function AnomalyDetail() {
       {executions.data && executions.data.length > 0 && (
         <Card>
           <CardBody>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">
+            <h2 className="text-xl font-semibold text-foreground mb-4">
               Execution History
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-border">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       ID
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Executed By
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Duration
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Started
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {executions.data.map((ex) => (
-                    <tr key={ex.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-2 text-sm font-mono text-slate-600">
+                    <tr key={ex.id} className="hover:bg-secondary transition-colors">
+                      <td className="px-4 py-2 text-sm font-mono text-muted-foreground">
                         #{ex.id}
                       </td>
                       <td className="px-4 py-2">
@@ -418,21 +418,21 @@ export default function AnomalyDetail() {
                               ? "bg-green-100 text-green-700"
                               : ex.status === "failed"
                                 ? "bg-red-100 text-red-700"
-                                : "bg-slate-100 text-slate-600"
+                                : "bg-secondary text-muted-foreground"
                           }`}
                         >
                           {ex.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.executed_by}
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.duration_ms > 0
                           ? `${(ex.duration_ms / 1000).toFixed(1)}s`
                           : "-"}
                       </td>
-                      <td className="px-4 py-2 text-sm text-slate-500">
+                      <td className="px-4 py-2 text-sm text-muted-foreground">
                         {ex.started_at
                           ? formatFullDate(ex.started_at)
                           : "-"}
@@ -486,7 +486,7 @@ const SEV_CHIP: Record<string, string> = {
   critical: "bg-red-100 text-red-700",
   high: "bg-orange-100 text-orange-700",
   medium: "bg-yellow-100 text-yellow-700",
-  low: "bg-slate-100 text-slate-600",
+  low: "bg-secondary text-muted-foreground",
 };
 
 function MergedAlertsSection({ alerts, occurrenceCount }: { alerts: MergedAlert[]; occurrenceCount?: number }) {
@@ -500,7 +500,7 @@ function MergedAlertsSection({ alerts, occurrenceCount }: { alerts: MergedAlert[
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-2 w-full text-left"
         >
-          <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+          <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
             Merged Alerts ({alerts.length})
           </h2>
           {occurrenceCount && occurrenceCount > 1 && (
@@ -508,25 +508,25 @@ function MergedAlertsSection({ alerts, occurrenceCount }: { alerts: MergedAlert[
               {occurrenceCount} occurrences
             </span>
           )}
-          <span className="ml-auto text-slate-400 text-xs">{expanded ? "▲ Collapse" : "▼ Expand"}</span>
+          <span className="ml-auto text-muted-foreground text-xs">{expanded ? "▲ Collapse" : "▼ Expand"}</span>
         </button>
         <div className="mt-3 space-y-2">
           {displayed.map((alert, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded bg-slate-50">
-              <span className="text-xs text-slate-400 whitespace-nowrap font-mono">
+            <div key={i} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded bg-secondary">
+              <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">
                 {new Date(alert.timestamp).toLocaleString()}
               </span>
-              <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">
+              <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
                 {alert.source}
               </span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${SEV_CHIP[alert.severity] || SEV_CHIP.low}`}>
                 {alert.severity}
               </span>
-              <span className="text-slate-700 truncate flex-1">{alert.title}</span>
+              <span className="text-foreground truncate flex-1">{alert.title}</span>
             </div>
           ))}
           {!expanded && alerts.length > 5 && (
-            <div className="text-xs text-slate-400 text-center">
+            <div className="text-xs text-muted-foreground text-center">
               Showing last 5 of {alerts.length} — click to expand
             </div>
           )}
@@ -545,7 +545,7 @@ const STAGE_COLORS: Record<string, string> = {
   approval: "bg-emerald-500",
   execution: "bg-orange-500",
   resolution: "bg-green-600",
-  notification: "bg-slate-400",
+  notification: "bg-muted-foreground/40",
 };
 
 const STATUS_ICONS: Record<string, string> = {
@@ -559,10 +559,10 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
   return (
     <div className="relative">
       {/* Vertical line */}
-      <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-200" />
+      <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-muted" />
       <div className="space-y-3">
         {events.map((ev, i) => {
-          const color = STAGE_COLORS[ev.stage] || "bg-slate-400";
+          const color = STAGE_COLORS[ev.stage] || "bg-muted-foreground/40";
           const icon = STATUS_ICONS[ev.status] || "•";
           const isFailed = ev.status === "failed";
           return (
@@ -576,7 +576,7 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
               {/* Content */}
               <div className="flex-1 min-w-0 pb-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-slate-900">
+                  <span className="text-sm font-medium text-foreground">
                     {ev.event_type.replace(/_/g, " ")}
                   </span>
                   <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${
@@ -585,20 +585,20 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                       : ev.status === "started"
                         ? "bg-blue-100 text-blue-700"
                         : ev.status === "skipped"
-                          ? "bg-slate-100 text-slate-500"
+                          ? "bg-secondary text-muted-foreground"
                           : "bg-green-100 text-green-700"
                   }`}>
                     {ev.status}
                   </span>
                   {ev.duration_ms != null && ev.duration_ms > 0 && (
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-[10px] text-muted-foreground">
                       {ev.duration_ms >= 1000
                         ? `${(ev.duration_ms / 1000).toFixed(1)}s`
                         : `${ev.duration_ms}ms`}
                     </span>
                   )}
                   {ev.trace_id && (
-                    <span className="text-[10px] font-mono text-indigo-400">
+                    <span className="text-[10px] font-mono text-primary-400">
                       {ev.trace_id}
                     </span>
                   )}
@@ -610,7 +610,7 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                       v != null ? (
                         <span
                           key={k}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600 font-mono"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-[10px] text-muted-foreground font-mono"
                         >
                           {k}: {typeof v === "object" ? JSON.stringify(v) : String(v).slice(0, 80)}
                         </span>
@@ -618,7 +618,7 @@ function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                     )}
                   </div>
                 )}
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[10px] text-muted-foreground mt-0.5">
                   {ev.actor !== "system" && <span className="mr-2">{ev.actor}</span>}
                   {formatFullDate(ev.created_at)}
                 </div>

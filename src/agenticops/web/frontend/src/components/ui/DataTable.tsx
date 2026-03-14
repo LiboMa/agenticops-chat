@@ -55,7 +55,7 @@ function DataTableInner<T>({
 
   if (data.length === 0) {
     return (
-      <div className="p-8 text-center text-slate-400 text-sm">
+      <div className="py-12 text-center text-muted-foreground text-sm">
         {emptyMessage}
       </div>
     );
@@ -65,13 +65,13 @@ function DataTableInner<T>({
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
-          <tr className="border-b border-slate-200">
+          <tr className="border-b">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  "px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider",
-                  col.sortable && "cursor-pointer select-none hover:text-slate-700",
+                  "px-5 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-[0.08em]",
+                  col.sortable && "cursor-pointer select-none hover:text-foreground transition-colors",
                   col.className,
                 )}
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
@@ -79,25 +79,27 @@ function DataTableInner<T>({
                 <span className="inline-flex items-center gap-1">
                   {col.header}
                   {col.sortable && sortCol === col.key && (
-                    <span>{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
+                    <span className="text-primary">{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
                   )}
                 </span>
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {sorted.map((row) => (
             <tr
               key={rowKey(row)}
               className={cn(
-                "hover:bg-slate-50 transition-colors",
-                onRowClick && "cursor-pointer",
+                "border-b border-border/50 transition-colors duration-150",
+                onRowClick
+                  ? "cursor-pointer hover:bg-accent"
+                  : "hover:bg-accent/50",
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (
-                <td key={col.key} className={cn("px-6 py-3 text-sm text-slate-600", col.className)}>
+                <td key={col.key} className={cn("px-5 py-2.5 text-sm", col.className)}>
                   {col.render(row)}
                 </td>
               ))}

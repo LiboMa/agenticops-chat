@@ -7,7 +7,7 @@ interface CardProps {
 
 export function Card({ children, className }: CardProps) {
   return (
-    <div className={cn("bg-white border border-slate-200 rounded-xl shadow-card", className)}>
+    <div className={cn("bg-card text-card-foreground border rounded-lg", className)}>
       {children}
     </div>
   );
@@ -21,12 +21,7 @@ export function CardHeader({
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "px-6 py-4 border-b border-slate-200 flex items-center justify-between",
-        className,
-      )}
-    >
+    <div className={cn("px-5 py-3.5 border-b flex items-center justify-between", className)}>
       {children}
     </div>
   );
@@ -39,5 +34,5 @@ export function CardBody({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={cn("p-6", className)}>{children}</div>;
+  return <div className={cn("p-5", className)}>{children}</div>;
 }

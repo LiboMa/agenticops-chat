@@ -14,7 +14,7 @@ const columns: Column<NotificationLog>[] = [
     key: "subject",
     header: "Subject",
     render: (r) => (
-      <span className="font-medium text-slate-900 max-w-xs truncate block">
+      <span className="font-medium text-foreground max-w-xs truncate block">
         {r.subject}
       </span>
     ),
@@ -23,14 +23,14 @@ const columns: Column<NotificationLog>[] = [
     key: "channel_name",
     header: "Channel",
     render: (r) => (
-      <span className="font-mono text-sm text-slate-600">{r.channel_name}</span>
+      <span className="font-mono text-sm text-muted-foreground">{r.channel_name}</span>
     ),
   },
   {
     key: "severity",
     header: "Severity",
     render: (r) => {
-      if (!r.severity) return <span className="text-slate-400">-</span>;
+      if (!r.severity) return <span className="text-muted-foreground">-</span>;
       const colors: Record<string, string> = {
         critical: "bg-red-100 text-red-700",
         high: "bg-orange-100 text-orange-700",
@@ -38,7 +38,7 @@ const columns: Column<NotificationLog>[] = [
         low: "bg-blue-100 text-blue-700",
       };
       return (
-        <Badge className={colors[r.severity] ?? "bg-slate-100 text-slate-700"}>
+        <Badge className={colors[r.severity] ?? "bg-secondary text-foreground"}>
           {r.severity}
         </Badge>
       );
@@ -60,7 +60,7 @@ const columns: Column<NotificationLog>[] = [
     sortable: true,
     sortValue: (r) => r.sent_at,
     render: (r) => (
-      <span className="text-sm text-slate-500">{formatShortDate(r.sent_at)}</span>
+      <span className="text-sm text-muted-foreground">{formatShortDate(r.sent_at)}</span>
     ),
   },
   {
@@ -70,7 +70,7 @@ const columns: Column<NotificationLog>[] = [
       r.error ? (
         <span className="text-sm text-red-600 max-w-xs truncate block">{r.error}</span>
       ) : (
-        <span className="text-slate-400">-</span>
+        <span className="text-muted-foreground">-</span>
       ),
   },
 ];
@@ -94,7 +94,7 @@ export default function NotificationLogs() {
         <div className="flex items-center gap-3">
           <Link
             to="/app/notifications"
-            className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 transition-colors"
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg
               className="h-4 w-4 mr-1"
@@ -111,7 +111,7 @@ export default function NotificationLogs() {
             </svg>
             Channels
           </Link>
-          <h2 className="text-lg font-semibold text-slate-900">Notification Logs</h2>
+          <h2 className="text-lg font-semibold text-foreground">Notification Logs</h2>
         </div>
         <div className="flex gap-2">
           <select
@@ -119,7 +119,7 @@ export default function NotificationLogs() {
             onChange={(e) =>
               setChannelFilter(e.target.value || undefined)
             }
-            className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="px-3 py-1.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Channels</option>
             {(channels ?? []).map((c) => (
@@ -131,7 +131,7 @@ export default function NotificationLogs() {
           <select
             value={statusFilter ?? ""}
             onChange={(e) => setStatusFilter(e.target.value || undefined)}
-            className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="px-3 py-1.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Statuses</option>
             <option value="sent">sent</option>

@@ -106,9 +106,10 @@ class ChatContext:
         """Get recent history."""
         return self.output_history[-count:]
 
-    def add_tokens(self, input_tokens: int = 0, output_tokens: int = 0):
+    def add_tokens(self, input_tokens: int = 0, output_tokens: int = 0,
+                   cache_read: int = 0, cache_write: int = 0, agent_name: str = "main"):
         """Add token usage."""
-        self.token_usage.add(input_tokens, output_tokens)
+        self.token_usage.add(input_tokens, output_tokens, cache_read, cache_write, agent_name)
 
     def get_token_summary(self) -> str:
         """Get token usage summary."""
