@@ -1,6 +1,8 @@
 # Next-Gen AgenticOps Design
 
-> **Date**: 2026-03-15 | **Status**: Draft | **Version**: v3 (final)
+> **Date**: 2026-03-15 | **Status**: Draft | **Version**: v4
+> **Vision**: [ClawOps Agent-First AIOps Architecture](/Users/malibo/Desktop/Work-AWS/AgenticOps/ClawOps_AgentFirst_AIOps_Architecture.md)
+> **Academic Basis**: eARCO (arXiv:2504.11505), OpsAgent (arXiv:2510.24145), AIOpsLab (arXiv:2501.06706), CCAR (arXiv:2603.08736)
 
 ---
 
@@ -10,31 +12,48 @@
 
 It is NOT a monitoring tool, NOT a data platform, NOT a script executor.
 
-```
-Uses platforms     -> consumes existing monitoring/APM/log systems, builds nothing
-Uses tools         -> Connectors + Skills + LLM writes its own queries
-Accumulates exp    -> KB (second brain) + System Prompt self-evolution
-Maintains exp      -> Human review for Ground Truth, experience improves over time
-Autonomous takeover -> receives tasks via IM/webhook, decides what to query and how to fix
-Self-repairs       -> RCA -> Fix -> Execute closed loop
-Self-iterates      -> every resolved issue makes the Agent smarter
-```
-
 Like a real SRE: gets alerts via Slack, opens Datadog/Prometheus/CloudTrail to investigate, figures out root cause, fixes it, writes a post-mortem. Except this SRE never sleeps, never forgets, and gets better with every incident.
 
 ---
 
-## 1. Problem Statement
+## 1. Agent-First Framework: Perceive -> Plan -> Act -> Decide -> Verify -> Learn
 
-AgenticOps 1.0.0 has a validated RCA -> Fix -> Execute closed loop (10/10 EKS scenarios). Three structural gaps remain:
+Aligned with ClawOps vision. No pre-built topology, no static graphs, no data warehousing. Agent investigates on-the-fly using experience + tools.
 
-1. **No service awareness** -- sees resources, not services. Limits blast radius analysis and RCA accuracy.
-2. **No change correlation** -- doesn't automatically answer "what changed recently?" during RCA.
-3. **Self-referential knowledge** -- Agent scores itself, writes its own KB cases, references its own cases. No Ground Truth. No learning from mistakes.
-
-And one foundational gap the v1 spec missed:
-
-4. **Static Agent intelligence** -- System Prompt never changes. An Agent that solved 1000 incidents reasons identically to one that solved 0. No wisdom accumulation at the prompt level.
+```
+Alert Arrives (via IM Channel / Webhook / CLI)
+    |
+[PERCEIVE] What do I know?
+    * Alert details (source, severity, affected resource)
+    * Memory recall: "Have I seen this pattern before?" (KB search)
+    * Service context: what service does this resource belong to? (DB query)
+    |
+[PLAN] What should I investigate?
+    * Prompt Optimization: Alert Classifier -> Strategy Selector -> Few-Shot Retriever
+    * Wisdom Roadmap: optimal investigation path for this pattern type
+    * If novel: LLM generates investigation plan from first principles
+    |
+[ACT] Execute investigation
+    * Uses Connectors to query external systems (CloudWatch, Datadog, CloudTrail, kubectl, ...)
+    * Each action produces Evidence with source-weighted confidence
+    * Agent decides next step based on findings -- no predefined sequence
+    |
+[DECIDE] Synthesize RCA
+    * Aggregate evidence chain with source weighting
+    * Apply confidence scoring (calibrated via human feedback history)
+    * Output: RCA + confidence + evidence chain + fix recommendation
+    |
+[VERIFY] Validate result (dual verification)
+    * PostActionValidator: automated T0-T3 observation windows
+    * Human Review: accuracy rating + corrections (Ground Truth)
+    * Independent self-check: reasoning quality verification
+    |
+[LEARN] Sediment knowledge
+    * Episodic Memory -> Procedural Memory -> Semantic Memory -> Skill
+    * Update Wisdom Roadmap investigation strategies
+    * Update Skill if gap detected (SkillGapDetector)
+    * Penalize wrong knowledge, reinforce correct knowledge
+```
 
 ---
 
@@ -42,232 +61,225 @@ And one foundational gap the v1 spec missed:
 
 ```
 +-----------------------------------------------------------+
-|                 Agent Cognitive System                      |
+|              Agent Cognitive System                         |
 |                                                            |
-|  System Prompt (self-evolving)                             |
-|    Base role + Wisdom Roadmap (auto-updated from exp)      |
-|    "For X-type issues, optimal path is A->B->C"           |
-|    "Y approach failed last time, try Z first"             |
+|  Prompt Optimization Engine (eARCO-inspired)               |
+|    Alert Classifier -> Strategy Selector ->                |
+|    Few-Shot Retriever -> Prompt Assembler                  |
 |                                                            |
-|  Knowledge Base (second brain, only persistent store)      |
-|    Verified cases + Service model + SOPs + Human feedback  |
-|                                                            |
-|  Skills (domain frameworks, scaffolding)                   |
-|    Gradually internalized as KB accumulates                |
+|  Four-Layer Memory                                         |
+|    Episodic: what happened, when, what we did              |
+|    Procedural: how to investigate this type (Wisdom)       |
+|    Semantic: generalized patterns (ALB 5xx = target group) |
+|    Skill: reusable investigation templates                 |
 |                                                            |
 |  LLM (reasoning engine)                                   |
 |    Writes queries, analyzes data, makes judgments          |
 |                                                            |
 +-----------------------------------------------------------+
-|                 Agent Action Capabilities                   |
+|              Agent Action Capabilities                      |
 |                                                            |
 |  Connectors (credentials + endpoints)                      |
-|    Admin configures system access: Datadog, Prometheus,    |
-|    CloudWatch, ELK, CloudTrail, K8s, AWS CLI, SSH, ...    |
-|    Agent decides what to query, when, and how              |
-|    No predefined query templates -- Agent explores freely  |
+|    Admin configures access. Agent decides what to query.   |
+|    No predefined templates -- Agent explores freely.       |
 |                                                            |
 |  Tools (execution)                                         |
 |    AWS CLI, kubectl, SSH, API calls, Code Interpreter      |
-|    Agent writes its own commands and queries               |
 |                                                            |
 +-----------------------------------------------------------+
-|                 Message Intake                              |
+|              Verification Layer                             |
+|                                                            |
+|  PostActionValidator (automated, T0-T3 windows)            |
+|  Human Review (Ground Truth, confidence calibration)       |
+|  Self-Verification (independent reasoning quality check)   |
+|                                                            |
++-----------------------------------------------------------+
+|              Message Intake                                 |
 |                                                            |
 |  IM Channel (Slack/Feishu) + Webhook + CLI + Web           |
 |                                                            |
 +-----------------------------------------------------------+
-|                 Learning Loop                               |
-|                                                            |
-|  Human review -> feedback -> KB update ->                  |
-|    System Prompt evolution                                 |
-|  Every resolved issue = Agent gets smarter                 |
-|                                                            |
-+-----------------------------------------------------------+
 ```
 
-### What AgenticOps stores vs. what it does NOT store
+### Storage Model
 
 ```
-KB (second brain, vector store) stores:
-  - Verified RCA cases (human-reviewed, with Ground Truth tags)
+Vector KB (second brain) stores:
+  - Verified RCA cases (human-reviewed, Ground Truth tagged)
   - SOPs (validated standard procedures)
-  - Wisdom Roadmap entries (distilled investigation strategies per issue type)
+  - Wisdom Roadmap entries (investigation strategies per pattern)
+  - Semantic memory (generalized patterns)
 
 DB (structured storage, SQLite/PG) stores:
   - HealthIssue, FixPlan, Report (workflow state)
-  - ReviewFeedback (review records)
-  - Service model (structured: Service, ServiceResource, ServiceDependency tables)
-  - Wisdom Roadmap index (pattern -> entry mapping, for retrieval)
-  - Confidence calibration data
-  - Human feedback records
-
-Note: Service model needs relational queries ("which services share this Redis?",
-"what are payment-service's dependencies?"). These are exact-match structural queries,
-not semantic search -- vector KB is the wrong tool. Service model lives in DB as
-structured tables, queried via SQL. This is still "Agent's memory", just stored
-in the appropriate format for the data type.
+  - Service model (Service, ServiceResource, ServiceDependency)
+  - ReviewFeedback, CalibrationBin (Ground Truth data)
+  - Skill registry (lifecycle state, usage metrics, validation results)
+  - Wisdom Roadmap index (pattern classification + retrieval)
 
 AgenticOps does NOT store:
-  - Metrics (live in CloudWatch/Datadog/Prometheus)
-  - Logs (live in CloudWatch Logs/ELK/Datadog)
-  - Change events (live in CloudTrail/K8s/CI-CD)
-  - Alert history (live in PagerDuty/AlertManager)
-  - APM traces (live in Jaeger/X-Ray/Datadog)
+  - Metrics, logs, traces, change events, alert history
   - Any raw data from external systems
-
-Need data? Agent uses Connectors to fetch it on demand.
-Done analyzing? Conclusions go to KB. Raw data is discarded.
+  Need data? Connectors fetch on demand. Conclusions go to KB. Raw data discarded.
 ```
 
 ---
 
-## 3. System Prompt Self-Evolution (Wisdom Roadmap)
+## 3. Prompt Optimization Engine
 
-This is the core differentiator. Every other AIOps tool has static logic. AgenticOps gets smarter with every incident.
+Based on eARCO (Microsoft, arXiv:2504.11505): prompt optimization > RAG > fine-tuning, with 21% accuracy improvement on 180K+ real incidents.
 
-### 3.1 Mechanism
-
-After each resolved incident (with human review), the system distills the investigation path into a Wisdom Roadmap entry:
+### 3.1 Components
 
 ```
-Trigger: HealthIssue resolved + ReviewFeedback submitted (verdict: accurate or partial)
-
-Distillation process:
-  Input:
-    - RCA result (what was the root cause)
-    - Investigation path (what did Agent query, in what order)
-    - Fix plan (what worked)
-    - Human feedback (corrections, additional notes)
-    - Time spent (where did Agent waste time)
-
-  Output: Wisdom Roadmap entry
-    {
-      issue_pattern: "cache_memory_exhaustion"
-      service_tier: "critical"
-      optimal_investigation_path: [
-        "1. Check recent deployments (change correlation - highest signal)",
-        "2. Check key patterns and TTL configuration",
-        "3. Check connection pool changes",
-        "4. Check traffic volume trends"
-      ]
-      known_pitfalls: [
-        "Do NOT restart Redis before checking if shared with other services",
-        "Memory spike after deployment usually means missing TTL, not traffic"
-      ]
-      effective_fix_patterns: [
-        "Set TTL on new key patterns",
-        "Rollback deployment if TTL fix insufficient"
-      ]
-      ineffective_approaches: [
-        "Scaling Redis memory without fixing root cause (recurs within hours)"
-      ]
-      confidence: 0.82 (calibrated)
-      case_references: ["case-42", "case-67", "case-103"]
-      last_updated: "2026-04-15"
-    }
++-----------------------------------------+
+|       Prompt Optimization Engine         |
++-----------------------------------------+
+|                                          |
+|  [Alert Classifier]                      |
+|    Alert -> Category                     |
+|    (cache/network/compute/database/      |
+|     security/storage/deployment/...)     |
+|                                          |
+|  [Strategy Selector]                     |
+|    Category -> Best Investigation Plan   |
+|    Learned from historical success rate  |
+|    Source: Wisdom Roadmap entries         |
+|                                          |
+|  [Few-Shot Retriever]                    |
+|    Category -> Top-K similar past cases  |
+|    Via KB vector search (episodic memory)|
+|                                          |
+|  [Prompt Assembler]                      |
+|    Strategy + Few-Shot + Service Context  |
+|    + Alert Details -> Optimized Prompt   |
+|    Hard budget: 3000 tokens max          |
+|                                          |
++-----------------------------------------+
 ```
 
-### 3.2 Issue Pattern Classification
+### 3.2 Before vs After
 
-Wisdom Roadmap entries are keyed by `issue_pattern`. Classification mechanism:
+```
+Before (hand-written prompt, current):
+  "You are an AIOps expert. Analyze this alert and find the root cause."
+  -> Agent wanders, checks random metrics, slow
+
+After (optimized prompt):
+  "ALB 5xx alert on payment-service (critical tier, ECS x3 + Redis + RDS).
+   Historical: 85% of similar alerts -> deployment-related.
+   Recommended: 1) CloudTrail recent deploys 2) ECS task state 3) Redis connection
+   Evidence from 3 similar past incidents attached.
+   Shared resources: Redis shared with order-service -- check cascade."
+  -> Agent investigates efficiently with direction
+```
+
+### 3.3 Alert Classification -> Pattern Matching
 
 ```
 When a new HealthIssue arrives:
-  1. LLM generates a candidate pattern label from the alert content
-     (e.g., "Redis memory alert on payment-service" -> "cache_memory_exhaustion")
-  2. Embedding similarity search against existing Wisdom entry patterns
-     - Match found (cosine > 0.85): reuse existing pattern
-     - No match: create new pattern label
-  3. Pattern stored on the HealthIssue record for downstream use
+  1. LLM classifies alert into category + generates candidate pattern label
+     (e.g., "Redis memory alert" -> category: cache, pattern: cache_memory_exhaustion)
+  2. Embedding similarity search against existing Wisdom patterns
+     - Match (cosine > 0.85): reuse existing pattern + strategy
+     - No match: new pattern, LLM generates investigation plan from first principles
+  3. Pattern stored on HealthIssue for downstream retrieval + learning
 
-Deduplication:
-  - Similar patterns flagged during human review
-    ("redis_oom" and "cache_memory_exhaustion" look like the same thing?)
-  - Human merges -> entries consolidated, references updated
-  - LLM-generated labels are free-form but converge via embedding similarity
+Deduplication: similar patterns flagged during human review, merged by human.
 ```
 
-### 3.3 How It Enters the System Prompt
-
-Agent System Prompt is dynamically composed with a **hard token budget**:
+### 3.4 Token Budget
 
 ```
-System Prompt = Base Role Definition (static, ~500 tokens)
-              + Service Model context (dynamic, from DB, ~300 tokens)
-              + Wisdom Roadmap entries (dynamic, TOP-K relevant, max 2000 tokens)
-              + Output Rules based on detail level (dynamic, ~200 tokens)
+System Prompt composition:
+  Base Role Definition          ~500 tokens  (static)
+  Service Model context         ~300 tokens  (from DB)
+  Wisdom / Strategy entries     ~1500 tokens (top-3 relevant, from KB)
+  Few-Shot examples             ~500 tokens  (top-1 similar case, from KB)
+  Output Rules                  ~200 tokens  (detail level)
+  ─────────────────────────────────────
+  Total budget:                 ~3000 tokens max
 
-Total system prompt budget: ~3000 tokens max
+Not all Wisdom entries injected. Top-K retrieval by pattern similarity.
 ```
-
-**Wisdom Roadmap retrieval**: NOT all entries injected. On each RCA invocation:
-  1. Classify incoming issue into pattern (Section 3.2)
-  2. Retrieve top-5 Wisdom entries by pattern similarity (embedding search)
-  3. Truncate to 2000 token budget (typically 3-5 entries)
-  4. Entries not retrieved are NOT in the prompt -- they remain in storage for future retrieval
-
-When RCA Agent receives "Redis memory at 95% on payment-service":
-
-```
-System Prompt includes:
-  "You are an expert SRE agent...  [base role]
-
-   Service context:
-   payment-service (critical): ECS x3, Lambda x1, RDS x1, Redis x1 (shared), ALB x1
-   Dependencies: auth-service (upstream), order-service (downstream)
-   [from DB service model]
-
-   Wisdom for cache_memory_exhaustion issues (3 most relevant entries):
-   - Optimal path: check deployments first, then key patterns, then connection pool
-   - Known pitfall: do NOT restart Redis before confirming shared resource impact
-   - Previously effective: set TTL on new key patterns
-   - Previously ineffective: scaling memory without fixing root cause
-   [from Wisdom Roadmap, top-K retrieval]"
-```
-
-The Agent now starts its investigation with the OPTIMAL path, not a generic exploration.
-
-### 3.3 Evolution Over Time
-
-```
-Month 1 (0 resolved issues):
-  System Prompt = base role only
-  Agent behavior: generic investigation, explores broadly, slow
-
-Month 3 (50 resolved issues):
-  System Prompt = base role + 15 Wisdom Roadmap entries
-  Agent behavior: knows optimal paths for common issue types
-  RCA time: 40% faster for known patterns
-
-Month 6 (200 resolved issues):
-  System Prompt = base role + 40 Wisdom Roadmap entries covering most scenarios
-  Agent behavior: expert-level for known patterns, still explores for novel issues
-  RCA time: 60% faster for known patterns
-
-Month 12+:
-  Agent has internalized the equivalent of a senior SRE's years of experience
-  Skills become scaffolding that's rarely needed (KB has richer, env-specific knowledge)
-  Novel issues are rare; when they occur, the resolution enriches the Wisdom Roadmap
-```
-
-### 3.4 Wisdom Roadmap Maintenance
-
-Entries are NOT append-only. They evolve:
-
-- New case confirms existing entry -> confidence UP, case reference added
-- New case contradicts entry -> entry flagged for human review
-- Human corrects entry -> entry updated, confidence recalculated
-- Entry not referenced for 6 months -> marked stale, deprioritized in prompt injection
-- Conflicting entries for same pattern -> surfaced to human for resolution
 
 ---
 
-## 4. Connectors: Credentials + Endpoints
+## 4. Four-Layer Memory System
 
-### 4.1 Design
+Aligned with ClawOps knowledge sediment architecture. Knowledge evolves from raw to refined:
 
-Admin provides a "notebook" -- credentials and endpoints for each system AgenticOps can access. Agent decides autonomously what to query and when.
+```
+Every RCA produces:
+    |
+[Episodic Memory] "What happened, when, what we did"
+    | (immediate, after each incident)
+    v
+[Procedural Memory] "How to investigate this type of alert"
+    | (after multiple similar incidents -- becomes Wisdom Roadmap entry)
+    v
+[Semantic Memory] "ALB 5xx is usually caused by target group health failure"
+    | (pattern crystallizes across many incidents)
+    v
+[Skill] Reusable investigation + remediation template
+    | (after validation)
+    v
+[SOP] Formal operational procedure (human-verified)
+```
+
+### 4.1 Storage Mapping
+
+| Memory Type | What It Stores | Where | Retrieval |
+|------------|---------------|-------|-----------|
+| **Episodic** | Individual case records (symptoms, evidence, RCA, fix) | Vector KB | Embedding similarity (alert text) |
+| **Procedural** | Investigation strategies per pattern (Wisdom Roadmap) | Vector KB + DB index | Pattern classification -> top-K |
+| **Semantic** | Generalized rules ("cache OOM after deploy = usually TTL") | Vector KB | Embedding similarity |
+| **Skill** | Reusable templates with lifecycle (see Section 7) | Skills directory + DB registry | Skill matching by category |
+
+### 4.2 Confidence Decay
+
+Knowledge that sits unused decays. Knowledge that gets confirmed strengthens.
+
+```
+confidence = base_confidence * 0.99^age_days * (1 + 0.1 * min(recall_count, 10))
+
+- Used often + confirmed: stays high
+- Unused for months: slowly decays
+- Wrong (human-rejected): actively penalized (base_confidence set to 0)
+```
+
+---
+
+## 5. Evidence-Weighted Confidence
+
+Not all evidence is equally trustworthy. Different data sources get different weights:
+
+```
+Evidence Source Weights:
+  CloudTrail change correlation    0.95  (direct causal: "this was changed 5 min ago")
+  APM trace showing error path     0.90  (direct observation)
+  Deployment timestamp match       0.85  (strong correlation)
+  CloudWatch metric anomaly        0.80  (statistical, could be coincidence)
+  Log error pattern match          0.75  (symptomatic, not causal)
+  SG/Network rule analysis         0.70  (structural, needs validation)
+  KB similar case match            0.50  (analogical, may not apply)
+  LLM reasoning without evidence   0.30  (pure inference)
+
+RCA confidence = weighted average of evidence chain
+  Each evidence item: {source, weight, finding, relevant: bool}
+  Final confidence = sum(weight_i * relevant_i) / sum(weight_i)
+  Then calibrated via human feedback bins (Section 8.5)
+```
+
+This means: RCA backed by CloudTrail change + deployment match = high confidence. RCA based purely on "similar to past case" = lower confidence, flagged for human review.
+
+---
+
+## 6. Connectors: Credentials + Endpoints
+
+### 6.1 Design
+
+Admin provides credentials and endpoints. Agent decides what to query.
 
 ```yaml
 # config/connectors.yaml (gitignored, admin-managed)
@@ -275,212 +287,162 @@ connectors:
   aws:
     role_arn: "arn:aws:iam::123456789:role/aiops-role"
     regions: ["us-east-1", "ap-southeast-1"]
-
   datadog:
     api_key: "${DATADOG_API_KEY}"
     app_key: "${DATADOG_APP_KEY}"
     site: "datadoghq.com"
-
   prometheus:
     endpoint: "http://prometheus.monitoring:9090"
-
   elasticsearch:
     endpoint: "https://es.internal:9200"
     username: "${ES_USER}"
     password: "${ES_PASS}"
-
   kubernetes:
     kubeconfig: "/path/to/kubeconfig"
     contexts: ["prod-cluster", "staging-cluster"]
-
   github:
     token: "${GITHUB_TOKEN}"
     repos: ["org/payment-service", "org/order-service"]
-
   pagerduty:
     api_key: "${PAGERDUTY_API_KEY}"
 ```
 
-### 4.2 Agent Behavior
+### 6.2 Agent Behavior
 
-Agent does NOT follow predefined query sequences. It reasons about what data it needs:
+Agent does NOT follow predefined query sequences. Each step is an autonomous decision:
 
 ```
-Agent receives: "payment-service Redis memory 95%"
-
-Agent thinks:
-  "I need to understand what changed recently and what the memory trend looks like."
-
-  -> Check Wisdom Roadmap: "For cache memory issues, check deployments first"
-  -> Uses aws connector: CloudTrail lookup for recent changes to Redis + ECS
-  -> Uses kubernetes connector: kubectl rollout history for payment deployments
-  -> Uses datadog connector (if configured): Redis memory trend over 24h
-
-  "CloudTrail shows a deployment 30 min ago. Let me check what changed."
-
-  -> Uses github connector: recent commits on payment-service repo
-  -> Found: new cache logic without TTL
-
-  "Root cause identified. Now I need to verify blast radius."
-
-  -> Uses KB: payment-service service model shows Redis is shared with order-service
-  -> Uses datadog connector: order-service error rate (checking for cascade)
-
-Each step is Agent's autonomous decision. Different incidents = different query paths.
+Agent receives alert -> checks Wisdom Roadmap for strategy
+  -> uses aws connector: CloudTrail for recent changes
+  -> uses datadog connector: metric trends
+  -> uses github connector: recent commits
+  -> each finding shapes the next query
+  Different incidents = different query paths
 ```
 
-### 4.3 No Connector Configured?
+No connector configured? Agent works with what it has. Adapts to available data sources.
 
-Agent works with what it has. No Datadog? Skip APM data, rely on CloudWatch. No GitHub? Skip commit history, rely on CloudTrail. The investigation adapts to available data sources -- just like a real SRE who doesn't have access to every tool.
+### 6.3 Guardrails
 
-### 4.4 Guardrails
-
-Agent has broad query access but needs boundaries:
-
-- **Rate limiting**: Max queries per connector per minute (configurable, e.g., Datadog: 30/min). Prevents runaway agents from hammering external APIs.
-- **Cost awareness**: Connectors with per-query costs (some APM APIs) can be flagged. Agent informed: "Datadog query costs apply -- use judiciously."
-- **Credential scoping**: Connectors are read-only by default. Write access (for fix execution) goes through existing L0-L3 security classification, not through Connectors.
-- **Existing AWS integration**: The current AWS auth system (get_active_account, assume_role, run_aws_cli_readonly) becomes the "aws" Connector implementation. Not replaced -- wrapped in the Connector interface for consistency.
+- **Rate limiting**: configurable per connector (e.g., Datadog: 30/min)
+- **Cost awareness**: connectors with per-query costs flagged to Agent
+- **Credential scoping**: connectors are read-only. Write access via existing L0-L3 classification.
+- **Existing AWS integration**: current get_active_account / assume_role / run_aws_cli_readonly becomes the "aws" connector implementation -- wrapped, not replaced.
 
 ---
 
-## 5. Service Model
+## 7. Self-Evolving Skills Lifecycle
 
-### 5.1 Structured Storage in DB
+Aligned with ClawOps SkillGapDetector + SOPAutoWriter + OpsAgent dual self-evolution.
 
-Service model requires relational queries ("which services share this Redis?", "what depends on payment-service?"). These are exact-match structural queries -- vector KB is the wrong tool. Service model lives in DB as structured tables.
-
-```
-Service (DB table)
-  id: int (PK)
-  name: str                    # "payment-service"
-  tier: "critical" | "standard" | "internal"
-  owner: str                   # "fintech-team"
-  status: "inferred" | "confirmed"
-  notes: text                  # Free-text operational notes
-  created_at: datetime
-  updated_at: datetime
-
-ServiceResource (DB table, many-to-many)
-  id: int (PK)
-  service_id: int (FK -> Service)
-  resource_id: int (FK -> AWSResource)
-  role: str                    # "api" | "datastore" | "cache" | "ingress" | ...
-  is_shared: bool              # True if resource belongs to multiple services
-  is_primary: bool             # For shared resources: primary owner
-
-ServiceDependency (DB table)
-  id: int (PK)
-  source_service_id: int (FK -> Service)
-  target_service_id: int (FK -> Service)
-  type: str                    # "upstream" | "downstream" | "async" | "shared_resource"
-  evidence: str                # "datadog_apm" | "sg_rule" | "human"
-  status: "inferred" | "confirmed"
-```
-
-Example:
+### 7.1 Lifecycle
 
 ```
-payment-service (critical, confirmed):
-  Resources:
-    - ECS: payment-api (x3 tasks, role: api)
-    - Lambda: payment-webhook (role: webhook-handler)
-    - RDS: pay-master-db (role: primary-datastore)
-    - ElastiCache: shared-redis (role: cache, SHARED with order-service)
-    - ALB: payment-api-lb (role: ingress)
-    - SQS: payment-queue (role: async-queue)
-  Dependencies:
-    - upstream: auth-service (evidence: Datadog APM)
-    - downstream: order-service (evidence: SG rules + API calls)
-    - shared: order-service via shared-redis
-  Notes:
-    - "Redis is shared -- do NOT restart without checking order-service impact"
-    - "payment-api deploys via CodePipeline, typically Tuesday/Thursday"
+[DETECT] SkillGapDetector
+    After RCA: "We don't have a skill for RDS connection timeout"
+        |
+[GENERATE] SOPAutoWriter
+    Draft skill: investigation steps + expected evidence + remediation
+        |
+[VALIDATE] Sandbox Replay (Phase 2+)
+    Inject similar fault scenario -> does skill produce correct RCA?
+    Reference: AIOpsLab (arXiv:2501.06706)
+        |
+[DEPLOY] Promoted to production
+    Available for Prompt Optimization retrieval
+        |
+[MONITOR] Usage Tracking
+    Success rate, time-to-RCA, false positive rate
+        |
+[EVOLVE] Periodic Reflection
+    Merge similar skills, retire stale ones, generalize patterns
+    "ECS OOM Kill" skill -> generalize to "Container Memory Exhaustion"
+    Reference: OpsAgent dual self-evolution (arXiv:2510.24145)
 ```
 
-Note: operational notes like "do NOT restart Redis before checking impact" are also valuable as Wisdom Roadmap entries (stored in vector KB for semantic retrieval during RCA). The DB stores the structured model; the KB stores the experiential knowledge ABOUT those services.
+### 7.2 Skill Types
 
-### 5.2 How Service Model Gets Built
+| Type | Examples | Lifecycle | Replaced by KB? |
+|------|---------|-----------|:---:|
+| **Domain frameworks** | kubernetes-admin, database-admin, network-engineer | DETECT->GENERATE->VALIDATE->DEPLOY->EVOLVE | Yes, gradually |
+| **Execution tools** | run_on_host, run_kubectl, aws_cli | Permanent infrastructure | No |
+| **Connector adapters** | datadog-connector, prometheus-connector | Permanent infrastructure | No |
+| **Security classification** | command risk L0-L3, sensitive file blacklist | Permanent infrastructure | No |
+| **Auto-generated** | "RDS connection timeout investigation" | Full lifecycle with validation | Absorbed into KB |
 
-Not through EventBridge daemons or graph databases. Through normal Agent operation:
+### 7.3 Skill Expiration + Refresh
 
-```
-Scenario 1: Admin tells Agent
-  Admin: "payment-service consists of these resources: [list]"
-  Agent: stores in KB, status=confirmed
-
-Scenario 2: Agent discovers during investigation
-  During RCA, Agent queries tags + SG rules + APM
-  Agent: "I've identified that pay-redis-01, payment-api ECS, and pay-master-db
-          appear to form a service. Should I save this as payment-service?"
-  Human: "Yes, also add the Lambda and SQS"
-  Agent: stores in KB, status=confirmed
-
-Scenario 3: Agent infers during scan
-  Scan Agent notices resources with matching tags/naming patterns
-  Agent: proposes service grouping in chat or IM
-  Human confirms or corrects -> stored in KB
-
-No background daemons. No event listeners. Normal Agent workflow.
-```
-
-### 5.3 Service Model Freshness
-
-Service model in KB may become stale (resources added/removed). Resolution:
-
-- During each RCA, Agent verifies current resource state against KB model
-- If mismatch found: Agent updates KB and notes the change
-- Periodic scan (existing Schedule system) can trigger service model refresh
-- Human can update service model via chat at any time
-
-No TTL mechanics needed. Agent naturally refreshes during normal operation.
+- Infrastructure changes (detected during investigation) -> mark related skills for re-validation
+- Skills not used for 6 months -> marked stale, deprioritized
+- Human can retire/update skills via chat
+- Confidence decay applies: `0.99^age_days * (1 + 0.1 * recall_count)`
 
 ---
 
-## 6. Human Review & Ground Truth
+## 8. Dual Verification: Automated + Human
 
-### 6.1 Three Review Points
+The ClawOps PostActionValidator (automated) + our Human Review (Ground Truth) work together:
+
+### 8.1 PostActionValidator (Automated, Immediate)
+
+After fix execution, automated observation windows:
+
+```
+T0 (30s):   Immediate check -- did the command succeed?
+T1 (2min):  Short-term -- is the target metric improving?
+T2 (5min):  Medium-term -- has the alert cleared?
+T3 (15min): Stabilization -- no new related alerts?
+
+Verdicts:
+  SUCCESS:          All checks pass through T3
+  PARTIAL_SUCCESS:  Metric improved (>20%) but alert not cleared
+  FAILED:           Metric unchanged or worsened
+  UNCERTAIN:        Insufficient signal (noisy metrics)
+```
+
+PARTIAL_SUCCESS innovation (from ClawOps): don't punish knowledge when fix partially works. Mark as "needs companion fix" instead.
+
+### 8.2 Human Review (Ground Truth, 24h+)
+
+Automated verification catches "did the metric recover?" but can't answer "did we fix the right thing?" Only humans can provide Ground Truth.
+
+Three review points:
 
 | Review Point | Trigger | Human Action | System Benefit |
 |-------------|---------|-------------|----------------|
-| **RCA Review** | After RCA completes | Accurate / Partial / Inaccurate + notes | Calibrate confidence, enrich Wisdom Roadmap |
-| **Fix Effectiveness** | 24h after execution | Resolved / Mitigated / Unresolved | Validate SOP quality, adjust KB weight |
-| **Service Model** | After Agent proposes grouping | Confirm / Correct | Improve service knowledge accuracy |
+| **RCA Review** | After RCA completes | Accurate / Partial / Inaccurate + notes | Calibrate confidence, enrich Wisdom |
+| **Fix Effectiveness** | 24h after execution (auto-push via Schedule) | Resolved / Mitigated / Unresolved | Validate SOP quality, adjust KB weight |
+| **Service Model** | After Agent proposes grouping | Confirm / Correct | Improve service knowledge |
 
-### 6.2 Review UI
-
-Minimal interaction. One click = one Ground Truth data point.
-
-**RCA Review Card** (Health Issue detail page):
+Review UI: minimal interaction. One click = one Ground Truth data point.
 
 ```
 +---------------------------------------------------+
 |  RCA Review                              I#42      |
 |---------------------------------------------------|
-|  Agent root cause: "payment-api v24 cache logic    |
-|  without TTL caused Redis memory exhaustion"       |
+|  Root cause: "payment-api v24 cache without TTL"   |
 |  Confidence: 0.85 (calibrated: 0.73)               |
+|  Evidence: CloudTrail[0.95] + Deployment[0.85]     |
+|  PostAction: SUCCESS (T3 passed)                   |
 |                                                    |
 |  [Accurate]  [Partially Accurate]  [Inaccurate]   |
 |  Notes: [optional free text]                       |
-|  Rating: 1-5 stars                                 |
 +---------------------------------------------------+
 ```
 
-**Fix Effectiveness** (24h after execution, pushed via Schedule):
+### 8.3 Self-Verification (Reasoning Quality Check)
 
-```
-+---------------------------------------------------+
-|  Fix Effectiveness                  Fix Plan #7    |
-|---------------------------------------------------|
-|  Action: Set TTL=3600s for promo:* keys            |
-|  24h status: No recurrence                         |
-|                                                    |
-|  [Resolved]  [Mitigated]  [Not resolved/Recurred] |
-+---------------------------------------------------+
-```
+Inspired by Voyager CriticAgent pattern and arXiv:2601.22208 (16 reasoning failure types):
 
-### 6.3 Feedback Data Model
+Before outputting RCA, Agent performs independent self-check:
+- Is the evidence chain logically consistent?
+- Am I making a multi-hop reasoning error? (hardest failure type per paper)
+- Does the root cause explain ALL symptoms, not just some?
+- Would this root cause also explain the timing of the alert?
+
+If self-check fails -> Agent re-investigates or flags low confidence.
+
+### 8.4 Feedback Data Model
 
 ```
 ReviewFeedback
@@ -489,233 +451,254 @@ ReviewFeedback
   health_issue_id: int (FK, nullable)
   fix_plan_id: int (FK, nullable)
   rca_result_id: int (FK, nullable)
-  verdict: str                 # "accurate" | "partial" | "inaccurate" | "resolved" | "mitigated" | "unresolved"
+  verdict: str                 # "accurate"|"partial"|"inaccurate"|"resolved"|"mitigated"|"unresolved"
   rating: int                  # 1-5
   notes: str (nullable)
   corrected_root_cause: str (nullable)
   reviewer: str
   created_at: datetime
+
+PostActionResult
+  id: int (PK)
+  fix_plan_id: int (FK)
+  health_issue_id: int (FK)
+  t0_result: str               # "pass" | "fail"
+  t1_result: str
+  t2_result: str
+  t3_result: str
+  verdict: str                 # "success" | "partial_success" | "failed" | "uncertain"
+  metric_improvement: float    # % improvement observed
+  created_at: datetime
 ```
 
-### 6.4 Feedback -> KB -> Wisdom Roadmap Flow
+### 8.5 Confidence Calibration
+
+Two-layer calibration: evidence-weighted (Section 5) + human-calibrated.
 
 ```
-Human submits review
-  |
-  +-- RCA accurate + fix resolved
-  |     -> KB case: verified, weight UP
-  |     -> Wisdom Roadmap: reinforce investigation path, confidence UP
-  |     -> System Prompt: next similar issue uses this optimal path
-  |
-  +-- RCA accurate + fix unresolved
-  |     -> KB: root cause kept, fix tagged ineffective
-  |     -> Wisdom Roadmap: add to ineffective_approaches
-  |     -> System Prompt: "this fix didn't work for this pattern"
-  |
-  +-- RCA inaccurate
-  |     -> KB: case tagged rejected, weight = 0
-  |     -> If human provides real root cause: new verified case created
-  |     -> Wisdom Roadmap: investigation path flagged as misleading
-  |     -> Confidence calibration adjusted downward
-  |
-  +-- Service model correction
-        -> KB: service model updated, status = confirmed
-```
+Layer 1: Evidence-weighted confidence (per RCA)
+  Based on source weights of evidence chain
 
-### 6.5 Confidence Calibration
-
-Simple bin-based, incrementally updated:
-
-```
-On each RCA review:
-  1. Agent raw confidence -> determine bin (0.9-1.0, 0.7-0.9, 0.5-0.7, <0.5)
-  2. Update bin: accuracy = (accurate + partial*0.5) / total
-  3. Calibrated confidence = bin accuracy
-  4. Segment by issue category once 30+ samples per segment
+Layer 2: Human-calibrated (historical accuracy)
+  Bin-based: 0.9-1.0, 0.7-0.9, 0.5-0.7, <0.5
+  Updated incrementally on each human review
+  Segmented by issue category once 30+ samples per segment
 
 Display: "Confidence: 0.85 (calibrated: 0.73)"
 Calibrated < 0.5 -> auto-flag "human review recommended"
 ```
 
-### 6.6 Cold Start
+### 8.6 Combined Verification Flow
 
 ```
-0-50 reviews:   All results pushed for review. No calibration. Equal KB weight.
-50-200 reviews: Global calibration active. Verified cases 2x weight.
-200+ reviews:   Segmented calibration. Exception-only review mode.
-```
-
----
-
-## 7. Skills: Scaffolding That Gets Internalized
-
-### 7.1 Repositioned Role
-
-Skills are NOT query template libraries. They are domain decision frameworks that provide scaffolding while KB is still sparse.
-
-```
-Skills provide:                    KB eventually provides:
-  "For Redis issues, consider       "In OUR environment, Redis issues
-   these 5 investigation angles"     are 80% caused by deployments,
-                                     check CodePipeline first"
-
-  Generic framework                  Environment-specific wisdom
-  (static, may become stale)         (dynamic, always current)
-```
-
-As KB accumulates verified cases and Wisdom Roadmap entries, Skills become less critical. The Agent's investigation strategy comes from internalized experience, not external templates.
-
-### 7.2 Skills That Remain Valuable Long-Term
-
-Some Skills provide capabilities, not just knowledge:
-
-- **Execution Skills**: run_on_host (SSH/SSM), run_kubectl -- these are TOOLS, always needed
-- **Connector Skills**: how to authenticate and query specific systems -- always needed
-- **Security classification**: command risk assessment (L0-L3) -- always needed
-
-These don't get replaced by KB. They're permanent infrastructure.
-
-### 7.3 Skills Self-Evolution Path
-
-```
-Month 1: 10 hand-written Skills (current state)
-Month 3: KB has 50 verified cases. Agent starts preferring KB over generic Skills.
-Month 6: Agent proposes Skill updates based on accumulated experience.
-         "The kubernetes-admin Skill says to check node status first for Pod issues.
-          But in our environment, 90% of Pod issues are image-related.
-          Should I update the investigation priority?"
-Month 12: Most generic Skills are superseded by rich, environment-specific KB.
-          Only execution/connector/security Skills remain essential.
+Fix executed
+  |
+  +-> PostActionValidator (automated, T0-T3)
+  |     -> SUCCESS: auto-resolve, push 24h human review
+  |     -> PARTIAL_SUCCESS: keep open, notify, push human review
+  |     -> FAILED: auto-rollback, flag for re-investigation
+  |     -> UNCERTAIN: keep open, push human review
+  |
+  +-> Human Review (24h later)
+  |     -> Accurate + Resolved: KB verified, Wisdom reinforced
+  |     -> Accurate + Unresolved: fix tagged ineffective
+  |     -> Inaccurate: KB rejected, Wisdom flagged
+  |
+  +-> Knowledge Sediment
+        -> Episodic -> Procedural -> Semantic -> Skill -> SOP
+        -> Confidence calibration updated
+        -> Skill lifecycle: detect gaps, generate, validate, deploy
 ```
 
 ---
 
-## 8. End-to-End Scenario
+## 9. Service Model
+
+### 9.1 Structured Storage in DB
+
+Service model needs relational queries. Lives in DB, not vector KB.
+
+```
+Service (DB table)
+  id, name, tier, owner, status (inferred|confirmed), notes, timestamps
+
+ServiceResource (DB table, many-to-many)
+  id, service_id (FK), resource_id (FK), role, is_shared, is_primary
+
+ServiceDependency (DB table)
+  id, source_service_id (FK), target_service_id (FK), type, evidence, status
+```
+
+### 9.2 How It Gets Built
+
+Through normal Agent operation, not daemons:
+
+- **Admin tells Agent**: "payment-service = [resource list]" -> stored, confirmed
+- **Agent discovers during RCA**: queries tags + SG + APM, proposes grouping, human confirms
+- **Agent infers during scan**: matching tags/naming -> proposes in chat, human confirms
+
+### 9.3 Freshness
+
+- During each RCA, Agent verifies current state against stored model
+- Mismatch found -> Agent updates and notes the change
+- Periodic scan can trigger refresh
+- No TTL mechanics -- Agent naturally refreshes during operation
+
+---
+
+## 10. End-to-End Scenario
 
 ```
 [10:35] Slack #ops-alerts: "FIRING: payment-api HealthCheckFailures"
 
-Agent reads message from IM channel.
+[PERCEIVE]
+  Agent reads IM. Alert classified: category=cache, pattern=cache_memory_exhaustion
+  Memory recall: 3 similar past cases found in KB
+  Service context: payment-service (critical), Redis shared with order-service
 
-REASONING (System Prompt includes Wisdom Roadmap):
-  "Cache/service issues: check deployments first (from Wisdom Roadmap)"
+[PLAN] (Prompt Optimization Engine)
+  Strategy from Wisdom: "check deployments first" (85% historical success)
+  Few-shot: case-42 attached as reference (similar Redis OOM after deploy)
+  Optimized prompt assembled (2800 tokens)
 
-INVESTIGATION (Agent decides autonomously):
-  -> KB query: payment-service model
-     Result: ECS x3, Lambda x1, RDS x1, Redis x1 (shared with order-service), ALB x1
-  -> aws connector: CloudTrail recent write events for payment-service resources
-     Result: CodePipeline deployed payment-api v24 at 10:30
-  -> kubernetes connector: kubectl rollout history
-     Result: confirms v24 deployment
-  -> datadog connector: Redis memory trend
-     Result: memory spike started exactly at 10:30
+[ACT]
+  -> aws connector: CloudTrail -> CodePipeline deployed v24 at 10:30 [evidence: 0.95]
+  -> kubernetes connector: rollout history confirms v24 [evidence: 0.85]
+  -> datadog connector: Redis memory spike at exactly 10:30 [evidence: 0.80]
+  -> github connector: v24 diff shows promo:* cache logic, no TTL [evidence: 0.90]
+  -> KB: Redis shared with order-service [context]
+  -> datadog connector: order-service error rate 2% (up from 0.1%) [evidence: 0.80]
 
-  "Root cause clear: v24 deployment. Let me check what changed in the code."
+[DECIDE]
+  RCA: "payment-api v24 introduced promo:* keys without TTL, exhausting Redis memory.
+        Cascade: order-service impacted via shared Redis."
+  Evidence-weighted confidence: 0.88
+  Calibrated confidence: 0.76
+  Fix: Rollback to v23 or set TTL on promo:* keys
 
-  -> github connector: diff for payment-api v23..v24
-     Result: new promo cache logic, Redis key prefix promo:*, no TTL set
+[VERIFY]
+  Fix executed (L1: kubectl + redis-cli, auto-approved)
+  PostActionValidator:
+    T0 (30s): command succeeded
+    T1 (2min): Redis memory dropping
+    T2 (5min): payment-api healthcheck passing
+    T3 (15min): no new alerts -> SUCCESS
+  Human review (24h): "Resolved" + rating 4/5
 
-  "Verified. Now check blast radius."
+[LEARN]
+  Episodic: case-142 saved (full evidence chain)
+  Procedural: Wisdom "cache_memory_exhaustion" reinforced, deployment path confidence UP
+  Semantic: "cache OOM after deploy = check TTL first" pattern strengthened
+  Skill: no gap detected (existing skills covered this)
+  SOP: auto-generated SOP for "Redis TTL verification after deployment"
+  Calibration: 0.88 -> human 4/5 -> bin updated
 
-  -> KB: Redis is shared with order-service
-  -> datadog connector: order-service error rate
-     Result: 2% error rate (up from 0.1%) -- cascade confirmed
-
-RCA OUTPUT:
-  "Root cause: payment-api v24 introduced promo:* cache keys without TTL.
-   Redis memory exhausted. Shared with order-service -- cascade impact confirmed.
-   Confidence: 0.91 (calibrated: 0.79)
-   Fix: Rollback to v23, or set TTL on promo:* keys."
-
-FIX EXECUTION:
-  Agent generates fix plan (L1: kubectl + redis-cli) -> auto-approved -> executed -> verified
-
-LEARNING:
-  - 24h later: human confirms "Resolved" via review UI
-  - KB: case saved as verified, linked to payment-service
-  - Wisdom Roadmap: "cache_memory_exhaustion" entry updated
-    - "deployment correlation" path reinforced
-    - "promo key TTL" added as known pattern
-  - System Prompt: next cache issue -> Agent goes straight to deployment check
-
-RESULT:
-  Total time: 3 minutes (vs 6 minutes first time this pattern occurred)
-  Next time same pattern: ~1.5 minutes (Wisdom Roadmap guides optimal path)
+  RESULT: 3 min total. Next similar: ~1.5 min (Wisdom guides optimal path)
 ```
 
 ---
 
-## 9. Implementation Phases
+## 11. Implementation Phases
 
-### Phase 1: Connector Framework + Service Model in KB
+### Phase 1: Foundation (aligns with ClawOps Q2 2026)
 
-- Connector config schema (config/connectors.yaml)
-- Base Connector interface (authenticate, query)
-- Initial connectors: AWS (existing), K8s (existing), Datadog (new), Prometheus (new)
-- Service model as KB entries (not separate DB tables)
+- Connector framework (config/connectors.yaml + base interface)
+- Initial connectors: AWS (wrap existing), K8s (wrap existing), Datadog (new), Prometheus (new)
+- Service model DB tables (Service, ServiceResource, ServiceDependency)
 - Service discovery via chat (Agent proposes, human confirms)
-- RCA/SRE context injection from KB service model
+- Alert Classifier + Pattern matching (basic LLM classification)
+- Prompt Optimization Engine v1 (Strategy Selector + Few-Shot Retriever + Prompt Assembler)
+- Evidence gathering with source weighting
 
-### Phase 2: Human Review Loop + Wisdom Roadmap Foundation
+### Phase 2: Verification + Learning (aligns with ClawOps Q3-Q4 2026)
 
-- ReviewFeedback model + DB schema
-- RCA Review Card UI (Health Issue detail page)
-- Fix Effectiveness Feedback UI (24h push via Schedule)
-- KB weight adjustment (verified/rejected/unreviewed)
-- Confidence calibration (global, bin-based)
-- Wisdom Roadmap entry distillation (from resolved + reviewed cases)
-- Dynamic System Prompt composition (base + service context + wisdom entries)
+- PostActionValidator (T0-T3 automated verification)
+- ReviewFeedback + PostActionResult DB models
+- RCA Review Card + Fix Effectiveness UI
+- Human feedback -> KB weight adjustment
+- Confidence calibration (evidence-weighted + human-calibrated)
+- Wisdom Roadmap: entry distillation from resolved+reviewed cases
+- Dynamic System Prompt composition (base + service + wisdom + few-shot)
+- Four-layer memory classification (episodic -> procedural -> semantic -> skill)
 
-### Phase 3: Wisdom Roadmap Maturation
+### Phase 3: Self-Evolution (aligns with ClawOps 2027)
 
-- Wisdom Roadmap entry evolution (reinforce/contradict/stale)
-- Confidence calibration segmentation (by issue category)
-- Skills internalization tracking (which Skills are still used vs KB-replaced)
+- SkillGapDetector: detect missing skills after RCA
+- SOPAutoWriter: auto-generate skill from successful RCA
+- Skill validation via sandbox replay (AIOpsLab framework)
+- Skill expiration + confidence decay + refresh
+- Wisdom Roadmap maturation (reinforce/contradict/merge/stale)
+- Calibration segmentation by category
+- Self-Verification (reasoning quality check, 16 failure types)
 - Agent self-proposed Skill updates
-- Exception-only review mode (200+ reviews)
 
-### Phase 4: Advanced Autonomy
+### Phase 4: Autonomous Operations (aligns with ClawOps 2028+)
 
-- Additional connectors (PagerDuty, Jira, GitHub Actions, ELK, etc.)
-- Proactive change risk detection (Agent notices risky changes in IM channel)
-- Cross-service incident correlation
-- Agent proposes new connectors when it encounters unknown data sources
-- Code Interpreter: Agent writes custom queries/scripts for novel scenarios
+- Cross-service incident correlation (N alerts -> 1 service incident)
+- Proactive change risk detection via IM channel monitoring
+- Skill generalization ("ECS OOM" -> "Container Memory Exhaustion")
+- Code Interpreter: Agent writes custom queries for novel scenarios
+- Graduated autonomous remediation (expanding L-level boundaries)
+- Multi-agent cross-verification
+- Additional connectors on demand (PagerDuty, Jira, ELK, etc.)
 
 ---
 
-## 10. API Endpoints (New)
+## 12. API Endpoints (New)
 
 | Group | Endpoint | Method | Purpose |
 |-------|----------|--------|---------|
 | **Connectors** | `/api/connectors` | GET | List configured connectors |
-| | `/api/connectors/{name}` | PUT | Add/update connector config |
-| | `/api/connectors/{name}/test` | POST | Test connector connectivity |
-| **Services** | `/api/services` | GET | List services from KB |
-| | `/api/services/{name}` | GET | Service detail (from KB) |
-| | `/api/services/{name}/confirm` | PUT | Human confirms/corrects service |
+| | `/api/connectors/{name}` | PUT | Add/update connector |
+| | `/api/connectors/{name}` | DELETE | Remove connector |
+| | `/api/connectors/{name}/test` | POST | Test connectivity |
+| **Services** | `/api/services` | GET | List services |
+| | `/api/services/{id}` | GET | Service detail + resources + deps |
+| | `/api/services/{id}/confirm` | PUT | Human confirms/corrects |
 | **Reviews** | `/api/reviews` | POST | Submit review feedback |
-| | `/api/reviews/stats` | GET | Review statistics + calibration |
-| | `/api/health-issues/{id}/review` | GET | Review status for an issue |
-| **Wisdom** | `/api/wisdom` | GET | List Wisdom Roadmap entries |
-| | `/api/wisdom/{pattern}` | GET | Wisdom entry for issue pattern |
-| **Calibration** | `/api/calibration` | GET | Current calibration table |
+| | `/api/reviews/stats` | GET | Statistics + calibration |
+| | `/api/health-issues/{id}/review` | GET | Review status |
+| **Verification** | `/api/health-issues/{id}/verification` | GET | PostAction result |
+| **Wisdom** | `/api/wisdom` | GET | List Wisdom entries |
+| | `/api/wisdom/{pattern}` | GET | Entry for pattern |
+| **Skills** | `/api/skills/gaps` | GET | Detected skill gaps |
+| | `/api/skills/{name}/lifecycle` | GET | Skill lifecycle state |
+| **Calibration** | `/api/calibration` | GET | Calibration table |
 
 ---
 
-## 11. Success Metrics
+## 13. Success Metrics
 
 | Metric | Current (1.0) | Target (2.0) | Measurement |
 |--------|:------------:|:------------:|-------------|
-| RCA accuracy (human-verified) | Unknown | >80% for known patterns | Review feedback |
-| RCA time for known patterns | ~2-6 min | <2 min (Wisdom Roadmap) | Pipeline timestamps |
-| RCA time for novel patterns | ~6 min | ~4 min (better connectors) | Pipeline timestamps |
-| KB verified case ratio | 0% | >50% after 6 months | Review data |
+| RCA accuracy (human-verified) | Unknown | >80% known patterns | Review feedback |
+| RCA time for known patterns | ~2-6 min | <2 min | Pipeline timestamps |
+| RCA time for novel patterns | ~6 min | ~4 min | Pipeline timestamps |
+| PostAction SUCCESS rate | N/A | >70% for L0/L1 fixes | PostActionResult |
+| KB verified case ratio | 0% | >50% at 6 months | Review data |
 | Confidence calibration error | Unknown | <10% deviation | Calibration vs actuals |
-| Wisdom Roadmap coverage | 0 entries | >40 patterns after 6 months | KB count |
-| Skills still actively used | 10/10 | <5/10 (rest internalized to KB) | Usage tracking |
-| Service model coverage | 0% | >80% of managed resources | KB service entries |
+| Wisdom Roadmap coverage | 0 entries | >40 patterns at 6 months | KB count |
+| Skill auto-generation rate | 0 | >5 new skills/quarter | Skill registry |
+| Skills internalized to KB | 0/10 | >5/10 at 12 months | Usage tracking |
+| Service model coverage | 0% | >80% managed resources | DB service entries |
+| Evidence-backed RCA ratio | Unknown | >90% (vs pure inference) | Evidence chain analysis |
 
 ---
 
-*AgenticOps Next-Gen Design v3 -- 2026-03-15*
+## 14. References
+
+| # | Paper | ArXiv | Key Contribution |
+|---|-------|-------|-----------------|
+| 1 | eARCO: Prompt Optimization for RCA | 2504.11505 | Prompt > RAG > Fine-tuning, 21% accuracy gain |
+| 2 | Why AI Agents Fail at Cloud RCA | 2602.09937 | 12 failure types, architecture > prompts |
+| 3 | 16 RCA Reasoning Failure Types | 2601.22208 | Multi-hop reasoning as hardest failure |
+| 4 | AIOpsLab: Agent Evaluation | 2501.06706 | Holistic AIOps eval framework (Microsoft) |
+| 5 | OpsAgent: Self-Evolution | 2510.24145 | Dual self-evolution mechanism |
+| 6 | CCAR: Safe Autonomous Resolution | 2603.08736 | Formal false-positive bounds |
+| 7 | RCACopilot (Microsoft) | 2305.15778 | 4-year production RCA, 0.766 accuracy |
+| 8 | Pearl's Causal Framework | -- | do-calculus, counterfactual reasoning |
+
+---
+
+*AgenticOps Next-Gen Design v4 -- 2026-03-15*
+*Vision: ClawOps Agent-First AIOps Architecture*
