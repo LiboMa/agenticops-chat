@@ -10,9 +10,9 @@ cd "$REPO_DIR"
 
 # Fail fast if wrong repo
 EXPECTED_REMOTE="LiboMa/ClawOps"
-ACTUAL_REMOTE=$(git remote -v | head -1)
-if [[ "$ACTUAL_REMOTE" != *"$EXPECTED_REMOTE"* ]]; then
-    echo "ERROR: wrong repo — expected $EXPECTED_REMOTE, got: $ACTUAL_REMOTE"
+if ! git remote -v | grep -q "$EXPECTED_REMOTE"; then
+    echo "ERROR: wrong repo — expected $EXPECTED_REMOTE in remotes"
+    git remote -v
     exit 1
 fi
 
