@@ -15,6 +15,8 @@ from agenticops.config import settings
 from agenticops.models import (
     AWSAccount,
     AWSResource,
+    CloudAccount,
+    CloudResource,
     FixExecution,
     FixPlan,
     HealthIssue,
@@ -44,28 +46,77 @@ def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
 
 
 @tool
-def get_active_account() -> str:
-    """Get the currently active AWS account configuration.
+def get_enabled_accounts() -> str:
+    """Get all enabled cloud accounts for scanning and operations.
 
-    Returns:
-        JSON object with account details: name, account_id, role_arn, regions, last_scanned_at.
-        Returns error message if no active account is configured.
+    Returns JSON array of accounts with id, name, provider, regions, labels.
+    Falls back to legacy AWSAccount if no CloudAccount records exist.
     """
     session = get_session()
     try:
-        account = session.query(AWSAccount).filter_by(is_active=True).first()
-        if not account:
-            return "No active AWS account configured. Use 'aiops create account' to add one."
+        accounts = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+        if not accounts:
+            # Fallback: try legacy AWSAccount table for backward compatibility
+            legacy = session.query(AWSAccount).filter_by(is_active=True).first()
+            if legacy:
+                return _truncate(json.dumps([{
+                    "id": legacy.id,
+                    "name": legacy.name,
+                    "provider": "aws",
+                    "regions": legacy.regions,
+                    "labels": {},
+                    "last_scanned_at": str(legacy.last_scanned_at) if legacy.last_scanned_at else None,
+                }]))
+            return json.dumps({"error": "No enabled accounts found. Add accounts via CLI or Web UI."})
+        result = []
+        for acct in accounts:
+            result.append({
+                "id": acct.id,
+                "name": acct.name,
+                "provider": acct.provider,
+                "regions": acct.regions,
+                "labels": acct.labels,
+                "last_scanned_at": acct.last_scanned_at.isoformat() if acct.last_scanned_at else None,
+            })
+        return _truncate(json.dumps(result))
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+    finally:
+        session.close()
 
-        return _truncate(json.dumps({
-            "id": account.id,
-            "name": account.name,
-            "account_id": account.account_id,
-            "role_arn": account.role_arn,
-            "external_id": account.external_id or "",
-            "regions": account.regions,
-            "last_scanned_at": str(account.last_scanned_at) if account.last_scanned_at else "never",
-        }))
+
+@tool
+def get_active_account() -> str:
+    """Get the currently active AWS account configuration.
+
+    DEPRECATED: Use get_enabled_accounts() instead. This wrapper returns the
+    first enabled account for backward compatibility with existing agent prompts.
+    """
+    session = get_session()
+    try:
+        # Try CloudAccount first
+        acct = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).first()  # noqa: E712
+        if acct:
+            return _truncate(json.dumps({
+                "id": acct.id,
+                "name": acct.name,
+                "provider": acct.provider,
+                "regions": acct.regions,
+                "labels": acct.labels,
+                "last_scanned_at": acct.last_scanned_at.isoformat() if acct.last_scanned_at else None,
+            }))
+        # Fallback to legacy AWSAccount
+        legacy = session.query(AWSAccount).filter_by(is_active=True).first()
+        if legacy:
+            return _truncate(json.dumps({
+                "id": legacy.id,
+                "name": legacy.name,
+                "provider": "aws",
+                "regions": legacy.regions,
+                "labels": {},
+                "last_scanned_at": str(legacy.last_scanned_at) if legacy.last_scanned_at else None,
+            }))
+        return "No active account configured. Use 'aiops create account' to add one."
     finally:
         session.close()
 
@@ -83,20 +134,55 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     """
     session = get_session()
     try:
-        # Get active account
+        # Try CloudAccount first, fall back to legacy AWSAccount
+        cloud_accounts = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+        if cloud_accounts:
+            account_ids = [a.id for a in cloud_accounts]
+            query = session.query(CloudResource).filter(
+                CloudResource.account_id.in_(account_ids),
+                CloudResource.managed == True,  # noqa: E712
+            )
+            if resource_type:
+                query = query.filter_by(resource_type=resource_type)
+            if region:
+                query = query.filter_by(region=region)
+
+            resources = query.limit(50).all()
+            if not resources:
+                filters = []
+                if resource_type:
+                    filters.append(f"type={resource_type}")
+                if region:
+                    filters.append(f"region={region}")
+                filter_str = f" (filters: {', '.join(filters)})" if filters else ""
+                return f"No resources found{filter_str}."
+
+            result = []
+            for r in resources:
+                result.append({
+                    "id": r.id,
+                    "resource_id": r.resource_id,
+                    "resource_type": r.resource_type,
+                    "name": r.name,
+                    "provider": r.provider,
+                    "region": r.region,
+                    "status": r.status,
+                    "managed": r.managed,
+                })
+            return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+
+        # Fallback to legacy AWSAccount/AWSResource
         account = session.query(AWSAccount).filter_by(is_active=True).first()
         if not account:
-            return "No active AWS account configured."
+            return "No active account configured."
 
         query = session.query(AWSResource).filter_by(account_id=account.id, managed=True)
-
         if resource_type:
             query = query.filter_by(resource_type=resource_type)
         if region:
             query = query.filter_by(region=region)
 
         resources = query.limit(50).all()
-
         if not resources:
             filters = []
             if resource_type:
@@ -117,22 +203,24 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                 "status": r.status,
                 "managed": r.managed,
             })
-
         return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
     finally:
         session.close()
 
 
 @tool
-def save_resources(resources_json: str) -> str:
+def save_resources(resources_json: str, account_id: int = 0, provider: str = "") -> str:
     """Save or update discovered resources in metadata.
 
-    Upserts resources: creates new or updates existing based on resource_id + region.
+    Upserts resources into CloudResource table. If account_id and provider are
+    given, uses them directly. Otherwise falls back to the first enabled
+    CloudAccount (or legacy AWSAccount).
 
     Args:
         resources_json: JSON array of resource objects. Each must have:
-            resource_id, resource_type, region. Optional: resource_name, resource_arn,
-            status, metadata, tags.
+            resource_id, resource_type, region. Optional: name, status, tags, raw_data.
+        account_id: CloudAccount ID to save resources under (0 = auto-detect).
+        provider: Cloud provider (aws, azure, gcp, alicloud). Empty = auto-detect.
 
     Returns:
         Summary of saved/updated resources.
@@ -150,10 +238,66 @@ def save_resources(resources_json: str) -> str:
     updated = 0
 
     try:
-        # Get active account
-        account = session.query(AWSAccount).filter_by(is_active=True).first()
-        if not account:
-            return "No active AWS account configured."
+        # Resolve account
+        cloud_acct = None
+        if account_id > 0:
+            cloud_acct = session.query(CloudAccount).filter_by(id=account_id).first()
+        if not cloud_acct:
+            cloud_acct = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).first()  # noqa: E712
+
+        if cloud_acct:
+            acct_id = cloud_acct.id
+            acct_provider = provider or cloud_acct.provider
+
+            for res_data in resources:
+                resource_id = res_data.get("resource_id")
+                region = res_data.get("region")
+                if not resource_id or not region:
+                    continue
+
+                existing = (
+                    session.query(CloudResource)
+                    .filter_by(
+                        account_id=acct_id,
+                        provider=acct_provider,
+                        resource_id=resource_id,
+                    )
+                    .first()
+                )
+
+                if existing:
+                    existing.name = res_data.get("name", existing.name)
+                    existing.status = res_data.get("status", existing.status)
+                    existing.raw_data = res_data.get("raw_data", existing.raw_data)
+                    existing.tags = res_data.get("tags", existing.tags)
+                    existing.region = region
+                    existing.scanned_at = datetime.utcnow()
+                    updated += 1
+                else:
+                    resource = CloudResource(
+                        account_id=acct_id,
+                        provider=acct_provider,
+                        resource_id=resource_id,
+                        resource_type=res_data.get("resource_type", "unknown"),
+                        name=res_data.get("name", ""),
+                        region=region,
+                        status=res_data.get("status", "unknown"),
+                        raw_data=res_data.get("raw_data", {}),
+                        tags=res_data.get("tags", {}),
+                        managed=res_data.get("managed", True),
+                        scanned_at=datetime.utcnow(),
+                    )
+                    session.add(resource)
+                    created += 1
+
+            cloud_acct.last_scanned_at = datetime.utcnow()
+            session.commit()
+            return f"Saved {created} new resources, updated {updated} existing (account={cloud_acct.name}, provider={acct_provider})."
+
+        # Fallback to legacy AWSAccount/AWSResource
+        legacy_acct = session.query(AWSAccount).filter_by(is_active=True).first()
+        if not legacy_acct:
+            return "No active account configured."
 
         for res_data in resources:
             resource_id = res_data.get("resource_id")
@@ -164,7 +308,7 @@ def save_resources(resources_json: str) -> str:
             existing = (
                 session.query(AWSResource)
                 .filter_by(
-                    account_id=account.id,
+                    account_id=legacy_acct.id,
                     resource_id=resource_id,
                     region=region,
                 )
@@ -180,7 +324,7 @@ def save_resources(resources_json: str) -> str:
                 updated += 1
             else:
                 resource = AWSResource(
-                    account_id=account.id,
+                    account_id=legacy_acct.id,
                     resource_id=resource_id,
                     resource_arn=res_data.get("resource_arn"),
                     resource_type=res_data.get("resource_type", "unknown"),
@@ -193,10 +337,8 @@ def save_resources(resources_json: str) -> str:
                 session.add(resource)
                 created += 1
 
-        # Update last_scanned_at
-        account.last_scanned_at = datetime.utcnow()
+        legacy_acct.last_scanned_at = datetime.utcnow()
         session.commit()
-
         return f"Saved {created} new resources, updated {updated} existing."
     except Exception as e:
         session.rollback()
@@ -513,28 +655,43 @@ def get_health_issue(issue_id: int) -> str:
 
 @tool
 def get_resource_by_id(resource_id: int) -> str:
-    """Get details of a specific AWS resource by its database ID.
+    """Get details of a specific cloud resource by its database ID.
 
     Args:
-        resource_id: The AWSResource database ID (integer PK).
+        resource_id: The CloudResource (or legacy AWSResource) database ID (integer PK).
 
     Returns:
         JSON object with resource details.
     """
     session = get_session()
     try:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
-        if not resource:
+        # Try CloudResource first
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
+        if resource:
+            return _truncate(json.dumps({
+                "id": resource.id,
+                "resource_id": resource.resource_id,
+                "provider": resource.provider,
+                "resource_type": resource.resource_type,
+                "name": resource.name,
+                "region": resource.region,
+                "status": resource.status,
+                "managed": resource.managed,
+                "tags": resource.tags,
+            }, default=str))
+        # Fallback to legacy AWSResource
+        legacy = session.query(AWSResource).filter_by(id=resource_id).first()
+        if not legacy:
             return f"Resource #{resource_id} not found."
         return _truncate(json.dumps({
-            "id": resource.id,
-            "resource_id": resource.resource_id,
-            "resource_arn": resource.resource_arn,
-            "resource_type": resource.resource_type,
-            "resource_name": resource.resource_name,
-            "region": resource.region,
-            "status": resource.status,
-            "managed": resource.managed,
+            "id": legacy.id,
+            "resource_id": legacy.resource_id,
+            "resource_arn": legacy.resource_arn,
+            "resource_type": legacy.resource_type,
+            "resource_name": legacy.resource_name,
+            "region": legacy.region,
+            "status": legacy.status,
+            "managed": legacy.managed,
         }, default=str))
     finally:
         session.close()

@@ -21,6 +21,7 @@ from agenticops.tools.cloudwatch_tools import (
 from agenticops.tools.cloudtrail_tools import lookup_cloudtrail_events
 from agenticops.tools.metadata_tools import (
     get_active_account,
+    get_enabled_accounts,
     get_managed_resources,
     save_resources,
     create_health_issue,
@@ -106,6 +107,7 @@ __all__ = [
     "lookup_cloudtrail_events",
     # Metadata tools
     "get_active_account",
+    "get_enabled_accounts",
     "get_managed_resources",
     "save_resources",
     "create_health_issue",
