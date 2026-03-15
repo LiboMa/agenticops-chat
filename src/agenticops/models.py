@@ -1,11 +1,11 @@
 """SQLAlchemy models for AgenticOps."""
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine, inspect, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -145,6 +145,85 @@ class AWSResource(Base):
 
 
 # ============================================================================
+# Multi-Cloud Account & Resource (replaces AWS-only models in future)
+# ============================================================================
+
+
+VALID_PROVIDERS = {"aws", "azure", "gcp", "alicloud"}
+
+
+class CloudAccount(Base):
+    """Multi-cloud account configuration."""
+
+    __tablename__ = "cloud_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    provider: Mapped[str] = mapped_column(String(20))  # aws | azure | gcp | alicloud
+    is_enabled: Mapped[bool] = mapped_column(default=True)
+    credentials_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    regions: Mapped[list] = mapped_column(JSON, default=list)
+    labels: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    last_scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    resources: Mapped[list["CloudResource"]] = relationship(back_populates="account")
+    monitoring_configs: Mapped[list["MonitoringConfig"]] = relationship(
+        back_populates="cloud_account", foreign_keys="MonitoringConfig.cloud_account_id"
+    )
+
+    @property
+    def credentials(self) -> Optional[dict]:
+        """Decrypt and return credentials dict."""
+        if not self.credentials_encrypted:
+            return None
+        from agenticops.providers.credential_store import get_credential_store
+        return get_credential_store().decrypt(self.credentials_encrypted)
+
+    @credentials.setter
+    def credentials(self, value: Optional[dict]) -> None:
+        """Encrypt and store credentials dict."""
+        if value is None:
+            self.credentials_encrypted = None
+            return
+        from agenticops.providers.credential_store import get_credential_store
+        self.credentials_encrypted = get_credential_store().encrypt(value)
+
+
+class CloudResource(Base):
+    """Multi-cloud resource inventory."""
+
+    __tablename__ = "cloud_resources"
+    __table_args__ = (
+        UniqueConstraint("account_id", "provider", "resource_id"),
+        Index("idx_cloud_resource_provider", "provider"),
+        Index("idx_cloud_resource_type_region", "resource_type", "region"),
+        Index("idx_cloud_resource_account", "account_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("cloud_accounts.id"))
+    provider: Mapped[str] = mapped_column(String(20))
+    region: Mapped[str] = mapped_column(String(30))
+    resource_type: Mapped[str] = mapped_column(String(50))
+    resource_id: Mapped[str] = mapped_column(String(500))
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    tags: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="unknown")
+    managed: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    account: Mapped["CloudAccount"] = relationship(back_populates="resources")
+
+
+# ============================================================================
 # Monitoring Configuration (MONITOR)
 # ============================================================================
 
@@ -156,6 +235,7 @@ class MonitoringConfig(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("aws_accounts.id"))
+    cloud_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cloud_accounts.id"), nullable=True)
     service_type: Mapped[str] = mapped_column(String(50))  # e.g., EC2, Lambda
     is_enabled: Mapped[bool] = mapped_column(default=True)
     metrics_config: Mapped[dict] = mapped_column(JSON, default=dict)  # Which metrics to collect
@@ -168,6 +248,9 @@ class MonitoringConfig(Base):
 
     # Relationships
     account: Mapped["AWSAccount"] = relationship(back_populates="monitoring_configs")
+    cloud_account: Mapped[Optional["CloudAccount"]] = relationship(
+        back_populates="monitoring_configs", foreign_keys=[cloud_account_id]
+    )
 
 
 class MetricDataPoint(Base):
@@ -335,6 +418,7 @@ class HealthIssue(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     resource_id: Mapped[str] = mapped_column(String(200))  # AWS resource ID
+    account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cloud_accounts.id"), nullable=True)
     severity: Mapped[str] = mapped_column(String(20))  # critical, high, medium, low
     source: Mapped[str] = mapped_column(
         String(50)
@@ -788,7 +872,64 @@ def init_db():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notification_log_channel_name ON notification_logs(channel_name)"))
                 conn.commit()
 
+    # Migration: create cloud_accounts / cloud_resources tables and migrate AWSAccount data
+    if not insp.has_table("cloud_accounts"):
+        # Tables will be created by create_all below; migrate after
+        _needs_cloud_migration = True
+    else:
+        _needs_cloud_migration = False
+
+    # Migration: add account_id FK to health_issues if missing
+    if insp.has_table("health_issues"):
+        columns = {col["name"] for col in insp.get_columns("health_issues")}
+        if "account_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN account_id INTEGER"))
+                conn.commit()
+
+    # Migration: add cloud_account_id to monitoring_configs if missing
+    if insp.has_table("monitoring_configs"):
+        columns = {col["name"] for col in insp.get_columns("monitoring_configs")}
+        if "cloud_account_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE monitoring_configs ADD COLUMN cloud_account_id INTEGER"))
+                conn.commit()
+
     Base.metadata.create_all(engine)
+
+    # Post-create_all: migrate AWSAccount data to CloudAccount
+    if _needs_cloud_migration and insp.has_table("aws_accounts"):
+        try:
+            from agenticops.providers.credential_store import get_credential_store
+            store = get_credential_store()
+            with engine.connect() as conn:
+                rows = conn.execute(text(
+                    "SELECT id, name, account_id, role_arn, external_id, regions, is_active, created_at, last_scanned_at "
+                    "FROM aws_accounts"
+                )).fetchall()
+                for row in rows:
+                    creds = {"account_id": row[2], "role_arn": row[3]}
+                    if row[4]:
+                        creds["external_id"] = row[4]
+                    encrypted = store.encrypt(creds)
+                    import json as _json
+                    regions_val = row[5] if isinstance(row[5], str) else _json.dumps(row[5] or [])
+                    conn.execute(text(
+                        "INSERT OR IGNORE INTO cloud_accounts "
+                        "(name, provider, is_enabled, credentials_encrypted, regions, labels, created_at, last_scanned_at) "
+                        "VALUES (:name, 'aws', :enabled, :creds, :regions, '{}', :created, :scanned)"
+                    ), {
+                        "name": row[1],
+                        "enabled": row[6],
+                        "creds": encrypted,
+                        "regions": regions_val,
+                        "created": row[7],
+                        "scanned": row[8],
+                    })
+                conn.commit()
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Cloud account migration failed (non-fatal)", exc_info=True)
 
     # Ensure graph tables exist (used by GraphStore, raw SQL for performance)
     with engine.connect() as conn:
