@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTask
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -107,7 +107,8 @@ class AccountResponse(BaseModel):
     created_at: datetime
     last_scanned_at: Optional[datetime]
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
     @model_validator(mode="after")
     def redact_secrets(self):
@@ -1468,9 +1469,12 @@ async def api_test_account_connection(account_id: int):
         acct = session.query(CloudAccount).filter_by(id=account_id).first()
         if not acct:
             raise HTTPException(status_code=404, detail="Account not found")
-        provider = get_provider(acct)
-        success = provider.resolve_credentials()
-        return {"success": success, "provider": acct.provider, "name": acct.name}
+        try:
+            provider = get_provider(acct)
+            success = provider.resolve_credentials()
+            return {"success": success, "provider": acct.provider, "name": acct.name}
+        except Exception as e:
+            return {"success": False, "provider": acct.provider, "name": acct.name, "error": str(e)}
 
 
 # ============================================================================
