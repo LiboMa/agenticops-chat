@@ -24,14 +24,22 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def _reset_db_engine():
-    """Reset the shared SQLAlchemy _engine singleton before each test.
+    """Reset the shared SQLAlchemy _engine singleton before AND after each test.
 
     Multiple test files create their own tmp_path SQLite DBs and set
     settings.database_url, but the models module caches a singleton _engine.
     Without this reset, a test that runs after another module may inherit
     a stale engine pointing to a deleted tmp DB file, causing
     ObjectDeletedError / NoneType cascades.
+
+    Reset on both setup and teardown to handle cases where a prior test's
+    teardown didn't execute cleanly (e.g. due to exception).
     """
+    try:
+        import agenticops.models as models_mod
+        models_mod._engine = None
+    except Exception:
+        pass
     yield
     try:
         import agenticops.models as models_mod
