@@ -55,6 +55,21 @@ Alert Arrives (via IM Channel / Webhook / CLI)
     * Penalize wrong knowledge, reinforce correct knowledge
 ```
 
+### Error Handling
+
+Each phase has defined fallback behavior:
+
+| Phase | Failure | Fallback |
+|-------|---------|----------|
+| PERCEIVE | Alert classification fails | Use "unknown" category, skip strategy optimization, proceed with first-principles plan |
+| PERCEIVE | KB/Memory unavailable | Proceed without historical context (novel investigation) |
+| PLAN | No Wisdom match, no similar cases | LLM generates investigation plan from alert context alone |
+| ACT | Connector timeout/error | Skip that data source, note gap in evidence, reduce confidence |
+| ACT | All connectors fail | Report "insufficient data" with available context, flag for manual investigation |
+| DECIDE | Confidence below threshold (<0.3) | Flag for human review, do not auto-execute fix |
+| VERIFY | PostActionValidator timeout | Mark UNCERTAIN, push human review |
+| LEARN | KB write fails | Log to fallback file, retry on next cycle |
+
 ---
 
 ## 2. Architecture
@@ -201,6 +216,12 @@ System Prompt composition:
   Total budget:                 ~3000 tokens max
 
 Not all Wisdom entries injected. Top-K retrieval by pattern similarity.
+
+Budget overflow strategy (when assembled prompt exceeds 3000 tokens):
+  1. Reduce few-shot to single-paragraph summary (saves ~300 tokens)
+  2. Trim wisdom entries by relevance rank (keep top-2 instead of top-3)
+  3. Truncate service context to direct dependencies only
+  4. Never truncate base role or output rules
 ```
 
 ---
@@ -326,8 +347,9 @@ No connector configured? Agent works with what it has. Adapts to available data 
 
 - **Rate limiting**: configurable per connector (e.g., Datadog: 30/min)
 - **Cost awareness**: connectors with per-query costs flagged to Agent
-- **Credential scoping**: connectors are read-only. Write access via existing L0-L3 classification.
+- **Credential scoping**: connectors are read-only by default. Write operations (rollback PR, PagerDuty ack) go through the existing executor agent with L0-L3 classification. Connector-based write operations are out of scope until Phase 4.
 - **Existing AWS integration**: current get_active_account / assume_role / run_aws_cli_readonly becomes the "aws" connector implementation -- wrapped, not replaced.
+- **Connectors vs cloud_accounts**: `config/connectors.yaml` manages external system credentials (Datadog, Prometheus, ELK, etc.). The existing `cloud_accounts` DB table manages cloud provider accounts. The "aws" connector bridges between them -- reads active account from cloud_accounts, exposes as connector interface.
 
 ---
 
@@ -375,7 +397,7 @@ Aligned with ClawOps SkillGapDetector + SOPAutoWriter + OpsAgent dual self-evolu
 - Infrastructure changes (detected during investigation) -> mark related skills for re-validation
 - Skills not used for 6 months -> marked stale, deprioritized
 - Human can retire/update skills via chat
-- Confidence decay applies: `0.99^age_days * (1 + 0.1 * recall_count)`
+- Confidence decay applies (same formula as Section 4.2): `base_confidence * 0.99^age_days * (1 + 0.1 * min(recall_count, 10))`
 
 ---
 
@@ -452,16 +474,22 @@ ReviewFeedback
   fix_plan_id: int (FK, nullable)
   rca_result_id: int (FK, nullable)
   verdict: str                 # "accurate"|"partial"|"inaccurate"|"resolved"|"mitigated"|"unresolved"
-  rating: int                  # 1-5
   notes: str (nullable)
   corrected_root_cause: str (nullable)
   reviewer: str
   created_at: datetime
 
+  UI flow: Human clicks one of 3 verdict buttons (Section 8.2).
+  That's the only required interaction. Notes and corrected_root_cause are optional.
+  No separate numeric rating -- verdict IS the Ground Truth signal.
+
 PostActionResult
   id: int (PK)
   fix_plan_id: int (FK)
   health_issue_id: int (FK)
+  observed_metric: str         # metric name being checked (e.g., "HealthCheckFailures")
+  baseline_value: float        # metric value before fix
+  threshold: float             # improvement threshold for "pass"
   t0_result: str               # "pass" | "fail"
   t1_result: str
   t2_result: str
@@ -469,6 +497,15 @@ PostActionResult
   verdict: str                 # "success" | "partial_success" | "failed" | "uncertain"
   metric_improvement: float    # % improvement observed
   created_at: datetime
+
+  Verdict aggregation from t0-t3:
+    All pass through T3           -> SUCCESS
+    T1 pass (>20% improvement)
+      but T2 or T3 fail          -> PARTIAL_SUCCESS
+    T0 pass but T1 fail          -> FAILED (metric didn't improve)
+    T0 fail                      -> FAILED (command itself failed)
+    Metric variance > threshold
+      (noisy, can't determine)   -> UNCERTAIN
 ```
 
 ### 8.5 Confidence Calibration
@@ -490,13 +527,24 @@ Calibrated < 0.5 -> auto-flag "human review recommended"
 
 ### 8.6 Combined Verification Flow
 
+**PostActionValidator verdicts mapped to HealthIssue state machine:**
+
+| Verdict | HealthIssue Transition | Notes |
+|---------|----------------------|-------|
+| SUCCESS | `fix_executed` -> `resolved` | Auto-transition. 24h human review scheduled. |
+| PARTIAL_SUCCESS | stays `fix_executed` | Issue remains open. Human review pushed immediately. |
+| FAILED | `fix_executed` -> `root_cause_identified` | Rolls back to re-plan. New FixPlan allowed (terminal state rule). |
+| UNCERTAIN | stays `fix_executed` | Issue remains open. Human decides next step via review. |
+
+No new states added -- all verdicts map to existing transitions.
+
 ```
 Fix executed
   |
   +-> PostActionValidator (automated, T0-T3)
   |     -> SUCCESS: auto-resolve, push 24h human review
   |     -> PARTIAL_SUCCESS: keep open, notify, push human review
-  |     -> FAILED: auto-rollback, flag for re-investigation
+  |     -> FAILED: rollback to root_cause_identified, flag for re-investigation
   |     -> UNCERTAIN: keep open, push human review
   |
   +-> Human Review (24h later)
@@ -523,7 +571,8 @@ Service (DB table)
   id, name, tier, owner, status (inferred|confirmed), notes, timestamps
 
 ServiceResource (DB table, many-to-many)
-  id, service_id (FK), resource_id (FK), role, is_shared, is_primary
+  id, service_id (FK), resource_id (FK -> cloud_resources.id), role, is_shared, is_primary
+  Note: FK targets cloud_resources (the multi-cloud table). AWSResource is legacy, not referenced.
 
 ServiceDependency (DB table)
   id, source_service_id (FK), target_service_id (FK), type, evidence, status
@@ -609,6 +658,7 @@ Through normal Agent operation, not daemons:
 - Alert Classifier + Pattern matching (basic LLM classification)
 - Prompt Optimization Engine v1 (Strategy Selector + Few-Shot Retriever + Prompt Assembler)
 - Evidence gathering with source weighting
+- Existing 10 domain skills continue unchanged; indexed for retrieval by Prompt Optimization Engine. Lifecycle management deferred to Phase 3.
 
 ### Phase 2: Verification + Learning (aligns with ClawOps Q3-Q4 2026)
 
