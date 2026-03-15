@@ -1991,18 +1991,21 @@ git commit -m "feat(prompt-engine): add PromptAssembler with token budget and ov
 - Modify: `src/agenticops/agents/preamble.py` (add dynamic prompt builder)
 - Modify: `src/agenticops/agents/main_agent.py` (register connector + service tools)
 
-- [ ] **Step 1: Update preamble.py — add `build_optimized_prompt` function**
+- [ ] **Step 1: Update preamble.py — add `build_prompt_with_optimization` function**
 
-In `src/agenticops/agents/preamble.py`, add:
+Note: `preamble.py` already exists with `build_system_prompt()`, `get_output_rules()`, `invoke_with_retry()`.
+We ADD a new function alongside the existing ones — do NOT replace existing code.
+
+In `src/agenticops/agents/preamble.py`, add at the end of the file:
 
 ```python
-def build_optimized_prompt(
+def build_prompt_with_optimization(
     alert_title: str,
     alert_description: str,
     base_system_prompt: str,
 ) -> str:
-    """Build an optimized system prompt using the Prompt Optimization Engine.
-    Falls back to base_system_prompt if engine components unavailable."""
+    """Enhance a base system prompt with Prompt Optimization Engine context.
+    Appends classification, strategy, and few-shot data. Falls back to base prompt if unavailable."""
     try:
         from agenticops.prompt_engine.classifier import AlertClassifier
         from agenticops.prompt_engine.strategy import StrategySelector
@@ -2044,9 +2047,13 @@ def build_optimized_prompt(
 
         return f"{base_system_prompt}\n\n--- Prompt Optimization Context ---\n{optimized_section}"
     except Exception:
-        # Fallback: return base prompt unchanged
+        # Fallback: return base prompt unchanged (spec Section 1 Error Handling)
         return base_system_prompt
 ```
+
+Usage in rca_agent.py: call `build_prompt_with_optimization()` to enhance the prompt
+BEFORE passing to `build_system_prompt()`. The existing `build_system_prompt()` adds account preamble,
+skills protocol, and output rules on top.
 
 - [ ] **Step 2: Update main_agent.py — register new tools**
 
@@ -2180,3 +2187,241 @@ Task 14 (Strategy) ──┘
 ```
 
 Parallel tracks: Connectors (1-7), Service Model (8-10), and Prompt Engine (11-15) can be developed concurrently. Task 16 merges them.
+
+---
+
+## Chunk 5: Missing Scope (Added from Plan Review)
+
+### Task 19: Service Discovery Chat Flow
+
+**Goal:** Agent discovers services during scan/RCA and proposes groupings. Human confirms via chat.
+
+**Files:**
+- Modify: `src/agenticops/agents/main_agent.py` (add service discovery routing)
+- Modify: `src/agenticops/agents/scan_agent.py` (add service inference after resource scan)
+
+- [ ] **Step 1: Add service inference to scan_agent system prompt**
+
+In `src/agenticops/agents/scan_agent.py`, append to system prompt:
+
+```
+After scanning resources, look for service grouping signals:
+- Resources with matching Name tags (e.g., "payment-*")
+- Resources in the same security groups
+- ECS services / K8s namespaces as natural service boundaries
+If you detect a likely service grouping, call create_service() and add_resource_to_service()
+to propose it. Set status="inferred" — human will confirm later.
+```
+
+- [ ] **Step 2: Register service tools in scan_agent**
+
+```python
+from agenticops.tools.metadata_tools import create_service, add_resource_to_service, list_services
+# Add to scan_agent tools list
+```
+
+- [ ] **Step 3: Add routing rule in main_agent**
+
+In main_agent system prompt, add:
+```
+- service/discover/group → scan_agent (with service discovery focus)
+- confirm service → confirm_service tool (direct)
+```
+
+- [ ] **Step 4: Verify compilation**
+
+```bash
+python3 -m py_compile src/agenticops/agents/scan_agent.py
+python3 -m py_compile src/agenticops/agents/main_agent.py
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agenticops/agents/scan_agent.py src/agenticops/agents/main_agent.py
+git commit -m "feat(agents): add service discovery during scan with human confirmation flow"
+```
+
+---
+
+### Task 20: Skills Indexing for Prompt Retrieval
+
+**Goal:** Index existing 10 domain skills so Prompt Optimization Engine can recommend them.
+
+**Files:**
+- Create: `src/agenticops/prompt_engine/skill_index.py`
+- Modify: `src/agenticops/prompt_engine/strategy.py` (include skill suggestions)
+- Test: `tests/test_prompt_assembler.py` (extend)
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# append to tests/test_prompt_assembler.py
+from agenticops.prompt_engine.skill_index import get_skills_for_category
+
+
+def test_skills_for_cache_category():
+    skills = get_skills_for_category("cache")
+    # Should suggest database-admin or monitoring skills for cache issues
+    assert isinstance(skills, list)
+
+
+def test_skills_for_unknown():
+    skills = get_skills_for_category("unknown")
+    assert isinstance(skills, list)
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+- [ ] **Step 3: Implement skill_index.py**
+
+```python
+# src/agenticops/prompt_engine/skill_index.py
+"""Index existing domain skills for prompt optimization retrieval."""
+from __future__ import annotations
+
+# Static mapping: category -> relevant skills
+# Built from the 10 existing domain skills in skills/ directory
+CATEGORY_SKILL_MAP = {
+    "cache": ["database-admin", "monitoring"],
+    "network": ["network-engineer", "monitoring"],
+    "compute": ["linux-admin", "aws-compute", "kubernetes-admin"],
+    "database": ["database-admin", "monitoring"],
+    "security": ["linux-admin", "network-engineer"],
+    "storage": ["aws-storage", "linux-admin"],
+    "deployment": ["kubernetes-admin", "aws-compute"],
+    "dns": ["network-engineer"],
+    "load_balancer": ["network-engineer", "monitoring", "aws-compute"],
+    "unknown": ["monitoring", "log-analysis"],
+}
+
+
+def get_skills_for_category(category: str) -> list[str]:
+    """Return skill names relevant to an alert category."""
+    return CATEGORY_SKILL_MAP.get(category, CATEGORY_SKILL_MAP["unknown"])
+
+
+def format_skill_suggestion(category: str) -> str:
+    """Format skill activation suggestion for prompt."""
+    skills = get_skills_for_category(category)
+    if not skills:
+        return ""
+    return f"Recommended skills to activate: {', '.join(skills)}"
+```
+
+- [ ] **Step 4: Wire into StrategySelector**
+
+In `src/agenticops/prompt_engine/strategy.py`, update `select()`:
+
+```python
+def select(self, category: str, pattern: str) -> str:
+    # Try Wisdom Roadmap first
+    if self._wisdom_fn:
+        wisdom = self._wisdom_fn(pattern)
+        if wisdom and "not found" not in wisdom.lower():
+            return wisdom
+
+    # Default strategy + skill suggestion
+    from agenticops.prompt_engine.skill_index import format_skill_suggestion
+    base_strategy = DEFAULT_STRATEGIES.get(category, DEFAULT_STRATEGIES["unknown"])
+    skill_hint = format_skill_suggestion(category)
+    if skill_hint:
+        return f"{base_strategy}\n{skill_hint}"
+    return base_strategy
+```
+
+- [ ] **Step 5: Run test — expect PASS**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/agenticops/prompt_engine/skill_index.py src/agenticops/prompt_engine/strategy.py tests/test_prompt_assembler.py
+git commit -m "feat(prompt-engine): index existing skills for category-based retrieval"
+```
+
+---
+
+### Task 21: DB Migration Note
+
+**Goal:** Ensure new tables are created on existing deployments.
+
+**Files:**
+- No new files. AgenticOps uses `Base.metadata.create_all()` on startup (not Alembic).
+
+- [ ] **Step 1: Verify auto-migration behavior**
+
+Check that `create_all()` in the startup path handles new tables:
+
+```bash
+grep -n "create_all" src/agenticops/models.py
+```
+
+`create_all()` adds new tables without dropping existing ones — this is safe for SQLite and PostgreSQL.
+
+- [ ] **Step 2: Test with existing DB**
+
+```bash
+# Backup existing DB, start app, verify new tables created
+cp data/agenticops.db data/agenticops.db.bak
+python -c "from agenticops.models import init_db; init_db()"
+python -c "
+from agenticops.models import get_engine
+from sqlalchemy import inspect
+tables = inspect(get_engine()).get_table_names()
+assert 'services' in tables, 'Service table missing'
+assert 'service_resources' in tables, 'ServiceResource table missing'
+print('Migration OK:', tables)
+"
+```
+
+- [ ] **Step 3: Note in commit**
+
+```bash
+git commit --allow-empty -m "chore: verify DB auto-migration for new Service/Connector tables
+
+New tables (services, service_resources, service_dependencies) are created
+automatically via Base.metadata.create_all() on startup. No Alembic migration needed."
+```
+
+---
+
+## Notes from Plan Review
+
+**Connector rate limiting**: `ConnectorConfig.rate_limit` field exists but no rate limiter implementation. Deferred to Phase 2 — current usage is agent-driven (low volume), rate limiting becomes important when automated batch queries are introduced.
+
+**Existing RCA tools vs connectors**: Connectors supplement, not replace, existing tools. RCA agent keeps its direct AWS/K8s tool imports. `query_connector` is for NEW data sources (Datadog, Prometheus) and for generic cross-platform queries. Over time (Phase 3+), connectors may replace direct tool imports.
+
+**Frontend for connectors/services**: Backend API only in Phase 1. Frontend UI deferred to Phase 2 alongside ReviewCard.
+
+---
+
+## Updated Summary: Phase 1 Deliverables
+
+| Component | Tasks | Files Created | Files Modified |
+|-----------|-------|--------------|----------------|
+| Connector Framework | 1-7 | 8 new files | config.py, .gitignore |
+| Service Model | 8-10, 19 | 1 test file | models.py, metadata_tools.py, app.py, scan_agent.py |
+| Prompt Engine | 11-15, 20 | 7 new files | strategy.py |
+| Agent Integration | 16-18, 21 | — | preamble.py, main_agent.py, rca_agent.py |
+| **Total** | **21 tasks** | **16 new files** | **9 modified files** |
+
+### Updated Dependency Graph
+
+```
+Task 1 (ConnectorBase) ──┬── Task 3 (AWS) ────┐
+                         ├── Task 4 (K8s) ─────┤
+Task 2 (Registry+Config)─┤                     ├── Task 7 (Connector Tools) ── Task 16 (Integration)
+                         ├── Task 5 (Datadog)──┤
+                         └── Task 6 (Prom) ────┘
+
+Task 8 (Service DB) ── Task 9 (Service CRUD) ──┬── Task 10 (Service API) ── Task 16 (Integration)
+                                                └── Task 19 (Chat Discovery)
+
+Task 11 (Evidence) ──┐
+Task 12 (Classifier)─┤
+Task 13 (Retriever) ─┼── Task 15 (Assembler) ── Task 16 (Integration)
+Task 14 (Strategy) ──┤
+Task 20 (Skill Index)┘
+
+Task 21 (Migration Check) — independent, run after all tables added
+```
