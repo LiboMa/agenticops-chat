@@ -11,10 +11,52 @@ import {
   useUpdateAccount,
   useDeleteAccount,
 } from "@/hooks/useAccounts";
-import type { Account, AccountCreate, AccountUpdate } from "@/api/types";
+import type { Account, AccountCreate, AccountUpdate, CloudProvider } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
-/*  Account form modal                                                 */
+/*  Provider constants                                                  */
+/* ------------------------------------------------------------------ */
+
+const PROVIDER_OPTIONS: { value: CloudProvider; label: string }[] = [
+  { value: "aws", label: "AWS" },
+  { value: "azure", label: "Azure" },
+  { value: "gcp", label: "GCP" },
+  { value: "alicloud", label: "Alicloud" },
+];
+
+const PROVIDER_BADGE_CLASSES: Record<CloudProvider, string> = {
+  aws: "bg-orange-100 text-orange-700",
+  azure: "bg-blue-100 text-blue-700",
+  gcp: "bg-green-100 text-green-700",
+  alicloud: "bg-purple-100 text-purple-700",
+};
+
+const PROVIDER_FIELDS: Record<CloudProvider, { key: string; label: string; type?: string; placeholder: string }[]> = {
+  aws: [
+    { key: "role_arn", label: "Role ARN", placeholder: "arn:aws:iam::123456789012:role/AgenticOps" },
+    { key: "external_id", label: "External ID", placeholder: "Optional" },
+    { key: "account_id", label: "Account ID", placeholder: "123456789012" },
+    { key: "profile_name", label: "Profile Name", placeholder: "default (from ~/.aws/credentials)" },
+  ],
+  azure: [
+    { key: "subscription_id", label: "Subscription ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "tenant_id", label: "Tenant ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "client_id", label: "Client ID", placeholder: "Service Principal App ID" },
+    { key: "client_secret", label: "Client Secret", type: "password", placeholder: "Service Principal Secret" },
+  ],
+  gcp: [
+    { key: "project_id", label: "Project ID", placeholder: "my-gcp-project" },
+    { key: "service_account_key", label: "Service Account Key (JSON)", type: "textarea", placeholder: '{"type": "service_account", ...}' },
+  ],
+  alicloud: [
+    { key: "access_key_id", label: "Access Key ID", placeholder: "LTAI..." },
+    { key: "access_key_secret", label: "Access Key Secret", type: "password", placeholder: "Secret" },
+    { key: "account_id", label: "Account ID", placeholder: "1234567890" },
+  ],
+};
+
+/* ------------------------------------------------------------------ */
+/*  Account form modal                                                  */
 /* ------------------------------------------------------------------ */
 
 interface FormModalProps {
@@ -26,12 +68,14 @@ interface FormModalProps {
 
 function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) {
   const isEdit = !!initial;
+  const [provider, setProvider] = useState<CloudProvider>(initial?.provider ?? "aws");
   const [name, setName] = useState(initial?.name ?? "");
-  const [accountId, setAccountId] = useState(initial?.account_id ?? "");
-  const [roleArn, setRoleArn] = useState(initial?.role_arn ?? "");
-  const [externalId, setExternalId] = useState(initial?.external_id ?? "");
   const [regions, setRegions] = useState(initial?.regions?.join(", ") ?? "");
-  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
+  const [useEnvDefaults, setUseEnvDefaults] = useState(false);
+  const [creds, setCreds] = useState<Record<string, string>>({});
+
+  const fields = PROVIDER_FIELDS[provider];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,71 +84,69 @@ function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
       .map((r) => r.trim())
       .filter(Boolean);
 
+    const credentials: Record<string, unknown> = {};
+    if (!useEnvDefaults) {
+      for (const f of fields) {
+        const val = creds[f.key]?.trim();
+        if (val) {
+          credentials[f.key] = f.key === "service_account_key" ? JSON.parse(val) : val;
+        }
+      }
+    }
+
     if (isEdit) {
       const data: AccountUpdate = {
         name,
-        role_arn: roleArn,
-        external_id: externalId || undefined,
-        regions: regionList.length ? regionList : undefined,
-        is_active: isActive,
+        credentials,
+        regions: regionList,
+        is_enabled: isEnabled,
       };
       onSave(data);
     } else {
       const data: AccountCreate = {
         name,
-        account_id: accountId,
-        role_arn: roleArn,
-        external_id: externalId || undefined,
-        regions: regionList.length ? regionList : undefined,
-        is_active: isActive,
+        provider,
+        credentials,
+        regions: regionList,
+        is_enabled: isEnabled,
       };
       onSave(data);
     }
   }
 
+  const inputClass = "w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">Provider</label>
+            <select
+              value={provider}
+              onChange={(e) => {
+                setProvider(e.target.value as CloudProvider);
+                setCreds({});
+              }}
+              disabled={isEdit}
+              className={`${inputClass} disabled:bg-secondary`}
+            >
+              {PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Name</label>
             <input
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Account ID</label>
-            <input
-              required
-              disabled={isEdit}
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Role ARN</label>
-            <input
-              required
-              value={roleArn}
-              onChange={(e) => setRoleArn(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">
-              External ID (optional)
-            </label>
-            <input
-              value={externalId}
-              onChange={(e) => setExternalId(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="e.g. aws-prod, azure-staging"
+              className={inputClass}
             />
           </div>
           <div>
@@ -115,19 +157,60 @@ function AccountFormModal({ initial, onClose, onSave, saving }: FormModalProps) 
               value={regions}
               onChange={(e) => setRegions(e.target.value)}
               placeholder="us-east-1, us-west-2"
-              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className={inputClass}
             />
           </div>
           <div className="flex items-center gap-2">
             <input
-              id="is-active"
+              id="use-env"
               type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
+              checked={useEnvDefaults}
+              onChange={(e) => setUseEnvDefaults(e.target.checked)}
               className="rounded border-border"
             />
-            <label htmlFor="is-active" className="text-sm text-foreground">
-              Active
+            <label htmlFor="use-env" className="text-sm text-muted-foreground">
+              Use environment / CLI defaults (no explicit credentials)
+            </label>
+          </div>
+          {!useEnvDefaults && (
+            <div className="space-y-3 border-t border-border pt-3">
+              <p className="text-xs text-muted-foreground">
+                {provider.toUpperCase()} Credentials — leave blank to use env defaults
+              </p>
+              {fields.map((f) => (
+                <div key={f.key}>
+                  <label className="block text-sm font-medium text-foreground mb-1">{f.label}</label>
+                  {f.type === "textarea" ? (
+                    <textarea
+                      value={creds[f.key] ?? ""}
+                      onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      rows={4}
+                      className={inputClass}
+                    />
+                  ) : (
+                    <input
+                      type={f.type ?? "text"}
+                      value={creds[f.key] ?? ""}
+                      onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      className={inputClass}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              id="is-enabled"
+              type="checkbox"
+              checked={isEnabled}
+              onChange={(e) => setIsEnabled(e.target.checked)}
+              className="rounded border-border"
+            />
+            <label htmlFor="is-enabled" className="text-sm text-foreground">
+              Enabled
             </label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
@@ -173,7 +256,7 @@ function DeleteModal({
         <h3 className="text-lg font-semibold text-foreground mb-2">Delete Account</h3>
         <p className="text-sm text-muted-foreground mb-4">
           Are you sure you want to delete <strong>{account.name}</strong> (
-          {account.account_id})? This action cannot be undone.
+          {account.provider.toUpperCase()})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button
@@ -208,17 +291,12 @@ const columns: Column<Account>[] = [
     render: (r) => <span className="font-medium text-foreground">{r.name}</span>,
   },
   {
-    key: "account_id",
-    header: "Account ID",
-    render: (r) => <span className="font-mono text-sm">{r.account_id}</span>,
-  },
-  {
-    key: "role_arn",
-    header: "Role ARN",
+    key: "provider",
+    header: "Provider",
     render: (r) => (
-      <span className="font-mono text-xs text-muted-foreground truncate max-w-[200px] block">
-        {r.role_arn}
-      </span>
+      <Badge className={PROVIDER_BADGE_CLASSES[r.provider]}>
+        {r.provider.toUpperCase()}
+      </Badge>
     ),
   },
   {
@@ -235,13 +313,13 @@ const columns: Column<Account>[] = [
     ),
   },
   {
-    key: "is_active",
+    key: "is_enabled",
     header: "Status",
     render: (r) =>
-      r.is_active ? (
-        <Badge className="bg-green-100 text-green-700">Active</Badge>
+      r.is_enabled ? (
+        <Badge className="bg-green-100 text-green-700">Enabled</Badge>
       ) : (
-        <Badge className="bg-secondary text-muted-foreground">Inactive</Badge>
+        <Badge className="bg-secondary text-muted-foreground">Disabled</Badge>
       ),
   },
   {
@@ -258,7 +336,8 @@ const columns: Column<Account>[] = [
 ];
 
 export default function Accounts() {
-  const { data: accounts, isLoading, error } = useAccounts();
+  const [filterProvider, setFilterProvider] = useState<string>("");
+  const { data: accounts, isLoading, error } = useAccounts(filterProvider || undefined);
   const createMut = useCreateAccount();
   const updateMut = useUpdateAccount();
   const deleteMut = useDeleteAccount();
@@ -274,16 +353,28 @@ export default function Accounts() {
     <>
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">AWS Accounts</h2>
-          <button
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
-          >
-            New Account
-          </button>
+          <h2 className="text-lg font-semibold text-foreground">Cloud Accounts</h2>
+          <div className="flex items-center gap-3">
+            <select
+              value={filterProvider}
+              onChange={(e) => setFilterProvider(e.target.value)}
+              className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground"
+            >
+              <option value="">All Providers</option>
+              {PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            >
+              New Account
+            </button>
+          </div>
         </CardHeader>
         <DataTable
           columns={[

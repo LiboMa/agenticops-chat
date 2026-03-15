@@ -21,7 +21,7 @@ import {
   useImportMcpServers,
 } from "@/hooks/useMcpServers";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
-import type { Account, AccountCreate, AccountUpdate, McpServerConfig } from "@/api/types";
+import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig } from "@/api/types";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
@@ -101,6 +101,13 @@ function SettingToggle({
 
 /* ── Account form modal (reused from Accounts page) ─────────────── */
 
+const SETTINGS_PROVIDER_OPTIONS: { value: CloudProvider; label: string }[] = [
+  { value: "aws", label: "AWS" },
+  { value: "azure", label: "Azure" },
+  { value: "gcp", label: "GCP" },
+  { value: "alicloud", label: "Alicloud" },
+];
+
 function AccountFormModal({
   initial, onClose, onSave, saving,
 }: {
@@ -108,22 +115,22 @@ function AccountFormModal({
   onSave: (data: AccountCreate | AccountUpdate) => void; saving: boolean;
 }) {
   const isEdit = !!initial;
+  const [provider, setProvider] = useState<CloudProvider>(initial?.provider ?? "aws");
   const [name, setName] = useState(initial?.name ?? "");
-  const [accountId, setAccountId] = useState(initial?.account_id ?? "");
-  const [roleArn, setRoleArn] = useState(initial?.role_arn ?? "");
-  const [externalId, setExternalId] = useState(initial?.external_id ?? "");
   const [regions, setRegions] = useState(initial?.regions?.join(", ") ?? "");
-  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const regionList = regions.split(",").map((r) => r.trim()).filter(Boolean);
     if (isEdit) {
-      onSave({ name, role_arn: roleArn, external_id: externalId || undefined, regions: regionList.length ? regionList : undefined, is_active: isActive } as AccountUpdate);
+      onSave({ name, regions: regionList, is_enabled: isEnabled } as AccountUpdate);
     } else {
-      onSave({ name, account_id: accountId, role_arn: roleArn, external_id: externalId || undefined, regions: regionList.length ? regionList : undefined, is_active: isActive } as AccountCreate);
+      onSave({ name, provider, credentials: {}, regions: regionList, is_enabled: isEnabled } as AccountCreate);
     }
   }
+
+  const inputClass = "w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -133,28 +140,22 @@ function AccountFormModal({
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
+            <label className="block text-sm font-medium text-foreground mb-1">Provider</label>
+            <select value={provider} onChange={(e) => setProvider(e.target.value as CloudProvider)} disabled={isEdit} className={`${inputClass} disabled:bg-secondary`}>
+              {SETTINGS_PROVIDER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-foreground mb-1">Name</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Account ID</label>
-            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Role ARN</label>
-            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">External ID (optional)</label>
-            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
           </div>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Regions (comma-separated)</label>
-            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className={inputClass} />
           </div>
           <div className="flex items-center gap-2">
-            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-border" />
-            <label htmlFor="is-active" className="text-sm text-foreground">Active</label>
+            <input id="is-enabled-settings" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="is-enabled-settings" className="text-sm text-foreground">Enabled</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
@@ -176,7 +177,7 @@ function DeleteModal({
       <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
         <h3 className="text-lg font-semibold text-foreground mb-2">Delete Account</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Are you sure you want to delete <strong>{account.name}</strong> ({account.account_id})? This action cannot be undone.
+          Are you sure you want to delete <strong>{account.name}</strong> ({account.provider.toUpperCase()})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
@@ -189,12 +190,18 @@ function DeleteModal({
 
 /* ── Accounts columns ───────────────────────────────────────────── */
 
+const SETTINGS_PROVIDER_BADGE: Record<CloudProvider, string> = {
+  aws: "bg-orange-100 text-orange-700",
+  azure: "bg-blue-100 text-blue-700",
+  gcp: "bg-green-100 text-green-700",
+  alicloud: "bg-purple-100 text-purple-700",
+};
+
 const accountColumns: Column<Account>[] = [
   { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-foreground">{r.name}</span> },
-  { key: "account_id", header: "Account ID", render: (r) => <span className="font-mono text-sm">{r.account_id}</span> },
-  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-muted-foreground truncate max-w-[200px] block">{r.role_arn}</span> },
+  { key: "provider", header: "Provider", render: (r) => <Badge className={SETTINGS_PROVIDER_BADGE[r.provider]}>{r.provider.toUpperCase()}</Badge> },
   { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-secondary text-muted-foreground">{reg}</Badge>)}</div> },
-  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-secondary text-muted-foreground">Inactive</Badge> },
+  { key: "is_enabled", header: "Status", render: (r) => r.is_enabled ? <Badge className="bg-green-100 text-green-700">Enabled</Badge> : <Badge className="bg-secondary text-muted-foreground">Disabled</Badge> },
   { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-muted-foreground">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 

@@ -149,33 +149,35 @@ export interface FixExecution {
 /*  Account                                                            */
 /* ------------------------------------------------------------------ */
 
+export type CloudProvider = "aws" | "azure" | "gcp" | "alicloud";
+
 export interface Account {
   id: number;
   name: string;
-  account_id: string;
-  role_arn: string;
-  external_id: string | null;
+  provider: CloudProvider;
+  credentials: Record<string, unknown>;
   regions: string[];
-  is_active: boolean;
+  labels: Record<string, string>;
+  is_enabled: boolean;
   created_at: string;
   last_scanned_at: string | null;
 }
 
 export interface AccountCreate {
   name: string;
-  account_id: string;
-  role_arn: string;
-  external_id?: string;
-  regions?: string[];
-  is_active?: boolean;
+  provider: CloudProvider;
+  credentials: Record<string, unknown>;
+  regions: string[];
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
 }
 
 export interface AccountUpdate {
   name?: string;
-  role_arn?: string;
-  external_id?: string;
+  credentials?: Record<string, unknown>;
   regions?: string[];
-  is_active?: boolean;
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
