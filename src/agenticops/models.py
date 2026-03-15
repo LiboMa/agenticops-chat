@@ -896,9 +896,9 @@ def init_db(engine=None):
                 aws_count = conn.execute(text("SELECT COUNT(*) FROM aws_accounts")).scalar()
                 if aws_count > 0:
                     conn.execute(text("""
-                        INSERT INTO cloud_accounts (name, provider, is_enabled, credentials, regions, created_at, last_scanned_at)
+                        INSERT INTO cloud_accounts (name, provider, is_enabled, credentials, regions, labels, created_at, last_scanned_at)
                         SELECT name, 'aws', is_active, json_object('account_id', account_id, 'role_arn', role_arn, 'external_id', external_id),
-                               regions, created_at, last_scanned_at
+                               regions, '{}', created_at, last_scanned_at
                         FROM aws_accounts
                     """))
                     conn.commit()

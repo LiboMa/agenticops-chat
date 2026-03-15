@@ -8,14 +8,14 @@ from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTask
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
     AlertEvent,
-    AWSAccount,
+    CloudAccount,
     AWSResource,
     Anomaly,
     FixExecution,
@@ -74,38 +74,49 @@ def _ensure_aws_session(region: str):
 
 
 class AccountCreate(BaseModel):
-    """Schema for creating an account."""
+    """Schema for creating a cloud account."""
     name: str = Field(..., max_length=100)
-    account_id: str = Field(..., max_length=12)
-    role_arn: str = Field(..., max_length=200)
-    external_id: Optional[str] = Field(None, max_length=100)
-    regions: List[str] = Field(default_factory=lambda: ["us-east-1"])
-    is_active: bool = True
+    provider: str = Field(..., pattern="^(aws|azure|gcp|alicloud)$")
+    credentials: dict = Field(default_factory=dict)
+    regions: List[str] = Field(default_factory=list)
+    labels: dict = Field(default_factory=dict)
+    is_enabled: bool = True
 
 
 class AccountUpdate(BaseModel):
-    """Schema for updating an account."""
+    """Schema for updating a cloud account."""
     name: Optional[str] = Field(None, max_length=100)
-    role_arn: Optional[str] = Field(None, max_length=200)
-    external_id: Optional[str] = Field(None, max_length=100)
+    credentials: Optional[dict] = None
     regions: Optional[List[str]] = None
-    is_active: Optional[bool] = None
+    labels: Optional[dict] = None
+    is_enabled: Optional[bool] = None
+
+
+REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key"}
 
 
 class AccountResponse(BaseModel):
     """Schema for account response."""
     id: int
     name: str
-    account_id: str
-    role_arn: str
-    external_id: Optional[str]
+    provider: str
+    credentials: dict
     regions: List[str]
-    is_active: bool
+    labels: dict
+    is_enabled: bool
     created_at: datetime
     last_scanned_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def redact_secrets(self):
+        if self.credentials:
+            self.credentials = {
+                k: "***REDACTED***" if k in REDACTED_KEYS else v
+                for k, v in self.credentials.items()
+            }
+        return self
 
 
 class ResourceResponse(BaseModel):
@@ -1257,7 +1268,7 @@ async def api_stats():
             "total_resources": session.query(AWSResource).count(),
             "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
             "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
-            "total_accounts": session.query(AWSAccount).count(),
+            "total_accounts": session.query(CloudAccount).count(),
         }
 
 
@@ -1382,18 +1393,20 @@ async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
 
 
 @app.get("/api/accounts", response_model=List[AccountResponse])
-async def api_list_accounts():
-    """List all AWS accounts."""
+async def api_list_accounts(provider: str | None = None):
+    """List cloud accounts, optionally filtered by provider."""
     with get_db_session() as session:
-        accounts = session.query(AWSAccount).all()
-        return [AccountResponse.model_validate(a) for a in accounts]
+        q = session.query(CloudAccount)
+        if provider:
+            q = q.filter(CloudAccount.provider == provider)
+        return [AccountResponse.model_validate(a) for a in q.all()]
 
 
 @app.get("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_get_account(account_id: int):
     """Get account by ID."""
     with get_db_session() as session:
-        account = session.query(AWSAccount).filter_by(id=account_id).first()
+        account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
         return AccountResponse.model_validate(account)
@@ -1401,38 +1414,36 @@ async def api_get_account(account_id: int):
 
 @app.post("/api/accounts", response_model=AccountResponse, status_code=201)
 async def api_create_account(account: AccountCreate):
-    """Create a new AWS account."""
+    """Create a new cloud account."""
     with get_db_session() as session:
-        # Check if account name or account_id already exists
-        existing = session.query(AWSAccount).filter(
-            (AWSAccount.name == account.name) | (AWSAccount.account_id == account.account_id)
+        existing = session.query(CloudAccount).filter(
+            CloudAccount.name == account.name
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Account name or ID already exists")
+            raise HTTPException(status_code=409, detail=f"Account name '{account.name}' already exists")
 
-        db_account = AWSAccount(
+        db_account = CloudAccount(
             name=account.name,
-            account_id=account.account_id,
-            role_arn=account.role_arn,
-            external_id=account.external_id,
+            provider=account.provider,
+            is_enabled=account.is_enabled,
+            credentials=account.credentials,
             regions=account.regions,
-            is_active=account.is_active,
+            labels=account.labels,
         )
         session.add(db_account)
-        session.flush()  # Get the ID
+        session.flush()
         return AccountResponse.model_validate(db_account)
 
 
 @app.put("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_update_account(account_id: int, account: AccountUpdate):
-    """Update an existing AWS account."""
+    """Update an existing cloud account."""
     with get_db_session() as session:
-        db_account = session.query(AWSAccount).filter_by(id=account_id).first()
+        db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
 
-        update_data = account.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
+        for key, value in account.model_dump(exclude_unset=True).items():
             setattr(db_account, key, value)
 
         session.flush()
@@ -1441,13 +1452,25 @@ async def api_update_account(account_id: int, account: AccountUpdate):
 
 @app.delete("/api/accounts/{account_id}", status_code=204)
 async def api_delete_account(account_id: int):
-    """Delete an AWS account."""
+    """Delete a cloud account."""
     with get_db_session() as session:
-        db_account = session.query(AWSAccount).filter_by(id=account_id).first()
+        db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
-
         session.delete(db_account)
+
+
+@app.post("/api/accounts/{account_id}/test")
+async def api_test_account_connection(account_id: int):
+    """Test credential chain for an account. Returns success/failure."""
+    from agenticops.providers import get_provider
+    with get_db_session() as session:
+        acct = session.query(CloudAccount).filter_by(id=account_id).first()
+        if not acct:
+            raise HTTPException(status_code=404, detail="Account not found")
+        provider = get_provider(acct)
+        success = provider.resolve_credentials()
+        return {"success": success, "provider": acct.provider, "name": acct.name}
 
 
 # ============================================================================
@@ -2875,11 +2898,11 @@ async def api_generate_report(request: ReportGenerateRequest):
         # Get account if specified
         account = None
         if request.account_name:
-            account = session.query(AWSAccount).filter_by(name=request.account_name).first()
+            account = session.query(CloudAccount).filter_by(name=request.account_name).first()
             if not account:
                 raise HTTPException(status_code=404, detail="Account not found")
         else:
-            account = session.query(AWSAccount).filter_by(is_active=True).first()
+            account = session.query(CloudAccount).filter_by(is_enabled=True).first()
 
         generator = ReportGenerator(account)
 
