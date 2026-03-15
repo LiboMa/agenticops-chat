@@ -553,6 +553,12 @@ class Settings(BaseSettings):
         description="Base weight in hybrid search reranking (0-1)",
     )
 
+    # Default regions per cloud provider (for account creation UI)
+    default_regions: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Default regions per cloud provider for account creation UI",
+    )
+
     def ensure_dirs(self) -> None:
         """Ensure all required directories exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)

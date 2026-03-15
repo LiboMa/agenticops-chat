@@ -10,7 +10,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from agenticops.config import settings
-from agenticops.models import Anomaly, AWSAccount, AWSResource, RCAResult, get_session
+from agenticops.models import Anomaly, CloudAccount, CloudResource, RCAResult, get_session
 from agenticops.monitor.cloudwatch import CloudWatchMonitor
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ class BedrockLLM:
 class RCAEngine:
     """Root Cause Analysis Engine."""
 
-    def __init__(self, account: Optional[AWSAccount] = None):
+    def __init__(self, account: Optional[CloudAccount] = None):
         """Initialize RCA engine."""
         self.account = account
         self.llm = BedrockLLM()
@@ -265,7 +265,7 @@ Format your response as JSON:
         try:
             session = get_session()
             resource = (
-                session.query(AWSResource)
+                session.query(CloudResource)
                 .filter_by(resource_id=anomaly.resource_id)
                 .first()
             )

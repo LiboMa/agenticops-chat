@@ -33,8 +33,8 @@ from rich.rule import Rule
 from agenticops import __version__
 from agenticops.config import settings
 from agenticops.models import (
-    AWSAccount,
-    AWSResource,
+    CloudAccount,
+    CloudResource,
     HealthIssue,
     FixPlan,
     FixExecution,
@@ -248,13 +248,13 @@ app.add_typer(service_app, name="service")
 # ============================================================================
 
 
-def get_account(name: str = None) -> Optional[AWSAccount]:
+def get_account(name: str = None) -> Optional[CloudAccount]:
     """Get AWS account by name or the first active account."""
     session = get_session()
     try:
         if name:
-            return session.query(AWSAccount).filter_by(name=name).first()
-        return session.query(AWSAccount).filter_by(is_active=True).first()
+            return session.query(CloudAccount).filter_by(name=name).first()
+        return session.query(CloudAccount).filter_by(is_enabled=True).first()
     finally:
         session.close()
 
@@ -311,9 +311,9 @@ def get_accounts(
     session = get_session()
 
     try:
-        query = session.query(AWSAccount)
+        query = session.query(CloudAccount)
         if not all_accounts:
-            query = query.filter_by(is_active=True)
+            query = query.filter_by(is_enabled=True)
         accounts = query.all()
 
         if not accounts:
@@ -323,27 +323,30 @@ def get_accounts(
         if output == "json":
             data = [{
                 "name": a.name,
-                "account_id": a.account_id,
+                "provider": a.provider,
+                "account_id": (a.credentials or {}).get("account_id", ""),
                 "regions": a.regions,
-                "is_active": a.is_active,
+                "is_enabled": a.is_enabled,
                 "last_scanned": a.last_scanned_at.isoformat() if a.last_scanned_at else None,
             } for a in accounts]
             output_json(data)
         elif output == "wide":
             output_table(
-                [(a.name, a.account_id, a.role_arn, ",".join(a.regions),
-                  "Active" if a.is_active else "Inactive",
+                [(a.name, a.provider, (a.credentials or {}).get("account_id", ""),
+                  (a.credentials or {}).get("role_arn", ""), ",".join(a.regions),
+                  "Active" if a.is_enabled else "Inactive",
                   a.last_scanned_at.strftime("%Y-%m-%d %H:%M") if a.last_scanned_at else "Never")
                  for a in accounts],
-                [{"name": "NAME"}, {"name": "ACCOUNT ID"}, {"name": "ROLE ARN"},
+                [{"name": "NAME"}, {"name": "PROVIDER"}, {"name": "ACCOUNT ID"}, {"name": "ROLE ARN"},
                  {"name": "REGIONS"}, {"name": "STATUS"}, {"name": "LAST SCAN"}],
             )
         else:
             output_table(
-                [(a.name, a.account_id, ",".join(a.regions[:2]) + ("..." if len(a.regions) > 2 else ""),
-                  "Active" if a.is_active else "Inactive")
+                [(a.name, a.provider, (a.credentials or {}).get("account_id", ""),
+                  ",".join(a.regions[:2]) + ("..." if len(a.regions) > 2 else ""),
+                  "Active" if a.is_enabled else "Inactive")
                  for a in accounts],
-                [{"name": "NAME"}, {"name": "ACCOUNT ID"}, {"name": "REGIONS"}, {"name": "STATUS"}],
+                [{"name": "NAME"}, {"name": "PROVIDER"}, {"name": "ACCOUNT ID"}, {"name": "REGIONS"}, {"name": "STATUS"}],
             )
     finally:
         session.close()
@@ -362,7 +365,7 @@ def get_resources(
     session = get_session()
 
     try:
-        query = session.query(AWSResource)
+        query = session.query(CloudResource)
         if type:
             query = query.filter_by(resource_type=type)
         if region:
@@ -380,22 +383,22 @@ def get_resources(
             data = [{
                 "type": r.resource_type,
                 "id": r.resource_id,
-                "name": r.resource_name,
+                "name": r.name,
                 "region": r.region,
                 "status": r.status,
             } for r in resources]
             output_json(data)
         elif output == "wide":
             output_table(
-                [(r.resource_type, r.resource_id, r.resource_name or "-", r.region,
-                  r.status, r.resource_arn or "-", r.updated_at.strftime("%Y-%m-%d %H:%M"))
+                [(r.resource_type, r.resource_id, r.name or "-", r.region,
+                  r.status, r.resource_id or "-", r.updated_at.strftime("%Y-%m-%d %H:%M"))
                  for r in resources],
                 [{"name": "TYPE"}, {"name": "ID"}, {"name": "NAME"}, {"name": "REGION"},
                  {"name": "STATUS"}, {"name": "ARN"}, {"name": "UPDATED"}],
             )
         else:
             output_table(
-                [(r.resource_type, r.resource_id, r.resource_name or "-", r.region, r.status)
+                [(r.resource_type, r.resource_id, r.name or "-", r.region, r.status)
                  for r in resources],
                 [{"name": "TYPE"}, {"name": "ID"}, {"name": "NAME"}, {"name": "REGION"}, {"name": "STATUS"}],
             )
@@ -587,18 +590,20 @@ def describe_account(name: str = typer.Argument(..., help="Account name")):
     session = get_session()
 
     try:
-        account = session.query(AWSAccount).filter_by(name=name).first()
+        account = session.query(CloudAccount).filter_by(name=name).first()
         if not account:
             console.print(f"[red]Account '{name}' not found.[/red]")
             raise typer.Exit(1)
 
+        creds = account.credentials or {}
         data = {
             "Name": account.name,
-            "Account ID": account.account_id,
-            "Role ARN": account.role_arn,
-            "External ID": account.external_id or "-",
+            "Provider": account.provider,
+            "Account ID": creds.get("account_id", ""),
+            "Role ARN": creds.get("role_arn", ""),
+            "External ID": creds.get("external_id", "") or "-",
             "Regions": account.regions,
-            "Status": "Active" if account.is_active else "Inactive",
+            "Status": "Active" if account.is_enabled else "Inactive",
             "Created": account.created_at.strftime("%Y-%m-%d %H:%M"),
             "Last Scanned": account.last_scanned_at.strftime("%Y-%m-%d %H:%M") if account.last_scanned_at else "Never",
         }
@@ -614,11 +619,11 @@ def describe_resource(resource_id: str = typer.Argument(..., help="Resource ID")
     session = get_session()
 
     try:
-        resource = session.query(AWSResource).filter_by(resource_id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(resource_id=resource_id).first()
         if not resource:
             # Try by database ID
             try:
-                resource = session.query(AWSResource).filter_by(id=int(resource_id)).first()
+                resource = session.query(CloudResource).filter_by(id=int(resource_id)).first()
             except ValueError:
                 pass
 
@@ -629,12 +634,12 @@ def describe_resource(resource_id: str = typer.Argument(..., help="Resource ID")
         data = {
             "Type": resource.resource_type,
             "ID": resource.resource_id,
-            "Name": resource.resource_name or "-",
-            "ARN": resource.resource_arn or "-",
+            "Name": resource.name or "-",
+            "ARN": resource.resource_id or "-",
             "Region": resource.region,
             "Status": resource.status,
             "Tags": resource.tags or {},
-            "Metadata": resource.resource_metadata or {},
+            "Metadata": resource.raw_data or {},
             "Created": resource.created_at.strftime("%Y-%m-%d %H:%M"),
             "Updated": resource.updated_at.strftime("%Y-%m-%d %H:%M"),
         }
@@ -739,7 +744,7 @@ def create_account(
     session = get_session()
 
     try:
-        existing = session.query(AWSAccount).filter_by(name=name).first()
+        existing = session.query(CloudAccount).filter_by(name=name).first()
         if existing:
             console.print(f"[red]Account '{name}' already exists.[/red]")
             raise typer.Exit(1)
@@ -748,15 +753,18 @@ def create_account(
 
         # Deactivate all other accounts if activating this one
         if activate:
-            session.query(AWSAccount).update({"is_active": False})
+            session.query(CloudAccount).update({"is_enabled": False})
 
-        account = AWSAccount(
+        account = CloudAccount(
             name=name,
-            account_id=account_id,
-            role_arn=role_arn,
-            external_id=external_id,
+            provider="aws",
+            credentials={
+                "account_id": account_id,
+                "role_arn": role_arn,
+                "external_id": external_id or "",
+            },
             regions=region_list,
-            is_active=activate,
+            is_enabled=activate,
         )
         session.add(account)
         session.commit()
@@ -843,7 +851,7 @@ def delete_account(
     session = get_session()
 
     try:
-        account = session.query(AWSAccount).filter_by(name=name).first()
+        account = session.query(CloudAccount).filter_by(name=name).first()
         if not account:
             console.print(f"[red]Account '{name}' not found.[/red]")
             raise typer.Exit(1)
@@ -904,24 +912,27 @@ def update_account(
     session = get_session()
 
     try:
-        account = session.query(AWSAccount).filter_by(name=name).first()
+        account = session.query(CloudAccount).filter_by(name=name).first()
         if not account:
             console.print(f"[red]Account '{name}' not found.[/red]")
             raise typer.Exit(1)
 
-        if role_arn:
-            account.role_arn = role_arn
-        if external_id is not None:
-            account.external_id = external_id
+        if role_arn or external_id is not None:
+            creds = dict(account.credentials or {})
+            if role_arn:
+                creds["role_arn"] = role_arn
+            if external_id is not None:
+                creds["external_id"] = external_id
+            account.credentials = creds
         if regions:
             account.regions = [r.strip() for r in regions.split(",")]
         if enable:
             # Deactivate ALL other accounts first (only one active at a time)
-            session.query(AWSAccount).filter(AWSAccount.id != account.id).update({"is_active": False})
-            account.is_active = True
+            session.query(CloudAccount).filter(CloudAccount.id != account.id).update({"is_enabled": False})
+            account.is_enabled = True
             console.print(f"[yellow]All other accounts deactivated.[/yellow]")
         if disable:
-            account.is_active = False
+            account.is_enabled = False
 
         session.commit()
         console.print(f"[green]account/{name} updated[/green]")
@@ -1658,66 +1669,70 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
 
     try:
         if not args or args[0] == "list":
-            accounts = session.query(AWSAccount).all()
+            accounts = session.query(CloudAccount).all()
             if not accounts:
                 return "[yellow]No accounts found.[/yellow]"
 
             if ctx.output_format == "json":
-                data = [{"name": a.name, "account_id": a.account_id,
-                        "regions": a.regions, "is_active": a.is_active} for a in accounts]
+                data = [{"name": a.name, "provider": a.provider,
+                        "account_id": (a.credentials or {}).get("account_id", ""),
+                        "regions": a.regions, "is_enabled": a.is_enabled} for a in accounts]
                 return json.dumps(data, indent=2)
 
-            lines = ["[bold]AWS Accounts:[/bold] [dim](only one can be active)[/dim]"]
+            lines = ["[bold]Cloud Accounts:[/bold] [dim](only one can be active)[/dim]"]
             for a in accounts:
-                status = "[green]● Active[/green]" if a.is_active else "[dim]○ Inactive[/dim]"
-                lines.append(f"  {status} {a.name}: {a.account_id}")
+                status = "[green]● Active[/green]" if a.is_enabled else "[dim]○ Inactive[/dim]"
+                acct_id = (a.credentials or {}).get("account_id", "")
+                lines.append(f"  {status} {a.name}: {a.provider}/{acct_id}")
             return "\n".join(lines)
 
         elif args[0] in ["show", "describe"] and len(args) > 1:
             name = args[1]
-            account = session.query(AWSAccount).filter_by(name=name).first()
+            account = session.query(CloudAccount).filter_by(name=name).first()
             if not account:
                 return f"[red]Account '{name}' not found.[/red]"
 
-            status = "[green]Active[/green]" if account.is_active else "[red]Inactive[/red]"
+            status = "[green]Active[/green]" if account.is_enabled else "[red]Inactive[/red]"
+            creds = account.credentials or {}
             return f"""[bold]Account: {account.name}[/bold] {status}
-  Account ID: {account.account_id}
-  Role ARN: {account.role_arn}
-  External ID: {account.external_id or '-'}
+  Provider: {account.provider}
+  Account ID: {creds.get('account_id', '')}
+  Role ARN: {creds.get('role_arn', '')}
+  External ID: {creds.get('external_id', '') or '-'}
   Regions: {', '.join(account.regions)}
   Last Scanned: {account.last_scanned_at.strftime('%Y-%m-%d %H:%M') if account.last_scanned_at else 'Never'}"""
 
         elif args[0] in ["activate", "enable", "use"] and len(args) > 1:
             name = args[1]
-            account = session.query(AWSAccount).filter_by(name=name).first()
+            account = session.query(CloudAccount).filter_by(name=name).first()
             if not account:
                 return f"[red]Account '{name}' not found.[/red]"
 
-            if account.is_active:
+            if account.is_enabled:
                 return f"[yellow]Account '{name}' is already active.[/yellow]"
 
             # Deactivate all other accounts first
-            session.query(AWSAccount).update({"is_active": False})
-            account.is_active = True
+            session.query(CloudAccount).update({"is_enabled": False})
+            account.is_enabled = True
             session.commit()
             return f"[green]Account '{name}' is now active. All other accounts deactivated.[/green]"
 
         elif args[0] in ["deactivate", "disable"] and len(args) > 1:
             name = args[1]
-            account = session.query(AWSAccount).filter_by(name=name).first()
+            account = session.query(CloudAccount).filter_by(name=name).first()
             if not account:
                 return f"[red]Account '{name}' not found.[/red]"
 
-            if not account.is_active:
+            if not account.is_enabled:
                 return f"[yellow]Account '{name}' is already inactive.[/yellow]"
 
-            account.is_active = False
+            account.is_enabled = False
             session.commit()
             return f"[yellow]Account '{name}' deactivated.[/yellow]"
 
         elif args[0] == "delete" and len(args) > 1:
             name = args[1]
-            account = session.query(AWSAccount).filter_by(name=name).first()
+            account = session.query(CloudAccount).filter_by(name=name).first()
             if not account:
                 return f"[red]Account '{name}' not found.[/red]"
 
@@ -1730,9 +1745,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             return f"[green]Account '{name}' deleted.[/green]"
 
         elif args[0] == "active":
-            active = session.query(AWSAccount).filter_by(is_active=True).first()
+            active = session.query(CloudAccount).filter_by(is_enabled=True).first()
             if active:
-                return f"[green]Active account: {active.name}[/green] ({active.account_id})"
+                return f"[green]Active account: {active.name}[/green] ({active.provider}/{(active.credentials or {}).get('account_id', '')})"
             return "[yellow]No active account. Use '/account activate <name>' to set one.[/yellow]"
 
         else:
@@ -1757,7 +1772,7 @@ def _slash_resource(ctx: ChatContext, args: list) -> str:
 
     try:
         if not args or args[0] == "list":
-            query = session.query(AWSResource)
+            query = session.query(CloudResource)
             limit = settings.default_list_limit
 
             # Parse --type flag
@@ -1791,32 +1806,32 @@ def _slash_resource(ctx: ChatContext, args: list) -> str:
 
             if ctx.output_format == "json":
                 data = [{"type": r.resource_type, "id": r.resource_id,
-                        "name": r.resource_name, "region": r.region} for r in resources]
+                        "name": r.name, "region": r.region} for r in resources]
                 return json.dumps(data, indent=2)
 
             lines = [f"[bold]Resources:[/bold] (showing {len(resources)} of {total}, use --limit N for more)"]
             for r in resources:
-                name = r.resource_name or r.resource_id[:20]
+                name = r.name or r.resource_id[:20]
                 # Escape brackets so Rich doesn't interpret them as markup
                 lines.append(f"  \\[{r.resource_type}] {name} ({r.region})")
             return "\n".join(lines)
 
         elif args[0] == "show" and len(args) > 1:
             resource_id = args[1]
-            resource = session.query(AWSResource).filter_by(resource_id=resource_id).first()
+            resource = session.query(CloudResource).filter_by(resource_id=resource_id).first()
             if not resource:
                 try:
-                    resource = session.query(AWSResource).filter_by(id=int(resource_id)).first()
+                    resource = session.query(CloudResource).filter_by(id=int(resource_id)).first()
                 except ValueError:
                     pass
 
             if not resource:
                 return f"[red]Resource '{resource_id}' not found.[/red]"
 
-            return f"""[bold]Resource: {resource.resource_name or resource.resource_id}[/bold]
+            return f"""[bold]Resource: {resource.name or resource.resource_id}[/bold]
   Type: {resource.resource_type}
   ID: {resource.resource_id}
-  ARN: {resource.resource_arn or '-'}
+  ARN: {resource.resource_id or '-'}
   Region: {resource.region}
   Status: {resource.status}
   Tags: {resource.tags or {}}"""
@@ -2554,7 +2569,7 @@ Usage: /workflow <name> [options]"""
         session = get_session()
         try:
             issue_count = session.query(HealthIssue).filter_by(status="open").count()
-            resource_count = session.query(AWSResource).count()
+            resource_count = session.query(CloudResource).count()
             results.append(f"  Resources: {resource_count}, Open issues: {issue_count}")
         finally:
             session.close()
@@ -2579,8 +2594,8 @@ Usage: /workflow <name> [options]"""
         init_db()
         session = get_session()
         try:
-            accounts = session.query(AWSAccount).filter_by(is_active=True).count()
-            resources = session.query(AWSResource).count()
+            accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
+            resources = session.query(CloudResource).count()
             open_issues = session.query(HealthIssue).filter_by(status="open").count()
             critical = session.query(HealthIssue).filter_by(status="open", severity="critical").count()
             high = session.query(HealthIssue).filter_by(status="open", severity="high").count()
@@ -2699,8 +2714,8 @@ def _slash_status(ctx: ChatContext, args: list) -> str:
     session = get_session()
 
     try:
-        accounts = session.query(AWSAccount).filter_by(is_active=True).count()
-        resources = session.query(AWSResource).count()
+        accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
+        resources = session.query(CloudResource).count()
         open_issues = session.query(HealthIssue).filter_by(status="open").count()
         investigating_issues = session.query(HealthIssue).filter_by(status="investigating").count()
 
@@ -3065,16 +3080,16 @@ Options:
 
     try:
         if entity == "resources":
-            resources = session.query(AWSResource).limit(100).all()
-            data = [{"type": r.resource_type, "id": r.resource_id, "name": r.resource_name,
+            resources = session.query(CloudResource).limit(100).all()
+            data = [{"type": r.resource_type, "id": r.resource_id, "name": r.name,
                     "region": r.region, "status": r.status} for r in resources]
         elif entity in ("issues", "anomalies"):
             items = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc()).limit(100).all()
             data = [{"id": a.id, "severity": a.severity, "title": a.title, "source": a.source,
                     "status": a.status} for a in items]
         elif entity == "accounts":
-            accounts = session.query(AWSAccount).all()
-            data = [{"name": a.name, "account_id": a.account_id, "regions": a.regions} for a in accounts]
+            accounts = session.query(CloudAccount).all()
+            data = [{"name": a.name, "provider": a.provider, "account_id": (a.credentials or {}).get("account_id", ""), "regions": a.regions} for a in accounts]
         else:
             return f"[red]Unknown entity: {entity}. Use: resources, issues, accounts[/red]"
 
@@ -3102,9 +3117,9 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
 
     try:
         # Gather stats
-        accounts = session.query(AWSAccount).count()
-        active = session.query(AWSAccount).filter_by(is_active=True).first()
-        resources = session.query(AWSResource).count()
+        accounts = session.query(CloudAccount).count()
+        active = session.query(CloudAccount).filter_by(is_enabled=True).first()
+        resources = session.query(CloudResource).count()
         anomalies = session.query(HealthIssue).filter_by(status="open").count()
 
         fmt = args[0] if args else "tree"
@@ -3377,7 +3392,7 @@ def manage(
     init_db()
     session = get_session()
     try:
-        query = session.query(AWSResource).filter_by(resource_id=resource_id)
+        query = session.query(CloudResource).filter_by(resource_id=resource_id)
         if region:
             query = query.filter_by(region=region)
         resource = query.first()
@@ -3403,7 +3418,7 @@ def unmanage(
     init_db()
     session = get_session()
     try:
-        query = session.query(AWSResource).filter_by(resource_id=resource_id)
+        query = session.query(CloudResource).filter_by(resource_id=resource_id)
         if region:
             query = query.filter_by(region=region)
         resource = query.first()
@@ -4228,14 +4243,14 @@ def export(
 
     try:
         if entity == "resources":
-            query = session.query(AWSResource)
+            query = session.query(CloudResource)
             if type:
                 query = query.filter_by(resource_type=type)
             if region:
                 query = query.filter_by(region=region)
             records = query.limit(limit).all()
             data = [{"id": r.id, "resource_id": r.resource_id, "type": r.resource_type,
-                    "name": r.resource_name, "region": r.region, "status": r.status} for r in records]
+                    "name": r.name, "region": r.region, "status": r.status} for r in records]
 
         elif entity in ("issues", "anomalies"):
             query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
@@ -4247,9 +4262,10 @@ def export(
                     "detected_at": a.detected_at.isoformat()} for a in records]
 
         elif entity == "accounts":
-            records = session.query(AWSAccount).limit(limit).all()
-            data = [{"name": a.name, "account_id": a.account_id, "regions": a.regions,
-                    "is_active": a.is_active} for a in records]
+            records = session.query(CloudAccount).limit(limit).all()
+            data = [{"name": a.name, "provider": a.provider,
+                    "account_id": (a.credentials or {}).get("account_id", ""),
+                    "regions": a.regions, "is_enabled": a.is_enabled} for a in records]
 
         elif entity == "reports":
             records = session.query(Report).order_by(Report.created_at.desc()).limit(limit).all()
@@ -4303,9 +4319,9 @@ def arch(
 
     try:
         # Gather stats
-        accounts = session.query(AWSAccount).count()
-        active_account = session.query(AWSAccount).filter_by(is_active=True).first()
-        resources = session.query(AWSResource).count()
+        accounts = session.query(CloudAccount).count()
+        active_account = session.query(CloudAccount).filter_by(is_enabled=True).first()
+        resources = session.query(CloudResource).count()
         anomalies_open = session.query(HealthIssue).filter_by(status="open").count()
         anomalies_total = session.query(HealthIssue).count()
         reports = session.query(Report).count()

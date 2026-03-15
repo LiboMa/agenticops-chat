@@ -219,7 +219,7 @@ class Scheduler:
 
     def _execute_schedule(self, schedule: Schedule):
         """Execute a scheduled pipeline."""
-        from agenticops.models import AWSAccount
+        from agenticops.models import CloudAccount
         from agenticops.pipeline import (
             FullScanPipeline,
             MonitoringPipeline,
@@ -250,12 +250,12 @@ class Scheduler:
             account = None
             if schedule.account_name:
                 with get_db_session() as session:
-                    account = session.query(AWSAccount).filter_by(
+                    account = session.query(CloudAccount).filter_by(
                         name=schedule.account_name
                     ).first()
             else:
                 with get_db_session() as session:
-                    account = session.query(AWSAccount).filter_by(is_active=True).first()
+                    account = session.query(CloudAccount).filter_by(is_enabled=True).first()
 
             # Get pipeline factory
             pipeline_factories = {

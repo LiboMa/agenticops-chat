@@ -56,3 +56,8 @@ dedup_resolved_cooldown_minutes: 60
 skills_enabled: true
 api_auth_enabled: false
 session_history_depth: 20
+default_regions:
+  aws: ["us-east-1", "us-west-2"]
+  azure: ["eastus", "westus2"]
+  gcp: ["us-central1", "us-east1"]
+  alicloud: ["cn-hangzhou", "cn-beijing"]

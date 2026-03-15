@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from agenticops.models import AWSAccount, AWSResource, MonitoringConfig, get_session
+from agenticops.models import CloudAccount, CloudResource, MonitoringConfig, get_session
 from agenticops.monitor.cloudwatch import CloudWatchMonitor
 
 logger = logging.getLogger(__name__)
@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 class MetricsCollector:
     """Collector for scheduled metrics gathering."""
 
-    def __init__(self, account: AWSAccount):
+    def __init__(self, account: CloudAccount):
         """Initialize collector with account."""
         self.account = account
         self.monitor = CloudWatchMonitor(account)
 
     def collect_for_resource(
         self,
-        resource: AWSResource,
+        resource: CloudResource,
         hours: int = 1,
         save: bool = True,
     ) -> dict:
@@ -52,7 +52,7 @@ class MetricsCollector:
         results = {}
 
         try:
-            query = session.query(AWSResource).filter_by(
+            query = session.query(CloudResource).filter_by(
                 account_id=self.account.id,
                 resource_type=service_type,
             )

@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 from agenticops.models import (
     AlertEvent,
     CloudAccount,
-    AWSResource,
+    CloudResource,
     Anomaly,
     FixExecution,
     HealthIssue,
@@ -1266,7 +1266,7 @@ async def api_stats():
     """API endpoint for dashboard stats."""
     with get_db_session() as session:
         return {
-            "total_resources": session.query(AWSResource).count(),
+            "total_resources": session.query(CloudResource).count(),
             "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
             "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
             "total_accounts": session.query(CloudAccount).count(),
@@ -1311,8 +1311,8 @@ async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
 
         # 3) Resource changes per day
         res_rows = (
-            session.query(func.date(AWSResource.created_at).label("d"), func.count().label("n"))
-            .filter(AWSResource.created_at >= cutoff)
+            session.query(func.date(CloudResource.created_at).label("d"), func.count().label("n"))
+            .filter(CloudResource.created_at >= cutoff)
             .group_by("d").all()
         )
         resources = [{"date": str(r.d), "added": r.n} for r in res_rows]
@@ -1493,7 +1493,7 @@ async def api_list_resources(
 ):
     """List resources with filtering."""
     with get_db_session() as session:
-        query = session.query(AWSResource)
+        query = session.query(CloudResource)
 
         if resource_type:
             query = query.filter_by(resource_type=resource_type)
@@ -1513,8 +1513,8 @@ async def api_resource_type_counts():
     """Resource counts grouped by type."""
     with get_db_session() as session:
         rows = (
-            session.query(AWSResource.resource_type, func.count())
-            .group_by(AWSResource.resource_type)
+            session.query(CloudResource.resource_type, func.count())
+            .group_by(CloudResource.resource_type)
             .order_by(func.count().desc())
             .all()
         )
@@ -1525,7 +1525,7 @@ async def api_resource_type_counts():
 async def api_get_resource(resource_id: int):
     """Get resource by ID."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         return ResourceResponse.model_validate(resource)
@@ -1586,7 +1586,7 @@ def _guess_type(resource_id: str) -> str:
 async def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
     """List health issues for a resource."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         issues = (
@@ -1603,7 +1603,7 @@ async def api_resource_issues(resource_id: int, limit: int = Query(default=20, l
 async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20, le=100)):
     """List fix plans for a resource (via linked health issues)."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         plans = (
@@ -1627,11 +1627,11 @@ async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20
 async def api_resource_related(resource_id: int):
     """Get related resources — network context or contained resources."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        meta = resource.resource_metadata or {}
+        meta = resource.raw_data or {}
         is_infra = resource.resource_type in _INFRA_TYPES
         network: list[RelatedResourceItem] = []
         contains: list[RelatedResourceItem] = []
@@ -1640,10 +1640,10 @@ async def api_resource_related(resource_id: int):
             ref_key = _infra_ref_key(resource.resource_type)
             if ref_key:
                 matched = (
-                    session.query(AWSResource)
+                    session.query(CloudResource)
                     .filter(
-                        AWSResource.id != resource.id,
-                        func.json_extract(AWSResource.resource_metadata, f"$.{ref_key}") == resource.resource_id,
+                        CloudResource.id != resource.id,
+                        func.json_extract(CloudResource.raw_data, f"$.{ref_key}") == resource.resource_id,
                     )
                     .limit(100)
                     .all()
@@ -1652,7 +1652,7 @@ async def api_resource_related(resource_id: int):
                     contains.append(RelatedResourceItem(
                         id=c.id, resource_id=c.resource_id,
                         resource_type=c.resource_type,
-                        resource_name=c.resource_name, status=c.status,
+                        resource_name=c.name, status=c.status,
                     ))
         else:
             for key in ("vpc_id", "subnet_id", "security_groups", "subnet_ids"):
@@ -1663,12 +1663,12 @@ async def api_resource_related(resource_id: int):
                 for rid in ids:
                     if not isinstance(rid, str):
                         continue
-                    linked = session.query(AWSResource).filter_by(resource_id=rid).first()
+                    linked = session.query(CloudResource).filter_by(resource_id=rid).first()
                     if linked:
                         network.append(RelatedResourceItem(
                             id=linked.id, resource_id=linked.resource_id,
                             resource_type=linked.resource_type,
-                            resource_name=linked.resource_name, status=linked.status,
+                            resource_name=linked.name, status=linked.status,
                         ))
                     else:
                         network.append(RelatedResourceItem(resource_id=rid, resource_type=_guess_type(rid)))
@@ -4108,11 +4108,11 @@ async def api_search(
 
         if "resources" in search_types:
             rows = (
-                db.query(AWSResource)
+                db.query(CloudResource)
                 .filter(
-                    func.lower(AWSResource.resource_id).like(search_term)
-                    | func.lower(AWSResource.resource_name).like(search_term)
-                    | func.lower(AWSResource.resource_type).like(search_term)
+                    func.lower(CloudResource.resource_id).like(search_term)
+                    | func.lower(CloudResource.name).like(search_term)
+                    | func.lower(CloudResource.resource_type).like(search_term)
                 )
                 .limit(limit)
                 .all()
@@ -4120,7 +4120,7 @@ async def api_search(
             results["resources"] = [
                 SearchResultItem(
                     id=r.id,
-                    title=r.resource_name or r.resource_id,
+                    title=r.name or r.resource_id,
                     subtitle=f"{r.resource_type} | {r.region} | {r.resource_id}",
                     entity_type="resource",
                     status=r.status,

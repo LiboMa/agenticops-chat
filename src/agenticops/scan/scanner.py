@@ -8,7 +8,7 @@ from typing import Any, Optional
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from agenticops.models import AWSAccount, AWSResource, get_session
+from agenticops.models import CloudAccount, CloudResource, get_session
 from agenticops.scan.services import AWS_SERVICES, AWSServiceDef, get_all_regions
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,16 @@ class ScanResult:
 class AWSScanner:
     """Scanner for AWS resources with cross-account support."""
 
-    def __init__(self, account: AWSAccount):
+    def __init__(self, account: CloudAccount):
         """Initialize scanner with AWS account configuration."""
         self.account = account
         self._session_cache: dict[str, boto3.Session] = {}
 
     def _get_assumed_session(self, region: str) -> boto3.Session:
         """Get boto3 session with assumed role for the account."""
-        cache_key = f"{self.account.account_id}:{region}"
+        creds = self.account.credentials or {}
+        acct_id = creds.get("account_id", "")
+        cache_key = f"{acct_id}:{region}"
 
         if cache_key in self._session_cache:
             return self._session_cache[cache_key]
@@ -52,12 +54,13 @@ class AWSScanner:
         sts = boto3.client("sts", region_name=region)
 
         assume_kwargs = {
-            "RoleArn": self.account.role_arn,
-            "RoleSessionName": f"AgenticOps-{self.account.account_id}",
+            "RoleArn": creds.get("role_arn", ""),
+            "RoleSessionName": f"AgenticOps-{acct_id}",
             "DurationSeconds": 3600,
         }
-        if self.account.external_id:
-            assume_kwargs["ExternalId"] = self.account.external_id
+        ext_id = creds.get("external_id", "")
+        if ext_id:
+            assume_kwargs["ExternalId"] = ext_id
 
         try:
             response = sts.assume_role(**assume_kwargs)
@@ -73,7 +76,7 @@ class AWSScanner:
             return session
 
         except ClientError as e:
-            logger.error(f"Failed to assume role {self.account.role_arn}: {e}")
+            logger.error(f"Failed to assume role {(self.account.credentials or {}).get('role_arn', '')}: {e}")
             raise
 
     def _get_client(self, service_name: str, region: str):
@@ -84,7 +87,7 @@ class AWSScanner:
     def scan_service(self, service_name: str, region: str) -> ScanResult:
         """Scan a specific AWS service in a region."""
         result = ScanResult(
-            account_id=self.account.account_id,
+            account_id=(self.account.credentials or {}).get("account_id", ""),
             region=region,
             service=service_name,
         )
@@ -178,7 +181,7 @@ class AWSScanner:
 
         return {
             "resource_id": instance.get("InstanceId"),
-            "resource_arn": f"arn:aws:ec2:{region}:{self.account.account_id}:instance/{instance.get('InstanceId')}",
+            "resource_arn": f"arn:aws:ec2:{region}:{(self.account.credentials or {}).get('account_id', '')}:instance/{instance.get('InstanceId')}",
             "resource_name": name,
             "resource_type": "EC2",
             "region": region,
@@ -317,7 +320,7 @@ class AWSScanner:
                 for resource_data in result.resources:
                     # Check if resource already exists
                     existing = (
-                        session.query(AWSResource)
+                        session.query(CloudResource)
                         .filter_by(
                             account_id=self.account.id,
                             resource_id=resource_data["resource_id"],
@@ -328,22 +331,25 @@ class AWSScanner:
 
                     if existing:
                         # Update existing
-                        existing.resource_name = resource_data.get("resource_name")
-                        existing.resource_arn = resource_data.get("resource_arn")
+                        existing.name = resource_data.get("resource_name") or ""
+                        # Store ARN in resource_id if available, otherwise keep original
+                        if resource_data.get("resource_arn"):
+                            existing.resource_id = resource_data["resource_arn"]
                         existing.status = resource_data.get("status", "unknown")
-                        existing.resource_metadata = resource_data.get("metadata", {})
+                        existing.raw_data = resource_data.get("metadata", {})
                         existing.tags = resource_data.get("tags", {})
                     else:
-                        # Create new
-                        resource = AWSResource(
+                        # Create new — prefer ARN as resource_id for AWS
+                        rid = resource_data.get("resource_arn") or resource_data["resource_id"]
+                        resource = CloudResource(
                             account_id=self.account.id,
-                            resource_id=resource_data["resource_id"],
-                            resource_arn=resource_data.get("resource_arn"),
+                            provider=self.account.provider,
+                            resource_id=rid,
                             resource_type=resource_data["resource_type"],
-                            resource_name=resource_data.get("resource_name"),
+                            name=resource_data.get("resource_name") or "",
                             region=result.region,
                             status=resource_data.get("status", "unknown"),
-                            resource_metadata=resource_data.get("metadata", {}),
+                            raw_data=resource_data.get("metadata", {}),
                             tags=resource_data.get("tags", {}),
                         )
                         session.add(resource)
