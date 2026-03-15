@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, create_engine, inspect, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -145,6 +145,65 @@ class AWSResource(Base):
 
 
 # ============================================================================
+# Multi-Cloud Account & Resource (replaces AWSAccount / AWSResource)
+# ============================================================================
+
+
+class CloudAccount(Base):
+    """Cloud account configuration supporting multiple providers."""
+
+    __tablename__ = "cloud_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    provider: Mapped[str] = mapped_column(String(20))  # aws | azure | gcp | alicloud
+    is_enabled: Mapped[bool] = mapped_column(default=True)
+    credentials: Mapped[dict] = mapped_column(JSON, default=dict)
+    regions: Mapped[list] = mapped_column(JSON, default=list)
+    labels: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    resources: Mapped[list["CloudResource"]] = relationship(back_populates="account")
+    monitoring_configs: Mapped[list["MonitoringConfig"]] = relationship(
+        back_populates="cloud_account", foreign_keys="MonitoringConfig.cloud_account_id"
+    )
+
+
+class CloudResource(Base):
+    """Scanned cloud resource inventory (multi-provider)."""
+
+    __tablename__ = "cloud_resources"
+    __table_args__ = (
+        UniqueConstraint("account_id", "provider", "resource_id", name="uq_cloud_resource_acct_prov_rid"),
+        Index("idx_cloud_resource_provider", "provider"),
+        Index("idx_cloud_resource_type_region", "resource_type", "region"),
+        Index("idx_cloud_resource_account", "account_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("cloud_accounts.id"))
+    provider: Mapped[str] = mapped_column(String(20))
+    region: Mapped[str] = mapped_column(String(30))
+    resource_type: Mapped[str] = mapped_column(String(50))
+    resource_id: Mapped[str] = mapped_column(String(500))
+    name: Mapped[str] = mapped_column(String(200), default="")
+    tags: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="unknown")
+    managed: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    account: Mapped["CloudAccount"] = relationship(back_populates="resources")
+
+
+# ============================================================================
 # Monitoring Configuration (MONITOR)
 # ============================================================================
 
@@ -166,8 +225,16 @@ class MonitoringConfig(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    # Multi-cloud FK (nullable for backward compat)
+    cloud_account_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cloud_accounts.id"), nullable=True
+    )
+
     # Relationships
     account: Mapped["AWSAccount"] = relationship(back_populates="monitoring_configs")
+    cloud_account: Mapped[Optional["CloudAccount"]] = relationship(
+        back_populates="monitoring_configs", foreign_keys=[cloud_account_id]
+    )
 
 
 class MetricDataPoint(Base):
@@ -357,6 +424,10 @@ class HealthIssue(Base):
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Pipeline trace ID (generated at alert entry, flows through entire lifecycle)
     trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    # Multi-cloud FK (nullable for backward compat)
+    account_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cloud_accounts.id"), nullable=True
+    )
 
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
@@ -695,13 +766,18 @@ class ChatMessage(Base):
 # ============================================================================
 
 
-def init_db():
+def init_db(engine=None):
     """Initialize database and create all tables.
+
+    Args:
+        engine: Optional SQLAlchemy engine. If None, uses the singleton
+                engine from get_engine().
 
     Includes migration: if rca_results table has the old anomaly_id column
     (from the deprecated Anomaly FK), drop and recreate it with the new schema.
     """
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
 
     # Migration: detect old rca_results schema and recreate
     insp = inspect(engine)
@@ -788,7 +864,72 @@ def init_db():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notification_log_channel_name ON notification_logs(channel_name)"))
                 conn.commit()
 
+    # Migration: add account_id column to health_issues if missing
+    if insp.has_table("health_issues"):
+        columns = {col["name"] for col in insp.get_columns("health_issues")}
+        if "account_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE health_issues ADD COLUMN account_id INTEGER REFERENCES cloud_accounts(id)"
+                ))
+                conn.commit()
+
+    # Migration: add cloud_account_id to monitoring_configs if missing
+    if insp.has_table("monitoring_configs"):
+        columns = {col["name"] for col in insp.get_columns("monitoring_configs")}
+        if "cloud_account_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE monitoring_configs ADD COLUMN cloud_account_id INTEGER REFERENCES cloud_accounts(id)"
+                ))
+                conn.commit()
+
     Base.metadata.create_all(engine)
+
+    # Migration: migrate AWSAccount rows → CloudAccount (if aws_accounts exists and cloud_accounts is empty)
+    # Re-inspect after create_all to see newly created tables
+    insp = inspect(engine)
+    if insp.has_table("aws_accounts") and insp.has_table("cloud_accounts"):
+        with engine.connect() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM cloud_accounts")).scalar()
+            if count == 0:
+                aws_count = conn.execute(text("SELECT COUNT(*) FROM aws_accounts")).scalar()
+                if aws_count > 0:
+                    conn.execute(text("""
+                        INSERT INTO cloud_accounts (name, provider, is_enabled, credentials, regions, created_at, last_scanned_at)
+                        SELECT name, 'aws', is_active, json_object('account_id', account_id, 'role_arn', role_arn, 'external_id', external_id),
+                               regions, created_at, last_scanned_at
+                        FROM aws_accounts
+                    """))
+                    conn.commit()
+
+    # Migration: migrate AWSResource rows → CloudResource (if aws_resources exists and cloud_resources is empty)
+    if insp.has_table("aws_resources") and insp.has_table("cloud_resources"):
+        with engine.connect() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM cloud_resources")).scalar()
+            if count == 0:
+                aws_count = conn.execute(text("SELECT COUNT(*) FROM aws_resources")).scalar()
+                if aws_count > 0:
+                    conn.execute(text("""
+                        INSERT INTO cloud_resources (account_id, provider, region, resource_type, resource_id, name, tags, raw_data, status, managed, created_at, updated_at)
+                        SELECT ca.id, 'aws', ar.region, ar.resource_type, ar.resource_id,
+                               COALESCE(ar.resource_name, ''), ar.tags, ar.resource_metadata,
+                               ar.status, ar.managed, ar.created_at, ar.updated_at
+                        FROM aws_resources ar
+                        JOIN aws_accounts aa ON ar.account_id = aa.id
+                        JOIN cloud_accounts ca ON ca.name = aa.name
+                    """))
+                    conn.commit()
+
+    # Migration: rename old tables to _legacy_* (keep data, stop confusion)
+    if insp.has_table("aws_accounts") and not insp.has_table("_legacy_aws_accounts"):
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE aws_accounts RENAME TO _legacy_aws_accounts"))
+            conn.commit()
+    if insp.has_table("aws_resources") and not insp.has_table("_legacy_aws_resources"):
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE aws_resources RENAME TO _legacy_aws_resources"))
+            conn.commit()
 
     # Ensure graph tables exist (used by GraphStore, raw SQL for performance)
     with engine.connect() as conn:
