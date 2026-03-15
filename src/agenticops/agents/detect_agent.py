@@ -36,7 +36,8 @@ from agenticops.tools.detect_tools import (
     run_zscore_detection,
     run_rule_evaluation,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
+from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.tools.integration_tools import (
     list_provider_alerts,
     query_provider_metrics,
@@ -78,7 +79,7 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
    - Call query_provider_metrics to get cross-platform metrics for a resource.
    - Cross-reference external alerts with CloudWatch findings for corroboration.
 7. SECURITY HEALTH CHECKS (always run when scope='all' or scope='security'):
-   Use run_aws_cli_readonly for all security checks:
+   Use the cloud CLI tool for all security checks:
    a) **GuardDuty Threats**:
       - `aws guardduty list-detectors` → get detector ID
       - `aws guardduty list-findings --detector-id DID --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`
@@ -124,11 +125,11 @@ RULES:
   AND security findings summary (threats, vulnerabilities, misconfigurations, compliance gaps).
 TOOL SELECTION — accuracy first:
 - Use specialized tools (list_alarms, get_metrics, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., security services),
+- Use the cloud CLI tool when: (a) the service has no specialized tool (e.g., security services),
   OR (b) the CLI gives more precise/complete data for the specific query (e.g., specific --query
   filters, fields not exposed by specialized tools).
 - Choose whichever tool produces the most accurate result for the task at hand.
-- When using run_aws_cli_readonly, always use --query to filter output fields.
+- When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 - 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
 """
@@ -147,6 +148,17 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
+
+        # Resolve provider CLI tool from first enabled account
+        cli_tool = None
+        try:
+            from agenticops.models import CloudAccount, get_db_session
+            with get_db_session() as db:
+                acct = db.query(CloudAccount).filter_by(is_enabled=True).first()
+                if acct:
+                    cli_tool = get_cli_tool_for_issue(acct.id)
+        except Exception:
+            pass
 
         model_id, max_tokens = get_agent_model_config("detect")
         cache_kwargs: dict = {}
@@ -184,8 +196,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 describe_region_topology,
                 analyze_vpc_topology,
                 map_eks_to_vpc_topology,
-                # AWS CLI (read-only, for uncovered services or precision queries)
-                run_aws_cli_readonly,
+                # Cloud CLI (provider-resolved, fallback to AWS read-only)
+                cli_tool or run_aws_cli_readonly,
                 # External monitoring providers
                 list_provider_alerts,
                 query_provider_metrics,

@@ -108,3 +108,29 @@ def get_provider(account: Any) -> CloudProvider:
             f"Unsupported provider '{provider_type}'. Supported: {supported}"
         )
     return PROVIDERS[provider_type](account)
+
+
+def get_cli_tool_for_issue(issue_account_id: int | None) -> Callable | None:
+    """Resolve CLI tool from a HealthIssue's account_id.
+
+    Returns a provider-specific CLI tool callable, or None if account not found
+    or credentials fail.
+    """
+    if not issue_account_id:
+        return None
+    from agenticops.models import CloudAccount, get_db_session
+    from types import SimpleNamespace
+    with get_db_session() as db:
+        acct = db.query(CloudAccount).filter_by(id=issue_account_id).first()
+        if not acct:
+            return None
+        # Snapshot to avoid DetachedInstanceError
+        snap = SimpleNamespace(
+            id=acct.id, name=acct.name, provider=acct.provider,
+            credentials=dict(acct.credentials or {}),
+            regions=list(acct.regions or []), labels=dict(acct.labels or {}),
+        )
+    provider = get_provider(snap)
+    if provider.resolve_credentials():
+        return provider.cli_tool()
+    return None
