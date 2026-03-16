@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFixPlans } from "@/hooks/useFixPlans";
+import { useAccounts } from "@/hooks/useAccounts";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
@@ -21,58 +22,73 @@ const STATUS_OPTIONS: FixPlanStatus[] = [
   "rejected",
 ];
 
-const columns: Column<FixPlan>[] = [
-  {
-    key: "risk_level",
-    header: "Risk",
-    render: (r) => <RiskLevelBadge level={r.risk_level} />,
-    className: "w-20",
-  },
-  {
-    key: "title",
-    header: "Title",
-    render: (r) => (
-      <span className="text-sm font-medium text-foreground">{r.title}</span>
-    ),
-  },
-  {
-    key: "status",
-    header: "Status",
-    render: (r) => <FixPlanStatusBadge status={r.status} />,
-  },
-  {
-    key: "health_issue_id",
-    header: "Issue #",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground font-mono">
-        #{r.health_issue_id}
-      </span>
-    ),
-  },
-  {
-    key: "approved_by",
-    header: "Approved By",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">{r.approved_by ?? "-"}</span>
-    ),
-  },
-  {
-    key: "created_at",
-    header: "Created",
-    sortable: true,
-    sortValue: (r) => new Date(r.created_at).getTime(),
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {formatShortDate(r.created_at)}
-      </span>
-    ),
-  },
-];
-
 export default function FixPlans() {
   const [statusFilter, setStatusFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const navigate = useNavigate();
+  const accounts = useAccounts();
+
+  const accountMap = useMemo(() => {
+    if (!accounts.data) return new Map<number, string>();
+    return new Map(accounts.data.map((a) => [a.id, a.name]));
+  }, [accounts.data]);
+
+  const columns: Column<FixPlan>[] = [
+    {
+      key: "risk_level",
+      header: "Risk",
+      render: (r) => <RiskLevelBadge level={r.risk_level} />,
+      className: "w-20",
+    },
+    {
+      key: "title",
+      header: "Title",
+      render: (r) => (
+        <span className="text-sm font-medium text-foreground">{r.title}</span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <FixPlanStatusBadge status={r.status} />,
+    },
+    {
+      key: "account",
+      header: "Account",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">
+          {r.account_id ? (accountMap.get(r.account_id) ?? "-") : "-"}
+        </span>
+      ),
+    },
+    {
+      key: "health_issue_id",
+      header: "Issue #",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground font-mono">
+          #{r.health_issue_id}
+        </span>
+      ),
+    },
+    {
+      key: "approved_by",
+      header: "Approved By",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">{r.approved_by ?? "-"}</span>
+      ),
+    },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      sortValue: (r) => new Date(r.created_at).getTime(),
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">
+          {formatShortDate(r.created_at)}
+        </span>
+      ),
+    },
+  ];
 
   const filters = useMemo(
     () => ({

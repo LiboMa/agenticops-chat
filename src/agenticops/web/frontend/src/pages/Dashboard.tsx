@@ -172,6 +172,7 @@ export default function Dashboard() {
                   <tr className="border-b">
                     <th className="w-8 pl-4 pr-1 py-2.5" />
                     <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Title</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Account</th>
                     <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Resource</th>
                     <th className="px-4 py-2.5 text-right text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Detected</th>
                   </tr>
@@ -188,6 +189,9 @@ export default function Dashboard() {
                       </td>
                       <td className="px-4 py-2.5 text-sm">
                         <span className="line-clamp-1">{a.title}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
+                        {a.account_name ?? "-"}
                       </td>
                       <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground hidden md:table-cell">
                         <span className="line-clamp-1">{a.resource_type}/{a.resource_id}</span>

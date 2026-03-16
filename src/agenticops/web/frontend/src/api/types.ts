@@ -8,6 +8,7 @@ export interface Stats {
 export interface Resource {
   id: number;
   account_id: number;
+  provider: string;
   resource_id: string;
   resource_arn: string | null;
   resource_type: string;
@@ -60,6 +61,8 @@ export interface Anomaly {
   trace_id: string | null;
   occurrence_count?: number;
   merged_alerts?: MergedAlert[];
+  account_id: number | null;
+  account_name: string | null;
 }
 
 export interface RCAResult {
@@ -126,6 +129,7 @@ export interface FixPlan {
   approved_by: string | null;
   approved_at: string | null;
   created_at: string;
+  account_id: number | null;
 }
 
 export interface FixExecution {

@@ -117,11 +117,10 @@ class TestSessionCache:
 
 class TestAWSProvider:
     def test_resolve_credentials_role_arn(self):
-        """Test STS AssumeRole path."""
+        """Test STS AssumeRole path: base session → base_session.client('sts').assume_role()."""
         account = make_account("aws", credentials={"role_arn": "arn:aws:iam::123:role/test"})
         provider = get_provider(account)
 
-        mock_session = MagicMock()
         mock_sts = MagicMock()
         mock_sts.assume_role.return_value = {
             "Credentials": {
@@ -131,10 +130,16 @@ class TestAWSProvider:
             }
         }
 
+        # base_session (default chain, no profile) — used for STS AssumeRole
+        mock_base_session = MagicMock()
+        mock_base_session.client.return_value = mock_sts
+
+        # assumed_session — created from assumed credentials
+        mock_assumed_session = MagicMock()
+        mock_assumed_session.client.return_value.get_caller_identity.return_value = {}
+
         mock_boto3 = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_boto3.Session.return_value = mock_session
-        mock_session.client.return_value.get_caller_identity.return_value = {}
+        mock_boto3.Session.side_effect = [mock_base_session, mock_assumed_session]
 
         import agenticops.providers.aws as aws_mod
         original = aws_mod.boto3
@@ -145,7 +150,49 @@ class TestAWSProvider:
             aws_mod.boto3 = original
 
         assert result is True
-        mock_boto3.client.assert_called_with("sts")
+        mock_base_session.client.assert_called_with("sts")
+        mock_sts.assume_role.assert_called_once()
+
+    def test_resolve_credentials_profile_plus_role_arn(self):
+        """Test profile_name + role_arn: base session uses profile, then assumes role."""
+        account = make_account("aws", credentials={
+            "profile_name": "china-profile",
+            "role_arn": "arn:aws-cn:iam::113:role/OpsRole",
+        })
+        provider = get_provider(account)
+
+        mock_sts = MagicMock()
+        mock_sts.assume_role.return_value = {
+            "Credentials": {
+                "AccessKeyId": "AKIA...",
+                "SecretAccessKey": "secret",
+                "SessionToken": "token",
+            }
+        }
+
+        mock_base_session = MagicMock()
+        mock_base_session.client.return_value = mock_sts
+
+        mock_assumed_session = MagicMock()
+        mock_assumed_session.client.return_value.get_caller_identity.return_value = {}
+
+        mock_boto3 = MagicMock()
+        mock_boto3.Session.side_effect = [mock_base_session, mock_assumed_session]
+
+        import agenticops.providers.aws as aws_mod
+        original = aws_mod.boto3
+        try:
+            aws_mod.boto3 = mock_boto3
+            result = provider.resolve_credentials()
+        finally:
+            aws_mod.boto3 = original
+
+        assert result is True
+        # Base session uses profile
+        mock_boto3.Session.assert_any_call(profile_name="china-profile")
+        # AssumeRole called via base session's STS client
+        mock_base_session.client.assert_called_with("sts")
+        mock_sts.assume_role.assert_called_once()
 
     def test_resolve_credentials_profile(self):
         """Test profile_name path."""

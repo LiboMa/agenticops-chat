@@ -43,23 +43,32 @@ class AWSProvider(CloudProvider):
     def resolve_credentials(self) -> bool:
         """Resolve AWS credentials through the following chain:
 
-        1. credentials.role_arn → STS AssumeRole
-        2. credentials.profile_name → boto3.Session(profile_name=...)
-        3. credentials.access_key_id + secret → static credentials
-        4. AWS_* env vars → boto3 default
-        5. empty → boto3 default chain (EC2/ECS metadata)
+        1. Build base session (profile_name > static keys > default chain)
+        2. If role_arn set, use base session's STS to AssumeRole
+        3. Validate by calling sts:GetCallerIdentity
         """
         if boto3 is None:
             logger.error("boto3 is required for AWS provider")
             return False
 
         creds = self.account.credentials or {}
-        session = None
 
-        # 1. STS AssumeRole
+        # Step 1: Build base session for authentication
+        if creds.get("profile_name"):
+            base_session = boto3.Session(profile_name=creds["profile_name"])
+        elif creds.get("access_key_id") and creds.get("secret_access_key"):
+            base_session = boto3.Session(
+                aws_access_key_id=creds["access_key_id"],
+                aws_secret_access_key=creds["secret_access_key"],
+                aws_session_token=creds.get("session_token"),
+            )
+        else:
+            base_session = boto3.Session()
+
+        # Step 2: If role_arn set, assume role using base session
         if creds.get("role_arn"):
             try:
-                sts = boto3.client("sts")
+                sts = base_session.client("sts")
                 resp = sts.assume_role(
                     RoleArn=creds["role_arn"],
                     RoleSessionName=f"agenticops-{self.account.name}",
@@ -73,22 +82,8 @@ class AWSProvider(CloudProvider):
             except Exception as e:
                 logger.error("STS AssumeRole failed for %s: %s", self.account.name, e)
                 return False
-
-        # 2. Profile name
-        elif creds.get("profile_name"):
-            session = boto3.Session(profile_name=creds["profile_name"])
-
-        # 3. Static credentials
-        elif creds.get("access_key_id") and creds.get("secret_access_key"):
-            session = boto3.Session(
-                aws_access_key_id=creds["access_key_id"],
-                aws_secret_access_key=creds["secret_access_key"],
-                aws_session_token=creds.get("session_token"),
-            )
-
-        # 4 & 5. Default chain (env vars or EC2/ECS metadata)
         else:
-            session = boto3.Session()
+            session = base_session
 
         # Validate by calling STS
         try:

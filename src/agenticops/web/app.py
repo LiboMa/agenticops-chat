@@ -124,19 +124,40 @@ class ResourceResponse(BaseModel):
     """Schema for resource response."""
     id: int
     account_id: int
+    provider: str = "aws"
     resource_id: str
-    resource_arn: Optional[str]
+    resource_arn: Optional[str] = None
     resource_type: str
-    resource_name: Optional[str]
+    resource_name: Optional[str] = None
     region: str
     status: str
-    resource_metadata: dict
-    tags: dict
+    resource_metadata: dict = Field(default_factory=dict)
+    tags: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def from_resource(cls, r) -> "ResourceResponse":
+        """Build response from CloudResource, mapping field names."""
+        raw = r.raw_data if isinstance(getattr(r, "raw_data", None), dict) else {}
+        return cls(
+            id=r.id,
+            account_id=r.account_id,
+            provider=getattr(r, "provider", "aws"),
+            resource_id=r.resource_id,
+            resource_arn=raw.get("Arn") or raw.get("arn") or getattr(r, "resource_arn", None),
+            resource_type=r.resource_type,
+            resource_name=getattr(r, "name", None) or getattr(r, "resource_name", None),
+            region=r.region,
+            status=r.status,
+            resource_metadata=raw or getattr(r, "resource_metadata", {}),
+            tags=r.tags if isinstance(r.tags, dict) else {},
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+        )
 
 
 class AnomalyStatusUpdate(BaseModel):
@@ -162,6 +183,8 @@ class AnomalyResponse(BaseModel):
     status: str
     detected_at: datetime
     resolved_at: Optional[datetime]
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -292,12 +315,14 @@ class HealthIssueResponse(BaseModel):
     trace_id: Optional[str] = None
     occurrence_count: int = 1
     merged_alerts: List = Field(default_factory=list)
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
 
     class Config:
         from_attributes = True
 
     @classmethod
-    def from_issue(cls, issue) -> "HealthIssueResponse":
+    def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
         """Build response, extracting merged_alerts from metric_data."""
         md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
         return cls(
@@ -317,6 +342,8 @@ class HealthIssueResponse(BaseModel):
             trace_id=getattr(issue, "trace_id", None),
             occurrence_count=issue.occurrence_count or 1,
             merged_alerts=md.get("merged_alerts", []),
+            account_id=issue.account_id,
+            account_name=account_name,
         )
 
 
@@ -370,6 +397,7 @@ class FixPlanResponse(BaseModel):
     approved_by: Optional[str]
     approved_at: Optional[datetime]
     created_at: datetime
+    account_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -1535,7 +1563,7 @@ async def api_list_resources(
             query = query.filter_by(status=status)
 
         resources = query.offset(offset).limit(limit).all()
-        return [ResourceResponse.model_validate(r) for r in resources]
+        return [ResourceResponse.from_resource(r) for r in resources]
 
 
 @app.get("/api/resources/type-counts")
@@ -1558,7 +1586,7 @@ async def api_get_resource(resource_id: int):
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
-        return ResourceResponse.model_validate(resource)
+        return ResourceResponse.from_resource(resource)
 
 
 # ── Resource Detail sub-endpoints ──────────────────────────────────────
@@ -1706,12 +1734,21 @@ async def api_resource_related(resource_id: int):
         return RelatedResourcesResponse(network=network, contains=contains)
 
 
+def _build_account_name_map(session, issues) -> dict[int, str]:
+    """Batch-load account names for a list of HealthIssues to avoid N+1 queries."""
+    account_ids = {i.account_id for i in issues if i.account_id}
+    if not account_ids:
+        return {}
+    rows = session.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.id.in_(account_ids)).all()
+    return {aid: aname for aid, aname in rows}
+
+
 # ============================================================================
 # Anomaly API Endpoints (Legacy — backed by HealthIssue)
 # ============================================================================
 
 
-def _health_issue_to_anomaly_response(issue: HealthIssue) -> AnomalyResponse:
+def _health_issue_to_anomaly_response(issue: HealthIssue, account_name: Optional[str] = None) -> AnomalyResponse:
     """Map a HealthIssue to the legacy AnomalyResponse format."""
     metric_data = issue.metric_data or {}
     return AnomalyResponse(
@@ -1730,6 +1767,8 @@ def _health_issue_to_anomaly_response(issue: HealthIssue) -> AnomalyResponse:
         status=issue.status,
         detected_at=issue.detected_at,
         resolved_at=issue.resolved_at,
+        account_id=issue.account_id,
+        account_name=account_name,
     )
 
 
@@ -1738,6 +1777,7 @@ async def api_list_anomalies(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_type: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
 ):
@@ -1749,13 +1789,16 @@ async def api_list_anomalies(
             query = query.filter_by(severity=severity)
         if status:
             query = query.filter_by(status=status)
+        if account_id is not None:
+            query = query.filter_by(account_id=account_id)
         if resource_type:
             query = query.filter(
                 HealthIssue.metric_data["resource_type"].as_string() == resource_type
             )
 
         issues = query.offset(offset).limit(limit).all()
-        return [_health_issue_to_anomaly_response(i) for i in issues]
+        acct_names = _build_account_name_map(session, issues)
+        return [_health_issue_to_anomaly_response(i, acct_names.get(i.account_id)) for i in issues]
 
 
 @app.get("/api/anomalies/{anomaly_id}", response_model=AnomalyResponse)
@@ -1765,7 +1808,11 @@ async def api_get_anomaly(anomaly_id: int):
         issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
-        return _health_issue_to_anomaly_response(issue)
+        acct_name = None
+        if issue.account_id:
+            acct = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+            acct_name = acct
+        return _health_issue_to_anomaly_response(issue, acct_name)
 
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
@@ -1790,7 +1837,10 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
             issue.resolved_at = datetime.utcnow()
 
         session.flush()
-        return _health_issue_to_anomaly_response(issue)
+        acct_name = None
+        if issue.account_id:
+            acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+        return _health_issue_to_anomaly_response(issue, acct_name)
 
 
 @app.get("/api/anomalies/{issue_id}/rca", response_model=Optional[RCAResponse])
@@ -1835,11 +1885,12 @@ async def api_list_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_type: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
 ):
     """List issues."""
-    return await api_list_anomalies(severity, status, resource_type, limit, offset)
+    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset)
 
 
 @app.get("/api/issues/{issue_id}", response_model=AnomalyResponse)
@@ -1884,6 +1935,7 @@ async def api_list_health_issues(
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
     trace_id: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
@@ -1901,9 +1953,12 @@ async def api_list_health_issues(
             query = query.filter_by(source=source)
         if trace_id:
             query = query.filter_by(trace_id=trace_id)
+        if account_id is not None:
+            query = query.filter_by(account_id=account_id)
 
         issues = query.offset(offset).limit(limit).all()
-        return [HealthIssueResponse.from_issue(i) for i in issues]
+        acct_names = _build_account_name_map(session, issues)
+        return [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues]
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -1913,7 +1968,10 @@ async def api_get_health_issue(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
-        return HealthIssueResponse.from_issue(issue)
+        acct_name = None
+        if issue.account_id:
+            acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+        return HealthIssueResponse.from_issue(issue, acct_name)
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
@@ -2246,6 +2304,7 @@ async def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
@@ -2259,9 +2318,22 @@ async def api_list_fix_plans(
             query = query.filter_by(risk_level=risk_level)
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
+        if account_id is not None:
+            query = query.join(HealthIssue).filter(HealthIssue.account_id == account_id)
 
         plans = query.offset(offset).limit(limit).all()
-        return [FixPlanResponse.model_validate(p) for p in plans]
+        # Resolve account_id from related HealthIssue
+        issue_ids = {p.health_issue_id for p in plans}
+        issue_accounts: dict[int, Optional[int]] = {}
+        if issue_ids:
+            rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
+            issue_accounts = {iid: aid for iid, aid in rows}
+        results = []
+        for p in plans:
+            resp = FixPlanResponse.model_validate(p)
+            resp.account_id = issue_accounts.get(p.health_issue_id)
+            results.append(resp)
+        return results
 
 
 @app.get("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
@@ -2271,7 +2343,10 @@ async def api_get_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        return FixPlanResponse.model_validate(plan)
+        resp = FixPlanResponse.model_validate(plan)
+        issue = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
+        resp.account_id = issue
+        return resp
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)

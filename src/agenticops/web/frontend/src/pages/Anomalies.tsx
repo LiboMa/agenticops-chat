@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAnomalies } from "@/hooks/useAnomalies";
+import { useAccounts } from "@/hooks/useAccounts";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
@@ -13,11 +14,14 @@ import type { Anomaly } from "@/api/types";
 export default function Anomalies() {
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
+  const [accountFilter, setAccountFilter] = useState("");
   const navigate = useNavigate();
+  const accounts = useAccounts();
 
   const { data, isLoading, error, refetch } = useAnomalies({
     severity: severity || undefined,
     status: status || undefined,
+    account_id: accountFilter ? Number(accountFilter) : undefined,
   });
 
   const columns: Column<Anomaly>[] = [
@@ -57,6 +61,17 @@ export default function Anomalies() {
       render: (a) => (
         <span className="text-sm text-muted-foreground font-mono">
           {a.resource_type}/{a.resource_id.slice(0, 20)}
+        </span>
+      ),
+    },
+    {
+      key: "account",
+      header: "Account",
+      sortable: true,
+      sortValue: (a) => a.account_name ?? "",
+      render: (a) => (
+        <span className="text-sm text-muted-foreground">
+          {a.account_name ?? "-"}
         </span>
       ),
     },
@@ -123,6 +138,18 @@ export default function Anomalies() {
               <option value="fix_approved">Fix Approved</option>
               <option value="fix_executed">Fix Executed</option>
               <option value="resolved">Resolved</option>
+            </select>
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className="text-sm border rounded-md px-3 py-1.5 bg-background"
+            >
+              <option value="">All Accounts</option>
+              {(accounts.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
             </select>
           </div>
         </CardHeader>

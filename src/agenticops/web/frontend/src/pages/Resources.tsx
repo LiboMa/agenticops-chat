@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useResources } from "@/hooks/useResources";
+import { useAccounts } from "@/hooks/useAccounts";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
@@ -13,10 +14,13 @@ export default function Resources() {
   const navigate = useNavigate();
   const [typeFilter, setTypeFilter] = useState("");
   const [regionFilter, setRegionFilter] = useState("");
+  const [accountFilter, setAccountFilter] = useState("");
+  const accounts = useAccounts();
 
   const { data, isLoading, error, refetch } = useResources({
     type: typeFilter || undefined,
     region: regionFilter || undefined,
+    account_id: accountFilter ? Number(accountFilter) : undefined,
     limit: 500,
   });
 
@@ -36,7 +40,33 @@ export default function Resources() {
     };
   }, [allResources.data]);
 
+  // Build account name lookup
+  const accountMap = useMemo(() => {
+    if (!accounts.data) return new Map<number, string>();
+    return new Map(accounts.data.map((a) => [a.id, a.name]));
+  }, [accounts.data]);
+
   const columns: Column<Resource>[] = [
+    {
+      key: "provider",
+      header: "Provider",
+      sortable: true,
+      sortValue: (r) => r.provider,
+      render: (r) => (
+        <span className="text-xs font-medium uppercase text-muted-foreground">{r.provider}</span>
+      ),
+    },
+    {
+      key: "account",
+      header: "Account",
+      sortable: true,
+      sortValue: (r) => accountMap.get(r.account_id) ?? "",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">
+          {accountMap.get(r.account_id) ?? "-"}
+        </span>
+      ),
+    },
     {
       key: "resource_type",
       header: "Type",
@@ -113,6 +143,18 @@ export default function Resources() {
               {regions.map((r) => (
                 <option key={r} value={r}>
                   {r}
+                </option>
+              ))}
+            </select>
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className="text-sm border rounded-md px-3 py-1.5 bg-background"
+            >
+              <option value="">All Accounts</option>
+              {(accounts.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
                 </option>
               ))}
             </select>
