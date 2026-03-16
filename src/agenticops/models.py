@@ -7,7 +7,7 @@ from typing import Optional, Generator
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from agenticops.config import settings
 
@@ -25,14 +25,14 @@ def get_engine():
     if _engine is None:
         settings.ensure_dirs()
 
-        # For SQLite, use StaticPool for thread safety
-        # For other databases, use standard pooling
+        # For SQLite, use NullPool so each thread gets its own connection
+        # (StaticPool shares one connection → InterfaceError under concurrency)
         if settings.database_url.startswith("sqlite"):
             _engine = create_engine(
                 settings.database_url,
                 echo=False,
                 connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
+                poolclass=NullPool,
             )
         else:
             _engine = create_engine(
