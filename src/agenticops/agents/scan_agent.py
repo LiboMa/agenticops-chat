@@ -35,6 +35,11 @@ Discover and inventory cloud resources across all enabled accounts.
    - Alicloud accounts: use run_aliyun_cli_<account_name> with 'aliyun <service> <Action>' commands
 3. For each discovered resource, call save_resources() with the account_id and provider
 
+## Preferred Approach
+For standard full scans, call scan_resources() — it runs predefined CLI commands across all accounts
+in parallel. Only use individual account CLI tools (run_aws_cli_*, etc.) for ad-hoc investigation
+or when you need to run specific commands not covered by the standard scan.
+
 ## Resource Categories
 Scan these categories per cloud:
 - compute: VMs, instances, functions/serverless
@@ -52,6 +57,41 @@ Scan these categories per cloud:
 ## Output
 Return a summary: how many resources found per account, per region, per type.
 """
+
+
+@tool
+def scan_resources(account_ids: str = "", focus: str = "all", regions: str = "") -> str:
+    """Programmatic parallel scan of cloud resources across all enabled accounts.
+
+    Uses predefined CLI commands per provider — much faster than manual scanning.
+    Prefer this for standard full scans. Use per-account CLI tools only for ad-hoc investigation.
+
+    Args:
+        account_ids: Comma-separated account IDs to scan, or empty for all enabled.
+        focus: Scan focus: computing,networking,databases,storage,security,all.
+        regions: Comma-separated regions to scan, or empty for each account's configured regions.
+
+    Returns:
+        Summary of scan results per account.
+    """
+    import asyncio
+    from agenticops.scanner import scan_accounts_parallel
+
+    ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
+    rgns = [r.strip() for r in regions.split(",") if r.strip()] or None
+
+    try:
+        result = asyncio.run(scan_accounts_parallel(account_ids=ids, focus=focus, regions=rgns))
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(scan_accounts_parallel(account_ids=ids, focus=focus, regions=rgns))
+
+    lines = [f"Scan complete in {result.duration_s}s — {result.total_found} resources found."]
+    for a in result.accounts:
+        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, regions={a.regions_scanned}")
+        for err in a.errors[:3]:
+            lines.append(f"    ⚠ {err}")
+    return "\n".join(lines)
 
 
 @tool
@@ -80,7 +120,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         )
 
         # Build dynamic tool list from enabled accounts
-        tools: list = [get_enabled_accounts, get_active_account, save_resources]
+        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources]
         tools.extend(get_all_cli_tools())
 
         agent = Agent(
