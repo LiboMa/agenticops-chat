@@ -64,6 +64,7 @@ from agenticops.cli.display import (
     StatusBar,
 )
 from agenticops.cli.context import ChatContext
+from agenticops.utils.timeutils import utc_now
 
 # Initialize app and console with better terminal support
 app = typer.Typer(
@@ -963,13 +964,13 @@ def update_issue(
                 console.print("[yellow]Issue is already resolved.[/yellow]")
                 return
             item.status = "resolved"
-            item.resolved_at = datetime.utcnow()
+            item.resolved_at = utc_now()
             console.print(f"[green]issue/{issue_id} resolved[/green]")
 
         if status:
             item.status = status
             if status == "resolved":
-                item.resolved_at = datetime.utcnow()
+                item.resolved_at = utc_now()
             console.print(f"[green]issue/{issue_id} status set to {status}[/green]")
 
         session.commit()
@@ -1180,7 +1181,7 @@ def logs_audit(
     from agenticops.audit import AuditService
 
     init_db()
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = utc_now() - timedelta(hours=hours)
 
     logs = AuditService.query(
         action=action,
@@ -2080,7 +2081,7 @@ def _slash_resolve(ctx: ChatContext, args: list) -> str:
             return "[yellow]Issue is already resolved.[/yellow]"
 
         item.status = "resolved"
-        item.resolved_at = datetime.utcnow()
+        item.resolved_at = utc_now()
         session.commit()
 
         return f"[green]Issue #{issue_id} resolved.[/green]"
@@ -2277,7 +2278,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
 
         plan.status = "approved"
         plan.approved_by = approver.strip()
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
 
         # Sync HealthIssue status
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
@@ -2332,7 +2333,7 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             health_issue_id=plan.health_issue_id,
             status="pending",
             executed_by="cli_user",
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
         )
         plan.status = "executing"
         session.add(execution)

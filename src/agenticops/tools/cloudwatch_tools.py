@@ -14,6 +14,7 @@ from strands import tool
 
 from agenticops.tools.aws_tools import _get_client
 from agenticops.scan.services import AWS_SERVICES
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def get_alarm_history(alarm_name: str, region: str, hours: int = 24) -> str:
     except RuntimeError as e:
         return str(e)
 
-    end_time = datetime.utcnow()
+    end_time = utc_now()
     start_time = end_time - timedelta(hours=min(hours, 168))
 
     try:
@@ -166,7 +167,7 @@ def get_metrics(
     )
     dimensions = [{"Name": dim_name, "Value": dim_value}]
 
-    end_time = datetime.utcnow()
+    end_time = utc_now()
     start_time = end_time - timedelta(hours=min(hours, 72))
 
     results = {}
@@ -238,7 +239,7 @@ def query_logs(
         | limit 50
         """
 
-    end_time = datetime.utcnow()
+    end_time = utc_now()
     start_time = end_time - timedelta(hours=min(hours, 48))
 
     try:

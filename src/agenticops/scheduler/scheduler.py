@@ -10,6 +10,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agenticops.models import Base, get_db_session, init_db
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,9 @@ class Schedule(Base):
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
 
@@ -51,7 +52,7 @@ class ScheduleExecution(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     schedule_id: Mapped[int] = mapped_column(ForeignKey("schedules.id"))
     status: Mapped[str] = mapped_column(String(20))  # running, completed, failed
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
     result: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -109,7 +110,7 @@ class CronParser:
     def next_run(self, after: Optional[datetime] = None) -> datetime:
         """Calculate the next run time after the given datetime."""
         if after is None:
-            after = datetime.utcnow()
+            after = utc_now()
 
         # Start from the next minute
         candidate = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
@@ -193,7 +194,7 @@ class Scheduler:
 
     def _check_schedules(self):
         """Check and execute due schedules."""
-        now = datetime.utcnow()
+        now = utc_now()
 
         with get_db_session() as session:
             schedules = session.query(Schedule).filter_by(is_enabled=True).all()
@@ -234,7 +235,7 @@ class Scheduler:
             execution = ScheduleExecution(
                 schedule_id=schedule.id,
                 status="running",
-                started_at=datetime.utcnow(),
+                started_at=utc_now(),
             )
             session.add(execution)
             session.flush()
@@ -283,7 +284,7 @@ class Scheduler:
                 ).first()
                 if execution:
                     execution.status = "completed" if result.success else "failed"
-                    execution.completed_at = datetime.utcnow()
+                    execution.completed_at = utc_now()
                     execution.duration_ms = result.duration_ms
                     execution.result = {
                         "pipeline": result.pipeline_name,
@@ -315,7 +316,7 @@ class Scheduler:
                 ).first()
                 if execution:
                     execution.status = "failed"
-                    execution.completed_at = datetime.utcnow()
+                    execution.completed_at = utc_now()
                     execution.error = str(e)
 
             # Auto-notify on failure

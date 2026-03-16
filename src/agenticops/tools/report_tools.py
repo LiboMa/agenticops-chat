@@ -11,6 +11,7 @@ from datetime import datetime
 from strands import tool
 
 from agenticops.models import Report, get_session
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def save_report(
     from agenticops.storage import get_storage_backend
 
     backend = get_storage_backend()
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = utc_now().strftime("%Y%m%d-%H%M%S")
     key = f"{report_type.lower()}/{report_type.lower()}-{timestamp}.md"
 
     try:

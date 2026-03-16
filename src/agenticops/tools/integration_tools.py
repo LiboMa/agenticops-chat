@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from strands import tool
 
 from agenticops.config import settings
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def query_provider_metrics(
             })
 
         metric_list = [m.strip() for m in metric_names.split(",") if m.strip()]
-        end = datetime.utcnow()
+        end = utc_now()
         start = end - timedelta(hours=hours)
 
         series_list = prov.query_metrics(resource_id, metric_list, start, end)
@@ -144,7 +145,7 @@ def query_provider_logs(
                 "available_providers": available,
             })
 
-        end = datetime.utcnow()
+        end = utc_now()
         start = end - timedelta(hours=hours)
 
         entries = prov.query_logs(query, start, end, limit=limit)
@@ -270,7 +271,7 @@ def store_metric_snapshot(
                 resource_id=resource_id,
                 metric_namespace=namespace,
                 metric_name=metric_name,
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now(),
                 value=value,
                 unit=unit,
             )

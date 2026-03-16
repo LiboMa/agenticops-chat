@@ -11,6 +11,7 @@ from agenticops.proactive.predictive_alert import ProactiveAlert
 from agenticops.agents.proactive_agent import ProactiveAgent
 from agenticops.memory.agent_memory import AgentMemory
 from agenticops.memory.types import MemoryEntry, MemoryType
+from agenticops.utils.timeutils import utc_now
 
 run = asyncio.get_event_loop().run_until_complete
 
@@ -19,7 +20,7 @@ def _make_entry(content: str, confidence: float = 0.7, days_ago: int = 0) -> Mag
     entry = MagicMock(spec=MemoryEntry)
     entry.content = content
     entry.confidence = confidence
-    entry.created_at = (datetime.utcnow() - timedelta(days=days_ago)).isoformat()
+    entry.created_at = (utc_now() - timedelta(days=days_ago)).isoformat()
     return entry
 
 
@@ -215,7 +216,7 @@ class TestProactiveAgent:
         agent.alert_callback = AsyncMock()
 
         # Fill rate limit
-        now = datetime.utcnow()
+        now = utc_now()
         for _ in range(5):
             agent._alert_history.append(now)
 

@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
 
 from agenticops.models import AWSAccount, get_db_session
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ class Pipeline:
         result = PipelineResult(
             pipeline_name=self.name,
             status=StepStatus.RUNNING,
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
         )
 
         # Initialize context with account
@@ -176,7 +177,7 @@ class Pipeline:
                 step_result = StepResult(
                     step_name=step.name,
                     status=StepStatus.RUNNING,
-                    started_at=datetime.utcnow(),
+                    started_at=utc_now(),
                 )
 
                 try:
@@ -194,7 +195,7 @@ class Pipeline:
                     step_result.status = StepStatus.FAILED
                     step_result.error = str(e)
 
-                step_result.completed_at = datetime.utcnow()
+                step_result.completed_at = utc_now()
                 if step_result.started_at:
                     step_result.duration_ms = int(
                         (step_result.completed_at - step_result.started_at).total_seconds() * 1000
@@ -213,7 +214,7 @@ class Pipeline:
             logger.error(f"Pipeline '{self.name}' failed: {e}")
             result.status = StepStatus.FAILED
 
-        result.completed_at = datetime.utcnow()
+        result.completed_at = utc_now()
         if result.started_at:
             result.duration_ms = int(
                 (result.completed_at - result.started_at).total_seconds() * 1000

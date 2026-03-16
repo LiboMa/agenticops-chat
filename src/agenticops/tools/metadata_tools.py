@@ -25,6 +25,7 @@ from agenticops.models import (
     validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ def save_resources(resources_json: str) -> str:
                 created += 1
 
         # Update last_scanned_at
-        account.last_scanned_at = datetime.utcnow()
+        account.last_scanned_at = utc_now()
         session.commit()
 
         return f"Saved {created} new resources, updated {updated} existing."
@@ -329,7 +330,7 @@ def create_health_issue(
         except json.JSONDecodeError:
             changes_parsed = []
 
-        now = datetime.utcnow()
+        now = utc_now()
         fingerprint = _compute_fingerprint(source, resource_id, title)
 
         # Fingerprint-based deduplication: find open/investigating issue with same
@@ -597,7 +598,7 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         issue.status = new_status
 
         if new_status == "resolved":
-            issue.resolved_at = datetime.utcnow()
+            issue.resolved_at = utc_now()
 
         session.commit()
 
@@ -1006,7 +1007,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
         plan.status = "approved"
         plan.approved_by = approved_by
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         session.commit()
 
         # Update health issue status
@@ -1141,8 +1142,8 @@ def save_execution_result(
             fix_plan_id=fix_plan_id,
             health_issue_id=health_issue_id,
             status=status,
-            started_at=datetime.utcnow(),
-            completed_at=datetime.utcnow(),
+            started_at=utc_now(),
+            completed_at=utc_now(),
             executed_by=executed_by,
             pre_check_results=_parse_json(pre_check_results, []),
             step_results=_parse_json(step_results, []),
@@ -1169,7 +1170,7 @@ def save_execution_result(
             issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
             if issue and issue.status in ("fix_approved", "fix_executed"):
                 issue.status = "resolved"
-                issue.resolved_at = datetime.utcnow()
+                issue.resolved_at = utc_now()
                 auto_resolved = True
 
         session.commit()

@@ -19,6 +19,7 @@ from agenticops.memory.types import MemoryType
 from agenticops.proactive.pattern_watch import PatternWatch
 from agenticops.proactive.risk_scorer import RiskScorer, RiskLevel, HealthIssue
 from agenticops.proactive.predictive_alert import ProactiveAlert
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class ProactiveAgent:
         Returns list of generated alerts (for testing).
         """
         # Rate limit check
-        now = datetime.utcnow()
+        now = utc_now()
         hour_ago = now - timedelta(hours=1)
         recent_alerts = sum(1 for t in self._alert_history if t > hour_ago)
         if recent_alerts >= self.MAX_ALERTS_PER_HOUR:
@@ -134,7 +135,7 @@ class ProactiveAgent:
 
     def get_stats(self) -> dict:
         """Get proactive agent statistics."""
-        now = datetime.utcnow()
+        now = utc_now()
         hour_ago = now - timedelta(hours=1)
         return {
             "running": self._running,

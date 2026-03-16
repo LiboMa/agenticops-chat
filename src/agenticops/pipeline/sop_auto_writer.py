@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class SOPDraft:
     remediation_steps: list[str] = field(default_factory=list)
     evidence_summary: list[str] = field(default_factory=list)
     created_from_incident: str = ""
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: utc_now().isoformat())
     status: str = "draft"  # draft → active → stable → review_needed
 
     def to_markdown(self) -> str:

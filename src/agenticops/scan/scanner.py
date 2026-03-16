@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 
 from agenticops.models import AWSAccount, AWSResource, get_session
 from agenticops.scan.services import AWS_SERVICES, AWSServiceDef, get_all_regions
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class ScanResult:
     service: str
     resources: list[dict] = field(default_factory=list)
     error: Optional[str] = None
-    scanned_at: datetime = field(default_factory=datetime.utcnow)
+    scanned_at: datetime = field(default_factory=utc_now)
 
     @property
     def success(self) -> bool:
@@ -350,7 +351,7 @@ class AWSScanner:
                         saved_count += 1
 
             # Update account last_scanned_at
-            self.account.last_scanned_at = datetime.utcnow()
+            self.account.last_scanned_at = utc_now()
             session.commit()
 
         except Exception as e:

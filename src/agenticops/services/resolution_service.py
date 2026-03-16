@@ -14,6 +14,7 @@ import threading
 from datetime import datetime
 
 from agenticops.config import settings
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _record_pipeline_run(health_issue_id: int, rag_result) -> None:
             return
 
         # Store pipeline results as JSON in description addendum
-        pipeline_note = f"\n\n[Auto] Post-resolution pipeline ran at {datetime.utcnow().isoformat()}"
+        pipeline_note = f"\n\n[Auto] Post-resolution pipeline ran at {utc_now().isoformat()}"
         if rag_result:
             pipeline_note += f" | RAG: {rag_result.action}"
             if rag_result.sop_filename:

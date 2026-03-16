@@ -11,6 +11,7 @@ from agenticops.models import (
     RCAResult,
     get_session,
 )
+from agenticops.utils.timeutils import utc_now
 
 
 @pytest.fixture
@@ -339,7 +340,7 @@ class TestApproveFixPlan:
             summary="Check if metric recovered",
             status="approved",
             approved_by="test",
-            approved_at=datetime.utcnow(),
+            approved_at=utc_now(),
         )
         db_session.add(plan)
         db_session.commit()

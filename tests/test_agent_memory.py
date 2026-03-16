@@ -11,6 +11,7 @@ import pytest
 
 from agenticops.memory import AgentMemory, clear_memory_cache, get_agent_memory
 from agenticops.memory.types import MemoryEntry, MemoryType, decayed_confidence
+from agenticops.utils.timeutils import utc_now
 
 
 @pytest.fixture
@@ -75,7 +76,7 @@ class TestMemoryTypes:
             content="test",
             confidence=1.0,
             recall_count=0,
-            timestamp=datetime.utcnow() - timedelta(days=100),
+            timestamp=utc_now() - timedelta(days=100),
         )
         dc = decayed_confidence(entry)
         # 0.99^100 ≈ 0.366
@@ -201,7 +202,7 @@ class TestAgentMemory:
         """Old entries with low confidence and 0 recalls are pruned."""
         # Insert old low-value entries directly
         conn = memory._get_conn()
-        old_date = (datetime.utcnow() - timedelta(days=200)).isoformat()
+        old_date = (utc_now() - timedelta(days=200)).isoformat()
         for i in range(5):
             conn.execute(
                 "INSERT INTO agent_memories (agent_name, memory_type, content, confidence, recall_count, created_at) "

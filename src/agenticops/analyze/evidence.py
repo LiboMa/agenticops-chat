@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class EvidenceItem:
     source: str  # "cloudtrail" | "cloudwatch" | "kb" | "memory" | "trace" | "network"
     content: str  # Human-readable evidence text
     confidence_delta: float  # How much this shifts confidence (-1.0 to 1.0)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=utc_now)
     raw_data: dict = field(default_factory=dict)
 
     # Evidence source weights (Researcher's hierarchy)
@@ -107,7 +108,7 @@ async def _gather_cloudtrail(
         client = boto3.client("cloudtrail")
         from datetime import timedelta
 
-        start_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+        start_time = utc_now() - timedelta(hours=lookback_hours)
         response = client.lookup_events(
             LookupAttributes=[
                 {"AttributeKey": "ResourceName", "AttributeValue": resource_id},

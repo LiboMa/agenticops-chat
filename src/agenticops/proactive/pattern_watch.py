@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, List
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class PatternWatch:
         if not entries:
             return 0.0
 
-        now = datetime.utcnow()
+        now = utc_now()
         total_score = 0.0
 
         for entry in entries:

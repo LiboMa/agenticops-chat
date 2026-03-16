@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from agenticops.memory.types import MemoryEntry, MemoryType, decayed_confidence
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,7 @@ class AgentMemory:
 
             # Score by semantic similarity + confidence
             scored = []
-            now = datetime.utcnow()
+            now = utc_now()
             for row in rows:
                 entry = self._row_to_entry(row)
                 if query_vector and row["vector"]:
@@ -203,7 +204,7 @@ class AgentMemory:
                     conn.execute(
                         f"UPDATE agent_memories SET recall_count = recall_count + 1, "
                         f"updated_at = ? WHERE id IN ({placeholders})",
-                        [datetime.utcnow().isoformat()] + ids,
+                        [utc_now().isoformat()] + ids,
                     )
                     conn.commit()
                     for entry in results:
@@ -249,7 +250,7 @@ class AgentMemory:
 
         If no LLM is available, falls back to text-based summary.
         """
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = utc_now().strftime("%Y-%m-%d")
         conn = self._get_conn()
         try:
             rows = conn.execute(
@@ -398,7 +399,7 @@ class AgentMemory:
                 return 0
 
             # Score entries
-            now = datetime.utcnow()
+            now = utc_now()
             scored = []
             for row in rows:
                 entry = self._row_to_entry(row)
@@ -494,7 +495,7 @@ class AgentMemory:
         try:
             ts = datetime.fromisoformat(row["created_at"])
         except (ValueError, TypeError):
-            ts = datetime.utcnow()
+            ts = utc_now()
 
         return MemoryEntry(
             id=row["id"],

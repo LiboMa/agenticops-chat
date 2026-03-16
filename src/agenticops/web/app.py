@@ -671,6 +671,7 @@ app.include_router(proactive_router)
 app.include_router(learning_router)
 
 from agenticops.web.api_cloud import cloud_router
+from agenticops.utils.timeutils import utc_now
 app.include_router(cloud_router)
 
 # Chat session manager
@@ -1140,7 +1141,7 @@ async def api_health():
     return HealthResponse(
         status=overall_status,
         version=__version__,
-        timestamp=datetime.utcnow(),
+        timestamp=utc_now(),
         checks=checks,
     )
 
@@ -1372,7 +1373,7 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
 
         issue.status = update.status
         if update.status == "resolved" and issue.resolved_at is None:
-            issue.resolved_at = datetime.utcnow()
+            issue.resolved_at = utc_now()
 
         session.flush()
         return _health_issue_to_anomaly_response(issue)
@@ -1553,7 +1554,7 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
             new_status == "resolved" and issue.status != "resolved"
         )
         if transitioning_to_resolved:
-            update_data["resolved_at"] = datetime.utcnow()
+            update_data["resolved_at"] = utc_now()
 
         for key, value in update_data.items():
             setattr(issue, key, value)
@@ -1947,7 +1948,7 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
 
         plan.status = "approved"
         plan.approved_by = approved_by
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
 
         # Sync HealthIssue status
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
@@ -2316,7 +2317,7 @@ async def api_approve_sop(sop_id: int, body: dict = Body(...)):
             raise HTTPException(status_code=409, detail=str(e))
         record.status = "active"
         record.approved_by = approved_by
-        record.reviewed_at = datetime.utcnow()
+        record.reviewed_at = utc_now()
     return {"status": "active", "approved_by": approved_by}
 
 
@@ -2332,7 +2333,7 @@ async def api_reject_sop(sop_id: int):
         except (InvalidSOPTransition, ValueError) as e:
             raise HTTPException(status_code=409, detail=str(e))
         record.status = "archived"
-        record.reviewed_at = datetime.utcnow()
+        record.reviewed_at = utc_now()
     return {"status": "archived"}
 
 
@@ -2733,7 +2734,7 @@ async def api_login(request: Request, request_data: LoginRequest):
         email=user.email,
         name=user.name,
         is_admin=user.is_admin,
-        expires_at=datetime.utcnow() + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
+        expires_at=utc_now() + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
     )
 
 
@@ -2935,7 +2936,7 @@ async def api_list_audit_logs(
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = utc_now() - timedelta(hours=hours)
 
     logs = AuditService.query(
         action=action,
@@ -3007,7 +3008,7 @@ async def api_get_audit_stats(request: Request, hours: int = Query(24, le=720)):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = utc_now() - timedelta(hours=hours)
 
     return {
         "period_hours": hours,
@@ -3135,7 +3136,7 @@ async def api_run_schedule(schedule_id: int):
         session.flush()
 
         # Update schedule last_run_at
-        schedule.last_run_at = datetime.utcnow()
+        schedule.last_run_at = utc_now()
 
         try:
             from agenticops.scheduler.scheduler import Scheduler
@@ -3143,12 +3144,12 @@ async def api_run_schedule(schedule_id: int):
             result = scheduler.run_pipeline(schedule.pipeline_name, schedule.account_name, schedule.config)
 
             execution.status = "completed"
-            execution.completed_at = datetime.utcnow()
+            execution.completed_at = utc_now()
             execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
             execution.result = {"output": str(result)} if result else {}
         except Exception as e:
             execution.status = "failed"
-            execution.completed_at = datetime.utcnow()
+            execution.completed_at = utc_now()
             execution.duration_ms = int((execution.completed_at - execution.started_at).total_seconds() * 1000)
             execution.error = str(e)
 
@@ -3356,7 +3357,7 @@ async def api_list_im_apps():
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
 async def api_create_chat_session(payload: ChatSessionCreate):
     sid = str(uuid.uuid4())
-    name = payload.name or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    name = payload.name or f"Chat {utc_now().strftime('%Y-%m-%d %H:%M')}"
     with get_db_session() as db:
         row = ChatSession(session_id=sid, name=name)
         db.add(row)
@@ -3507,7 +3508,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             if row:
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=ch_result.message))
-                row.last_activity_at = datetime.utcnow()
+                row.last_activity_at = utc_now()
 
         async def _channel_stream():
             yield {"event": "text", "data": json.dumps({"token": ch_result.message})}
@@ -3527,7 +3528,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             if row:
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=send_result.message))
-                row.last_activity_at = datetime.utcnow()
+                row.last_activity_at = utc_now()
 
         async def _send_to_stream():
             yield {"event": "text", "data": json.dumps({"token": send_result.message})}
@@ -3551,7 +3552,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             attachments=attachments,
         )
         db.add(msg)
-        row.last_activity_at = datetime.utcnow()
+        row.last_activity_at = utc_now()
         db_session_pk = row.id
 
     async def _generate():
@@ -4074,7 +4075,7 @@ async def _handle_im_message(platform: str, msg) -> None:
         db.add(ChatMessageModel(session_id=row.id, role="user", content=msg.content))
         # Save assistant response
         db.add(ChatMessageModel(session_id=row.id, role="assistant", content=response_text))
-        row.last_activity_at = datetime.utcnow()
+        row.last_activity_at = utc_now()
 
     # Reply to IM
     if notifier:

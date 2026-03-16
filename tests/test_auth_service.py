@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agenticops.models import Base
 from agenticops.auth.models import User, APIKey, Session as SessionModel
+from agenticops.utils.timeutils import utc_now
 
 
 # ── DB Fixture ───────────────────────────────────────────────────────
@@ -216,7 +217,7 @@ class TestSessionCRUD:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         with db_session_factory() as s:
             sess = s.query(SessionModel).filter_by(token_hash=token_hash).first()
-            sess.expires_at = datetime.utcnow() - timedelta(hours=1)
+            sess.expires_at = utc_now() - timedelta(hours=1)
             s.commit()
         assert AuthService.validate_session(token) is None
 
@@ -264,7 +265,7 @@ class TestApiKeyCRUD:
         key_hash = hashlib.sha256(key.encode()).hexdigest()
         with db_session_factory() as s:
             ak = s.query(APIKey).filter_by(key_hash=key_hash).first()
-            ak.expires_at = datetime.utcnow() - timedelta(hours=1)
+            ak.expires_at = utc_now() - timedelta(hours=1)
             s.commit()
         assert AuthService.validate_api_key(key) is None
 

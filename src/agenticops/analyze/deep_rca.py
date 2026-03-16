@@ -21,6 +21,7 @@ from typing import Any, Optional
 from agenticops.analyze.evidence import EvidenceItem, gather_evidence
 from agenticops.analyze.rca import BedrockLLM, RCAAnalysis, RCAEngine
 from agenticops.memory import AgentMemory, MemoryType, get_agent_memory
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -572,14 +573,14 @@ Provide your response as JSON:
         )
 
         case = CaseStudy(
-            case_id=f"auto-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+            case_id=f"auto-{utc_now().strftime('%Y%m%d-%H%M%S')}",
             title=title,
             symptoms=description,
             root_cause=result.analysis.root_cause,
             meta=CaseStudyMeta(
                 resource_type=resource_type,
                 severity=severity,
-                created_at=datetime.utcnow().strftime("%Y-%m-%d"),
+                created_at=utc_now().strftime("%Y-%m-%d"),
                 tags=["auto-generated", "deep-rca"],
             ),
             embedding_inputs=EmbeddingInputs(

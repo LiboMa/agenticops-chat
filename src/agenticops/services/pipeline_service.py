@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Optional
 
 from agenticops.config import settings
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
             # Approve L0/L1 plan
             plan.status = "approved"
             plan.approved_by = "agent:auto-pipeline"
-            plan.approved_at = datetime.utcnow()
+            plan.approved_at = utc_now()
 
             # Capture values before session closes
             risk_level = plan.risk_level

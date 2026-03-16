@@ -12,6 +12,7 @@ from agenticops.pipeline.orchestrator import (
     StepResult,
     StepStatus,
 )
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class HealthPatrolPipeline(Pipeline):
         self.patrol_config = config or {}
 
     async def execute(self) -> PipelineResult:
-        started = datetime.utcnow()
+        started = utc_now()
         result = PipelineResult(
             pipeline_name=self.name,
             status=StepStatus.RUNNING,
@@ -119,7 +120,7 @@ class HealthPatrolPipeline(Pipeline):
             }
 
         for step in self.steps:
-            step_started = datetime.utcnow()
+            step_started = utc_now()
             try:
                 data = await step.execute(context)
                 step_result = StepResult(
@@ -127,7 +128,7 @@ class HealthPatrolPipeline(Pipeline):
                     status=StepStatus.COMPLETED,
                     data=data,
                     started_at=step_started,
-                    completed_at=datetime.utcnow(),
+                    completed_at=utc_now(),
                 )
                 context[step.name] = data
             except Exception as e:
@@ -137,18 +138,18 @@ class HealthPatrolPipeline(Pipeline):
                     status=StepStatus.FAILED,
                     error=str(e),
                     started_at=step_started,
-                    completed_at=datetime.utcnow(),
+                    completed_at=utc_now(),
                 )
 
             result.step_results.append(step_result)
 
             if step_result.status == StepStatus.FAILED:
                 result.status = StepStatus.FAILED
-                result.completed_at = datetime.utcnow()
+                result.completed_at = utc_now()
                 return result
 
         result.status = StepStatus.COMPLETED
-        result.completed_at = datetime.utcnow()
+        result.completed_at = utc_now()
         if result.started_at:
             result.duration_ms = int(
                 (result.completed_at - result.started_at).total_seconds() * 1000

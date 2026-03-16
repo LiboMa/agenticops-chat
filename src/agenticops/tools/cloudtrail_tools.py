@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from agenticops.tools.aws_tools import _get_client
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def lookup_cloudtrail_events(
     except RuntimeError as e:
         return str(e)
 
-    end_time = datetime.utcnow()
+    end_time = utc_now()
     start_time = end_time - timedelta(hours=min(hours, 24))
 
     try:

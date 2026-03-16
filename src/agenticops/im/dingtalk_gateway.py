@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
 from agenticops.notify.im_config import get_dingtalk_app
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class DingTalkGateway(IMGateway):
             sender_name=payload.get("senderNick", "unknown"),
             content=text,
             message_id=payload.get("msgId", ""),
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now(),
             is_group=(conversation_type == "2"),
             app_name=self.app_name,
         )

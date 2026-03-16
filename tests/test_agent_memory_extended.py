@@ -21,6 +21,7 @@ from agenticops.memory.agent_memory import (
     _encode_vector,
 )
 from agenticops.memory.types import MemoryEntry, MemoryType
+from agenticops.utils.timeutils import utc_now
 
 
 def run(coro):
@@ -140,7 +141,7 @@ class TestAgentMemoryEdgeCases:
     def test_prune_keeps_reflections(self, memory):
         """Reflections should never be pruned even when old and low-conf."""
         conn = sqlite3.connect(memory._db_path)
-        old_date = (datetime.utcnow() - timedelta(days=365)).isoformat()
+        old_date = (utc_now() - timedelta(days=365)).isoformat()
         conn.execute(
             """INSERT INTO agent_memories
                (agent_name, content, memory_type, source, confidence,
@@ -166,7 +167,7 @@ class TestAgentMemoryEdgeCases:
         """Test reflect when prune actually removes something."""
         # Add old low-value entry
         conn = sqlite3.connect(memory._db_path)
-        old_date = (datetime.utcnow() - timedelta(days=200)).isoformat()
+        old_date = (utc_now() - timedelta(days=200)).isoformat()
         conn.execute(
             """INSERT INTO agent_memories
                (agent_name, content, memory_type, source, confidence,
@@ -204,7 +205,7 @@ class TestRowToEntry:
                 recall_count, created_at, context_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             ("test_row", "content", "episodic", "test", 0.8, 0,
-             datetime.utcnow().isoformat(), "NOT_JSON"),
+             utc_now().isoformat(), "NOT_JSON"),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM agent_memories LIMIT 1").fetchone()
@@ -240,7 +241,7 @@ class TestRowToEntry:
                 recall_count, created_at, context_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             ("test_row", "content", "semantic", "test", 0.8, 0,
-             datetime.utcnow().isoformat(), None),
+             utc_now().isoformat(), None),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM agent_memories LIMIT 1").fetchone()

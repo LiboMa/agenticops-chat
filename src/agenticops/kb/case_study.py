@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+from agenticops.utils.timeutils import utc_now
 
 
 class CaseStudyStatus(str, Enum):
@@ -112,7 +113,7 @@ class CaseStudy:
             f"verified: {str(self.verified).lower()}",
             f"efficiency_score: {self.lessons_learned.efficiency_score}",
             f"reuse_count: {self.reuse_count}",
-            f"date: {self.meta.created_at or datetime.utcnow().strftime('%Y-%m-%d')}",
+            f"date: {self.meta.created_at or utc_now().strftime('%Y-%m-%d')}",
             f"tags: [{tags_str}]",
             "---",
             "",

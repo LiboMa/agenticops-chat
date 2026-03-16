@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, String, Text, Boolean, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agenticops.models import Base
+from agenticops.utils.timeutils import utc_now
 
 
 class User(Base):
@@ -22,9 +23,9 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     permissions: Mapped[list] = mapped_column(JSON, default=list)  # ["read", "write", "admin"]
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
 
@@ -45,7 +46,7 @@ class APIKey(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class Session(Base):
@@ -63,4 +64,4 @@ class Session(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from agenticops.analyze.deep_rca import DeepRCAResult
 from agenticops.memory import MemoryType, get_agent_memory
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +219,7 @@ class RCALearner:
     async def _incident_count_today(self) -> int:
         """Count today's incidents from memory."""
         recent = await self.memory.recall_recent(limit=50)
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = utc_now().strftime("%Y-%m-%d")
         return sum(
             1
             for m in recent

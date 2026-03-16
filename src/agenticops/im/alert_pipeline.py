@@ -13,6 +13,7 @@ from agenticops.integrations.alert_processor import AlertProcessResult, process_
 from agenticops.integrations.base import AlertPayload
 from agenticops.integrations.parsers import _hash_title
 from agenticops.notify.im_config import find_channel_by_chat
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ def _try_auto_resolve(title: str, text: str) -> int | None:
             issue = query.first()
             if issue:
                 issue.status = "resolved"
-                issue.resolved_at = datetime.utcnow()
+                issue.resolved_at = utc_now()
                 session.flush()
                 return issue.id
     except Exception:

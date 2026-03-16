@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+from agenticops.utils.timeutils import utc_now
 
 
 class MemoryType(str, Enum):
@@ -21,7 +22,7 @@ class MemoryEntry:
     memory_type: MemoryType
     content: str                          # Natural language description
     context: dict = field(default_factory=dict)  # Structured metadata
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=utc_now)
     source: str = ""                      # What triggered this memory (e.g., "rca:issue-42")
     confidence: float = 1.0               # 0.0-1.0, decays over time
     recall_count: int = 0                 # How often this memory was retrieved
@@ -39,7 +40,7 @@ def decayed_confidence(entry: MemoryEntry, now: Optional[datetime] = None) -> fl
     ~37% after 100 days with no recalls. Recall boosts up to 2x.
     """
     if now is None:
-        now = datetime.utcnow()
+        now = utc_now()
     age_days = max(0, (now - entry.timestamp).days)
     decay = 0.99 ** age_days
     recall_boost = 1 + 0.1 * min(entry.recall_count, 10)

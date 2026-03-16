@@ -9,6 +9,7 @@ from typing import Dict
 from strands import Agent
 
 from agenticops.agents.main_agent import create_main_agent
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class ChatSessionManager:
             self._remove_stale()
 
     def _remove_stale(self):
-        now = datetime.utcnow()
+        now = utc_now()
         with self._lock:
             stale = [sid for sid, ts in self._last_activity.items() if now - ts > self._ttl]
             for sid in stale:
@@ -53,7 +54,7 @@ class ChatSessionManager:
             if session_id not in self._agents:
                 logger.info("Creating agent for session %s", session_id)
                 self._agents[session_id] = create_main_agent()
-            self._last_activity[session_id] = datetime.utcnow()
+            self._last_activity[session_id] = utc_now()
             return self._agents[session_id]
 
     def remove(self, session_id: str):

@@ -24,6 +24,7 @@ from agenticops.models import (
     get_session,
     init_db,
 )
+from agenticops.utils.timeutils import utc_now
 
 
 @pytest.fixture
@@ -210,7 +211,7 @@ class TestL4Lifecycle:
         # Approve the plan (L1 = auto-approvable)
         plan.status = "approved"
         plan.approved_by = "agent:main_agent"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.commit()
 
@@ -226,7 +227,7 @@ class TestL4Lifecycle:
         # Approve first
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 
@@ -255,7 +256,7 @@ class TestL4Lifecycle:
         # Approve
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 
@@ -304,7 +305,7 @@ class TestL4Lifecycle:
 
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 
@@ -357,7 +358,7 @@ class TestRAGPipeline:
 
         # Mark as resolved (needed for extract)
         issue.status = "resolved"
-        issue.resolved_at = datetime.utcnow()
+        issue.resolved_at = utc_now()
         session.commit()
 
         from agenticops.pipeline.rag_pipeline import _extract_case_data
@@ -481,7 +482,7 @@ class TestExecutorService:
         # Approve plan
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 

@@ -21,6 +21,7 @@ from typing import Optional
 from agenticops.config import settings
 from agenticops.pipeline.sop_identifier import SOPMatch, identify_matching_sop
 from agenticops.pipeline.sop_upgrader import generate_new_sop, upgrade_existing_sop
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def run_rag_pipeline(health_issue_id: int) -> RAGPipelineResult:
             error="RAG pipeline is disabled (AIOPS_RAG_PIPELINE_ENABLED=false)",
         )
 
-    start = datetime.utcnow()
+    start = utc_now()
     result = RAGPipelineResult(
         health_issue_id=health_issue_id,
         success=False,
@@ -140,7 +141,7 @@ def run_rag_pipeline(health_issue_id: int) -> RAGPipelineResult:
         result.error = str(e)
         result.steps.append({"step": "error", "status": "failed", "error": str(e)})
 
-    elapsed = (datetime.utcnow() - start).total_seconds()
+    elapsed = (utc_now() - start).total_seconds()
     result.duration_ms = int(elapsed * 1000)
     return result
 
@@ -361,7 +362,7 @@ def _save_sop_record(filename: str, file_path: str, case_data: dict, action: str
             if existing:
                 existing.quality_score = quality
                 existing.issue_pattern = (case_data.get("issue_pattern", "") or "")[:500]
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = utc_now()
                 if existing.status == "draft":
                     existing.status = initial_status
             else:

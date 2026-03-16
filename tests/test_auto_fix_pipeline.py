@@ -25,6 +25,7 @@ from agenticops.models import (
     get_engine,
     get_session,
 )
+from agenticops.utils.timeutils import utc_now
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -548,7 +549,7 @@ class TestFullE2EPipeline:
         plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
         plan.status = "approved"
         plan.approved_by = "agent:auto-pipeline"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = utc_now()
         issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
         issue.status = "fix_approved"
         db_session.commit()

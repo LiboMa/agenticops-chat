@@ -23,6 +23,7 @@ from slack_sdk.web import WebClient
 from agenticops.config import PROJECT_ROOT, settings
 from agenticops.im.session_manager import IMChatSessionManager
 from agenticops.notify.im_config import get_slack_app
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +373,7 @@ class SlackWSService:
                     )
                 )
                 db.commit()
-                session.last_activity_at = datetime.utcnow()
+                session.last_activity_at = utc_now()
                 db.commit()
         except Exception:
             logger.debug("Failed to persist Slack IM messages", exc_info=True)

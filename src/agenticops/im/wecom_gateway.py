@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
 from agenticops.notify.im_config import get_wecom_app
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class WeComGateway(IMGateway):
             sender_name=from_user,
             content=content,
             message_id=msg_id,
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now(),
             is_group=False,  # WeCom app messages are typically user-to-app
             app_name=self.app_name,
         )

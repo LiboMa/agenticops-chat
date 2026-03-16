@@ -27,6 +27,7 @@ from langchain_aws import ChatBedrock
 
 from agenticops.config import settings
 from agenticops.models import AWSAccount, get_session
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -486,7 +487,7 @@ class OpsAgent:
                     return f"Anomaly #{anomaly_id} is already resolved."
 
                 anomaly.status = "resolved"
-                anomaly.resolved_at = datetime.utcnow()
+                anomaly.resolved_at = utc_now()
                 session.commit()
 
                 result = f"Anomaly #{anomaly_id} has been resolved."

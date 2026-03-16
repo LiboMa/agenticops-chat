@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from .pattern_watch import PatternAlert
 from .risk_scorer import RiskLevel
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class ProactiveAlert:
     title: str = ""
     description: str = ""
     resource_id: str = ""
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=utc_now)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @staticmethod

@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
 from agenticops.notify.im_config import get_feishu_app
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ class FeishuGateway(IMGateway):
             sender_name=sender.get("sender_id", {}).get("user_id", "unknown"),
             content=text.strip(),
             message_id=message.get("message_id", ""),
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now(),
             is_group=(chat_type == "group"),
             app_name=self.app_name,
         )

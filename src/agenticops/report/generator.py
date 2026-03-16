@@ -14,6 +14,7 @@ from agenticops.models import (
     Report,
     get_session,
 )
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class ReportGenerator:
     ) -> str:
         """Generate daily operations report."""
         if date is None:
-            date = datetime.utcnow()
+            date = utc_now()
 
         start_time = date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_time = start_time + timedelta(days=1)
@@ -101,7 +102,7 @@ class ReportGenerator:
         lines = [
             f"# Daily Operations Report",
             f"**Date**: {date.strftime('%Y-%m-%d')}",
-            f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Generated**: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
             "---",
             "",
@@ -225,7 +226,7 @@ class ReportGenerator:
             f"# Anomaly Report",
             "",
             f"**ID**: {anomaly.id}",
-            f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Generated**: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
             "---",
             "",
@@ -334,7 +335,7 @@ class ReportGenerator:
             lines = [
                 "# Resource Inventory Report",
                 "",
-                f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                f"**Generated**: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}",
                 f"**Total Resources**: {len(resources)}",
                 "",
                 "---",
@@ -404,7 +405,7 @@ class ReportGenerator:
             else:
                 regions = ["us-east-1"]
 
-        now = datetime.utcnow()
+        now = utc_now()
         lines = [
             "# Network Health Report",
             f"**Generated**: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
@@ -561,7 +562,7 @@ class ReportGenerator:
 
         try:
             # Save to file
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = utc_now().strftime("%Y%m%d_%H%M%S")
             filename = f"{report_type}_{timestamp}.md"
             file_path = settings.reports_dir / filename
 

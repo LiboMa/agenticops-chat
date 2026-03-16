@@ -51,6 +51,7 @@ def _ensure_lark():
 from agenticops.config import PROJECT_ROOT, settings
 from agenticops.im.session_manager import IMChatSessionManager
 from agenticops.notify.im_config import get_feishu_app
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +413,7 @@ class FeishuWSService:
                     )
                 )
                 db.commit()
-                session.last_activity_at = datetime.utcnow()
+                session.last_activity_at = utc_now()
                 db.commit()
         except Exception:
             logger.debug("Failed to persist Feishu IM messages", exc_info=True)

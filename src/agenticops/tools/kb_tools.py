@@ -13,6 +13,7 @@ from typing import Optional
 from strands import tool
 
 from agenticops.config import settings
+from agenticops.utils.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -590,7 +591,7 @@ def _parse_distilled_case(distilled: dict, context: dict) -> "CaseStudy":
         Resolution,
     )
 
-    now = datetime.utcnow()
+    now = utc_now()
     case_id = f"case_{now.strftime('%Y%m%d')}_{context['issue_id']:03d}"
 
     tags = distilled.get("tags", [])
