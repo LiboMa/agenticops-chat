@@ -16,7 +16,6 @@ const MANAGE_ITEMS = [
   { to: "/app/audit", label: "Audit Log", end: false, icon: "clipboard" },
   { to: "/app/kb", label: "Knowledge Base", end: false, icon: "book" },
   { to: "/app/skills", label: "Skills", end: false, icon: "puzzle" },
-  { to: "/app/accounts", label: "Accounts", end: false, icon: "cloud" },
 ] as const;
 
 function I({ d }: { d: string }) {

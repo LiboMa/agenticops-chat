@@ -22,7 +22,6 @@ const Settings = lazy(() => import("@/pages/Settings"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
 const Skills = lazy(() => import("@/pages/Skills"));
-const Accounts = lazy(() => import("@/pages/Accounts"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -188,14 +187,6 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Skills />
-                </Suspense>
-              }
-            />
-            <Route
-              path="accounts"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Accounts />
                 </Suspense>
               }
             />

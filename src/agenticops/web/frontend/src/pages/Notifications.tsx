@@ -255,7 +255,7 @@ function StatusBadge({ status }: { status: string }) {
 function IMBotsCard() {
   const { data: bots, isLoading, error } = useQuery<IMBotStatus[]>({
     queryKey: ["im-bots"],
-    queryFn: () => apiFetch("/api/im/bots"),
+    queryFn: () => apiFetch("/im/bots"),
     refetchInterval: 30_000,
   });
 

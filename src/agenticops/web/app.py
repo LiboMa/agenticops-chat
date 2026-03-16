@@ -1416,6 +1416,8 @@ async def api_get_account(account_id: int):
 @app.post("/api/accounts", response_model=AccountResponse, status_code=201)
 async def api_create_account(account: AccountCreate):
     """Create a new cloud account."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
         existing = session.query(CloudAccount).filter(
             CloudAccount.name == account.name
@@ -1432,22 +1434,41 @@ async def api_create_account(account: AccountCreate):
             labels=account.labels,
         )
         session.add(db_account)
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=f"Account name '{account.name}' already exists")
         return AccountResponse.model_validate(db_account)
 
 
 @app.put("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_update_account(account_id: int, account: AccountUpdate):
     """Update an existing cloud account."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
         db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
 
-        for key, value in account.model_dump(exclude_unset=True).items():
+        update_data = account.model_dump(exclude_unset=True)
+
+        # Check name uniqueness before applying
+        new_name = update_data.get("name")
+        if new_name and new_name != db_account.name:
+            conflict = session.query(CloudAccount).filter(
+                CloudAccount.name == new_name, CloudAccount.id != account_id
+            ).first()
+            if conflict:
+                raise HTTPException(status_code=409, detail=f"Account name '{new_name}' already exists")
+
+        for key, value in update_data.items():
             setattr(db_account, key, value)
 
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=f"Account name '{new_name or db_account.name}' already exists")
         return AccountResponse.model_validate(db_account)
 
 

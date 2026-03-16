@@ -21,7 +21,7 @@ type SettingsPatch = Partial<Omit<AppSettings, "agent_models">> & { agent_models
 export function useSettings() {
   return useQuery<AppSettings>({
     queryKey: ["settings"],
-    queryFn: () => apiFetch("/api/settings"),
+    queryFn: () => apiFetch("/settings"),
   });
 }
 
@@ -29,7 +29,7 @@ export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (patch: SettingsPatch) =>
-      apiFetch("/api/settings", {
+      apiFetch("/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
