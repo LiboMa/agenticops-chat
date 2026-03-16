@@ -675,10 +675,10 @@ VALID_SCAN_FOCUS = ("computing", "networking", "databases", "storage", "security
 
 SCAN_FOCUS_SERVICES = {
     "computing": "EC2,Lambda,ECS,EKS,AutoScaling",
-    "networking": "VPC,Subnet,SecurityGroup,RouteTable,NATGateway,TransitGateway,ELB,CloudFront,Route53",
-    "databases": "RDS,DynamoDB,ElastiCache,Redshift,OpenSearch",
-    "storage": "S3,EBS,EFS,Backup",
-    "security": "security",
+    "networking": "VPC,Subnet,SecurityGroup,NATGateway,ELB,Route53",
+    "databases": "RDS,DynamoDB,ElastiCache,OpenSearch",
+    "storage": "S3,EBS,EFS",
+    "security": "IAMRole,KMS",
     "billing": "billing",
     "all": "all",
 }

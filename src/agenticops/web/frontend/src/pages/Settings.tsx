@@ -28,10 +28,10 @@ import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerCon
 const FOCUS_META: Record<ScanFocus, { label: string; services: string; icon: JSX.Element }> = {
   all:        { label: "All",       services: "All categories",                     icon: <IconAll /> },
   computing:  { label: "Compute",   services: "EC2, Lambda, ECS, EKS, AutoScaling", icon: <IconCompute /> },
-  networking: { label: "Network",   services: "VPC, SG, ELB, CloudFront, Route53",  icon: <IconNetwork /> },
-  databases:  { label: "Database",  services: "RDS, DynamoDB, ElastiCache",          icon: <IconDatabase /> },
-  storage:    { label: "Storage",   services: "S3, EBS, EFS, Backup",                icon: <IconStorage /> },
-  security:   { label: "Security",  services: "IAM, GuardDuty, WAF, KMS",            icon: <IconSecurity /> },
+  networking: { label: "Network",   services: "VPC, SG, ELB, Subnet, NAT GW, Route53",  icon: <IconNetwork /> },
+  databases:  { label: "Database",  services: "RDS, DynamoDB, ElastiCache, OpenSearch",  icon: <IconDatabase /> },
+  storage:    { label: "Storage",   services: "S3, EBS, EFS",                icon: <IconStorage /> },
+  security:   { label: "Security",  services: "IAM Roles, KMS",            icon: <IconSecurity /> },
   billing:    { label: "Billing",   services: "Cost Explorer, Budgets, Quotas",      icon: <IconBilling /> },
 };
 
