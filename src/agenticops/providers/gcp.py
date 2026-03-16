@@ -141,6 +141,10 @@ class GCPProvider(CloudProvider):
         _run_gcloud_cli.__name__ = f"run_gcloud_{safe_name}"
         _run_gcloud_cli.__doc__ = (
             f"Execute a gcloud CLI command for account '{account_name}'. "
-            f"Command must start with 'gcloud '. Returns JSON output."
+            f"Command must start with 'gcloud '. Returns JSON output.\n\n"
+            f"Args:\n"
+            f"    command: The gcloud CLI command to execute (must start with 'gcloud ')."
         )
-        return _run_gcloud_cli
+
+        from strands import tool as strands_tool
+        return strands_tool(_run_gcloud_cli)

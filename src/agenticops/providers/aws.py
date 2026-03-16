@@ -193,6 +193,10 @@ class AWSProvider(CloudProvider):
         _run_aws_cli.__name__ = f"run_aws_cli_{safe_name}"
         _run_aws_cli.__doc__ = (
             f"Execute an AWS CLI command for account '{account_name}'. "
-            f"Command must start with 'aws '. Returns JSON output."
+            f"Command must start with 'aws '. Returns JSON output.\n\n"
+            f"Args:\n"
+            f"    command: The AWS CLI command to execute (must start with 'aws ')."
         )
-        return _run_aws_cli
+
+        from strands import tool as strands_tool
+        return strands_tool(_run_aws_cli)

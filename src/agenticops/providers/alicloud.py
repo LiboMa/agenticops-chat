@@ -155,6 +155,10 @@ class AlicloudProvider(CloudProvider):
         _run_aliyun_cli.__name__ = f"run_aliyun_cli_{safe_name}"
         _run_aliyun_cli.__doc__ = (
             f"Execute an Alicloud CLI command for account '{account_name}'. "
-            f"Command must start with 'aliyun '. Returns output text."
+            f"Command must start with 'aliyun '. Returns output text.\n\n"
+            f"Args:\n"
+            f"    command: The Alicloud CLI command to execute (must start with 'aliyun ')."
         )
-        return _run_aliyun_cli
+
+        from strands import tool as strands_tool
+        return strands_tool(_run_aliyun_cli)

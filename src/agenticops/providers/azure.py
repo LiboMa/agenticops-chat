@@ -158,6 +158,10 @@ class AzureProvider(CloudProvider):
         _run_az_cli.__name__ = f"run_az_cli_{safe_name}"
         _run_az_cli.__doc__ = (
             f"Execute an Azure CLI command for account '{account_name}'. "
-            f"Command must start with 'az '. Returns JSON output."
+            f"Command must start with 'az '. Returns JSON output.\n\n"
+            f"Args:\n"
+            f"    command: The Azure CLI command to execute (must start with 'az ')."
         )
-        return _run_az_cli
+
+        from strands import tool as strands_tool
+        return strands_tool(_run_az_cli)
