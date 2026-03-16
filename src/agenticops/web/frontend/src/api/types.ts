@@ -695,3 +695,50 @@ export interface ReportSubscription {
   endpoint: string;
   status: string;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Cloud Account (Multi-Cloud)                                        */
+/* ------------------------------------------------------------------ */
+
+export interface CloudAccount {
+  id: number;
+  name: string;
+  provider: "aws" | "azure" | "gcp" | "alicloud";
+  is_enabled: boolean;
+  regions: string[];
+  labels: Record<string, string>;
+  created_at: string | null;
+  last_scanned_at: string | null;
+  has_credentials: boolean;
+}
+
+export interface CloudAccountCreate {
+  name: string;
+  provider: "aws" | "azure" | "gcp" | "alicloud";
+  credentials?: Record<string, unknown>;
+  regions?: string[];
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
+}
+
+export interface CloudAccountUpdate {
+  name?: string;
+  credentials?: Record<string, unknown>;
+  regions?: string[];
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
+}
+
+export interface CloudResource {
+  id: number;
+  account_id: number;
+  provider: string;
+  region: string;
+  resource_type: string;
+  resource_id: string;
+  name: string;
+  status: string;
+  managed: boolean;
+  tags: Record<string, string>;
+  scanned_at: string | null;
+}

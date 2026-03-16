@@ -29,6 +29,7 @@ const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
+const CloudAccounts = lazy(() => import("@/pages/CloudAccounts"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -74,6 +75,7 @@ export default function App() {
             <Route path="settings" element={<S><Settings /></S>} />
             <Route path="audit-log" element={<S><AuditLog /></S>} />
             <Route path="knowledge-base" element={<S><KnowledgeBase /></S>} />
+            <Route path="cloud-accounts" element={<S><CloudAccounts /></S>} />
           </Route>
         </Routes>
       </BrowserRouter>

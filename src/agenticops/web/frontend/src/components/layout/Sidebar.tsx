@@ -12,6 +12,7 @@ const NAV_ITEMS = [
 ] as const;
 
 const MANAGE_ITEMS = [
+  { to: "/app/cloud-accounts", label: "Cloud Accounts", end: false },
   { to: "/app/schedules", label: "Schedules", end: false },
   { to: "/app/notifications", label: "Notifications", end: false },
   { to: "/app/audit-log", label: "Audit Log", end: false },
