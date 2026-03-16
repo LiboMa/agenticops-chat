@@ -1348,3 +1348,186 @@ def list_send_targets(target_type: str = "") -> str:
 
     result["hint"] = 'Use /send_to <name> #R<id> or /send_to <name> "message" to send.'
     return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+
+
+# ============================================================================
+# Multi-Cloud Tools (new — works with CloudAccount/CloudResource)
+# These coexist with the legacy AWSAccount-based tools above.
+# Legacy tools will be deprecated in Chunk 7 (global migration).
+# ============================================================================
+
+
+@tool
+def get_enabled_accounts(provider: str = "") -> str:
+    """Get all enabled cloud accounts, optionally filtered by provider.
+
+    Args:
+        provider: Filter by provider (aws, azure, gcp, alicloud) or empty for all.
+
+    Returns:
+        JSON list of enabled accounts with id, name, provider, regions, last_scanned_at.
+        Credentials are never exposed in tool output.
+    """
+    from agenticops.models import CloudAccount
+
+    session = get_session()
+    try:
+        query = session.query(CloudAccount).filter_by(is_enabled=True)
+        if provider:
+            query = query.filter_by(provider=provider.lower())
+        accounts = query.all()
+
+        if not accounts:
+            hint = f" for provider '{provider}'" if provider else ""
+            return f"No enabled cloud accounts found{hint}. Use the API to add one."
+
+        result = []
+        for acct in accounts:
+            result.append({
+                "id": acct.id,
+                "name": acct.name,
+                "provider": acct.provider,
+                "regions": acct.regions,
+                "labels": acct.labels,
+                "last_scanned_at": str(acct.last_scanned_at) if acct.last_scanned_at else "never",
+            })
+        return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+    finally:
+        session.close()
+
+
+@tool
+def get_cloud_resources(
+    provider: str = "",
+    resource_type: str = "",
+    region: str = "",
+    account_id: int = 0,
+) -> str:
+    """List cloud resources from the inventory, with multi-cloud support.
+
+    Args:
+        provider: Filter by provider (aws, azure, gcp, alicloud) or empty for all.
+        resource_type: Filter by type (e.g. EC2, VM, ComputeEngine) or empty for all.
+        region: Filter by region or empty for all.
+        account_id: Filter by cloud account ID (0 = all accounts).
+
+    Returns:
+        JSON list of resources with id, provider, resource_type, resource_id, name, region, status.
+    """
+    from agenticops.models import CloudResource
+
+    session = get_session()
+    try:
+        query = session.query(CloudResource)
+        if provider:
+            query = query.filter_by(provider=provider.lower())
+        if resource_type:
+            query = query.filter(
+                CloudResource.resource_type.ilike(f"%{resource_type}%")
+            )
+        if region:
+            query = query.filter_by(region=region)
+        if account_id:
+            query = query.filter_by(account_id=account_id)
+
+        resources = query.limit(100).all()
+
+        if not resources:
+            return "No cloud resources found matching the filters."
+
+        result = []
+        for r in resources:
+            result.append({
+                "id": r.id,
+                "account_id": r.account_id,
+                "provider": r.provider,
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "name": r.name or "",
+                "region": r.region,
+                "status": r.status,
+                "managed": r.managed,
+                "tags": r.tags,
+            })
+        return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+    finally:
+        session.close()
+
+
+@tool
+def upsert_cloud_resource(
+    account_id: int,
+    provider: str,
+    region: str,
+    resource_type: str,
+    resource_id: str,
+    name: str = "",
+    status: str = "active",
+    tags: str = "{}",
+    raw_data: str = "{}",
+) -> str:
+    """Create or update a cloud resource in the inventory.
+
+    Used by scan agents to persist discovered resources.
+    Uses (account_id, provider, resource_id) as the unique key.
+
+    Args:
+        account_id: CloudAccount ID that owns this resource.
+        provider: Cloud provider (aws, azure, gcp, alicloud).
+        region: Resource region.
+        resource_type: Resource type (e.g. EC2, VM, RDS).
+        resource_id: Provider-specific resource identifier.
+        name: Human-readable name.
+        status: Resource status (active, stopped, terminated, etc.).
+        tags: JSON string of resource tags.
+        raw_data: JSON string of raw provider data.
+
+    Returns:
+        JSON with action (created/updated) and resource id.
+    """
+    from agenticops.models import CloudResource
+    from datetime import UTC, datetime as dt
+
+    session = get_session()
+    try:
+        tags_dict = json.loads(tags) if isinstance(tags, str) else tags
+        raw_dict = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+
+        existing = (
+            session.query(CloudResource)
+            .filter_by(account_id=account_id, provider=provider.lower(), resource_id=resource_id)
+            .first()
+        )
+
+        if existing:
+            existing.name = name or existing.name
+            existing.status = status
+            existing.region = region
+            existing.resource_type = resource_type
+            existing.tags = tags_dict
+            existing.raw_data = raw_dict
+            existing.scanned_at = dt.now(UTC)
+            session.commit()
+            return json.dumps({"action": "updated", "id": existing.id, "resource_id": resource_id})
+        else:
+            resource = CloudResource(
+                account_id=account_id,
+                provider=provider.lower(),
+                region=region,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                name=name,
+                status=status,
+                tags=tags_dict,
+                raw_data=raw_dict,
+                scanned_at=dt.now(UTC),
+            )
+            session.add(resource)
+            session.commit()
+            return json.dumps({"action": "created", "id": resource.id, "resource_id": resource_id})
+    except Exception as e:
+        session.rollback()
+        logger.error("upsert_cloud_resource failed: %s", e, exc_info=True)
+        return json.dumps({"error": str(e)})
+    finally:
+        session.close()
