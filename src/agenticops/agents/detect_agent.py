@@ -135,6 +135,73 @@ TOOL SELECTION — accuracy first:
 """
 
 
+def _build_detect_agent_for_account(
+    acct_name: str,
+    acct_id: int,
+    cli_tool,
+    session,
+) -> Agent:
+    """Build a detect agent scoped to a single account.
+
+    Args:
+        acct_name: Human-readable account name
+        acct_id: Database account ID
+        cli_tool: The CLI tool callable for this specific account
+        session: Database session (reserved for future use)
+
+    Returns:
+        Agent instance pre-configured for the given account
+    """
+    from agenticops.config import get_agent_model_config, get_agent_window_size
+
+    model_id, max_tokens = get_agent_model_config("detect")
+    cache_kwargs: dict = {}
+    if settings.bedrock_cache_enabled:
+        cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+    model = BedrockModel(
+        model_id=model_id,
+        region_name=settings.bedrock_region,
+        max_tokens=max_tokens,
+        **cache_kwargs,
+    )
+
+    # Account-scoped system prompt preamble
+    account_context = (
+        f"You are checking account '{acct_name}' (id={acct_id}). "
+        f"Use the CLI tool provided to query this account's resources. "
+        f"Do NOT call get_active_account or assume_role — you already know which account you're checking."
+    )
+
+    agent = Agent(
+        system_prompt=f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}",
+        model=model,
+        callback_handler=None,
+        conversation_manager=SlidingWindowConversationManager(
+            window_size=get_agent_window_size("detect"), per_turn=True
+        ),
+        tools=[
+            cli_tool,
+            get_managed_resources,
+            list_alarms,
+            get_alarm_history,
+            get_metrics,
+            query_logs,
+            lookup_cloudtrail_events,
+            run_zscore_detection,
+            run_rule_evaluation,
+            describe_nat_gateways,
+            describe_load_balancers,
+            describe_region_topology,
+            analyze_vpc_topology,
+            map_eks_to_vpc_topology,
+            list_provider_alerts,
+            query_provider_metrics,
+            create_health_issue,
+        ],
+    )
+    return agent
+
+
 @tool
 def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """Check health of resources via CloudWatch Alarms, metrics, and security posture.
