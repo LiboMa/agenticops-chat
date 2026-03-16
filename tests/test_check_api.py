@@ -37,7 +37,6 @@ class TestHealthCheckAPI:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
         assert data["total_issues"] == 2
         assert data["duration_s"] == 50.0
         assert len(data["accounts"]) == 2
@@ -83,7 +82,6 @@ class TestHealthCheckAPI:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
         assert data["total_issues"] == 0
         assert len(data["accounts"]) == 0
 

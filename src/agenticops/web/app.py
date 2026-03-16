@@ -1627,7 +1627,6 @@ async def api_trigger_health_check(req: HealthCheckRequest):
         account_ids=req.account_ids, scope=req.scope, deep=req.deep
     )
     return {
-        "status": "ok",
         "total_issues": result.total_issues,
         "duration_s": result.duration_s,
         "accounts": [
