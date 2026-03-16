@@ -670,6 +670,9 @@ app.include_router(memory_router)
 app.include_router(proactive_router)
 app.include_router(learning_router)
 
+from agenticops.web.api_cloud import cloud_router
+app.include_router(cloud_router)
+
 # Chat session manager
 _chat_sessions = ChatSessionManager(ttl_minutes=30)
 _executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)
