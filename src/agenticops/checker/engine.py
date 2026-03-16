@@ -31,16 +31,18 @@ class CheckResult:
 def _parse_issue_count(output: str) -> int:
     """Extract issue count from detect agent output.
 
-    Handles several output patterns:
-      - "3 issues created" / "3 issue created"
-      - "Found 2 health issues" / "created 5 health issues"
-      - Individual "Created HealthIssue" lines (counted)
+    Best-effort parser — the authoritative issue count lives in the DB.
+    Handles several LLM output patterns.
     """
-    # Pattern 1: "X issues created" or "X issue created"
+    # Pattern 1: "X issues created/found" or "X health issues"
     m = re.search(r"(\d+)\s+(?:issues?\s+(?:created|found)|health\s+issues?)", output, re.IGNORECASE)
     if m:
         return int(m.group(1))
-    # Pattern 2: count individual "Created HealthIssue" lines
+    # Pattern 2: "Found/Detected X issues"
+    m = re.search(r"(?:found|detected|identified|discovered)\s+(\d+)\s+issues?", output, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    # Pattern 3: count individual "Created HealthIssue" lines
     count = len(re.findall(r"[Cc]reated?\s+[Hh]ealth\s*[Ii]ssue", output))
     return count
 
