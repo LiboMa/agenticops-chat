@@ -144,8 +144,20 @@ function AccountFormModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [regions, setRegions] = useState(initial?.regions?.join(", ") ?? "");
   const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
-  const [useEnvDefaults, setUseEnvDefaults] = useState(false);
-  const [creds, setCreds] = useState<Record<string, string>>({});
+  // Seed credential fields from existing account (edit mode)
+  const initialCreds: Record<string, string> = {};
+  if (initial?.credentials) {
+    for (const [k, v] of Object.entries(initial.credentials)) {
+      if (typeof v === "string" && v !== "***REDACTED***") {
+        initialCreds[k] = v;
+      } else if (typeof v === "object" && v !== null) {
+        initialCreds[k] = JSON.stringify(v, null, 2);
+      }
+    }
+  }
+  const hasExplicitCreds = isEdit && Object.keys(initial?.credentials ?? {}).length > 0;
+  const [useEnvDefaults, setUseEnvDefaults] = useState(isEdit ? !hasExplicitCreds : false);
+  const [creds, setCreds] = useState<Record<string, string>>(initialCreds);
 
   const fields = PROVIDER_FIELDS[provider];
 
