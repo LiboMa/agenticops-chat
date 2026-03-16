@@ -1579,6 +1579,40 @@ async def api_resource_type_counts():
         return {rtype: count for rtype, count in rows}
 
 
+class ScanRequest(BaseModel):
+    account_ids: Optional[List[int]] = None
+    focus: str = "all"
+    regions: Optional[List[str]] = None
+
+
+@app.post("/api/scan")
+async def api_trigger_scan(req: ScanRequest):
+    """Trigger parallel resource scan across enabled accounts."""
+    from agenticops.scanner import scan_accounts_parallel
+    result = await scan_accounts_parallel(
+        account_ids=req.account_ids,
+        focus=req.focus,
+        regions=req.regions,
+    )
+    return {
+        "total_found": result.total_found,
+        "total_updated": result.total_updated,
+        "duration_s": result.duration_s,
+        "accounts": [
+            {
+                "account_id": a.account_id,
+                "account_name": a.account_name,
+                "provider": a.provider,
+                "resources_found": a.resources_found,
+                "resources_updated": a.resources_updated,
+                "regions_scanned": a.regions_scanned,
+                "errors": a.errors,
+            }
+            for a in result.accounts
+        ],
+    }
+
+
 @app.get("/api/resources/{resource_id}", response_model=ResourceResponse)
 async def api_get_resource(resource_id: int):
     """Get resource by ID."""
