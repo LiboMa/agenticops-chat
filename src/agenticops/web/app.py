@@ -1613,6 +1613,37 @@ async def api_trigger_scan(req: ScanRequest):
     }
 
 
+class HealthCheckRequest(BaseModel):
+    account_ids: Optional[List[int]] = None
+    scope: str = "all"
+    deep: bool = False
+
+
+@app.post("/api/health-check")
+async def api_trigger_health_check(req: HealthCheckRequest):
+    """Trigger parallel health check across enabled accounts."""
+    from agenticops.checker import check_accounts_parallel
+    result = await check_accounts_parallel(
+        account_ids=req.account_ids, scope=req.scope, deep=req.deep
+    )
+    return {
+        "status": "ok",
+        "total_issues": result.total_issues,
+        "duration_s": result.duration_s,
+        "accounts": [
+            {
+                "account_id": a.account_id,
+                "account_name": a.account_name,
+                "provider": a.provider,
+                "issues_created": a.issues_created,
+                "duration_s": a.duration_s,
+                "errors": a.errors,
+            }
+            for a in result.accounts
+        ],
+    }
+
+
 @app.get("/api/resources/{resource_id}", response_model=ResourceResponse)
 async def api_get_resource(resource_id: int):
     """Get resource by ID."""

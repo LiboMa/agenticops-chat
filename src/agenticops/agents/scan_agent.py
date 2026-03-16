@@ -37,8 +37,10 @@ Discover and inventory cloud resources across all enabled accounts.
 
 ## Preferred Approach
 For standard full scans, call scan_resources() — it runs predefined CLI commands across all accounts
-in parallel. Only use individual account CLI tools (run_aws_cli_*, etc.) for ad-hoc investigation
-or when you need to run specific commands not covered by the standard scan.
+in parallel. For parallel health checking across multiple accounts, call check_health() — it spawns
+one detect agent per account for concurrent LLM-powered analysis. Only use individual account CLI
+tools (run_aws_cli_*, etc.) for ad-hoc investigation or when you need to run specific commands not
+covered by the standard scan.
 
 ## Resource Categories
 Scan these categories per cloud:
@@ -95,6 +97,42 @@ def scan_resources(account_ids: str = "", focus: str = "all", regions: str = "")
 
 
 @tool
+def check_health(account_ids: str = "", scope: str = "all", deep: str = "false") -> str:
+    """Run parallel health checks across all enabled accounts.
+
+    Spawns one detect agent per account for concurrent LLM-powered health checking.
+    Each agent uses the account's cloud CLI tool and reasons about what to check.
+    Much faster than sequential single-agent detection.
+
+    Args:
+        account_ids: Comma-separated account IDs, or empty for all enabled.
+        scope: Resource scope: 'all', 'EC2', 'RDS', 'security', etc.
+        deep: 'true' for deep investigation even on healthy resources.
+
+    Returns:
+        Summary of health check results per account.
+    """
+    import asyncio
+    from agenticops.checker import check_accounts_parallel
+
+    ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
+    is_deep = deep.lower() == "true"
+
+    try:
+        result = asyncio.run(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+
+    lines = [f"Health check complete in {result.duration_s}s — {result.total_issues} issues found."]
+    for a in result.accounts:
+        lines.append(f"  {a.account_name} ({a.provider}): {a.issues_created} issues, {a.duration_s}s")
+        for err in a.errors[:3]:
+            lines.append(f"    ERROR: {err}")
+    return "\n".join(lines)
+
+
+@tool
 def scan_agent(services: str = "all", regions: str = "all") -> str:
     """Scan cloud resources across all enabled accounts and update inventory.
 
@@ -120,7 +158,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         )
 
         # Build dynamic tool list from enabled accounts
-        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources]
+        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources, check_health]
         tools.extend(get_all_cli_tools())
 
         agent = Agent(
