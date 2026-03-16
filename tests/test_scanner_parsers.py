@@ -195,6 +195,104 @@ class TestIAMParser:
         assert result[0]["resource_type"] == "IAMRole"
 
 
+class TestAutoScalingParser:
+    def test_parse_auto_scaling_groups(self):
+        raw = json.dumps({"AutoScalingGroups": [{
+            "AutoScalingGroupName": "web-asg",
+            "AutoScalingGroupARN": "arn:aws:autoscaling:us-east-1:123:autoScalingGroup:abc:autoScalingGroupName/web-asg",
+            "MinSize": 2,
+            "MaxSize": 10,
+            "DesiredCapacity": 4,
+            "HealthCheckType": "ELB",
+            "Tags": [{"Key": "Name", "Value": "web-asg-prod"}],
+        }]})
+        result = parse_cli_output("aws_autoscaling_groups", raw, "us-east-1")
+        assert len(result) == 1
+        assert result[0]["resource_id"] == "web-asg"
+        assert result[0]["resource_type"] == "AutoScaling"
+        assert result[0]["name"] == "web-asg-prod"
+        assert result[0]["status"] == "active"
+
+
+class TestNATGatewayParser:
+    def test_parse_nat_gateways(self):
+        raw = json.dumps({"NatGateways": [{
+            "NatGatewayId": "nat-abc123",
+            "State": "available",
+            "SubnetId": "subnet-123",
+            "VpcId": "vpc-123",
+            "Tags": [{"Key": "Name", "Value": "prod-nat"}],
+        }]})
+        result = parse_cli_output("aws_nat_gateways", raw, "us-east-1")
+        assert len(result) == 1
+        assert result[0]["resource_id"] == "nat-abc123"
+        assert result[0]["resource_type"] == "NATGateway"
+        assert result[0]["name"] == "prod-nat"
+        assert result[0]["status"] == "available"
+
+
+class TestRoute53Parser:
+    def test_parse_hosted_zones(self):
+        raw = json.dumps({"HostedZones": [{
+            "Id": "/hostedzone/Z123ABC",
+            "Name": "example.com.",
+            "CallerReference": "abc-123",
+            "Config": {"PrivateZone": False},
+            "ResourceRecordSetCount": 10,
+        }]})
+        result = parse_cli_output("aws_route53_zones", raw, "global")
+        assert len(result) == 1
+        assert result[0]["resource_id"] == "Z123ABC"
+        assert result[0]["resource_type"] == "Route53"
+        assert result[0]["name"] == "example.com."
+        assert result[0]["status"] == "active"
+
+
+class TestOpenSearchParser:
+    def test_parse_opensearch_domains(self):
+        raw = json.dumps({"DomainNames": [
+            {"DomainName": "logs-cluster"},
+            {"DomainName": "analytics-cluster"},
+        ]})
+        result = parse_cli_output("aws_opensearch_domains", raw, "us-east-1")
+        assert len(result) == 2
+        assert result[0]["resource_id"] == "logs-cluster"
+        assert result[0]["resource_type"] == "OpenSearch"
+        assert result[0]["name"] == "logs-cluster"
+        assert result[1]["resource_id"] == "analytics-cluster"
+
+
+class TestEFSParser:
+    def test_parse_file_systems(self):
+        raw = json.dumps({"FileSystems": [{
+            "FileSystemId": "fs-abc123",
+            "Name": "shared-data",
+            "LifeCycleState": "available",
+            "SizeInBytes": {"Value": 1073741824},
+            "Tags": [{"Key": "Name", "Value": "shared-data-fs"}],
+        }]})
+        result = parse_cli_output("aws_efs_file_systems", raw, "us-east-1")
+        assert len(result) == 1
+        assert result[0]["resource_id"] == "fs-abc123"
+        assert result[0]["resource_type"] == "EFS"
+        assert result[0]["name"] == "shared-data-fs"
+        assert result[0]["status"] == "available"
+
+
+class TestKMSParser:
+    def test_parse_kms_keys(self):
+        raw = json.dumps({"Keys": [{
+            "KeyId": "abc-123-def-456",
+            "KeyArn": "arn:aws:kms:us-east-1:123:key/abc-123-def-456",
+        }]})
+        result = parse_cli_output("aws_kms_keys", raw, "us-east-1")
+        assert len(result) == 1
+        assert result[0]["resource_id"] == "abc-123-def-456"
+        assert result[0]["resource_type"] == "KMS"
+        assert result[0]["name"] == "abc-123-def-456"
+        assert result[0]["status"] == "active"
+
+
 class TestUnknownParser:
     def test_unknown_key_returns_empty(self):
         result = parse_cli_output("unknown_key", "{}", "us-east-1")

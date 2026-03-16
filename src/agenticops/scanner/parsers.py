@@ -231,6 +231,94 @@ def _parse_iam_roles(data: dict, region: str) -> list[dict]:
     } for r in data.get("Roles", [])]
 
 
+def _parse_autoscaling_groups(data: dict, region: str) -> list[dict]:
+    results = []
+    for asg in data.get("AutoScalingGroups", []):
+        tags = asg.get("Tags", [])
+        results.append({
+            "resource_id": asg["AutoScalingGroupName"],
+            "resource_type": "AutoScaling",
+            "name": _name_from_tags(tags),
+            "region": region,
+            "status": "active",
+            "tags": _aws_tags_to_dict(tags),
+            "raw_data": asg,
+        })
+    return results
+
+
+def _parse_nat_gateways(data: dict, region: str) -> list[dict]:
+    results = []
+    for nat in data.get("NatGateways", []):
+        tags = nat.get("Tags", [])
+        results.append({
+            "resource_id": nat["NatGatewayId"],
+            "resource_type": "NATGateway",
+            "name": _name_from_tags(tags),
+            "region": region,
+            "status": nat.get("State", "unknown"),
+            "tags": _aws_tags_to_dict(tags),
+            "raw_data": nat,
+        })
+    return results
+
+
+def _parse_route53_zones(data: dict, region: str) -> list[dict]:
+    results = []
+    for zone in data.get("HostedZones", []):
+        zone_id = zone["Id"].split("/")[-1]  # Extract Z123ABC from /hostedzone/Z123ABC
+        results.append({
+            "resource_id": zone_id,
+            "resource_type": "Route53",
+            "name": zone["Name"],
+            "region": region,
+            "status": "active",
+            "tags": {},
+            "raw_data": zone,
+        })
+    return results
+
+
+def _parse_opensearch_domains(data: dict, region: str) -> list[dict]:
+    return [{
+        "resource_id": d["DomainName"],
+        "resource_type": "OpenSearch",
+        "name": d["DomainName"],
+        "region": region,
+        "status": "active",
+        "tags": {},
+        "raw_data": d,
+    } for d in data.get("DomainNames", [])]
+
+
+def _parse_efs_file_systems(data: dict, region: str) -> list[dict]:
+    results = []
+    for fs in data.get("FileSystems", []):
+        tags = fs.get("Tags", [])
+        results.append({
+            "resource_id": fs["FileSystemId"],
+            "resource_type": "EFS",
+            "name": _name_from_tags(tags),
+            "region": region,
+            "status": fs.get("LifeCycleState", "unknown"),
+            "tags": _aws_tags_to_dict(tags),
+            "raw_data": fs,
+        })
+    return results
+
+
+def _parse_kms_keys(data: dict, region: str) -> list[dict]:
+    return [{
+        "resource_id": k["KeyId"],
+        "resource_type": "KMS",
+        "name": k["KeyId"],
+        "region": region,
+        "status": "active",
+        "tags": {},
+        "raw_data": k,
+    } for k in data.get("Keys", [])]
+
+
 # ── Parser registry ───────────────────────────────────────────────
 
 _PARSERS: dict[str, callable] = {
@@ -248,4 +336,10 @@ _PARSERS: dict[str, callable] = {
     "aws_load_balancers": _parse_load_balancers,
     "aws_subnets": _parse_subnets,
     "aws_iam_roles": _parse_iam_roles,
+    "aws_autoscaling_groups": _parse_autoscaling_groups,
+    "aws_nat_gateways": _parse_nat_gateways,
+    "aws_route53_zones": _parse_route53_zones,
+    "aws_opensearch_domains": _parse_opensearch_domains,
+    "aws_efs_file_systems": _parse_efs_file_systems,
+    "aws_kms_keys": _parse_kms_keys,
 }
