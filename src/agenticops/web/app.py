@@ -1474,12 +1474,21 @@ async def api_update_account(account_id: int, account: AccountUpdate):
 
 @app.delete("/api/accounts/{account_id}", status_code=204)
 async def api_delete_account(account_id: int):
-    """Delete a cloud account."""
+    """Delete a cloud account and its associated resources."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
         db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
-        session.delete(db_account)
+        try:
+            session.delete(db_account)
+            session.flush()
+        except IntegrityError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot delete account: it is still referenced by other records ({e.orig})",
+            )
 
 
 @app.post("/api/accounts/{account_id}/test")

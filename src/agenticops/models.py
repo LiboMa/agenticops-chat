@@ -165,9 +165,12 @@ class CloudAccount(Base):
     last_scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    resources: Mapped[list["CloudResource"]] = relationship(back_populates="account")
+    resources: Mapped[list["CloudResource"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
     monitoring_configs: Mapped[list["MonitoringConfig"]] = relationship(
-        back_populates="cloud_account", foreign_keys="MonitoringConfig.cloud_account_id"
+        back_populates="cloud_account", foreign_keys="MonitoringConfig.cloud_account_id",
+        cascade="all, delete-orphan",
     )
 
 
