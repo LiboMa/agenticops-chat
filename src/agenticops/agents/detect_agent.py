@@ -37,7 +37,7 @@ from agenticops.tools.detect_tools import (
     run_rule_evaluation,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
-from agenticops.providers.base import get_cli_tool_for_issue
+from agenticops.providers.base import get_all_cli_tools
 from agenticops.tools.integration_tools import (
     list_provider_alerts,
     query_provider_metrics,
@@ -149,16 +149,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
 
-        # Resolve provider CLI tool from first enabled account
-        cli_tool = None
-        try:
-            from agenticops.models import CloudAccount, get_db_session
-            with get_db_session() as db:
-                acct = db.query(CloudAccount).filter_by(is_enabled=True).first()
-                if acct:
-                    cli_tool = get_cli_tool_for_issue(acct.id)
-        except Exception:
-            pass
+        # Resolve provider CLI tools for all enabled accounts
+        cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
 
         model_id, max_tokens = get_agent_model_config("detect")
         cache_kwargs: dict = {}
@@ -196,8 +188,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 describe_region_topology,
                 analyze_vpc_topology,
                 map_eks_to_vpc_topology,
-                # Cloud CLI (provider-resolved, fallback to AWS read-only)
-                cli_tool or run_aws_cli_readonly,
+                # Cloud CLI tools (all enabled accounts, fallback to AWS read-only)
+                *cli_tools,
                 # External monitoring providers
                 list_provider_alerts,
                 query_provider_metrics,

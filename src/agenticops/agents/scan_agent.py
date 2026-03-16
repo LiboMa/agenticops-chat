@@ -5,7 +5,6 @@ using dynamic provider CLI tools. Exposed as a tool for the Main Agent (agents-a
 """
 
 import logging
-from types import SimpleNamespace
 
 from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
@@ -13,8 +12,7 @@ from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
 from agenticops.config import settings
-from agenticops.models import CloudAccount, get_db_session
-from agenticops.providers import get_provider
+from agenticops.providers.base import get_all_cli_tools
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_enabled_accounts,
@@ -83,26 +81,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
 
         # Build dynamic tool list from enabled accounts
         tools: list = [get_enabled_accounts, get_active_account, save_resources]
-
-        # Load accounts, snapshot to avoid DetachedInstanceError
-        with get_db_session() as db:
-            accounts = db.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
-            account_snapshots = []
-            for acct in accounts:
-                account_snapshots.append({
-                    "id": acct.id, "name": acct.name, "provider": acct.provider,
-                    "credentials": dict(acct.credentials or {}),
-                    "regions": list(acct.regions or []), "labels": dict(acct.labels or {}),
-                })
-
-        for snap in account_snapshots:
-            try:
-                acct_obj = SimpleNamespace(**snap)
-                provider = get_provider(acct_obj)
-                if provider.resolve_credentials():
-                    tools.append(provider.cli_tool())
-            except Exception as e:
-                logger.warning("Failed to init provider for %s: %s", snap["name"], e)
+        tools.extend(get_all_cli_tools())
 
         agent = Agent(
             system_prompt=SCAN_SYSTEM_PROMPT,

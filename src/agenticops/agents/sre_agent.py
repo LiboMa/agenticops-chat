@@ -55,7 +55,7 @@ from agenticops.graph.tools import (
     simulate_edge_removal,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
-from agenticops.providers.base import get_cli_tool_for_issue
+from agenticops.providers.base import get_cli_tool_for_issue, get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
@@ -194,7 +194,7 @@ TOOL SELECTION — accuracy first:
 """
 
 
-def _create_sre_agent(cli_tool=None) -> Agent:
+def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
     from agenticops.config import get_agent_model_config, get_agent_window_size
 
@@ -254,7 +254,7 @@ def _create_sre_agent(cli_tool=None) -> Agent:
             analyze_capacity_risk,
             simulate_edge_removal,
             # Cloud CLI (provider-resolved, fallback to AWS read-only)
-            cli_tool or run_aws_cli_readonly,
+            *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
             # Agent Skills (domain knowledge + host/kubectl execution)
             activate_skill,
             read_skill_reference,
@@ -320,7 +320,8 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
     """
     try:
         from agenticops.agents.preamble import invoke_with_retry
-        agent = _create_sre_agent()
+        cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
+        agent = _create_sre_agent(cli_tools=cli_tools)
         result = invoke_with_retry(agent,
             f"General AWS investigation (Mode B). Region: {region}\n"
             f"Query: {query}\n"

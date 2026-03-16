@@ -570,6 +570,18 @@ def create_health_issue(
         elif im_origin and not metric_data_parsed:
             metric_data_parsed = {"im_origin": im_origin}
 
+        # Auto-resolve account_id from resource inventory
+        account_id = None
+        if resource_id and resource_id != "unknown":
+            res = session.query(CloudResource).filter_by(resource_id=resource_id).first()
+            if res:
+                account_id = res.account_id
+        # Fallback: use the first enabled account
+        if not account_id:
+            default_acct = session.query(CloudAccount).filter_by(is_enabled=True).first()
+            if default_acct:
+                account_id = default_acct.id
+
         issue = HealthIssue(
             resource_id=resource_id,
             severity=severity.lower(),
@@ -586,6 +598,7 @@ def create_health_issue(
             first_seen=now,
             last_seen=now,
             trace_id=trace_id,
+            account_id=account_id,
         )
         session.add(issue)
         session.commit()

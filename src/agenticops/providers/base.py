@@ -110,6 +110,39 @@ def get_provider(account: Any) -> CloudProvider:
     return PROVIDERS[provider_type](account)
 
 
+def get_all_cli_tools() -> list[Callable]:
+    """Return CLI tools for all enabled cloud accounts.
+
+    Iterates enabled accounts, resolves credentials, and returns a list of
+    provider-specific CLI tool callables. Accounts that fail credential
+    resolution are silently skipped.
+    """
+    from agenticops.models import CloudAccount, get_db_session
+    from types import SimpleNamespace
+    tools: list[Callable] = []
+    try:
+        with get_db_session() as db:
+            accounts = db.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+            snapshots = [
+                SimpleNamespace(
+                    id=a.id, name=a.name, provider=a.provider,
+                    credentials=dict(a.credentials or {}),
+                    regions=list(a.regions or []), labels=dict(a.labels or {}),
+                )
+                for a in accounts
+            ]
+        for snap in snapshots:
+            try:
+                provider = get_provider(snap)
+                if provider.resolve_credentials():
+                    tools.append(provider.cli_tool())
+            except Exception as e:
+                logger.warning("Failed to init provider for %s: %s", snap.name, e)
+    except Exception as e:
+        logger.warning("Failed to load cloud accounts: %s", e)
+    return tools
+
+
 def get_cli_tool_for_issue(issue_account_id: int | None) -> Callable | None:
     """Resolve CLI tool from a HealthIssue's account_id.
 
