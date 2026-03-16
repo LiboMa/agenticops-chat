@@ -215,20 +215,27 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
-        from agenticops.scanner.engine import _load_accounts
 
-        accounts = _load_accounts()
+        # Check account count to decide parallel vs single-agent mode.
+        # Fallback to single-agent if DB is unavailable.
+        try:
+            from agenticops.scanner.engine import _load_accounts
+            accounts = _load_accounts()
+        except Exception:
+            logger.warning("Failed to load accounts, falling back to single-agent mode")
+            accounts = []
 
         if len(accounts) > 1:
             # Multiple accounts: use parallel agentic checker
             import asyncio
             from agenticops.checker import check_accounts_parallel
 
+            acct_ids = [a.id for a in accounts]
             try:
-                result = asyncio.run(check_accounts_parallel(scope=scope, deep=deep))
+                result = asyncio.run(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
             except RuntimeError:
                 loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(check_accounts_parallel(scope=scope, deep=deep))
+                result = loop.run_until_complete(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
 
             lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
             for a in result.accounts:
