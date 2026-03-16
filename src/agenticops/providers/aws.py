@@ -33,6 +33,15 @@ TIMEOUT_SECONDS = 30
 MAX_OUTPUT_CHARS = 4000
 
 
+def _sts_region_for_arn(role_arn: str) -> str | None:
+    """Return the STS region for cross-partition ARNs (China, GovCloud)."""
+    if role_arn.startswith("arn:aws-cn:"):
+        return "cn-north-1"
+    if role_arn.startswith("arn:aws-us-gov:"):
+        return "us-gov-west-1"
+    return None
+
+
 class AWSProvider(CloudProvider):
     """AWS cloud provider using boto3 and the AWS CLI."""
 
@@ -66,11 +75,15 @@ class AWSProvider(CloudProvider):
             base_session = boto3.Session()
 
         # Step 2: If role_arn set, assume role using base session
-        if creds.get("role_arn"):
+        role_arn = creds.get("role_arn")
+        sts_region = _sts_region_for_arn(role_arn) if role_arn else None
+        sts_kwargs: dict[str, str] = {"region_name": sts_region} if sts_region else {}
+
+        if role_arn:
             try:
-                sts = base_session.client("sts")
+                sts = base_session.client("sts", **sts_kwargs)
                 resp = sts.assume_role(
-                    RoleArn=creds["role_arn"],
+                    RoleArn=role_arn,
                     RoleSessionName=f"agenticops-{self.account.name}",
                 )
                 assumed = resp["Credentials"]
@@ -85,9 +98,9 @@ class AWSProvider(CloudProvider):
         else:
             session = base_session
 
-        # Validate by calling STS
+        # Validate by calling STS (use partition-aware endpoint)
         try:
-            session.client("sts").get_caller_identity()
+            session.client("sts", **sts_kwargs).get_caller_identity()
         except Exception as e:
             logger.error("AWS credential validation failed for %s: %s", self.account.name, e)
             return False

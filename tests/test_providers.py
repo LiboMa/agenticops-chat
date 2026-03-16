@@ -190,8 +190,8 @@ class TestAWSProvider:
         assert result is True
         # Base session uses profile
         mock_boto3.Session.assert_any_call(profile_name="china-profile")
-        # AssumeRole called via base session's STS client
-        mock_base_session.client.assert_called_with("sts")
+        # AssumeRole called via base session's STS client (cn-north-1 for aws-cn partition)
+        mock_base_session.client.assert_called_with("sts", region_name="cn-north-1")
         mock_sts.assume_role.assert_called_once()
 
     def test_resolve_credentials_profile(self):
