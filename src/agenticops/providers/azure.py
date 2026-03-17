@@ -26,7 +26,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 30
-MAX_OUTPUT_CHARS = 200_000
 
 
 class AzureProvider(CloudProvider):
@@ -147,12 +146,14 @@ class AzureProvider(CloudProvider):
                 return "Error: Azure CLI ('az') not found on PATH."
 
             if result.returncode != 0:
-                stderr = result.stderr.strip()[:MAX_OUTPUT_CHARS]
+                stderr = result.stderr.strip()
                 return f"Error (exit {result.returncode}): {stderr}"
 
             output = result.stdout.strip()
-            if len(output) > MAX_OUTPUT_CHARS:
-                output = output[:MAX_OUTPUT_CHARS] + "\n... (truncated)"
+            from agenticops.config import settings
+            limit = settings.cli_max_output_chars
+            if limit > 0 and len(output) > limit:
+                output = output[:limit] + "\n... (truncated)"
             return output if output else "(no output)"
 
         _run_az_cli.__name__ = f"run_az_cli_{safe_name}"

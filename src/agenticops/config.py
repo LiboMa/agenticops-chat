@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     # Prompt caching toggle
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
 
+    # CLI tool output limit (0 = unlimited)
+    cli_max_output_chars: int = Field(default=0, description="Max chars for CLI tool output (0 = no limit)")
+
     # Notification consolidation
     notifications_consolidated: bool = Field(
         default=False,

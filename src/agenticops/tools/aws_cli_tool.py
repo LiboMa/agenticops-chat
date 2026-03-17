@@ -159,8 +159,6 @@ BLOCKED_PATTERNS = [
     "aws ec2 terminate-instances",
 ]
 
-MAX_OUTPUT_CHARS = 2000
-MAX_OUTPUT_CHARS_READONLY = 200_000
 TIMEOUT_SECONDS = 30
 
 
@@ -183,11 +181,12 @@ def _classify_command(command: str) -> str:
     return "unknown"
 
 
-def _execute_aws_cli(command: str, max_chars: int) -> str:
+def _execute_aws_cli(command: str) -> str:
     """Shared execution logic for both AWS CLI tools.
 
     Assumes command has already been validated (starts with 'aws', no shell injection).
-    Appends --output json if needed, executes via subprocess, truncates output.
+    Appends --output json if needed, executes via subprocess, truncates output
+    based on settings.cli_max_output_chars (0 = no limit).
     """
     # Auto-append --output json if not specified
     if "--output" not in command:
@@ -211,15 +210,18 @@ def _execute_aws_cli(command: str, max_chars: int) -> str:
     except FileNotFoundError:
         return "Error: AWS CLI not found. Please ensure 'aws' is installed and on PATH."
 
+    from agenticops.config import settings
+    limit = settings.cli_max_output_chars
+
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if len(stderr) > max_chars:
-            stderr = stderr[:max_chars] + "\n... (output truncated)"
+        if limit > 0 and len(stderr) > limit:
+            stderr = stderr[:limit] + "\n... (truncated)"
         return f"Error (exit code {result.returncode}): {stderr}"
 
     output = result.stdout.strip()
-    if len(output) > max_chars:
-        output = output[:max_chars] + "\n... (output truncated)"
+    if limit > 0 and len(output) > limit:
+        output = output[:limit] + "\n... (truncated)"
 
     return output if output else "(no output)"
 
@@ -277,7 +279,7 @@ def run_aws_cli(command: str, require_confirmation: bool = False) -> str:
         )
 
     # 4. Execute
-    return _execute_aws_cli(command, MAX_OUTPUT_CHARS)
+    return _execute_aws_cli(command)
 
 
 @tool
@@ -322,5 +324,5 @@ def run_aws_cli_readonly(command: str) -> str:
             f"Command: {command}"
         )
 
-    # 4. Execute with larger output limit for deeper investigation
-    return _execute_aws_cli(command, MAX_OUTPUT_CHARS_READONLY)
+    # 4. Execute
+    return _execute_aws_cli(command)
