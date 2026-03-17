@@ -340,39 +340,187 @@ def share_content(
             logger.warning("S3 upload failed for share_content, sending directly: %s", e)
             notification_body = body[:4000]
 
-    # Send notification
-    try:
-        from agenticops.notify.notifier import NotificationManager
+    # Resolve target channels and split by preferred_format
+    from agenticops.notify.im_config import load_channels
 
-        manager = NotificationManager()
-        channels = [n.strip() for n in channel_names.split(",") if n.strip()] if channel_names else None
+    all_channels_cfg = load_channels()
+    if channel_names:
+        requested = {n.strip() for n in channel_names.split(",") if n.strip()}
+        target_channels = [c for c in all_channels_cfg if c.name in requested and c.is_enabled]
+    else:
+        target_channels = [c for c in all_channels_cfg if c.is_enabled]
 
+    html_channels = [c for c in target_channels if c.preferred_format == "html"]
+    text_channels = [c for c in target_channels if c.preferred_format != "html"]
+
+    results_map: Dict[str, bool] = {}
+
+    # HTML channels: S3 upload + presigned link via SES/SNS
+    for ch in html_channels:
+        try:
+            ok = _send_html_content(ch, subject, body, presigned_url)
+            results_map[ch.name] = ok
+        except Exception as e:
+            logger.warning("HTML delivery to '%s' failed: %s", ch.name, e)
+            results_map[ch.name] = False
+
+    # Text/markdown channels: existing NotificationManager path
+    if text_channels:
+        try:
+            from agenticops.notify.notifier import NotificationManager
+
+            manager = NotificationManager()
+            text_channel_names = [c.name for c in text_channels]
+
+            loop = asyncio.new_event_loop()
+            try:
+                nm_results = loop.run_until_complete(
+                    manager.send_notification(
+                        subject=subject,
+                        body=notification_body,
+                        channel_names=text_channel_names,
+                    )
+                )
+            finally:
+                loop.close()
+
+            results_map.update(nm_results)
+        except Exception as e:
+            logger.warning("Text notification failed: %s", e)
+            for c in text_channels:
+                results_map.setdefault(c.name, False)
+
+    sent = [ch for ch, ok in results_map.items() if ok]
+    failed = [ch for ch, ok in results_map.items() if not ok]
+
+    result: Dict = {
+        "success": len(sent) > 0,
+        "channels_sent": sent,
+        "channels_failed": failed,
+    }
+    if presigned_url:
+        result["presigned_url"] = presigned_url
+    return json.dumps(result, default=str)
+
+
+def _send_html_content(
+    ch,
+    title: str,
+    content_markdown: str,
+    presigned_md_url: str | None = None,
+) -> bool:
+    """Convert markdown -> HTML, upload to S3, send presigned link via SES/SNS.
+
+    Mirrors the SNSReportNotifier.send_report() pipeline but works with raw
+    markdown content instead of a Report DB object.
+    """
+    from agenticops.notify.report_formatter import format_report
+    from agenticops.notify.notifier import SNSReportNotifier, SESNotifier
+
+    # 1. Convert markdown -> HTML
+    formatted = format_report(
+        title=title,
+        content_markdown=content_markdown,
+        formats=["html", "markdown"],
+    )
+    if not formatted:
+        logger.warning("HTML conversion failed for '%s'", title)
+        return False
+
+    html_bytes = None
+    for fr in formatted:
+        if fr.format == "html":
+            html_bytes = fr.content
+            break
+
+    if not html_bytes:
+        return False
+
+    # Pick the right notifier class based on channel type
+    if ch.channel_type == "ses":
+        notifier = SESNotifier(ch.config)
+        s3_bucket = notifier.s3_bucket
+        s3_prefix = notifier.s3_prefix
+        s3_region = notifier.s3_region
+    else:
+        notifier = SNSReportNotifier(ch.config)
+        s3_bucket = notifier.s3_bucket
+        s3_prefix = notifier.s3_prefix
+        s3_region = notifier.s3_region
+
+    if not s3_bucket:
+        # No S3 bucket configured - fall back to inline plain text
         loop = asyncio.new_event_loop()
         try:
-            results = loop.run_until_complete(
-                manager.send_notification(
-                    subject=subject,
-                    body=notification_body,
-                    channel_names=channels,
-                )
+            return loop.run_until_complete(
+                notifier.send(title, content_markdown[:4000])
             )
         finally:
             loop.close()
 
-        sent = [ch for ch, ok in results.items() if ok]
-        failed = [ch for ch, ok in results.items() if not ok]
+    # 2. Upload HTML to S3 as .html file -> presigned URL
+    from datetime import datetime as _dt
 
-        result: Dict = {
-            "success": len(sent) > 0,
-            "channels_sent": sent,
-            "channels_failed": failed,
-        }
-        if presigned_url:
-            result["presigned_url"] = presigned_url
-        return json.dumps(result, default=str)
+    date_str = _dt.utcnow().strftime("%Y-%m-%d")
+    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in title[:50])
+    ts = _dt.utcnow().strftime("%H%M%S")
+    s3_key = f"{s3_prefix}shared/{date_str}/{ts}_{safe_title}.html"
 
-    except Exception as e:
-        return json.dumps({"success": False, "message": f"Notification failed: {e}"})
+    # Use SNSReportNotifier for S3 upload (SESNotifier doesn't have _upload_to_s3)
+    upload_notifier = notifier if isinstance(notifier, SNSReportNotifier) else SNSReportNotifier(ch.config)
+    html_url = upload_notifier._upload_to_s3(s3_key, html_bytes, "text/html; charset=utf-8")
+
+    # Build URLs dict
+    urls = {"html": html_url}
+    if presigned_md_url:
+        urls["markdown"] = presigned_md_url
+
+    # 3. Build email message and send via SES (HTML) or SNS (links)
+    inline_html = html_bytes.decode("utf-8")
+
+    if isinstance(notifier, SESNotifier) and notifier.sender and notifier.recipients:
+        # SES path: send HTML email directly
+        try:
+            links_text = "\n".join(f"  - {fmt.upper()}: {url}" for fmt, url in urls.items())
+            plain_body = (
+                f"{title}\n\n{content_markdown[:1000]}\n\n"
+                f"Download Links:\n{links_text}\n\n-- AgenticOps"
+            )
+            # Append download links to inline HTML
+            links_html = "".join(
+                f'<li><a href="{url}">{fmt.upper()}</a></li>'
+                for fmt, url in urls.items()
+            )
+            download_section = (
+                f'<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;">'
+                f'<p style="color:#64748b;font-size:0.85rem;">'
+                f'Download links: <ul style="font-size:0.85rem;">{links_html}</ul></p></div>'
+            )
+            full_html = inline_html.replace("</body>", f"{download_section}</body>") if "</body>" in inline_html else inline_html + download_section
+            notifier._send_email(title, plain_body, full_html)
+            return True
+        except Exception:
+            logger.warning("SES delivery failed for '%s'", title, exc_info=True)
+            return False
+    elif isinstance(notifier, SNSReportNotifier):
+        msg_id = notifier._publish_report_message(
+            title=title,
+            summary=content_markdown[:500],
+            urls=urls,
+            report_type="schedule",
+            report_id=0,
+            inline_html=inline_html,
+        )
+        return bool(msg_id)
+    else:
+        # Fallback: plain text
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                notifier.send(title, content_markdown[:4000])
+            )
+        finally:
+            loop.close()
 
 
 def _distribute_via_report_channel(ch, report_id, title, summary, content_md, report_type, report_meta) -> dict:
