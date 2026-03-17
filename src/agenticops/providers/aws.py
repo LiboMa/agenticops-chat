@@ -30,7 +30,7 @@ BLOCKED_PATTERNS = [
 ]
 
 TIMEOUT_SECONDS = 30
-MAX_OUTPUT_CHARS = 4000
+MAX_OUTPUT_CHARS = 200_000  # Must handle large outputs (e.g., 110+ S3 buckets ~14KB)
 
 
 def _sts_region_for_arn(role_arn: str) -> str | None:

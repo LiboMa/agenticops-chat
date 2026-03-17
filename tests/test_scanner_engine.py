@@ -57,10 +57,10 @@ class TestScanOneAccount:
             regions=["us-east-1", "us-west-2"],
         )
         result, resources = scan_one_account(acct, cli_tool, focus="storage")
-        # storage has 2 commands: aws_s3_buckets (global) + aws_ebs_volumes (regional)
-        # s3 runs once, ebs runs per region (2 regions)
-        # total calls = 1 (s3) + 2 (ebs) = 3
-        assert cli_tool.call_count == 3
+        # storage has 3 commands: aws_s3_buckets (global) + aws_ebs_volumes (regional) + aws_efs_file_systems (regional)
+        # s3 runs once, ebs runs per region (2), efs runs per region (2)
+        # total calls = 1 (s3) + 2 (ebs) + 2 (efs) = 5
+        assert cli_tool.call_count == 5
 
     def test_returns_tuple(self):
         """scan_one_account returns (AccountScanResult, list[dict])."""

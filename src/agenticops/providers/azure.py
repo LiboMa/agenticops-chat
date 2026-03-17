@@ -26,7 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 30
-MAX_OUTPUT_CHARS = 4000
+MAX_OUTPUT_CHARS = 200_000
 
 
 class AzureProvider(CloudProvider):
