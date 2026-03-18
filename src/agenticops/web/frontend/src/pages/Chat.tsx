@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useChatSessions } from "@/hooks/useChatSessions";
+import { useChatSessions, useCreateChatSession } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useChat } from "@/hooks/useChat";
 import { usePersistedState } from "@/hooks/usePersistedState";
@@ -13,25 +13,23 @@ export default function Chat() {
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const { data: sessions } = useChatSessions();
-  const [lastSessionId, setLastSessionId] = usePersistedState<string | null>("aiops-last-session", null);
+  const createMut = useCreateChatSession();
+  const creatingRef = useRef(false);
   const [detailLevel, setDetailLevel] = usePersistedState("aiops-detail-level", "medium");
 
   // Determine selected session from URL parameter
   const selectedId = urlSessionId || null;
 
-  // Auto-redirect to a session if none in URL
+  // Auto-create a new session when navigating to /app/chat without a session ID
   useEffect(() => {
-    if (urlSessionId) {
-      // URL has session ID - save it to localStorage
-      setLastSessionId(urlSessionId);
-      return;
-    }
-    // No session in URL - try localStorage first, then first session from API
-    const target = lastSessionId || (sessions && sessions.length > 0 ? sessions[0].session_id : null);
-    if (target) {
-      navigate(`/app/chat/${target}`, { replace: true });
-    }
-  }, [urlSessionId, sessions, lastSessionId, navigate, setLastSessionId]);
+    if (urlSessionId || creatingRef.current) return;
+    creatingRef.current = true;
+    createMut.mutateAsync(undefined).then((s) => {
+      navigate(`/app/chat/${s.session_id}`, { replace: true });
+    }).finally(() => {
+      creatingRef.current = false;
+    });
+  }, [urlSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: detail } = useChatSession(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, sendMessage, cancel } =
