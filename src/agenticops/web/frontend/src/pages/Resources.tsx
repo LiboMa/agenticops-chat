@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useResources } from "@/hooks/useResources";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
@@ -10,41 +11,62 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { Resource } from "@/api/types";
 
+const PAGE_SIZES = [50, 100, 200];
+
 export default function Resources() {
   const navigate = useNavigate();
   const [typeFilter, setTypeFilter] = useState("");
   const [regionFilter, setRegionFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const accounts = useAccounts();
+  const typeCounts = useResourceTypeCounts();
+
+  const offset = (page - 1) * pageSize;
 
   const { data, isLoading, error, refetch } = useResources({
     type: typeFilter || undefined,
     region: regionFilter || undefined,
     account_id: accountFilter ? Number(accountFilter) : undefined,
-    limit: 500,
+    limit: pageSize,
+    offset,
   });
 
-  // Extract unique types and regions for filter dropdowns
-  const allResources = useResources({ limit: 500 });
-  const { types, regions } = useMemo(() => {
-    if (!allResources.data) return { types: [], regions: [] };
-    const typeSet = new Set<string>();
+  const total = data?.total ?? 0;
+  const items = data?.items ?? [];
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Types from type-counts endpoint (no limit)
+  const types = useMemo(() => {
+    if (!typeCounts.data) return [];
+    return Object.keys(typeCounts.data).sort();
+  }, [typeCounts.data]);
+
+  // Regions from accounts
+  const regions = useMemo(() => {
+    if (!accounts.data) return [];
     const regionSet = new Set<string>();
-    for (const r of allResources.data) {
-      typeSet.add(r.resource_type);
-      regionSet.add(r.region);
+    for (const a of accounts.data) {
+      for (const r of a.regions ?? []) regionSet.add(r);
     }
-    return {
-      types: [...typeSet].sort(),
-      regions: [...regionSet].sort(),
-    };
-  }, [allResources.data]);
+    return [...regionSet].sort();
+  }, [accounts.data]);
 
   // Build account name lookup
   const accountMap = useMemo(() => {
     if (!accounts.data) return new Map<number, string>();
     return new Map(accounts.data.map((a) => [a.id, a.name]));
   }, [accounts.data]);
+
+  // Reset to page 1 when filters change
+  const handleFilterChange = (
+    setter: (v: string) => void,
+    value: string,
+  ) => {
+    setter(value);
+    setPage(1);
+  };
 
   const columns: Column<Resource>[] = [
     {
@@ -119,12 +141,12 @@ export default function Resources() {
       <Card>
         <CardHeader>
           <h2 className="text-sm font-semibold">
-            Resources{data ? ` (${data.length})` : ""}
+            Resources ({total})
           </h2>
           <div className="flex gap-2">
             <select
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
+              onChange={(e) => handleFilterChange(setTypeFilter, e.target.value)}
               className="text-sm border rounded-md px-3 py-1.5 bg-background"
             >
               <option value="">All Types</option>
@@ -136,7 +158,7 @@ export default function Resources() {
             </select>
             <select
               value={regionFilter}
-              onChange={(e) => setRegionFilter(e.target.value)}
+              onChange={(e) => handleFilterChange(setRegionFilter, e.target.value)}
               className="text-sm border rounded-md px-3 py-1.5 bg-background"
             >
               <option value="">All Regions</option>
@@ -148,7 +170,7 @@ export default function Resources() {
             </select>
             <select
               value={accountFilter}
-              onChange={(e) => setAccountFilter(e.target.value)}
+              onChange={(e) => handleFilterChange(setAccountFilter, e.target.value)}
               className="text-sm border rounded-md px-3 py-1.5 bg-background"
             >
               <option value="">All Accounts</option>
@@ -164,13 +186,75 @@ export default function Resources() {
         {isLoading ? (
           <Spinner />
         ) : (
-          <DataTable
-            columns={columns}
-            data={data ?? []}
-            rowKey={(r) => r.id}
-            onRowClick={(r) => navigate(`/app/resources/${r.id}`)}
-            emptyMessage="No resources found."
-          />
+          <>
+            <DataTable
+              columns={columns}
+              data={items}
+              rowKey={(r) => r.id}
+              onRowClick={(r) => navigate(`/app/resources/${r.id}`)}
+              emptyMessage="No resources found."
+            />
+
+            {/* Pagination */}
+            {total > 0 && (
+              <div className="flex items-center justify-between border-t px-5 py-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Rows per page</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="border rounded-md px-2 py-1 bg-background text-sm"
+                  >
+                    {PAGE_SIZES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-muted-foreground">
+                    {offset + 1}–{Math.min(offset + pageSize, total)} of {total}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setPage(1)}
+                      disabled={page <= 1}
+                      className="px-2 py-1 rounded-md border text-xs disabled:opacity-30 hover:bg-accent transition-colors"
+                    >
+                      &laquo;
+                    </button>
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={page <= 1}
+                      className="px-2 py-1 rounded-md border text-xs disabled:opacity-30 hover:bg-accent transition-colors"
+                    >
+                      &lsaquo;
+                    </button>
+                    <span className="px-2 py-1 text-xs font-mono">
+                      {page} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={page >= totalPages}
+                      className="px-2 py-1 rounded-md border text-xs disabled:opacity-30 hover:bg-accent transition-colors"
+                    >
+                      &rsaquo;
+                    </button>
+                    <button
+                      onClick={() => setPage(totalPages)}
+                      disabled={page >= totalPages}
+                      className="px-2 py-1 rounded-md border text-xs disabled:opacity-30 hover:bg-accent transition-colors"
+                    >
+                      &raquo;
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </Card>
     </div>

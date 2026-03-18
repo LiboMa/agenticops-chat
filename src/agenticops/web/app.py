@@ -1540,16 +1540,16 @@ async def api_test_account_connection(account_id: int):
 # ============================================================================
 
 
-@app.get("/api/resources", response_model=List[ResourceResponse])
+@app.get("/api/resources")
 async def api_list_resources(
     resource_type: Optional[str] = Query(None, alias="type"),
     region: Optional[str] = None,
     account_id: Optional[int] = None,
     status: Optional[str] = None,
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    limit: int = Query(default=50, ge=1),
     offset: int = Query(default=0, ge=0),
 ):
-    """List resources with filtering."""
+    """List resources with filtering and pagination."""
     with get_db_session() as session:
         query = session.query(CloudResource)
 
@@ -1562,8 +1562,12 @@ async def api_list_resources(
         if status:
             query = query.filter_by(status=status)
 
+        total = query.count()
         resources = query.offset(offset).limit(limit).all()
-        return [ResourceResponse.from_resource(r) for r in resources]
+        return {
+            "total": total,
+            "items": [ResourceResponse.from_resource(r) for r in resources],
+        }
 
 
 @app.get("/api/resources/type-counts")

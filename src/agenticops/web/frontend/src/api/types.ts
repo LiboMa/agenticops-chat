@@ -21,6 +21,11 @@ export interface Resource {
   updated_at: string;
 }
 
+export interface PaginatedResources {
+  total: number;
+  items: Resource[];
+}
+
 export type ScanFocus = "computing" | "networking" | "databases" | "storage" | "security" | "billing" | "all";
 
 export type IssueStatus =
