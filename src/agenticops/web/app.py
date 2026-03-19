@@ -1633,6 +1633,12 @@ async def api_trigger_health_check(req: HealthCheckRequest):
     return {
         "total_issues": result.total_issues,
         "duration_s": result.duration_s,
+        "token_usage": {
+            "input_tokens": result.total_input_tokens,
+            "output_tokens": result.total_output_tokens,
+            "cache_read_tokens": result.total_cache_read_tokens,
+            "cache_write_tokens": result.total_cache_write_tokens,
+        },
         "accounts": [
             {
                 "account_id": a.account_id,
@@ -1641,6 +1647,12 @@ async def api_trigger_health_check(req: HealthCheckRequest):
                 "issues_created": a.issues_created,
                 "duration_s": a.duration_s,
                 "errors": a.errors,
+                "token_usage": {
+                    "input_tokens": a.input_tokens,
+                    "output_tokens": a.output_tokens,
+                    "cache_read_tokens": a.cache_read_tokens,
+                    "cache_write_tokens": a.cache_write_tokens,
+                },
             }
             for a in result.accounts
         ],

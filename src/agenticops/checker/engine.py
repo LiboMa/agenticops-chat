@@ -19,6 +19,10 @@ class AccountCheckResult:
     regions_checked: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass
@@ -26,6 +30,10 @@ class CheckResult:
     accounts: list[AccountCheckResult] = field(default_factory=list)
     total_issues: int = 0
     duration_s: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_write_tokens: int = 0
 
 
 def _parse_issue_count(output: str) -> int:
@@ -68,9 +76,20 @@ def _check_one_account(acct, cli_tool, session, scope, deep) -> AccountCheckResu
             session=session,
         )
         prompt = f"Check health for account '{acct.name}'. Scope={scope}. Deep={deep}."
-        output = str(invoke_with_retry(agent, prompt))
-        result.agent_output = output
-        result.issues_created = _parse_issue_count(output)
+        agent_result = invoke_with_retry(agent, prompt)
+        result.agent_output = str(agent_result)
+        result.issues_created = _parse_issue_count(result.agent_output)
+
+        # Extract accumulated token usage
+        try:
+            usage = agent_result.metrics.accumulated_usage
+            if usage:
+                result.input_tokens = usage.get("inputTokens", 0)
+                result.output_tokens = usage.get("outputTokens", 0)
+                result.cache_read_tokens = usage.get("cacheReadInputTokens", 0)
+                result.cache_write_tokens = usage.get("cacheWriteInputTokens", 0)
+        except (AttributeError, TypeError):
+            pass
     except Exception as e:
         result.errors.append(str(e))
 
@@ -120,8 +139,13 @@ async def check_accounts_parallel(
         for acct, cli_tool, session in account_tools
     ])
 
+    result_list = list(results)
     return CheckResult(
-        accounts=list(results),
-        total_issues=sum(r.issues_created for r in results),
+        accounts=result_list,
+        total_issues=sum(r.issues_created for r in result_list),
         duration_s=round(time.time() - start, 2),
+        total_input_tokens=sum(r.input_tokens for r in result_list),
+        total_output_tokens=sum(r.output_tokens for r in result_list),
+        total_cache_read_tokens=sum(r.cache_read_tokens for r in result_list),
+        total_cache_write_tokens=sum(r.cache_write_tokens for r in result_list),
     )

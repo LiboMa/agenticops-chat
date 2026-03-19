@@ -125,8 +125,9 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
         result = loop.run_until_complete(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
 
     lines = [f"Health check complete in {result.duration_s}s — {result.total_issues} issues found."]
+    lines.append(f"Tokens: {result.total_input_tokens:,} in / {result.total_output_tokens:,} out (cache read: {result.total_cache_read_tokens:,}, cache write: {result.total_cache_write_tokens:,})")
     for a in result.accounts:
-        lines.append(f"  {a.account_name} ({a.provider}): {a.issues_created} issues, {a.duration_s}s")
+        lines.append(f"  {a.account_name} ({a.provider}): {a.issues_created} issues, {a.duration_s}s, tokens: {a.input_tokens:,} in / {a.output_tokens:,} out")
         for err in a.errors[:3]:
             lines.append(f"    ERROR: {err}")
     return "\n".join(lines)
