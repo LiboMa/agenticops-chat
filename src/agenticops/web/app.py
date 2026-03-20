@@ -162,7 +162,7 @@ class ResourceResponse(BaseModel):
 
 class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
-    status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved)$")
+    status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved|dismissed)$")
     note: Optional[str] = None
 
 
@@ -627,6 +627,10 @@ class ReportFromSessionRequest(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     name: Optional[str] = None
+
+
+class ChatSessionUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class ChatMessageCreate(BaseModel):
@@ -1201,6 +1205,26 @@ async def api_reload_mcp_servers():
     return {"reloaded": len(clients)}
 
 
+@app.get("/api/settings/issue-exclude-patterns")
+async def api_get_exclude_patterns():
+    return {"patterns": settings.issue_exclude_patterns}
+
+
+@app.patch("/api/settings/issue-exclude-patterns")
+async def api_update_exclude_patterns(body: dict):
+    patterns = body.get("patterns", [])
+    if not isinstance(patterns, list):
+        raise HTTPException(status_code=400, detail="patterns must be a list")
+    import re
+    for p in patterns:
+        try:
+            re.compile(p)
+        except re.error as e:
+            raise HTTPException(status_code=400, detail=f"Invalid regex pattern '{p}': {e}")
+    settings.issue_exclude_patterns = patterns
+    return {"patterns": settings.issue_exclude_patterns}
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def api_health():
     """Health check endpoint."""
@@ -1546,6 +1570,7 @@ async def api_list_resources(
     region: Optional[str] = None,
     account_id: Optional[int] = None,
     status: Optional[str] = None,
+    q: Optional[str] = Query(None, description="Search by resource ID, name, or type"),
     limit: int = Query(default=50, ge=1),
     offset: int = Query(default=0, ge=0),
 ):
@@ -1561,6 +1586,13 @@ async def api_list_resources(
             query = query.filter_by(account_id=account_id)
         if status:
             query = query.filter_by(status=status)
+        if q:
+            pattern = f"%{q}%"
+            query = query.filter(
+                CloudResource.resource_id.ilike(pattern)
+                | CloudResource.resource_name.ilike(pattern)
+                | CloudResource.resource_type.ilike(pattern)
+            )
 
         total = query.count()
         resources = query.offset(offset).limit(limit).all()
@@ -4386,6 +4418,51 @@ async def api_get_chat_session(session_id: str):
         )
 
 
+@app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate):
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        row.name = payload.name
+        row.updated_at = datetime.utcnow()
+        db.flush()
+        cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
+        return ChatSessionResponse(
+            id=row.id, session_id=row.session_id, name=row.name,
+            created_at=row.created_at, updated_at=row.updated_at,
+            last_activity_at=row.last_activity_at, message_count=cnt,
+        )
+
+
+def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
+    """Generate a concise session title using the cheap LLM. Returns None on failure."""
+    try:
+        import boto3
+
+        client = boto3.client("bedrock-runtime", region_name=settings.bedrock_region)
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 30,
+            "messages": [{"role": "user", "content": (
+                "Generate a concise title (max 6 words) for this conversation. "
+                "Reply with ONLY the title, no quotes.\n\n"
+                f"User: {user_msg[:500]}\nAssistant: {assistant_msg[:500]}"
+            )}],
+        })
+        resp = client.invoke_model(
+            modelId=settings.bedrock_model_id_cheap,
+            contentType="application/json",
+            accept="application/json",
+            body=body,
+        )
+        title = json.loads(resp["body"].read()).get("content", [{}])[0].get("text", "").strip()
+        return title if title else None
+    except Exception as e:
+        logger.warning("Session title generation failed: %s", e)
+        return None
+
+
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
 async def api_delete_chat_session(session_id: str):
     with get_db_session() as db:
@@ -4579,6 +4656,23 @@ async def api_send_chat_message(session_id: str, request: Request):
                     tool_calls=tool_calls if tool_calls else None,
                     token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
                 ))
+
+            # Auto-name session after first exchange
+            import re as _re
+            with get_db_session() as db:
+                msg_count = db.query(func.count(ChatMessage.id)).filter(
+                    ChatMessage.session_id == db_session_pk
+                ).scalar()
+                if msg_count == 2:
+                    sess = db.query(ChatSession).filter(ChatSession.id == db_session_pk).first()
+                    if sess and _re.match(r"^Chat \d{4}-\d{2}-\d{2}", sess.name):
+                        title = await asyncio.get_event_loop().run_in_executor(
+                            None, _generate_session_title, user_content[:500], accumulated[:500]
+                        )
+                        if title:
+                            sess.name = title
+                            sess.updated_at = datetime.utcnow()
+                            yield {"event": "session_renamed", "data": json.dumps({"name": title})}
 
             yield {
                 "event": "done",
