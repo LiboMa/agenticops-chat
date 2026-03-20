@@ -381,7 +381,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
 
 /* ── Main Page ───────────────────────────────────────────────────── */
 
-export default function Skills() {
+export function SkillsTab() {
   const { data: skills, isLoading, error } = useSkills();
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");

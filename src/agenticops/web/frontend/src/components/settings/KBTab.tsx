@@ -224,7 +224,7 @@ function SOPDetailPanel({
   );
 }
 
-export default function KnowledgeBase() {
+export function KBTab() {
   const [tab, setTab] = useState<Tab>("review");
   const [selectedSopId, setSelectedSopId] = useState<number | null>(null);
 

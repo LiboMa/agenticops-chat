@@ -92,12 +92,12 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               handleSend();
             }
           }}
-          placeholder="Ask about AWS resources, health issues, or reports... (use I#42 for issues, R#17 for resources)"
+          placeholder="Ask about AWS resources, health issues, or reports... (Cmd+Enter to send)"
           disabled={disabled}
           rows={2}
           className="flex-1 bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none disabled:opacity-50 transition-shadow"

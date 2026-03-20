@@ -1,12 +1,19 @@
 import { useState, useRef, useCallback } from "react";
+import * as Tabs from "@radix-ui/react-tabs";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { formatShortDate } from "@/lib/formatDate";
+import { useLocale } from "@/i18n/LocaleContext";
 import { useScanFocus } from "@/hooks/useScanFocus";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
+import { NotificationsTab } from "@/components/settings/NotificationsTab";
+import { NotificationLogsTab } from "@/components/settings/NotificationLogsTab";
+import { AuditTab } from "@/components/settings/AuditTab";
+import { KBTab } from "@/components/settings/KBTab";
+import { SkillsTab } from "@/components/settings/SkillsTab";
 import {
   useAccounts,
   useCreateAccount,
@@ -717,11 +724,26 @@ export default function Settings() {
     updateMut.mutate({ [key]: value });
   }
 
-  return (
-    <div className="space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
+  const { t } = useLocale();
+  const tabTriggerClass = "px-4 py-2 text-sm font-medium border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary text-muted-foreground hover:text-foreground transition-colors";
 
-      {/* ── Scan Focus ────────────────────────────────────────── */}
+  return (
+    <div className="max-w-5xl">
+      <h1 className="text-2xl font-semibold text-foreground mb-4">{t("settings.title")}</h1>
+
+      <Tabs.Root defaultValue="general">
+        <Tabs.List className="flex border-b border-border mb-6 gap-0 overflow-x-auto">
+          <Tabs.Trigger value="general" className={tabTriggerClass}>{t("settings.general")}</Tabs.Trigger>
+          <Tabs.Trigger value="accounts" className={tabTriggerClass}>{t("settings.accounts")}</Tabs.Trigger>
+          <Tabs.Trigger value="notifications" className={tabTriggerClass}>{t("settings.notifications")}</Tabs.Trigger>
+          <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>
+          <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
+          <Tabs.Trigger value="skills" className={tabTriggerClass}>{t("settings.skills")}</Tabs.Trigger>
+          <Tabs.Trigger value="mcp" className={tabTriggerClass}>{t("settings.mcp")}</Tabs.Trigger>
+        </Tabs.List>
+
+        {/* ── General Tab ──────────────────────────────────────── */}
+        <Tabs.Content value="general" className="space-y-6">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">Scan Focus</h2>
@@ -824,8 +846,10 @@ export default function Settings() {
 
       {/* ── Agent Models ─────────────────────────────────────── */}
       <AgentModelsCard />
+        </Tabs.Content>
 
-      {/* ── Accounts ──────────────────────────────────────────── */}
+        {/* ── Accounts Tab ─────────────────────────────────────── */}
+        <Tabs.Content value="accounts" className="space-y-6">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">Cloud Accounts</h2>
@@ -874,7 +898,31 @@ export default function Settings() {
         )}
       </Card>
 
-      {/* ── MCP Servers ─────────────────────────────────────── */}
+        </Tabs.Content>
+
+        {/* ── Notifications Tab ────────────────────────────────── */}
+        <Tabs.Content value="notifications" className="space-y-6">
+          <NotificationsTab />
+          <NotificationLogsTab />
+        </Tabs.Content>
+
+        {/* ── Audit Tab ────────────────────────────────────────── */}
+        <Tabs.Content value="audit">
+          <AuditTab />
+        </Tabs.Content>
+
+        {/* ── Knowledge Base Tab ───────────────────────────────── */}
+        <Tabs.Content value="kb">
+          <KBTab />
+        </Tabs.Content>
+
+        {/* ── Skills Tab ───────────────────────────────────────── */}
+        <Tabs.Content value="skills">
+          <SkillsTab />
+        </Tabs.Content>
+
+        {/* ── MCP Servers Tab ──────────────────────────────────── */}
+        <Tabs.Content value="mcp" className="space-y-6">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">MCP Servers</h2>
@@ -945,6 +993,8 @@ export default function Settings() {
           )}
         </CardBody>
       </Card>
+        </Tabs.Content>
+      </Tabs.Root>
 
       {/* MCP Modals */}
       {mcpImportOpen && (

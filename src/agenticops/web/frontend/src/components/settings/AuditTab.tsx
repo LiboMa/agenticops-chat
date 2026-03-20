@@ -54,7 +54,7 @@ const columns: Column<AuditLogEntry>[] = [
   },
 ];
 
-export default function AuditLog() {
+export function AuditTab() {
   const [action, setAction] = useState("");
   const [entityType, setEntityType] = useState("");
   const [hours, setHours] = useState(24);

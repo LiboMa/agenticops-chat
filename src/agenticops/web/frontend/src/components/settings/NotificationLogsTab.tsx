@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
@@ -75,7 +74,7 @@ const columns: Column<NotificationLog>[] = [
   },
 ];
 
-export default function NotificationLogs() {
+export function NotificationLogsTab() {
   const [channelFilter, setChannelFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
@@ -91,28 +90,7 @@ export default function NotificationLogs() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-3">
-          <Link
-            to="/app/notifications"
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <svg
-              className="h-4 w-4 mr-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            Channels
-          </Link>
-          <h2 className="text-lg font-semibold text-foreground">Notification Logs</h2>
-        </div>
+        <h2 className="text-lg font-semibold text-foreground">Notification Logs</h2>
         <div className="flex gap-2">
           <select
             value={channelFilter ?? ""}
