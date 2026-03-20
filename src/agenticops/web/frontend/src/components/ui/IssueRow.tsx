@@ -33,7 +33,7 @@ export function IssueRow({ issue, onClick }: Props) {
     >
       <SeverityBadge severity={issue.severity} />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-foreground truncate">
+        <div className="text-sm text-foreground">
           <span className="text-muted-foreground font-mono">#{issue.id}</span>{" "}
           {issue.title}
         </div>

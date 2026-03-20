@@ -47,7 +47,7 @@ const columns: Column<AuditLogEntry>[] = [
     key: "details",
     header: "Details",
     render: (r) => (
-      <span className="text-sm text-muted-foreground truncate max-w-[250px] block">
+      <span className="text-sm text-muted-foreground">
         {r.details ?? "-"}
       </span>
     ),

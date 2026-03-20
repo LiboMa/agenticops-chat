@@ -255,7 +255,7 @@ export default function ScheduleDetail() {
                             ? `${(ex.duration_ms / 1000).toFixed(1)}s`
                             : "-"}
                         </td>
-                        <td className="px-4 py-2 text-sm text-red-600 max-w-xs truncate">
+                        <td className="px-4 py-2 text-sm text-red-600">
                           {ex.error || "-"}
                         </td>
                         <td className="px-4 py-2 text-sm">

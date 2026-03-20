@@ -125,7 +125,7 @@ function SOPDetailPanel({
             </div>
             <div>
               <span className="text-muted-foreground block">Issue Pattern</span>
-              <span className="text-foreground truncate block">
+              <span className="text-foreground">
                 {sop.issue_pattern || "N/A"}
               </span>
             </div>
@@ -350,7 +350,7 @@ export function KBTab() {
                       <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.resource_type}
                       </td>
-                      <td className="px-6 py-3 text-sm text-muted-foreground max-w-xs truncate">
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
                         {sop.issue_pattern}
                       </td>
                       <td className="px-6 py-3">
@@ -517,10 +517,8 @@ export function KBTab() {
                       <td className="px-6 py-3 text-sm text-muted-foreground">
                         {formatShortDate(c.created_at)}
                       </td>
-                      <td className="px-6 py-3 text-sm text-muted-foreground max-w-xs truncate">
-                        {c.preview && c.preview.length > 80
-                          ? c.preview.slice(0, 80) + "..."
-                          : c.preview}
+                      <td className="px-6 py-3 text-sm text-muted-foreground">
+                        {c.preview}
                       </td>
                     </tr>
                   ))}

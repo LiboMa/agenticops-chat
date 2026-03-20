@@ -916,7 +916,7 @@ function MergedAlertsSection({
               <span className={`text-xs px-1.5 py-0.5 rounded ${SEV_CHIP[alert.severity] || SEV_CHIP.low}`}>
                 {alert.severity}
               </span>
-              <span className="text-foreground truncate flex-1">{alert.title}</span>
+              <span className="text-foreground flex-1">{alert.title}</span>
             </div>
           ))}
           {!expanded && alerts.length > 5 && (

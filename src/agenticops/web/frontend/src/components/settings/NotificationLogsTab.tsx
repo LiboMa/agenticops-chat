@@ -13,7 +13,7 @@ const columns: Column<NotificationLog>[] = [
     key: "subject",
     header: "Subject",
     render: (r) => (
-      <span className="font-medium text-foreground max-w-xs truncate block">
+      <span className="font-medium text-foreground">
         {r.subject}
       </span>
     ),
@@ -67,7 +67,7 @@ const columns: Column<NotificationLog>[] = [
     header: "Error",
     render: (r) =>
       r.error ? (
-        <span className="text-sm text-red-600 max-w-xs truncate block">{r.error}</span>
+        <span className="text-sm text-red-600">{r.error}</span>
       ) : (
         <span className="text-muted-foreground">-</span>
       ),

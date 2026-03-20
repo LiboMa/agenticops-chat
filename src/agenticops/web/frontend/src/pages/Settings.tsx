@@ -972,7 +972,7 @@ export default function Settings() {
                           {cfg.url ? "SSE" : "stdio"}
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate max-w-[400px]">
+                      <p className="text-xs text-muted-foreground mt-0.5 font-mono break-all">
                         {cfg.url ?? `${cfg.command ?? ""} ${(cfg.args ?? []).join(" ")}`}
                       </p>
                     </div>
