@@ -8,8 +8,8 @@ from typing import Optional
 from agenticops.config import settings
 from agenticops.models import (
     Anomaly,
-    AWSAccount,
-    AWSResource,
+    CloudAccount,
+    CloudResource,
     RCAResult,
     Report,
     get_session,
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ReportGenerator:
     """Generator for various report types."""
 
-    def __init__(self, account: Optional[AWSAccount] = None):
+    def __init__(self, account: Optional[CloudAccount] = None):
         """Initialize report generator."""
         self.account = account
         settings.ensure_dirs()
@@ -42,10 +42,10 @@ class ReportGenerator:
 
         try:
             # Gather data
-            resource_count = session.query(AWSResource).count()
+            resource_count = session.query(CloudResource).count()
             if self.account:
                 resource_count = (
-                    session.query(AWSResource)
+                    session.query(CloudResource)
                     .filter_by(account_id=self.account.id)
                     .count()
                 )
@@ -183,10 +183,10 @@ class ReportGenerator:
 
             type_counts = (
                 session.query(
-                    AWSResource.resource_type,
-                    func.count(AWSResource.id).label("count"),
+                    CloudResource.resource_type,
+                    func.count(CloudResource.id).label("count"),
                 )
-                .group_by(AWSResource.resource_type)
+                .group_by(CloudResource.resource_type)
                 .all()
             )
 
@@ -325,7 +325,7 @@ class ReportGenerator:
         session = get_session()
 
         try:
-            query = session.query(AWSResource)
+            query = session.query(CloudResource)
             if self.account:
                 query = query.filter_by(account_id=self.account.id)
 
@@ -342,7 +342,7 @@ class ReportGenerator:
             ]
 
             # Group by service type
-            by_type: dict[str, list[AWSResource]] = {}
+            by_type: dict[str, list[CloudResource]] = {}
             for r in resources:
                 if r.resource_type not in by_type:
                     by_type[r.resource_type] = []

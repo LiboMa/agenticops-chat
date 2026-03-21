@@ -2,7 +2,7 @@
 
 Handles:
 - I#N reference resolution (HealthIssue by ID)
-- R#N reference resolution (AWSResource by ID)
+- R#N reference resolution (CloudResource by ID)
 - @file/path extraction and content injection (CLI)
 - Pre-read file content injection (Web upload)
 """
@@ -50,19 +50,19 @@ def _resolve_issue_ref(issue_id: int) -> str | None:
 
 
 def _resolve_resource_ref(resource_id: int) -> str | None:
-    """Fetch AWSResource by int PK and return context block."""
-    from agenticops.models import AWSResource, get_db_session
+    """Fetch CloudResource by int PK and return context block."""
+    from agenticops.models import CloudResource, get_db_session
 
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             return None
         return (
             f'<referenced_resource id="{resource.id}">\n'
-            f"AWS ID: {resource.resource_id}\n"
-            f"ARN: {resource.resource_arn or 'N/A'}\n"
+            f"Resource ID: {resource.resource_id}\n"
+            f"Provider: {resource.provider}\n"
             f"Type: {resource.resource_type}\n"
-            f"Name: {resource.resource_name or 'unnamed'}\n"
+            f"Name: {resource.name or 'unnamed'}\n"
             f"Region: {resource.region}\n"
             f"Status: {resource.status}\n"
             f"</referenced_resource>"

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { useChatSessions, useCreateChatSession, useDeleteChatSession } from "@/hooks/useChatSessions";
+import { useChatSessions, useCreateChatSession, useDeleteChatSession, useRenameChatSession } from "@/hooks/useChatSessions";
 import { formatShortDate } from "@/lib/formatDate";
+import { useConfirm } from "@/components/ui/ConfirmDialog";
 
 interface Props {
   selectedId: string | null;
@@ -11,6 +12,8 @@ export function SessionList({ selectedId, onSelect }: Props) {
   const { data: sessions, isLoading } = useChatSessions();
   const createMut = useCreateChatSession();
   const deleteMut = useDeleteChatSession();
+  const renameMut = useRenameChatSession();
+  const { confirm, dialog } = useConfirm();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
@@ -29,7 +32,7 @@ export function SessionList({ selectedId, onSelect }: Props) {
 
   const handleDelete = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this chat session?")) return;
+    if (!(await confirm("Delete this chat session?", { variant: "destructive", confirmText: "Delete" }))) return;
     await deleteMut.mutateAsync(sessionId);
     if (selectedId === sessionId && sessions && sessions.length > 1) {
       const next = sessions.find((s) => s.session_id !== sessionId);
@@ -42,8 +45,14 @@ export function SessionList({ selectedId, onSelect }: Props) {
     setRenameValue(currentName);
   };
 
-  const handleRenameSubmit = () => {
-    // Just cancel rename for now - API rename not implemented
+  const handleRenameSubmit = async () => {
+    const trimmed = renameValue.trim();
+    if (renamingId && trimmed) {
+      const session = sessions?.find((s) => s.session_id === renamingId);
+      if (session && trimmed !== session.name) {
+        await renameMut.mutateAsync({ sessionId: renamingId, name: trimmed });
+      }
+    }
     setRenamingId(null);
   };
 
@@ -152,6 +161,7 @@ export function SessionList({ selectedId, onSelect }: Props) {
           {sessions?.length ?? 0} session{(sessions?.length ?? 0) !== 1 ? "s" : ""}
         </p>
       </div>
+      {dialog}
     </div>
   );
 }

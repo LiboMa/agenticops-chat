@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from agenticops.models import AWSAccount
+from agenticops.models import CloudAccount
 from agenticops.pipeline.orchestrator import (
     Pipeline,
     PipelineResult,
@@ -91,7 +91,7 @@ class HealthPatrolPipeline(Pipeline):
         providers: Comma-separated provider names or "all" (default "all")
     """
 
-    def __init__(self, account: Optional[AWSAccount] = None, config: Optional[dict] = None):
+    def __init__(self, account: Optional[CloudAccount] = None, config: Optional[dict] = None):
         super().__init__(
             name="HealthPatrol",
             steps=[

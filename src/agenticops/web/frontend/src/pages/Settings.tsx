@@ -1,12 +1,19 @@
 import { useState, useRef, useCallback } from "react";
+import * as Tabs from "@radix-ui/react-tabs";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { formatShortDate } from "@/lib/formatDate";
+import { useLocale } from "@/i18n/LocaleContext";
 import { useScanFocus } from "@/hooks/useScanFocus";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
+import { NotificationsTab } from "@/components/settings/NotificationsTab";
+import { NotificationLogsTab } from "@/components/settings/NotificationLogsTab";
+import { AuditTab } from "@/components/settings/AuditTab";
+import { KBTab } from "@/components/settings/KBTab";
+import { SkillsTab } from "@/components/settings/SkillsTab";
 import {
   useAccounts,
   useCreateAccount,
@@ -21,17 +28,17 @@ import {
   useImportMcpServers,
 } from "@/hooks/useMcpServers";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
-import type { Account, AccountCreate, AccountUpdate, McpServerConfig } from "@/api/types";
+import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig } from "@/api/types";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
 const FOCUS_META: Record<ScanFocus, { label: string; services: string; icon: JSX.Element }> = {
   all:        { label: "All",       services: "All categories",                     icon: <IconAll /> },
   computing:  { label: "Compute",   services: "EC2, Lambda, ECS, EKS, AutoScaling", icon: <IconCompute /> },
-  networking: { label: "Network",   services: "VPC, SG, ELB, CloudFront, Route53",  icon: <IconNetwork /> },
-  databases:  { label: "Database",  services: "RDS, DynamoDB, ElastiCache",          icon: <IconDatabase /> },
-  storage:    { label: "Storage",   services: "S3, EBS, EFS, Backup",                icon: <IconStorage /> },
-  security:   { label: "Security",  services: "IAM, GuardDuty, WAF, KMS",            icon: <IconSecurity /> },
+  networking: { label: "Network",   services: "VPC, SG, ELB, Subnet, NAT GW, Route53",  icon: <IconNetwork /> },
+  databases:  { label: "Database",  services: "RDS, DynamoDB, ElastiCache, OpenSearch",  icon: <IconDatabase /> },
+  storage:    { label: "Storage",   services: "S3, EBS, EFS",                icon: <IconStorage /> },
+  security:   { label: "Security",  services: "IAM Roles, KMS",            icon: <IconSecurity /> },
   billing:    { label: "Billing",   services: "Cost Explorer, Budgets, Quotas",      icon: <IconBilling /> },
 };
 
@@ -99,63 +106,155 @@ function SettingToggle({
   );
 }
 
-/* ── Account form modal (reused from Accounts page) ─────────────── */
+/* ── Account form modal ────────────────────────────────────────── */
+
+const PROVIDER_OPTIONS: { value: CloudProvider; label: string }[] = [
+  { value: "aws", label: "AWS" },
+  { value: "azure", label: "Azure" },
+  { value: "gcp", label: "GCP" },
+  { value: "alicloud", label: "Alicloud" },
+];
+
+const PROVIDER_FIELDS: Record<CloudProvider, { key: string; label: string; type?: string; placeholder: string }[]> = {
+  aws: [
+    { key: "role_arn", label: "Role ARN", placeholder: "arn:aws:iam::123456789012:role/AgenticOps" },
+    { key: "external_id", label: "External ID", placeholder: "Optional" },
+    { key: "account_id", label: "Account ID", placeholder: "123456789012" },
+    { key: "profile_name", label: "Profile Name", placeholder: "default (from ~/.aws/credentials)" },
+  ],
+  azure: [
+    { key: "subscription_id", label: "Subscription ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "tenant_id", label: "Tenant ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "client_id", label: "Client ID", placeholder: "Service Principal App ID" },
+    { key: "client_secret", label: "Client Secret", type: "password", placeholder: "Service Principal Secret" },
+  ],
+  gcp: [
+    { key: "project_id", label: "Project ID", placeholder: "my-gcp-project" },
+    { key: "service_account_key", label: "Service Account Key (JSON)", type: "textarea", placeholder: '{"type": "service_account", ...}' },
+  ],
+  alicloud: [
+    { key: "access_key_id", label: "Access Key ID", placeholder: "LTAI..." },
+    { key: "access_key_secret", label: "Access Key Secret", type: "password", placeholder: "Secret" },
+    { key: "account_id", label: "Account ID", placeholder: "1234567890" },
+  ],
+};
 
 function AccountFormModal({
-  initial, onClose, onSave, saving,
+  initial, onClose, onSave, saving, error,
 }: {
   initial?: Account | null; onClose: () => void;
   onSave: (data: AccountCreate | AccountUpdate) => void; saving: boolean;
+  error?: string | null;
 }) {
   const isEdit = !!initial;
+  const [provider, setProvider] = useState<CloudProvider>(initial?.provider ?? "aws");
   const [name, setName] = useState(initial?.name ?? "");
-  const [accountId, setAccountId] = useState(initial?.account_id ?? "");
-  const [roleArn, setRoleArn] = useState(initial?.role_arn ?? "");
-  const [externalId, setExternalId] = useState(initial?.external_id ?? "");
   const [regions, setRegions] = useState(initial?.regions?.join(", ") ?? "");
-  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
+  // Seed credential fields from existing account (edit mode)
+  const initialCreds: Record<string, string> = {};
+  if (initial?.credentials) {
+    for (const [k, v] of Object.entries(initial.credentials)) {
+      if (typeof v === "string" && v !== "***REDACTED***") {
+        initialCreds[k] = v;
+      } else if (typeof v === "object" && v !== null) {
+        initialCreds[k] = JSON.stringify(v, null, 2);
+      }
+    }
+  }
+  const hasExplicitCreds = isEdit && Object.keys(initial?.credentials ?? {}).length > 0;
+  const [useEnvDefaults, setUseEnvDefaults] = useState(isEdit ? !hasExplicitCreds : false);
+  const [creds, setCreds] = useState<Record<string, string>>(initialCreds);
+
+  const fields = PROVIDER_FIELDS[provider];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const regionList = regions.split(",").map((r) => r.trim()).filter(Boolean);
+
+    const credentials: Record<string, unknown> = {};
+    if (!useEnvDefaults) {
+      for (const f of fields) {
+        const val = creds[f.key]?.trim();
+        if (val) {
+          credentials[f.key] = f.key === "service_account_key" ? JSON.parse(val) : val;
+        }
+      }
+    }
+
     if (isEdit) {
-      onSave({ name, role_arn: roleArn, external_id: externalId || undefined, regions: regionList.length ? regionList : undefined, is_active: isActive } as AccountUpdate);
+      onSave({ name, credentials, regions: regionList, is_enabled: isEnabled } as AccountUpdate);
     } else {
-      onSave({ name, account_id: accountId, role_arn: roleArn, external_id: externalId || undefined, regions: regionList.length ? regionList : undefined, is_active: isActive } as AccountCreate);
+      onSave({ name, provider, credentials, regions: regionList, is_enabled: isEnabled } as AccountCreate);
     }
   }
 
+  const inputClass = "w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
+            <label className="block text-sm font-medium text-foreground mb-1">Provider</label>
+            <select
+              value={provider}
+              onChange={(e) => { setProvider(e.target.value as CloudProvider); setCreds({}); }}
+              disabled={isEdit}
+              className={`${inputClass} disabled:bg-secondary`}
+            >
+              {PROVIDER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-foreground mb-1">Name</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Account ID</label>
-            <input required disabled={isEdit} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-secondary" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Role ARN</label>
-            <input required value={roleArn} onChange={(e) => setRoleArn(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">External ID (optional)</label>
-            <input value={externalId} onChange={(e) => setExternalId(e.target.value)} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. aws-prod, azure-staging" className={inputClass} />
           </div>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Regions (comma-separated)</label>
-            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className={inputClass} />
           </div>
           <div className="flex items-center gap-2">
-            <input id="is-active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-border" />
-            <label htmlFor="is-active" className="text-sm text-foreground">Active</label>
+            <input id="use-env" type="checkbox" checked={useEnvDefaults} onChange={(e) => setUseEnvDefaults(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="use-env" className="text-sm text-muted-foreground">Use environment / CLI defaults (no explicit credentials)</label>
           </div>
+          {!useEnvDefaults && (
+            <div className="space-y-3 border-t border-border pt-3">
+              <p className="text-xs text-muted-foreground">{provider.toUpperCase()} Credentials — leave blank to use env defaults</p>
+              {fields.map((f) => (
+                <div key={f.key}>
+                  <label className="block text-sm font-medium text-foreground mb-1">{f.label}</label>
+                  {f.type === "textarea" ? (
+                    <textarea
+                      value={creds[f.key] ?? ""}
+                      onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      rows={4}
+                      className={inputClass}
+                    />
+                  ) : (
+                    <input
+                      type={f.type ?? "text"}
+                      value={creds[f.key] ?? ""}
+                      onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      className={inputClass}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input id="is-enabled-settings" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-border" />
+            <label htmlFor="is-enabled-settings" className="text-sm text-foreground">Enabled</label>
+          </div>
+          {error && (
+            <div className="p-3 rounded-lg border bg-red-50 border-red-200 text-sm text-red-700">{error}</div>
+          )}
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
@@ -176,7 +275,7 @@ function DeleteModal({
       <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
         <h3 className="text-lg font-semibold text-foreground mb-2">Delete Account</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Are you sure you want to delete <strong>{account.name}</strong> ({account.account_id})? This action cannot be undone.
+          Are you sure you want to delete <strong>{account.name}</strong> ({account.provider.toUpperCase()})? This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">Cancel</button>
@@ -189,12 +288,18 @@ function DeleteModal({
 
 /* ── Accounts columns ───────────────────────────────────────────── */
 
+const SETTINGS_PROVIDER_BADGE: Record<CloudProvider, string> = {
+  aws: "bg-orange-100 text-orange-700",
+  azure: "bg-blue-100 text-blue-700",
+  gcp: "bg-green-100 text-green-700",
+  alicloud: "bg-purple-100 text-purple-700",
+};
+
 const accountColumns: Column<Account>[] = [
   { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-foreground">{r.name}</span> },
-  { key: "account_id", header: "Account ID", render: (r) => <span className="font-mono text-sm">{r.account_id}</span> },
-  { key: "role_arn", header: "Role ARN", render: (r) => <span className="font-mono text-xs text-muted-foreground truncate max-w-[200px] block">{r.role_arn}</span> },
+  { key: "provider", header: "Provider", render: (r) => <Badge className={SETTINGS_PROVIDER_BADGE[r.provider]}>{r.provider.toUpperCase()}</Badge> },
   { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-secondary text-muted-foreground">{reg}</Badge>)}</div> },
-  { key: "is_active", header: "Status", render: (r) => r.is_active ? <Badge className="bg-green-100 text-green-700">Active</Badge> : <Badge className="bg-secondary text-muted-foreground">Inactive</Badge> },
+  { key: "is_enabled", header: "Status", render: (r) => r.is_enabled ? <Badge className="bg-green-100 text-green-700">Enabled</Badge> : <Badge className="bg-secondary text-muted-foreground">Disabled</Badge> },
   { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-muted-foreground">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
 ];
 
@@ -592,13 +697,15 @@ export default function Settings() {
   const updateMut = useUpdateSettings();
 
   // Accounts
-  const { data: accounts, isLoading: acctLoading, error: acctError } = useAccounts();
+  const [filterProvider, setFilterProvider] = useState<string>("");
+  const { data: accounts, isLoading: acctLoading, error: acctError } = useAccounts(filterProvider || undefined);
   const createMut = useCreateAccount();
   const updateAcctMut = useUpdateAccount();
   const deleteMut = useDeleteAccount();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const [acctFormError, setAcctFormError] = useState<string | null>(null);
 
   // MCP Servers
   const mcpQ = useMcpServers();
@@ -617,11 +724,26 @@ export default function Settings() {
     updateMut.mutate({ [key]: value });
   }
 
-  return (
-    <div className="space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
+  const { t } = useLocale();
+  const tabTriggerClass = "px-4 py-2 text-sm font-medium border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary text-muted-foreground hover:text-foreground transition-colors";
 
-      {/* ── Scan Focus ────────────────────────────────────────── */}
+  return (
+    <div className="max-w-5xl">
+      <h1 className="text-2xl font-semibold text-foreground mb-4">{t("settings.title")}</h1>
+
+      <Tabs.Root defaultValue="general">
+        <Tabs.List className="flex border-b border-border mb-6 gap-0 overflow-x-auto">
+          <Tabs.Trigger value="general" className={tabTriggerClass}>{t("settings.general")}</Tabs.Trigger>
+          <Tabs.Trigger value="accounts" className={tabTriggerClass}>{t("settings.accounts")}</Tabs.Trigger>
+          <Tabs.Trigger value="notifications" className={tabTriggerClass}>{t("settings.notifications")}</Tabs.Trigger>
+          <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>
+          <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
+          <Tabs.Trigger value="skills" className={tabTriggerClass}>{t("settings.skills")}</Tabs.Trigger>
+          <Tabs.Trigger value="mcp" className={tabTriggerClass}>{t("settings.mcp")}</Tabs.Trigger>
+        </Tabs.List>
+
+        {/* ── General Tab ──────────────────────────────────────── */}
+        <Tabs.Content value="general" className="space-y-6">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">Scan Focus</h2>
@@ -724,17 +846,31 @@ export default function Settings() {
 
       {/* ── Agent Models ─────────────────────────────────────── */}
       <AgentModelsCard />
+        </Tabs.Content>
 
-      {/* ── Accounts ──────────────────────────────────────────── */}
+        {/* ── Accounts Tab ─────────────────────────────────────── */}
+        <Tabs.Content value="accounts" className="space-y-6">
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">AWS Accounts</h2>
-          <button
-            onClick={() => { setEditing(null); setFormOpen(true); }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
-          >
-            New Account
-          </button>
+          <h2 className="text-lg font-semibold text-foreground">Cloud Accounts</h2>
+          <div className="flex items-center gap-3">
+            <select
+              value={filterProvider}
+              onChange={(e) => setFilterProvider(e.target.value)}
+              className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground"
+            >
+              <option value="">All Providers</option>
+              {PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => { setEditing(null); setFormOpen(true); }}
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            >
+              New Account
+            </button>
+          </div>
         </CardHeader>
         {acctLoading ? (
           <div className="p-6"><Spinner /></div>
@@ -762,7 +898,31 @@ export default function Settings() {
         )}
       </Card>
 
-      {/* ── MCP Servers ─────────────────────────────────────── */}
+        </Tabs.Content>
+
+        {/* ── Notifications Tab ────────────────────────────────── */}
+        <Tabs.Content value="notifications" className="space-y-6">
+          <NotificationsTab />
+          <NotificationLogsTab />
+        </Tabs.Content>
+
+        {/* ── Audit Tab ────────────────────────────────────────── */}
+        <Tabs.Content value="audit">
+          <AuditTab />
+        </Tabs.Content>
+
+        {/* ── Knowledge Base Tab ───────────────────────────────── */}
+        <Tabs.Content value="kb">
+          <KBTab />
+        </Tabs.Content>
+
+        {/* ── Skills Tab ───────────────────────────────────────── */}
+        <Tabs.Content value="skills">
+          <SkillsTab />
+        </Tabs.Content>
+
+        {/* ── MCP Servers Tab ──────────────────────────────────── */}
+        <Tabs.Content value="mcp" className="space-y-6">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">MCP Servers</h2>
@@ -812,7 +972,7 @@ export default function Settings() {
                           {cfg.url ? "SSE" : "stdio"}
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate max-w-[400px]">
+                      <p className="text-xs text-muted-foreground mt-0.5 font-mono break-all">
                         {cfg.url ?? `${cfg.command ?? ""} ${(cfg.args ?? []).join(" ")}`}
                       </p>
                     </div>
@@ -833,6 +993,8 @@ export default function Settings() {
           )}
         </CardBody>
       </Card>
+        </Tabs.Content>
+      </Tabs.Root>
 
       {/* MCP Modals */}
       {mcpImportOpen && (
@@ -878,15 +1040,21 @@ export default function Settings() {
         <AccountFormModal
           initial={editing}
           saving={createMut.isPending || updateAcctMut.isPending}
-          onClose={() => { setFormOpen(false); setEditing(null); }}
+          error={acctFormError}
+          onClose={() => { setFormOpen(false); setEditing(null); setAcctFormError(null); }}
           onSave={async (data) => {
-            if (editing) {
-              await updateAcctMut.mutateAsync({ id: editing.id, data: data as AccountUpdate });
-            } else {
-              await createMut.mutateAsync(data as AccountCreate);
+            setAcctFormError(null);
+            try {
+              if (editing) {
+                await updateAcctMut.mutateAsync({ id: editing.id, data: data as AccountUpdate });
+              } else {
+                await createMut.mutateAsync(data as AccountCreate);
+              }
+              setFormOpen(false);
+              setEditing(null);
+            } catch (err) {
+              setAcctFormError(err instanceof Error ? err.message : String(err));
             }
-            setFormOpen(false);
-            setEditing(null);
           }}
         />
       )}

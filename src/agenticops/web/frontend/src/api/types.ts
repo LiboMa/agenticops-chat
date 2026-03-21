@@ -8,6 +8,7 @@ export interface Stats {
 export interface Resource {
   id: number;
   account_id: number;
+  provider: string;
   resource_id: string;
   resource_arn: string | null;
   resource_type: string;
@@ -18,6 +19,11 @@ export interface Resource {
   tags: Record<string, string>;
   created_at: string;
   updated_at: string;
+}
+
+export interface PaginatedResources {
+  total: number;
+  items: Resource[];
 }
 
 export type ScanFocus = "computing" | "networking" | "databases" | "storage" | "security" | "billing" | "all";
@@ -60,6 +66,8 @@ export interface Anomaly {
   trace_id: string | null;
   occurrence_count?: number;
   merged_alerts?: MergedAlert[];
+  account_id: number | null;
+  account_name: string | null;
 }
 
 export interface RCAResult {
@@ -126,6 +134,7 @@ export interface FixPlan {
   approved_by: string | null;
   approved_at: string | null;
   created_at: string;
+  account_id: number | null;
 }
 
 export interface FixExecution {
@@ -149,33 +158,35 @@ export interface FixExecution {
 /*  Account                                                            */
 /* ------------------------------------------------------------------ */
 
+export type CloudProvider = "aws" | "azure" | "gcp" | "alicloud";
+
 export interface Account {
   id: number;
   name: string;
-  account_id: string;
-  role_arn: string;
-  external_id: string | null;
+  provider: CloudProvider;
+  credentials: Record<string, unknown>;
   regions: string[];
-  is_active: boolean;
+  labels: Record<string, string>;
+  is_enabled: boolean;
   created_at: string;
   last_scanned_at: string | null;
 }
 
 export interface AccountCreate {
   name: string;
-  account_id: string;
-  role_arn: string;
-  external_id?: string;
-  regions?: string[];
-  is_active?: boolean;
+  provider: CloudProvider;
+  credentials: Record<string, unknown>;
+  regions: string[];
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
 }
 
 export interface AccountUpdate {
   name?: string;
-  role_arn?: string;
-  external_id?: string;
+  credentials?: Record<string, unknown>;
   regions?: string[];
-  is_active?: boolean;
+  labels?: Record<string, string>;
+  is_enabled?: boolean;
 }
 
 /* ------------------------------------------------------------------ */

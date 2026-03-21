@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -255,7 +254,7 @@ function StatusBadge({ status }: { status: string }) {
 function IMBotsCard() {
   const { data: bots, isLoading, error } = useQuery<IMBotStatus[]>({
     queryKey: ["im-bots"],
-    queryFn: () => apiFetch("/api/im/bots"),
+    queryFn: () => apiFetch("/im/bots"),
     refetchInterval: 30_000,
   });
 
@@ -370,8 +369,7 @@ const columns: Column<NotificationChannel>[] = [
   },
 ];
 
-export default function Notifications() {
-  const navigate = useNavigate();
+export function NotificationsTab() {
   const { data: channels, isLoading, error } = useNotificationChannels();
   const createMut = useCreateChannel();
   const updateMut = useUpdateChannel();
@@ -395,12 +393,6 @@ export default function Notifications() {
             <h2 className="text-lg font-semibold text-foreground">
               Notification Channels
             </h2>
-            <button
-              onClick={() => navigate("/app/notifications/logs")}
-              className="px-3 py-1.5 text-xs text-muted-foreground border border-border rounded-lg hover:bg-secondary transition-colors"
-            >
-              View Logs
-            </button>
           </div>
           <button
             onClick={() => {

@@ -54,7 +54,8 @@ from agenticops.graph.tools import (
     analyze_capacity_risk,
     simulate_edge_removal,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
+from agenticops.providers.base import get_cli_tool_for_issue, get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
@@ -153,7 +154,7 @@ AWS infrastructure investigator:
      Use read_skill_reference for deep-dive material when needed.
 2. QUERY: Use the best tool for the job:
    - Specialized tools first (describe_ec2, describe_rds, network tools, EKS tools, etc.)
-   - run_aws_cli_readonly for ANY AWS service that lacks a specialized tool —
+   - The cloud CLI tool for ANY service that lacks a specialized tool —
      this covers 60+ services (ElastiCache, Redshift, Step Functions, CloudFront,
      WAF, Route53, DynamoDB, SQS, SNS, Glue, Athena, EMR, CodePipeline,
      GuardDuty, Security Hub, Cost Explorer, Organizations, etc.)
@@ -175,17 +176,17 @@ RULES & GUARDRAILS (CRITICAL):
 - Be specific: use actual resource IDs, exact CLI commands, specific parameter values.
 - **NO HALLUCINATION**: Never invent inventories, like - AWS ARNs, Instance IDs, IP addresses, or metrics. If you cannot find the resource, state clearly that it was not found.
 - **ERROR RECOVERY**: If a tool or CLI command returns an error (e.g., syntax error, resource not found), DO NOT stop. Analyze the error message, adjust your query parameters, and try again up to 3 times before reporting failure.
-- **CONTEXT MANAGEMENT**: When reading logs or files (via `run_aws_cli_readonly` or `read_local_file`), ALWAYS use limits (e.g., `tail -n 50` or `--max-items 10`) to prevent context window overflow.
+- **CONTEXT MANAGEMENT**: When reading logs or files (via the cloud CLI tool or `read_local_file`), ALWAYS use limits (e.g., `tail -n 50` or `--max-items 10`) to prevent context window overflow.
 - **SECRET REDACTION**: If your queries return sensitive data (passwords, tokens, API keys) in configs or logs, you MUST mask them (e.g., `[REDACTED]`) before outputting the final response or fix plan.
 
 TOOL SELECTION — accuracy first:
 - Use specialized tools (describe_ec2, describe_rds, network tools, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool, OR (b) the CLI
+- Use the cloud CLI tool when: (a) the service has no specialized tool, OR (b) the CLI
   gives more precise/complete data (e.g., specific fields, parameters not exposed by
-  specialized tools), OR (c) the user asks about any AWS service/resource not covered
+  specialized tools), OR (c) the user asks about any service/resource not covered
   by specialized tools.
 - Choose whichever tool produces the most accurate result for the task at hand.
-- When using run_aws_cli_readonly, always use --query to filter output fields.
+- When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws rds describe-db-instances --query 'DBInstances[].{Id:DBInstanceIdentifier,Status:DBInstanceStatus,Class:DBInstanceClass}'`
   Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
   Example: `aws ce get-cost-and-usage --time-period Start=2026-02-01,End=2026-02-28 --granularity MONTHLY --metrics BlendedCost --query 'ResultsByTime[].Total'`
@@ -193,7 +194,7 @@ TOOL SELECTION — accuracy first:
 """
 
 
-def _create_sre_agent() -> Agent:
+def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
     from agenticops.config import get_agent_model_config, get_agent_window_size
 
@@ -252,8 +253,8 @@ def _create_sre_agent() -> Agent:
             detect_single_points_of_failure,
             analyze_capacity_risk,
             simulate_edge_removal,
-            # AWS CLI (read-only, for uncovered services or general queries)
-            run_aws_cli_readonly,
+            # Cloud CLI (provider-resolved, fallback to AWS read-only)
+            *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
             # Agent Skills (domain knowledge + host/kubectl execution)
             activate_skill,
             read_skill_reference,
@@ -277,8 +278,19 @@ def sre_agent(issue_id: int) -> str:
         Fix plan summary with risk level, steps, and rollback plan.
     """
     try:
+        # Resolve provider CLI tool from issue's account
+        cli_tool = None
+        try:
+            from agenticops.models import HealthIssue, get_db_session
+            with get_db_session() as db:
+                issue = db.query(HealthIssue).filter_by(id=issue_id).first()
+                if issue and issue.account_id:
+                    cli_tool = get_cli_tool_for_issue(issue.account_id)
+        except Exception:
+            pass
+
         from agenticops.agents.preamble import invoke_with_retry
-        agent = _create_sre_agent()
+        agent = _create_sre_agent(cli_tool=cli_tool)
         result = invoke_with_retry(agent,
             f"Generate a Fix Plan for HealthIssue #{issue_id}. "
             f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."
@@ -308,7 +320,8 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
     """
     try:
         from agenticops.agents.preamble import invoke_with_retry
-        agent = _create_sre_agent()
+        cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
+        agent = _create_sre_agent(cli_tools=cli_tools)
         result = invoke_with_retry(agent,
             f"General AWS investigation (Mode B). Region: {region}\n"
             f"Query: {query}\n"

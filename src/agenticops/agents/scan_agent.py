@@ -1,7 +1,7 @@
-"""Scan Agent - Resource discovery and inventory using Strands SDK.
+"""Scan Agent - Multi-cloud resource discovery and inventory using Strands SDK.
 
-Discovers AWS resources via STS AssumeRole and saves them to metadata.
-Exposed as a tool for the Main Agent (agents-as-tools pattern).
+Discovers cloud resources across all enabled accounts (AWS, Azure, GCP, Alicloud)
+using dynamic provider CLI tools. Exposed as a tool for the Main Agent (agents-as-tools pattern).
 """
 
 import logging
@@ -12,94 +12,137 @@ from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
 from agenticops.config import settings
-from agenticops.tools.aws_tools import (
-    assume_role,
-    describe_ec2,
-    list_lambda_functions,
-    describe_rds,
-    list_s3_buckets,
-    describe_ecs,
-    describe_eks,
-    list_dynamodb,
-    list_sqs,
-    list_sns,
-)
-from agenticops.tools.eks_tools import describe_eks_clusters
-from agenticops.tools.network_tools import (
-    describe_vpcs,
-    describe_subnets,
-    describe_security_groups,
-    describe_route_tables,
-    describe_nat_gateways,
-    describe_transit_gateways,
-    describe_load_balancers,
-    describe_region_topology,
-)
+from agenticops.providers.base import get_all_cli_tools
 from agenticops.tools.metadata_tools import (
     get_active_account,
+    get_enabled_accounts,
     save_resources,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
 
 logger = logging.getLogger(__name__)
 
-SCAN_SYSTEM_PROMPT = """You are the Scan Agent for AgenticOps.
-Your job is to discover and inventory AWS resources in the active account.
+SCAN_SYSTEM_PROMPT = """You are a multi-cloud resource scanner for AgenticOps.
 
-WORKFLOW:
-1. Call get_active_account to get the active account configuration (account_id, role_arn, regions).
-2. Call assume_role with the account's role_arn and external_id for each region to scan.
-3. For each requested service, call the appropriate describe/list tool in each region.
-4. Collect all discovered resources and call save_resources with the combined JSON array.
-5. Return a summary: count by service, count by region, new vs updated.
+## Your Job
+Discover and inventory cloud resources across all enabled accounts.
 
-RULES:
-- Only READ operations. Never create, modify, or delete AWS resources.
-- If a service/region fails, log the error and continue with others.
-- When services='all', scan: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPC, Subnet, SecurityGroup, NATGateway, TransitGateway, ELB, RouteTable, AND security resources.
-- When services='security', scan ONLY the security resources listed below.
-- When regions='all', use the regions from the account configuration.
-- Always call save_resources at the end to persist discovered resources.
+## Workflow
+1. Call get_enabled_accounts() to get the list of active cloud accounts
+2. For each account, use its dedicated CLI tool to discover resources:
+   - AWS accounts: use run_aws_cli_<account_name> with 'aws <service> describe-*' commands
+   - Azure accounts: use run_az_cli_<account_name> with 'az <service> list' commands
+   - GCP accounts: use run_gcloud_<account_name> with 'gcloud <service> list' commands
+   - Alicloud accounts: use run_aliyun_cli_<account_name> with 'aliyun <service> <Action>' commands
+3. For each discovered resource, call save_resources() with the account_id and provider
 
-SECURITY RESOURCE SCANNING:
-When services includes 'all' or 'security', also discover and inventory these security resources
-using run_aws_cli_readonly:
-  - **IAM**: `aws iam list-users`, `aws iam list-roles`, `aws iam list-policies --scope Local`
-    (IAM is global — scan once, not per-region)
-  - **GuardDuty**: `aws guardduty list-detectors` → for each detector, `aws guardduty get-detector`
-  - **Security Hub**: `aws securityhub describe-hub` (check if enabled)
-  - **Inspector**: `aws inspector2 batch-get-account-status` (check scanning status)
-  - **WAFv2**: `aws wafv2 list-web-acls --scope REGIONAL` per region
-  - **AWS Config**: `aws configservice describe-configuration-recorders` (check if enabled)
-  - **KMS**: `aws kms list-keys` → `aws kms describe-key` for each key
-  - **CloudTrail**: `aws cloudtrail describe-trails` (check multi-region, logging status)
-  - **IAM Access Analyzer**: `aws accessanalyzer list-analyzers`
-  - **Secrets Manager**: `aws secretsmanager list-secrets --query 'SecretList[].{Name:Name,ARN:ARN,LastAccessed:LastAccessedDate}'`
-Save security resources with resource_type values: IAMUser, IAMRole, IAMPolicy, GuardDutyDetector,
-SecurityHub, Inspector, WAFWebACL, ConfigRecorder, KMSKey, CloudTrail, AccessAnalyzer, Secret.
-Include status info (enabled/disabled, logging, detector status) in resource_metadata.
+## Preferred Approach
+For standard full scans, call scan_resources() — it runs predefined CLI commands across all accounts
+in parallel. For parallel health checking across multiple accounts, call check_health() — it spawns
+one detect agent per account for concurrent LLM-powered analysis. Only use individual account CLI
+tools (run_aws_cli_*, etc.) for ad-hoc investigation or when you need to run specific commands not
+covered by the standard scan.
 
-TOOL SELECTION — accuracy first:
-- Use specialized tools (describe_ec2, describe_rds, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., ElastiCache,
-  Redshift, Step Functions, security services), OR (b) the CLI gives more precise/complete data
-  for the specific query.
-- Choose whichever tool produces the most accurate result for the task at hand.
-- When using run_aws_cli_readonly, always use --query to filter output fields.
-  Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
+## Resource Categories
+Scan these categories per cloud:
+- compute: VMs, instances, functions/serverless
+- database: Managed databases, caches
+- storage: Object storage, file systems
+- container: Kubernetes clusters, container services
+- network: VPCs, subnets, load balancers, security groups
+- serverless: Lambda, Functions, Cloud Functions
+
+## CLI Tips
+- Always request JSON output
+- Use --query/--filter to limit results when possible
+- For large accounts, scan region by region
+
+## Output
+Return a summary: how many resources found per account, per region, per type.
 """
 
 
 @tool
-def scan_agent(services: str = "all", regions: str = "all") -> str:
-    """Scan AWS resources in the active account and update inventory.
+def scan_resources(account_ids: str = "", focus: str = "all", regions: str = "") -> str:
+    """Programmatic parallel scan of cloud resources across all enabled accounts.
+
+    Uses predefined CLI commands per provider — much faster than manual scanning.
+    Prefer this for standard full scans. Use per-account CLI tools only for ad-hoc investigation.
 
     Args:
-        services: Comma-separated service names (EC2,RDS,Lambda,S3,ECS,EKS,DynamoDB,SQS,SNS,VPC,Subnet,SecurityGroup,NATGateway,TransitGateway,ELB,RouteTable,security) or 'all'. Use 'security' for security-only scan (IAM,GuardDuty,SecurityHub,Inspector,WAF,Config,KMS,CloudTrail,AccessAnalyzer,SecretsManager).
-        regions: Comma-separated AWS regions or 'all' (uses account configured regions)
+        account_ids: Comma-separated account IDs to scan, or empty for all enabled.
+        focus: Scan focus: computing,networking,databases,storage,security,all.
+        regions: Comma-separated regions to scan, or empty for each account's configured regions.
 
     Returns:
-        Summary of discovered resources with counts by service and region.
+        Summary of scan results per account.
+    """
+    import asyncio
+    from agenticops.scanner import scan_accounts_parallel
+
+    ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
+    rgns = [r.strip() for r in regions.split(",") if r.strip()] or None
+
+    try:
+        result = asyncio.run(scan_accounts_parallel(account_ids=ids, focus=focus, regions=rgns))
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(scan_accounts_parallel(account_ids=ids, focus=focus, regions=rgns))
+
+    lines = [f"Scan complete in {result.duration_s}s — {result.total_found} resources found."]
+    for a in result.accounts:
+        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, regions={a.regions_scanned}")
+        for err in a.errors[:3]:
+            lines.append(f"    ⚠ {err}")
+    return "\n".join(lines)
+
+
+@tool
+def check_health(account_ids: str = "", scope: str = "all", deep: str = "false") -> str:
+    """Run parallel health checks across all enabled accounts.
+
+    Spawns one detect agent per account for concurrent LLM-powered health checking.
+    Each agent uses the account's cloud CLI tool and reasons about what to check.
+    Much faster than sequential single-agent detection.
+
+    Args:
+        account_ids: Comma-separated account IDs, or empty for all enabled.
+        scope: Resource scope: 'all', 'EC2', 'RDS', 'security', etc.
+        deep: 'true' for deep investigation even on healthy resources.
+
+    Returns:
+        Summary of health check results per account.
+    """
+    import asyncio
+    from agenticops.checker import check_accounts_parallel
+
+    ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
+    is_deep = deep.lower() == "true"
+
+    try:
+        result = asyncio.run(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+
+    lines = [f"Health check complete in {result.duration_s}s — {result.total_issues} issues found."]
+    lines.append(f"Tokens: {result.total_input_tokens:,} in / {result.total_output_tokens:,} out (cache read: {result.total_cache_read_tokens:,}, cache write: {result.total_cache_write_tokens:,})")
+    for a in result.accounts:
+        lines.append(f"  {a.account_name} ({a.provider}): {a.issues_created} issues, {a.duration_s}s, tokens: {a.input_tokens:,} in / {a.output_tokens:,} out")
+        for err in a.errors[:3]:
+            lines.append(f"    ERROR: {err}")
+    return "\n".join(lines)
+
+
+@tool
+def scan_agent(services: str = "all", regions: str = "all") -> str:
+    """Scan cloud resources across all enabled accounts and update inventory.
+
+    Args:
+        services: Comma-separated resource categories (compute,database,storage,container,network,serverless) or 'all'.
+        regions: Comma-separated regions or 'all' (uses each account's configured regions)
+
+    Returns:
+        Summary of discovered resources with counts per account, region, and type.
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
@@ -108,51 +151,30 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         cache_kwargs: dict = {}
         if settings.bedrock_cache_enabled:
             cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-        model = BedrockModel(
+        bedrock_model = BedrockModel(
             model_id=model_id,
             region_name=settings.bedrock_region,
             max_tokens=max_tokens,
             **cache_kwargs,
         )
 
+        # Build dynamic tool list from enabled accounts
+        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources, check_health]
+        tools.extend(get_all_cli_tools())
+
         agent = Agent(
             system_prompt=SCAN_SYSTEM_PROMPT,
-            model=model,
+            model=bedrock_model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
                 window_size=get_agent_window_size("scan"), per_turn=True
             ),
-            tools=[
-                assume_role,
-                describe_ec2,
-                list_lambda_functions,
-                describe_rds,
-                list_s3_buckets,
-                describe_ecs,
-                describe_eks,
-                describe_eks_clusters,
-                list_dynamodb,
-                list_sqs,
-                list_sns,
-                # Network tools
-                describe_vpcs,
-                describe_subnets,
-                describe_security_groups,
-                describe_route_tables,
-                describe_nat_gateways,
-                describe_transit_gateways,
-                describe_load_balancers,
-                describe_region_topology,
-                # Metadata
-                save_resources,
-                get_active_account,
-                # AWS CLI (read-only, for uncovered services or precision queries)
-                run_aws_cli_readonly,
-            ],
+            tools=tools,
         )
 
         from agenticops.agents.preamble import invoke_with_retry
-        result = invoke_with_retry(agent, f"Scan services={services} regions={regions}")
+        prompt = f"Scan resources. Services: {services}. Regions: {regions}."
+        result = invoke_with_retry(agent, prompt)
         return str(result)
     except Exception as e:
         logger.exception("Scan agent failed")

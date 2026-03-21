@@ -42,7 +42,8 @@ from agenticops.graph.tools import (
     find_network_path,
     detect_network_anomalies,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly
+from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly  # fallback
+from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
@@ -108,8 +109,8 @@ SAFETY RULES (NEVER violate):
 - Total timeout: {settings.executor_total_timeout} seconds.
 
 TOOL SELECTION (route each step to the correct backend):
-- AWS API operations (e.g., modify-instance-attribute, update-function-code, modify-db-instance):
-  Use run_aws_cli (write) or run_aws_cli_readonly (read-only checks).
+- AWS/Cloud API operations (e.g., modify-instance-attribute, update-function-code, modify-db-instance):
+  Use the provided cloud CLI tool (supports both read and write operations with security filtering).
 - Host-level commands (e.g., systemctl restart, kill, disk cleanup, log inspection):
   Use run_on_host with method="ssm" (or "ssh"). Set require_confirmation=True for write commands —
   the plan approval serves as the confirmation.
@@ -132,13 +133,13 @@ c. Sensitive files (credentials, .env, private keys) are automatically blocked.
 
 STEP TYPE IDENTIFICATION:
 When the plan's steps include a field like "action" or "runner_type", use it to route:
-  - "aws_cli" → run_aws_cli / run_aws_cli_readonly
+  - "aws_cli" → the cloud CLI tool
   - "host_command" / "ssm" / "ssh" → run_on_host
   - "kubectl" → run_kubectl
   - "file_read" / "verify_file" → activate_skill("local-os-operator") first, then read_local_file / search_local_file
   - "verify" → appropriate read-only tool
 When the step has no explicit type, infer from the command:
-  - Starts with "aws " → run_aws_cli
+  - Starts with "aws " or cloud CLI command → the cloud CLI tool
   - Starts with "kubectl " → run_kubectl
   - OS-level commands (systemctl, kill, df, ps, etc.) → run_on_host
   - File paths or "cat", "less", "grep" references → activate_skill("local-os-operator") first, then use file tools
@@ -167,7 +168,19 @@ def executor_agent(fix_plan_id: int) -> str:
 
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
-        from agenticops.models import get_db_session, FixPlan
+        from agenticops.models import get_db_session, FixPlan, HealthIssue
+
+        # Resolve provider CLI tool from fix plan's issue account
+        cli_tool = None
+        try:
+            with get_db_session() as db:
+                plan_for_acct = db.query(FixPlan).filter_by(id=fix_plan_id).first()
+                if plan_for_acct:
+                    issue = db.query(HealthIssue).filter_by(id=plan_for_acct.health_issue_id).first()
+                    if issue and issue.account_id:
+                        cli_tool = get_cli_tool_for_issue(issue.account_id)
+        except Exception:
+            pass
 
         # Query risk level BEFORE agent creation for smart model selection
         model_id, max_tokens = get_agent_model_config("executor")
@@ -205,9 +218,8 @@ def executor_agent(fix_plan_id: int) -> str:
             tools=[
                 # Plan verification (safety gate)
                 get_approved_fix_plan,
-                # Execution — AWS CLI (write + read-only)
-                run_aws_cli,
-                run_aws_cli_readonly,
+                # Cloud CLI (provider-resolved with security filtering, fallback to AWS)
+                *(([cli_tool] if cli_tool else [run_aws_cli, run_aws_cli_readonly])),
                 # Execution — Host-level (SSM/SSH)
                 run_on_host,
                 # Execution — Kubernetes (kubectl)

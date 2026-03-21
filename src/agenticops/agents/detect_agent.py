@@ -36,7 +36,8 @@ from agenticops.tools.detect_tools import (
     run_zscore_detection,
     run_rule_evaluation,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
+from agenticops.providers.base import get_all_cli_tools
 from agenticops.tools.integration_tools import (
     list_provider_alerts,
     query_provider_metrics,
@@ -78,7 +79,7 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
    - Call query_provider_metrics to get cross-platform metrics for a resource.
    - Cross-reference external alerts with CloudWatch findings for corroboration.
 7. SECURITY HEALTH CHECKS (always run when scope='all' or scope='security'):
-   Use run_aws_cli_readonly for all security checks:
+   Use the cloud CLI tool for all security checks:
    a) **GuardDuty Threats**:
       - `aws guardduty list-detectors` → get detector ID
       - `aws guardduty list-findings --detector-id DID --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`
@@ -124,14 +125,81 @@ RULES:
   AND security findings summary (threats, vulnerabilities, misconfigurations, compliance gaps).
 TOOL SELECTION — accuracy first:
 - Use specialized tools (list_alarms, get_metrics, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., security services),
+- Use the cloud CLI tool when: (a) the service has no specialized tool (e.g., security services),
   OR (b) the CLI gives more precise/complete data for the specific query (e.g., specific --query
   filters, fields not exposed by specialized tools).
 - Choose whichever tool produces the most accurate result for the task at hand.
-- When using run_aws_cli_readonly, always use --query to filter output fields.
+- When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 - 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
 """
+
+
+def _build_detect_agent_for_account(
+    acct_name: str,
+    acct_id: int,
+    cli_tool,
+    session,
+) -> Agent:
+    """Build a detect agent scoped to a single account.
+
+    Args:
+        acct_name: Human-readable account name
+        acct_id: Database account ID
+        cli_tool: The CLI tool callable for this specific account
+        session: Database session (reserved for future use)
+
+    Returns:
+        Agent instance pre-configured for the given account
+    """
+    from agenticops.config import get_agent_model_config, get_agent_window_size
+
+    model_id, max_tokens = get_agent_model_config("detect")
+    cache_kwargs: dict = {}
+    if settings.bedrock_cache_enabled:
+        cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+    model = BedrockModel(
+        model_id=model_id,
+        region_name=settings.bedrock_region,
+        max_tokens=max_tokens,
+        **cache_kwargs,
+    )
+
+    # Account-scoped system prompt preamble
+    account_context = (
+        f"You are checking account '{acct_name}' (id={acct_id}). "
+        f"Use the CLI tool provided to query this account's resources. "
+        f"Do NOT call get_active_account or assume_role — you already know which account you're checking."
+    )
+
+    agent = Agent(
+        system_prompt=f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}",
+        model=model,
+        callback_handler=None,
+        conversation_manager=SlidingWindowConversationManager(
+            window_size=get_agent_window_size("detect"), per_turn=True
+        ),
+        tools=[
+            cli_tool,
+            get_managed_resources,
+            list_alarms,
+            get_alarm_history,
+            get_metrics,
+            query_logs,
+            lookup_cloudtrail_events,
+            run_zscore_detection,
+            run_rule_evaluation,
+            describe_nat_gateways,
+            describe_load_balancers,
+            describe_region_topology,
+            analyze_vpc_topology,
+            map_eks_to_vpc_topology,
+            list_provider_alerts,
+            query_provider_metrics,
+            create_health_issue,
+        ],
+    )
+    return agent
 
 
 @tool
@@ -148,53 +216,81 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
 
-        model_id, max_tokens = get_agent_model_config("detect")
-        cache_kwargs: dict = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-        model = BedrockModel(
-            model_id=model_id,
-            region_name=settings.bedrock_region,
-            max_tokens=max_tokens,
-            **cache_kwargs,
-        )
+        # Check account count to decide parallel vs single-agent mode.
+        # Fallback to single-agent if DB is unavailable.
+        try:
+            from agenticops.scanner.engine import _load_accounts
+            accounts = _load_accounts()
+        except Exception:
+            logger.warning("Failed to load accounts, falling back to single-agent mode")
+            accounts = []
 
-        agent = Agent(
-            system_prompt=DETECT_SYSTEM_PROMPT,
-            model=model,
-            callback_handler=None,
-            conversation_manager=SlidingWindowConversationManager(
-                window_size=get_agent_window_size("detect"), per_turn=True
-            ),
-            tools=[
-                assume_role,
-                get_active_account,
-                get_managed_resources,
-                list_alarms,
-                get_alarm_history,
-                get_metrics,
-                query_logs,
-                lookup_cloudtrail_events,
-                create_health_issue,
-                run_zscore_detection,
-                run_rule_evaluation,
-                # Network health tools
-                describe_nat_gateways,
-                describe_load_balancers,
-                describe_region_topology,
-                analyze_vpc_topology,
-                map_eks_to_vpc_topology,
-                # AWS CLI (read-only, for uncovered services or precision queries)
-                run_aws_cli_readonly,
-                # External monitoring providers
-                list_provider_alerts,
-                query_provider_metrics,
-            ],
-        )
+        if len(accounts) > 1:
+            # Multiple accounts: use parallel agentic checker
+            import asyncio
+            from agenticops.checker import check_accounts_parallel
 
-        from agenticops.agents.preamble import invoke_with_retry
-        result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
-        return str(result)
+            acct_ids = [a.id for a in accounts]
+            try:
+                result = asyncio.run(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+                result = loop.run_until_complete(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+
+            lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
+            for a in result.accounts:
+                lines.append(f"  {a.account_name}: {a.issues_created} issues")
+                if a.agent_output:
+                    lines.append(f"    {a.agent_output[:500]}")
+            return "\n".join(lines)
+        else:
+            # Single account: use original single-agent approach
+            cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
+
+            model_id, max_tokens = get_agent_model_config("detect")
+            cache_kwargs: dict = {}
+            if settings.bedrock_cache_enabled:
+                cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+            model = BedrockModel(
+                model_id=model_id,
+                region_name=settings.bedrock_region,
+                max_tokens=max_tokens,
+                **cache_kwargs,
+            )
+
+            agent = Agent(
+                system_prompt=DETECT_SYSTEM_PROMPT,
+                model=model,
+                callback_handler=None,
+                conversation_manager=SlidingWindowConversationManager(
+                    window_size=get_agent_window_size("detect"), per_turn=True
+                ),
+                tools=[
+                    assume_role,
+                    get_active_account,
+                    get_managed_resources,
+                    list_alarms,
+                    get_alarm_history,
+                    get_metrics,
+                    query_logs,
+                    lookup_cloudtrail_events,
+                    create_health_issue,
+                    run_zscore_detection,
+                    run_rule_evaluation,
+                    describe_nat_gateways,
+                    describe_load_balancers,
+                    describe_region_topology,
+                    analyze_vpc_topology,
+                    map_eks_to_vpc_topology,
+                    *cli_tools,
+                    list_provider_alerts,
+                    query_provider_metrics,
+                ],
+            )
+
+            from agenticops.agents.preamble import invoke_with_retry
+            result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
+            return str(result)
     except Exception as e:
         logger.exception("Detect agent failed")
         return f"Detect agent error: {e}"

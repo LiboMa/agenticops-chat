@@ -12,9 +12,19 @@ Gated by settings.notifications_enabled — when disabled, all calls are no-ops.
 import asyncio
 import logging
 import threading
+from contextvars import ContextVar
 from typing import Optional
 
 from agenticops.config import settings
+
+# ── ContextVar guard for scheduled runs ───────────────────────────
+# When True, suppresses auto report distribution to avoid duplicate emails.
+_schedule_running: ContextVar[bool] = ContextVar("_schedule_running", default=False)
+
+
+def set_schedule_running(value: bool) -> None:
+    """Set the schedule-running guard (call from scheduler)."""
+    _schedule_running.set(value)
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +262,8 @@ def notify_report_saved(
     )
 
     # Rich report distribution to sns-report channels
-    if settings.notifications_enabled:
+    # Suppressed during scheduled runs (scheduler delivers via share_content instead)
+    if settings.notifications_enabled and not _schedule_running.get(False):
         _trigger_report_distribution(report_id, report_type)
 
 

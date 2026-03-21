@@ -47,7 +47,8 @@ from agenticops.graph.tools import (
     find_network_path,
     detect_network_anomalies,
 )
-from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
+from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
@@ -128,7 +129,7 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    - Create a fix plan with step-by-step remediation.
    - Assess fix risk level: low, medium, high, or critical.
 8. SAVE: Call save_rca_result with all findings.
-8.5. EXTENDED INVESTIGATION: Use run_aws_cli_readonly for services not covered
+8.5. EXTENDED INVESTIGATION: Use the provided cloud CLI tool for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 8.6. LOCAL FILE INSPECTION (when you need to check configs, logs, or templates):
      a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
@@ -165,11 +166,11 @@ RULES:
 - Return a structured summary at the end.
 TOOL SELECTION — accuracy first:
 - Use specialized tools (get_metrics, query_logs, describe_* tools, etc.) when they cover the service.
-- Use run_aws_cli_readonly when: (a) the service has no specialized tool (e.g., ElastiCache,
+- Use the cloud CLI tool when: (a) the service has no specialized tool (e.g., ElastiCache,
   Redshift, Step Functions, API Gateway), OR (b) the CLI gives more precise/complete data
   for investigation (e.g., specific fields, parameters not exposed by specialized tools).
 - Choose whichever tool produces the most accurate result for the task at hand.
-- When using run_aws_cli_readonly, always use --query to filter output fields.
+- When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws elasticache describe-cache-clusters --query 'CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus,Engine:Engine}'`
 
 """
@@ -191,6 +192,17 @@ def rca_agent(issue_id: int) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_window_size
+
+        # Resolve provider CLI tool from issue's account
+        cli_tool = None
+        try:
+            from agenticops.models import HealthIssue, get_db_session
+            with get_db_session() as db:
+                issue = db.query(HealthIssue).filter_by(id=issue_id).first()
+                if issue and issue.account_id:
+                    cli_tool = get_cli_tool_for_issue(issue.account_id)
+        except Exception:
+            pass
 
         model_id, max_tokens = get_agent_model_config("rca")
         cache_kwargs: dict = {}
@@ -242,8 +254,8 @@ def rca_agent(issue_id: int) -> str:
                 query_impact_radius,
                 find_network_path,
                 detect_network_anomalies,
-                # AWS CLI (read-only, for uncovered services or precision queries)
-                run_aws_cli_readonly,
+                # Cloud CLI (provider-resolved, fallback to AWS read-only)
+                cli_tool or run_aws_cli_readonly,
                 # Agent Skills (domain knowledge + host/kubectl execution + dynamic tools)
                 activate_skill,
                 read_skill_reference,

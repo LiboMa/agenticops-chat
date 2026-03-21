@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { ChatSession } from "@/api/types";
 
 interface ToolCall {
   name: string;
@@ -110,6 +111,13 @@ export function useChat(sessionId: string | null) {
                   if (data.name) {
                     setToolCalls((prev) =>
                       prev.map((t) => (t.name === data.name ? { ...t, status: "done" as const } : t)),
+                    );
+                  }
+                  break;
+                case "session_renamed":
+                  if (data.name) {
+                    qc.setQueryData<ChatSession[]>(["chat-sessions"], (old) =>
+                      old?.map((s) => s.session_id === sessionId ? { ...s, name: data.name } : s)
                     );
                   }
                   break;

@@ -11,8 +11,6 @@ from agenticops.tools.aws_cli_tool import (
     _classify_command,
     run_aws_cli_readonly,
     run_aws_cli,
-    MAX_OUTPUT_CHARS_READONLY,
-    MAX_OUTPUT_CHARS,
 )
 
 
@@ -214,8 +212,10 @@ class TestRunAwsCliReadonly:
         assert "--output" in call_args
         assert "json" in call_args
 
+    @patch("agenticops.config.settings")
     @patch("agenticops.tools.aws_cli_tool.subprocess.run")
-    def test_output_truncation_at_8000(self, mock_run):
+    def test_output_truncation_when_limit_set(self, mock_run, mock_settings):
+        mock_settings.cli_max_output_chars = 5000
         long_output = "x" * 10000
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -227,6 +227,22 @@ class TestRunAwsCliReadonly:
         )
         assert len(result) < len(long_output)
         assert "truncated" in result
+
+    @patch("agenticops.config.settings")
+    @patch("agenticops.tools.aws_cli_tool.subprocess.run")
+    def test_no_truncation_when_unlimited(self, mock_run, mock_settings):
+        mock_settings.cli_max_output_chars = 0
+        long_output = "x" * 500_000
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=long_output,
+            stderr="",
+        )
+        result = run_aws_cli_readonly._tool_func(
+            command="aws ec2 describe-instances --region us-east-1"
+        )
+        assert result == long_output
+        assert "truncated" not in result
 
     def test_no_require_confirmation_parameter(self):
         """Verify run_aws_cli_readonly has no require_confirmation parameter."""

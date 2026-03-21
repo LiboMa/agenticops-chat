@@ -26,7 +26,7 @@ from langchain_core.tools import Tool, tool
 from langchain_aws import ChatBedrock
 
 from agenticops.config import settings
-from agenticops.models import AWSAccount, get_session
+from agenticops.models import CloudAccount, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class AgentResponse:
 class OpsAgent:
     """LLM-powered operations agent for cloud management."""
 
-    def __init__(self, account: Optional[AWSAccount] = None):
+    def __init__(self, account: Optional[CloudAccount] = None):
         """Initialize the agent."""
         self.account = account
         self._llm = None
@@ -299,11 +299,11 @@ class OpsAgent:
             # Use config default if not specified
             if limit <= 0:
                 limit = settings.agent_list_limit
-            from agenticops.models import AWSResource
+            from agenticops.models import CloudResource
 
             session = get_session()
             try:
-                query = session.query(AWSResource)
+                query = session.query(CloudResource)
 
                 if self.account:
                     query = query.filter_by(account_id=self.account.id)
@@ -320,7 +320,7 @@ class OpsAgent:
 
                 lines = [f"**Resources** (showing {len(resources)} of {total}):", ""]
                 for r in resources:
-                    name = r.resource_name or r.resource_id
+                    name = r.name or r.resource_id
                     lines.append(f"| {r.resource_type} | {name} | {r.region} | {r.status} |")
 
                 lines.append("")
@@ -393,23 +393,24 @@ class OpsAgent:
             Returns:
                 List of AWS accounts with their details
             """
-            from agenticops.models import AWSAccount
+            from agenticops.models import CloudAccount
 
             session = get_session()
             try:
-                accounts = session.query(AWSAccount).all()
+                accounts = session.query(CloudAccount).all()
 
                 if not accounts:
                     return "No AWS accounts configured."
 
-                lines = ["**AWS Accounts:**", ""]
-                lines.append("| Name | Account ID | Status | Regions | Last Scan |")
-                lines.append("|---|---|---|---|---|")
+                lines = ["**Cloud Accounts:**", ""]
+                lines.append("| Name | Provider | Account ID | Status | Regions | Last Scan |")
+                lines.append("|---|---|---|---|---|---|")
                 for acc in accounts:
-                    status = "✓ Active" if acc.is_active else "Inactive"
+                    status = "✓ Active" if acc.is_enabled else "Inactive"
                     last_scan = acc.last_scanned_at.strftime('%Y-%m-%d %H:%M') if acc.last_scanned_at else "Never"
                     regions = ', '.join(acc.regions[:3])
-                    lines.append(f"| {acc.name} | {acc.account_id} | {status} | {regions} | {last_scan} |")
+                    acct_id = (acc.credentials or {}).get("account_id", "")
+                    lines.append(f"| {acc.name} | {acc.provider} | {acct_id} | {status} | {regions} | {last_scan} |")
 
                 lines.append("")
                 lines.append("[DISPLAY THIS TABLE TO USER]")
@@ -514,14 +515,14 @@ class OpsAgent:
             Returns:
                 Monitoring configuration details
             """
-            from agenticops.models import MonitoringConfig, AWSAccount
+            from agenticops.models import MonitoringConfig, CloudAccount
 
             session = get_session()
             try:
                 query = session.query(MonitoringConfig)
 
                 if account_name:
-                    account = session.query(AWSAccount).filter_by(name=account_name).first()
+                    account = session.query(CloudAccount).filter_by(name=account_name).first()
                     if not account:
                         return f"Account '{account_name}' not found."
                     query = query.filter_by(account_id=account.id)
@@ -568,19 +569,19 @@ class OpsAgent:
             Returns:
                 Confirmation message
             """
-            from agenticops.models import MonitoringConfig, AWSAccount
+            from agenticops.models import MonitoringConfig, CloudAccount
 
             session = get_session()
             try:
                 # Get account
                 if account_name:
-                    account = session.query(AWSAccount).filter_by(name=account_name).first()
+                    account = session.query(CloudAccount).filter_by(name=account_name).first()
                     if not account:
                         return f"Account '{account_name}' not found."
                 elif self.account:
                     account = self.account
                 else:
-                    account = session.query(AWSAccount).filter_by(is_active=True).first()
+                    account = session.query(CloudAccount).filter_by(is_enabled=True).first()
                     if not account:
                         return "No active account found."
 
@@ -629,15 +630,15 @@ class OpsAgent:
             Returns:
                 Detailed resource information
             """
-            from agenticops.models import AWSResource
+            from agenticops.models import CloudResource
 
             session = get_session()
             try:
-                resource = session.query(AWSResource).filter_by(resource_id=resource_id).first()
+                resource = session.query(CloudResource).filter_by(resource_id=resource_id).first()
                 if not resource:
                     # Try by internal ID
                     try:
-                        resource = session.query(AWSResource).filter_by(id=int(resource_id)).first()
+                        resource = session.query(CloudResource).filter_by(id=int(resource_id)).first()
                     except ValueError:
                         pass
 
@@ -645,10 +646,10 @@ class OpsAgent:
                     return f"Resource '{resource_id}' not found."
 
                 details = [
-                    f"Resource: {resource.resource_name or resource.resource_id}",
+                    f"Resource: {resource.name or resource.resource_id}",
                     f"Type: {resource.resource_type}",
                     f"ID: {resource.resource_id}",
-                    f"ARN: {resource.resource_arn or 'N/A'}",
+                    f"ARN: {resource.resource_id or 'N/A'}",
                     f"Region: {resource.region}",
                     f"Status: {resource.status}",
                     f"Created: {resource.created_at.strftime('%Y-%m-%d %H:%M') if resource.created_at else 'Unknown'}",
@@ -724,14 +725,14 @@ class OpsAgent:
             Returns:
                 System status summary
             """
-            from agenticops.models import AWSAccount, AWSResource, Anomaly
+            from agenticops.models import CloudAccount, CloudResource, Anomaly
 
             session = get_session()
             try:
-                accounts = session.query(AWSAccount).all()
-                active_account = next((a for a in accounts if a.is_active), None)
+                accounts = session.query(CloudAccount).all()
+                active_account = next((a for a in accounts if a.is_enabled), None)
 
-                resources = session.query(AWSResource).count()
+                resources = session.query(CloudResource).count()
                 open_anomalies = session.query(Anomaly).filter_by(status="open").count()
                 ack_anomalies = session.query(Anomaly).filter_by(status="acknowledged").count()
                 critical_anomalies = session.query(Anomaly).filter(
@@ -775,20 +776,20 @@ class OpsAgent:
             Returns:
                 Confirmation message
             """
-            from agenticops.models import AWSAccount
+            from agenticops.models import CloudAccount
 
             session = get_session()
             try:
-                account = session.query(AWSAccount).filter_by(name=account_name).first()
+                account = session.query(CloudAccount).filter_by(name=account_name).first()
                 if not account:
                     return f"Account '{account_name}' not found."
 
-                if account.is_active:
+                if account.is_enabled:
                     return f"Account '{account_name}' is already active."
 
                 # Deactivate all others
-                session.query(AWSAccount).update({"is_active": False})
-                account.is_active = True
+                session.query(CloudAccount).update({"is_enabled": False})
+                account.is_enabled = True
                 session.commit()
 
                 return f"Account '{account_name}' is now active. All other accounts have been deactivated."
@@ -854,17 +855,17 @@ class OpsAgent:
             Returns:
                 Matching resources
             """
-            from agenticops.models import AWSResource
+            from agenticops.models import CloudResource
             from sqlalchemy import or_
 
             session = get_session()
             try:
                 search_pattern = f"%{query}%"
-                resources = session.query(AWSResource).filter(
+                resources = session.query(CloudResource).filter(
                     or_(
-                        AWSResource.resource_id.ilike(search_pattern),
-                        AWSResource.resource_name.ilike(search_pattern),
-                        AWSResource.resource_arn.ilike(search_pattern),
+                        CloudResource.resource_id.ilike(search_pattern),
+                        CloudResource.name.ilike(search_pattern),
+                        CloudResource.resource_id.ilike(search_pattern),
                     )
                 ).limit(limit).all()
 
@@ -873,7 +874,7 @@ class OpsAgent:
 
                 lines = [f"Found {len(resources)} resources matching '{query}':"]
                 for r in resources:
-                    name = r.resource_name or r.resource_id
+                    name = r.name or r.resource_id
                     lines.append(f"- {r.resource_type}/{name} ({r.region})")
 
                 return "\n".join(lines)

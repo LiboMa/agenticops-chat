@@ -10,8 +10,8 @@ import numpy as np
 from agenticops.models import (
     Anomaly,
     AnomalySeverity,
-    AWSAccount,
-    AWSResource,
+    CloudAccount,
+    CloudResource,
     MetricDataPoint,
     get_session,
 )
@@ -161,7 +161,7 @@ class StatisticalDetector:
 class AnomalyDetector:
     """Main anomaly detector combining rules and statistical methods."""
 
-    def __init__(self, account: AWSAccount):
+    def __init__(self, account: CloudAccount):
         """Initialize detector with AWS account."""
         self.account = account
         self.monitor = CloudWatchMonitor(account)
@@ -170,7 +170,7 @@ class AnomalyDetector:
 
     def detect_for_resource(
         self,
-        resource: AWSResource,
+        resource: CloudResource,
         hours: int = 1,
         save: bool = True,
     ) -> list[AnomalyDetectionResult]:
@@ -239,7 +239,7 @@ class AnomalyDetector:
     def _rule_to_detection_result(
         self,
         rule_result: RuleResult,
-        resource: AWSResource,
+        resource: CloudResource,
         metric_name: str,
         value: float,
     ) -> AnomalyDetectionResult:
@@ -273,7 +273,7 @@ class AnomalyDetector:
 
     def _create_statistical_result(
         self,
-        resource: AWSResource,
+        resource: CloudResource,
         metric_name: str,
         anomaly_type: str,
         value: float,
@@ -313,7 +313,7 @@ class AnomalyDetector:
 
     def _save_anomalies(
         self,
-        resource: AWSResource,
+        resource: CloudResource,
         results: list[AnomalyDetectionResult],
     ):
         """Save detected anomalies to database."""
@@ -362,10 +362,10 @@ class AnomalyDetector:
         all_results = {}
 
         try:
-            query = session.query(AWSResource).filter_by(account_id=self.account.id)
+            query = session.query(CloudResource).filter_by(account_id=self.account.id)
 
             if service_types:
-                query = query.filter(AWSResource.resource_type.in_(service_types))
+                query = query.filter(CloudResource.resource_type.in_(service_types))
             if region:
                 query = query.filter_by(region=region)
 

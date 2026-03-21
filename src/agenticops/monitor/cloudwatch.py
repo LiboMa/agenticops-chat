@@ -8,7 +8,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from agenticops.config import settings
-from agenticops.models import AWSAccount, MetricDataPoint, get_session
+from agenticops.models import CloudAccount, MetricDataPoint, get_session
 from agenticops.scan.services import AWS_SERVICES
 
 logger = logging.getLogger(__name__)
@@ -17,14 +17,16 @@ logger = logging.getLogger(__name__)
 class CloudWatchMonitor:
     """CloudWatch metrics and logs monitor."""
 
-    def __init__(self, account: AWSAccount):
+    def __init__(self, account: CloudAccount):
         """Initialize with AWS account."""
         self.account = account
         self._session_cache: dict[str, boto3.Session] = {}
 
     def _get_assumed_session(self, region: str) -> boto3.Session:
         """Get boto3 session with assumed role."""
-        cache_key = f"{self.account.account_id}:{region}"
+        creds = self.account.credentials or {}
+        acct_id = creds.get("account_id", "")
+        cache_key = f"{acct_id}:{region}"
 
         if cache_key in self._session_cache:
             return self._session_cache[cache_key]
@@ -32,12 +34,13 @@ class CloudWatchMonitor:
         sts = boto3.client("sts", region_name=region)
 
         assume_kwargs = {
-            "RoleArn": self.account.role_arn,
-            "RoleSessionName": f"AgenticOps-Monitor-{self.account.account_id}",
+            "RoleArn": creds.get("role_arn", ""),
+            "RoleSessionName": f"AgenticOps-Monitor-{acct_id}",
             "DurationSeconds": 3600,
         }
-        if self.account.external_id:
-            assume_kwargs["ExternalId"] = self.account.external_id
+        ext_id = creds.get("external_id", "")
+        if ext_id:
+            assume_kwargs["ExternalId"] = ext_id
 
         response = sts.assume_role(**assume_kwargs)
         credentials = response["Credentials"]

@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     # Prompt caching toggle
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
 
+    # CLI tool output limit (0 = unlimited)
+    cli_max_output_chars: int = Field(default=0, description="Max chars for CLI tool output (0 = no limit)")
+
     # Notification consolidation
     notifications_consolidated: bool = Field(
         default=False,
@@ -553,6 +556,12 @@ class Settings(BaseSettings):
         description="Base weight in hybrid search reranking (0-1)",
     )
 
+    # Default regions per cloud provider (for account creation UI)
+    default_regions: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Default regions per cloud provider for account creation UI",
+    )
+
     def ensure_dirs(self) -> None:
         """Ensure all required directories exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -669,10 +678,10 @@ VALID_SCAN_FOCUS = ("computing", "networking", "databases", "storage", "security
 
 SCAN_FOCUS_SERVICES = {
     "computing": "EC2,Lambda,ECS,EKS,AutoScaling",
-    "networking": "VPC,Subnet,SecurityGroup,RouteTable,NATGateway,TransitGateway,ELB,CloudFront,Route53",
-    "databases": "RDS,DynamoDB,ElastiCache,Redshift,OpenSearch",
-    "storage": "S3,EBS,EFS,Backup",
-    "security": "security",
+    "networking": "VPC,Subnet,SecurityGroup,NATGateway,ELB,Route53",
+    "databases": "RDS,DynamoDB,ElastiCache,OpenSearch",
+    "storage": "S3,EBS,EFS",
+    "security": "IAMRole,KMS",
     "billing": "billing",
     "all": "all",
 }

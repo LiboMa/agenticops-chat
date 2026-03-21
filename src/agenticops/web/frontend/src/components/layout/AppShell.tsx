@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet } from "react-router-dom";
-import { Sidebar } from "./Sidebar";
-import { TopBar } from "./TopBar";
+import { IconSidebar } from "./IconSidebar";
+import { MinimalTopBar } from "./MinimalTopBar";
 import { CommandPalette } from "../CommandPalette";
 
 export function AppShell() {
@@ -21,9 +21,9 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Sidebar />
-      <div className="pl-56">
-        <TopBar onSearchClick={() => setPaletteOpen(true)} />
+      <IconSidebar />
+      <div className="pl-[52px]">
+        <MinimalTopBar />
         <main className="p-6">
           <Outlet />
         </main>

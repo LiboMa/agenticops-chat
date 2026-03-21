@@ -6,22 +6,13 @@ import { Spinner } from "@/components/ui/Spinner";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
-const Resources = lazy(() => import("@/pages/Resources"));
-const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
-const Issues = lazy(() => import("@/pages/Anomalies"));
-const IssueDetail = lazy(() => import("@/pages/AnomalyDetail"));
-const FixPlans = lazy(() => import("@/pages/FixPlans"));
-const FixPlanDetail = lazy(() => import("@/pages/FixPlanDetail"));
+const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
+const IssueDetail = lazy(() => import("@/pages/IssueDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
-const Notifications = lazy(() => import("@/pages/Notifications"));
-const NotificationLogs = lazy(() => import("@/pages/NotificationLogs"));
 const Settings = lazy(() => import("@/pages/Settings"));
-const AuditLog = lazy(() => import("@/pages/AuditLog"));
-const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
-const Skills = lazy(() => import("@/pages/Skills"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,26 +54,10 @@ export default function App() {
               }
             />
             <Route
-              path="resources"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Resources />
-                </Suspense>
-              }
-            />
-            <Route
-              path="resources/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <ResourceDetail />
-                </Suspense>
-              }
-            />
-            <Route
               path="issues"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <Issues />
+                  <IssuesAndPlans />
                 </Suspense>
               }
             />
@@ -91,38 +66,6 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <IssueDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="fix-plans"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <FixPlans />
-                </Suspense>
-              }
-            />
-            <Route
-              path="fix-plans/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <FixPlanDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="reports"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Reports />
-                </Suspense>
-              }
-            />
-            <Route
-              path="reports/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <ReportDetail />
                 </Suspense>
               }
             />
@@ -143,18 +86,18 @@ export default function App() {
               }
             />
             <Route
-              path="notifications"
+              path="reports"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <Notifications />
+                  <Reports />
                 </Suspense>
               }
             />
             <Route
-              path="notifications/logs"
+              path="reports/:id"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <NotificationLogs />
+                  <ReportDetail />
                 </Suspense>
               }
             />
@@ -163,30 +106,6 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Settings />
-                </Suspense>
-              }
-            />
-            <Route
-              path="audit"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <AuditLog />
-                </Suspense>
-              }
-            />
-            <Route
-              path="kb"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <KnowledgeBase />
-                </Suspense>
-              }
-            />
-            <Route
-              path="skills"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Skills />
                 </Suspense>
               }
             />

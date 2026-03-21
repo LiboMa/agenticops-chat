@@ -6,6 +6,7 @@ interface AnomalyFilters {
   severity?: string;
   status?: string;
   resource_type?: string;
+  account_id?: number;
 }
 
 export function useAnomalies(filters: AnomalyFilters = {}) {
@@ -13,6 +14,7 @@ export function useAnomalies(filters: AnomalyFilters = {}) {
   if (filters.severity) params.set("severity", filters.severity);
   if (filters.status) params.set("status", filters.status);
   if (filters.resource_type) params.set("resource_type", filters.resource_type);
+  if (filters.account_id) params.set("account_id", String(filters.account_id));
   const qs = params.toString();
 
   return useQuery({

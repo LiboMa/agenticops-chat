@@ -43,16 +43,22 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
             .all()
         )
 
-    if not rows:
-        return []
+        if not rows:
+            return []
+
+        # Materialise attributes while session is open to avoid DetachedInstanceError
+        row_data = [
+            {"role": msg.role, "content": msg.content or "", "tool_calls": msg.tool_calls}
+            for msg in rows
+        ]
 
     # Reverse to chronological order
-    rows.reverse()
+    row_data.reverse()
 
     # Convert to Strands message format
     raw_messages: List[dict] = []
-    for msg in rows:
-        content = msg.content or ""
+    for msg in row_data:
+        content = msg["content"]
         if not content.strip():
             continue
 
@@ -61,10 +67,10 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
             content = content[:_MAX_MSG_CHARS] + "\n... (truncated)"
 
         # For assistant messages with tool_calls, add a prefix hint
-        if msg.role == "assistant" and msg.tool_calls:
+        if msg["role"] == "assistant" and msg["tool_calls"]:
             try:
                 tool_names = []
-                calls = msg.tool_calls if isinstance(msg.tool_calls, list) else []
+                calls = msg["tool_calls"] if isinstance(msg["tool_calls"], list) else []
                 for tc in calls:
                     name = tc.get("name") or tc.get("tool_name", "unknown")
                     tool_names.append(name)
@@ -74,7 +80,7 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
                 pass
 
         raw_messages.append({
-            "role": msg.role,
+            "role": msg["role"],
             "content": [{"text": content}],
         })
 

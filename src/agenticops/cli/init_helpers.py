@@ -830,29 +830,34 @@ def _validate_account(
 
 def _register_account(details: dict) -> None:
     """Register account in DB (idempotent — skip if account_id exists)."""
-    from agenticops.models import AWSAccount, get_db_session
+    from agenticops.models import CloudAccount, get_db_session
 
     with get_db_session() as session:
         existing = (
-            session.query(AWSAccount)
-            .filter(AWSAccount.account_id == details["account_id"])
+            session.query(CloudAccount)
+            .filter(CloudAccount.name == details["name"])
             .first()
         )
         if existing:
             console.print(f"    [dim]Account {details['account_id']} already registered, updating.[/dim]")
-            existing.name = details["name"]
-            existing.role_arn = details["role_arn"]
-            existing.external_id = details.get("external_id", "")
+            existing.credentials = {
+                "account_id": details["account_id"],
+                "role_arn": details["role_arn"],
+                "external_id": details.get("external_id", ""),
+            }
             existing.regions = details["regions"]
             return
 
-        account = AWSAccount(
+        account = CloudAccount(
             name=details["name"],
-            account_id=details["account_id"],
-            role_arn=details["role_arn"],
-            external_id=details.get("external_id", ""),
+            provider="aws",
+            credentials={
+                "account_id": details["account_id"],
+                "role_arn": details["role_arn"],
+                "external_id": details.get("external_id", ""),
+            },
             regions=details["regions"],
-            is_active=True,
+            is_enabled=True,
         )
         session.add(account)
 

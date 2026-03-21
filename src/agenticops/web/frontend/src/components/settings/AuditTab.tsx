@@ -47,14 +47,14 @@ const columns: Column<AuditLogEntry>[] = [
     key: "details",
     header: "Details",
     render: (r) => (
-      <span className="text-sm text-muted-foreground truncate max-w-[250px] block">
+      <span className="text-sm text-muted-foreground">
         {r.details ?? "-"}
       </span>
     ),
   },
 ];
 
-export default function AuditLog() {
+export function AuditTab() {
   const [action, setAction] = useState("");
   const [entityType, setEntityType] = useState("");
   const [hours, setHours] = useState(24);

@@ -15,8 +15,8 @@ from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
     AlertEvent,
-    AWSAccount,
-    AWSResource,
+    CloudAccount,
+    CloudResource,
     Anomaly,
     FixExecution,
     HealthIssue,
@@ -74,62 +74,95 @@ def _ensure_aws_session(region: str):
 
 
 class AccountCreate(BaseModel):
-    """Schema for creating an account."""
+    """Schema for creating a cloud account."""
     name: str = Field(..., max_length=100)
-    account_id: str = Field(..., max_length=12)
-    role_arn: str = Field(..., max_length=200)
-    external_id: Optional[str] = Field(None, max_length=100)
-    regions: List[str] = Field(default_factory=lambda: ["us-east-1"])
-    is_active: bool = True
+    provider: str = Field(..., pattern="^(aws|azure|gcp|alicloud)$")
+    credentials: dict = Field(default_factory=dict)
+    regions: List[str] = Field(default_factory=list)
+    labels: dict = Field(default_factory=dict)
+    is_enabled: bool = True
 
 
 class AccountUpdate(BaseModel):
-    """Schema for updating an account."""
+    """Schema for updating a cloud account."""
     name: Optional[str] = Field(None, max_length=100)
-    role_arn: Optional[str] = Field(None, max_length=200)
-    external_id: Optional[str] = Field(None, max_length=100)
+    credentials: Optional[dict] = None
     regions: Optional[List[str]] = None
-    is_active: Optional[bool] = None
+    labels: Optional[dict] = None
+    is_enabled: Optional[bool] = None
+
+
+REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key"}
 
 
 class AccountResponse(BaseModel):
     """Schema for account response."""
     id: int
     name: str
-    account_id: str
-    role_arn: str
-    external_id: Optional[str]
+    provider: str
+    credentials: dict
     regions: List[str]
-    is_active: bool
+    labels: dict
+    is_enabled: bool
     created_at: datetime
     last_scanned_at: Optional[datetime]
 
     class Config:
         from_attributes = True
 
+    @model_validator(mode="after")
+    def redact_secrets(self):
+        if self.credentials:
+            self.credentials = {
+                k: "***REDACTED***" if k in REDACTED_KEYS else v
+                for k, v in self.credentials.items()
+            }
+        return self
+
 
 class ResourceResponse(BaseModel):
     """Schema for resource response."""
     id: int
     account_id: int
+    provider: str = "aws"
     resource_id: str
-    resource_arn: Optional[str]
+    resource_arn: Optional[str] = None
     resource_type: str
-    resource_name: Optional[str]
+    resource_name: Optional[str] = None
     region: str
     status: str
-    resource_metadata: dict
-    tags: dict
+    resource_metadata: dict = Field(default_factory=dict)
+    tags: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
 
+    @classmethod
+    def from_resource(cls, r) -> "ResourceResponse":
+        """Build response from CloudResource, mapping field names."""
+        raw = r.raw_data if isinstance(getattr(r, "raw_data", None), dict) else {}
+        return cls(
+            id=r.id,
+            account_id=r.account_id,
+            provider=getattr(r, "provider", "aws"),
+            resource_id=r.resource_id,
+            resource_arn=raw.get("Arn") or raw.get("arn") or getattr(r, "resource_arn", None),
+            resource_type=r.resource_type,
+            resource_name=getattr(r, "name", None) or getattr(r, "resource_name", None),
+            region=r.region,
+            status=r.status,
+            resource_metadata=raw or getattr(r, "resource_metadata", {}),
+            tags=r.tags if isinstance(r.tags, dict) else {},
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+        )
+
 
 class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
-    status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved)$")
+    status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved|dismissed)$")
     note: Optional[str] = None
 
 
@@ -150,6 +183,8 @@ class AnomalyResponse(BaseModel):
     status: str
     detected_at: datetime
     resolved_at: Optional[datetime]
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -280,12 +315,14 @@ class HealthIssueResponse(BaseModel):
     trace_id: Optional[str] = None
     occurrence_count: int = 1
     merged_alerts: List = Field(default_factory=list)
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
 
     class Config:
         from_attributes = True
 
     @classmethod
-    def from_issue(cls, issue) -> "HealthIssueResponse":
+    def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
         """Build response, extracting merged_alerts from metric_data."""
         md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
         return cls(
@@ -305,6 +342,8 @@ class HealthIssueResponse(BaseModel):
             trace_id=getattr(issue, "trace_id", None),
             occurrence_count=issue.occurrence_count or 1,
             merged_alerts=md.get("merged_alerts", []),
+            account_id=issue.account_id,
+            account_name=account_name,
         )
 
 
@@ -358,6 +397,7 @@ class FixPlanResponse(BaseModel):
     approved_by: Optional[str]
     approved_at: Optional[datetime]
     created_at: datetime
+    account_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -587,6 +627,10 @@ class ReportFromSessionRequest(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     name: Optional[str] = None
+
+
+class ChatSessionUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
 
 
 class ChatMessageCreate(BaseModel):
@@ -1161,6 +1205,26 @@ async def api_reload_mcp_servers():
     return {"reloaded": len(clients)}
 
 
+@app.get("/api/settings/issue-exclude-patterns")
+async def api_get_exclude_patterns():
+    return {"patterns": settings.issue_exclude_patterns}
+
+
+@app.patch("/api/settings/issue-exclude-patterns")
+async def api_update_exclude_patterns(body: dict):
+    patterns = body.get("patterns", [])
+    if not isinstance(patterns, list):
+        raise HTTPException(status_code=400, detail="patterns must be a list")
+    import re
+    for p in patterns:
+        try:
+            re.compile(p)
+        except re.error as e:
+            raise HTTPException(status_code=400, detail=f"Invalid regex pattern '{p}': {e}")
+    settings.issue_exclude_patterns = patterns
+    return {"patterns": settings.issue_exclude_patterns}
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def api_health():
     """Health check endpoint."""
@@ -1254,10 +1318,10 @@ async def api_stats():
     """API endpoint for dashboard stats."""
     with get_db_session() as session:
         return {
-            "total_resources": session.query(AWSResource).count(),
+            "total_resources": session.query(CloudResource).count(),
             "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
             "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
-            "total_accounts": session.query(AWSAccount).count(),
+            "total_accounts": session.query(CloudAccount).count(),
         }
 
 
@@ -1299,8 +1363,8 @@ async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
 
         # 3) Resource changes per day
         res_rows = (
-            session.query(func.date(AWSResource.created_at).label("d"), func.count().label("n"))
-            .filter(AWSResource.created_at >= cutoff)
+            session.query(func.date(CloudResource.created_at).label("d"), func.count().label("n"))
+            .filter(CloudResource.created_at >= cutoff)
             .group_by("d").all()
         )
         resources = [{"date": str(r.d), "added": r.n} for r in res_rows]
@@ -1382,18 +1446,20 @@ async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
 
 
 @app.get("/api/accounts", response_model=List[AccountResponse])
-async def api_list_accounts():
-    """List all AWS accounts."""
+async def api_list_accounts(provider: str | None = None):
+    """List cloud accounts, optionally filtered by provider."""
     with get_db_session() as session:
-        accounts = session.query(AWSAccount).all()
-        return [AccountResponse.model_validate(a) for a in accounts]
+        q = session.query(CloudAccount)
+        if provider:
+            q = q.filter(CloudAccount.provider == provider)
+        return [AccountResponse.model_validate(a) for a in q.all()]
 
 
 @app.get("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_get_account(account_id: int):
     """Get account by ID."""
     with get_db_session() as session:
-        account = session.query(AWSAccount).filter_by(id=account_id).first()
+        account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
         return AccountResponse.model_validate(account)
@@ -1401,53 +1467,96 @@ async def api_get_account(account_id: int):
 
 @app.post("/api/accounts", response_model=AccountResponse, status_code=201)
 async def api_create_account(account: AccountCreate):
-    """Create a new AWS account."""
+    """Create a new cloud account."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
-        # Check if account name or account_id already exists
-        existing = session.query(AWSAccount).filter(
-            (AWSAccount.name == account.name) | (AWSAccount.account_id == account.account_id)
+        existing = session.query(CloudAccount).filter(
+            CloudAccount.name == account.name
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Account name or ID already exists")
+            raise HTTPException(status_code=409, detail=f"Account name '{account.name}' already exists")
 
-        db_account = AWSAccount(
+        db_account = CloudAccount(
             name=account.name,
-            account_id=account.account_id,
-            role_arn=account.role_arn,
-            external_id=account.external_id,
+            provider=account.provider,
+            is_enabled=account.is_enabled,
+            credentials=account.credentials,
             regions=account.regions,
-            is_active=account.is_active,
+            labels=account.labels,
         )
         session.add(db_account)
-        session.flush()  # Get the ID
+        try:
+            session.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=f"Account name '{account.name}' already exists")
         return AccountResponse.model_validate(db_account)
 
 
 @app.put("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_update_account(account_id: int, account: AccountUpdate):
-    """Update an existing AWS account."""
+    """Update an existing cloud account."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
-        db_account = session.query(AWSAccount).filter_by(id=account_id).first()
+        db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
 
         update_data = account.model_dump(exclude_unset=True)
+
+        # Check name uniqueness before applying
+        new_name = update_data.get("name")
+        if new_name and new_name != db_account.name:
+            conflict = session.query(CloudAccount).filter(
+                CloudAccount.name == new_name, CloudAccount.id != account_id
+            ).first()
+            if conflict:
+                raise HTTPException(status_code=409, detail=f"Account name '{new_name}' already exists")
+
         for key, value in update_data.items():
             setattr(db_account, key, value)
 
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=f"Account name '{new_name or db_account.name}' already exists")
         return AccountResponse.model_validate(db_account)
 
 
 @app.delete("/api/accounts/{account_id}", status_code=204)
 async def api_delete_account(account_id: int):
-    """Delete an AWS account."""
+    """Delete a cloud account and its associated resources."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_db_session() as session:
-        db_account = session.query(AWSAccount).filter_by(id=account_id).first()
+        db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
+        try:
+            session.delete(db_account)
+            session.flush()
+        except IntegrityError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot delete account: it is still referenced by other records ({e.orig})",
+            )
 
-        session.delete(db_account)
+
+@app.post("/api/accounts/{account_id}/test")
+async def api_test_account_connection(account_id: int):
+    """Test credential chain for an account. Returns success/failure."""
+    from agenticops.providers import get_provider
+    with get_db_session() as session:
+        acct = session.query(CloudAccount).filter_by(id=account_id).first()
+        if not acct:
+            raise HTTPException(status_code=404, detail="Account not found")
+        try:
+            provider = get_provider(acct)
+            success = provider.resolve_credentials()
+            return {"success": success, "provider": acct.provider, "name": acct.name}
+        except Exception as e:
+            return {"success": False, "provider": acct.provider, "name": acct.name, "error": str(e)}
 
 
 # ============================================================================
@@ -1455,18 +1564,19 @@ async def api_delete_account(account_id: int):
 # ============================================================================
 
 
-@app.get("/api/resources", response_model=List[ResourceResponse])
+@app.get("/api/resources")
 async def api_list_resources(
     resource_type: Optional[str] = Query(None, alias="type"),
     region: Optional[str] = None,
     account_id: Optional[int] = None,
     status: Optional[str] = None,
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    q: Optional[str] = Query(None, description="Search by resource ID, name, or type"),
+    limit: int = Query(default=50, ge=1),
     offset: int = Query(default=0, ge=0),
 ):
-    """List resources with filtering."""
+    """List resources with filtering and pagination."""
     with get_db_session() as session:
-        query = session.query(AWSResource)
+        query = session.query(CloudResource)
 
         if resource_type:
             query = query.filter_by(resource_type=resource_type)
@@ -1476,9 +1586,20 @@ async def api_list_resources(
             query = query.filter_by(account_id=account_id)
         if status:
             query = query.filter_by(status=status)
+        if q:
+            pattern = f"%{q}%"
+            query = query.filter(
+                CloudResource.resource_id.ilike(pattern)
+                | CloudResource.resource_name.ilike(pattern)
+                | CloudResource.resource_type.ilike(pattern)
+            )
 
+        total = query.count()
         resources = query.offset(offset).limit(limit).all()
-        return [ResourceResponse.model_validate(r) for r in resources]
+        return {
+            "total": total,
+            "items": [ResourceResponse.from_resource(r) for r in resources],
+        }
 
 
 @app.get("/api/resources/type-counts")
@@ -1486,22 +1607,98 @@ async def api_resource_type_counts():
     """Resource counts grouped by type."""
     with get_db_session() as session:
         rows = (
-            session.query(AWSResource.resource_type, func.count())
-            .group_by(AWSResource.resource_type)
+            session.query(CloudResource.resource_type, func.count())
+            .group_by(CloudResource.resource_type)
             .order_by(func.count().desc())
             .all()
         )
         return {rtype: count for rtype, count in rows}
 
 
+class ScanRequest(BaseModel):
+    account_ids: Optional[List[int]] = None
+    focus: str = "all"
+    regions: Optional[List[str]] = None
+
+
+@app.post("/api/scan")
+async def api_trigger_scan(req: ScanRequest):
+    """Trigger parallel resource scan across enabled accounts."""
+    from agenticops.scanner import scan_accounts_parallel
+    result = await scan_accounts_parallel(
+        account_ids=req.account_ids,
+        focus=req.focus,
+        regions=req.regions,
+    )
+    return {
+        "total_found": result.total_found,
+        "total_updated": result.total_updated,
+        "duration_s": result.duration_s,
+        "accounts": [
+            {
+                "account_id": a.account_id,
+                "account_name": a.account_name,
+                "provider": a.provider,
+                "resources_found": a.resources_found,
+                "resources_updated": a.resources_updated,
+                "regions_scanned": a.regions_scanned,
+                "errors": a.errors,
+            }
+            for a in result.accounts
+        ],
+    }
+
+
+class HealthCheckRequest(BaseModel):
+    account_ids: Optional[List[int]] = None
+    scope: str = "all"
+    deep: bool = False
+
+
+@app.post("/api/health-check")
+async def api_trigger_health_check(req: HealthCheckRequest):
+    """Trigger parallel health check across enabled accounts."""
+    from agenticops.checker import check_accounts_parallel
+    result = await check_accounts_parallel(
+        account_ids=req.account_ids, scope=req.scope, deep=req.deep
+    )
+    return {
+        "total_issues": result.total_issues,
+        "duration_s": result.duration_s,
+        "token_usage": {
+            "input_tokens": result.total_input_tokens,
+            "output_tokens": result.total_output_tokens,
+            "cache_read_tokens": result.total_cache_read_tokens,
+            "cache_write_tokens": result.total_cache_write_tokens,
+        },
+        "accounts": [
+            {
+                "account_id": a.account_id,
+                "account_name": a.account_name,
+                "provider": a.provider,
+                "issues_created": a.issues_created,
+                "duration_s": a.duration_s,
+                "errors": a.errors,
+                "token_usage": {
+                    "input_tokens": a.input_tokens,
+                    "output_tokens": a.output_tokens,
+                    "cache_read_tokens": a.cache_read_tokens,
+                    "cache_write_tokens": a.cache_write_tokens,
+                },
+            }
+            for a in result.accounts
+        ],
+    }
+
+
 @app.get("/api/resources/{resource_id}", response_model=ResourceResponse)
 async def api_get_resource(resource_id: int):
     """Get resource by ID."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
-        return ResourceResponse.model_validate(resource)
+        return ResourceResponse.from_resource(resource)
 
 
 # ── Resource Detail sub-endpoints ──────────────────────────────────────
@@ -1559,7 +1756,7 @@ def _guess_type(resource_id: str) -> str:
 async def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
     """List health issues for a resource."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         issues = (
@@ -1576,7 +1773,7 @@ async def api_resource_issues(resource_id: int, limit: int = Query(default=20, l
 async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20, le=100)):
     """List fix plans for a resource (via linked health issues)."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         plans = (
@@ -1600,11 +1797,11 @@ async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20
 async def api_resource_related(resource_id: int):
     """Get related resources — network context or contained resources."""
     with get_db_session() as session:
-        resource = session.query(AWSResource).filter_by(id=resource_id).first()
+        resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        meta = resource.resource_metadata or {}
+        meta = resource.raw_data or {}
         is_infra = resource.resource_type in _INFRA_TYPES
         network: list[RelatedResourceItem] = []
         contains: list[RelatedResourceItem] = []
@@ -1613,10 +1810,10 @@ async def api_resource_related(resource_id: int):
             ref_key = _infra_ref_key(resource.resource_type)
             if ref_key:
                 matched = (
-                    session.query(AWSResource)
+                    session.query(CloudResource)
                     .filter(
-                        AWSResource.id != resource.id,
-                        func.json_extract(AWSResource.resource_metadata, f"$.{ref_key}") == resource.resource_id,
+                        CloudResource.id != resource.id,
+                        func.json_extract(CloudResource.raw_data, f"$.{ref_key}") == resource.resource_id,
                     )
                     .limit(100)
                     .all()
@@ -1625,7 +1822,7 @@ async def api_resource_related(resource_id: int):
                     contains.append(RelatedResourceItem(
                         id=c.id, resource_id=c.resource_id,
                         resource_type=c.resource_type,
-                        resource_name=c.resource_name, status=c.status,
+                        resource_name=c.name, status=c.status,
                     ))
         else:
             for key in ("vpc_id", "subnet_id", "security_groups", "subnet_ids"):
@@ -1636,12 +1833,12 @@ async def api_resource_related(resource_id: int):
                 for rid in ids:
                     if not isinstance(rid, str):
                         continue
-                    linked = session.query(AWSResource).filter_by(resource_id=rid).first()
+                    linked = session.query(CloudResource).filter_by(resource_id=rid).first()
                     if linked:
                         network.append(RelatedResourceItem(
                             id=linked.id, resource_id=linked.resource_id,
                             resource_type=linked.resource_type,
-                            resource_name=linked.resource_name, status=linked.status,
+                            resource_name=linked.name, status=linked.status,
                         ))
                     else:
                         network.append(RelatedResourceItem(resource_id=rid, resource_type=_guess_type(rid)))
@@ -1649,12 +1846,21 @@ async def api_resource_related(resource_id: int):
         return RelatedResourcesResponse(network=network, contains=contains)
 
 
+def _build_account_name_map(session, issues) -> dict[int, str]:
+    """Batch-load account names for a list of HealthIssues to avoid N+1 queries."""
+    account_ids = {i.account_id for i in issues if i.account_id}
+    if not account_ids:
+        return {}
+    rows = session.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.id.in_(account_ids)).all()
+    return {aid: aname for aid, aname in rows}
+
+
 # ============================================================================
 # Anomaly API Endpoints (Legacy — backed by HealthIssue)
 # ============================================================================
 
 
-def _health_issue_to_anomaly_response(issue: HealthIssue) -> AnomalyResponse:
+def _health_issue_to_anomaly_response(issue: HealthIssue, account_name: Optional[str] = None) -> AnomalyResponse:
     """Map a HealthIssue to the legacy AnomalyResponse format."""
     metric_data = issue.metric_data or {}
     return AnomalyResponse(
@@ -1673,6 +1879,8 @@ def _health_issue_to_anomaly_response(issue: HealthIssue) -> AnomalyResponse:
         status=issue.status,
         detected_at=issue.detected_at,
         resolved_at=issue.resolved_at,
+        account_id=issue.account_id,
+        account_name=account_name,
     )
 
 
@@ -1681,6 +1889,7 @@ async def api_list_anomalies(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_type: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
 ):
@@ -1692,13 +1901,16 @@ async def api_list_anomalies(
             query = query.filter_by(severity=severity)
         if status:
             query = query.filter_by(status=status)
+        if account_id is not None:
+            query = query.filter_by(account_id=account_id)
         if resource_type:
             query = query.filter(
                 HealthIssue.metric_data["resource_type"].as_string() == resource_type
             )
 
         issues = query.offset(offset).limit(limit).all()
-        return [_health_issue_to_anomaly_response(i) for i in issues]
+        acct_names = _build_account_name_map(session, issues)
+        return [_health_issue_to_anomaly_response(i, acct_names.get(i.account_id)) for i in issues]
 
 
 @app.get("/api/anomalies/{anomaly_id}", response_model=AnomalyResponse)
@@ -1708,7 +1920,11 @@ async def api_get_anomaly(anomaly_id: int):
         issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
-        return _health_issue_to_anomaly_response(issue)
+        acct_name = None
+        if issue.account_id:
+            acct = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+            acct_name = acct
+        return _health_issue_to_anomaly_response(issue, acct_name)
 
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
@@ -1733,7 +1949,10 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
             issue.resolved_at = datetime.utcnow()
 
         session.flush()
-        return _health_issue_to_anomaly_response(issue)
+        acct_name = None
+        if issue.account_id:
+            acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+        return _health_issue_to_anomaly_response(issue, acct_name)
 
 
 @app.get("/api/anomalies/{issue_id}/rca", response_model=Optional[RCAResponse])
@@ -1778,11 +1997,12 @@ async def api_list_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_type: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
 ):
     """List issues."""
-    return await api_list_anomalies(severity, status, resource_type, limit, offset)
+    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset)
 
 
 @app.get("/api/issues/{issue_id}", response_model=AnomalyResponse)
@@ -1827,6 +2047,7 @@ async def api_list_health_issues(
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
     trace_id: Optional[str] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
@@ -1844,9 +2065,12 @@ async def api_list_health_issues(
             query = query.filter_by(source=source)
         if trace_id:
             query = query.filter_by(trace_id=trace_id)
+        if account_id is not None:
+            query = query.filter_by(account_id=account_id)
 
         issues = query.offset(offset).limit(limit).all()
-        return [HealthIssueResponse.from_issue(i) for i in issues]
+        acct_names = _build_account_name_map(session, issues)
+        return [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues]
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -1856,7 +2080,10 @@ async def api_get_health_issue(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
-        return HealthIssueResponse.from_issue(issue)
+        acct_name = None
+        if issue.account_id:
+            acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
+        return HealthIssueResponse.from_issue(issue, acct_name)
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
@@ -2189,6 +2416,7 @@ async def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
+    account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
@@ -2202,9 +2430,22 @@ async def api_list_fix_plans(
             query = query.filter_by(risk_level=risk_level)
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
+        if account_id is not None:
+            query = query.join(HealthIssue).filter(HealthIssue.account_id == account_id)
 
         plans = query.offset(offset).limit(limit).all()
-        return [FixPlanResponse.model_validate(p) for p in plans]
+        # Resolve account_id from related HealthIssue
+        issue_ids = {p.health_issue_id for p in plans}
+        issue_accounts: dict[int, Optional[int]] = {}
+        if issue_ids:
+            rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
+            issue_accounts = {iid: aid for iid, aid in rows}
+        results = []
+        for p in plans:
+            resp = FixPlanResponse.model_validate(p)
+            resp.account_id = issue_accounts.get(p.health_issue_id)
+            results.append(resp)
+        return results
 
 
 @app.get("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
@@ -2214,7 +2455,10 @@ async def api_get_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        return FixPlanResponse.model_validate(plan)
+        resp = FixPlanResponse.model_validate(plan)
+        issue = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
+        resp.account_id = issue
+        return resp
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
@@ -2875,11 +3119,11 @@ async def api_generate_report(request: ReportGenerateRequest):
         # Get account if specified
         account = None
         if request.account_name:
-            account = session.query(AWSAccount).filter_by(name=request.account_name).first()
+            account = session.query(CloudAccount).filter_by(name=request.account_name).first()
             if not account:
                 raise HTTPException(status_code=404, detail="Account not found")
         else:
-            account = session.query(AWSAccount).filter_by(is_active=True).first()
+            account = session.query(CloudAccount).filter_by(is_enabled=True).first()
 
         generator = ReportGenerator(account)
 
@@ -4081,11 +4325,11 @@ async def api_search(
 
         if "resources" in search_types:
             rows = (
-                db.query(AWSResource)
+                db.query(CloudResource)
                 .filter(
-                    func.lower(AWSResource.resource_id).like(search_term)
-                    | func.lower(AWSResource.resource_name).like(search_term)
-                    | func.lower(AWSResource.resource_type).like(search_term)
+                    func.lower(CloudResource.resource_id).like(search_term)
+                    | func.lower(CloudResource.name).like(search_term)
+                    | func.lower(CloudResource.resource_type).like(search_term)
                 )
                 .limit(limit)
                 .all()
@@ -4093,7 +4337,7 @@ async def api_search(
             results["resources"] = [
                 SearchResultItem(
                     id=r.id,
-                    title=r.resource_name or r.resource_id,
+                    title=r.name or r.resource_id,
                     subtitle=f"{r.resource_type} | {r.region} | {r.resource_id}",
                     entity_type="resource",
                     status=r.status,
@@ -4172,6 +4416,51 @@ async def api_get_chat_session(session_id: str):
                 created_at=m.created_at,
             ) for m in msgs],
         )
+
+
+@app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate):
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        row.name = payload.name
+        row.updated_at = datetime.utcnow()
+        db.flush()
+        cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
+        return ChatSessionResponse(
+            id=row.id, session_id=row.session_id, name=row.name,
+            created_at=row.created_at, updated_at=row.updated_at,
+            last_activity_at=row.last_activity_at, message_count=cnt,
+        )
+
+
+def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
+    """Generate a concise session title using the cheap LLM. Returns None on failure."""
+    try:
+        import boto3
+
+        client = boto3.client("bedrock-runtime", region_name=settings.bedrock_region)
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 30,
+            "messages": [{"role": "user", "content": (
+                "Generate a concise title (max 6 words) for this conversation. "
+                "Reply with ONLY the title, no quotes.\n\n"
+                f"User: {user_msg[:500]}\nAssistant: {assistant_msg[:500]}"
+            )}],
+        })
+        resp = client.invoke_model(
+            modelId=settings.bedrock_model_id_cheap,
+            contentType="application/json",
+            accept="application/json",
+            body=body,
+        )
+        title = json.loads(resp["body"].read()).get("content", [{}])[0].get("text", "").strip()
+        return title if title else None
+    except Exception as e:
+        logger.warning("Session title generation failed: %s", e)
+        return None
 
 
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
@@ -4367,6 +4656,23 @@ async def api_send_chat_message(session_id: str, request: Request):
                     tool_calls=tool_calls if tool_calls else None,
                     token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
                 ))
+
+            # Auto-name session after first exchange
+            import re as _re
+            with get_db_session() as db:
+                msg_count = db.query(func.count(ChatMessage.id)).filter(
+                    ChatMessage.session_id == db_session_pk
+                ).scalar()
+                if msg_count == 2:
+                    sess = db.query(ChatSession).filter(ChatSession.id == db_session_pk).first()
+                    if sess and _re.match(r"^Chat \d{4}-\d{2}-\d{2}", sess.name):
+                        title = await asyncio.get_event_loop().run_in_executor(
+                            None, _generate_session_title, user_content[:500], accumulated[:500]
+                        )
+                        if title:
+                            sess.name = title
+                            sess.updated_at = datetime.utcnow()
+                            yield {"event": "session_renamed", "data": json.dumps({"name": title})}
 
             yield {
                 "event": "done",

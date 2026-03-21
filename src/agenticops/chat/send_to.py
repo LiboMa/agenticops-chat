@@ -292,16 +292,29 @@ def _send_via_channel(channel_name: str, subject: str, body: str) -> SendToResul
 
     For sns-report channels with a #R<id> reference, triggers rich report distribution
     (formatted files uploaded to S3 with presigned URLs).
+    For html-preferred channels, converts markdown to HTML and delivers via S3+SES/SNS.
     """
     from agenticops.notify.im_config import get_channel
 
     channel = get_channel(channel_name)
 
-    # Rich report distribution for sns-report channels
+    # Rich report distribution for sns-report channels with #R reference
     if channel and channel.channel_type == "sns-report":
         report_id = _extract_report_id(body)
         if report_id:
             return _send_report_via_channel(channel_name, channel.config, report_id)
+
+    # HTML delivery for html-preferred channels (text content)
+    if channel and channel.preferred_format == "html":
+        try:
+            from agenticops.tools.notification_tools import _send_html_content
+
+            ok = _send_html_content(channel, subject, body)
+            if ok:
+                return SendToResult(success=True, message=f"HTML content sent to {channel_name}")
+            return SendToResult(success=False, message=f"HTML delivery to {channel_name} failed")
+        except Exception as e:
+            logger.warning("HTML path failed for %s, falling back to text: %s", channel_name, e)
 
     # Default: plain text via NotificationManager
     from agenticops.notify.notifier import NotificationManager

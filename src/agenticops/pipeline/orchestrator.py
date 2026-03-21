@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
 
-from agenticops.models import AWSAccount, get_db_session
+from agenticops.models import CloudAccount, get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class FunctionStep(PipelineStep):
 class Pipeline:
     """Pipeline for orchestrating multi-step operations."""
 
-    def __init__(self, name: str, account: Optional[AWSAccount] = None):
+    def __init__(self, name: str, account: Optional[CloudAccount] = None):
         self.name = name
         self.account = account
         self.steps: List[PipelineStep] = []
@@ -227,7 +227,7 @@ class Pipeline:
 # ============================================================================
 
 
-def FullScanPipeline(account: AWSAccount) -> Pipeline:
+def FullScanPipeline(account: CloudAccount) -> Pipeline:
     """Create a full scan pipeline: scan -> detect -> analyze -> report.
 
     Args:
@@ -241,7 +241,7 @@ def FullScanPipeline(account: AWSAccount) -> Pipeline:
     from agenticops.analyze import RCAEngine
     from agenticops.report import ReportGenerator
 
-    def scan_step(account: AWSAccount) -> dict:
+    def scan_step(account: CloudAccount) -> dict:
         """Scan AWS resources."""
         scanner = AWSScanner(account)
         results = scanner.scan_all_services()
@@ -252,7 +252,7 @@ def FullScanPipeline(account: AWSAccount) -> Pipeline:
             "errors": sum(1 for r in results if not r.success),
         }
 
-    def detect_step(account: AWSAccount) -> dict:
+    def detect_step(account: CloudAccount) -> dict:
         """Detect anomalies."""
         detector = AnomalyDetector(account)
         results = detector.detect_all()
@@ -262,7 +262,7 @@ def FullScanPipeline(account: AWSAccount) -> Pipeline:
             "by_resource": {k: len(v) for k, v in results.items()},
         }
 
-    def analyze_step(account: AWSAccount, detect: dict) -> dict:
+    def analyze_step(account: CloudAccount, detect: dict) -> dict:
         """Analyze detected anomalies."""
         if detect.get("total_anomalies", 0) == 0:
             return {"analyzed": 0}
@@ -291,7 +291,7 @@ def FullScanPipeline(account: AWSAccount) -> Pipeline:
 
         return {"analyzed": analyzed}
 
-    def report_step(account: AWSAccount, scan: dict, detect: dict) -> dict:
+    def report_step(account: CloudAccount, scan: dict, detect: dict) -> dict:
         """Generate report."""
         generator = ReportGenerator(account)
         content = generator.generate_daily_report()
@@ -309,7 +309,7 @@ def FullScanPipeline(account: AWSAccount) -> Pipeline:
     return pipeline
 
 
-def MonitoringPipeline(account: AWSAccount) -> Pipeline:
+def MonitoringPipeline(account: CloudAccount) -> Pipeline:
     """Create a monitoring pipeline: monitor -> detect -> notify.
 
     Args:
@@ -320,7 +320,7 @@ def MonitoringPipeline(account: AWSAccount) -> Pipeline:
     """
     from agenticops.detect import AnomalyDetector
 
-    def monitor_step(account: AWSAccount) -> dict:
+    def monitor_step(account: CloudAccount) -> dict:
         """Collect metrics."""
         from agenticops.monitor import MetricsCollector
 
@@ -332,7 +332,7 @@ def MonitoringPipeline(account: AWSAccount) -> Pipeline:
             logger.warning(f"Metrics collection warning: {e}")
             return {"metrics_collected": 0}
 
-    def detect_step(account: AWSAccount) -> dict:
+    def detect_step(account: CloudAccount) -> dict:
         """Detect anomalies."""
         detector = AnomalyDetector(account)
         results = detector.detect_all()
@@ -362,7 +362,7 @@ def MonitoringPipeline(account: AWSAccount) -> Pipeline:
     return pipeline
 
 
-def DailyReportPipeline(account: AWSAccount) -> Pipeline:
+def DailyReportPipeline(account: CloudAccount) -> Pipeline:
     """Create a daily report pipeline: scan -> detect -> analyze -> daily_report.
 
     Args:
@@ -375,7 +375,7 @@ def DailyReportPipeline(account: AWSAccount) -> Pipeline:
     from agenticops.detect import AnomalyDetector
     from agenticops.report import ReportGenerator
 
-    def scan_step(account: AWSAccount) -> dict:
+    def scan_step(account: CloudAccount) -> dict:
         """Scan AWS resources."""
         scanner = AWSScanner(account)
         results = scanner.scan_all_services()
@@ -385,7 +385,7 @@ def DailyReportPipeline(account: AWSAccount) -> Pipeline:
             "saved": saved,
         }
 
-    def detect_step(account: AWSAccount) -> dict:
+    def detect_step(account: CloudAccount) -> dict:
         """Detect anomalies."""
         detector = AnomalyDetector(account)
         results = detector.detect_all()
@@ -393,7 +393,7 @@ def DailyReportPipeline(account: AWSAccount) -> Pipeline:
             "total_anomalies": sum(len(v) for v in results.values()),
         }
 
-    def analyze_step(account: AWSAccount) -> dict:
+    def analyze_step(account: CloudAccount) -> dict:
         """Brief analysis of top anomalies."""
         from agenticops.models import Anomaly
         from agenticops.analyze import RCAEngine
@@ -420,7 +420,7 @@ def DailyReportPipeline(account: AWSAccount) -> Pipeline:
 
         return {"analyzed": analyzed}
 
-    def daily_report_step(account: AWSAccount) -> dict:
+    def daily_report_step(account: CloudAccount) -> dict:
         """Generate daily report."""
         generator = ReportGenerator(account)
         content = generator.generate_daily_report()

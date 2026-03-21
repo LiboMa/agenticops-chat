@@ -219,7 +219,7 @@ class Scheduler:
 
     def _execute_schedule(self, schedule: Schedule):
         """Execute a scheduled pipeline."""
-        from agenticops.models import AWSAccount
+        from agenticops.models import CloudAccount
         from agenticops.pipeline import (
             FullScanPipeline,
             MonitoringPipeline,
@@ -250,12 +250,12 @@ class Scheduler:
             account = None
             if schedule.account_name:
                 with get_db_session() as session:
-                    account = session.query(AWSAccount).filter_by(
+                    account = session.query(CloudAccount).filter_by(
                         name=schedule.account_name
                     ).first()
             else:
                 with get_db_session() as session:
-                    account = session.query(AWSAccount).filter_by(is_active=True).first()
+                    account = session.query(CloudAccount).filter_by(is_enabled=True).first()
 
             # Get pipeline factory
             pipeline_factories = {
@@ -350,15 +350,13 @@ class Scheduler:
         notify_channels = config.get("notify_channels", [])
         timeout_seconds = config.get("timeout_seconds", 300)
 
-        # Build enhanced prompt
+        # Build enhanced prompt (notify_channels handled externally via share_content)
         parts = []
         if skills:
             parts.append(f"First activate these skills: {', '.join(skills)}.")
         parts.append(prompt)
         if report_type:
             parts.append(f"Generate a {report_type} type report.")
-        if notify_channels:
-            parts.append(f"Send the report to notification channels: {', '.join(notify_channels)}.")
         enhanced_prompt = " ".join(parts)
 
         response_text = ""
@@ -367,9 +365,15 @@ class Scheduler:
         def _run():
             nonlocal response_text
             try:
-                agent = create_main_agent()
-                result = agent(enhanced_prompt)
-                response_text = str(result)
+                # Suppress auto report distribution during scheduled runs
+                from agenticops.services.notification_service import set_schedule_running
+                set_schedule_running(True)
+                try:
+                    agent = create_main_agent()
+                    result = agent(enhanced_prompt)
+                    response_text = str(result)
+                finally:
+                    set_schedule_running(False)
             except Exception as e:
                 raise e
 
@@ -424,57 +428,27 @@ class Scheduler:
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
-        # Deliver full content to configured notify_channels
+        # Deliver full content to configured notify_channels via share_content
+        # (supports HTML email for html-preferred channels)
         if notify_channels and response_text and not timed_out:
-            self._deliver_content_to_channels(
-                schedule.name, response_text, notify_channels, presigned_url
-            )
-
-    @staticmethod
-    def _deliver_content_to_channels(
-        schedule_name: str,
-        content: str,
-        channel_names: list,
-        presigned_url: str | None = None,
-    ) -> None:
-        """Deliver agent output content to notification channels."""
-        try:
-            from agenticops.notify.notifier import NotificationManager
-
-            subject = f"Schedule '{schedule_name}' — Output"
-            # Build body: summary for notification, link for full content
-            if len(content) > 4000 and presigned_url:
-                summary = content[:500].rstrip()
-                if len(content) > 500:
-                    summary += "..."
-                body = f"{summary}\n\nFull output: {presigned_url}"
-            elif presigned_url:
-                body = f"{content}\n\nDownload: {presigned_url}"
-            else:
-                body = content[:4000]
-
-            manager = NotificationManager()
-            loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(
-                    manager.send_notification(
-                        subject=subject,
-                        body=body,
-                        channel_names=channel_names,
-                    )
-                )
-            finally:
-                loop.close()
+                from agenticops.tools.notification_tools import share_content as _share
 
-            logger.info(
-                "Delivered schedule '%s' content to channels: %s",
-                schedule_name, channel_names,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to deliver schedule '%s' content to channels",
-                schedule_name, exc_info=True,
-            )
+                _share(
+                    subject=f"Schedule '{schedule.name}' — Output",
+                    body=response_text,
+                    channel_names=",".join(notify_channels),
+                    upload_to_s3=True,
+                )
+                logger.info(
+                    "Delivered schedule '%s' content to channels: %s",
+                    schedule.name, notify_channels,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to deliver schedule '%s' content to channels",
+                    schedule.name, exc_info=True,
+                )
 
     @staticmethod
     def add_schedule(
