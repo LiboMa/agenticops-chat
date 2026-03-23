@@ -477,20 +477,22 @@ class TestFullE2EPipeline:
         print(f"[4] Issue status: fix_approved")
 
         # ── Step 5: Simulate executor completion ─────────────────────
+        # Patch post-resolution background thread to avoid concurrent SQLite access
         from agenticops.tools.metadata_tools import save_execution_result
 
-        exec_result = save_execution_result(
-            fix_plan_id=plan_id,
-            health_issue_id=issue_id,
-            status="succeeded",
-            step_results=json.dumps([
-                {"step_index": 1, "command": "kill -9 12345", "status": "succeeded", "output": "Process killed", "duration_ms": 500},
-                {"step_index": 2, "command": "systemctl restart app-worker", "status": "succeeded", "output": "Service restarted", "duration_ms": 2000},
-            ]),
-            pre_check_results=json.dumps([{"check": "CPU > 90%", "status": "passed", "output": "CPU: 97.2%"}]),
-            post_check_results=json.dumps([{"check": "CPU < 50%", "status": "passed", "output": "CPU: 12.4%"}]),
-            duration_ms=5000,
-        )
+        with patch("agenticops.services.resolution_service.trigger_post_resolution"):
+            exec_result = save_execution_result(
+                fix_plan_id=plan_id,
+                health_issue_id=issue_id,
+                status="succeeded",
+                step_results=json.dumps([
+                    {"step_index": 1, "command": "kill -9 12345", "status": "succeeded", "output": "Process killed", "duration_ms": 500},
+                    {"step_index": 2, "command": "systemctl restart app-worker", "status": "succeeded", "output": "Service restarted", "duration_ms": 2000},
+                ]),
+                pre_check_results=json.dumps([{"check": "CPU > 90%", "status": "passed", "output": "CPU: 97.2%"}]),
+                post_check_results=json.dumps([{"check": "CPU < 50%", "status": "passed", "output": "CPU: 12.4%"}]),
+                duration_ms=5000,
+            )
         print(f"[5] Execution saved: {exec_result}")
 
         # ── Verify final state ───────────────────────────────────────
