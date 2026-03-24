@@ -56,7 +56,7 @@ graph TB
 
     subgraph "Knowledge & Skills"
         KB["Knowledge Base<br/>SOPs + Past Cases"]
-        SKILLS["Agent Skills (12)<br/>Domain expertise packages"]
+        SKILLS["Agent Skills (13)<br/>Domain expertise packages"]
         RAG["RAG Pipeline<br/>Vector search + reranking"]
     end
 
@@ -317,7 +317,7 @@ flowchart LR
         REF["read_skill_reference<br/>~2-8K tokens<br/>(deep dive)"]
     end
 
-    subgraph "12 Domain Skills"
+    subgraph "13 Domain Skills"
         S1["linux-admin"]
         S2["network-engineer"]
         S3["kubernetes-admin"]

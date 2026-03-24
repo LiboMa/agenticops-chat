@@ -63,6 +63,7 @@ from agenticops.tools.kb_tools import (
     distill_case_study,
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli
+from agenticops.tools.web_tools import web_fetch
 from agenticops.graph.tools import (
     query_reachability,
     query_impact_radius,
@@ -136,4 +137,6 @@ __all__ = [
     "find_network_path",
     "detect_network_anomalies",
     "analyze_network_segments",
+    # Web tools
+    "web_fetch",
 ]

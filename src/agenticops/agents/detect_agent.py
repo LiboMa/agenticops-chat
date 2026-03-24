@@ -42,6 +42,7 @@ from agenticops.tools.integration_tools import (
     list_provider_alerts,
     query_provider_metrics,
 )
+from agenticops.skills.tools import activate_skill, read_skill_reference
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,8 @@ Priority 1 — CRITICAL (immediate operational impact, resolve NOW):
 - Service down, data loss risk imminent
 
 Priority 2 — HIGH (performance degradation, short-term danger signals):
-- CPU/Memory sustained > 90% causing latency spikes
+# - CPU/Memory sustained > 90% causing latency spikes
+- Memory sustained > 90% causing latency spikes
 - Response time P99 > SLA threshold, elevated error rates (>5%)
 - Database connection pool exhaustion approaching, replication lag growing
 - Network packet loss > 1%, intermittent connectivity, jitter spikes
@@ -163,6 +165,10 @@ TOOL SELECTION — accuracy first:
 - When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 - 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
+8.5. WEB RESEARCH: When investigating potential service-wide issues, call
+     activate_skill("web-research") to load web_fetch, then check cloud provider
+     status pages (e.g., AWS Health Dashboard) to confirm whether symptoms are
+     caused by an upstream provider outage.
 """
 
 
@@ -228,6 +234,9 @@ def _build_detect_agent_for_account(
             list_provider_alerts,
             query_provider_metrics,
             create_health_issue,
+            # Agent Skills (dynamic tool registration)
+            activate_skill,
+            read_skill_reference,
         ],
     )
     return agent
@@ -316,6 +325,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     *cli_tools,
                     list_provider_alerts,
                     query_provider_metrics,
+                    # Agent Skills (dynamic tool registration)
+                    activate_skill,
+                    read_skill_reference,
                 ],
             )
 

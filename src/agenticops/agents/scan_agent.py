@@ -13,6 +13,8 @@ from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.providers.base import get_all_cli_tools
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_enabled_accounts,
@@ -58,6 +60,11 @@ Scan these categories per cloud:
 
 ## Output
 Return a summary: how many resources found per account, per region, per type.
+
+## Agent Skills
+- Use activate_skill("web-research") to fetch cloud provider status pages or
+  service availability info during scans.
+- Skills dynamically register tools — after activation, web_fetch becomes available.
 """
 
 
@@ -159,11 +166,16 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         )
 
         # Build dynamic tool list from enabled accounts
-        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources, check_health]
+        tools: list = [
+            get_enabled_accounts, get_active_account, save_resources,
+            scan_resources, check_health,
+            # Agent Skills (dynamic tool registration)
+            activate_skill, read_skill_reference,
+        ]
         tools.extend(get_all_cli_tools())
 
         agent = Agent(
-            system_prompt=SCAN_SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(SCAN_SYSTEM_PROMPT, include_account=False, agent_type="scan"),
             model=bedrock_model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
