@@ -23,11 +23,12 @@ const SEV_DOT: Record<string, string> = {
 };
 
 const TERMINAL_STATUSES = new Set(["executed", "rejected", "cancelled"]);
+const CLOSED_STATUSES = new Set(["resolved", "dismissed"]);
 
 export default function Dashboard() {
   const { t } = useLocale();
   const stats = useStats();
-  const anomalies = useAnomalies({ status: "open" });
+  const anomalies = useAnomalies();
   const typeCounts = useResourceTypeCounts();
   const executor = useExecutorStatus();
   const fixPlans = useFixPlans();
@@ -75,7 +76,7 @@ export default function Dashboard() {
   const s = stats.data!;
 
   const kpis = [
-    { label: t("dashboard.resources"), value: s.total_resources, hot: false },
+    { label: t("dashboard.resources"), value: s.total_resources, hot: false, link: "/app/issues?view=resources" },
     { label: t("dashboard.openIssues"), value: s.open_anomalies, hot: s.open_anomalies > 0 },
     { label: t("dashboard.critical"), value: s.critical_anomalies, hot: s.critical_anomalies > 0 },
     { label: t("dashboard.accounts"), value: s.total_accounts, hot: false },
@@ -88,8 +89,9 @@ export default function Dashboard() {
         {kpis.map((k, i) => (
           <div
             key={k.label}
-            className="bg-card border rounded-lg px-5 py-4 duo-fade"
+            className={`bg-card border rounded-lg px-5 py-4 duo-fade${k.link ? " cursor-pointer hover:border-primary/50 transition-colors" : ""}`}
             style={{ animationDelay: `${i * 70}ms` }}
+            onClick={k.link ? () => navigate(k.link!) : undefined}
           >
             <div className="text-[11px] font-medium tracking-[0.1em] uppercase text-muted-foreground mb-1.5">
               {k.label}
@@ -192,7 +194,7 @@ export default function Dashboard() {
           </div>
           {anomalies.isLoading ? (
             <Spinner />
-          ) : anomalies.data && anomalies.data.length > 0 ? (
+          ) : anomalies.data && anomalies.data.filter((a) => !CLOSED_STATUSES.has(a.status)).length > 0 ? (
             <div className="bg-card border rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -205,7 +207,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {anomalies.data.slice(0, 8).map((a) => (
+                  {anomalies.data.filter((a) => !CLOSED_STATUSES.has(a.status)).slice(0, 8).map((a) => (
                     <tr
                       key={a.id}
                       className="border-b border-border/50 cursor-pointer transition-colors duration-150 hover:bg-accent"
@@ -248,7 +250,7 @@ export default function Dashboard() {
           ) : resourceTypes.length > 0 ? (
             <div className="space-y-4">
               {resourceTypes.map(({ type, count, pct }) => (
-                <div key={type} className="group cursor-default">
+                <div key={type} className="group cursor-pointer" onClick={() => navigate(`/app/issues?view=resources&type=${type}`)}>
                   <div className="flex items-baseline justify-between mb-1.5">
                     <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors duration-150">
                       {type}

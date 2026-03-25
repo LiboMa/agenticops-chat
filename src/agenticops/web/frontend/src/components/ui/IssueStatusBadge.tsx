@@ -6,11 +6,12 @@ const STYLES: Record<IssueStatus, { dot: string; text: string }> = {
   open: { dot: "bg-red-500", text: "text-red-500 dark:text-red-400" },
   investigating: { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
   root_cause_identified: { dot: "bg-orange-500", text: "text-orange-600 dark:text-orange-400" },
-  fix_planned: { dot: "bg-blue-500 dark:bg-green-500", text: "text-blue-600 dark:text-green-400" },
-  fix_approved: { dot: "bg-primary-500 dark:bg-emerald-500", text: "text-primary-600 dark:text-emerald-400" },
+  fix_planned: { dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
+  fix_approved: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
   fix_executed: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
   resolved: { dot: "bg-green-500", text: "text-green-600 dark:text-green-400" },
   acknowledged: { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+  dismissed: { dot: "bg-muted-foreground/50", text: "text-muted-foreground" },
 };
 
 const LABELS: Record<IssueStatus, string> = {
@@ -22,6 +23,7 @@ const LABELS: Record<IssueStatus, string> = {
   fix_executed: "Fix Executed",
   resolved: "Resolved",
   acknowledged: "Acknowledged",
+  dismissed: "Dismissed",
 };
 
 export const IssueStatusBadge = React.memo(function IssueStatusBadge({

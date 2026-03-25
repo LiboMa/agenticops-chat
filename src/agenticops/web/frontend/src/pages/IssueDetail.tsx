@@ -13,6 +13,7 @@ import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useCancelExecution } from "@/hooks/useFixExecutions";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
@@ -69,10 +70,10 @@ export default function IssueDetail() {
     setActionMsg(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/rca`, { method: "POST" });
-      setActionMsg("RCA analysis triggered. It may take a minute -- refresh to see results.");
+      setActionMsg(t("issues.rcaTriggered"));
       setTimeout(() => rca.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`RCA trigger failed: ${e.message}`);
+      setActionMsg(`${t("issues.rcaFailed")}: ${e.message}`);
     } finally {
       setRcaLoading(false);
     }
@@ -83,10 +84,10 @@ export default function IssueDetail() {
     setActionMsg(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/generate-fix-plan`, { method: "POST" });
-      setActionMsg("Fix plan generation triggered. It may take a minute -- refresh to see results.");
+      setActionMsg(t("issues.fixPlanTriggered"));
       setTimeout(() => fixPlans.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`Fix plan generation failed: ${e.message}`);
+      setActionMsg(`${t("issues.fixPlanFailed")}: ${e.message}`);
     } finally {
       setFixPlanLoading(false);
     }
@@ -188,6 +189,7 @@ export default function IssueDetail() {
         onRunRca={triggerRca}
         onGenerateFixPlan={triggerFixPlan}
         onUpdateStatus={updateStatus}
+        onViewFixPlan={() => setTab("fixPlan")}
       />
 
       {/* Tab bar */}
@@ -287,7 +289,7 @@ function IssueTab({
               <span className="font-mono text-foreground">{a.resource_id}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Type</span>
+              <span className="text-muted-foreground block">{t("issues.type")}</span>
               <span className="text-foreground">{a.resource_type}</span>
             </div>
             <div>
@@ -308,18 +310,18 @@ function IssueTab({
 
           {a.metric_name && (
             <div className="mt-6 p-4 bg-secondary rounded-lg border border-border/50">
-              <h3 className="font-semibold text-foreground mb-2">Metric Details</h3>
+              <h3 className="font-semibold text-foreground mb-2">{t("issues.metricDetails")}</h3>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
-                  <span className="text-muted-foreground">Metric:</span>{" "}
+                  <span className="text-muted-foreground">{t("issues.metric")}:</span>{" "}
                   <span className="text-foreground">{a.metric_name}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Expected:</span>{" "}
+                  <span className="text-muted-foreground">{t("issues.expected")}:</span>{" "}
                   <span className="text-foreground">{a.expected_value}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Actual:</span>{" "}
+                  <span className="text-muted-foreground">{t("issues.actual")}:</span>{" "}
                   <span className="text-foreground">{a.actual_value}</span>
                 </div>
               </div>
@@ -360,14 +362,14 @@ function RcaSection({
               {t("issues.noRca")}
             </h2>
             <p className="text-muted-foreground mb-4">
-              Run RCA to analyze the root cause of this issue and get recommendations.
+              {t("issues.rcaHint")}
             </p>
             <button
               onClick={onRunRca}
               disabled={rcaLoading}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
-              {rcaLoading ? "Analyzing..." : t("issues.runRca")}
+              {rcaLoading ? t("issues.analyzing") : t("issues.runRca")}
             </button>
           </div>
         </CardBody>
@@ -386,7 +388,7 @@ function RcaSection({
         {/* Confidence bar */}
         <div className="mb-6">
           <div className="flex justify-between text-sm mb-1">
-            <span className="text-muted-foreground">Confidence</span>
+            <span className="text-muted-foreground">{t("issues.confidence")}</span>
             <span className="font-medium text-foreground">
               {Math.round(r.confidence_score * 100)}%
             </span>
@@ -401,7 +403,7 @@ function RcaSection({
 
         {/* Root Cause */}
         <div className="mb-6">
-          <h3 className="font-semibold text-foreground mb-2">Root Cause</h3>
+          <h3 className="font-semibold text-foreground mb-2">{t("issues.rootCause")}</h3>
           <div
             className="text-foreground report-content"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(r.root_cause) }}
@@ -411,7 +413,7 @@ function RcaSection({
         {/* Contributing Factors */}
         {r.contributing_factors.length > 0 && (
           <div className="mb-6">
-            <h3 className="font-semibold text-foreground mb-2">Contributing Factors</h3>
+            <h3 className="font-semibold text-foreground mb-2">{t("issues.contributingFactors")}</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
               {r.contributing_factors.map((f, i) => (
                 <li key={i}>{f}</li>
@@ -423,7 +425,7 @@ function RcaSection({
         {/* Recommendations */}
         {r.recommendations.length > 0 && (
           <div>
-            <h3 className="font-semibold text-foreground mb-2">Recommendations</h3>
+            <h3 className="font-semibold text-foreground mb-2">{t("issues.recommendations")}</h3>
             <ol className="list-decimal list-inside text-muted-foreground space-y-1">
               {r.recommendations.map((rec, i) => (
                 <li key={i}>{rec}</li>
@@ -433,7 +435,7 @@ function RcaSection({
         )}
 
         <div className="mt-4 text-xs text-muted-foreground">
-          Model: {r.llm_model} | Analyzed {formatFullDate(r.created_at)}
+          {t("issues.rcaModel")}: {r.llm_model} | {t("issues.rcaAnalyzed")} {formatFullDate(r.created_at)}
         </div>
       </CardBody>
     </Card>
@@ -479,6 +481,8 @@ function FixPlanTab({
   setActionMsg: (v: string | null) => void;
   t: (key: string) => string;
 }) {
+  const { confirm, dialog } = useConfirm();
+
   if (fixPlans.isLoading) return <Spinner label="Loading fix plans..." />;
 
   const plans = fixPlans.data ?? [];
@@ -493,16 +497,14 @@ function FixPlanTab({
               {t("issues.noFixPlan")}
             </h2>
             <p className="text-muted-foreground mb-4">
-              {hasRca
-                ? "Generate a fix plan based on the RCA result to remediate this issue."
-                : "Run RCA first, then generate a fix plan."}
+              {hasRca ? t("issues.fixPlanHint") : t("issues.fixPlanHintNoRca")}
             </p>
             <button
               onClick={onGenerateFixPlan}
               disabled={fixPlanLoading || !hasRca}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
             >
-              {fixPlanLoading ? "Generating..." : t("issues.createFixPlan")}
+              {fixPlanLoading ? t("issues.generating") : t("issues.createFixPlan")}
             </button>
           </div>
         </CardBody>
@@ -529,16 +531,16 @@ function FixPlanTab({
     );
   }
 
-  function handleReject() {
-    if (!window.confirm("Are you sure you want to reject this fix plan?")) return;
+  async function handleReject() {
+    if (!(await confirm("Are you sure you want to reject this fix plan?", { variant: "destructive", confirmText: "Reject" }))) return;
     rejectMut.mutate(fp.id, {
       onSuccess: () => fixPlans.refetch(),
       onError: (err) => setActionMsg(`Reject failed: ${err.message}`),
     });
   }
 
-  function handleExecute() {
-    if (!window.confirm("Execute this fix plan now?")) return;
+  async function handleExecute() {
+    if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
     executeMut.mutate(fp.id, {
       onSuccess: () => {
         fixPlans.refetch();
@@ -568,22 +570,22 @@ function FixPlanTab({
               <span className="font-medium text-foreground">{fp.risk_level}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Impact</span>
+              <span className="text-muted-foreground block">{t("issues.impact")}</span>
               <span className="text-foreground">{fp.estimated_impact || "-"}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Created</span>
+              <span className="text-muted-foreground block">{t("issues.created")}</span>
               <span className="text-foreground">{formatShortDate(fp.created_at)}</span>
             </div>
             {fp.approved_by && (
               <div>
-                <span className="text-muted-foreground block">Approved By</span>
+                <span className="text-muted-foreground block">{t("issues.approvedBy")}</span>
                 <span className="font-medium text-foreground">{fp.approved_by}</span>
               </div>
             )}
             {fp.approved_at && (
               <div>
-                <span className="text-muted-foreground block">Approved At</span>
+                <span className="text-muted-foreground block">{t("issues.approvedAt")}</span>
                 <span className="text-foreground">{formatFullDate(fp.approved_at)}</span>
               </div>
             )}
@@ -604,7 +606,7 @@ function FixPlanTab({
 
             {fp.pre_checks.length > 0 && (
               <div className="mt-6">
-                <h4 className="font-semibold text-foreground mb-2">Pre-checks</h4>
+                <h4 className="font-semibold text-foreground mb-2">{t("issues.preChecks")}</h4>
                 <ul className="space-y-1.5">
                   {fp.pre_checks.map((c, i) => (
                     <CheckItem key={i} item={c} />
@@ -615,7 +617,7 @@ function FixPlanTab({
 
             {fp.post_checks.length > 0 && (
               <div className="mt-6">
-                <h4 className="font-semibold text-foreground mb-2">Post-checks</h4>
+                <h4 className="font-semibold text-foreground mb-2">{t("issues.postChecks")}</h4>
                 <ul className="space-y-1.5">
                   {fp.post_checks.map((c, i) => (
                     <CheckItem key={i} item={c} />
@@ -635,11 +637,11 @@ function FixPlanTab({
       {needsApproval && (
         <Card>
           <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">Approval</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.approval")}</h3>
 
             {(fp.risk_level === "L2" || fp.risk_level === "L3") && (
               <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-500">
-                <strong>{fp.risk_level} plan</strong> -- requires human approval before execution.
+                <strong>{fp.risk_level} {t("issues.approvalWarning")}</strong>
               </div>
             )}
 
@@ -655,7 +657,7 @@ function FixPlanTab({
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    placeholder="Your name"
+                    placeholder={t("issues.approverPlaceholder")}
                     value={approverName}
                     onChange={(e) => setApproverName(e.target.value)}
                     className="border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -665,7 +667,7 @@ function FixPlanTab({
                     disabled={approveMut.isPending || !approverName.trim()}
                     className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
-                    {approveMut.isPending ? "Approving..." : t("common.confirm")}
+                    {approveMut.isPending ? t("issues.approving") : t("common.confirm")}
                   </button>
                   <button
                     onClick={() => setShowApproveForm(false)}
@@ -680,7 +682,7 @@ function FixPlanTab({
                 disabled={rejectMut.isPending}
                 className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors"
               >
-                {rejectMut.isPending ? "Rejecting..." : t("issues.reject")}
+                {rejectMut.isPending ? t("issues.rejecting") : t("issues.reject")}
               </button>
             </div>
           </CardBody>
@@ -691,13 +693,13 @@ function FixPlanTab({
       {canExecute && (
         <Card>
           <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">Execute Plan</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.executePlan")}</h3>
             <button
               onClick={handleExecute}
               disabled={executeMut.isPending}
               className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
-              {executeMut.isPending ? "Executing..." : t("issues.execute")}
+              {executeMut.isPending ? t("issues.executing") : t("issues.execute")}
             </button>
           </CardBody>
         </Card>
@@ -707,17 +709,17 @@ function FixPlanTab({
       {executions.data && executions.data.length > 0 && (
         <Card>
           <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">Execution History</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.executionHistory")}</h3>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">ID</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Executed By</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Duration</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Started</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Actions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.tab.issue")}</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.executedBy")}</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.duration")}</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.started")}</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -747,8 +749,8 @@ function FixPlanTab({
                       <td className="px-4 py-2">
                         {(ex.status === "pending" || ex.status === "running") && (
                           <button
-                            onClick={() => {
-                              if (!window.confirm("Cancel this execution?")) return;
+                            onClick={async () => {
+                              if (!(await confirm("Cancel this execution?", { variant: "destructive", confirmText: "Cancel Execution" }))) return;
                               cancelExecMut.mutate(ex.id, {
                                 onError: (err) => setActionMsg(`Cancel failed: ${err.message}`),
                               });
@@ -774,7 +776,7 @@ function FixPlanTab({
                       key={ex.id}
                       className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400 mb-2"
                     >
-                      <strong>Execution #{ex.id} error:</strong> {ex.error_message}
+                      <strong>#{ex.id} {t("issues.executionError")}:</strong> {ex.error_message}
                     </div>
                   ))}
               </div>
@@ -788,31 +790,33 @@ function FixPlanTab({
         <Card>
           <CardBody>
             <h3 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wider">
-              All Fix Plans
+              {t("issues.allFixPlans")}
             </h3>
             <div className="space-y-2">
               {plans.map((p) => (
-                <Link
+                <div
                   key={p.id}
-                  to={`/app/fix-plans/${p.id}`}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-secondary transition-colors"
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    p.id === fp.id
+                      ? "border-primary/50 bg-primary/5"
+                      : "border-border"
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <RiskLevelBadge level={p.risk_level} />
                     <span className="text-sm font-medium text-foreground">{p.title}</span>
+                    {p.id === fp.id && (
+                      <span className="text-[10px] text-primary font-medium uppercase">{t("issues.currentPlan")}</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <FixPlanStatusBadge status={p.status} />
-                    <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </Link>
+                  <FixPlanStatusBadge status={p.status} />
+                </div>
               ))}
             </div>
           </CardBody>
         </Card>
       )}
+      {dialog}
     </div>
   );
 }
@@ -850,7 +854,7 @@ function TimelineTab({
         <Card>
           <CardBody>
             <h3 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">
-              Pipeline Timeline
+              {t("issues.pipelineTimeline")}
             </h3>
             <PipelineTimeline events={events} />
           </CardBody>
@@ -882,6 +886,7 @@ function MergedAlertsSection({
   alerts: MergedAlert[];
   occurrenceCount?: number;
 }) {
+  const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const displayed = expanded ? alerts : alerts.slice(-5);
 
@@ -893,15 +898,15 @@ function MergedAlertsSection({
           className="flex items-center gap-2 w-full text-left"
         >
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-            Merged Alerts ({alerts.length})
+            {t("issues.mergedAlerts")} ({alerts.length})
           </h3>
           {occurrenceCount && occurrenceCount > 1 && (
             <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-              {occurrenceCount} occurrences
+              {occurrenceCount} {t("issues.occurrences")}
             </span>
           )}
           <span className="ml-auto text-muted-foreground text-xs">
-            {expanded ? "Collapse" : "Expand"}
+            {expanded ? t("issues.collapse") : t("issues.expand")}
           </span>
         </button>
         <div className="mt-3 space-y-2">
@@ -921,7 +926,7 @@ function MergedAlertsSection({
           ))}
           {!expanded && alerts.length > 5 && (
             <div className="text-xs text-muted-foreground text-center">
-              Showing last 5 of {alerts.length} -- click to expand
+              {t("issues.showingLast")} {alerts.length}
             </div>
           )}
         </div>
@@ -1061,6 +1066,7 @@ function RunbookStep({ index, step }: { index: number; step: unknown }) {
 }
 
 function CommandBlock({ command }: { command: string }) {
+  const { t } = useLocale();
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -1086,7 +1092,7 @@ function CommandBlock({ command }: { command: string }) {
         className="absolute top-2 right-2 px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
         style={{ backgroundColor: "#313244", color: "#a6adc8" }}
       >
-        {copied ? "Copied" : "Copy"}
+        {copied ? t("issues.copied") : t("issues.copy")}
       </button>
     </div>
   );
@@ -1112,13 +1118,14 @@ function CheckItem({ item }: { item: unknown }) {
 }
 
 function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
+  const { t } = useLocale();
   const trigger = plan.trigger as string | undefined;
   const steps = Array.isArray(plan.steps) ? plan.steps : null;
 
   return (
     <div className="mt-6 border border-amber-500/30 rounded-lg bg-amber-500/5 overflow-hidden">
       <div className="px-4 py-3 border-b border-amber-500/30">
-        <h4 className="font-semibold text-foreground">Rollback Plan</h4>
+        <h4 className="font-semibold text-foreground">{t("issues.rollbackPlan")}</h4>
       </div>
       <div className="p-4 space-y-3">
         {trigger && (
@@ -1127,7 +1134,7 @@ function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <span>
-              <strong>Trigger:</strong> {trigger}
+              <strong>{t("issues.rollbackTrigger")}:</strong> {trigger}
             </span>
           </div>
         )}

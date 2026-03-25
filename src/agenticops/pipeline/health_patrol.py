@@ -92,14 +92,9 @@ class HealthPatrolPipeline(Pipeline):
     """
 
     def __init__(self, account: Optional[CloudAccount] = None, config: Optional[dict] = None):
-        super().__init__(
-            name="HealthPatrol",
-            steps=[
-                FetchExternalAlertsStep(),
-                RunDetectStep(),
-            ],
-        )
-        self.account = account
+        super().__init__("HealthPatrol", account)
+        self.add_step(FetchExternalAlertsStep())
+        self.add_step(RunDetectStep())
         self.patrol_config = config or {}
 
     async def execute(self) -> PipelineResult:
