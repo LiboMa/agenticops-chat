@@ -246,16 +246,20 @@ class Scheduler:
             return
 
         try:
-            # Get account
+            # Get account — expunge so it can be used outside the session
             account = None
             if schedule.account_name:
                 with get_db_session() as session:
                     account = session.query(CloudAccount).filter_by(
                         name=schedule.account_name
                     ).first()
+                    if account:
+                        session.expunge(account)
             else:
                 with get_db_session() as session:
                     account = session.query(CloudAccount).filter_by(is_enabled=True).first()
+                    if account:
+                        session.expunge(account)
 
             # Get pipeline factory
             pipeline_factories = {
