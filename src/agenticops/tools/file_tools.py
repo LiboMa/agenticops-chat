@@ -56,7 +56,6 @@ def _register_local_doc(resolved_path: str, size_bytes: int, mode: str) -> None:
 # ── Output limits (matches metadata_tools.py / aws_cli_tool.py) ────────
 MAX_RESULT_CHARS = 4000
 MAX_LIST_RESULT_CHARS = 6000
-MAX_DOCUMENT_CHARS = 30000  # ~7500 tokens — documents need more context than operational tools
 MAX_WRITE_BYTES = 1_048_576  # 1 MB
 
 
@@ -395,14 +394,20 @@ def file_stat(path: str) -> str:
         return f"Error: {e}"
 
 
+# Document formats — no output truncation (documents are meant to be read in full).
+_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".csv", ".xlsx", ".xls", ".md", ".txt", ".html", ".rst", ".json", ".yaml", ".yml"}
+
+
 @tool
 def read_document(path: str, pages: str = "") -> str:
-    """Read a document file (PDF, DOCX, CSV, XLSX) and return extracted text.
+    """Read a document file and return its full text content — no truncation.
 
-    Use this to read and analyze document files that read_local_file cannot
-    handle. Supports PDF (via pymupdf or pypdf), DOCX (via python-docx), and
-    other document formats. For PDFs, you can specify a page range to avoid
-    reading excessively large files.
+    Use this to read and analyze documents: PDF, DOCX, Markdown, HTML, CSV,
+    XLSX, plain text, JSON, YAML. Unlike read_local_file (which truncates
+    output for operational safety), this tool returns the complete content
+    so you can fully understand and explain the document.
+
+    For PDFs, you can specify a page range to read specific sections.
 
     Args:
         path: Absolute or relative file path to the document.
@@ -410,7 +415,7 @@ def read_document(path: str, pages: str = "") -> str:
                Empty string reads all pages. Ignored for non-PDF files.
 
     Returns:
-        Extracted text content from the document, or error message.
+        Full extracted text content from the document, or error message.
     """
     blocked = _is_blocked(path)
     if blocked:
@@ -431,7 +436,6 @@ def read_document(path: str, pages: str = "") -> str:
             if file_size > 20 * 1024 * 1024:
                 return f"PDF too large ({file_size:,} bytes, max 20 MB). Specify a page range with pages='1-10'."
 
-            # Parse page range
             start_page = 0
             end_page = None
             if pages.strip():
@@ -454,7 +458,7 @@ def read_document(path: str, pages: str = "") -> str:
                 text_pages = [doc[i].get_text() for i in range(start_page, actual_end)]
                 doc.close()
                 header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
-                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_DOCUMENT_CHARS)
+                return header + "\n\n---\n\n".join(text_pages)
             except ImportError:
                 pass
             try:
@@ -464,7 +468,7 @@ def read_document(path: str, pages: str = "") -> str:
                 actual_end = min(end_page or total_pages, total_pages)
                 text_pages = [reader.pages[i].extract_text() or "" for i in range(start_page, actual_end)]
                 header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
-                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_DOCUMENT_CHARS)
+                return header + "\n\n---\n\n".join(text_pages)
             except ImportError:
                 return "No PDF library installed. Run: pip install pymupdf"
             except Exception as e:
@@ -477,45 +481,47 @@ def read_document(path: str, pages: str = "") -> str:
                 doc = Document(str(resolved))
                 paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
                 header = f"# {resolved.name} ({len(paragraphs)} paragraphs)\n\n"
-                return _truncate(header + "\n\n".join(paragraphs), MAX_DOCUMENT_CHARS)
+                return header + "\n\n".join(paragraphs)
             except ImportError:
                 return "DOCX support not installed. Run: pip install python-docx"
             except Exception as e:
                 return f"Error reading DOCX: {e}"
-
-        # CSV
-        if suffix == ".csv":
-            try:
-                text = resolved.read_text(encoding="utf-8", errors="replace")
-                header = f"# {resolved.name} ({file_size:,} bytes)\n\n"
-                return _truncate(header + text, MAX_DOCUMENT_CHARS)
-            except Exception as e:
-                return f"Error reading CSV: {e}"
 
         # XLSX
         if suffix in (".xlsx", ".xls"):
             try:
                 import openpyxl
                 wb = openpyxl.load_workbook(str(resolved), read_only=True, data_only=True)
-                parts = []
+                sheet_parts = []
                 for sheet_name in wb.sheetnames:
                     ws = wb[sheet_name]
                     rows = []
                     for row in ws.iter_rows(values_only=True):
                         rows.append("\t".join(str(c) if c is not None else "" for c in row))
-                    parts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows[:200]))
+                    sheet_parts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows))
                 wb.close()
                 header = f"# {resolved.name} ({len(wb.sheetnames)} sheets)\n\n"
-                return _truncate(header + "\n\n".join(parts), MAX_DOCUMENT_CHARS)
+                return header + "\n\n".join(sheet_parts)
             except ImportError:
                 return "XLSX support not installed. Run: pip install openpyxl"
             except Exception as e:
                 return f"Error reading XLSX: {e}"
 
+        # Text-based documents (markdown, HTML, CSV, JSON, YAML, plain text, rst)
+        if suffix in _DOCUMENT_EXTENSIONS:
+            if file_size > 10 * 1024 * 1024:
+                return f"File too large ({file_size:,} bytes, max 10 MB)."
+            try:
+                text = resolved.read_text(encoding="utf-8", errors="replace")
+                header = f"# {resolved.name} ({file_size:,} bytes)\n\n"
+                return header + text
+            except Exception as e:
+                return f"Error reading {path}: {e}"
+
         return (
             f"Unsupported document format: {suffix}. "
-            f"Supported: .pdf, .docx, .csv, .xlsx. "
-            f"For text files use read_local_file instead."
+            f"Supported: .pdf, .docx, .xlsx, .md, .txt, .html, .csv, .json, .yaml. "
+            f"For config/code files with line numbers use read_local_file instead."
         )
 
     except PermissionError:

@@ -1,6 +1,6 @@
 ---
 name: document-analysis
-description: "Read and analyze documents — PDF reports, DOCX specs, CSV data, XLSX spreadsheets. Provides read_document tool with page-range support for PDFs. Use when the user shares a document or asks to explain, summarize, or extract information from files that are not plain text."
+description: "Read and analyze documents — PDF, DOCX, Markdown, HTML, CSV, XLSX, JSON, YAML. Provides read_document tool with no output truncation and page-range support for PDFs. Use when the user shares a document or asks to explain, summarize, or extract information from files."
 metadata:
   author: agenticops
   version: "1.0"
@@ -17,7 +17,10 @@ When this skill is activated, the `read_document` tool is dynamically registered
 
 | Tool | Purpose | Key Args |
 |------|---------|----------|
-| `read_document` | Extract text from PDF, DOCX, CSV, XLSX | `path`, `pages` |
+| `read_document` | Read full document content (no truncation) | `path`, `pages` |
+
+Unlike `read_local_file` (which truncates at 4K chars for operational safety), `read_document`
+returns the **complete content** so you can fully understand and explain the document.
 
 ## Supported Formats
 
@@ -25,8 +28,11 @@ When this skill is activated, the `read_document` tool is dynamically registered
 |--------|---------|-------|
 | PDF | pymupdf or pypdf | Page-range support (`pages="1-5"`) |
 | DOCX | python-docx | Full paragraph extraction |
-| CSV | built-in | Raw text with delimiters |
-| XLSX | openpyxl | Multi-sheet, first 200 rows per sheet |
+| Markdown | built-in | Full content, no truncation |
+| HTML | built-in | Full content, no truncation |
+| CSV | built-in | Full content, no truncation |
+| JSON/YAML | built-in | Full content, no truncation |
+| XLSX | openpyxl | Multi-sheet, all rows |
 
 ## Quick Decision Trees
 
