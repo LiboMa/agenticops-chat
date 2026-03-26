@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
 from agenticops.models import CloudAccount, CloudResource, get_session
@@ -39,50 +38,19 @@ class AWSScanner:
 
     def __init__(self, account: CloudAccount):
         """Initialize scanner with AWS account configuration."""
-        self.account = account
-        self._session_cache: dict[str, boto3.Session] = {}
-
-    def _get_assumed_session(self, region: str) -> boto3.Session:
-        """Get boto3 session with assumed role for the account."""
-        creds = self.account.credentials or {}
-        acct_id = creds.get("account_id", "")
-        cache_key = f"{acct_id}:{region}"
-
-        if cache_key in self._session_cache:
-            return self._session_cache[cache_key]
-
-        sts = boto3.client("sts", region_name=region)
-
-        assume_kwargs = {
-            "RoleArn": creds.get("role_arn", ""),
-            "RoleSessionName": f"AgenticOps-{acct_id}",
-            "DurationSeconds": 3600,
-        }
-        ext_id = creds.get("external_id", "")
-        if ext_id:
-            assume_kwargs["ExternalId"] = ext_id
-
-        try:
-            response = sts.assume_role(**assume_kwargs)
-            credentials = response["Credentials"]
-
-            session = boto3.Session(
-                aws_access_key_id=credentials["AccessKeyId"],
-                aws_secret_access_key=credentials["SecretAccessKey"],
-                aws_session_token=credentials["SessionToken"],
-                region_name=region,
+        if account.provider.lower() != "aws":
+            raise ValueError(
+                f"AWSScanner only supports AWS accounts, got provider='{account.provider}'"
             )
-            self._session_cache[cache_key] = session
-            return session
-
-        except ClientError as e:
-            logger.error(f"Failed to assume role {(self.account.credentials or {}).get('role_arn', '')}: {e}")
-            raise
+        self.account = account
+        from agenticops.providers import get_provider
+        self._provider = get_provider(account)
+        self._provider.resolve_credentials()
 
     def _get_client(self, service_name: str, region: str):
-        """Get boto3 client for a service."""
-        session = self._get_assumed_session(region)
-        return session.client(service_name)
+        """Get boto3 client for a service via provider layer."""
+        session = self._provider.sdk_session()
+        return session.client(service_name, region_name=region)
 
     def scan_service(self, service_name: str, region: str) -> ScanResult:
         """Scan a specific AWS service in a region."""
@@ -201,7 +169,19 @@ class AWSScanner:
     def _format_resource(self, item: dict, service_def: AWSServiceDef, region: str) -> dict:
         """Format a generic resource."""
         resource_id = item.get(service_def.id_field)
-        resource_name = item.get(service_def.name_field) if service_def.name_field else resource_id
+        if service_def.name_field == "Tags":
+            # Extract name from AWS Tags list: [{"Key": "Name", "Value": "..."}]
+            resource_name = None
+            for tag in item.get("Tags", []):
+                if tag.get("Key") == "Name":
+                    resource_name = tag.get("Value")
+                    break
+            if not resource_name:
+                resource_name = resource_id
+        elif service_def.name_field:
+            resource_name = item.get(service_def.name_field)
+        else:
+            resource_name = resource_id
         resource_arn = item.get(service_def.arn_field) if service_def.arn_field else None
 
         # Extract status using dot notation
@@ -225,7 +205,7 @@ class AWSScanner:
             "region": region,
             "status": status,
             "metadata": self._extract_metadata(item, service_def),
-            "tags": item.get("Tags", {}),
+            "tags": self._normalize_tags(item.get("Tags", [])),
         }
 
     def _format_simple_resource(
@@ -261,6 +241,15 @@ class AWSScanner:
             "metadata": {"queue_url": queue_url},
             "tags": {},
         }
+
+    @staticmethod
+    def _normalize_tags(tags) -> dict:
+        """Convert AWS tag list [{"Key":k,"Value":v}] to {k:v} dict."""
+        if isinstance(tags, list):
+            return {t["Key"]: t["Value"] for t in tags if "Key" in t and "Value" in t}
+        if isinstance(tags, dict):
+            return tags
+        return {}
 
     def _extract_metadata(self, item: dict, service_def: AWSServiceDef) -> dict:
         """Extract service-specific metadata."""
