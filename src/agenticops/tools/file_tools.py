@@ -56,6 +56,7 @@ def _register_local_doc(resolved_path: str, size_bytes: int, mode: str) -> None:
 # ── Output limits (matches metadata_tools.py / aws_cli_tool.py) ────────
 MAX_RESULT_CHARS = 4000
 MAX_LIST_RESULT_CHARS = 6000
+MAX_DOCUMENT_CHARS = 30000  # ~7500 tokens — documents need more context than operational tools
 MAX_WRITE_BYTES = 1_048_576  # 1 MB
 
 
@@ -453,7 +454,7 @@ def read_document(path: str, pages: str = "") -> str:
                 text_pages = [doc[i].get_text() for i in range(start_page, actual_end)]
                 doc.close()
                 header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
-                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_LIST_RESULT_CHARS)
+                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_DOCUMENT_CHARS)
             except ImportError:
                 pass
             try:
@@ -463,7 +464,7 @@ def read_document(path: str, pages: str = "") -> str:
                 actual_end = min(end_page or total_pages, total_pages)
                 text_pages = [reader.pages[i].extract_text() or "" for i in range(start_page, actual_end)]
                 header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
-                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_LIST_RESULT_CHARS)
+                return _truncate(header + "\n\n---\n\n".join(text_pages), MAX_DOCUMENT_CHARS)
             except ImportError:
                 return "No PDF library installed. Run: pip install pymupdf"
             except Exception as e:
@@ -476,7 +477,7 @@ def read_document(path: str, pages: str = "") -> str:
                 doc = Document(str(resolved))
                 paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
                 header = f"# {resolved.name} ({len(paragraphs)} paragraphs)\n\n"
-                return _truncate(header + "\n\n".join(paragraphs), MAX_LIST_RESULT_CHARS)
+                return _truncate(header + "\n\n".join(paragraphs), MAX_DOCUMENT_CHARS)
             except ImportError:
                 return "DOCX support not installed. Run: pip install python-docx"
             except Exception as e:
@@ -487,7 +488,7 @@ def read_document(path: str, pages: str = "") -> str:
             try:
                 text = resolved.read_text(encoding="utf-8", errors="replace")
                 header = f"# {resolved.name} ({file_size:,} bytes)\n\n"
-                return _truncate(header + text, MAX_LIST_RESULT_CHARS)
+                return _truncate(header + text, MAX_DOCUMENT_CHARS)
             except Exception as e:
                 return f"Error reading CSV: {e}"
 
@@ -505,7 +506,7 @@ def read_document(path: str, pages: str = "") -> str:
                     parts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows[:200]))
                 wb.close()
                 header = f"# {resolved.name} ({len(wb.sheetnames)} sheets)\n\n"
-                return _truncate(header + "\n\n".join(parts), MAX_LIST_RESULT_CHARS)
+                return _truncate(header + "\n\n".join(parts), MAX_DOCUMENT_CHARS)
             except ImportError:
                 return "XLSX support not installed. Run: pip install openpyxl"
             except Exception as e:
