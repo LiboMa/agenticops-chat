@@ -305,52 +305,69 @@ class AWSScanner:
         return results
 
     def save_results(self, results: list[ScanResult]) -> int:
-        """Save scan results to database."""
+        """Save scan results to database.
+
+        Unique constraint is (account_id, provider, resource_id).
+        We prefer ARN as resource_id when available.  Lookup tries
+        both ARN and short ID to handle records saved before the
+        ARN migration.
+        """
         session = get_session()
         saved_count = 0
 
         try:
-            for result in results:
-                if not result.success:
-                    continue
+            # Prevent autoflush during queries to avoid premature
+            # INSERT that triggers UNIQUE constraint violations.
+            with session.no_autoflush:
+                for result in results:
+                    if not result.success:
+                        continue
 
-                for resource_data in result.resources:
-                    # Check if resource already exists
-                    existing = (
-                        session.query(CloudResource)
-                        .filter_by(
-                            account_id=self.account.id,
-                            resource_id=resource_data["resource_id"],
-                            region=result.region,
-                        )
-                        .first()
-                    )
+                    for resource_data in result.resources:
+                        short_id = resource_data["resource_id"]
+                        rid = resource_data.get("resource_arn") or short_id
 
-                    if existing:
-                        # Update existing
-                        existing.name = resource_data.get("resource_name") or ""
-                        # Store ARN in resource_id if available, otherwise keep original
-                        if resource_data.get("resource_arn"):
-                            existing.resource_id = resource_data["resource_arn"]
-                        existing.status = resource_data.get("status", "unknown")
-                        existing.raw_data = resource_data.get("metadata", {})
-                        existing.tags = resource_data.get("tags", {})
-                    else:
-                        # Create new — prefer ARN as resource_id for AWS
-                        rid = resource_data.get("resource_arn") or resource_data["resource_id"]
-                        resource = CloudResource(
-                            account_id=self.account.id,
-                            provider=self.account.provider,
-                            resource_id=rid,
-                            resource_type=resource_data["resource_type"],
-                            name=resource_data.get("resource_name") or "",
-                            region=result.region,
-                            status=resource_data.get("status", "unknown"),
-                            raw_data=resource_data.get("metadata", {}),
-                            tags=resource_data.get("tags", {}),
+                        # Look up by canonical ID (ARN) first
+                        existing = (
+                            session.query(CloudResource)
+                            .filter_by(
+                                account_id=self.account.id,
+                                resource_id=rid,
+                            )
+                            .first()
                         )
-                        session.add(resource)
-                        saved_count += 1
+                        # Fallback: try short ID (pre-migration records)
+                        if not existing and rid != short_id:
+                            existing = (
+                                session.query(CloudResource)
+                                .filter_by(
+                                    account_id=self.account.id,
+                                    resource_id=short_id,
+                                )
+                                .first()
+                            )
+
+                        if existing:
+                            existing.name = resource_data.get("resource_name") or ""
+                            existing.resource_id = rid  # upgrade to ARN
+                            existing.region = result.region
+                            existing.status = resource_data.get("status", "unknown")
+                            existing.raw_data = resource_data.get("metadata", {})
+                            existing.tags = resource_data.get("tags", {})
+                        else:
+                            resource = CloudResource(
+                                account_id=self.account.id,
+                                provider=self.account.provider,
+                                resource_id=rid,
+                                resource_type=resource_data["resource_type"],
+                                name=resource_data.get("resource_name") or "",
+                                region=result.region,
+                                status=resource_data.get("status", "unknown"),
+                                raw_data=resource_data.get("metadata", {}),
+                                tags=resource_data.get("tags", {}),
+                            )
+                            session.add(resource)
+                            saved_count += 1
 
             # Update account last_scanned_at
             self.account.last_scanned_at = datetime.utcnow()
