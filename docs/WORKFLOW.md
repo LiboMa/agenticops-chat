@@ -56,7 +56,7 @@ graph TB
 
     subgraph "Knowledge & Skills"
         KB["Knowledge Base<br/>SOPs + Past Cases"]
-        SKILLS["Agent Skills (13)<br/>Domain expertise packages"]
+        SKILLS["Agent Skills (14)<br/>Domain expertise packages"]
         RAG["RAG Pipeline<br/>Vector search + reranking"]
     end
 
@@ -317,7 +317,7 @@ flowchart LR
         REF["read_skill_reference<br/>~2-8K tokens<br/>(deep dive)"]
     end
 
-    subgraph "13 Domain Skills"
+    subgraph "14 Domain Skills"
         S1["linux-admin"]
         S2["network-engineer"]
         S3["kubernetes-admin"]
@@ -327,9 +327,10 @@ flowchart LR
         S7["log-analysis"]
         S8["aws-compute"]
         S9["aws-storage"]
-        S10["local-os-operator<br/>(5 dynamic tools)"]
+        S10["local-os-operator<br/>(6 dynamic tools)"]
         S11["distributed-tracing"]
         S12["notification-operator"]
+        S13["document-analysis<br/>(read_document tool)"]
     end
 
     subgraph "Execution Tools"
@@ -356,6 +357,7 @@ flowchart LR
     S10 --> ACTIVATE
     S11 --> ACTIVATE
     S12 --> ACTIVATE
+    S13 --> ACTIVATE
     ACTIVATE --> HOST
     ACTIVATE --> KUBE
 

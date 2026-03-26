@@ -200,3 +200,4 @@ Tips from existing skills:
 | `aws-compute` | infrastructure | EC2, ECS, EKS, Lambda troubleshooting |
 | `aws-storage` | infrastructure | S3, EBS, EFS, FSx troubleshooting |
 | `web-research` | operations | Fetch public web data, status pages, CVE databases |
+| `document-analysis` | operations | Read and analyze PDF, DOCX, CSV, XLSX documents |
