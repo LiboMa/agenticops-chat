@@ -230,16 +230,12 @@ Format your response as JSON:
 
         try:
             result = RCAResult(
-                anomaly_id=anomaly.id,
-                analysis_type="auto",
+                health_issue_id=anomaly.id,
                 root_cause=analysis.root_cause,
-                confidence_score=analysis.confidence_score,
+                confidence=analysis.confidence_score,
                 contributing_factors=analysis.contributing_factors,
                 recommendations=analysis.recommendations,
-                related_resources=analysis.related_resources,
-                llm_model=self.llm.model_id,
-                llm_prompt=prompt,
-                llm_response=analysis.llm_response,
+                model_id=self.llm.model_id,
             )
             session.add(result)
             session.commit()
@@ -281,7 +277,7 @@ Format your response as JSON:
 
                 # Summarize metrics for context
                 context = {
-                    "resource_metadata": resource.resource_metadata,
+                    "resource_metadata": resource.raw_data,
                     "resource_tags": resource.tags,
                     "recent_metrics": {
                         name: {
@@ -336,7 +332,7 @@ Format your response as JSON:
             query = session.query(RCAResult).order_by(RCAResult.created_at.desc())
 
             if anomaly_id:
-                query = query.filter_by(anomaly_id=anomaly_id)
+                query = query.filter_by(health_issue_id=anomaly_id)
 
             return query.limit(limit).all()
 

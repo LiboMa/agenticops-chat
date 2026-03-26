@@ -280,14 +280,19 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         if len(accounts) > 1:
             # Multiple accounts: use parallel agentic checker
             import asyncio
+            import concurrent.futures
             from agenticops.checker import check_accounts_parallel
 
             acct_ids = [a.id for a in accounts]
+            coro = check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep)
             try:
-                result = asyncio.run(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+                asyncio.get_running_loop()
+                # Already inside an async event loop (e.g. scheduler) — run in a thread
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(asyncio.run, coro).result()
             except RuntimeError:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+                # No running loop — safe to use asyncio.run()
+                result = asyncio.run(coro)
 
             lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
             for a in result.accounts:

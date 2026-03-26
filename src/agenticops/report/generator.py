@@ -152,7 +152,7 @@ class ReportGenerator:
 
                 # Add RCA if available
                 rca = next(
-                    (r for r in rca_results if r.anomaly_id == anomaly.id), None
+                    (r for r in rca_results if r.health_issue_id == anomaly.id), None
                 )
                 if rca:
                     lines.extend(
@@ -181,14 +181,13 @@ class ReportGenerator:
         try:
             from sqlalchemy import func
 
-            type_counts = (
-                session.query(
-                    CloudResource.resource_type,
-                    func.count(CloudResource.id).label("count"),
-                )
-                .group_by(CloudResource.resource_type)
-                .all()
+            type_query = session.query(
+                CloudResource.resource_type,
+                func.count(CloudResource.id).label("count"),
             )
+            if self.account:
+                type_query = type_query.filter_by(account_id=self.account.id)
+            type_counts = type_query.group_by(CloudResource.resource_type).all()
 
             lines.extend(
                 [
@@ -266,7 +265,7 @@ class ReportGenerator:
                     "",
                     "## Root Cause Analysis",
                     "",
-                    f"**Confidence**: {rca.confidence_score * 100:.0f}%",
+                    f"**Confidence**: {rca.confidence * 100:.0f}%",
                     "",
                     "### Root Cause",
                     "",
@@ -288,17 +287,6 @@ class ReportGenerator:
             )
             for i, rec in enumerate(rca.recommendations, 1):
                 lines.append(f"{i}. {rec}")
-
-            if rca.related_resources:
-                lines.extend(
-                    [
-                        "",
-                        "### Related Resources",
-                        "",
-                    ]
-                )
-                for res in rca.related_resources:
-                    lines.append(f"- {res}")
 
         lines.extend(
             [
@@ -359,7 +347,7 @@ class ReportGenerator:
                 )
 
                 for r in service_resources[:50]:  # Limit per service
-                    name = r.resource_name or "-"
+                    name = r.name or "-"
                     lines.append(f"| {r.resource_id} | {name} | {r.region} | {r.status} |")
 
                 lines.append("")

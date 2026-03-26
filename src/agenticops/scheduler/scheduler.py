@@ -160,11 +160,26 @@ class Scheduler:
             logger.warning("Scheduler is already running")
             return
 
+        self._cleanup_stale_executions()
         self._running = True
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info("Scheduler started")
+
+    def _cleanup_stale_executions(self):
+        """Mark any 'running' executions from a previous process as failed."""
+        try:
+            with get_db_session() as session:
+                stale = session.query(ScheduleExecution).filter_by(status="running").all()
+                for ex in stale:
+                    ex.status = "failed"
+                    ex.error = "Stale: process restarted before completion"
+                    ex.completed_at = datetime.utcnow()
+                if stale:
+                    logger.info(f"Cleaned up {len(stale)} stale 'running' executions")
+        except Exception as e:
+            logger.warning(f"Failed to clean up stale executions: {e}")
 
     def stop(self):
         """Stop the scheduler."""

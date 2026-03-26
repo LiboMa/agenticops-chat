@@ -121,16 +121,21 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
         Summary of health check results per account.
     """
     import asyncio
+    import concurrent.futures
     from agenticops.checker import check_accounts_parallel
 
     ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
     is_deep = deep.lower() == "true"
 
+    coro = check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep)
     try:
-        result = asyncio.run(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+        asyncio.get_running_loop()
+        # Already inside an async event loop (e.g. scheduler) — run in a thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(asyncio.run, coro).result()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+        # No running loop — safe to use asyncio.run()
+        result = asyncio.run(coro)
 
     lines = [f"Health check complete in {result.duration_s}s — {result.total_issues} issues found."]
     lines.append(f"Tokens: {result.total_input_tokens:,} in / {result.total_output_tokens:,} out (cache read: {result.total_cache_read_tokens:,}, cache write: {result.total_cache_write_tokens:,})")

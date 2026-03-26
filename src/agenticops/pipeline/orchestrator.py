@@ -422,11 +422,12 @@ def DailyReportPipeline(account: CloudAccount) -> Pipeline:
 
     def daily_report_step(account: CloudAccount) -> dict:
         """Generate daily report."""
+        from agenticops.config import settings as _settings
         generator = ReportGenerator(account)
         content = generator.generate_daily_report()
         return {
             "report_generated": True,
-            "report_path": str(generator.reports_dir),
+            "report_path": str(_settings.reports_dir),
         }
 
     pipeline = Pipeline("DailyReport", account)
