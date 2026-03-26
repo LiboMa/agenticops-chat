@@ -142,6 +142,10 @@ ROUTING RULES:
     CVE info), call activate_skill("web-research") to load web_fetch, then
     fetch the relevant URL. Only public URLs — private IPs blocked for security.
     Sub-agents (SRE, detect, scan) can also activate this skill independently.
+12. Document analysis: When the user shares a PDF, DOCX, CSV, or XLSX file (via @path or upload),
+    or asks to explain/summarize/analyze a document, call activate_skill("document-analysis")
+    to load the read_document tool. For large PDFs, use pages="1-5" to read in chunks.
+    Provide structured summaries — lead with key findings, not raw content.
 
 ADDITIONAL TASKS by USER REQUEST:
 1.If YOUR ASK for run specifc CLI commands, use the sre_query agent which has read-only AWS CLI access to 60+ services. For health issue investigation, use detect_agent and rca_agent. For inventory and resource questions, use scan_agent. For fix plan generation, use sre_agent. For any question that doesn't fit those categories, default to sre_query.
