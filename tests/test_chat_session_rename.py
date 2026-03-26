@@ -1,6 +1,7 @@
 """Tests for chat session rename (PATCH) endpoint and auto-naming logic."""
 
 import json
+import re
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
@@ -96,21 +97,12 @@ class TestGenerateSessionTitle:
 
 
 class TestAutoNamingConditions:
+    """Verify the regex pattern used in app.py to detect default session names."""
 
-    def test_skip_custom_named_session(self, client):
-        """Session with a custom name (not 'Chat YYYY-MM-DD') should not be auto-renamed."""
-        import re
-        # Custom name does NOT match the default pattern
-        assert not re.match(r"^Chat \d{4}-\d{2}-\d{2}", "My Custom Session")
+    AUTO_NAME_PATTERN = r"^Chat \d{4}-\d{2}-\d{2}"
 
-    def test_default_name_matches_pattern(self):
-        """Default name matches the auto-naming trigger pattern."""
-        import re
-        assert re.match(r"^Chat \d{4}-\d{2}-\d{2}", "Chat 2026-03-22 10:00")
+    def test_custom_name_does_not_match(self):
+        assert not re.match(self.AUTO_NAME_PATTERN, "My Custom Session")
 
-    def test_only_triggers_on_msg_count_2(self):
-        """Auto-naming logic checks msg_count == 2 (first user+assistant exchange)."""
-        # This is a logic verification — the actual code checks msg_count == 2
-        # Messages > 2 means the session is past its first exchange
-        assert 2 == 2  # msg_count threshold
-        assert 3 != 2  # later messages should not trigger
+    def test_default_name_matches(self):
+        assert re.match(self.AUTO_NAME_PATTERN, "Chat 2026-03-22 10:00")

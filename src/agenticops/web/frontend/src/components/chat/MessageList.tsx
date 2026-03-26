@@ -1,4 +1,5 @@
 import { useEffect, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { ToolCallChip } from "./ToolCallChip";
 import { TokenMetrics } from "./TokenMetrics";
 import type { ChatMessage } from "@/api/types";
@@ -20,6 +21,15 @@ export function MessageList({
   streaming,
 }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  const handleRefClick = (e: React.MouseEvent) => {
+    const anchor = (e.target as HTMLElement).closest("a.md-ref") as HTMLAnchorElement | null;
+    if (anchor) {
+      e.preventDefault();
+      navigate(new URL(anchor.href).pathname);
+    }
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,7 +55,7 @@ export function MessageList({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5" onClick={handleRefClick}>
       {messages.map((msg) => (
         <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : "flex gap-3"}>
           {msg.role === "assistant" && (

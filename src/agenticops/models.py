@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, create_engine, inspect, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import NullPool, StaticPool
 
@@ -350,19 +350,21 @@ class RCAResult(Base):
 VALID_ISSUE_STATUSES = {
     "open", "investigating", "acknowledged", "root_cause_identified",
     "fix_planned", "fix_approved", "fix_executing", "fix_executed", "resolved",
+    "dismissed",
 }
 
 # Allowed transitions: from_status -> {to_status, ...}
 _ISSUE_TRANSITIONS: dict[str, set[str]] = {
-    "open":                   {"investigating", "acknowledged", "resolved"},
-    "investigating":          {"acknowledged", "root_cause_identified", "fix_planned", "resolved"},
-    "acknowledged":           {"investigating", "root_cause_identified", "fix_planned", "resolved"},
-    "root_cause_identified":  {"fix_planned", "resolved"},
-    "fix_planned":            {"fix_approved", "resolved"},
-    "fix_approved":           {"fix_executing", "resolved"},
-    "fix_executing":          {"fix_executed", "resolved"},
-    "fix_executed":           {"resolved"},
+    "open":                   {"investigating", "acknowledged", "resolved", "dismissed"},
+    "investigating":          {"acknowledged", "root_cause_identified", "fix_planned", "resolved", "dismissed"},
+    "acknowledged":           {"investigating", "root_cause_identified", "fix_planned", "resolved", "dismissed"},
+    "root_cause_identified":  {"fix_planned", "resolved", "dismissed"},
+    "fix_planned":            {"fix_approved", "resolved", "dismissed"},
+    "fix_approved":           {"fix_executing", "resolved", "dismissed"},
+    "fix_executing":          {"fix_executed", "resolved", "dismissed"},
+    "fix_executed":           {"resolved", "dismissed"},
     "resolved":               set(),  # terminal state
+    "dismissed":              {"open"},  # can reopen
 }
 
 
@@ -749,6 +751,11 @@ class ChatSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Session metadata: pin/star/archive
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+
 
 class ChatMessage(Base):
     """Individual message in a chat session."""
@@ -761,6 +768,48 @@ class ChatMessage(Base):
     tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     attachments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SessionSummary(Base):
+    """Rolling conversation summary generated when the sliding window trims messages."""
+    __tablename__ = "session_summaries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"))
+    summary_text: Mapped[str] = mapped_column(Text)
+    message_range_start: Mapped[int] = mapped_column(Integer)  # ChatMessage.id
+    message_range_end: Mapped[int] = mapped_column(Integer)    # ChatMessage.id
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AgentMemoryFact(Base):
+    """跨会话结构化事实记忆（key-value 形式）。"""
+    __tablename__ = "agent_memory_facts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[str] = mapped_column(String(50))  # user_preference, infra_context, team_info
+    key: Mapped[str] = mapped_column(String(200))
+    value: Mapped[str] = mapped_column(Text)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.8)
+    source_session_id: Mapped[str] = mapped_column(String(36))  # ChatSession.session_id
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("category", "key", name="uq_fact_category_key"),
+    )
+
+
+class AgentMemory(Base):
+    """跨会话向量化经验记忆。"""
+    __tablename__ = "agent_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36))  # ChatSession.session_id
+    memory_type: Mapped[str] = mapped_column(String(20))  # problem, root_cause, solution
+    content_text: Mapped[str] = mapped_column(Text)
+    embedding_vector: Mapped[bytes] = mapped_column(LargeBinary, nullable=True)  # numpy array as BLOB
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -817,6 +866,16 @@ def init_db(engine=None):
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN im_platform VARCHAR(20)"))
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN im_chat_id VARCHAR(200)"))
+                conn.commit()
+
+    # Migration: add pinned/starred/archived columns to chat_sessions if missing
+    if insp.has_table("chat_sessions"):
+        columns = {col["name"] for col in insp.get_columns("chat_sessions")}
+        if "pinned" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN pinned BOOLEAN DEFAULT 0"))
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN starred BOOLEAN DEFAULT 0"))
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN archived BOOLEAN DEFAULT 0"))
                 conn.commit()
 
     # Migration: add fingerprint dedup columns to health_issues if missing

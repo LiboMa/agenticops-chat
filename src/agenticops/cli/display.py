@@ -121,6 +121,26 @@ class TokenUsage:
         return "\n".join(lines)
 
 
+def format_reference_links(text: str, base_url: str) -> str:
+    """Detect I#N and R#N patterns in text and return formatted URL lines."""
+    import re
+    seen: set[str] = set()
+    lines: list[str] = []
+    for m in re.finditer(r'\bI#(\d+)\b', text):
+        key = f"I#{m.group(1)}"
+        if key not in seen:
+            seen.add(key)
+            lines.append(f"  {key} → {base_url}/app/issues/{m.group(1)}")
+    for m in re.finditer(r'\bR#(\d+)\b', text):
+        key = f"R#{m.group(1)}"
+        if key not in seen:
+            seen.add(key)
+            lines.append(f"  {key} → {base_url}/app/resources/{m.group(1)}")
+    if lines:
+        return "References:\n" + "\n".join(lines)
+    return ""
+
+
 class StreamingCallbackHandler:
     """CLI callback: animated spinner during thinking/tools, buffered streaming for text."""
 

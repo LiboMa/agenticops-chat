@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/report_tools.py
+# hypothesis_version: 6.151.9
+
+[100, 200, '%Y%m%d-%H%M%S', 'created_at', 'daily', 'file_path', 'id', 'incident', 'inventory', 'network', 'newsletter', 'report_type', 'summary', 'text/markdown', 'title', 'utf-8', '{}']

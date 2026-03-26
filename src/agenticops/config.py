@@ -365,6 +365,9 @@ class Settings(BaseSettings):
         description="Default agent output detail level: concise, medium, or detailed",
     )
 
+    # Issue exclude patterns — regex patterns to suppress issue creation
+    issue_exclude_patterns: list[str] = Field(default_factory=list)
+
     # Scan focus — resource category filter
     scan_focus: str = Field(
         default="all",
@@ -526,6 +529,12 @@ class Settings(BaseSettings):
         description="Auto-resolve HealthIssue after successful fix execution",
     )
 
+    # Session TTL
+    session_ttl_minutes: int = Field(
+        default=30,
+        description="Agent instance TTL in minutes before cleanup",
+    )
+
     # Session history restoration
     session_history_depth: int = Field(
         default=20,
@@ -555,6 +564,9 @@ class Settings(BaseSettings):
         default=0.2,
         description="Base weight in hybrid search reranking (0-1)",
     )
+
+    # Web base URL (for CLI reference links)
+    web_base_url: str = Field(default="http://localhost:8000")
 
     # Default regions per cloud provider (for account creation UI)
     default_regions: dict[str, list[str]] = Field(

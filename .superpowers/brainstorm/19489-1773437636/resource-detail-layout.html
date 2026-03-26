@@ -1,0 +1,88 @@
+<h2>Resource Detail Page Layout</h2>
+<p class="subtitle">Click to select your preferred layout for /app/resources/:id</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Tab Layout</h3>
+      <p>Header with resource summary, then tabs: Overview | Issues | Fix Plans | Network | Tags</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Resource Detail — i-0abc123 (EC2)</div>
+        <div class="mockup-body" style="padding:16px;font-size:13px">
+          <div style="display:flex;gap:24px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1)">
+            <div><span style="opacity:0.5">Name</span><br><strong>web-server-prod-01</strong></div>
+            <div><span style="opacity:0.5">Type</span><br><strong>t3.large</strong></div>
+            <div><span style="opacity:0.5">Region</span><br><strong>us-east-1</strong></div>
+            <div><span style="opacity:0.5">Status</span><br><span style="color:#22c55e">● running</span></div>
+            <div><span style="opacity:0.5">Account</span><br><strong>prod-main</strong></div>
+          </div>
+          <div style="display:flex;gap:2px;margin-bottom:16px">
+            <span style="background:rgba(99,102,241,0.2);padding:6px 16px;border-radius:6px 6px 0 0;font-size:12px;font-weight:600;color:#818cf8">Overview</span>
+            <span style="padding:6px 16px;font-size:12px;opacity:0.5">Issues (3)</span>
+            <span style="padding:6px 16px;font-size:12px;opacity:0.5">Fix Plans (1)</span>
+            <span style="padding:6px 16px;font-size:12px;opacity:0.5">Network</span>
+            <span style="padding:6px 16px;font-size:12px;opacity:0.5">Tags</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Metadata</div>
+              <div style="font-size:12px;line-height:2">
+                Instance Type: t3.large<br>
+                Launch Time: 2026-01-15<br>
+                VPC: vpc-abc123<br>
+                Subnet: subnet-def456<br>
+                AMI: ami-0xyz789
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Recent Activity</div>
+              <div style="font-size:12px;line-height:2">
+                <span style="color:#f59e0b">● high</span> CPU spike detected — 2h ago<br>
+                <span style="color:#22c55e">● resolved</span> Disk full — 3d ago<br>
+                Fix Plan #12 executed — 3d ago
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Single Scroll Layout</h3>
+      <p>No tabs — all sections stack vertically: Summary → Issues → Fix Plans → Network → Tags. Simple, everything visible at once.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Resource Detail — i-0abc123 (EC2)</div>
+        <div class="mockup-body" style="padding:16px;font-size:13px">
+          <div style="display:flex;gap:24px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1)">
+            <div><span style="opacity:0.5">Name</span><br><strong>web-server-prod-01</strong></div>
+            <div><span style="opacity:0.5">Type</span><br><strong>t3.large</strong></div>
+            <div><span style="opacity:0.5">Region</span><br><strong>us-east-1</strong></div>
+            <div><span style="opacity:0.5">Status</span><br><span style="color:#22c55e">● running</span></div>
+          </div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Metadata</div>
+          <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;line-height:2">
+            Instance Type: t3.large | Launch: 2026-01-15 | VPC: vpc-abc123 | AMI: ami-0xyz789
+          </div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Issues (3)</div>
+          <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px">
+            <div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:#f59e0b">● high</span> CPU spike — open — 2h ago</div>
+            <div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:#22c55e">● resolved</span> Disk full — 3d ago</div>
+            <div style="padding:4px 0"><span style="color:#22c55e">● resolved</span> Memory leak — 7d ago</div>
+          </div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Fix Plans (1)</div>
+          <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px">
+            <div>Fix Plan #12 — Disk cleanup — <span style="color:#22c55e">executed</span></div>
+          </div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Network</div>
+          <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;font-size:12px;line-height:2">
+            VPC: vpc-abc123 | Subnet: subnet-def456 | SG: sg-web-prod (80, 443, 22)
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

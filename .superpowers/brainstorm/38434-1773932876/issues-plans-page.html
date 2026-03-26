@@ -1,0 +1,194 @@
+<h2>Issues & Plans — Combined Page Layout</h2>
+<p class="subtitle">How should Issues and Fix Plans merge into one unified view?</p>
+
+<div class="cards">
+
+  <!-- Option A: Single list with pipeline status -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:12px;background:#0f172a;">
+      <div style="display:flex;flex-direction:column;height:320px;font-size:11px;color:#94a3b8;">
+        <!-- Filter bar -->
+        <div style="display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid #334155;align-items:center;flex-shrink:0;">
+          <div style="background:#4f46e5;color:#fff;padding:3px 10px;border-radius:4px;font-size:10px;">All</div>
+          <div style="background:#334155;color:#94a3b8;padding:3px 10px;border-radius:4px;font-size:10px;">Open (3)</div>
+          <div style="background:#334155;color:#94a3b8;padding:3px 10px;border-radius:4px;font-size:10px;">In Progress (2)</div>
+          <div style="background:#334155;color:#94a3b8;padding:3px 10px;border-radius:4px;font-size:10px;">Resolved (8)</div>
+          <div style="flex:1;"></div>
+          <div style="width:120px;height:24px;background:#1e293b;border-radius:4px;border:1px solid #334155;padding:0 8px;display:flex;align-items:center;">
+            <span style="color:#475569;font-size:9px;">Search...</span>
+          </div>
+        </div>
+        <!-- List -->
+        <div style="flex:1;overflow-y:auto;">
+          <!-- Row 1: Critical with fix plan -->
+          <div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #1e293b;gap:10px;cursor:pointer;background:#dc262608;">
+            <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:3px;font-size:8px;font-weight:700;width:52px;text-align:center;flex-shrink:0;">CRITICAL</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#12 sg_all — ALL ports from 0.0.0.0/0</div>
+              <div style="font-size:9px;color:#64748b;margin-top:1px;">cn-northwest-1 · Aurora PostgreSQL · 10m ago</div>
+            </div>
+            <!-- Pipeline mini-stepper -->
+            <div style="display:flex;gap:2px;flex-shrink:0;width:80px;">
+              <div style="height:3px;flex:1;background:#4f46e5;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#4f46e5;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+            </div>
+            <span style="font-size:9px;color:#c7d2fe;width:64px;text-align:right;flex-shrink:0;">fix_planned</span>
+          </div>
+          <!-- Row 2 -->
+          <div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #1e293b;gap:10px;cursor:pointer;background:#dc262608;">
+            <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:3px;font-size:8px;font-weight:700;width:52px;text-align:center;flex-shrink:0;">CRITICAL</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#13 MySQL 3306 open to internet</div>
+              <div style="font-size:9px;color:#64748b;margin-top:1px;">cn-north-1 · online-shopping-mysql-sg · 10m ago</div>
+            </div>
+            <div style="display:flex;gap:2px;flex-shrink:0;width:80px;">
+              <div style="height:3px;flex:1;background:#4f46e5;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#4f46e5;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+            </div>
+            <span style="font-size:9px;color:#c7d2fe;width:64px;text-align:right;flex-shrink:0;">investigating</span>
+          </div>
+          <!-- Row 3: High -->
+          <div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #1e293b;gap:10px;cursor:pointer;">
+            <span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:3px;font-size:8px;font-weight:700;width:52px;text-align:center;flex-shrink:0;">HIGH</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:#e2e8f0;">#14 SSH 22 open — sg_web</div>
+              <div style="font-size:9px;color:#64748b;margin-top:1px;">cn-northwest-1 · 10m ago</div>
+            </div>
+            <div style="display:flex;gap:2px;flex-shrink:0;width:80px;">
+              <div style="height:3px;flex:1;background:#4f46e5;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#334155;border-radius:2px;"></div>
+            </div>
+            <span style="font-size:9px;color:#94a3b8;width:64px;text-align:right;flex-shrink:0;">open</span>
+          </div>
+          <!-- Row 4: Resolved -->
+          <div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #1e293b;gap:10px;cursor:pointer;opacity:0.5;">
+            <span style="background:#334155;color:#94a3b8;padding:1px 6px;border-radius:3px;font-size:8px;font-weight:700;width:52px;text-align:center;flex-shrink:0;">HIGH</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:#94a3b8;">#8 launch-wizard-1 SSH open</div>
+              <div style="font-size:9px;color:#475569;margin-top:1px;">cn-north-1 · 2d ago</div>
+            </div>
+            <div style="display:flex;gap:2px;flex-shrink:0;width:80px;">
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+            </div>
+            <span style="font-size:9px;color:#22c55e;width:64px;text-align:right;flex-shrink:0;">resolved ✓</span>
+          </div>
+          <!-- Row 5 -->
+          <div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #1e293b;gap:10px;cursor:pointer;opacity:0.5;">
+            <span style="background:#334155;color:#94a3b8;padding:1px 6px;border-radius:3px;font-size:8px;font-weight:700;width:52px;text-align:center;flex-shrink:0;">MEDIUM</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:#94a3b8;">#5 Unused EBS volumes in cn-north-1</div>
+              <div style="font-size:9px;color:#475569;margin-top:1px;">cn-north-1 · 5d ago</div>
+            </div>
+            <div style="display:flex;gap:2px;flex-shrink:0;width:80px;">
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+              <div style="height:3px;flex:1;background:#22c55e;border-radius:2px;"></div>
+            </div>
+            <span style="font-size:9px;color:#22c55e;width:64px;text-align:right;flex-shrink:0;">resolved ✓</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Unified Pipeline List</h3>
+      <p>Single list of Issues, each row shows the full pipeline progress (open → investigating → rca → fix → resolved). Filter by status phase. Click a row → opens detail in Chat's context panel or as a sub-page. Issue and Fix Plan are one journey, not two lists.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Kanban board -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:12px;background:#0f172a;">
+      <div style="display:flex;height:320px;gap:8px;font-size:11px;color:#94a3b8;padding:8px;overflow-x:auto;">
+        <!-- Column: Open -->
+        <div style="width:160px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-bottom:2px solid #ef4444;">Open (3)</div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;border-left:3px solid #dc2626;">
+            <div style="font-size:10px;color:#e2e8f0;">#12 sg_all ALL ports</div>
+            <div style="font-size:8px;color:#64748b;margin-top:3px;">CRITICAL · 10m ago</div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;border-left:3px solid #dc2626;">
+            <div style="font-size:10px;color:#e2e8f0;">#13 MySQL 3306</div>
+            <div style="font-size:8px;color:#64748b;margin-top:3px;">CRITICAL · 10m ago</div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;border-left:3px solid #f97316;">
+            <div style="font-size:10px;color:#e2e8f0;">#14 SSH open</div>
+            <div style="font-size:8px;color:#64748b;margin-top:3px;">HIGH · 10m ago</div>
+          </div>
+        </div>
+        <!-- Column: RCA -->
+        <div style="width:160px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-bottom:2px solid #eab308;">RCA (1)</div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;border-left:3px solid #dc2626;">
+            <div style="font-size:10px;color:#e2e8f0;">#11 UDP all ports</div>
+            <div style="font-size:8px;color:#64748b;margin-top:3px;">CRITICAL · 1h ago</div>
+          </div>
+        </div>
+        <!-- Column: Fix Plan -->
+        <div style="width:160px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-bottom:2px solid #4f46e5;">Fix Planned (1)</div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;border-left:3px solid #f97316;">
+            <div style="font-size:10px;color:#e2e8f0;">#10 Default SG SSH</div>
+            <div style="font-size:8px;color:#64748b;margin-top:3px;">HIGH · 3h ago</div>
+            <div style="font-size:8px;color:#22c55e;margin-top:2px;">L0 · auto-approve</div>
+          </div>
+        </div>
+        <!-- Column: Resolved -->
+        <div style="width:160px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-bottom:2px solid #22c55e;">Resolved (8)</div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;opacity:0.5;">
+            <div style="font-size:10px;color:#94a3b8;">#8 launch-wizard-1</div>
+            <div style="font-size:8px;color:#475569;margin-top:3px;">2d ago ✓</div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:8px;opacity:0.5;">
+            <div style="font-size:10px;color:#94a3b8;">#5 Unused EBS</div>
+            <div style="font-size:8px;color:#475569;margin-top:3px;">5d ago ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Kanban Board</h3>
+      <p>Pipeline stages as columns: Open → RCA → Fix Planned → Executing → Resolved. Cards show severity badge, drag to change status (optional). Visual pipeline overview at a glance. Like Jira/Linear board view.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:20px;">
+  <h3>Key Difference</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>A. Pipeline List</h4>
+      <ul>
+        <li>Compact, scannable</li>
+        <li>Works great with Chat context panel</li>
+        <li>Filter by status phase</li>
+        <li>Familiar ops pattern</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>B. Kanban Board</h4>
+      <ul>
+        <li>Visual pipeline stages at a glance</li>
+        <li>See bottlenecks instantly</li>
+        <li>Needs more horizontal space</li>
+        <li>Harder to combine with context panel</li>
+      </ul>
+    </div>
+  </div>
+</div>

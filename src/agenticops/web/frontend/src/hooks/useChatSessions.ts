@@ -42,3 +42,23 @@ export function useRenameChatSession() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions"] }),
   });
 }
+
+export function useUpdateChatSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      ...fields
+    }: {
+      sessionId: string;
+      pinned?: boolean;
+      starred?: boolean;
+      archived?: boolean;
+    }) =>
+      apiFetch<ChatSession>(`/chat/sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify(fields),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions"] }),
+  });
+}

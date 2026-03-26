@@ -20,7 +20,7 @@ function entityRoute(item: SearchResultItem): string {
     case "issue":
       return `/app/issues/${item.id}`;
     case "fix_plan":
-      return `/app/fix-plans/${item.id}`;
+      return `/app/issues/${item.parent_id ?? item.id}`;
     case "report":
       return `/app/reports/${item.id}`;
     case "resource":

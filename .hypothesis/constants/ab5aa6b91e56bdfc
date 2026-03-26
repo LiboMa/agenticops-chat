@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/checker/engine.py
+# hypothesis_version: 6.151.9
+
+[0.0, 'all', 'cacheReadInputTokens', 'inputTokens', 'outputTokens']

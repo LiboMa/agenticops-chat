@@ -13,6 +13,7 @@ const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -106,6 +107,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Settings />
+                </Suspense>
+              }
+            />
+            <Route
+              path="resources/:id"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ResourceDetail />
                 </Suspense>
               }
             />

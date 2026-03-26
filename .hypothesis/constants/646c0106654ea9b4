@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/mcp.py
+# hypothesis_version: 6.151.9
+
+['\\$\\{(\\w+)\\}', 'args', 'command', 'disabled', 'env', 'headers', 'mcpServers', 'url', 'utf-8']

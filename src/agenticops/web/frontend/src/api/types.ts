@@ -36,7 +36,8 @@ export type IssueStatus =
   | "fix_approved"
   | "fix_executed"
   | "resolved"
-  | "acknowledged"; // legacy fallback
+  | "acknowledged" // legacy fallback
+  | "dismissed";
 
 export interface MergedAlert {
   timestamp: string;
@@ -440,6 +441,9 @@ export interface ChatSession {
   updated_at: string;
   last_activity_at: string;
   message_count: number;
+  pinned: boolean;
+  starred: boolean;
+  archived: boolean;
 }
 
 export interface ChatMessage {
@@ -508,6 +512,7 @@ export interface SearchResultItem {
   status?: string;
   severity?: string;
   report_type?: string;
+  parent_id?: number;
   updated_at?: string;
   created_at?: string;
 }

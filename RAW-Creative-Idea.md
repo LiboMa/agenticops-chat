@@ -571,3 +571,7 @@ Feature development and updates:
   4. Report Feature update: When Scanning/Detect/RCA/Fixxing do not send the RCA, Issue, and fixed_plan separately by default, Can configured in the configure file as well.
   Plan this and complete it line by line.
   5. Test the features at the end of the development and updates the docs related if no errors.
+
+  ### 2026.3.16 - [feature update] - Multiple-cloud accounts updated.
+  - AWS, AWS China region
+  - Alicoud/GCP/Azure account support updated.

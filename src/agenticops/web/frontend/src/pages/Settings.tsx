@@ -9,6 +9,7 @@ import { formatShortDate } from "@/lib/formatDate";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useScanFocus } from "@/hooks/useScanFocus";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
+import { useExcludePatterns, useUpdateExcludePatterns } from "@/hooks/useExcludePatterns";
 import { NotificationsTab } from "@/components/settings/NotificationsTab";
 import { NotificationLogsTab } from "@/components/settings/NotificationLogsTab";
 import { AuditTab } from "@/components/settings/AuditTab";
@@ -569,6 +570,109 @@ function McpImportDialog({
   );
 }
 
+/* ── Exclude Patterns Card ──────────────────────────────────────── */
+
+function ExcludePatternsCard() {
+  const { t } = useLocale();
+  const patternsQ = useExcludePatterns();
+  const updateMut = useUpdateExcludePatterns();
+  const [newPattern, setNewPattern] = useState("");
+  const [localPatterns, setLocalPatterns] = useState<string[] | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  const patterns = localPatterns ?? patternsQ.data?.patterns ?? [];
+
+  function handleAdd() {
+    const trimmed = newPattern.trim();
+    if (!trimmed || patterns.includes(trimmed)) return;
+    const updated = [...patterns, trimmed];
+    setLocalPatterns(updated);
+    setNewPattern("");
+    setDirty(true);
+  }
+
+  function handleRemove(idx: number) {
+    const updated = patterns.filter((_, i) => i !== idx);
+    setLocalPatterns(updated);
+    setDirty(true);
+  }
+
+  function handleSave() {
+    updateMut.mutate(patterns, {
+      onSuccess: () => {
+        setDirty(false);
+        setLocalPatterns(null);
+      },
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t("settings.excludePatterns")}</h2>
+          <span className="text-xs text-muted-foreground">{t("settings.excludePatternsDesc")}</span>
+        </div>
+      </CardHeader>
+      <CardBody>
+        {patternsQ.isLoading ? (
+          <Spinner />
+        ) : patternsQ.error ? (
+          <ErrorBanner message={(patternsQ.error as Error).message} onRetry={() => patternsQ.refetch()} />
+        ) : (
+          <>
+            <div className="space-y-2 mb-4">
+              {patterns.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No exclude patterns configured.</p>
+              ) : (
+                patterns.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between p-2 rounded-lg border border-border bg-background">
+                    <span className="text-sm font-mono text-foreground">{p}</span>
+                    <button
+                      onClick={() => handleRemove(i)}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newPattern}
+                onChange={(e) => setNewPattern(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+                placeholder="e.g. (?i)informational|advisory"
+                className="flex-1 px-3 py-2 border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              <button
+                onClick={handleAdd}
+                disabled={!newPattern.trim()}
+                className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            {dirty && (
+              <div className="flex justify-end mt-3">
+                <button
+                  onClick={handleSave}
+                  disabled={updateMut.isPending}
+                  className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+                >
+                  {updateMut.isPending ? "Saving..." : "Save"}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── Agent Models Card ──────────────────────────────────────────── */
 
 // MODEL_PRESETS loaded from GET /api/settings → s.model_presets (single source: config.py)
@@ -843,6 +947,9 @@ export default function Settings() {
           ) : null}
         </CardBody>
       </Card>
+
+      {/* ── Exclude Patterns ─────────────────────────────────── */}
+      <ExcludePatternsCard />
 
       {/* ── Agent Models ─────────────────────────────────────── */}
       <AgentModelsCard />

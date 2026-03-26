@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/monitor/collector.py
+# hypothesis_version: 6.151.9
+
+['count', 'data_points', 'earliest', 'latest', 'resource_id', 'resources', 'total_resources']

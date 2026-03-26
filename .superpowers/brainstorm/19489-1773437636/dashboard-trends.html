@@ -1,0 +1,233 @@
+<h2>Dashboard Trends Layout</h2>
+<p class="subtitle">5 trend charts added below existing KPI strip. Which arrangement?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>2-Row Grid</h3>
+      <p>Row 1: Issue Trend + Severity Distribution (large). Row 2: Resources + MTTR + Fix Success (small).</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Dashboard — below KPI strip</div>
+        <div class="mockup-body" style="padding:16px;font-size:11px">
+          <!-- Time switcher -->
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:4px">
+            <span style="background:rgba(99,102,241,0.2);color:#818cf8;padding:3px 10px;border-radius:4px;font-weight:600;font-size:10px">7d</span>
+            <span style="padding:3px 10px;border-radius:4px;opacity:0.4;font-size:10px">30d</span>
+            <span style="padding:3px 10px;border-radius:4px;opacity:0.4;font-size:10px">90d</span>
+          </div>
+          <!-- Row 1: 2 large charts -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;font-size:10px">Issue Trend</div>
+              <div style="height:80px;display:flex;align-items:end;gap:3px;padding:0 4px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px;align-items:stretch">
+                  <div style="height:30px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:15px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:25px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:20px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:35px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:10px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:20px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:25px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:15px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:30px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:10px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:35px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:1px">
+                  <div style="height:18px;background:rgba(239,68,68,0.3);border-radius:2px 2px 0 0"></div>
+                  <div style="height:12px;background:rgba(34,197,94,0.3);border-radius:0 0 2px 2px"></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:12px;margin-top:8px;font-size:10px;opacity:0.5">
+                <span><span style="color:#ef4444">■</span> opened</span>
+                <span><span style="color:#22c55e">■</span> resolved</span>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;font-size:10px">Severity Distribution</div>
+              <div style="height:80px;display:flex;align-items:end;gap:3px;padding:0 4px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:10px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:15px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:25px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:10px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:12px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:18px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:20px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:12px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:15px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:20px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:22px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:8px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:8px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:15px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:28px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:14px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:5px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:12px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:30px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:15px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:6px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:10px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:25px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:18px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0">
+                  <div style="height:8px;background:rgba(239,68,68,0.5)"></div>
+                  <div style="height:14px;background:rgba(249,115,22,0.4)"></div>
+                  <div style="height:22px;background:rgba(234,179,8,0.3)"></div>
+                  <div style="height:16px;background:rgba(59,130,246,0.3)"></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:8px;font-size:10px;opacity:0.5">
+                <span><span style="color:#ef4444">■</span> critical</span>
+                <span><span style="color:#f97316">■</span> high</span>
+                <span><span style="color:#eab308">■</span> medium</span>
+                <span><span style="color:#3b82f6">■</span> low</span>
+              </div>
+            </div>
+          </div>
+          <!-- Row 2: 3 small charts -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;font-size:10px">Resource Changes</div>
+              <div style="font-size:20px;font-weight:300;font-family:monospace;margin-bottom:4px">+14 <span style="font-size:12px;opacity:0.4">/ -2</span></div>
+              <div style="height:30px;display:flex;align-items:end;gap:2px">
+                <div style="flex:1;height:60%;background:rgba(99,102,241,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:40%;background:rgba(99,102,241,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:80%;background:rgba(99,102,241,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:30%;background:rgba(99,102,241,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:50%;background:rgba(99,102,241,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:90%;background:rgba(99,102,241,0.4);border-radius:2px"></div>
+                <div style="flex:1;height:70%;background:rgba(99,102,241,0.4);border-radius:2px"></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;font-size:10px">MTTR</div>
+              <div style="font-size:20px;font-weight:300;font-family:monospace;margin-bottom:4px">2.4h <span style="font-size:12px;color:#22c55e">↓12%</span></div>
+              <div style="height:30px;display:flex;align-items:end;gap:2px">
+                <div style="flex:1;height:80%;background:rgba(234,179,8,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:70%;background:rgba(234,179,8,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:90%;background:rgba(234,179,8,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:60%;background:rgba(234,179,8,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:50%;background:rgba(234,179,8,0.25);border-radius:2px"></div>
+                <div style="flex:1;height:40%;background:rgba(234,179,8,0.25);border-radius:2px"></div>
+                <div style="flex:1;height:35%;background:rgba(34,197,94,0.3);border-radius:2px"></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px">
+              <div style="opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;font-size:10px">Fix Success Rate</div>
+              <div style="font-size:20px;font-weight:300;font-family:monospace;margin-bottom:4px">87% <span style="font-size:12px;color:#22c55e">↑5%</span></div>
+              <div style="height:30px;display:flex;align-items:end;gap:2px">
+                <div style="flex:1;height:60%;background:rgba(34,197,94,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:70%;background:rgba(34,197,94,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:50%;background:rgba(34,197,94,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:75%;background:rgba(34,197,94,0.3);border-radius:2px"></div>
+                <div style="flex:1;height:80%;background:rgba(34,197,94,0.35);border-radius:2px"></div>
+                <div style="flex:1;height:85%;background:rgba(34,197,94,0.35);border-radius:2px"></div>
+                <div style="flex:1;height:90%;background:rgba(34,197,94,0.4);border-radius:2px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Compact Strip</h3>
+      <p>All 5 charts in a single row of sparklines with headline numbers. Minimal vertical space.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Dashboard — below KPI strip</div>
+        <div class="mockup-body" style="padding:16px;font-size:11px">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:4px">
+            <span style="background:rgba(99,102,241,0.2);color:#818cf8;padding:3px 10px;border-radius:4px;font-weight:600;font-size:10px">7d</span>
+            <span style="padding:3px 10px;border-radius:4px;opacity:0.4;font-size:10px">30d</span>
+            <span style="padding:3px 10px;border-radius:4px;opacity:0.4;font-size:10px">90d</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
+              <div style="opacity:0.5;font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Issues</div>
+              <div style="font-size:16px;font-weight:300;font-family:monospace;margin:4px 0">+8 / -12</div>
+              <div style="height:20px;display:flex;align-items:end;gap:1px">
+                <div style="flex:1;height:60%;background:rgba(239,68,68,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:40%;background:rgba(239,68,68,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:80%;background:rgba(239,68,68,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:30%;background:rgba(34,197,94,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:50%;background:rgba(34,197,94,0.3);border-radius:1px"></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
+              <div style="opacity:0.5;font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Severity</div>
+              <div style="font-size:16px;font-weight:300;font-family:monospace;margin:4px 0">2 crit</div>
+              <div style="height:20px;display:flex;align-items:end;gap:1px">
+                <div style="flex:1;height:70%;display:flex;flex-direction:column"><div style="flex:1;background:rgba(239,68,68,0.4)"></div><div style="flex:2;background:rgba(234,179,8,0.3)"></div></div>
+                <div style="flex:1;height:60%;display:flex;flex-direction:column"><div style="flex:1;background:rgba(239,68,68,0.4)"></div><div style="flex:3;background:rgba(234,179,8,0.3)"></div></div>
+                <div style="flex:1;height:80%;display:flex;flex-direction:column"><div style="flex:2;background:rgba(239,68,68,0.4)"></div><div style="flex:2;background:rgba(234,179,8,0.3)"></div></div>
+                <div style="flex:1;height:50%;display:flex;flex-direction:column"><div style="flex:1;background:rgba(249,115,22,0.3)"></div><div style="flex:3;background:rgba(234,179,8,0.3)"></div></div>
+                <div style="flex:1;height:40%;display:flex;flex-direction:column"><div style="flex:1;background:rgba(249,115,22,0.3)"></div><div style="flex:2;background:rgba(59,130,246,0.3)"></div></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
+              <div style="opacity:0.5;font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Resources</div>
+              <div style="font-size:16px;font-weight:300;font-family:monospace;margin:4px 0">+14</div>
+              <div style="height:20px;display:flex;align-items:end;gap:1px">
+                <div style="flex:1;height:50%;background:rgba(99,102,241,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:30%;background:rgba(99,102,241,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:70%;background:rgba(99,102,241,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:90%;background:rgba(99,102,241,0.4);border-radius:1px"></div>
+                <div style="flex:1;height:60%;background:rgba(99,102,241,0.3);border-radius:1px"></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
+              <div style="opacity:0.5;font-size:9px;text-transform:uppercase;letter-spacing:0.05em">MTTR</div>
+              <div style="font-size:16px;font-weight:300;font-family:monospace;margin:4px 0">2.4h <span style="font-size:10px;color:#22c55e">↓</span></div>
+              <div style="height:20px;display:flex;align-items:end;gap:1px">
+                <div style="flex:1;height:80%;background:rgba(234,179,8,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:60%;background:rgba(234,179,8,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:70%;background:rgba(234,179,8,0.25);border-radius:1px"></div>
+                <div style="flex:1;height:40%;background:rgba(234,179,8,0.25);border-radius:1px"></div>
+                <div style="flex:1;height:35%;background:rgba(34,197,94,0.3);border-radius:1px"></div>
+              </div>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
+              <div style="opacity:0.5;font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Fix Rate</div>
+              <div style="font-size:16px;font-weight:300;font-family:monospace;margin:4px 0">87% <span style="font-size:10px;color:#22c55e">↑</span></div>
+              <div style="height:20px;display:flex;align-items:end;gap:1px">
+                <div style="flex:1;height:50%;background:rgba(34,197,94,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:60%;background:rgba(34,197,94,0.3);border-radius:1px"></div>
+                <div style="flex:1;height:70%;background:rgba(34,197,94,0.35);border-radius:1px"></div>
+                <div style="flex:1;height:80%;background:rgba(34,197,94,0.35);border-radius:1px"></div>
+                <div style="flex:1;height:90%;background:rgba(34,197,94,0.4);border-radius:1px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

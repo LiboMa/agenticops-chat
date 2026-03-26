@@ -22,6 +22,18 @@ def trigger_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> No
         logger.info("Auto-RCA disabled — skipping for issue #%d", health_issue_id)
         return
 
+    # Skip dismissed issues
+    try:
+        from agenticops.database import get_db_session
+        from agenticops.models import HealthIssue
+        with get_db_session() as session:
+            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+            if issue and issue.status == "dismissed":
+                logger.info("Issue #%d is dismissed — skipping auto-RCA", health_issue_id)
+                return
+    except Exception:
+        pass  # If check fails, proceed with RCA anyway
+
     thread = threading.Thread(
         target=_run_auto_rca,
         args=(health_issue_id, trace_id),

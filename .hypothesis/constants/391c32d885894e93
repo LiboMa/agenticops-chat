@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/detect_tools.py
+# hypothesis_version: 6.151.9
+
+[3.0, 'actual_value', 'anomalies', 'index', 'mean', 'message', 'metric_name', 'rule_name', 'rules_checked', 'rules_triggered', 'sample_size', 'severity', 'std_dev', 'threshold', 'threshold_value', 'value', 'z_score', '{}']

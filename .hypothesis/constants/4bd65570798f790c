@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/skills/evolution.py
+# hypothesis_version: 6.151.9
+
+[8192, 'SKILL.md', '```', 'action', 'bedrock-runtime', 'content', 'description', 'draft_path', 'error', 'maxTokens', 'message', 'name', 'output', 'references', 'role', 'skill_name', 'text', 'updated', 'user', 'utf-8']

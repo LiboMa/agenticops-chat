@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Update Docs After Task",
+  "description": "After a spec task is completed, automatically review the changes made and update any related documentation (README, steering files, API docs, etc.) to keep them in sync with the code.\nand the project's docs: docs/",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A spec task was just completed. Review the changes that were made during this task and identify any documentation that needs to be updated to reflect those changes. Check files like README.md, docs/, .kiro/steering/, and any inline documentation. Update the relevant docs to stay in sync with the code changes. Only update docs that are actually affected — don't make unnecessary edits."
+  },
+  "workspaceFolderName": "AgenticOps",
+  "shortName": "update-docs-post-task"
+}

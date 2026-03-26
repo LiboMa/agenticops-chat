@@ -1,0 +1,1 @@
+Please help me to scan all my regions and resources and do the health check finally, generate the 中文的HTML  的Report给我
