@@ -59,6 +59,7 @@ from agenticops.providers.base import get_cli_tool_for_issue, get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         **cache_kwargs,
     )
     return Agent(
-        system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre"),
+        system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre", agent_name="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(
@@ -263,6 +264,8 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
             read_skill_reference,
             run_on_host,
             run_kubectl,
+            # Agent Memory (cross-agent search)
+            search_agent_memory,
         ],
     )
 

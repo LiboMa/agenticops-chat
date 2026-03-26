@@ -45,6 +45,7 @@ from agenticops.skills.tools import (
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
 from agenticops.tools.notification_tools import share_content
+from agenticops.tools.memory_tools import record_agent_feedback, search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ If the user explicitly requests a different scope, honor their request over this
     prompt = MAIN_SYSTEM_PROMPT + focus_section
 
     agent = Agent(
-        system_prompt=build_system_prompt(prompt, include_account=False),
+        system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
         model=model,
         conversation_manager=SlidingWindowConversationManager(
             window_size=get_agent_window_size("main"), per_turn=True
@@ -244,6 +245,9 @@ If the user explicitly requests a different scope, honor their request over this
             list_monitoring_providers,
             # Notification tools (direct, no skill activation needed)
             share_content,
+            # Agent Memory tools (feedback recording + cross-agent search)
+            record_agent_feedback,
+            search_agent_memory,
             # MCP tool providers (external servers)
             *get_mcp_clients(),
         ],

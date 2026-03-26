@@ -15,6 +15,7 @@ from agenticops.config import settings
 from agenticops.providers.base import get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.agents.preamble import build_system_prompt
+from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_enabled_accounts,
@@ -171,11 +172,13 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             scan_resources, check_health,
             # Agent Skills (dynamic tool registration)
             activate_skill, read_skill_reference,
+            # Agent Memory (cross-agent search)
+            search_agent_memory,
         ]
         tools.extend(get_all_cli_tools())
 
         agent = Agent(
-            system_prompt=build_system_prompt(SCAN_SYSTEM_PROMPT, include_account=False, agent_type="scan"),
+            system_prompt=build_system_prompt(SCAN_SYSTEM_PROMPT, include_account=False, agent_type="scan", agent_name="scan"),
             model=bedrock_model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(

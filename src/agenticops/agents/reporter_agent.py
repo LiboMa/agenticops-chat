@@ -24,6 +24,7 @@ from agenticops.tools.metadata_tools import (
 from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
 from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +126,9 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             **cache_kwargs,
         )
 
+        from agenticops.agents.preamble import build_system_prompt
         agent = Agent(
-            system_prompt=REPORTER_SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(REPORTER_SYSTEM_PROMPT, include_account=False, agent_name="reporter"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -145,6 +147,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 distill_case_study,
                 activate_skill,
                 read_skill_reference,
+                # Agent Memory (cross-agent search)
+                search_agent_memory,
             ],
         )
 

@@ -43,6 +43,7 @@ from agenticops.tools.integration_tools import (
     query_provider_metrics,
 )
 from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +210,11 @@ def _build_detect_agent_for_account(
         f"Do NOT call get_active_account or assume_role — you already know which account you're checking."
     )
 
+    from agenticops.agents.preamble import build_system_prompt
+    base_prompt = f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}"
+
     agent = Agent(
-        system_prompt=f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}",
+        system_prompt=build_system_prompt(base_prompt, include_account=False, agent_name="detect"),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(
@@ -237,6 +241,8 @@ def _build_detect_agent_for_account(
             # Agent Skills (dynamic tool registration)
             activate_skill,
             read_skill_reference,
+            # Agent Memory (cross-agent search)
+            search_agent_memory,
         ],
     )
     return agent
@@ -298,8 +304,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 **cache_kwargs,
             )
 
+            from agenticops.agents.preamble import build_system_prompt as _bsp
             agent = Agent(
-                system_prompt=DETECT_SYSTEM_PROMPT,
+                system_prompt=_bsp(DETECT_SYSTEM_PROMPT, include_account=False, agent_name="detect"),
                 model=model,
                 callback_handler=None,
                 conversation_manager=SlidingWindowConversationManager(
@@ -328,6 +335,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     # Agent Skills (dynamic tool registration)
                     activate_skill,
                     read_skill_reference,
+                    # Agent Memory (cross-agent search)
+                    search_agent_memory,
                 ],
             )
 

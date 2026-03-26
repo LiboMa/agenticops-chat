@@ -121,6 +121,7 @@ def build_system_prompt(
     include_account: bool = True,
     include_skills: bool = True,
     agent_type: str = "generic",
+    agent_name: str = "",
 ) -> str:
     """Compose a final system prompt from a base prompt + selected preamble blocks.
 
@@ -129,6 +130,7 @@ def build_system_prompt(
         include_account: Prepend the account preamble instruction.
         include_skills: Append skills XML + usage protocol (requires skills_enabled).
         agent_type: Agent type for output rule selection ('rca', 'sre', or 'generic').
+        agent_name: Agent name for memory injection (e.g. "detect"). Empty = no memory.
 
     Returns:
         Assembled system prompt string.
@@ -139,6 +141,19 @@ def build_system_prompt(
         parts.append(ACCOUNT_PREAMBLE)
 
     parts.append(base)
+
+    # Inject agent memory (behavioral constraints learned from feedback)
+    if agent_name:
+        try:
+            from agenticops.memory.agent_memory import load_agent_memory
+
+            memory_block = load_agent_memory(agent_name)
+            if memory_block:
+                parts.append(memory_block)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Failed to load agent memory for %s", agent_name, exc_info=True
+            )
 
     # Always inject output rules
     parts.append(get_output_rules(agent_type))

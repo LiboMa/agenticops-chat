@@ -47,6 +47,7 @@ from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=build_system_prompt(EXECUTOR_SYSTEM_PROMPT, include_account=False, agent_type="executor"),
+            system_prompt=build_system_prompt(EXECUTOR_SYSTEM_PROMPT, include_account=False, agent_type="executor", agent_name="executor"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -246,6 +247,8 @@ def executor_agent(fix_plan_id: int) -> str:
                 # Agent Skills (domain knowledge + dynamic tool loading)
                 activate_skill,
                 read_skill_reference,
+                # Agent Memory (cross-agent search)
+                search_agent_memory,
             ],
         )
 
