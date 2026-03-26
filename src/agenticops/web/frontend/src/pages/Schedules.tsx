@@ -15,6 +15,7 @@ import {
 } from "@/hooks/useSchedules";
 import { useSkills } from "@/hooks/useSkills";
 import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
+import { CronBuilder } from "@/components/ui/CronBuilder";
 
 const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
@@ -139,10 +140,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
               <p className="text-xs text-muted-foreground mt-1">{PIPELINE_META[pipelineName].desc}</p>
             )}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Cron Expression</label>
-            <input required value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} placeholder="0 */6 * * *" className={`${inputCls} font-mono`} />
-          </div>
+          <CronBuilder value={cronExpression} onChange={setCronExpression} />
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Account Name (optional)</label>
             <input value={accountName} onChange={(e) => setAccountName(e.target.value)} className={inputCls} />

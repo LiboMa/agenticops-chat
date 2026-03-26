@@ -3831,6 +3831,26 @@ async def api_pipeline_options():
     }
 
 
+@app.get("/api/schedules/cron-preview")
+async def api_cron_preview(expr: str = ""):
+    """Validate a cron expression and return the next 3 run times."""
+    from agenticops.scheduler.scheduler import CronParser
+
+    if not expr.strip():
+        return {"valid": False, "error": "Empty expression"}
+    try:
+        parser = CronParser(expr.strip())
+        now = datetime.utcnow()
+        runs = []
+        t = now
+        for _ in range(3):
+            t = parser.next_run(t)
+            runs.append(t.isoformat())
+        return {"valid": True, "next_runs": runs}
+    except (ValueError, Exception) as e:
+        return {"valid": False, "error": str(e)}
+
+
 @app.get("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
 async def api_get_schedule(schedule_id: int):
     """Get schedule by ID."""
