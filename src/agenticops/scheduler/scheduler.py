@@ -195,30 +195,74 @@ class Scheduler:
         """Check and execute due schedules."""
         now = datetime.utcnow()
 
+        # Phase 1: read all enabled schedules and close the session
+        due: list[dict] = []
+        init_only: list[tuple[int, datetime]] = []
+
         with get_db_session() as session:
             schedules = session.query(Schedule).filter_by(is_enabled=True).all()
-
-            for schedule in schedules:
+            for s in schedules:
                 try:
-                    cron = CronParser(schedule.cron_expression)
-
-                    # Check if it's time to run
-                    if schedule.next_run_at and schedule.next_run_at <= now:
-                        self._execute_schedule(schedule)
-
-                        # Update next run time
-                        schedule.last_run_at = now
-                        schedule.next_run_at = cron.next_run(now)
-
-                    # Initialize next_run_at if not set
-                    elif schedule.next_run_at is None:
-                        schedule.next_run_at = cron.next_run(now)
-
+                    cron = CronParser(s.cron_expression)
+                    if s.next_run_at and s.next_run_at <= now:
+                        # Snapshot the fields we need — no lazy access later
+                        due.append({
+                            "id": s.id,
+                            "name": s.name,
+                            "pipeline_name": s.pipeline_name,
+                            "account_name": s.account_name,
+                            "config": dict(s.config) if s.config else {},
+                            "next_run": cron.next_run(now),
+                        })
+                    elif s.next_run_at is None:
+                        init_only.append((s.id, cron.next_run(now)))
                 except Exception as e:
-                    logger.error(f"Error processing schedule '{schedule.name}': {e}")
+                    logger.error(f"Error parsing schedule '{s.name}': {e}")
+
+            # Initialize next_run_at for newly created schedules
+            for sid, next_run in init_only:
+                obj = session.query(Schedule).filter_by(id=sid).first()
+                if obj:
+                    obj.next_run_at = next_run
+
+        # Phase 2: execute due schedules outside any session
+        for info in due:
+            try:
+                self._execute_schedule_by_info(info)
+            except Exception as e:
+                logger.error(f"Error executing schedule '{info['name']}': {e}")
+
+            # Phase 3: update last_run_at / next_run_at in a fresh session
+            try:
+                with get_db_session() as session:
+                    obj = session.query(Schedule).filter_by(id=info["id"]).first()
+                    if obj:
+                        obj.last_run_at = now
+                        obj.next_run_at = info["next_run"]
+            except Exception as e:
+                logger.error(f"Error updating schedule '{info['name']}': {e}")
 
     def _execute_schedule(self, schedule: Schedule):
-        """Execute a scheduled pipeline."""
+        """Execute a scheduled pipeline from an ORM object.
+
+        Extracts plain data from the Schedule, then delegates to
+        ``_execute_schedule_by_info`` so no SQLAlchemy lazy-load happens
+        during the (potentially long-running) pipeline execution.
+        """
+        info = {
+            "id": schedule.id,
+            "name": schedule.name,
+            "pipeline_name": schedule.pipeline_name,
+            "account_name": schedule.account_name,
+            "config": dict(schedule.config) if schedule.config else {},
+        }
+        self._execute_schedule_by_info(info)
+
+    def _execute_schedule_by_info(self, info: dict):
+        """Execute a scheduled pipeline from a plain dict (no ORM dependency).
+
+        ``info`` keys: id, name, pipeline_name, account_name, config.
+        """
         from agenticops.models import CloudAccount
         from agenticops.pipeline import (
             FullScanPipeline,
@@ -227,12 +271,18 @@ class Scheduler:
             HealthPatrolPipeline,
         )
 
-        logger.info(f"Executing scheduled pipeline: {schedule.name}")
+        schedule_id = info["id"]
+        schedule_name = info["name"]
+        pipeline_name = info["pipeline_name"]
+        account_name = info.get("account_name")
+        config = info.get("config") or {}
+
+        logger.info(f"Executing scheduled pipeline: {schedule_name}")
 
         # Create execution record
         with get_db_session() as session:
             execution = ScheduleExecution(
-                schedule_id=schedule.id,
+                schedule_id=schedule_id,
                 status="running",
                 started_at=datetime.utcnow(),
             )
@@ -241,17 +291,23 @@ class Scheduler:
             execution_id = execution.id
 
         # AgentChain: prompt-driven execution via Main Agent
-        if schedule.pipeline_name == "AgentChain":
-            self._execute_agent_chain(schedule, execution_id)
+        if pipeline_name == "AgentChain":
+            # _execute_agent_chain still needs a Schedule ORM; load fresh
+            with get_db_session() as session:
+                schedule_obj = session.query(Schedule).filter_by(id=schedule_id).first()
+                if schedule_obj:
+                    session.expunge(schedule_obj)
+            if schedule_obj:
+                self._execute_agent_chain(schedule_obj, execution_id)
             return
 
         try:
             # Get accounts — expunge so they can be used outside the session
             accounts = []
-            if schedule.account_name:
+            if account_name:
                 with get_db_session() as session:
                     acct = session.query(CloudAccount).filter_by(
-                        name=schedule.account_name
+                        name=account_name
                     ).first()
                     if acct:
                         session.expunge(acct)
@@ -278,9 +334,9 @@ class Scheduler:
                 "HealthPatrolPipeline": HealthPatrolPipeline,
             }
 
-            factory = pipeline_factories.get(schedule.pipeline_name)
+            factory = pipeline_factories.get(pipeline_name)
             if not factory:
-                raise ValueError(f"Unknown pipeline: {schedule.pipeline_name}")
+                raise ValueError(f"Unknown pipeline: {pipeline_name}")
 
             # Execute pipeline for each account, aggregate results
             all_step_results = []
@@ -288,9 +344,9 @@ class Scheduler:
             total_duration_ms = 0
 
             for account in accounts:
-                logger.info(f"Schedule '{schedule.name}' running pipeline for account '{account.name}'")
+                logger.info(f"Schedule '{schedule_name}' running pipeline for account '{account.name}'")
                 if factory is HealthPatrolPipeline:
-                    pipeline = factory(account, config=schedule.config)
+                    pipeline = factory(account, config=config)
                 else:
                     pipeline = factory(account)
                 result = asyncio.run(pipeline.execute())
@@ -315,22 +371,22 @@ class Scheduler:
                     execution.completed_at = datetime.utcnow()
                     execution.duration_ms = total_duration_ms
                     execution.result = {
-                        "pipeline": schedule.pipeline_name,
+                        "pipeline": pipeline_name,
                         "accounts": [a.name for a in accounts],
                         "steps": all_step_results,
                     }
 
-            logger.info(f"Schedule '{schedule.name}' completed for {len(accounts)} account(s)")
+            logger.info(f"Schedule '{schedule_name}' completed for {len(accounts)} account(s)")
 
             # Auto-notify on completion
             try:
                 from agenticops.services.notification_service import notify_schedule_result
-                notify_schedule_result(schedule.name, not any_failed)
+                notify_schedule_result(schedule_name, not any_failed)
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
 
         except Exception as e:
-            logger.error(f"Schedule '{schedule.name}' failed: {e}")
+            logger.error(f"Schedule '{schedule_name}' failed: {e}")
 
             with get_db_session() as session:
                 execution = session.query(ScheduleExecution).filter_by(
@@ -344,7 +400,7 @@ class Scheduler:
             # Auto-notify on failure
             try:
                 from agenticops.services.notification_service import notify_schedule_result
-                notify_schedule_result(schedule.name, False, str(e))
+                notify_schedule_result(schedule_name, False, str(e))
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
 
@@ -552,19 +608,29 @@ class Scheduler:
         """Manually trigger a schedule to run immediately."""
         init_db()
 
+        # Load schedule data and close the session before executing
         with get_db_session() as session:
             schedule = session.query(Schedule).filter_by(name=name).first()
             if not schedule:
                 return None
+            schedule_id = schedule.id
+            info = {
+                "id": schedule.id,
+                "name": schedule.name,
+                "pipeline_name": schedule.pipeline_name,
+                "account_name": schedule.account_name,
+                "config": dict(schedule.config) if schedule.config else {},
+            }
 
-            # Create a temporary scheduler instance to run the schedule
-            scheduler = Scheduler()
-            scheduler._execute_schedule(schedule)
+        # Execute outside any session
+        scheduler = Scheduler()
+        scheduler._execute_schedule_by_info(info)
 
-            # Return the latest execution
+        # Query the result in a fresh session
+        with get_db_session() as session:
             return (
                 session.query(ScheduleExecution)
-                .filter_by(schedule_id=schedule.id)
+                .filter_by(schedule_id=schedule_id)
                 .order_by(ScheduleExecution.started_at.desc())
                 .first()
             )
