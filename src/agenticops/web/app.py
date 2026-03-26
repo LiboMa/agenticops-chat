@@ -5411,6 +5411,199 @@ async def api_wecom_callback(request: Request):
 
 
 # ============================================================================
+# Agent Memory API
+# ============================================================================
+
+
+class IssueFeedbackRequest(BaseModel):
+    """Schema for issue feedback (false positive / confirmed)."""
+    type: str = Field(..., pattern="^(false_positive|confirmed)$")
+    note: str = ""
+    confidence: int = Field(default=3, ge=1, le=5)
+
+
+class AgentMemoryResponse(BaseModel):
+    """Schema for agent memory entry."""
+    agent: str
+    filename: str
+    type: str
+    status: str
+    confidence: int
+    source: str
+    resource_pattern: str = ""
+    related_issue_id: Optional[int] = None
+    summary: str
+    created_at: str
+    last_confirmed: str
+
+
+class AgentMemoryUpdateRequest(BaseModel):
+    """Schema for updating an agent memory entry."""
+    confidence: Optional[int] = Field(None, ge=1, le=5)
+    status: Optional[str] = Field(None, pattern="^(active|archived)$")
+    body: Optional[str] = None
+
+
+@app.post("/api/health-issues/{issue_id}/feedback", status_code=201)
+async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
+    """Record user feedback on a health issue (false positive / confirmed).
+
+    For false_positive: creates agent memory for detect agent + dismisses issue.
+    For confirmed: archives any memory that suppresses this pattern.
+    """
+    from agenticops.memory.agent_memory import (
+        archive_memory,
+        save_memory_file,
+        search_memories,
+    )
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        resource_id = issue.resource_id
+        title = issue.title
+        description = issue.description
+        severity = issue.severity
+        source = issue.source
+
+    if data.type == "false_positive":
+        # Build resource pattern from issue
+        parts = resource_id.split("/") if resource_id else []
+        resource_pattern = f"{parts[0]}/*" if parts else ""
+
+        # Build memory body
+        body = f"{title}\n\n{description}\n\nMarked as false positive on issue I#{issue_id}."
+        if data.note:
+            body += f"\nUser note: {data.note}"
+
+        # Create/update detect agent memory
+        import re
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower().strip())[:50].strip("_")
+        filename = f"{slug}.md" if slug else f"issue_{issue_id}_fp.md"
+
+        filepath = save_memory_file(
+            agent_name="detect",
+            filename=filename,
+            memory_type="feedback",
+            confidence=data.confidence,
+            source="user",
+            body=body,
+            resource_pattern=resource_pattern,
+            related_issue_id=issue_id,
+        )
+
+        # Dismiss the issue
+        with get_db_session() as session:
+            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+            if issue and issue.status not in ("resolved",):
+                issue.status = "resolved"
+
+        return {
+            "status": "recorded",
+            "type": "false_positive",
+            "memory_file": filepath.name,
+            "agent": "detect",
+            "confidence": data.confidence,
+        }
+
+    elif data.type == "confirmed":
+        # Search for memories that might suppress this pattern
+        archived_count = 0
+        matches = search_memories(title, agent_name="detect")
+        for m in matches:
+            if archive_memory("detect", m["filename"]):
+                archived_count += 1
+
+        return {
+            "status": "recorded",
+            "type": "confirmed",
+            "archived_memories": archived_count,
+        }
+
+
+@app.get("/api/agent-memory", response_model=List[AgentMemoryResponse])
+async def api_list_agent_memories(
+    agent: str = "",
+    status: str = "active",
+):
+    """List agent memories with optional filtering."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, list_memories
+
+    if agent and agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+    if status not in ("active", "archived", "all"):
+        raise HTTPException(status_code=400, detail="status must be active, archived, or all")
+
+    memories = list_memories(agent_name=agent, status_filter=status)
+    return memories
+
+
+@app.get("/api/agent-memory/{agent}/{filename}")
+async def api_get_agent_memory(agent: str, filename: str):
+    """Read a single agent memory file."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, _agent_dir, parse_frontmatter
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    filepath = _agent_dir(agent) / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Memory file not found")
+
+    raw = filepath.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter(raw)
+    return {"agent": agent, "filename": filename, "frontmatter": fm, "body": body}
+
+
+@app.put("/api/agent-memory/{agent}/{filename}")
+async def api_update_agent_memory(agent: str, filename: str, data: AgentMemoryUpdateRequest):
+    """Update an agent memory file (confidence, status, body)."""
+    from agenticops.memory.agent_memory import (
+        AGENT_NAMES,
+        _agent_dir,
+        _serialize_frontmatter,
+        parse_frontmatter,
+        update_memory_index,
+    )
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    filepath = _agent_dir(agent) / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Memory file not found")
+
+    raw = filepath.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter(raw)
+
+    if data.confidence is not None:
+        fm["confidence"] = data.confidence
+    if data.status is not None:
+        fm["status"] = data.status
+    if data.body is not None:
+        body = data.body
+
+    filepath.write_text(_serialize_frontmatter(fm, body), encoding="utf-8")
+    update_memory_index(agent)
+
+    return {"status": "updated", "agent": agent, "filename": filename}
+
+
+@app.delete("/api/agent-memory/{agent}/{filename}", status_code=204)
+async def api_delete_agent_memory(agent: str, filename: str):
+    """Archive or delete an agent memory file."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, archive_memory
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    if not archive_memory(agent, filename):
+        raise HTTPException(status_code=404, detail="Memory file not found")
+
+
+# ============================================================================
 # Run Server Function
 # ============================================================================
 
