@@ -30,6 +30,25 @@ from agenticops.notify.im_config import load_channels as _load_yaml_channels
 
 logger = logging.getLogger(__name__)
 
+# ── Pre-compiled exclude patterns (avoids re-compiling per issue) ──────
+_exclude_cache: tuple[list[str], list[re.Pattern]] | None = None
+
+
+def _compiled_exclude_patterns() -> list[re.Pattern]:
+    """Return compiled exclude patterns, recompiling only when config changes."""
+    global _exclude_cache
+    raw = settings.issue_exclude_patterns
+    if _exclude_cache is None or _exclude_cache[0] != raw:
+        compiled = []
+        for p in raw:
+            try:
+                compiled.append(re.compile(p))
+            except re.error:
+                logger.warning("Invalid exclude pattern: %s", p)
+        _exclude_cache = (raw, compiled)
+    return _exclude_cache[1]
+
+
 # ── Output size limits (prevents context window overflow) ──────────────
 # Matches pattern in aws_cli_tool.py and skills/execution.py.
 # Tool results accumulate in the agent conversation; unbounded JSON from
@@ -87,38 +106,12 @@ def get_enabled_accounts() -> str:
 
 @tool
 def get_active_account() -> str:
-    """Get the currently active AWS account configuration.
+    """Get all enabled cloud accounts for operations.
 
-    DEPRECATED: Use get_enabled_accounts() instead. This wrapper returns the
-    first enabled account for backward compatibility with existing agent prompts.
+    Returns JSON array of enabled accounts (same as get_enabled_accounts).
+    Agents should operate on ALL returned accounts unless the user specifies one.
     """
-    session = get_session()
-    try:
-        # Try CloudAccount first
-        acct = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).first()  # noqa: E712
-        if acct:
-            return _truncate(json.dumps({
-                "id": acct.id,
-                "name": acct.name,
-                "provider": acct.provider,
-                "regions": acct.regions,
-                "labels": acct.labels,
-                "last_scanned_at": acct.last_scanned_at.isoformat() if acct.last_scanned_at else None,
-            }))
-        # Fallback to legacy AWSAccount
-        legacy = session.query(AWSAccount).filter_by(is_active=True).first()
-        if legacy:
-            return _truncate(json.dumps({
-                "id": legacy.id,
-                "name": legacy.name,
-                "provider": "aws",
-                "regions": legacy.regions,
-                "labels": {},
-                "last_scanned_at": str(legacy.last_scanned_at) if legacy.last_scanned_at else None,
-            }))
-        return "No active account configured. Use 'aiops create account' to add one."
-    finally:
-        session.close()
+    return get_enabled_accounts()
 
 
 @tool
@@ -243,7 +236,11 @@ def save_resources(resources_json: str, account_id: int = 0, provider: str = "")
         if account_id > 0:
             cloud_acct = session.query(CloudAccount).filter_by(id=account_id).first()
         if not cloud_acct:
-            cloud_acct = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).first()  # noqa: E712
+            enabled = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+            if len(enabled) == 1:
+                cloud_acct = enabled[0]
+            elif len(enabled) > 1:
+                return json.dumps({"error": "Multiple accounts enabled. Specify account_id.", "accounts": [{"id": a.id, "name": a.name} for a in enabled]})
 
         if cloud_acct:
             acct_id = cloud_acct.id
@@ -354,6 +351,7 @@ _ACTIVE_ISSUE_STATUSES = (
     "open", "investigating", "acknowledged",
     "root_cause_identified", "fix_planned",
     "fix_approved", "fix_executing", "fix_executed",
+    "dismissed",
 )
 
 RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
@@ -479,6 +477,12 @@ def create_health_issue(
         except json.JSONDecodeError:
             changes_parsed = []
 
+        # Check exclude patterns
+        for compiled in _compiled_exclude_patterns():
+            if compiled.search(title):
+                logger.info("Suppressed issue: title '%s' matched exclude pattern", title)
+                return f"Suppressed: issue title matched exclude pattern"
+
         now = datetime.utcnow()
         fingerprint = _compute_fingerprint(source, resource_id, title)
 
@@ -576,11 +580,11 @@ def create_health_issue(
             res = session.query(CloudResource).filter_by(resource_id=resource_id).first()
             if res:
                 account_id = res.account_id
-        # Fallback: use the first enabled account
+        # Fallback: use single enabled account, or skip if ambiguous
         if not account_id:
-            default_acct = session.query(CloudAccount).filter_by(is_enabled=True).first()
-            if default_acct:
-                account_id = default_acct.id
+            enabled = session.query(CloudAccount).filter_by(is_enabled=True).all()
+            if len(enabled) == 1:
+                account_id = enabled[0].id
 
         issue = HealthIssue(
             resource_id=resource_id,

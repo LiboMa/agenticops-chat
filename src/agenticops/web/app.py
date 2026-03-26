@@ -14,6 +14,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
+    AgentMemory,
+    AgentMemoryFact,
     AlertEvent,
     CloudAccount,
     CloudResource,
@@ -608,6 +610,7 @@ class SearchResultItem(BaseModel):
     status: Optional[str] = None
     severity: Optional[str] = None
     report_type: Optional[str] = None
+    parent_id: Optional[int] = None
     updated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -630,7 +633,10 @@ class ChatSessionCreate(BaseModel):
 
 
 class ChatSessionUpdate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    pinned: Optional[bool] = None
+    starred: Optional[bool] = None
+    archived: Optional[bool] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -660,6 +666,9 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
     last_activity_at: datetime
     message_count: int = 0
+    pinned: bool = False
+    starred: bool = False
+    archived: bool = False
 
     class Config:
         from_attributes = True
@@ -667,6 +676,31 @@ class ChatSessionResponse(BaseModel):
 
 class ChatSessionDetail(ChatSessionResponse):
     messages: List[ChatMessageResponse] = []
+
+
+class MemoryFactResponse(BaseModel):
+    id: int
+    category: str
+    key: str
+    value: str
+    confidence_score: float
+    source_session_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MemoryExperienceResponse(BaseModel):
+    id: int
+    session_id: str
+    memory_type: str
+    content_text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ============================================================================
@@ -758,7 +792,7 @@ app = FastAPI(
 app.include_router(graph_router)
 
 # Chat session manager
-_chat_sessions = ChatSessionManager(ttl_minutes=30)
+_chat_sessions = ChatSessionManager()
 _executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)
 
 
@@ -3116,23 +3150,25 @@ async def api_generate_report(request: ReportGenerateRequest):
     from agenticops.report import ReportGenerator
 
     with get_db_session() as session:
-        # Get account if specified
-        account = None
+        # Get account(s)
         if request.account_name:
-            account = session.query(CloudAccount).filter_by(name=request.account_name).first()
-            if not account:
+            accounts = [session.query(CloudAccount).filter_by(name=request.account_name).first()]
+            if not accounts[0]:
                 raise HTTPException(status_code=404, detail="Account not found")
         else:
-            account = session.query(CloudAccount).filter_by(is_enabled=True).first()
+            accounts = session.query(CloudAccount).filter_by(is_enabled=True).all()
+            if not accounts:
+                raise HTTPException(status_code=404, detail="No enabled accounts")
 
-        generator = ReportGenerator(account)
-
-        if request.report_type == "daily":
-            content = generator.generate_daily_report()
-        elif request.report_type == "inventory":
-            content = generator.generate_inventory_report()
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown report type: {request.report_type}")
+        # Generate report for each account
+        for account in accounts:
+            generator = ReportGenerator(account)
+            if request.report_type == "daily":
+                generator.generate_daily_report()
+            elif request.report_type == "inventory":
+                generator.generate_inventory_report()
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown report type: {request.report_type}")
 
         # Get the last generated report
         report = (
@@ -4298,6 +4334,7 @@ async def api_search(
                     id=r.id, title=r.title,
                     subtitle=(r.summary or "")[:100],
                     entity_type="fix_plan", status=r.status,
+                    parent_id=r.health_issue_id,
                     created_at=r.created_at,
                 ).model_dump()
                 for r in rows
@@ -4372,10 +4409,14 @@ async def api_create_chat_session(payload: ChatSessionCreate):
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
 async def api_list_chat_sessions(
     limit: int = Query(default=50, le=100),
+    include_archived: bool = Query(default=False),
 ):
     with get_db_session() as db:
+        query = db.query(ChatSession)
+        if not include_archived:
+            query = query.filter(ChatSession.archived == False)
         rows = (
-            db.query(ChatSession)
+            query
             .order_by(ChatSession.last_activity_at.desc())
             .limit(limit)
             .all()
@@ -4389,6 +4430,7 @@ async def api_list_chat_sessions(
                 id=r.id, session_id=r.session_id, name=r.name,
                 created_at=r.created_at, updated_at=r.updated_at,
                 last_activity_at=r.last_activity_at, message_count=cnt,
+                pinned=r.pinned, starred=r.starred, archived=r.archived,
             ))
         return result
 
@@ -4410,6 +4452,7 @@ async def api_get_chat_session(session_id: str):
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at,
             message_count=len(msgs),
+            pinned=row.pinned, starred=row.starred, archived=row.archived,
             messages=[ChatMessageResponse(
                 id=m.id, role=m.role, content=m.content,
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
@@ -4419,20 +4462,37 @@ async def api_get_chat_session(session_id: str):
 
 
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate):
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
     with get_db_session() as db:
         row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
         if not row:
             raise HTTPException(404, "Session not found")
-        row.name = payload.name
+        if payload.name is not None:
+            row.name = payload.name
+        if payload.pinned is not None:
+            row.pinned = payload.pinned
+        if payload.starred is not None:
+            row.starred = payload.starred
+        # Track whether this request is archiving the session
+        archiving = payload.archived is True and not row.archived
+        if payload.archived is not None:
+            row.archived = payload.archived
         row.updated_at = datetime.utcnow()
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
-        return ChatSessionResponse(
+        response = ChatSessionResponse(
             id=row.id, session_id=row.session_id, name=row.name,
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=cnt,
+            pinned=row.pinned, starred=row.starred, archived=row.archived,
         )
+
+    # Trigger memory extraction in the background when archiving
+    if archiving:
+        from agenticops.web.session_manager import _trigger_memory_extraction
+        background_tasks.add_task(_trigger_memory_extraction, session_id)
+
+    return response
 
 
 def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
@@ -4472,6 +4532,72 @@ async def api_delete_chat_session(session_id: str):
         db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
         db.delete(row)
     _chat_sessions.remove(session_id)
+
+
+# ============================================================================
+# Memory Facts API
+# ============================================================================
+
+
+@app.get("/api/memory/facts", response_model=List[MemoryFactResponse])
+async def api_get_memory_facts(
+    min_confidence: float = Query(default=0.7, ge=0.0, le=1.0),
+):
+    """Query structured facts from cross-session memory."""
+    from agenticops.web.memory_service import MemoryService
+
+    svc = MemoryService()
+    facts = svc.get_facts(min_confidence=min_confidence)
+    return [
+        MemoryFactResponse(
+            id=f.id,
+            category=f.category,
+            key=f.key,
+            value=f.value,
+            confidence_score=f.confidence_score,
+            source_session_id=f.source_session_id,
+            created_at=f.created_at,
+            updated_at=f.updated_at,
+        )
+        for f in facts
+    ]
+
+
+@app.delete("/api/memory/facts/{fact_id}", status_code=204)
+async def api_delete_memory_fact(fact_id: int):
+    """Delete a specific fact by its primary key id."""
+    with get_db_session() as db:
+        fact = db.query(AgentMemoryFact).filter(AgentMemoryFact.id == fact_id).first()
+        if not fact:
+            raise HTTPException(404, "Fact not found")
+        db.delete(fact)
+
+
+# ============================================================================
+# Memory Experiences API
+# ============================================================================
+
+
+@app.get("/api/memory/experiences", response_model=List[MemoryExperienceResponse])
+async def api_get_memory_experiences():
+    """Query vectorized experience memories (without embedding_vector)."""
+    with get_db_session() as db:
+        memories = (
+            db.query(AgentMemory)
+            .order_by(AgentMemory.created_at.desc())
+            .all()
+        )
+        db.expunge_all()
+    return [
+        MemoryExperienceResponse(
+            id=m.id,
+            session_id=m.session_id,
+            memory_type=m.memory_type,
+            content_text=m.content_text,
+            created_at=m.created_at,
+        )
+        for m in memories
+    ]
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")

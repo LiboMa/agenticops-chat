@@ -248,15 +248,22 @@ app.add_typer(service_app, name="service")
 # ============================================================================
 
 
-def get_account(name: str = None) -> Optional[CloudAccount]:
-    """Get AWS account by name or the first active account."""
+def get_accounts(name: str = None) -> list:
+    """Get account(s) by name, or all enabled accounts."""
     session = get_session()
     try:
         if name:
-            return session.query(CloudAccount).filter_by(name=name).first()
-        return session.query(CloudAccount).filter_by(is_enabled=True).first()
+            acct = session.query(CloudAccount).filter_by(name=name).first()
+            return [acct] if acct else []
+        return session.query(CloudAccount).filter_by(is_enabled=True).all()
     finally:
         session.close()
+
+
+def get_account(name: str = None) -> Optional[CloudAccount]:
+    """Get single account by name, or first enabled (backward compat)."""
+    accounts = get_accounts(name)
+    return accounts[0] if accounts else None
 
 
 def output_table(data: list, columns: list, title: str = None):
@@ -1578,12 +1585,17 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
         elif topic in ["session", "sessions"]:
             return """[bold]Session Commands:[/bold]
 
-  /session list             List saved sessions
-  /session save [name]      Save current session state
-  /session load <name>      Load a saved session
-  /session delete <name>    Delete a saved session
+  /session list             List DB sessions (id, name, msgs, activity, pin/star)
+  /session resume [id|name] Switch to a session (default: most recent active)
+  /session rename <id> <name>  Rename a session
+  /session pin <id>         Toggle pinned status
+  /session star <id>        Toggle starred status
+  /session archive <id>     Toggle archived status
+  /session save [name]      Save context to local JSON (backward compat)
+  /session load <name>      Load context from local JSON (backward compat)
+  /session delete <name>    Delete a local JSON session
 
-[dim]Sessions preserve context, output format, and account selection.[/dim]"""
+[dim]DB sessions are shared with the Web Dashboard. save/load use local JSON files.[/dim]"""
 
         elif topic in ["context", "ctx"]:
             return """[bold]Context Commands:[/bold]
@@ -1631,7 +1643,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
   /channel list | show | sync | test  Channel management
 
 [cyan]Session & Context:[/cyan]
-  /session list | save | load      Session management
+  /session list | resume | pin     Session management (DB-backed)
   /context [account <name>]        Context management
 
 [cyan]Export & Output:[/cyan]
@@ -1745,9 +1757,13 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             return f"[green]Account '{name}' deleted.[/green]"
 
         elif args[0] == "active":
-            active = session.query(CloudAccount).filter_by(is_enabled=True).first()
-            if active:
-                return f"[green]Active account: {active.name}[/green] ({active.provider}/{(active.credentials or {}).get('account_id', '')})"
+            active_list = session.query(CloudAccount).filter_by(is_enabled=True).all()
+            if active_list:
+                lines = ["[bold]Enabled accounts:[/bold]"]
+                for a in active_list:
+                    acct_id = (a.credentials or {}).get("account_id", "")
+                    lines.append(f"  [green]{a.name}[/green] ({a.provider}/{acct_id})")
+                return "\n".join(lines)
             return "[yellow]No active account. Use '/account activate <name>' to set one.[/yellow]"
 
         else:
@@ -1755,12 +1771,10 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
 
   /account list                 List all accounts
   /account show <name>          Show account details
-  /account active               Show current active account
-  /account activate <name>      Activate account (deactivates others)
-  /account deactivate <name>    Deactivate account
-  /account delete <name> -f     Delete account
-
-[dim]Note: Only ONE account can be active at a time.[/dim]"""
+  /account active               Show all enabled accounts
+  /account activate <name>      Enable account
+  /account deactivate <name>    Disable account
+  /account delete <name> -f     Delete account"""
     finally:
         session.close()
 
@@ -2652,28 +2666,171 @@ Usage:
 
 
 def _slash_session(ctx: ChatContext, args: list) -> str:
-    """Handle /session commands - session management."""
-    import hashlib
+    """Handle /session commands - DB-backed session management with local JSON backward compat."""
     from pathlib import Path
+    from agenticops.models import ChatSession, ChatMessage, get_db_session
+    from agenticops.web.session_manager import _load_history_messages
+    from agenticops.config import settings
+    from sqlalchemy import func
 
-    session_dir = Path.home() / ".aiops" / "sessions"
-    session_dir.mkdir(parents=True, exist_ok=True)
+    cmd = args[0].lower() if args else "list"
 
-    if not args or args[0] == "list":
-        sessions = list(session_dir.glob("*.json"))
-        if not sessions:
-            return "[yellow]No saved sessions.[/yellow]"
+    # ------------------------------------------------------------------
+    # /session list — query DB for ChatSession list
+    # ------------------------------------------------------------------
+    if cmd == "list":
+        try:
+            init_db()
+            with get_db_session() as db:
+                sessions = (
+                    db.query(ChatSession)
+                    .filter(ChatSession.archived == False)
+                    .order_by(
+                        ChatSession.pinned.desc(),
+                        ChatSession.starred.desc(),
+                        ChatSession.last_activity_at.desc(),
+                    )
+                    .limit(20)
+                    .all()
+                )
+                if not sessions:
+                    return "[yellow]No sessions found.[/yellow]"
 
-        lines = ["[bold]Saved Sessions:[/bold]"]
-        for s in sessions[-10:]:
-            name = s.stem
-            mtime = datetime.fromtimestamp(s.stat().st_mtime)
-            lines.append(f"  {name} - {mtime.strftime('%Y-%m-%d %H:%M')}")
-        return "\n".join(lines)
+                lines = ["[bold]Chat Sessions:[/bold]\n"]
+                for s in sessions:
+                    msg_count = db.query(func.count(ChatMessage.id)).filter(
+                        ChatMessage.session_id == s.id
+                    ).scalar()
+                    icons = ""
+                    if s.pinned:
+                        icons += "📌"
+                    if s.starred:
+                        icons += "⭐"
+                    activity = s.last_activity_at.strftime("%Y-%m-%d %H:%M") if s.last_activity_at else "-"
+                    current = " [green](current)[/green]" if ctx.db_session_id == s.id else ""
+                    lines.append(
+                        f"  {icons:3s} [cyan]{s.id:>4}[/cyan]  {s.name[:30]:<30s}  "
+                        f"[dim]{msg_count:>3} msgs[/dim]  {activity}{current}"
+                    )
+                return "\n".join(lines)
+        except Exception as e:
+            logger.warning("Failed to list DB sessions: %s", e)
+            return f"[red]Error listing sessions: {e}[/red]"
 
-    cmd = args[0].lower()
+    # ------------------------------------------------------------------
+    # /session resume [id|name] — switch to a DB session
+    # ------------------------------------------------------------------
+    if cmd == "resume":
+        try:
+            init_db()
+            with get_db_session() as db:
+                if len(args) > 1:
+                    identifier = args[1]
+                    # Try by DB id first, then UUID, then name
+                    row = None
+                    try:
+                        row = db.query(ChatSession).filter(ChatSession.id == int(identifier)).first()
+                    except (ValueError, TypeError):
+                        pass
+                    if row is None:
+                        row = db.query(ChatSession).filter(
+                            ChatSession.session_id == identifier
+                        ).first()
+                    if row is None:
+                        row = db.query(ChatSession).filter(
+                            ChatSession.name.ilike(f"%{identifier}%")
+                        ).first()
+                    if row is None:
+                        return f"[red]Session '{identifier}' not found.[/red]"
+                else:
+                    # No argument: most recent non-archived session
+                    row = (
+                        db.query(ChatSession)
+                        .filter(ChatSession.archived == False)
+                        .order_by(ChatSession.last_activity_at.desc())
+                        .first()
+                    )
+                    if row is None:
+                        return "[yellow]No active sessions to resume.[/yellow]"
 
+                ctx.db_session_id = row.id
+                ctx.db_session_uuid = row.session_id
+                msg_count = db.query(func.count(ChatMessage.id)).filter(
+                    ChatMessage.session_id == row.id
+                ).scalar()
+                session_name = row.name
+                session_uuid = row.session_id
+
+            # Load history and inject into agent
+            history = _load_history_messages(session_uuid, settings.session_history_depth)
+            if ctx.agent is not None and history:
+                ctx.agent.messages.clear()
+                ctx.agent.messages.extend(history)
+
+            return f"[green]Resumed session: {session_name} ({msg_count} messages)[/green]"
+        except Exception as e:
+            logger.warning("Failed to resume session: %s", e)
+            return f"[red]Error resuming session: {e}[/red]"
+
+    # ------------------------------------------------------------------
+    # /session rename <id> <name> — update session name in DB
+    # ------------------------------------------------------------------
+    if cmd == "rename":
+        if len(args) < 3:
+            return "[yellow]Usage: /session rename <id> <new_name>[/yellow]"
+        identifier = args[1]
+        new_name = " ".join(args[2:])
+        try:
+            init_db()
+            with get_db_session() as db:
+                row = None
+                try:
+                    row = db.query(ChatSession).filter(ChatSession.id == int(identifier)).first()
+                except (ValueError, TypeError):
+                    pass
+                if row is None:
+                    row = db.query(ChatSession).filter(
+                        ChatSession.session_id == identifier
+                    ).first()
+                if row is None:
+                    return f"[red]Session '{identifier}' not found.[/red]"
+                old_name = row.name
+                row.name = new_name
+            return f"[green]Renamed session: '{old_name}' → '{new_name}'[/green]"
+        except Exception as e:
+            logger.warning("Failed to rename session: %s", e)
+            return f"[red]Error renaming session: {e}[/red]"
+
+    # ------------------------------------------------------------------
+    # /session pin <id> — toggle pinned status
+    # ------------------------------------------------------------------
+    if cmd == "pin":
+        if len(args) < 2:
+            return "[yellow]Usage: /session pin <id>[/yellow]"
+        return _session_toggle_field(args[1], "pinned")
+
+    # ------------------------------------------------------------------
+    # /session star <id> — toggle starred status
+    # ------------------------------------------------------------------
+    if cmd == "star":
+        if len(args) < 2:
+            return "[yellow]Usage: /session star <id>[/yellow]"
+        return _session_toggle_field(args[1], "starred")
+
+    # ------------------------------------------------------------------
+    # /session archive <id> — toggle archived status
+    # ------------------------------------------------------------------
+    if cmd == "archive":
+        if len(args) < 2:
+            return "[yellow]Usage: /session archive <id>[/yellow]"
+        return _session_toggle_field(args[1], "archived")
+
+    # ------------------------------------------------------------------
+    # /session save [name] — backward compat: save context to local JSON
+    # ------------------------------------------------------------------
     if cmd == "save":
+        session_dir = Path.home() / ".aiops" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
         name = args[1] if len(args) > 1 else datetime.now().strftime("%Y%m%d_%H%M%S")
         session_file = session_dir / f"{name}.json"
         session_data = {
@@ -2685,19 +2842,26 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         session_file.write_text(json.dumps(session_data, indent=2))
         return f"[green]Session saved: {name}[/green]"
 
-    elif cmd == "load" and len(args) > 1:
+    # ------------------------------------------------------------------
+    # /session load <name> — backward compat: load context from local JSON
+    # ------------------------------------------------------------------
+    if cmd == "load" and len(args) > 1:
+        session_dir = Path.home() / ".aiops" / "sessions"
         name = args[1]
         session_file = session_dir / f"{name}.json"
         if not session_file.exists():
             return f"[red]Session '{name}' not found.[/red]"
-
         data = json.loads(session_file.read_text())
         ctx.account = data.get("account")
         ctx.output_format = data.get("output_format", "table")
         ctx.detail_level = data.get("detail_level", "medium")
         return f"[green]Session loaded: {name}[/green]"
 
-    elif cmd == "delete" and len(args) > 1:
+    # ------------------------------------------------------------------
+    # /session delete <name> — backward compat: delete local JSON
+    # ------------------------------------------------------------------
+    if cmd == "delete" and len(args) > 1:
+        session_dir = Path.home() / ".aiops" / "sessions"
         name = args[1]
         session_file = session_dir / f"{name}.json"
         if session_file.exists():
@@ -2705,7 +2869,42 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
             return f"[green]Session deleted: {name}[/green]"
         return f"[red]Session '{name}' not found.[/red]"
 
-    return "[yellow]Usage: /session [list | save [name] | load <name> | delete <name>][/yellow]"
+    return (
+        "[yellow]Usage: /session [list | resume [id|name] | rename <id> <name> | "
+        "pin <id> | star <id> | archive <id> | save [name] | load <name> | delete <name>][/yellow]"
+    )
+
+
+def _session_toggle_field(identifier: str, field: str) -> str:
+    """Toggle a boolean field (pinned/starred/archived) on a ChatSession."""
+    from agenticops.models import ChatSession, get_db_session
+
+    try:
+        init_db()
+        with get_db_session() as db:
+            row = None
+            try:
+                row = db.query(ChatSession).filter(ChatSession.id == int(identifier)).first()
+            except (ValueError, TypeError):
+                pass
+            if row is None:
+                row = db.query(ChatSession).filter(
+                    ChatSession.session_id == identifier
+                ).first()
+            if row is None:
+                return f"[red]Session '{identifier}' not found.[/red]"
+
+            current = getattr(row, field)
+            setattr(row, field, not current)
+            new_val = not current
+            session_name = row.name
+
+        icon = {"pinned": "📌", "starred": "⭐", "archived": "📦"}.get(field, "")
+        state = "on" if new_val else "off"
+        return f"[green]{icon} {field.capitalize()} {state}: {session_name}[/green]"
+    except Exception as e:
+        logger.warning("Failed to toggle %s: %s", field, e)
+        return f"[red]Error toggling {field}: {e}[/red]"
 
 
 def _slash_status(ctx: ChatContext, args: list) -> str:
@@ -3118,7 +3317,8 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
     try:
         # Gather stats
         accounts = session.query(CloudAccount).count()
-        active = session.query(CloudAccount).filter_by(is_enabled=True).first()
+        active_list = session.query(CloudAccount).filter_by(is_enabled=True).all()
+        active_names = ", ".join(a.name for a in active_list) if active_list else "none"
         resources = session.query(CloudResource).count()
         anomalies = session.query(HealthIssue).filter_by(status="open").count()
 
@@ -3149,7 +3349,7 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
   └── [blue]web[/blue]      - REST API (30+ endpoints) & Dashboard
 
 [cyan]Current State[/cyan]
-  ├── Accounts:  {accounts} ({active.name if active else 'none'} active)
+  ├── Accounts:  {accounts} ({active_names} enabled)
   ├── Resources: {resources}
   └── Anomalies: {anomalies} open"""
 
@@ -3612,6 +3812,169 @@ def _run_headless(query: str, account: Optional[str] = None):
         print(str(result))
 
 
+def _cli_persist_message(
+    ctx: ChatContext,
+    role: str,
+    content: str,
+    tool_calls: Optional[list] = None,
+    token_usage: Optional[dict] = None,
+) -> None:
+    """Persist a chat message to the DB, shared with Web Dashboard.
+
+    Silently skips when ``ctx.db_session_id`` is None (non-DB mode).
+    On DB write failure, logs a warning and degrades gracefully — the chat
+    continues without persistence.
+    """
+    if ctx.db_session_id is None:
+        return
+    try:
+        from agenticops.models import ChatSession, ChatMessage, get_db_session
+        from datetime import datetime as _dt
+
+        with get_db_session() as db:
+            db.add(ChatMessage(
+                session_id=ctx.db_session_id,
+                role=role,
+                content=content,
+                tool_calls=tool_calls if tool_calls else None,
+                token_usage=token_usage if token_usage else None,
+            ))
+            # Update session last_activity_at so Web Dashboard sees fresh activity
+            row = db.query(ChatSession).filter(
+                ChatSession.id == ctx.db_session_id
+            ).first()
+            if row:
+                row.last_activity_at = _dt.utcnow()
+    except Exception:
+        logger.warning(
+            "Failed to persist %s message to DB for session %s — "
+            "continuing in non-persistent mode",
+            role,
+            ctx.db_session_id,
+            exc_info=True,
+        )
+
+
+def _cli_setup_db_session(
+    ctx: ChatContext,
+    agent,
+    console: Console,
+    resume: bool,
+    session_id: Optional[str],
+) -> None:
+    """Create a new DB ChatSession or resume an existing one.
+
+    Sets ``ctx.db_session_id`` and ``ctx.db_session_uuid``.  When resuming,
+    loads history messages and injects them into the agent.
+    """
+    import uuid as _uuid
+    from agenticops.models import ChatSession, ChatMessage, get_db_session
+    from agenticops.web.session_manager import _load_history_messages
+    from sqlalchemy import func
+
+    if session_id:
+        # --session <id>: resume a specific session by UUID or DB id
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row is None:
+                # Try matching by DB integer id
+                try:
+                    row = db.query(ChatSession).filter(ChatSession.id == int(session_id)).first()
+                except (ValueError, TypeError):
+                    pass
+            if row is None:
+                console.print(f"[red]Session '{session_id}' not found.[/red]")
+                # List recent sessions as a hint
+                recent = (
+                    db.query(ChatSession)
+                    .filter(ChatSession.archived == False)
+                    .order_by(ChatSession.last_activity_at.desc())
+                    .limit(5)
+                    .all()
+                )
+                if recent:
+                    console.print("[yellow]Recent sessions:[/yellow]")
+                    for s in recent:
+                        cnt = db.query(func.count(ChatMessage.id)).filter(
+                            ChatMessage.session_id == s.id
+                        ).scalar()
+                        console.print(
+                            f"  {s.session_id}  {s.name}  ({cnt} msgs)  "
+                            f"{s.last_activity_at.strftime('%Y-%m-%d %H:%M')}"
+                        )
+                raise typer.Exit(1)
+
+            ctx.db_session_id = row.id
+            ctx.db_session_uuid = row.session_id
+            msg_count = db.query(func.count(ChatMessage.id)).filter(
+                ChatMessage.session_id == row.id
+            ).scalar()
+            session_name = row.name
+
+        # Load history and inject into agent
+        history = _load_history_messages(ctx.db_session_uuid, settings.session_history_depth)
+        if history:
+            agent.messages.extend(history)
+        console.print(
+            f"[green]Resumed session: {session_name} ({msg_count} messages)[/green]"
+        )
+
+    elif resume:
+        # --resume: find the most recent non-archived session
+        with get_db_session() as db:
+            row = (
+                db.query(ChatSession)
+                .filter(ChatSession.archived == False)
+                .order_by(ChatSession.last_activity_at.desc())
+                .first()
+            )
+            if row is None:
+                # No existing session — create a new one
+                console.print(
+                    "[yellow]No active sessions found. Creating a new session.[/yellow]"
+                )
+                sid = str(_uuid.uuid4())
+                from datetime import datetime as _dt
+                row = ChatSession(
+                    session_id=sid,
+                    name=f"CLI Chat {_dt.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                )
+                db.add(row)
+                db.flush()
+                ctx.db_session_id = row.id
+                ctx.db_session_uuid = row.session_id
+                return
+
+            ctx.db_session_id = row.id
+            ctx.db_session_uuid = row.session_id
+            msg_count = db.query(func.count(ChatMessage.id)).filter(
+                ChatMessage.session_id == row.id
+            ).scalar()
+            session_name = row.name
+
+        # Load history and inject into agent
+        history = _load_history_messages(ctx.db_session_uuid, settings.session_history_depth)
+        if history:
+            agent.messages.extend(history)
+        console.print(
+            f"[green]Resumed session: {session_name} ({msg_count} messages)[/green]"
+        )
+
+    else:
+        # Default: create a new DB session
+        sid = str(_uuid.uuid4())
+        from datetime import datetime as _dt
+        with get_db_session() as db:
+            row = ChatSession(
+                session_id=sid,
+                name=f"CLI Chat {_dt.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            )
+            db.add(row)
+            db.flush()
+            ctx.db_session_id = row.id
+            ctx.db_session_uuid = row.session_id
+
+
 @app.command()
 def chat(
     query: Optional[str] = typer.Argument(None, help="Single query (headless mode)"),
@@ -3620,11 +3983,15 @@ def chat(
     detail: Optional[str] = typer.Option(None, "--detail", "-d", help="Output detail level: concise, medium, detailed"),
     focus: Optional[str] = typer.Option(None, "--focus", "-f", help="Resource focus: computing,networking,databases,storage,security,billing,all"),
     debug: bool = typer.Option(False, "--debug", help="Show debug logs (default: clean streaming output only)"),
+    resume: bool = typer.Option(False, "--resume", help="Resume the most recently active non-archived session"),
+    session_id: Optional[str] = typer.Option(None, "--session", help="Resume a specific session by ID (UUID or DB id)"),
 ):
     """Start an interactive chat, or run a single query in headless mode.
 
     Examples:
       aiops chat                              # interactive REPL
+      aiops chat --resume                     # resume last active session
+      aiops chat --session <id>               # resume specific session
       aiops chat "check health of prod"       # single query, exit
       aiops chat -q "scan us-east-1"          # explicit flag
       echo "list issues" | aiops chat         # pipe mode
@@ -3760,6 +4127,10 @@ def chat(
     agent = _agent_container["agent"]
     ctx.agent = agent  # Enable /model to swap model at runtime
 
+    # --- DB Session: create new or resume existing ---
+    init_db()
+    _cli_setup_db_session(ctx, agent, console, resume, session_id)
+
     while True:
         try:
             # Use prompt_toolkit for input
@@ -3789,6 +4160,9 @@ def chat(
 
             # Store user input in history
             ctx.add_to_history("user", user_input)
+
+            # Persist user message to DB (shared with Web Dashboard)
+            _cli_persist_message(ctx, "user", user_input)
 
             # Preprocess message: resolve I#/R# references, @file/path attachments
             from agenticops.chat.preprocessor import preprocess_message
@@ -3842,11 +4216,30 @@ def chat(
             # Store response in history
             ctx.add_to_history("assistant", response)
 
+            # Persist assistant response to DB (shared with Web Dashboard)
+            _token_usage_dict = None
+            try:
+                _acc = result.metrics.accumulated_usage
+                if _acc:
+                    _token_usage_dict = {
+                        "input": _acc.get("inputTokens", 0),
+                        "output": _acc.get("outputTokens", 0),
+                    }
+            except Exception:
+                pass
+            _cli_persist_message(ctx, "assistant", response, token_usage=_token_usage_dict)
+
             # Show session token summary in status bar
             from agenticops.config import get_agent_model_config
             _main_mid, _ = get_agent_model_config("main")
             _main_short = _main_mid.split(".")[-1] if "." in _main_mid else _main_mid
             console.print(f"[dim]─── {_main_short} | {ctx.get_token_summary()} | Requests: {ctx.token_usage.requests} ───[/dim]", justify="right")
+
+            # Show clickable reference links for I#N / R#N
+            from agenticops.cli.display import format_reference_links
+            ref_links = format_reference_links(response, settings.web_base_url)
+            if ref_links:
+                console.print(f"\n[dim]{ref_links}[/dim]")
 
         except KeyboardInterrupt:
             # Clean up any active spinner from StreamingCallbackHandler
@@ -4320,7 +4713,8 @@ def arch(
     try:
         # Gather stats
         accounts = session.query(CloudAccount).count()
-        active_account = session.query(CloudAccount).filter_by(is_enabled=True).first()
+        active_accounts = session.query(CloudAccount).filter_by(is_enabled=True).all()
+        active_names = ", ".join(a.name for a in active_accounts) if active_accounts else "none"
         resources = session.query(CloudResource).count()
         anomalies_open = session.query(HealthIssue).filter_by(status="open").count()
         anomalies_total = session.query(HealthIssue).count()
@@ -4359,7 +4753,7 @@ def arch(
 
             # Current state
             state = tree.add("[cyan]Current State[/cyan]")
-            state.add(f"Accounts: {accounts} ({'[green]' + active_account.name + '[/green] active' if active_account else '[yellow]none active[/yellow]'})")
+            state.add(f"Accounts: {accounts} ({active_names} enabled)")
             state.add(f"Resources: {resources}")
             state.add(f"Anomalies: {anomalies_open} open / {anomalies_total} total")
             state.add(f"Reports: {reports}")

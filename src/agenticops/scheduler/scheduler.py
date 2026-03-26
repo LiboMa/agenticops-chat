@@ -246,20 +246,25 @@ class Scheduler:
             return
 
         try:
-            # Get account — expunge so it can be used outside the session
-            account = None
+            # Get accounts — expunge so they can be used outside the session
+            accounts = []
             if schedule.account_name:
                 with get_db_session() as session:
-                    account = session.query(CloudAccount).filter_by(
+                    acct = session.query(CloudAccount).filter_by(
                         name=schedule.account_name
                     ).first()
-                    if account:
-                        session.expunge(account)
+                    if acct:
+                        session.expunge(acct)
+                        accounts = [acct]
             else:
                 with get_db_session() as session:
-                    account = session.query(CloudAccount).filter_by(is_enabled=True).first()
-                    if account:
-                        session.expunge(account)
+                    all_accts = session.query(CloudAccount).filter_by(is_enabled=True).all()
+                    for a in all_accts:
+                        session.expunge(a)
+                    accounts = all_accts
+
+            if not accounts:
+                raise ValueError("No enabled accounts found")
 
             # Get pipeline factory
             pipeline_factories = {
@@ -277,13 +282,28 @@ class Scheduler:
             if not factory:
                 raise ValueError(f"Unknown pipeline: {schedule.pipeline_name}")
 
-            # Create and execute pipeline
-            # HealthPatrolPipeline accepts an extra config kwarg
-            if factory is HealthPatrolPipeline:
-                pipeline = factory(account, config=schedule.config)
-            else:
-                pipeline = factory(account)
-            result = asyncio.run(pipeline.execute())
+            # Execute pipeline for each account, aggregate results
+            all_step_results = []
+            any_failed = False
+            total_duration_ms = 0
+
+            for account in accounts:
+                logger.info(f"Schedule '{schedule.name}' running pipeline for account '{account.name}'")
+                if factory is HealthPatrolPipeline:
+                    pipeline = factory(account, config=schedule.config)
+                else:
+                    pipeline = factory(account)
+                result = asyncio.run(pipeline.execute())
+                total_duration_ms += result.duration_ms or 0
+                for s in result.step_results:
+                    all_step_results.append({
+                        "account": account.name,
+                        "name": s.step_name,
+                        "status": s.status.value,
+                        "data": s.data,
+                    })
+                if not result.success:
+                    any_failed = True
 
             # Update execution record
             with get_db_session() as session:
@@ -291,27 +311,21 @@ class Scheduler:
                     id=execution_id
                 ).first()
                 if execution:
-                    execution.status = "completed" if result.success else "failed"
+                    execution.status = "failed" if any_failed else "completed"
                     execution.completed_at = datetime.utcnow()
-                    execution.duration_ms = result.duration_ms
+                    execution.duration_ms = total_duration_ms
                     execution.result = {
-                        "pipeline": result.pipeline_name,
-                        "steps": [
-                            {
-                                "name": s.step_name,
-                                "status": s.status.value,
-                                "data": s.data,
-                            }
-                            for s in result.step_results
-                        ],
+                        "pipeline": schedule.pipeline_name,
+                        "accounts": [a.name for a in accounts],
+                        "steps": all_step_results,
                     }
 
-            logger.info(f"Schedule '{schedule.name}' completed: {result.status.value}")
+            logger.info(f"Schedule '{schedule.name}' completed for {len(accounts)} account(s)")
 
             # Auto-notify on completion
             try:
                 from agenticops.services.notification_service import notify_schedule_result
-                notify_schedule_result(schedule.name, result.success)
+                notify_schedule_result(schedule.name, not any_failed)
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
 

@@ -16,7 +16,9 @@ from agenticops.config import get_detail_level, settings
 # ── Account Preamble ─────────────────────────────────────────────────
 
 ACCOUNT_PREAMBLE = (
-    "Call get_active_account and assume_role before any AWS operation. "
+    "Call get_active_account to get all enabled cloud accounts. "
+    "Operate on ALL enabled accounts unless the user specifies a particular one. "
+    "Call assume_role for each account before its cloud operations. "
     "If no account is configured, inform the user."
 )
 

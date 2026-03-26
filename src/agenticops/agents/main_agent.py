@@ -67,7 +67,7 @@ SPECIALIZED AGENTS (dispatch all AWS work to these):
 - reporter_agent: Generates operations reports (daily, incident, inventory). Call with report_type and scope.
 
 METADATA TOOLS (local database queries ONLY — no AWS calls):
-- get_active_account: Check which AWS account is currently active.
+- get_active_account: Get all enabled cloud accounts. Returns JSON array.
 - get_managed_resources: List resources in the inventory, filtered by type/region.
 - get_health_issue / list_health_issues: Get health issue details or list.
 - get_resource_by_id: Get a specific AWS resource by its database ID.
@@ -87,7 +87,7 @@ MONITORING INTEGRATION TOOLS:
 - list_monitoring_providers: Show configured monitoring providers and their status (CloudWatch, Datadog, etc.).
 
 ROUTING RULES:
-1. ALWAYS check get_active_account first. If no account is configured, tell the user.
+1. ALWAYS check get_active_account first — it returns ALL enabled accounts. Operate on all of them unless the user specifies a particular account. If no account is configured, tell the user.
 2. "scan" / "discover" / "inventory" → dispatch to scan_agent. If user mentions "security scan",
    call scan_agent with services='security'.
 3. "health" / "detect" / "issues" / "problems" / "check" / "status" → dispatch to detect_agent.
