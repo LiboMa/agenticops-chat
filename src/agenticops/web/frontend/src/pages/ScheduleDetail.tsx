@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
+import { PIPELINE_META } from "./Schedules";
 
 export default function ScheduleDetail() {
   const { id } = useParams<{ id: string }>();
@@ -108,7 +109,12 @@ export default function ScheduleDetail() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-muted-foreground block">Pipeline</span>
-              <Badge className="bg-blue-100 text-blue-700">{s.pipeline_name}</Badge>
+              <Badge className={PIPELINE_META[s.pipeline_name]?.badge ?? "bg-blue-100 text-blue-700"}>
+                {PIPELINE_META[s.pipeline_name]?.label ?? s.pipeline_name}
+              </Badge>
+              {PIPELINE_META[s.pipeline_name]?.desc && (
+                <p className="text-xs text-muted-foreground mt-1">{PIPELINE_META[s.pipeline_name].desc}</p>
+              )}
             </div>
             <div>
               <span className="text-muted-foreground block">Cron</span>
@@ -135,7 +141,27 @@ export default function ScheduleDetail() {
           {Object.keys(s.config).length > 0 && (
             <div className="mt-4">
               <span className="text-muted-foreground block text-sm mb-1">Config</span>
-              {s.pipeline_name === "AgentChain" ? (
+              {s.pipeline_name === "HealthPatrol" ? (
+                (() => {
+                  const cfg = s.config as Record<string, unknown>;
+                  return (
+                    <div className="bg-secondary rounded-lg p-4 space-y-2 text-sm">
+                      <div>
+                        <span className="font-medium text-foreground">Scope:</span>{" "}
+                        <span className="text-muted-foreground">{(cfg.scope as string) || "all"}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-foreground">Providers:</span>{" "}
+                        <span className="text-muted-foreground">{(cfg.providers as string) || "all"}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-foreground">Deep Investigation:</span>{" "}
+                        <span className="text-muted-foreground">{cfg.deep ? "Yes" : "No"}</span>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : s.pipeline_name === "AgentChain" ? (
                 (() => {
                   const cfg = s.config as Record<string, unknown>;
                   const prompt = cfg.prompt as string | undefined;

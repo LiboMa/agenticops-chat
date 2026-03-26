@@ -18,6 +18,35 @@ import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
 
 const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
+const SCAN_SCOPES = ["all", "computing", "networking", "databases", "storage", "security", "billing"] as const;
+
+export const PIPELINE_META: Record<string, { label: string; desc: string; badge: string }> = {
+  FullScan: {
+    label: "Full Scan",
+    desc: "Scan all cloud resources and detect anomalies across your infrastructure.",
+    badge: "bg-blue-100 text-blue-700",
+  },
+  Monitoring: {
+    label: "Monitoring",
+    desc: "Continuous monitoring of key metrics, alerts, and service health.",
+    badge: "bg-emerald-100 text-emerald-700",
+  },
+  DailyReport: {
+    label: "Daily Report",
+    desc: "Generate a daily summary of infrastructure health, issues, and trends.",
+    badge: "bg-amber-100 text-amber-700",
+  },
+  HealthPatrol: {
+    label: "Health Patrol",
+    desc: "Proactive health check — pulls alerts from monitoring providers and runs anomaly detection to find issues before they escalate.",
+    badge: "bg-violet-100 text-violet-700",
+  },
+  AgentChain: {
+    label: "Agent Chain",
+    desc: "Custom multi-agent workflow driven by a natural language prompt.",
+    badge: "bg-rose-100 text-rose-700",
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /*  Schedule form modal                                                */
@@ -45,11 +74,16 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
   const [reportType, setReportType] = useState((initConfig.report_type as string) ?? "");
   const [selectedChannels, setSelectedChannels] = useState<string[]>((initConfig.notify_channels as string[]) ?? []);
   const [timeout, setTimeout] = useState((initConfig.timeout_seconds as number) ?? 300);
+  // HealthPatrol fields
+  const [hpScope, setHpScope] = useState((initConfig.scope as string) ?? "all");
+  const [hpDeep, setHpDeep] = useState((initConfig.deep as boolean) ?? false);
+  const [hpProviders, setHpProviders] = useState((initConfig.providers as string) ?? "all");
 
   const { data: skills } = useSkills();
   const { data: channels } = useNotificationChannels();
 
   const isAgentChain = pipelineName === "AgentChain";
+  const isHealthPatrol = pipelineName === "HealthPatrol";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,6 +94,11 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
       if (reportType) config.report_type = reportType;
       if (selectedChannels.length > 0) config.notify_channels = selectedChannels;
       if (timeout !== 300) config.timeout_seconds = timeout;
+    }
+    if (isHealthPatrol) {
+      if (hpScope !== "all") config.scope = hpScope;
+      if (hpDeep) config.deep = true;
+      if (hpProviders !== "all") config.providers = hpProviders;
     }
     const base = {
       name,
@@ -93,9 +132,12 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
             <label className="block text-sm font-medium text-foreground mb-1">Pipeline</label>
             <select value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} className={inputCls}>
               {PIPELINE_OPTIONS.map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p} value={p}>{PIPELINE_META[p]?.label ?? p}</option>
               ))}
             </select>
+            {PIPELINE_META[pipelineName]?.desc && (
+              <p className="text-xs text-muted-foreground mt-1">{PIPELINE_META[pipelineName].desc}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Cron Expression</label>
@@ -105,6 +147,32 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
             <label className="block text-sm font-medium text-foreground mb-1">Account Name (optional)</label>
             <input value={accountName} onChange={(e) => setAccountName(e.target.value)} className={inputCls} />
           </div>
+
+          {/* HealthPatrol-specific fields */}
+          {isHealthPatrol && (
+            <div className="space-y-3 border-t border-border pt-3 mt-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Health Patrol Config</p>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-foreground mb-1">Scope</label>
+                  <select value={hpScope} onChange={(e) => setHpScope(e.target.value)} className={inputCls}>
+                    {SCAN_SCOPES.map((sc) => (
+                      <option key={sc} value={sc}>{sc}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-foreground mb-1">Providers</label>
+                  <input value={hpProviders} onChange={(e) => setHpProviders(e.target.value)} placeholder="all" className={inputCls} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input id="hp-deep" type="checkbox" checked={hpDeep} onChange={(e) => setHpDeep(e.target.checked)} className="rounded border-border" />
+                <label htmlFor="hp-deep" className="text-sm text-foreground">Deep investigation</label>
+                <span className="text-xs text-muted-foreground">(slower but more thorough)</span>
+              </div>
+            </div>
+          )}
 
           {/* AgentChain-specific fields */}
           {isAgentChain && (
@@ -239,9 +307,10 @@ const columns: Column<Schedule>[] = [
   {
     key: "pipeline_name",
     header: "Pipeline",
-    render: (r) => (
-      <Badge className="bg-blue-100 text-blue-700">{r.pipeline_name}</Badge>
-    ),
+    render: (r) => {
+      const meta = PIPELINE_META[r.pipeline_name];
+      return <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>;
+    },
   },
   {
     key: "cron_expression",
