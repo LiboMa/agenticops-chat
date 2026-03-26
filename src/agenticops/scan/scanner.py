@@ -251,6 +251,17 @@ class AWSScanner:
             return tags
         return {}
 
+    @staticmethod
+    def _json_safe(obj):
+        """Recursively convert datetime and other non-JSON-serializable types."""
+        if isinstance(obj, dict):
+            return {k: AWSScanner._json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [AWSScanner._json_safe(v) for v in obj]
+        if hasattr(obj, "isoformat"):
+            return obj.isoformat()
+        return obj
+
     def _extract_metadata(self, item: dict, service_def: AWSServiceDef) -> dict:
         """Extract service-specific metadata."""
         # Remove common fields and large nested objects
@@ -263,10 +274,7 @@ class AWSScanner:
             # Skip large nested objects
             if isinstance(value, (dict, list)) and len(str(value)) > 1000:
                 continue
-            # Convert datetime to string
-            if hasattr(value, "isoformat"):
-                value = value.isoformat()
-            metadata[key] = value
+            metadata[key] = self._json_safe(value)
 
         return metadata
 
