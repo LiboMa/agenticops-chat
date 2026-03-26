@@ -28,6 +28,12 @@ import {
   useReloadMcpServers,
   useImportMcpServers,
 } from "@/hooks/useMcpServers";
+import {
+  useAgentMemories,
+  useUpdateAgentMemory,
+  useDeleteAgentMemory,
+  type AgentMemory,
+} from "@/hooks/useAgentMemory";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig } from "@/api/types";
 
@@ -822,6 +828,15 @@ export default function Settings() {
   const [mcpDeleting, setMcpDeleting] = useState<string | null>(null);
   const [mcpImportOpen, setMcpImportOpen] = useState(false);
 
+  // Agent Memory
+  const [memAgent, setMemAgent] = useState("");
+  const [memStatus, setMemStatus] = useState("active");
+  const memQ = useAgentMemories(memAgent, memStatus);
+  const updateMemMut = useUpdateAgentMemory();
+  const deleteMemMut = useDeleteAgentMemory();
+  const [memEditing, setMemEditing] = useState<AgentMemory | null>(null);
+  const [memEditConf, setMemEditConf] = useState(3);
+
   const s = settingsQ.data;
 
   function patchSetting(key: string, value: boolean) {
@@ -844,6 +859,7 @@ export default function Settings() {
           <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
           <Tabs.Trigger value="skills" className={tabTriggerClass}>{t("settings.skills")}</Tabs.Trigger>
           <Tabs.Trigger value="mcp" className={tabTriggerClass}>{t("settings.mcp")}</Tabs.Trigger>
+          <Tabs.Trigger value="memory" className={tabTriggerClass}>Agent Memory</Tabs.Trigger>
         </Tabs.List>
 
         {/* ── General Tab ──────────────────────────────────────── */}
@@ -1096,6 +1112,125 @@ export default function Settings() {
                   </div>
                 ))
               )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+        </Tabs.Content>
+
+        {/* ── Agent Memory Tab ──────────────────────────────────── */}
+        <Tabs.Content value="memory" className="space-y-6">
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-foreground">Agent Memory</h2>
+          <div className="flex items-center gap-2">
+            <select
+              value={memAgent}
+              onChange={(e) => setMemAgent(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground"
+            >
+              <option value="">All Agents</option>
+              {["detect", "rca", "sre", "executor", "reporter", "scan", "shared"].map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+            <select
+              value={memStatus}
+              onChange={(e) => setMemStatus(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground"
+            >
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {memQ.isLoading ? (
+            <Spinner />
+          ) : memQ.error ? (
+            <ErrorBanner message={(memQ.error as Error).message} onRetry={() => memQ.refetch()} />
+          ) : !memQ.data?.length ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No memories found.</p>
+          ) : (
+            <div className="space-y-2">
+              {memQ.data.map((m) => (
+                <div key={`${m.agent}-${m.filename}`} className="flex items-center justify-between p-3 rounded-lg border border-border bg-background">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400">{m.agent}</Badge>
+                      <span className="text-sm font-medium text-foreground truncate">{m.filename}</span>
+                      {m.status === "archived" && (
+                        <Badge className="bg-secondary text-muted-foreground">Archived</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{m.summary}</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-xs text-muted-foreground">
+                        Confidence: <strong>{m.confidence}</strong>/5
+                      </span>
+                      <span className="text-xs text-muted-foreground">Source: {m.source}</span>
+                      {m.resource_pattern && (
+                        <span className="text-xs text-muted-foreground font-mono">{m.resource_pattern}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    {/* Confidence editor */}
+                    {memEditing?.filename === m.filename && memEditing?.agent === m.agent ? (
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => setMemEditConf(n)}
+                            className={`w-6 h-6 rounded text-xs font-bold ${
+                              n <= memEditConf
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-secondary text-muted-foreground"
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => {
+                            updateMemMut.mutate(
+                              { agent: m.agent, filename: m.filename, data: { confidence: memEditConf } },
+                              { onSuccess: () => setMemEditing(null) },
+                            );
+                          }}
+                          disabled={updateMemMut.isPending}
+                          className="text-xs text-primary-600 hover:underline ml-1"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setMemEditing(null)}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setMemEditing(m); setMemEditConf(m.confidence); }}
+                        className="text-xs text-primary-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {m.status === "active" && (
+                      <button
+                        onClick={() => deleteMemMut.mutate({ agent: m.agent, filename: m.filename })}
+                        disabled={deleteMemMut.isPending}
+                        className="text-xs text-red-600 hover:underline"
+                      >
+                        Archive
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardBody>

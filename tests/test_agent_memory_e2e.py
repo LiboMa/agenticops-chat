@@ -511,3 +511,76 @@ class TestRecordFeedbackToolE2E:
 
         rca_prompt = load_agent_memory("rca")
         assert "security group issue" in rca_prompt
+
+
+# ── E2E Flow 8: Auto-Learning from Dismissed Issues ──────────────
+
+
+class TestAutoLearnDismissed:
+    """When a user dismisses an issue via status update, auto-create detect memory."""
+
+    def test_dismiss_creates_auto_memory(self, client, tmp_memory_dir, seed_issue):
+        issue_id = seed_issue
+
+        # Dismiss the issue
+        resp = client.put(
+            f"/api/anomalies/{issue_id}/status",
+            json={"status": "dismissed"},
+        )
+        assert resp.status_code == 200
+
+        # Verify auto-memory was created for detect agent
+        mem_files = [
+            f for f in (tmp_memory_dir / "detect").glob("auto_*.md")
+            if f.name != "MEMORY.md"
+        ]
+        assert len(mem_files) >= 1
+
+        # Check the memory content
+        content = mem_files[0].read_text()
+        fm, body = parse_frontmatter(content)
+        assert fm["source"] == "auto"
+        assert fm["confidence"] == 2  # auto-learned = low confidence
+        assert fm["agent"] == "detect"
+        assert "dismissed" in body.lower()
+        assert f"I#{issue_id}" in body
+
+    def test_auto_memory_searchable(self, client, tmp_memory_dir, seed_issue):
+        issue_id = seed_issue
+
+        client.put(
+            f"/api/anomalies/{issue_id}/status",
+            json={"status": "dismissed"},
+        )
+
+        # Search should find the auto-created memory
+        results = search_memories("CPU utilization")
+        assert len(results) >= 1
+        assert any(r["type"] == "feedback" for r in results)
+
+    def test_auto_memory_in_detect_prompt(self, client, tmp_memory_dir, seed_issue):
+        issue_id = seed_issue
+
+        client.put(
+            f"/api/anomalies/{issue_id}/status",
+            json={"status": "dismissed"},
+        )
+
+        prompt = load_agent_memory("detect")
+        assert "dismissed" in prompt.lower()
+        assert "(confidence: 2/5)" in prompt  # auto confidence
+
+    def test_non_dismiss_status_no_memory(self, client, tmp_memory_dir, seed_issue):
+        issue_id = seed_issue
+
+        # Move to investigating — should NOT create memory
+        client.put(
+            f"/api/anomalies/{issue_id}/status",
+            json={"status": "investigating"},
+        )
+
+        mem_files = [
+            f for f in (tmp_memory_dir / "detect").glob("auto_*.md")
+            if f.name != "MEMORY.md"
+        ]
+        assert len(mem_files) == 0

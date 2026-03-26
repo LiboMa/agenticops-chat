@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
+import { useIssueFeedback } from "@/hooks/useAgentMemory";
 import type { IssueStatus, Anomaly, RCAResult, FixPlan } from "@/api/types";
 
 interface IssueActionBarProps {
@@ -28,6 +29,8 @@ export const IssueActionBar = React.memo(function IssueActionBar({
   onViewFixPlan,
 }: IssueActionBarProps) {
   const { confirm, dialog } = useConfirm();
+  const feedbackMut = useIssueFeedback();
+  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const status = issue.status;
   const latestPlan = fixPlans?.length ? fixPlans[0] : null;
 
@@ -47,6 +50,28 @@ export const IssueActionBar = React.memo(function IssueActionBar({
     if (await confirm("Dismiss this issue? It will be hidden from active views.", { variant: "destructive", confirmText: "Dismiss" })) {
       onUpdateStatus("dismissed");
     }
+  };
+
+  const handleFalsePositive = async () => {
+    if (await confirm("Mark as false positive? This creates an agent memory so similar issues are suppressed in the future.", { confirmText: "False Positive" })) {
+      feedbackMut.mutate(
+        { issueId: issue.id, feedback: { type: "false_positive", confidence: 4 } },
+        {
+          onSuccess: () => setFeedbackMsg("Marked as false positive — agent memory created."),
+          onError: (err) => setFeedbackMsg(`Feedback failed: ${err.message}`),
+        },
+      );
+    }
+  };
+
+  const handleConfirmed = async () => {
+    feedbackMut.mutate(
+      { issueId: issue.id, feedback: { type: "confirmed", confidence: 5 } },
+      {
+        onSuccess: () => setFeedbackMsg("Issue confirmed — conflicting memories archived."),
+        onError: (err) => setFeedbackMsg(`Feedback failed: ${err.message}`),
+      },
+    );
   };
 
   if (status === "dismissed") {
@@ -194,6 +219,29 @@ export const IssueActionBar = React.memo(function IssueActionBar({
           </button>
         )}
 
+        {/* Divider */}
+        <div className="w-px h-6 bg-border mx-1" />
+
+        {/* Feedback: False Positive */}
+        <button
+          onClick={handleFalsePositive}
+          disabled={feedbackMut.isPending}
+          title="Mark as false positive — creates agent memory for future suppression"
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 transition-colors dark:border-amber-700 dark:text-amber-400 dark:bg-amber-950 dark:hover:bg-amber-900"
+        >
+          {feedbackMut.isPending ? "..." : "False Positive"}
+        </button>
+
+        {/* Feedback: Confirmed */}
+        <button
+          onClick={handleConfirmed}
+          disabled={feedbackMut.isPending}
+          title="Confirm this issue is real — archives conflicting memories"
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-green-300 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 transition-colors dark:border-green-700 dark:text-green-400 dark:bg-green-950 dark:hover:bg-green-900"
+        >
+          {feedbackMut.isPending ? "..." : "Confirmed"}
+        </button>
+
         {/* Dismiss */}
         <button
           onClick={handleDismiss}
@@ -203,6 +251,11 @@ export const IssueActionBar = React.memo(function IssueActionBar({
           {statusUpdating ? "Updating..." : "Dismiss"}
         </button>
       </div>
+      {feedbackMsg && (
+        <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">
+          {feedbackMsg}
+        </div>
+      )}
       {dialog}
     </>
   );

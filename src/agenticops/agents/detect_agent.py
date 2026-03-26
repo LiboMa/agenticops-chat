@@ -170,6 +170,12 @@ TOOL SELECTION — accuracy first:
      activate_skill("web-research") to load web_fetch, then check cloud provider
      status pages (e.g., AWS Health Dashboard) to confirm whether symptoms are
      caused by an upstream provider outage.
+
+AGENT MEMORY SUPPRESSION:
+Before creating a HealthIssue, call search_agent_memory with a keyword summary of the finding.
+If a matching memory exists with confidence >= 3, SKIP creating the issue (it was previously
+marked as a false positive or known-benign pattern). Log it as "suppressed by memory: {filename}".
+If confidence is 1-2, still create the issue but lower severity by one level.
 """
 
 

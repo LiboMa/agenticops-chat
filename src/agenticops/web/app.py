@@ -1961,6 +1961,35 @@ async def api_get_anomaly(anomaly_id: int):
         return _health_issue_to_anomaly_response(issue, acct_name)
 
 
+def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, description: str) -> None:
+    """Auto-create detect agent memory when an issue is dismissed (best-effort)."""
+    try:
+        import re
+        from agenticops.memory.agent_memory import save_memory_file
+
+        parts = resource_id.split("/") if resource_id else []
+        resource_pattern = f"{parts[0]}/*" if parts else ""
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower().strip())[:50].strip("_")
+        filename = f"auto_{slug}.md" if slug else f"auto_issue_{issue_id}.md"
+
+        body = (
+            f"{title}\n\n{description}\n\n"
+            f"Auto-learned: issue I#{issue_id} was dismissed by user."
+        )
+        save_memory_file(
+            agent_name="detect",
+            filename=filename,
+            memory_type="feedback",
+            confidence=2,
+            source="auto",
+            body=body,
+            resource_pattern=resource_pattern,
+            related_issue_id=issue_id,
+        )
+    except Exception:
+        logger.debug("Auto-learn failed for dismissed issue #%d", issue_id, exc_info=True)
+
+
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
 async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
     """Update anomaly status (backed by HealthIssue) with state machine enforcement."""
@@ -1981,6 +2010,10 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
         issue.status = update.status
         if update.status == "resolved" and issue.resolved_at is None:
             issue.resolved_at = datetime.utcnow()
+
+        # Auto-learn: dismissed issues create detect agent memory
+        if update.status == "dismissed":
+            _auto_learn_dismissed(issue.id, issue.resource_id, issue.title, issue.description)
 
         session.flush()
         acct_name = None
