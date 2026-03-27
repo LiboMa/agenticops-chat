@@ -23,7 +23,9 @@ def db_session(tmp_path):
     settings.reports_dir.mkdir(parents=True, exist_ok=True)
 
     engine = models_mod.get_engine()
-    Base.metadata.create_all(engine)
+    # Create only tables needed for report tests to avoid DDL conflicts
+    # with auth models (api_keys index issue on fresh SQLite).
+    Report.__table__.create(engine, checkfirst=True)
 
     session = get_session()
     yield session
