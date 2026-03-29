@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/web/summary_service.py
+# hypothesis_version: 6.151.9
+
+[500, '[Tool Result]', '_db_id', 'anthropic_version', 'application/json', 'bedrock-2023-05-31', 'bedrock-runtime', 'body', 'content', 'max_tokens', 'messages', 'role', 'text', 'toolResult', 'toolUse', 'unknown', 'user']

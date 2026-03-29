@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/cli/context.py
+# hypothesis_version: 6.151.9
+
+[-100, 100, '%H:%M:%S', ',', 'AIOPS_TABLE_STYLE', 'all', 'content', 'default', 'json', 'main', 'medium', 'role', 'sonnet', 'table', 'timestamp', 'wide', 'yaml']

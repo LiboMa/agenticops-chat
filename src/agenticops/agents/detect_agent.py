@@ -42,6 +42,8 @@ from agenticops.tools.integration_tools import (
     list_provider_alerts,
     query_provider_metrics,
 )
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +127,8 @@ Priority 1 — CRITICAL (immediate operational impact, resolve NOW):
 - Service down, data loss risk imminent
 
 Priority 2 — HIGH (performance degradation, short-term danger signals):
-- CPU/Memory sustained > 90% causing latency spikes
+# - CPU/Memory sustained > 90% causing latency spikes
+- Memory sustained > 90% causing latency spikes
 - Response time P99 > SLA threshold, elevated error rates (>5%)
 - Database connection pool exhaustion approaching, replication lag growing
 - Network packet loss > 1%, intermittent connectivity, jitter spikes
@@ -163,6 +166,16 @@ TOOL SELECTION — accuracy first:
 - When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 - 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
+8.5. WEB RESEARCH: When investigating potential service-wide issues, call
+     activate_skill("web-research") to load web_fetch, then check cloud provider
+     status pages (e.g., AWS Health Dashboard) to confirm whether symptoms are
+     caused by an upstream provider outage.
+
+AGENT MEMORY SUPPRESSION:
+Before creating a HealthIssue, call search_agent_memory with a keyword summary of the finding.
+If a matching memory exists with confidence >= 3, SKIP creating the issue (it was previously
+marked as a false positive or known-benign pattern). Log it as "suppressed by memory: {filename}".
+If confidence is 1-2, still create the issue but lower severity by one level.
 """
 
 
@@ -203,8 +216,11 @@ def _build_detect_agent_for_account(
         f"Do NOT call get_active_account or assume_role — you already know which account you're checking."
     )
 
+    from agenticops.agents.preamble import build_system_prompt
+    base_prompt = f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}"
+
     agent = Agent(
-        system_prompt=f"{account_context}\n\n{DETECT_SYSTEM_PROMPT}",
+        system_prompt=build_system_prompt(base_prompt, include_account=False, agent_name="detect"),
         model=model,
         callback_handler=None,
         conversation_manager=SlidingWindowConversationManager(
@@ -228,6 +244,11 @@ def _build_detect_agent_for_account(
             list_provider_alerts,
             query_provider_metrics,
             create_health_issue,
+            # Agent Skills (dynamic tool registration)
+            activate_skill,
+            read_skill_reference,
+            # Agent Memory (cross-agent search)
+            search_agent_memory,
         ],
     )
     return agent
@@ -259,14 +280,19 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         if len(accounts) > 1:
             # Multiple accounts: use parallel agentic checker
             import asyncio
+            import concurrent.futures
             from agenticops.checker import check_accounts_parallel
 
             acct_ids = [a.id for a in accounts]
+            coro = check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep)
             try:
-                result = asyncio.run(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+                asyncio.get_running_loop()
+                # Already inside an async event loop (e.g. scheduler) — run in a thread
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(asyncio.run, coro).result()
             except RuntimeError:
-                loop = asyncio.get_event_loop()
-                result = loop.run_until_complete(check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep))
+                # No running loop — safe to use asyncio.run()
+                result = asyncio.run(coro)
 
             lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
             for a in result.accounts:
@@ -289,8 +315,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 **cache_kwargs,
             )
 
+            from agenticops.agents.preamble import build_system_prompt as _bsp
             agent = Agent(
-                system_prompt=DETECT_SYSTEM_PROMPT,
+                system_prompt=_bsp(DETECT_SYSTEM_PROMPT, include_account=False, agent_name="detect"),
                 model=model,
                 callback_handler=None,
                 conversation_manager=SlidingWindowConversationManager(
@@ -316,6 +343,11 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     *cli_tools,
                     list_provider_alerts,
                     query_provider_metrics,
+                    # Agent Skills (dynamic tool registration)
+                    activate_skill,
+                    read_skill_reference,
+                    # Agent Memory (cross-agent search)
+                    search_agent_memory,
                 ],
             )
 

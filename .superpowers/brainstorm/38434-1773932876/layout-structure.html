@@ -1,0 +1,188 @@
+<h2>Overall Layout Structure</h2>
+<p class="subtitle">Chat-core hybrid with 5 nav items — which shell layout feels right?</p>
+
+<div class="cards">
+
+  <!-- Option A: Compact icon sidebar -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;">
+      <div style="display:flex;height:280px;gap:0;font-size:12px;color:#94a3b8;">
+        <!-- Icon sidebar -->
+        <div style="width:52px;background:#1e293b;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:16px;border-right:1px solid #334155;flex-shrink:0;">
+          <div style="width:28px;height:28px;background:#4f46e5;border-radius:6px;"></div>
+          <div style="width:20px;height:20px;background:#475569;border-radius:4px;opacity:0.6;"></div>
+          <div style="width:20px;height:20px;background:#4f46e5;border-radius:4px;"></div>
+          <div style="width:20px;height:20px;background:#475569;border-radius:4px;opacity:0.6;"></div>
+          <div style="width:20px;height:20px;background:#475569;border-radius:4px;opacity:0.6;"></div>
+          <div style="width:20px;height:20px;background:#475569;border-radius:4px;opacity:0.6;"></div>
+          <div style="flex:1;"></div>
+          <div style="width:20px;height:20px;background:#475569;border-radius:50%;opacity:0.4;"></div>
+        </div>
+        <!-- Main content area -->
+        <div style="flex:1;display:flex;flex-direction:column;">
+          <!-- Top bar -->
+          <div style="height:40px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;padding:0 16px;justify-content:space-between;">
+            <span style="color:#e2e8f0;font-weight:600;">Chat</span>
+            <div style="display:flex;gap:8px;">
+              <div style="width:60px;height:22px;background:#334155;border-radius:4px;"></div>
+              <div style="width:22px;height:22px;background:#334155;border-radius:50%;"></div>
+            </div>
+          </div>
+          <!-- Chat area -->
+          <div style="flex:1;padding:16px;display:flex;flex-direction:column;gap:8px;background:#0f172a;">
+            <div style="align-self:flex-start;background:#1e293b;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#cbd5e1;">check security groups</div>
+            <div style="align-self:flex-end;background:#312e81;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#c7d2fe;">Scanning 30 security groups across cn-north-1...</div>
+            <div style="align-self:flex-end;background:#312e81;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#c7d2fe;">Found 15 violations</div>
+          </div>
+          <!-- Input -->
+          <div style="height:48px;background:#1e293b;border-top:1px solid #334155;display:flex;align-items:center;padding:0 12px;gap:8px;">
+            <div style="flex:1;height:30px;background:#0f172a;border-radius:6px;border:1px solid #334155;"></div>
+            <div style="width:30px;height:30px;background:#4f46e5;border-radius:6px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Icon Sidebar (52px)</h3>
+      <p>Ultra-compact icon-only sidebar. Hover to see labels. Maximum content area for Chat. Like VS Code / Linear.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Slim labeled sidebar -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;">
+      <div style="display:flex;height:280px;gap:0;font-size:12px;color:#94a3b8;">
+        <!-- Slim sidebar with labels -->
+        <div style="width:140px;background:#1e293b;display:flex;flex-direction:column;padding:12px 0;border-right:1px solid #334155;flex-shrink:0;">
+          <div style="padding:8px 16px;display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <div style="width:24px;height:24px;background:#4f46e5;border-radius:5px;flex-shrink:0;"></div>
+            <span style="color:#e2e8f0;font-weight:700;font-size:13px;">AiOps</span>
+          </div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;opacity:0.6;">
+            <div style="width:14px;height:14px;background:#475569;border-radius:3px;"></div>
+            <span style="font-size:11px;">Dashboard</span>
+          </div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;background:#4f46e520;border-left:2px solid #4f46e5;">
+            <div style="width:14px;height:14px;background:#4f46e5;border-radius:3px;"></div>
+            <span style="font-size:11px;color:#c7d2fe;">Chat</span>
+          </div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;opacity:0.6;">
+            <div style="width:14px;height:14px;background:#475569;border-radius:3px;"></div>
+            <span style="font-size:11px;">Issues</span>
+          </div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;opacity:0.6;">
+            <div style="width:14px;height:14px;background:#475569;border-radius:3px;"></div>
+            <span style="font-size:11px;">Schedules</span>
+          </div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;opacity:0.6;">
+            <div style="width:14px;height:14px;background:#475569;border-radius:3px;"></div>
+            <span style="font-size:11px;">Reports</span>
+          </div>
+          <div style="flex:1;"></div>
+          <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;opacity:0.4;">
+            <div style="width:14px;height:14px;background:#475569;border-radius:50%;"></div>
+            <span style="font-size:11px;">Settings</span>
+          </div>
+        </div>
+        <!-- Main content -->
+        <div style="flex:1;display:flex;flex-direction:column;">
+          <div style="height:40px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;padding:0 16px;justify-content:space-between;">
+            <span style="color:#e2e8f0;font-weight:600;">Chat</span>
+            <div style="display:flex;gap:8px;">
+              <div style="width:22px;height:22px;background:#334155;border-radius:50%;"></div>
+            </div>
+          </div>
+          <div style="flex:1;padding:16px;display:flex;flex-direction:column;gap:8px;background:#0f172a;">
+            <div style="align-self:flex-start;background:#1e293b;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#cbd5e1;">check security groups</div>
+            <div style="align-self:flex-end;background:#312e81;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#c7d2fe;">Found 15 violations across 30 SGs</div>
+          </div>
+          <div style="height:48px;background:#1e293b;border-top:1px solid #334155;display:flex;align-items:center;padding:0 12px;gap:8px;">
+            <div style="flex:1;height:30px;background:#0f172a;border-radius:6px;border:1px solid #334155;"></div>
+            <div style="width:30px;height:30px;background:#4f46e5;border-radius:6px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Slim Sidebar (140px)</h3>
+      <p>Compact sidebar with icon + label. Always visible, no hover needed. Good balance of clarity and space. Like GitHub / Notion.</p>
+    </div>
+  </div>
+
+  <!-- Option C: Top nav + full width -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;">
+      <div style="display:flex;flex-direction:column;height:280px;font-size:12px;color:#94a3b8;">
+        <!-- Top nav bar -->
+        <div style="height:48px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;padding:0 20px;gap:24px;flex-shrink:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-right:16px;">
+            <div style="width:24px;height:24px;background:#4f46e5;border-radius:5px;"></div>
+            <span style="color:#e2e8f0;font-weight:700;font-size:13px;">AiOps</span>
+          </div>
+          <span style="opacity:0.5;font-size:11px;">Dashboard</span>
+          <span style="color:#c7d2fe;font-size:11px;border-bottom:2px solid #4f46e5;padding-bottom:12px;">Chat</span>
+          <span style="opacity:0.5;font-size:11px;">Issues</span>
+          <span style="opacity:0.5;font-size:11px;">Schedules</span>
+          <span style="opacity:0.5;font-size:11px;">Reports</span>
+          <div style="flex:1;"></div>
+          <div style="width:22px;height:22px;background:#334155;border-radius:50%;"></div>
+        </div>
+        <!-- Full width chat -->
+        <div style="flex:1;display:flex;flex-direction:column;max-width:800px;margin:0 auto;width:100%;padding:16px;">
+          <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+            <div style="align-self:flex-start;background:#1e293b;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#cbd5e1;">check security groups</div>
+            <div style="align-self:flex-end;background:#312e81;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#c7d2fe;">Scanning 30 security groups...</div>
+            <div style="align-self:flex-end;background:#312e81;border-radius:8px;padding:8px 12px;max-width:70%;font-size:11px;color:#c7d2fe;">Found 15 violations. 2 critical DB exposures.</div>
+          </div>
+        </div>
+        <div style="max-width:800px;margin:0 auto;width:100%;padding:0 16px 16px;">
+          <div style="height:40px;background:#1e293b;border-radius:8px;border:1px solid #334155;display:flex;align-items:center;padding:0 12px;gap:8px;">
+            <div style="flex:1;"></div>
+            <div style="width:28px;height:28px;background:#4f46e5;border-radius:6px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Top Nav (full width)</h3>
+      <p>Horizontal nav bar, content gets full width. Chat centered with max-width like ChatGPT. Maximum breathing room. Like Vercel / Linear.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>Key Tradeoffs</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr style="border-bottom:1px solid #334155;">
+      <th style="text-align:left;padding:8px;color:#94a3b8;">Aspect</th>
+      <th style="text-align:center;padding:8px;color:#94a3b8;">A. Icon (52px)</th>
+      <th style="text-align:center;padding:8px;color:#94a3b8;">B. Slim (140px)</th>
+      <th style="text-align:center;padding:8px;color:#94a3b8;">C. Top Nav</th>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:8px;">Content space</td>
+      <td style="text-align:center;padding:8px;">Very large</td>
+      <td style="text-align:center;padding:8px;">Large</td>
+      <td style="text-align:center;padding:8px;">Maximum</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:8px;">Nav discoverability</td>
+      <td style="text-align:center;padding:8px;">Low (icons only)</td>
+      <td style="text-align:center;padding:8px;">High (always visible)</td>
+      <td style="text-align:center;padding:8px;">Medium (horizontal scan)</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:8px;">Chat experience</td>
+      <td style="text-align:center;padding:8px;">Good</td>
+      <td style="text-align:center;padding:8px;">Good</td>
+      <td style="text-align:center;padding:8px;">Best (centered, max-width)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px;">Minimalist feel</td>
+      <td style="text-align:center;padding:8px;">High</td>
+      <td style="text-align:center;padding:8px;">Medium</td>
+      <td style="text-align:center;padding:8px;">Highest</td>
+    </tr>
+  </table>
+</div>

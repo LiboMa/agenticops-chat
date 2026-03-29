@@ -12,6 +12,7 @@ const STEPS: { key: IssueStatus; label: string }[] = [
 ];
 
 function stepIndex(status: IssueStatus): number {
+  if (status === "dismissed") return -1;
   const idx = STEPS.findIndex((s) => s.key === status);
   // "acknowledged" maps to "investigating"
   if (idx === -1 && status === "acknowledged") return 1;
@@ -24,6 +25,18 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
   status: IssueStatus;
 }) {
   const current = stepIndex(status);
+  const isDismissed = status === "dismissed";
+
+  if (isDismissed) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-2 text-sm text-slate-500">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+        </svg>
+        <span className="font-medium">Dismissed</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center w-full">
@@ -37,7 +50,7 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
             {i > 0 && (
               <div
                 className={`flex-1 h-0.5 ${
-                  i <= current ? "bg-primary-500" : "bg-muted"
+                  i <= current ? "bg-primary" : "bg-muted"
                 }`}
               />
             )}
@@ -47,9 +60,9 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
                   isCompleted
-                    ? "bg-primary-500 text-white"
+                    ? "bg-primary text-primary-foreground"
                     : isCurrent
-                      ? "bg-primary-500 text-white ring-4 ring-primary-100"
+                      ? "bg-primary text-primary-foreground ring-4 ring-primary/20"
                       : "bg-muted text-muted-foreground"
                 }`}
               >
@@ -64,7 +77,7 @@ export const IssueStatusStepper = React.memo(function IssueStatusStepper({
               <span
                 className={`mt-1.5 text-[10px] leading-tight text-center whitespace-nowrap ${
                   isCompleted || isCurrent
-                    ? "text-primary-700 font-medium"
+                    ? "text-primary font-medium"
                     : "text-muted-foreground"
                 }`}
               >

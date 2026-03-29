@@ -45,6 +45,7 @@ from agenticops.skills.tools import (
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
 from agenticops.tools.notification_tools import share_content
+from agenticops.tools.memory_tools import record_agent_feedback, search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ SPECIALIZED AGENTS (dispatch all AWS work to these):
 - reporter_agent: Generates operations reports (daily, incident, inventory). Call with report_type and scope.
 
 METADATA TOOLS (local database queries ONLY — no AWS calls):
-- get_active_account: Check which AWS account is currently active.
+- get_active_account: Get all enabled cloud accounts. Returns JSON array.
 - get_managed_resources: List resources in the inventory, filtered by type/region.
 - get_health_issue / list_health_issues: Get health issue details or list.
 - get_resource_by_id: Get a specific AWS resource by its database ID.
@@ -87,7 +88,7 @@ MONITORING INTEGRATION TOOLS:
 - list_monitoring_providers: Show configured monitoring providers and their status (CloudWatch, Datadog, etc.).
 
 ROUTING RULES:
-1. ALWAYS check get_active_account first. If no account is configured, tell the user.
+1. ALWAYS check get_active_account first — it returns ALL enabled accounts. Operate on all of them unless the user specifies a particular account. If no account is configured, tell the user.
 2. "scan" / "discover" / "inventory" → dispatch to scan_agent. If user mentions "security scan",
    call scan_agent with services='security'.
 3. "health" / "detect" / "issues" / "problems" / "check" / "status" → dispatch to detect_agent.
@@ -137,6 +138,14 @@ ROUTING RULES:
    "what are my DynamoDB tables", "check Route53 zones", "get cost breakdown",
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
    This is your CATCH-ALL for AWS queries that don't fit rules 2-9.
+11. Web research: When you need external web data (status pages, documentation,
+    CVE info), call activate_skill("web-research") to load web_fetch, then
+    fetch the relevant URL. Only public URLs — private IPs blocked for security.
+    Sub-agents (SRE, detect, scan) can also activate this skill independently.
+12. Document analysis: When the user shares a PDF, DOCX, CSV, or XLSX file (via @path or upload),
+    or asks to explain/summarize/analyze a document, call activate_skill("document-analysis")
+    to load the read_document tool. For large PDFs, use pages="1-5" to read in chunks.
+    Provide structured summaries — lead with key findings, not raw content.
 
 ADDITIONAL TASKS by USER REQUEST:
 1.If YOUR ASK for run specifc CLI commands, use the sre_query agent which has read-only AWS CLI access to 60+ services. For health issue investigation, use detect_agent and rca_agent. For inventory and resource questions, use scan_agent. For fix plan generation, use sre_agent. For any question that doesn't fit those categories, default to sre_query.
@@ -155,6 +164,10 @@ IMPORTANT — YOUR BOUNDARIES:
 - NEVER duplicate work. If a sub-agent already returned data, use that — do not query again.
 - Present results concisely. Show severity, affected resources, and recommended actions.
 - When multiple issues exist, prioritize by severity (critical > high > medium > low).
+
+OUTPUT FORMATTING:
+- When referencing issues, use I#N notation (e.g., I#170). When referencing resources, use R#N notation (e.g., R#42).
+  These references are auto-linked in the web UI and CLI.
 """
 
 
@@ -194,7 +207,7 @@ If the user explicitly requests a different scope, honor their request over this
     prompt = MAIN_SYSTEM_PROMPT + focus_section
 
     agent = Agent(
-        system_prompt=build_system_prompt(prompt, include_account=False),
+        system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
         model=model,
         conversation_manager=SlidingWindowConversationManager(
             window_size=get_agent_window_size("main"), per_turn=True
@@ -236,6 +249,9 @@ If the user explicitly requests a different scope, honor their request over this
             list_monitoring_providers,
             # Notification tools (direct, no skill activation needed)
             share_content,
+            # Agent Memory tools (feedback recording + cross-agent search)
+            record_agent_feedback,
+            search_agent_memory,
             # MCP tool providers (external servers)
             *get_mcp_clients(),
         ],

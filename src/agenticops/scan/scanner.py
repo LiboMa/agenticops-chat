@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
 from agenticops.models import CloudAccount, CloudResource, get_session
@@ -39,50 +38,19 @@ class AWSScanner:
 
     def __init__(self, account: CloudAccount):
         """Initialize scanner with AWS account configuration."""
-        self.account = account
-        self._session_cache: dict[str, boto3.Session] = {}
-
-    def _get_assumed_session(self, region: str) -> boto3.Session:
-        """Get boto3 session with assumed role for the account."""
-        creds = self.account.credentials or {}
-        acct_id = creds.get("account_id", "")
-        cache_key = f"{acct_id}:{region}"
-
-        if cache_key in self._session_cache:
-            return self._session_cache[cache_key]
-
-        sts = boto3.client("sts", region_name=region)
-
-        assume_kwargs = {
-            "RoleArn": creds.get("role_arn", ""),
-            "RoleSessionName": f"AgenticOps-{acct_id}",
-            "DurationSeconds": 3600,
-        }
-        ext_id = creds.get("external_id", "")
-        if ext_id:
-            assume_kwargs["ExternalId"] = ext_id
-
-        try:
-            response = sts.assume_role(**assume_kwargs)
-            credentials = response["Credentials"]
-
-            session = boto3.Session(
-                aws_access_key_id=credentials["AccessKeyId"],
-                aws_secret_access_key=credentials["SecretAccessKey"],
-                aws_session_token=credentials["SessionToken"],
-                region_name=region,
+        if account.provider.lower() != "aws":
+            raise ValueError(
+                f"AWSScanner only supports AWS accounts, got provider='{account.provider}'"
             )
-            self._session_cache[cache_key] = session
-            return session
-
-        except ClientError as e:
-            logger.error(f"Failed to assume role {(self.account.credentials or {}).get('role_arn', '')}: {e}")
-            raise
+        self.account = account
+        from agenticops.providers import get_provider
+        self._provider = get_provider(account)
+        self._provider.resolve_credentials()
 
     def _get_client(self, service_name: str, region: str):
-        """Get boto3 client for a service."""
-        session = self._get_assumed_session(region)
-        return session.client(service_name)
+        """Get boto3 client for a service via provider layer."""
+        session = self._provider.sdk_session()
+        return session.client(service_name, region_name=region)
 
     def scan_service(self, service_name: str, region: str) -> ScanResult:
         """Scan a specific AWS service in a region."""
@@ -201,7 +169,19 @@ class AWSScanner:
     def _format_resource(self, item: dict, service_def: AWSServiceDef, region: str) -> dict:
         """Format a generic resource."""
         resource_id = item.get(service_def.id_field)
-        resource_name = item.get(service_def.name_field) if service_def.name_field else resource_id
+        if service_def.name_field == "Tags":
+            # Extract name from AWS Tags list: [{"Key": "Name", "Value": "..."}]
+            resource_name = None
+            for tag in item.get("Tags", []):
+                if tag.get("Key") == "Name":
+                    resource_name = tag.get("Value")
+                    break
+            if not resource_name:
+                resource_name = resource_id
+        elif service_def.name_field:
+            resource_name = item.get(service_def.name_field)
+        else:
+            resource_name = resource_id
         resource_arn = item.get(service_def.arn_field) if service_def.arn_field else None
 
         # Extract status using dot notation
@@ -225,7 +205,7 @@ class AWSScanner:
             "region": region,
             "status": status,
             "metadata": self._extract_metadata(item, service_def),
-            "tags": item.get("Tags", {}),
+            "tags": self._normalize_tags(item.get("Tags", [])),
         }
 
     def _format_simple_resource(
@@ -262,6 +242,26 @@ class AWSScanner:
             "tags": {},
         }
 
+    @staticmethod
+    def _normalize_tags(tags) -> dict:
+        """Convert AWS tag list [{"Key":k,"Value":v}] to {k:v} dict."""
+        if isinstance(tags, list):
+            return {t["Key"]: t["Value"] for t in tags if "Key" in t and "Value" in t}
+        if isinstance(tags, dict):
+            return tags
+        return {}
+
+    @staticmethod
+    def _json_safe(obj):
+        """Recursively convert datetime and other non-JSON-serializable types."""
+        if isinstance(obj, dict):
+            return {k: AWSScanner._json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [AWSScanner._json_safe(v) for v in obj]
+        if hasattr(obj, "isoformat"):
+            return obj.isoformat()
+        return obj
+
     def _extract_metadata(self, item: dict, service_def: AWSServiceDef) -> dict:
         """Extract service-specific metadata."""
         # Remove common fields and large nested objects
@@ -274,10 +274,7 @@ class AWSScanner:
             # Skip large nested objects
             if isinstance(value, (dict, list)) and len(str(value)) > 1000:
                 continue
-            # Convert datetime to string
-            if hasattr(value, "isoformat"):
-                value = value.isoformat()
-            metadata[key] = value
+            metadata[key] = self._json_safe(value)
 
         return metadata
 
@@ -308,52 +305,69 @@ class AWSScanner:
         return results
 
     def save_results(self, results: list[ScanResult]) -> int:
-        """Save scan results to database."""
+        """Save scan results to database.
+
+        Unique constraint is (account_id, provider, resource_id).
+        We prefer ARN as resource_id when available.  Lookup tries
+        both ARN and short ID to handle records saved before the
+        ARN migration.
+        """
         session = get_session()
         saved_count = 0
 
         try:
-            for result in results:
-                if not result.success:
-                    continue
+            # Prevent autoflush during queries to avoid premature
+            # INSERT that triggers UNIQUE constraint violations.
+            with session.no_autoflush:
+                for result in results:
+                    if not result.success:
+                        continue
 
-                for resource_data in result.resources:
-                    # Check if resource already exists
-                    existing = (
-                        session.query(CloudResource)
-                        .filter_by(
-                            account_id=self.account.id,
-                            resource_id=resource_data["resource_id"],
-                            region=result.region,
-                        )
-                        .first()
-                    )
+                    for resource_data in result.resources:
+                        short_id = resource_data["resource_id"]
+                        rid = resource_data.get("resource_arn") or short_id
 
-                    if existing:
-                        # Update existing
-                        existing.name = resource_data.get("resource_name") or ""
-                        # Store ARN in resource_id if available, otherwise keep original
-                        if resource_data.get("resource_arn"):
-                            existing.resource_id = resource_data["resource_arn"]
-                        existing.status = resource_data.get("status", "unknown")
-                        existing.raw_data = resource_data.get("metadata", {})
-                        existing.tags = resource_data.get("tags", {})
-                    else:
-                        # Create new — prefer ARN as resource_id for AWS
-                        rid = resource_data.get("resource_arn") or resource_data["resource_id"]
-                        resource = CloudResource(
-                            account_id=self.account.id,
-                            provider=self.account.provider,
-                            resource_id=rid,
-                            resource_type=resource_data["resource_type"],
-                            name=resource_data.get("resource_name") or "",
-                            region=result.region,
-                            status=resource_data.get("status", "unknown"),
-                            raw_data=resource_data.get("metadata", {}),
-                            tags=resource_data.get("tags", {}),
+                        # Look up by canonical ID (ARN) first
+                        existing = (
+                            session.query(CloudResource)
+                            .filter_by(
+                                account_id=self.account.id,
+                                resource_id=rid,
+                            )
+                            .first()
                         )
-                        session.add(resource)
-                        saved_count += 1
+                        # Fallback: try short ID (pre-migration records)
+                        if not existing and rid != short_id:
+                            existing = (
+                                session.query(CloudResource)
+                                .filter_by(
+                                    account_id=self.account.id,
+                                    resource_id=short_id,
+                                )
+                                .first()
+                            )
+
+                        if existing:
+                            existing.name = resource_data.get("resource_name") or ""
+                            existing.resource_id = rid  # upgrade to ARN
+                            existing.region = result.region
+                            existing.status = resource_data.get("status", "unknown")
+                            existing.raw_data = resource_data.get("metadata", {})
+                            existing.tags = resource_data.get("tags", {})
+                        else:
+                            resource = CloudResource(
+                                account_id=self.account.id,
+                                provider=self.account.provider,
+                                resource_id=rid,
+                                resource_type=resource_data["resource_type"],
+                                name=resource_data.get("resource_name") or "",
+                                region=result.region,
+                                status=resource_data.get("status", "unknown"),
+                                raw_data=resource_data.get("metadata", {}),
+                                tags=resource_data.get("tags", {}),
+                            )
+                            session.add(resource)
+                            saved_count += 1
 
             # Update account last_scanned_at
             self.account.last_scanned_at = datetime.utcnow()

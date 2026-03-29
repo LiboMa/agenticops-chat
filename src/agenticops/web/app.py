@@ -14,6 +14,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
+    AgentMemory,
+    AgentMemoryFact,
     AlertEvent,
     CloudAccount,
     CloudResource,
@@ -608,6 +610,7 @@ class SearchResultItem(BaseModel):
     status: Optional[str] = None
     severity: Optional[str] = None
     report_type: Optional[str] = None
+    parent_id: Optional[int] = None
     updated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -630,7 +633,10 @@ class ChatSessionCreate(BaseModel):
 
 
 class ChatSessionUpdate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    pinned: Optional[bool] = None
+    starred: Optional[bool] = None
+    archived: Optional[bool] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -660,6 +666,9 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
     last_activity_at: datetime
     message_count: int = 0
+    pinned: bool = False
+    starred: bool = False
+    archived: bool = False
 
     class Config:
         from_attributes = True
@@ -667,6 +676,31 @@ class ChatSessionResponse(BaseModel):
 
 class ChatSessionDetail(ChatSessionResponse):
     messages: List[ChatMessageResponse] = []
+
+
+class MemoryFactResponse(BaseModel):
+    id: int
+    category: str
+    key: str
+    value: str
+    confidence_score: float
+    source_session_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MemoryExperienceResponse(BaseModel):
+    id: int
+    session_id: str
+    memory_type: str
+    content_text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ============================================================================
@@ -758,7 +792,7 @@ app = FastAPI(
 app.include_router(graph_router)
 
 # Chat session manager
-_chat_sessions = ChatSessionManager(ttl_minutes=30)
+_chat_sessions = ChatSessionManager()
 _executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)
 
 
@@ -1927,6 +1961,35 @@ async def api_get_anomaly(anomaly_id: int):
         return _health_issue_to_anomaly_response(issue, acct_name)
 
 
+def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, description: str) -> None:
+    """Auto-create detect agent memory when an issue is dismissed (best-effort)."""
+    try:
+        import re
+        from agenticops.memory.agent_memory import save_memory_file
+
+        parts = resource_id.split("/") if resource_id else []
+        resource_pattern = f"{parts[0]}/*" if parts else ""
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower().strip())[:50].strip("_")
+        filename = f"auto_{slug}.md" if slug else f"auto_issue_{issue_id}.md"
+
+        body = (
+            f"{title}\n\n{description}\n\n"
+            f"Auto-learned: issue I#{issue_id} was dismissed by user."
+        )
+        save_memory_file(
+            agent_name="detect",
+            filename=filename,
+            memory_type="feedback",
+            confidence=2,
+            source="auto",
+            body=body,
+            resource_pattern=resource_pattern,
+            related_issue_id=issue_id,
+        )
+    except Exception:
+        logger.debug("Auto-learn failed for dismissed issue #%d", issue_id, exc_info=True)
+
+
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
 async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
     """Update anomaly status (backed by HealthIssue) with state machine enforcement."""
@@ -1947,6 +2010,10 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
         issue.status = update.status
         if update.status == "resolved" and issue.resolved_at is None:
             issue.resolved_at = datetime.utcnow()
+
+        # Auto-learn: dismissed issues create detect agent memory
+        if update.status == "dismissed":
+            _auto_learn_dismissed(issue.id, issue.resource_id, issue.title, issue.description)
 
         session.flush()
         acct_name = None
@@ -3116,23 +3183,25 @@ async def api_generate_report(request: ReportGenerateRequest):
     from agenticops.report import ReportGenerator
 
     with get_db_session() as session:
-        # Get account if specified
-        account = None
+        # Get account(s)
         if request.account_name:
-            account = session.query(CloudAccount).filter_by(name=request.account_name).first()
-            if not account:
+            accounts = [session.query(CloudAccount).filter_by(name=request.account_name).first()]
+            if not accounts[0]:
                 raise HTTPException(status_code=404, detail="Account not found")
         else:
-            account = session.query(CloudAccount).filter_by(is_enabled=True).first()
+            accounts = session.query(CloudAccount).filter_by(is_enabled=True).all()
+            if not accounts:
+                raise HTTPException(status_code=404, detail="No enabled accounts")
 
-        generator = ReportGenerator(account)
-
-        if request.report_type == "daily":
-            content = generator.generate_daily_report()
-        elif request.report_type == "inventory":
-            content = generator.generate_inventory_report()
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown report type: {request.report_type}")
+        # Generate report for each account
+        for account in accounts:
+            generator = ReportGenerator(account)
+            if request.report_type == "daily":
+                generator.generate_daily_report()
+            elif request.report_type == "inventory":
+                generator.generate_inventory_report()
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown report type: {request.report_type}")
 
         # Get the last generated report
         report = (
@@ -3762,6 +3831,26 @@ async def api_pipeline_options():
     }
 
 
+@app.get("/api/schedules/cron-preview")
+async def api_cron_preview(expr: str = ""):
+    """Validate a cron expression and return the next 3 run times."""
+    from agenticops.scheduler.scheduler import CronParser
+
+    if not expr.strip():
+        return {"valid": False, "error": "Empty expression"}
+    try:
+        parser = CronParser(expr.strip())
+        now = datetime.utcnow()
+        runs = []
+        t = now
+        for _ in range(3):
+            t = parser.next_run(t)
+            runs.append(t.isoformat())
+        return {"valid": True, "next_runs": runs}
+    except (ValueError, Exception) as e:
+        return {"valid": False, "error": str(e)}
+
+
 @app.get("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
 async def api_get_schedule(schedule_id: int):
     """Get schedule by ID."""
@@ -4298,6 +4387,7 @@ async def api_search(
                     id=r.id, title=r.title,
                     subtitle=(r.summary or "")[:100],
                     entity_type="fix_plan", status=r.status,
+                    parent_id=r.health_issue_id,
                     created_at=r.created_at,
                 ).model_dump()
                 for r in rows
@@ -4372,10 +4462,14 @@ async def api_create_chat_session(payload: ChatSessionCreate):
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
 async def api_list_chat_sessions(
     limit: int = Query(default=50, le=100),
+    include_archived: bool = Query(default=False),
 ):
     with get_db_session() as db:
+        query = db.query(ChatSession)
+        if not include_archived:
+            query = query.filter(ChatSession.archived == False)
         rows = (
-            db.query(ChatSession)
+            query
             .order_by(ChatSession.last_activity_at.desc())
             .limit(limit)
             .all()
@@ -4389,6 +4483,7 @@ async def api_list_chat_sessions(
                 id=r.id, session_id=r.session_id, name=r.name,
                 created_at=r.created_at, updated_at=r.updated_at,
                 last_activity_at=r.last_activity_at, message_count=cnt,
+                pinned=r.pinned, starred=r.starred, archived=r.archived,
             ))
         return result
 
@@ -4410,6 +4505,7 @@ async def api_get_chat_session(session_id: str):
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at,
             message_count=len(msgs),
+            pinned=row.pinned, starred=row.starred, archived=row.archived,
             messages=[ChatMessageResponse(
                 id=m.id, role=m.role, content=m.content,
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
@@ -4419,20 +4515,37 @@ async def api_get_chat_session(session_id: str):
 
 
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate):
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
     with get_db_session() as db:
         row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
         if not row:
             raise HTTPException(404, "Session not found")
-        row.name = payload.name
+        if payload.name is not None:
+            row.name = payload.name
+        if payload.pinned is not None:
+            row.pinned = payload.pinned
+        if payload.starred is not None:
+            row.starred = payload.starred
+        # Track whether this request is archiving the session
+        archiving = payload.archived is True and not row.archived
+        if payload.archived is not None:
+            row.archived = payload.archived
         row.updated_at = datetime.utcnow()
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
-        return ChatSessionResponse(
+        response = ChatSessionResponse(
             id=row.id, session_id=row.session_id, name=row.name,
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=cnt,
+            pinned=row.pinned, starred=row.starred, archived=row.archived,
         )
+
+    # Trigger memory extraction in the background when archiving
+    if archiving:
+        from agenticops.web.session_manager import _trigger_memory_extraction
+        background_tasks.add_task(_trigger_memory_extraction, session_id)
+
+    return response
 
 
 def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
@@ -4472,6 +4585,72 @@ async def api_delete_chat_session(session_id: str):
         db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
         db.delete(row)
     _chat_sessions.remove(session_id)
+
+
+# ============================================================================
+# Memory Facts API
+# ============================================================================
+
+
+@app.get("/api/memory/facts", response_model=List[MemoryFactResponse])
+async def api_get_memory_facts(
+    min_confidence: float = Query(default=0.7, ge=0.0, le=1.0),
+):
+    """Query structured facts from cross-session memory."""
+    from agenticops.web.memory_service import MemoryService
+
+    svc = MemoryService()
+    facts = svc.get_facts(min_confidence=min_confidence)
+    return [
+        MemoryFactResponse(
+            id=f.id,
+            category=f.category,
+            key=f.key,
+            value=f.value,
+            confidence_score=f.confidence_score,
+            source_session_id=f.source_session_id,
+            created_at=f.created_at,
+            updated_at=f.updated_at,
+        )
+        for f in facts
+    ]
+
+
+@app.delete("/api/memory/facts/{fact_id}", status_code=204)
+async def api_delete_memory_fact(fact_id: int):
+    """Delete a specific fact by its primary key id."""
+    with get_db_session() as db:
+        fact = db.query(AgentMemoryFact).filter(AgentMemoryFact.id == fact_id).first()
+        if not fact:
+            raise HTTPException(404, "Fact not found")
+        db.delete(fact)
+
+
+# ============================================================================
+# Memory Experiences API
+# ============================================================================
+
+
+@app.get("/api/memory/experiences", response_model=List[MemoryExperienceResponse])
+async def api_get_memory_experiences():
+    """Query vectorized experience memories (without embedding_vector)."""
+    with get_db_session() as db:
+        memories = (
+            db.query(AgentMemory)
+            .order_by(AgentMemory.created_at.desc())
+            .all()
+        )
+        db.expunge_all()
+    return [
+        MemoryExperienceResponse(
+            id=m.id,
+            session_id=m.session_id,
+            memory_type=m.memory_type,
+            content_text=m.content_text,
+            created_at=m.created_at,
+        )
+        for m in memories
+    ]
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
@@ -5282,6 +5461,199 @@ async def api_wecom_callback(request: Request):
         asyncio.ensure_future(_handle_im_message("wecom", msg))
 
     return ""
+
+
+# ============================================================================
+# Agent Memory API
+# ============================================================================
+
+
+class IssueFeedbackRequest(BaseModel):
+    """Schema for issue feedback (false positive / confirmed)."""
+    type: str = Field(..., pattern="^(false_positive|confirmed)$")
+    note: str = ""
+    confidence: int = Field(default=3, ge=1, le=5)
+
+
+class AgentMemoryResponse(BaseModel):
+    """Schema for agent memory entry."""
+    agent: str
+    filename: str
+    type: str
+    status: str
+    confidence: int
+    source: str
+    resource_pattern: str = ""
+    related_issue_id: Optional[int] = None
+    summary: str
+    created_at: str
+    last_confirmed: str
+
+
+class AgentMemoryUpdateRequest(BaseModel):
+    """Schema for updating an agent memory entry."""
+    confidence: Optional[int] = Field(None, ge=1, le=5)
+    status: Optional[str] = Field(None, pattern="^(active|archived)$")
+    body: Optional[str] = None
+
+
+@app.post("/api/health-issues/{issue_id}/feedback", status_code=201)
+async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
+    """Record user feedback on a health issue (false positive / confirmed).
+
+    For false_positive: creates agent memory for detect agent + dismisses issue.
+    For confirmed: archives any memory that suppresses this pattern.
+    """
+    from agenticops.memory.agent_memory import (
+        archive_memory,
+        save_memory_file,
+        search_memories,
+    )
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+
+        resource_id = issue.resource_id
+        title = issue.title
+        description = issue.description
+        severity = issue.severity
+        source = issue.source
+
+    if data.type == "false_positive":
+        # Build resource pattern from issue
+        parts = resource_id.split("/") if resource_id else []
+        resource_pattern = f"{parts[0]}/*" if parts else ""
+
+        # Build memory body
+        body = f"{title}\n\n{description}\n\nMarked as false positive on issue I#{issue_id}."
+        if data.note:
+            body += f"\nUser note: {data.note}"
+
+        # Create/update detect agent memory
+        import re
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower().strip())[:50].strip("_")
+        filename = f"{slug}.md" if slug else f"issue_{issue_id}_fp.md"
+
+        filepath = save_memory_file(
+            agent_name="detect",
+            filename=filename,
+            memory_type="feedback",
+            confidence=data.confidence,
+            source="user",
+            body=body,
+            resource_pattern=resource_pattern,
+            related_issue_id=issue_id,
+        )
+
+        # Dismiss the issue
+        with get_db_session() as session:
+            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+            if issue and issue.status not in ("resolved",):
+                issue.status = "resolved"
+
+        return {
+            "status": "recorded",
+            "type": "false_positive",
+            "memory_file": filepath.name,
+            "agent": "detect",
+            "confidence": data.confidence,
+        }
+
+    elif data.type == "confirmed":
+        # Search for memories that might suppress this pattern
+        archived_count = 0
+        matches = search_memories(title, agent_name="detect")
+        for m in matches:
+            if archive_memory("detect", m["filename"]):
+                archived_count += 1
+
+        return {
+            "status": "recorded",
+            "type": "confirmed",
+            "archived_memories": archived_count,
+        }
+
+
+@app.get("/api/agent-memory", response_model=List[AgentMemoryResponse])
+async def api_list_agent_memories(
+    agent: str = "",
+    status: str = "active",
+):
+    """List agent memories with optional filtering."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, list_memories
+
+    if agent and agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+    if status not in ("active", "archived", "all"):
+        raise HTTPException(status_code=400, detail="status must be active, archived, or all")
+
+    memories = list_memories(agent_name=agent, status_filter=status)
+    return memories
+
+
+@app.get("/api/agent-memory/{agent}/{filename}")
+async def api_get_agent_memory(agent: str, filename: str):
+    """Read a single agent memory file."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, _agent_dir, parse_frontmatter
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    filepath = _agent_dir(agent) / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Memory file not found")
+
+    raw = filepath.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter(raw)
+    return {"agent": agent, "filename": filename, "frontmatter": fm, "body": body}
+
+
+@app.put("/api/agent-memory/{agent}/{filename}")
+async def api_update_agent_memory(agent: str, filename: str, data: AgentMemoryUpdateRequest):
+    """Update an agent memory file (confidence, status, body)."""
+    from agenticops.memory.agent_memory import (
+        AGENT_NAMES,
+        _agent_dir,
+        _serialize_frontmatter,
+        parse_frontmatter,
+        update_memory_index,
+    )
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    filepath = _agent_dir(agent) / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Memory file not found")
+
+    raw = filepath.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter(raw)
+
+    if data.confidence is not None:
+        fm["confidence"] = data.confidence
+    if data.status is not None:
+        fm["status"] = data.status
+    if data.body is not None:
+        body = data.body
+
+    filepath.write_text(_serialize_frontmatter(fm, body), encoding="utf-8")
+    update_memory_index(agent)
+
+    return {"status": "updated", "agent": agent, "filename": filename}
+
+
+@app.delete("/api/agent-memory/{agent}/{filename}", status_code=204)
+async def api_delete_agent_memory(agent: str, filename: str):
+    """Archive or delete an agent memory file."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, archive_memory
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+
+    if not archive_memory(agent, filename):
+        raise HTTPException(status_code=404, detail="Memory file not found")
 
 
 # ============================================================================

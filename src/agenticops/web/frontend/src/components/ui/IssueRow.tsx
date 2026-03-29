@@ -18,17 +18,19 @@ const STATUS_LABELS: Record<string, string> = {
   fix_executing: "executing",
   fix_executed: "executed",
   resolved: "resolved",
+  dismissed: "dismissed",
 };
 
 export function IssueRow({ issue, onClick }: Props) {
   const isResolved = issue.status === "resolved";
-  const isCritical = issue.severity === "critical" && !isResolved;
+  const isDismissed = issue.status === "dismissed";
+  const isCritical = issue.severity === "critical" && !isResolved && !isDismissed;
 
   return (
     <div
       onClick={() => onClick(issue)}
       className={`flex items-center gap-3 px-4 py-3 border-b border-border/50 cursor-pointer transition-colors hover:bg-accent ${
-        isResolved ? "opacity-50" : ""
+        isResolved || isDismissed ? "opacity-50" : ""
       } ${isCritical ? "bg-red-500/5" : ""}`}
     >
       <SeverityBadge severity={issue.severity} />
@@ -43,7 +45,7 @@ export function IssueRow({ issue, onClick }: Props) {
       </div>
       <PipelineStepper status={issue.status} className="w-20 flex-shrink-0" />
       <span className={`text-xs w-16 text-right flex-shrink-0 ${
-        isResolved ? "text-green-500" : "text-primary"
+        isResolved ? "text-green-500" : isDismissed ? "text-slate-400" : "text-primary"
       }`}>
         {STATUS_LABELS[issue.status] ?? issue.status}
         {isResolved && " \u2713"}

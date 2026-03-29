@@ -49,6 +49,12 @@ export function renderMarkdown(md: string): string {
       /\[([^\]]+)\]\(([^)]+)\)/g,
       '<a href="$2" class="md-link" target="_blank" rel="noopener">$1</a>',
     );
+    // Auto-link I#N → /app/issues/N
+    s = s.replace(/\bI#(\d+)\b/g,
+      '<a href="/app/issues/$1" class="md-link md-ref" title="Issue #$1">I#$1</a>');
+    // Auto-link R#N → /app/resources/N
+    s = s.replace(/\bR#(\d+)\b/g,
+      '<a href="/app/resources/$1" class="md-link md-ref" title="Resource #$1">R#$1</a>');
     return s;
   }
 

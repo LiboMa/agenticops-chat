@@ -48,7 +48,7 @@ AgenticOps（`aiops`）是一个基于多智能体架构的 **AI 运维助手**�
                     │  SQLite / PostgreSQL (pgvector)  │
                     │  S3 (报告/KB 向量存储)           │
                     │  Graph Engine (NetworkX)         │
-                    │  Agent Skills (10 领域技能包)     │
+                    │  Agent Skills (11 领域技能包)     │
                     └─────────────────────────────────┘
 ```
 
@@ -130,7 +130,7 @@ AgenticOps（`aiops`）是一个基于多智能体架构的 **AI 运维助手**�
 - **自动流程**: 修复成功 → RAG 向量化 → Case 蒸馏 → 写入 KB
 - **Agent 使用**: RCA Agent 查询 SOP + 相似案例辅助分析
 
-### 3.5 Agent Skills（10 个领域技能包）
+### 3.5 Agent Skills（11 个领域技能包）
 
 | 技能 | 覆盖 |
 |------|------|
@@ -144,6 +144,7 @@ AgenticOps（`aiops`）是一个基于多智能体架构的 **AI 运维助手**�
 | aws-compute | EC2/ECS/EKS/Lambda |
 | aws-storage | S3/EBS/EFS |
 | local-os-operator | 本地文件读取/搜索（动态注册） |
+| web-research | 公开网页抓取/状态页/CVE 查询（动态注册） |
 
 > 渐进式加载：系统提示 ~636 tokens（技能列表），按需加载技能体 ~3-5K tokens
 

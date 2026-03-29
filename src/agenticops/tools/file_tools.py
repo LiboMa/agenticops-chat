@@ -394,6 +394,142 @@ def file_stat(path: str) -> str:
         return f"Error: {e}"
 
 
+# Document formats — no output truncation (documents are meant to be read in full).
+_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".csv", ".xlsx", ".xls", ".md", ".txt", ".html", ".rst", ".json", ".yaml", ".yml"}
+
+
+@tool
+def read_document(path: str, pages: str = "") -> str:
+    """Read a document file and return its full text content — no truncation.
+
+    Use this to read and analyze documents: PDF, DOCX, Markdown, HTML, CSV,
+    XLSX, plain text, JSON, YAML. Unlike read_local_file (which truncates
+    output for operational safety), this tool returns the complete content
+    so you can fully understand and explain the document.
+
+    For PDFs, you can specify a page range to read specific sections.
+
+    Args:
+        path: Absolute or relative file path to the document.
+        pages: Optional page range for PDFs (e.g., "1-5", "3", "10-20").
+               Empty string reads all pages. Ignored for non-PDF files.
+
+    Returns:
+        Full extracted text content from the document, or error message.
+    """
+    blocked = _is_blocked(path)
+    if blocked:
+        return f"ACCESS DENIED: {blocked}. Cannot read sensitive files."
+
+    try:
+        resolved = Path(path).resolve()
+        if not resolved.exists():
+            return f"File not found: {path}"
+        if not resolved.is_file():
+            return f"Not a file: {path}"
+
+        suffix = resolved.suffix.lower()
+        file_size = resolved.stat().st_size
+
+        # PDF
+        if suffix == ".pdf":
+            if file_size > 20 * 1024 * 1024:
+                return f"PDF too large ({file_size:,} bytes, max 20 MB). Specify a page range with pages='1-10'."
+
+            start_page = 0
+            end_page = None
+            if pages.strip():
+                try:
+                    if "-" in pages:
+                        parts = pages.split("-", 1)
+                        start_page = max(0, int(parts[0]) - 1)
+                        end_page = int(parts[1])
+                    else:
+                        start_page = max(0, int(pages) - 1)
+                        end_page = start_page + 1
+                except ValueError:
+                    return f"Invalid page range: '{pages}'. Use '1-5' or '3'."
+
+            try:
+                import pymupdf
+                doc = pymupdf.open(str(resolved))
+                total_pages = len(doc)
+                actual_end = min(end_page or total_pages, total_pages)
+                text_pages = [doc[i].get_text() for i in range(start_page, actual_end)]
+                doc.close()
+                header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
+                return header + "\n\n---\n\n".join(text_pages)
+            except ImportError:
+                pass
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(str(resolved))
+                total_pages = len(reader.pages)
+                actual_end = min(end_page or total_pages, total_pages)
+                text_pages = [reader.pages[i].extract_text() or "" for i in range(start_page, actual_end)]
+                header = f"# {resolved.name} ({total_pages} pages, showing {start_page+1}-{actual_end})\n\n"
+                return header + "\n\n---\n\n".join(text_pages)
+            except ImportError:
+                return "No PDF library installed. Run: pip install pymupdf"
+            except Exception as e:
+                return f"Error reading PDF: {e}"
+
+        # DOCX
+        if suffix == ".docx":
+            try:
+                from docx import Document
+                doc = Document(str(resolved))
+                paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                header = f"# {resolved.name} ({len(paragraphs)} paragraphs)\n\n"
+                return header + "\n\n".join(paragraphs)
+            except ImportError:
+                return "DOCX support not installed. Run: pip install python-docx"
+            except Exception as e:
+                return f"Error reading DOCX: {e}"
+
+        # XLSX
+        if suffix in (".xlsx", ".xls"):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(str(resolved), read_only=True, data_only=True)
+                sheet_parts = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    rows = []
+                    for row in ws.iter_rows(values_only=True):
+                        rows.append("\t".join(str(c) if c is not None else "" for c in row))
+                    sheet_parts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows))
+                wb.close()
+                header = f"# {resolved.name} ({len(wb.sheetnames)} sheets)\n\n"
+                return header + "\n\n".join(sheet_parts)
+            except ImportError:
+                return "XLSX support not installed. Run: pip install openpyxl"
+            except Exception as e:
+                return f"Error reading XLSX: {e}"
+
+        # Text-based documents (markdown, HTML, CSV, JSON, YAML, plain text, rst)
+        if suffix in _DOCUMENT_EXTENSIONS:
+            if file_size > 10 * 1024 * 1024:
+                return f"File too large ({file_size:,} bytes, max 10 MB)."
+            try:
+                text = resolved.read_text(encoding="utf-8", errors="replace")
+                header = f"# {resolved.name} ({file_size:,} bytes)\n\n"
+                return header + text
+            except Exception as e:
+                return f"Error reading {path}: {e}"
+
+        return (
+            f"Unsupported document format: {suffix}. "
+            f"Supported: .pdf, .docx, .xlsx, .md, .txt, .html, .csv, .json, .yaml. "
+            f"For config/code files with line numbers use read_local_file instead."
+        )
+
+    except PermissionError:
+        return f"Permission denied: {path}"
+    except Exception as e:
+        return f"Error reading document {path}: {e}"
+
+
 @tool
 def write_local_file(path: str, content: str, mode: str = "overwrite") -> str:
     """Write text content to a local file.

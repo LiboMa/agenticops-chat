@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/graph/algorithms.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.8, 0.9, 0.95, 100, 110, ', ', '/', 'available_ips', 'blackhole', 'blackhole_route', 'cidr', 'critical', 'current_size', 'cycle', 'destination', 'edge_type', 'from', 'high', 'id', 'internet', 'ip_utilization', 'label', 'low', 'max_pods', 'medium', 'node_id', 'node_type', 'orphan_node', 'pod_utilization', 'public', 'raw', 'resource_type', 'routes', 'routing_cycle', 'source', 'source_label', 'source_type', 'state', 'status', 'subnet_type', 'target', 'target_label', 'target_type', 'to', 'type', 'unhealthy_node', 'unknown', 'unreachable_subnet', 'via']

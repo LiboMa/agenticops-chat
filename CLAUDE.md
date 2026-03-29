@@ -23,7 +23,7 @@ Web Dashboard ──────┘         │
                               ├──► CloudWatch, CloudTrail, EKS, VPC, ELB, ...
                               ├──► SQLite / PostgreSQL metadata DB
                               ├──► Graph Engine (NetworkX) — SPOF, capacity, dependency, change sim
-                              └──► Agent Skills (SKILL.md packages) — 10 domain skills
+                              └──► Agent Skills (SKILL.md packages) — 14 domain skills
 ```
 
 - **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
@@ -66,7 +66,7 @@ Web Dashboard ──────┘         │
 
 ### Skills (`skills/`)
 
-10 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`.
+14 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
 
 ### Infrastructure (`infra/`)
 

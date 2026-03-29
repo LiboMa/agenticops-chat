@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/kb/search.py
+# hypothesis_version: 6.151.9
+
+[0.5, 1.0, 1.2, '*.md', 'Error reading %s: %s', 'case_id', 'efficiency_score', 'false', 'keyword', 'resource_type', 'symptom', 'true', 'vector', 'verified']

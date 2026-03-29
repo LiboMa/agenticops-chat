@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/web_tools.py
+# hypothesis_version: 6.151.9
+
+[400, 500, 4000, 1048576, '"', '&', '&#39;', '&amp;', '&gt;', '&lt;', '&nbsp;', '&quot;', "'", '- \\1', '169.254.169.254', '<', '</?p[^>]*>', '<[^>]+>', '<br\\s*/?>', '<li[^>]*>(.*?)</li>', '>', 'AgenticOps/1.0', 'Error: URL is empty.', 'GET', 'HEAD', 'User-Agent', '\\n## \\1\\n', '\\n{3,}', 'article', 'content-type', 'footer', 'header', 'http', 'https', 'location', 'main', 'nav', 'script', 'style', 'text/html', 'unknown']

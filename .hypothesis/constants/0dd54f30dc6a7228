@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/cli/formatters.py
+# hypothesis_version: 6.151.9
+
+[1024.0, 1000, 1000000, 1000000000, 'AIOPS_TABLE_STYLE', 'B', 'GB', 'KB', 'MB', 'TB', 'ascii', 'blue', 'bold cyan', 'default', 'dim', 'double', 'ellipsis', 'green', 'json', 'justify', 'left', 'minimal', 'monokai', 'name', 'no_wrap', 'simple', 'style']

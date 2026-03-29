@@ -48,6 +48,7 @@ executor_auto_approve_l0_l1: true
 notifications_enabled: true
 notifications_consolidated: false
 agent_output_detail: medium
+issue_exclude_patterns: []
 scan_focus: all
 alert_pipeline_mode: both
 im_alert_detection_enabled: true
@@ -55,6 +56,7 @@ im_alert_cooldown_seconds: 60
 dedup_resolved_cooldown_minutes: 60
 skills_enabled: true
 api_auth_enabled: false
+session_ttl_minutes: 30
 session_history_depth: 20
 default_regions:
   aws: ["us-east-1", "us-west-2"]

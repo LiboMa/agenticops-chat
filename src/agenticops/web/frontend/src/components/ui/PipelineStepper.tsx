@@ -23,14 +23,16 @@ const STATUS_TO_PHASE: Record<string, number> = {
 export function PipelineStepper({ status, className = "" }: Props) {
   const currentPhase = STATUS_TO_PHASE[status] ?? 0;
   const isResolved = status === "resolved";
+  const isDismissed = status === "dismissed";
 
   return (
     <div className={`flex gap-0.5 ${className}`}>
       {[0, 1, 2, 3, 4].map((i) => {
         let bg: string;
-        if (isResolved) bg = "bg-green-500";
-        else if (i <= currentPhase) bg = "bg-indigo-500";
-        else bg = "bg-slate-700";
+        if (isDismissed) bg = "bg-muted-foreground/30";
+        else if (isResolved) bg = "bg-green-500";
+        else if (i <= currentPhase) bg = "bg-primary";
+        else bg = "bg-muted";
         return <div key={i} className={`h-[3px] flex-1 rounded-sm ${bg}`} />;
       })}
     </div>

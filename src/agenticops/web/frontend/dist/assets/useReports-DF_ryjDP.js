@@ -1,0 +1,1 @@
+import{i as t,k as o,u}from"./vendor-m_UFY9X8.js";import{a as e}from"./index-CMJeLmuQ.js";function a(){return u({queryKey:["reports"],queryFn:()=>e("/reports"),staleTime:6e4})}function p(){const r=t();return o({mutationFn:s=>e("/reports/from-session",{method:"POST",body:JSON.stringify(s)}),onSuccess:()=>r.invalidateQueries({queryKey:["reports"]})})}export{a,p as u};

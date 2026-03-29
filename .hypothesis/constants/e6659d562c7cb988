@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/kb/embeddings.py
+# hypothesis_version: 6.151.9
+
+[1024, 8000, 'application/json', 'bedrock-runtime', 'body', 'connectivity test', 'dimensions', 'embedding', 'embedding_dimension', 'embedding_enabled', 'embedding_model_id', 'inputText', 'normalize']

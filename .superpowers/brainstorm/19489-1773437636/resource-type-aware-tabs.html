@@ -1,0 +1,138 @@
+<h2>Resource Type-Aware Detail Tabs</h2>
+<p class="subtitle">Compare: compute resource vs infrastructure resource detail pages</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">EC2 Instance — i-0abc123</div>
+    <div class="mockup-body" style="padding:16px;font-size:13px">
+      <div style="display:flex;gap:20px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1)">
+        <div><span style="opacity:0.5;font-size:11px">Name</span><br><strong>web-prod-01</strong></div>
+        <div><span style="opacity:0.5;font-size:11px">Type</span><br><strong>t3.large</strong></div>
+        <div><span style="opacity:0.5;font-size:11px">Status</span><br><span style="color:#22c55e">running</span></div>
+      </div>
+      <div style="display:flex;gap:2px;margin-bottom:14px">
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Overview</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Issues</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Fix Plans</span>
+        <span style="background:rgba(99,102,241,0.2);padding:5px 12px;border-radius:5px 5px 0 0;font-size:11px;font-weight:600;color:#818cf8">Network</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Tags</span>
+      </div>
+      <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Network Context</div>
+      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px;line-height:2.2;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between">
+          <span>VPC</span>
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">vpc-abc123</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span>Subnet</span>
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">subnet-def456</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span>Private IP</span>
+          <span>10.0.1.42</span>
+        </div>
+      </div>
+      <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Security Groups</div>
+      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px">
+        <div style="margin-bottom:6px"><span style="color:#818cf8;cursor:pointer;text-decoration:underline">sg-web-prod</span></div>
+        <div style="font-size:11px;opacity:0.6;line-height:1.8;padding-left:8px">
+          Inbound: 80/tcp 0.0.0.0/0<br>
+          Inbound: 443/tcp 0.0.0.0/0<br>
+          Inbound: 22/tcp 10.0.0.0/8
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">VPC — vpc-abc123</div>
+    <div class="mockup-body" style="padding:16px;font-size:13px">
+      <div style="display:flex;gap:20px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1)">
+        <div><span style="opacity:0.5;font-size:11px">Name</span><br><strong>prod-vpc</strong></div>
+        <div><span style="opacity:0.5;font-size:11px">CIDR</span><br><strong>10.0.0.0/16</strong></div>
+        <div><span style="opacity:0.5;font-size:11px">Status</span><br><span style="color:#22c55e">available</span></div>
+      </div>
+      <div style="display:flex;gap:2px;margin-bottom:14px">
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Overview</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Issues</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Fix Plans</span>
+        <span style="background:rgba(99,102,241,0.2);padding:5px 12px;border-radius:5px 5px 0 0;font-size:11px;font-weight:600;color:#818cf8">Contains</span>
+        <span style="padding:5px 12px;font-size:11px;opacity:0.4">Tags</span>
+      </div>
+      <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Subnets (4)</div>
+      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px;line-height:2.2;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">subnet-pub-1a</span>
+          <span style="opacity:0.5">10.0.1.0/24 · us-east-1a</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">subnet-pub-1b</span>
+          <span style="opacity:0.5">10.0.2.0/24 · us-east-1b</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">subnet-priv-1a</span>
+          <span style="opacity:0.5">10.0.10.0/24 · us-east-1a</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:#818cf8;cursor:pointer;text-decoration:underline">subnet-priv-1b</span>
+          <span style="opacity:0.5">10.0.11.0/24 · us-east-1b</span>
+        </div>
+      </div>
+      <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Resources (12)</div>
+      <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px;line-height:2.2">
+        <div style="display:flex;justify-content:space-between">
+          <span><span style="background:rgba(99,102,241,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px">EC2</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">web-prod-01</span></span>
+          <span style="color:#22c55e;font-size:11px">running</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span><span style="background:rgba(99,102,241,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px">EC2</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">web-prod-02</span></span>
+          <span style="color:#22c55e;font-size:11px">running</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span><span style="background:rgba(234,179,8,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px;color:#eab308">RDS</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">prod-postgres</span></span>
+          <span style="color:#22c55e;font-size:11px">available</span>
+        </div>
+        <div style="opacity:0.4;font-size:11px;padding-top:4px">+ 9 more...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:32px">Similarly for SG detail:</h3>
+
+<div class="mockup" style="max-width:520px">
+  <div class="mockup-header">Security Group — sg-web-prod</div>
+  <div class="mockup-body" style="padding:16px;font-size:13px">
+    <div style="display:flex;gap:20px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1)">
+      <div><span style="opacity:0.5;font-size:11px">Name</span><br><strong>sg-web-prod</strong></div>
+      <div><span style="opacity:0.5;font-size:11px">VPC</span><br><span style="color:#818cf8;cursor:pointer;text-decoration:underline">vpc-abc123</span></div>
+      <div><span style="opacity:0.5;font-size:11px">Rules</span><br><strong>3 in / 1 out</strong></div>
+    </div>
+    <div style="display:flex;gap:2px;margin-bottom:14px">
+      <span style="padding:5px 12px;font-size:11px;opacity:0.4">Overview</span>
+      <span style="padding:5px 12px;font-size:11px;opacity:0.4">Issues</span>
+      <span style="background:rgba(99,102,241,0.2);padding:5px 12px;border-radius:5px 5px 0 0;font-size:11px;font-weight:600;color:#818cf8">Contains</span>
+      <span style="padding:5px 12px;font-size:11px;opacity:0.4">Tags</span>
+    </div>
+    <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Inbound Rules</div>
+    <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px;line-height:2.2;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between">
+        <span>TCP :80</span><span style="opacity:0.5">0.0.0.0/0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span>TCP :443</span><span style="opacity:0.5">0.0.0.0/0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span>TCP :22</span><span style="opacity:0.5">10.0.0.0/8</span>
+      </div>
+    </div>
+    <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Used By (3 resources)</div>
+    <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:12px;line-height:2.2">
+      <div><span style="background:rgba(99,102,241,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px">EC2</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">web-prod-01</span></div>
+      <div><span style="background:rgba(99,102,241,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px">EC2</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">web-prod-02</span></div>
+      <div><span style="background:rgba(234,179,8,0.15);padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px;color:#eab308">ELB</span><span style="color:#818cf8;cursor:pointer;text-decoration:underline">prod-alb</span></div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:24px">All blue underlined items are clickable links — navigating between related resources</p>

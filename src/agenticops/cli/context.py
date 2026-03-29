@@ -25,6 +25,8 @@ class ChatContext:
         self.auto_pager = True  # Enable auto-truncation for long outputs
         self.last_full_output = ""  # Full output for /less when truncated
         self.token_usage = TokenUsage()  # Track token consumption
+        self.db_session_id: Optional[int] = None      # ChatSession.id (DB PK)
+        self.db_session_uuid: Optional[str] = None    # ChatSession.session_id (UUID)
 
     def set_output(self, fmt: str):
         if fmt in ["table", "json", "wide", "yaml"]:

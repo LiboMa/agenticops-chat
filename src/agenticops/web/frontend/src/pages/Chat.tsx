@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useChatSessions, useCreateChatSession } from "@/hooks/useChatSessions";
+import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useChat } from "@/hooks/useChat";
+import { useLazySessionCreate } from "@/hooks/useLazySessionCreate";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { SessionFlyout } from "@/components/chat/SessionFlyout";
 import { MessageList } from "@/components/chat/MessageList";
@@ -11,29 +12,77 @@ import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
 import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
+import { ApiError } from "@/api/client";
+import { apiFetch } from "@/api/client";
+
+const LAST_SESSION_KEY = "aiops-last-session-id";
 
 export default function Chat() {
   const { t } = useLocale();
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const { data: sessions } = useChatSessions();
-  const createMut = useCreateChatSession();
-  const creatingRef = useRef(false);
   const [detailLevel, setDetailLevel] = usePersistedState("aiops-detail-level", "medium");
+
+  // Whether we're in "welcome" mode (no active session)
+  const [showWelcome, setShowWelcome] = useState(false);
+  // Track whether localStorage restoration has been attempted
+  const restorationAttempted = useRef(false);
+
+  // Lazy session creation hook
+  const { sendFirstMessage, creating } = useLazySessionCreate();
 
   // Determine selected session from URL parameter
   const selectedId = urlSessionId || null;
 
-  // Auto-create a new session when navigating to /app/chat without a session ID
+  // --- Requirement 1.1, 1.2, 1.5, 1.6, 1.7 ---
+  // When no URL sessionId: check localStorage for last session, validate it, navigate or show welcome.
+  // When URL sessionId present: just use it (page refresh case, Req 1.7).
   useEffect(() => {
-    if (urlSessionId || creatingRef.current) return;
-    creatingRef.current = true;
-    createMut.mutateAsync(undefined).then((s) => {
-      navigate(`/app/chat/${s.session_id}`, { replace: true });
-    }).finally(() => {
-      creatingRef.current = false;
-    });
-  }, [urlSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (urlSessionId || restorationAttempted.current) return;
+    restorationAttempted.current = true;
+
+    const lastSessionId = localStorage.getItem(LAST_SESSION_KEY);
+    if (!lastSessionId) {
+      setShowWelcome(true);
+      return;
+    }
+
+    // Validate the stored sessionId still exists (Req 1.5)
+    apiFetch(`/chat/sessions/${lastSessionId}`)
+      .then(() => {
+        navigate(`/app/chat/${lastSessionId}`, { replace: true });
+      })
+      .catch((err: unknown) => {
+        // Session deleted or not found — clear localStorage and show welcome (Req 1.5)
+        if (err instanceof ApiError && err.status === 404) {
+          localStorage.removeItem(LAST_SESSION_KEY);
+        }
+        setShowWelcome(true);
+      });
+  }, [urlSessionId, navigate]);
+
+  // --- Requirement 1.4 ---
+  // Save current sessionId to localStorage when user leaves the page
+  useEffect(() => {
+    if (!selectedId) return;
+
+    // Persist on every navigation to a valid session
+    localStorage.setItem(LAST_SESSION_KEY, selectedId);
+
+    const handleBeforeUnload = () => {
+      localStorage.setItem(LAST_SESSION_KEY, selectedId);
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [selectedId]);
+
+  // When URL gains a sessionId, exit welcome mode
+  useEffect(() => {
+    if (urlSessionId) {
+      setShowWelcome(false);
+    }
+  }, [urlSessionId]);
 
   const { data: detail } = useChatSession(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, sendMessage, cancel } =
@@ -46,27 +95,133 @@ export default function Chat() {
   const [contextIssueId, setContextIssueId] = useState<number | null>(null);
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
+  // Flyout resizable width (px), persisted
+  const [flyoutWidth, setFlyoutWidth] = usePersistedState("aiops-flyout-width", 220);
+  const [flyoutDragging, setFlyoutDragging] = useState(false);
+  const flyoutDraggingRef = useRef(false);
+  const flyoutContainerRef = useRef<HTMLDivElement>(null);
+  const flyoutRaf = useRef(0);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!flyoutDraggingRef.current || !flyoutContainerRef.current) return;
+      cancelAnimationFrame(flyoutRaf.current);
+      flyoutRaf.current = requestAnimationFrame(() => {
+        if (!flyoutContainerRef.current) return;
+        const parentRect = flyoutContainerRef.current.getBoundingClientRect();
+        const newWidth = e.clientX - parentRect.left;
+        setFlyoutWidth(Math.min(400, Math.max(160, newWidth)));
+      });
+    };
+    const handleMouseUp = () => {
+      if (flyoutDraggingRef.current) {
+        cancelAnimationFrame(flyoutRaf.current);
+        flyoutDraggingRef.current = false;
+        setFlyoutDragging(false);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      cancelAnimationFrame(flyoutRaf.current);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [setFlyoutWidth]);
+
   // Session selection handler - navigates to new URL
   const handleSelectSession = (id: string) => {
     navigate(`/app/chat/${id}`);
   };
 
+  // --- Requirement 1.3 ---
+  // Handle first message in welcome state: create session lazily, then send message
+  const handleWelcomeSend = (content: string, file?: File) => {
+    sendFirstMessage(content, file);
+  };
+
   return (
-    <div className="flex h-[calc(100vh-2.25rem)] -m-6">
-      {/* Left: Session Flyout */}
-      <SessionFlyout
-        open={flyoutOpen}
-        selectedId={selectedId}
-        onSelect={handleSelectSession}
-        onClose={() => setFlyoutOpen(false)}
-      />
+    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-2.25rem)] -m-6">
+      {/* Left: Session Flyout (resizable) */}
+      <div
+        style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}
+        className={`flex-shrink-0 overflow-hidden ${flyoutDragging ? "" : "transition-[width] duration-200 ease-in-out"} ${flyoutOpen ? "" : "w-0"}`}
+      >
+        <SessionFlyout
+          open={flyoutOpen}
+          selectedId={selectedId}
+          onSelect={handleSelectSession}
+          onClose={() => setFlyoutOpen(false)}
+        />
+      </div>
+
+      {/* Flyout ↔ Chat drag handle (always visible) */}
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          if (!flyoutOpen) setFlyoutOpen(true);
+          flyoutDraggingRef.current = true;
+          setFlyoutDragging(true);
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+        }}
+        onDoubleClick={() => setFlyoutOpen((prev) => !prev)}
+        className="w-[6px] flex-shrink-0 cursor-col-resize group flex items-center justify-center hover:bg-primary/20 transition-colors"
+      >
+        <div className="flex flex-col gap-1">
+          <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+          <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+          <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+        </div>
+      </div>
 
       {/* Center: Chat area */}
       <div
         style={{ flex: contextIssueId ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
         className="flex flex-col min-w-0"
       >
-        {!selectedId ? (
+        {showWelcome && !selectedId ? (
+          /* Welcome screen — no session yet (Req 1.1) */
+          <>
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+              {/* Flyout toggle in welcome mode */}
+              <button
+                onClick={() => setFlyoutOpen((prev) => !prev)}
+                className="absolute top-4 left-4 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                title={t("chat.sessions")}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              </button>
+
+              <div className="text-center">
+                <h2 className="text-lg font-semibold text-foreground mb-2">
+                  {t("chat.welcome")}
+                </h2>
+                <p className="text-sm text-muted-foreground max-w-md">
+                  {t("chat.welcomeHint")}
+                </p>
+              </div>
+            </div>
+
+            {/* Chat input in welcome mode — triggers lazy session creation (Req 1.3) */}
+            <ChatInput
+              onSend={handleWelcomeSend}
+              disabled={creating}
+              streaming={false}
+              detailLevel={detailLevel}
+              onDetailLevelChange={setDetailLevel}
+            />
+          </>
+        ) : !selectedId ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             {t("chat.selectSession")}
           </div>

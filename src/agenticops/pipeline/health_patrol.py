@@ -92,14 +92,9 @@ class HealthPatrolPipeline(Pipeline):
     """
 
     def __init__(self, account: Optional[CloudAccount] = None, config: Optional[dict] = None):
-        super().__init__(
-            name="HealthPatrol",
-            steps=[
-                FetchExternalAlertsStep(),
-                RunDetectStep(),
-            ],
-        )
-        self.account = account
+        super().__init__("HealthPatrol", account)
+        self.add_step(FetchExternalAlertsStep())
+        self.add_step(RunDetectStep())
         self.patrol_config = config or {}
 
     async def execute(self) -> PipelineResult:
@@ -112,10 +107,12 @@ class HealthPatrolPipeline(Pipeline):
 
         context: Dict[str, Any] = {"config": self.patrol_config}
         if self.account:
+            creds = self.account.credentials or {}
             context["account"] = {
                 "name": self.account.name,
-                "account_id": self.account.account_id,
-                "role_arn": self.account.role_arn,
+                "provider": self.account.provider,
+                "account_id": creds.get("account_id", ""),
+                "role_arn": creds.get("role_arn", ""),
             }
 
         for step in self.steps:

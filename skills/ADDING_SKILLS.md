@@ -163,6 +163,8 @@ Skills are available to these agents:
 | **RCA agent** | `activate_skill`, `read_skill_reference`, `run_on_host`, `run_kubectl` | Full investigation + execution |
 | **SRE agent** | `activate_skill`, `read_skill_reference`, `run_on_host`, `run_kubectl` | Fix planning + investigation |
 | **Main agent** | `list_skills`, `activate_skill`, `read_skill_reference` | Discovery + routing (no execution) |
+| **Scan agent** | `activate_skill`, `read_skill_reference` | Dynamic tool registration for scans |
+| **Detect agent** | `activate_skill`, `read_skill_reference` | Dynamic tool registration for health checks |
 
 To add skill activation prompts to a new agent, update its system prompt in `src/agenticops/agents/` — see `rca_agent.py` step 1.5 for the pattern.
 
@@ -197,3 +199,5 @@ Tips from existing skills:
 | `log-analysis` | monitoring | CloudWatch Insights, pod logs, error patterns |
 | `aws-compute` | infrastructure | EC2, ECS, EKS, Lambda troubleshooting |
 | `aws-storage` | infrastructure | S3, EBS, EFS, FSx troubleshooting |
+| `web-research` | operations | Fetch public web data, status pages, CVE databases |
+| `document-analysis` | operations | Read and analyze PDF, DOCX, CSV, XLSX documents |

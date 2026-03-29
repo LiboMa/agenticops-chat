@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/web/session_manager.py
+# hypothesis_version: 6.151.9
+
+[4000, '\n... (truncated)', 'assistant', 'content', 'input', 'name', 'role', 'status', 'success', 'text', 'toolResult', 'toolUse', 'toolUseId', 'tool_calls', 'tool_name', 'tool_use_id', 'unknown', 'user']

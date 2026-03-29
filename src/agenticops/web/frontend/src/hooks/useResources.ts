@@ -6,6 +6,7 @@ interface ResourceFilters {
   type?: string;
   region?: string;
   account_id?: number;
+  search?: string;
   limit?: number;
   offset?: number;
 }
@@ -15,6 +16,7 @@ export function useResources(filters: ResourceFilters = {}) {
   if (filters.type) params.set("type", filters.type);
   if (filters.region) params.set("region", filters.region);
   if (filters.account_id) params.set("account_id", String(filters.account_id));
+  if (filters.search) params.set("q", filters.search);
   if (filters.limit) params.set("limit", String(filters.limit));
   if (filters.offset) params.set("offset", String(filters.offset));
   const qs = params.toString();

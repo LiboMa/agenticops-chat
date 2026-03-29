@@ -1,5 +1,4 @@
 ## US Geographic Cross-Region Inference Profiles
-
 1. Claude 3 Haiku - us.anthropic.claude-3-haiku-20240307-v1:0
 2. Claude 3 Opus - us.anthropic.claude-3-opus-20240229-v1:0
 3. Claude 3 Sonnet - us.anthropic.claude-3-sonnet-20240229-v1:0

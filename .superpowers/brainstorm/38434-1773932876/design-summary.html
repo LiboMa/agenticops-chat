@@ -1,0 +1,129 @@
+<h2>AgenticOps Frontend Redesign — Design Summary</h2>
+<p class="subtitle">Minimalist hybrid layout with Chat as core</p>
+
+<div class="section">
+  <h3>Navigation Structure</h3>
+  <div style="display:flex;gap:16px;font-size:13px;">
+    <!-- Before -->
+    <div style="flex:1;">
+      <div class="label" style="margin-bottom:8px;">Before (11 nav items, 18 pages)</div>
+      <div style="background:#1e293b;border-radius:8px;padding:12px;line-height:2;">
+        <div style="color:#94a3b8;">Dashboard</div>
+        <div style="color:#94a3b8;">Chat</div>
+        <div style="color:#94a3b8;">Resources</div>
+        <div style="color:#94a3b8;">Issues (Anomalies)</div>
+        <div style="color:#94a3b8;">Fix Plans</div>
+        <div style="color:#94a3b8;">Reports</div>
+        <div style="color:#94a3b8;border-top:1px solid #334155;padding-top:4px;margin-top:4px;font-size:11px;color:#64748b;">Schedules</div>
+        <div style="color:#94a3b8;font-size:11px;color:#64748b;">Notifications</div>
+        <div style="color:#94a3b8;font-size:11px;color:#64748b;">Audit Log</div>
+        <div style="color:#94a3b8;font-size:11px;color:#64748b;">Knowledge Base</div>
+        <div style="color:#94a3b8;font-size:11px;color:#64748b;">Skills</div>
+      </div>
+    </div>
+    <!-- Arrow -->
+    <div style="display:flex;align-items:center;font-size:24px;color:#4f46e5;">→</div>
+    <!-- After -->
+    <div style="flex:1;">
+      <div class="label" style="margin-bottom:8px;">After (5+1 nav icons)</div>
+      <div style="background:#1e293b;border-radius:8px;padding:12px;line-height:2.2;">
+        <div style="color:#e2e8f0;">📊 Dashboard <span style="color:#475569;font-size:10px;">+ Resources merged</span></div>
+        <div style="color:#c7d2fe;font-weight:600;">💬 Chat <span style="color:#475569;font-size:10px;">core + context panel</span></div>
+        <div style="color:#e2e8f0;">🔔 Issues & Plans <span style="color:#475569;font-size:10px;">unified pipeline</span></div>
+        <div style="color:#e2e8f0;">📅 Schedules</div>
+        <div style="color:#e2e8f0;">📄 Reports</div>
+        <div style="border-top:1px solid #334155;padding-top:4px;margin-top:4px;"></div>
+        <div style="color:#64748b;">⚙️ Settings <span style="color:#475569;font-size:10px;">+ Notifications, Audit, KB, Skills as tabs</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Design Decisions</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr style="border-bottom:1px solid #334155;">
+      <th style="text-align:left;padding:10px;color:#94a3b8;width:30%;">Decision</th>
+      <th style="text-align:left;padding:10px;color:#94a3b8;">Choice</th>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Interaction model</td>
+      <td style="padding:10px;color:#c7d2fe;">Hybrid — Chat core + Dashboard overview</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Shell layout</td>
+      <td style="padding:10px;color:#c7d2fe;">52px icon sidebar (hover labels)</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Chat context panel</td>
+      <td style="padding:10px;color:#c7d2fe;">Resizable split + tabs (Issue / Fix Plan / Timeline)</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Session management</td>
+      <td style="padding:10px;color:#c7d2fe;">Chat icon flyout panel (200px, toggle open/close)</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Send message</td>
+      <td style="padding:10px;color:#c7d2fe;">Cmd/Ctrl+Enter to send, Enter for newline</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Issues + Fix Plans</td>
+      <td style="padding:10px;color:#c7d2fe;">Unified pipeline list with inline status stepper</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">Dashboard</td>
+      <td style="padding:10px;color:#c7d2fe;">Full modules: Issues summary, Resources, Active Fix Plans, Recent Activity, Scheduled Jobs, Trends</td>
+    </tr>
+    <tr style="border-bottom:1px solid #1e293b;">
+      <td style="padding:10px;color:#cbd5e1;">i18n</td>
+      <td style="padding:10px;color:#c7d2fe;">Auto-detect browser language + manual CN/EN switch, persisted to localStorage</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;color:#cbd5e1;">Tech stack</td>
+      <td style="padding:10px;color:#c7d2fe;">React + TypeScript + Tailwind + Radix UI (unchanged)</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h3>Page Architecture</h3>
+  <div style="background:#1e293b;border-radius:8px;padding:16px;font-size:12px;font-family:monospace;color:#e2e8f0;line-height:1.8;">
+    <div style="color:#64748b;">// Routes</div>
+    <div>/app <span style="color:#64748b;">→</span> Dashboard <span style="color:#475569;">(KPIs, Resources, Issues summary, Trends, Activity)</span></div>
+    <div>/app/chat <span style="color:#64748b;">→</span> Chat <span style="color:#475569;">(session flyout + messages + context panel)</span></div>
+    <div>/app/chat/:sessionId <span style="color:#64748b;">→</span> Chat <span style="color:#475569;">(specific session)</span></div>
+    <div>/app/issues <span style="color:#64748b;">→</span> Issues & Plans <span style="color:#475569;">(unified pipeline list)</span></div>
+    <div>/app/issues/:id <span style="color:#64748b;">→</span> Issue Detail <span style="color:#475569;">(or open in Chat context panel)</span></div>
+    <div>/app/schedules <span style="color:#64748b;">→</span> Schedules <span style="color:#475569;">(list + detail)</span></div>
+    <div>/app/schedules/:id <span style="color:#64748b;">→</span> Schedule Detail</div>
+    <div>/app/reports <span style="color:#64748b;">→</span> Reports <span style="color:#475569;">(list + detail)</span></div>
+    <div>/app/reports/:id <span style="color:#64748b;">→</span> Report Detail</div>
+    <div>/app/settings <span style="color:#64748b;">→</span> Settings <span style="color:#475569;">(tabs: General, Accounts, Notifications, Audit, KB, Skills, MCP)</span></div>
+    <div style="color:#64748b;margin-top:8px;">// Removed: standalone Resources, Anomalies, AnomalyDetail, FixPlans, FixPlanDetail, NotificationLogs, AuditLog, KnowledgeBase, Skills pages</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Reduction</h3>
+  <div style="display:flex;gap:24px;font-size:14px;">
+    <div style="text-align:center;">
+      <div style="font-size:28px;font-weight:700;color:#ef4444;">18</div>
+      <div style="font-size:11px;color:#64748b;">pages before</div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:20px;color:#4f46e5;">→</div>
+    <div style="text-align:center;">
+      <div style="font-size:28px;font-weight:700;color:#22c55e;">10</div>
+      <div style="font-size:11px;color:#64748b;">pages after</div>
+    </div>
+    <div style="width:1px;background:#334155;"></div>
+    <div style="text-align:center;">
+      <div style="font-size:28px;font-weight:700;color:#ef4444;">11</div>
+      <div style="font-size:11px;color:#64748b;">nav items before</div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:20px;color:#4f46e5;">→</div>
+    <div style="text-align:center;">
+      <div style="font-size:28px;font-weight:700;color:#22c55e;">6</div>
+      <div style="font-size:11px;color:#64748b;">nav icons after</div>
+    </div>
+  </div>
+</div>

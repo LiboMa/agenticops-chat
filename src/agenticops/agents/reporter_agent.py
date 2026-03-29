@@ -9,6 +9,7 @@ import logging
 
 from strands import Agent, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
+from botocore.config import Config as BotocoreConfig
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -23,6 +24,7 @@ from agenticops.tools.metadata_tools import (
 from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
 from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ REPORT GENERATION PROTOCOL:
    - **Issues Detail**: For each issue, include severity, resource, title, RCA summary
      (if available), status, and recommendations.
    - **Resource Inventory** (for daily/inventory): Total resources by type and region.
+   - **Service Security Focus** (for daily/inventory): all enabled services's support status, version info, security, certificate expiration, EOS info.
    - **Recommendations**: Aggregated action items prioritized by severity.
 4. SAVE: Call save_report with the full markdown content.
 5. KNOWLEDGE BASE (optional): For resolved issues with high-confidence RCA,
@@ -119,11 +122,13 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             model_id=model_id,
             region_name=settings.bedrock_region,
             max_tokens=max_tokens,
+            boto_client_config=BotocoreConfig(read_timeout=300),
             **cache_kwargs,
         )
 
+        from agenticops.agents.preamble import build_system_prompt
         agent = Agent(
-            system_prompt=REPORTER_SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(REPORTER_SYSTEM_PROMPT, include_account=False, agent_name="reporter"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -142,13 +147,16 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
                 distill_case_study,
                 activate_skill,
                 read_skill_reference,
+                # Agent Memory (cross-agent search)
+                search_agent_memory,
             ],
         )
 
         from agenticops.agents.preamble import invoke_with_retry
         result = invoke_with_retry(agent,
             f"Generate a {report_type} report. Scope: {scope}. "
-            f"Follow the report generation protocol."
+            f"Follow the report generation protocol.",
+            max_retries=3, backoff=5.0,
         )
         return str(result)
     except Exception as e:

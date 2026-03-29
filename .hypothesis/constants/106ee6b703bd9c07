@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/graph/tools.py
+# hypothesis_version: 6.151.9
+
+[0.8, 'anomalies', 'edge_type', 'error', 'graph_summary', 'label', 'node_count', 'node_type', 'raw', 'region', 'region_summaries', 'segments', 'source', 'source_region', 'state', 'target', 'target_region', 'tgw', 'tgw_count', 'unknown', 'vpc', 'vpc_count']

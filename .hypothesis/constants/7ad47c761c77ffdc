@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/skills/registry.py
+# hypothesis_version: 6.151.9
+
+['*.md', '--dir', '--format', 'CLAWHUB_TOKEN', 'author', 'clawhub', 'compatibility', 'description', 'draft', 'has_tools', 'inspect', 'install', 'is_draft', 'json', 'license', 'local', 'name', 'path', 'readme', 'references', 'results', 'search', 'slug', 'source', 'tools', 'version']

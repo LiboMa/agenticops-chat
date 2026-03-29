@@ -47,9 +47,13 @@ export function DragHandle({ onResize, min = 0.3, max = 0.7 }: Props) {
     <div
       ref={containerRef}
       onMouseDown={handleMouseDown}
-      className="w-[6px] flex-shrink-0 cursor-col-resize group flex items-center justify-center hover:bg-indigo-500/20 transition-colors"
+      className="w-[6px] flex-shrink-0 cursor-col-resize group flex items-center justify-center hover:bg-primary/20 transition-colors"
     >
-      <div className="w-[2px] h-8 rounded-full bg-slate-600 group-hover:bg-indigo-400 transition-colors" />
+      <div className="flex flex-col gap-1">
+        <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+        <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+        <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+      </div>
     </div>
   );
 }

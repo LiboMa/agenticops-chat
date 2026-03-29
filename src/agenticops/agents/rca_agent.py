@@ -52,6 +52,7 @@ from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
+from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
@@ -216,7 +217,7 @@ def rca_agent(issue_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca"),
+            system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca", agent_name="rca"),
             model=model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(
@@ -264,6 +265,8 @@ def rca_agent(issue_id: int) -> str:
                 # External monitoring providers
                 query_provider_metrics,
                 query_provider_logs,
+                # Agent Memory (cross-agent search)
+                search_agent_memory,
             ],
         )
 

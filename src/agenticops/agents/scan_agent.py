@@ -13,6 +13,9 @@ from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.providers.base import get_all_cli_tools
+from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.agents.preamble import build_system_prompt
+from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_enabled_accounts,
@@ -58,6 +61,11 @@ Scan these categories per cloud:
 
 ## Output
 Return a summary: how many resources found per account, per region, per type.
+
+## Agent Skills
+- Use activate_skill("web-research") to fetch cloud provider status pages or
+  service availability info during scans.
+- Skills dynamically register tools — after activation, web_fetch becomes available.
 """
 
 
@@ -113,16 +121,21 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
         Summary of health check results per account.
     """
     import asyncio
+    import concurrent.futures
     from agenticops.checker import check_accounts_parallel
 
     ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
     is_deep = deep.lower() == "true"
 
+    coro = check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep)
     try:
-        result = asyncio.run(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+        asyncio.get_running_loop()
+        # Already inside an async event loop (e.g. scheduler) — run in a thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(asyncio.run, coro).result()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(check_accounts_parallel(account_ids=ids, scope=scope, deep=is_deep))
+        # No running loop — safe to use asyncio.run()
+        result = asyncio.run(coro)
 
     lines = [f"Health check complete in {result.duration_s}s — {result.total_issues} issues found."]
     lines.append(f"Tokens: {result.total_input_tokens:,} in / {result.total_output_tokens:,} out (cache read: {result.total_cache_read_tokens:,}, cache write: {result.total_cache_write_tokens:,})")
@@ -159,11 +172,18 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         )
 
         # Build dynamic tool list from enabled accounts
-        tools: list = [get_enabled_accounts, get_active_account, save_resources, scan_resources, check_health]
+        tools: list = [
+            get_enabled_accounts, get_active_account, save_resources,
+            scan_resources, check_health,
+            # Agent Skills (dynamic tool registration)
+            activate_skill, read_skill_reference,
+            # Agent Memory (cross-agent search)
+            search_agent_memory,
+        ]
         tools.extend(get_all_cli_tools())
 
         agent = Agent(
-            system_prompt=SCAN_SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(SCAN_SYSTEM_PROMPT, include_account=False, agent_type="scan", agent_name="scan"),
             model=bedrock_model,
             callback_handler=None,
             conversation_manager=SlidingWindowConversationManager(

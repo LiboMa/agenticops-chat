@@ -369,6 +369,10 @@ class AnomalyDetector:
             if region:
                 query = query.filter_by(region=region)
 
+            # Exclude global resources (IAM, S3, Route53) — CloudWatch has no
+            # metrics endpoint for region="global".
+            query = query.filter(CloudResource.region != "global")
+
             resources = query.all()
             logger.info(f"Running anomaly detection on {len(resources)} resources")
 
