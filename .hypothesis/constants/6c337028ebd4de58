@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/services/pipeline_service.py
+# hypothesis_version: 6.151.9
+
+[200, 'L0', 'L1', 'agent:auto-pipeline', 'agent:executor', 'approval', 'approved', 'approved_by', 'draft', 'execution', 'execution_completed', 'execution_started', 'executor', 'failed', 'fix_approved', 'plan_id', 'risk_level', 'started']

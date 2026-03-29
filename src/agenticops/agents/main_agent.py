@@ -7,12 +7,11 @@ callable tools to the orchestrator agent.
 import logging
 
 from strands import Agent
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
 from agenticops.config import settings
-from agenticops.mcp import get_mcp_clients
+from agenticops.mcp_manager import get_mcp_clients
 from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
@@ -178,7 +177,7 @@ def create_main_agent() -> Agent:
         Configured Strands Agent with sub-agents and metadata tools.
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
-    from agenticops.config import get_agent_model_config, get_agent_window_size
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
     model_id, max_tokens = get_agent_model_config("main")
     cache_kwargs: dict = {}
@@ -209,9 +208,7 @@ If the user explicitly requests a different scope, honor their request over this
     agent = Agent(
         system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
         model=model,
-        conversation_manager=SlidingWindowConversationManager(
-            window_size=get_agent_window_size("main"), per_turn=True
-        ),
+        conversation_manager=get_agent_conversation_manager("main"),
         tools=[
             # Sub-agents as tools
             scan_agent,

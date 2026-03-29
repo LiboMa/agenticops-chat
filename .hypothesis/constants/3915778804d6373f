@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/im/session_manager.py
+# hypothesis_version: 6.151.9
+
+['app_name', 'chat_id', 'default', 'dingtalk', 'feishu', 'slack', 'wecom']

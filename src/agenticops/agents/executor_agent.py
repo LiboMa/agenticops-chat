@@ -11,7 +11,6 @@ Exposed as a tool for the Main Agent (agents-as-tools pattern).
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -168,7 +167,7 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
     try:
-        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
         from agenticops.models import get_db_session, FixPlan, HealthIssue
 
         # Resolve provider CLI tool from fix plan's issue account
@@ -213,9 +212,7 @@ def executor_agent(fix_plan_id: int) -> str:
             system_prompt=build_system_prompt(EXECUTOR_SYSTEM_PROMPT, include_account=False, agent_type="executor", agent_name="executor"),
             model=model,
             callback_handler=None,
-            conversation_manager=SlidingWindowConversationManager(
-                window_size=get_agent_window_size("executor"), per_turn=True
-            ),
+            conversation_manager=get_agent_conversation_manager("executor"),
             tools=[
                 # Plan verification (safety gate)
                 get_approved_fix_plan,
@@ -253,11 +250,14 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         from agenticops.agents.preamble import invoke_with_retry
-        result = invoke_with_retry(agent,
-            f"Execute FixPlan #{fix_plan_id}. "
-            f"Follow the 7-step execution protocol exactly. "
-            f"Start with step 1: call get_approved_fix_plan({fix_plan_id})."
-        )
+        from agenticops.services.agent_log_service import track_agent
+        with track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent,
+                f"Execute FixPlan #{fix_plan_id}. "
+                f"Follow the 7-step execution protocol exactly. "
+                f"Start with step 1: call get_approved_fix_plan({fix_plan_id})."
+            )
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("Executor agent failed for FixPlan #%d", fix_plan_id)

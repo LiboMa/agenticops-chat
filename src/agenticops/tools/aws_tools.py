@@ -7,7 +7,6 @@ import json
 import logging
 from typing import Any
 
-import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 from strands import tool
 
@@ -16,7 +15,9 @@ from agenticops.scan.services import AWS_SERVICES, AWSServiceDef
 logger = logging.getLogger(__name__)
 
 # Session cache: keyed by "account_id:region"
-_session_cache: dict[str, boto3.Session] = {}
+# Populated by assume_role via provider layer. Kept for backward compat with
+# graph/api.py and integrations/cloudwatch_provider.py until they migrate.
+_session_cache: dict[str, Any] = {}
 
 
 @tool
@@ -24,6 +25,10 @@ def assume_role(
     account_id: str, role_arn: str, region: str, external_id: str = ""
 ) -> str:
     """Assume an IAM role in a target AWS account and cache the session.
+
+    Resolves credentials through the provider abstraction layer, which supports
+    cross-partition roles (aws, aws-cn, aws-us-gov), named profiles, static
+    keys, and the default credential chain.
 
     Args:
         account_id: AWS account ID
@@ -39,32 +44,41 @@ def assume_role(
     if cache_key in _session_cache:
         return f"Session already cached for account {account_id} in {region}."
 
-    sts = boto3.client("sts", region_name=region)
-    assume_kwargs = {
-        "RoleArn": role_arn,
-        "RoleSessionName": f"AgenticOps-{account_id}",
-        "DurationSeconds": 3600,
-    }
-    if external_id:
-        assume_kwargs["ExternalId"] = external_id
+    from agenticops.providers import get_provider
+    from agenticops.models import CloudAccount, get_db_session
+    from types import SimpleNamespace
+
+    matched = None
+    try:
+        with get_db_session() as db:
+            accounts = db.query(CloudAccount).filter_by(is_enabled=True).all()
+            for acct in accounts:
+                creds = acct.credentials or {}
+                if creds.get("role_arn") == role_arn or str(creds.get("account_id")) == account_id:
+                    matched = SimpleNamespace(
+                        id=acct.id, name=acct.name, provider=acct.provider,
+                        credentials=dict(creds), regions=list(acct.regions or []),
+                        labels=dict(acct.labels or {}),
+                    )
+                    break
+    except Exception as e:
+        return f"Error looking up account: {e}"
+
+    if not matched:
+        return f"No enabled account found matching role_arn={role_arn} or account_id={account_id}."
 
     try:
-        response = sts.assume_role(**assume_kwargs)
-        credentials = response["Credentials"]
-
-        session = boto3.Session(
-            aws_access_key_id=credentials["AccessKeyId"],
-            aws_secret_access_key=credentials["SecretAccessKey"],
-            aws_session_token=credentials["SessionToken"],
-            region_name=region,
-        )
-        _session_cache[cache_key] = session
-        return f"Assumed role {role_arn} in account {account_id}, region {region}. Session cached."
-    except ClientError as e:
-        return f"Error assuming role: {e}"
+        provider = get_provider(matched)
+        if provider.resolve_credentials():
+            session = provider.sdk_session()
+            _session_cache[cache_key] = session
+            return f"Credentials resolved for {matched.name} ({matched.provider}) in {region}. Session cached."
+        return f"Failed to resolve credentials for {matched.name}."
+    except Exception as e:
+        return f"Error resolving credentials: {e}"
 
 
-def _get_session(region: str) -> boto3.Session:
+def _get_session(region: str) -> Any:
     """Get a cached session for the given region (any account)."""
     for key, session in _session_cache.items():
         if key.endswith(f":{region}"):
@@ -77,7 +91,7 @@ def _get_session(region: str) -> boto3.Session:
 def _get_client(service_name: str, region: str):
     """Get boto3 client from cached session."""
     session = _get_session(region)
-    return session.client(service_name)
+    return session.client(service_name, region_name=region)
 
 
 def _extract_items(response: dict, list_key: str) -> list:

@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/memory_tools.py
+# hypothesis_version: 6.151.9
+
+['.md', '[^a-z0-9]+', '_', 'agent', 'baseline', 'chat', 'confidence', 'detect', 'error', 'executor', 'feedback', 'file', 'matches', 'memory', 'message', 'pattern', 'preference', 'rca', 'reporter', 'saved', 'scan', 'shared', 'sre', 'status', 'total']

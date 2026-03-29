@@ -6,6 +6,8 @@ import type {
   SkillGenerateRequest,
   SkillGenerateResponse,
   SkillDraftRequest,
+  SkillReviewData,
+  SkillImproveResponse,
 } from "@/api/types";
 
 export function useSkills() {
@@ -74,6 +76,49 @@ export function useDeleteSkill() {
         `/skills/${encodeURIComponent(name)}`,
         { method: "DELETE" },
       ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
+  });
+}
+
+export function useUpdateSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, content }: { name: string; content: string }) =>
+      apiFetch<{ updated: boolean; name: string }>(`/skills/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      }),
+    onSuccess: (_, { name }) => {
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["skill", name] });
+    },
+  });
+}
+
+export function useReviewSkill() {
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<SkillReviewData>(`/skills/${encodeURIComponent(name)}/review`, { method: "POST" }),
+  });
+}
+
+export function usePromoteSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<{ promoted: boolean; name: string }>(`/skills/${encodeURIComponent(name)}/promote`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
+  });
+}
+
+export function useImproveSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, improvement }: { name: string; improvement: string }) =>
+      apiFetch<SkillImproveResponse>(`/skills/${encodeURIComponent(name)}/improve`, {
+        method: "POST",
+        body: JSON.stringify({ improvement }),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
   });
 }

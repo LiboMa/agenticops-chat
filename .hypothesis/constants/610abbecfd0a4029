@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/agents/detect_agent.py
+# hypothesis_version: 6.151.9
+
+['Detect agent failed', 'all', 'auto', 'cache_config', 'cache_tools', 'check_health', 'default', 'detect', 'main']

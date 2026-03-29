@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/aws_tools.py
+# hypothesis_version: 6.151.9
+
+[1000, '.', '/', 'DynamoDB', 'EC2', 'ECS', 'EKS', 'InstanceId', 'InstanceType', 'Instances', 'Key', 'Lambda', 'LaunchTime', 'Name', 'PrivateIpAddress', 'PublicIpAddress', 'RDS', 'S3', 'SNS', 'SQS', 'State', 'SubnetId', 'Tags', 'Value', 'VpcId', 'account_id', 'arn:', 'available', 'instance_type', 'isoformat', 'launch_time', 'metadata', 'private_ip', 'public_ip', 'queue_url', 'region', 'resource_arn', 'resource_id', 'resource_name', 'resource_type', 'role_arn', 'status', 'subnet_id', 'tags', 'unknown', 'vpc_id']

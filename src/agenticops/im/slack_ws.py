@@ -101,6 +101,7 @@ class SlackWSService:
         self._socket_client = SocketModeClient(
             app_token=self._app_config.app_token,
             web_client=self._web_client,
+            auto_reconnect_enabled=True,
         )
         self._socket_client.socket_mode_request_listeners.append(self._on_event)
 
@@ -409,14 +410,23 @@ class SlackWSService:
 
     def _run_ws(self) -> None:
         """Run Socket Mode client (blocking — runs in daemon thread)."""
-        try:
-            self._socket_client.connect()
-            # Keep the thread alive
-            import time
-            while self._started:
-                time.sleep(1)
-        except Exception:
-            logger.exception("Slack Socket Mode client exited with error")
+        import time
+        backoff = 1
+        max_backoff = 60
+        while self._started:
+            try:
+                self._socket_client.connect()
+                backoff = 1  # reset on successful connect
+                while self._started:
+                    if not self._socket_client.is_connected():
+                        logger.warning("Slack WebSocket disconnected, reconnecting...")
+                        break
+                    time.sleep(1)
+            except Exception:
+                logger.exception("Slack Socket Mode error, retrying in %ds", backoff)
+            if self._started:
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
     def stop(self) -> None:
         """Stop the service."""

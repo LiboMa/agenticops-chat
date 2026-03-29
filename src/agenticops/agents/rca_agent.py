@@ -8,7 +8,6 @@ and persists structured RCA results. Exposed as a tool for the Main Agent
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -192,7 +191,7 @@ def rca_agent(issue_id: int) -> str:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
         # Resolve provider CLI tool from issue's account
         cli_tool = None
@@ -220,9 +219,7 @@ def rca_agent(issue_id: int) -> str:
             system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca", agent_name="rca"),
             model=model,
             callback_handler=None,
-            conversation_manager=SlidingWindowConversationManager(
-                window_size=get_agent_window_size("rca"), per_turn=True
-            ),
+            conversation_manager=get_agent_conversation_manager("rca"),
             tools=[
                 assume_role,
                 get_active_account,
@@ -271,7 +268,10 @@ def rca_agent(issue_id: int) -> str:
         )
 
         from agenticops.agents.preamble import invoke_with_retry
-        result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
+        from agenticops.services.agent_log_service import track_agent
+        with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")

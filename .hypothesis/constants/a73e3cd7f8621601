@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/chat/send_to.py
+# hypothesis_version: 6.151.9
+
+[100, 2000, 4000, '#([RDI])(\\d+)', ', ', '/send_to', '/send_to ', '/sendto', '/sendto ', 'D', 'DingTalkNotifier', 'FeishuNotifier', 'I', 'No content to send.', 'R', 'Report\\s*#(\\d+)', 'WeComNotifier', 'app_name', 'channel', 'channel_type', 'chat_id', 'config', 'default', 'dingtalk', 'feishu', 'formats', 'html', 'im', 'name', 'platform', 'replace', 'send_to failed: %s', 'sns-report', 'unknown', 'urls', 'utf-8', 'wecom']

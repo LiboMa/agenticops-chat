@@ -165,6 +165,7 @@ def process_alert(
                             metric_data["graph_context"] = im_origin["graph_context"]
                     issue = HealthIssue(
                         resource_id=alert.resource_hint or "unknown",
+                        provider=alert.tags.get("provider", "aws") if alert.tags else "aws",
                         severity=alert.severity,
                         source=f"webhook_{alert.source}",
                         title=alert.title,

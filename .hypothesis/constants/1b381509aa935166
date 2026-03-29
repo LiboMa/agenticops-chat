@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/notify/report_formatter.py
+# hypothesis_version: 6.151.9
+
+['#78350f', '#fbbf24', '%Y-%m-%d %H:%M UTC', '* ', ', ', '- ', '.docx', '.html', '.md', '.pdf', '</table></td></tr>', '<[^>]+>', '<h2', '<h2(?:\\s([^>]*))?>', '<h3', '<table>', '<td(?=[>\\s])', '<th(?=[>\\s])', 'List Bullet', 'List Number', 'Subtitle', '^(#{1,4})\\s+(.*)', '^\\d+\\.\\s+(.*)', '```', 'application/pdf', 'classification', 'contributors', 'docx', 'fenced_code', 'html', 'issue_number', 'markdown', 'newsletter', 'nl2br', 'pdf', 'report', 'report_type', 'subtitle', 'tables', 'toc', 'transparent', 'utf-8']

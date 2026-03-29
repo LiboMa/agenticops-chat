@@ -758,9 +758,7 @@ def create_account(
 
         region_list = [r.strip() for r in regions.split(",")]
 
-        # Deactivate all other accounts if activating this one
-        if activate:
-            session.query(CloudAccount).update({"is_enabled": False})
+        # Multi-account: multiple accounts can be enabled simultaneously
 
         account = CloudAccount(
             name=name,
@@ -934,10 +932,8 @@ def update_account(
         if regions:
             account.regions = [r.strip() for r in regions.split(",")]
         if enable:
-            # Deactivate ALL other accounts first (only one active at a time)
-            session.query(CloudAccount).filter(CloudAccount.id != account.id).update({"is_enabled": False})
             account.is_enabled = True
-            console.print(f"[yellow]All other accounts deactivated.[/yellow]")
+            console.print(f"[green]Account '{name}' enabled.[/green]")
         if disable:
             account.is_enabled = False
 
@@ -1723,11 +1719,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if account.is_enabled:
                 return f"[yellow]Account '{name}' is already active.[/yellow]"
 
-            # Deactivate all other accounts first
-            session.query(CloudAccount).update({"is_enabled": False})
             account.is_enabled = True
             session.commit()
-            return f"[green]Account '{name}' is now active. All other accounts deactivated.[/green]"
+            return f"[green]Account '{name}' is now active.[/green]"
 
         elif args[0] in ["deactivate", "disable"] and len(args) > 1:
             name = args[1]
@@ -3765,6 +3759,11 @@ def _run_headless(query: str, account: Optional[str] = None):
     agent = create_main_agent()
     enriched, warnings = preprocess_message(query, resolve_file_refs=True)
 
+    # Set trace_id for this headless invocation
+    from agenticops.config import generate_trace_id, set_trace_id
+    from agenticops.services.agent_log_service import track_agent
+    set_trace_id(generate_trace_id())
+
     is_tty = sys.stdout.isatty()
 
     if is_tty:
@@ -3778,7 +3777,9 @@ def _run_headless(query: str, account: Optional[str] = None):
         with display.live_display():
             display.start("Thinking...")
             try:
-                result = agent(enriched)
+                with track_agent("main", "chat_headless", query[:200]) as tracker:
+                    result = agent(enriched)
+                    tracker.set_result(result)
                 display.complete("Done")
             except Exception as e:
                 display.error(str(e))
@@ -3805,7 +3806,9 @@ def _run_headless(query: str, account: Optional[str] = None):
         for w in warnings:
             print(f"Warning: {w}", file=sys.stderr)
         try:
-            result = agent(enriched)
+            with track_agent("main", "chat_headless", query[:200]) as tracker:
+                result = agent(enriched)
+                tracker.set_result(result)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             raise typer.Exit(1)
@@ -4181,13 +4184,20 @@ def chat(
             _set_dl(ctx.detail_level)
             _set_sf(ctx.scan_focus)
 
+            # Set trace_id for this REPL turn
+            from agenticops.config import generate_trace_id as _gen_tid, set_trace_id as _set_tid
+            _set_tid(_gen_tid())
+
             # Call agent with streaming output + animated spinner
             try:
                 handler = StreamingCallbackHandler(console)
                 agent.callback_handler = handler
                 handler.start()
                 try:
-                    result = agent(enriched_input)
+                    from agenticops.services.agent_log_service import track_agent as _track
+                    with _track("main", "chat", user_input[:200]) as _trk:
+                        result = agent(enriched_input)
+                        _trk.set_result(result)
                 except Exception as e:
                     handler.stop()
                     console.print(f"[red]Error: {str(e)}[/red]")
@@ -4837,26 +4847,23 @@ def test_account(name: str = typer.Argument(..., help="Account name to test")):
         console.print(f"[red]Account '{name}' not found.[/red]")
         raise typer.Exit(1)
 
-    import boto3
-    from botocore.exceptions import ClientError
+    from agenticops.providers import get_provider
 
     console.print(f"[bold]Testing credentials for account '{name}'...[/bold]")
 
     try:
-        sts = boto3.client("sts")
-        assume_kwargs = {"RoleArn": acc.role_arn, "RoleSessionName": "AgenticOps-Test"}
-        if acc.external_id:
-            assume_kwargs["ExternalId"] = acc.external_id
+        provider = get_provider(acc)
+        with console.status("Resolving credentials..."):
+            success = provider.resolve_credentials()
 
-        with console.status("Assuming role..."):
-            response = sts.assume_role(**assume_kwargs)
+        if success:
+            console.print(f"[green]Credentials valid! Provider: {acc.provider}[/green]")
+        else:
+            console.print(f"[red]Credential test failed for {acc.provider} account '{name}'.[/red]")
+            raise typer.Exit(1)
 
-        console.print("[green]Credentials valid![/green]")
-        console.print(f"  Account ID: {response['AssumedRoleUser']['Arn'].split(':')[4]}")
-        console.print(f"  Expiration: {response['Credentials']['Expiration']}")
-
-    except ClientError as e:
-        console.print(f"[red]Credential test failed: {e.response['Error']['Message']}[/red]")
+    except Exception as e:
+        console.print(f"[red]Credential test failed: {e}[/red]")
         raise typer.Exit(1)
 
 

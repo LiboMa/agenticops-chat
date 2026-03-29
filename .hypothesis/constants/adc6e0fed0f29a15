@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/im/__init__.py
+# hypothesis_version: 6.151.9
+
+['FeishuWSService', 'IMGateway', 'IMInboundMessage', 'SlackWSService', 'start_feishu_ws', 'start_slack_ws', 'stop_feishu_ws', 'stop_slack_ws']

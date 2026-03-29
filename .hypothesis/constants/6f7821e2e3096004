@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/scan/scanner.py
+# hypothesis_version: 6.151.9
+
+[1000, 3600, '.', '/', ':aws-cn:', 'AccessKeyId', 'AvailabilityZone', 'Code', 'Credentials', 'DurationSeconds', 'DynamoDB', 'EC2', 'ECS', 'EKS', 'Error', 'ExternalId', 'InstanceId', 'InstanceType', 'Instances', 'InvalidClientTokenId', 'Key', 'Kinesis', 'LaunchTime', 'Name', 'Placement', 'PrivateIpAddress', 'PublicIpAddress', 'RoleArn', 'RoleSessionName', 'SQS', 'SecretAccessKey', 'SessionToken', 'State', 'SubnetId', 'Tags', 'Unknown', 'Value', 'VpcId', 'access_key_id', 'account_id', 'arn:', 'availability_zone', 'available', 'aws_profile', 'external_id', 'instance_type', 'isoformat', 'launch_time', 'metadata', 'private_ip', 'public_ip', 'queue_url', 'region', 'resource_arn', 'resource_id', 'resource_name', 'resource_type', 'role_arn', 'secret_access_key', 'status', 'sts', 'subnet_id', 'tags', 'unknown', 'vpc_id']

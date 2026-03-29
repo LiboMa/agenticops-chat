@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-import boto3
 from botocore.exceptions import ClientError
 
 from agenticops.config import settings
@@ -20,49 +19,19 @@ class CloudWatchMonitor:
     def __init__(self, account: CloudAccount):
         """Initialize with AWS account."""
         self.account = account
-        self._session_cache: dict[str, boto3.Session] = {}
-
-    def _get_assumed_session(self, region: str) -> boto3.Session:
-        """Get boto3 session with assumed role."""
-        creds = self.account.credentials or {}
-        acct_id = creds.get("account_id", "")
-        cache_key = f"{acct_id}:{region}"
-
-        if cache_key in self._session_cache:
-            return self._session_cache[cache_key]
-
-        sts = boto3.client("sts", region_name=region)
-
-        assume_kwargs = {
-            "RoleArn": creds.get("role_arn", ""),
-            "RoleSessionName": f"AgenticOps-Monitor-{acct_id}",
-            "DurationSeconds": 3600,
-        }
-        ext_id = creds.get("external_id", "")
-        if ext_id:
-            assume_kwargs["ExternalId"] = ext_id
-
-        response = sts.assume_role(**assume_kwargs)
-        credentials = response["Credentials"]
-
-        session = boto3.Session(
-            aws_access_key_id=credentials["AccessKeyId"],
-            aws_secret_access_key=credentials["SecretAccessKey"],
-            aws_session_token=credentials["SessionToken"],
-            region_name=region,
-        )
-        self._session_cache[cache_key] = session
-        return session
+        from agenticops.providers import get_provider
+        self._provider = get_provider(account)
+        self._provider.resolve_credentials()
 
     def _get_cloudwatch_client(self, region: str):
-        """Get CloudWatch client for region."""
-        session = self._get_assumed_session(region)
-        return session.client("cloudwatch")
+        """Get CloudWatch client for region via provider layer."""
+        session = self._provider.sdk_session()
+        return session.client("cloudwatch", region_name=region)
 
     def _get_logs_client(self, region: str):
-        """Get CloudWatch Logs client for region."""
-        session = self._get_assumed_session(region)
-        return session.client("logs")
+        """Get CloudWatch Logs client for region via provider layer."""
+        session = self._provider.sdk_session()
+        return session.client("logs", region_name=region)
 
     # =========================================================================
     # Metrics Collection

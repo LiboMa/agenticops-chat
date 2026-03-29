@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/chat/preprocessor.py
+# hypothesis_version: 6.151.9
+
+['\\bI#(\\d+)\\b', '\\bR#(\\d+)\\b', 'bytes', 'document', 'format', 'image', 'name', 'source', 'text']

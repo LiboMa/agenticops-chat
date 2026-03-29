@@ -279,7 +279,8 @@ class AlertEventResponse(BaseModel):
 
 class HealthIssueCreate(BaseModel):
     """Schema for creating a health issue."""
-    resource_id: str = Field(..., max_length=200)
+    resource_id: str = Field(..., max_length=500)
+    provider: Optional[str] = Field("aws", pattern="^(aws|azure|gcp|alicloud)$")
     severity: str = Field(..., pattern="^(critical|high|medium|low)$")
     source: str = Field(..., max_length=50)
     title: str = Field(..., max_length=300)
@@ -303,6 +304,7 @@ class HealthIssueResponse(BaseModel):
     """Schema for health issue response."""
     id: int
     resource_id: str
+    provider: Optional[str] = None
     severity: str
     source: str
     title: str
@@ -330,6 +332,7 @@ class HealthIssueResponse(BaseModel):
         return cls(
             id=issue.id,
             resource_id=issue.resource_id,
+            provider=getattr(issue, "provider", None),
             severity=issue.severity,
             source=issue.source,
             title=issue.title,
@@ -860,7 +863,7 @@ async def startup():
 
     # Start MCP servers
     try:
-        from agenticops.mcp import start_mcp_clients
+        from agenticops.mcp_manager import start_mcp_clients
         mcp_clients = start_mcp_clients()
         if mcp_clients:
             logger.info("MCP: %d server(s) started", len(mcp_clients))
@@ -930,7 +933,7 @@ async def shutdown():
 
     # Stop MCP clients
     try:
-        from agenticops.mcp import stop_mcp_clients
+        from agenticops.mcp_manager import stop_mcp_clients
         stop_mcp_clients()
     except Exception:
         pass
@@ -1103,14 +1106,17 @@ def _model_version_label(model_id: str) -> str:
 @app.get("/api/settings")
 async def api_get_settings():
     """Return all toggleable runtime settings."""
-    from agenticops.config import AGENT_NAMES, MODEL_ALIASES, get_agent_model_config
+    from agenticops.config import AGENT_NAMES, MODEL_ALIASES, get_agent_model_config, FULL_CONTEXT, get_agent_window_size
 
     agent_models = {}
     for name in AGENT_NAMES:
         model_id, max_tokens = get_agent_model_config(name)
+        ws = get_agent_window_size(name)
         agent_models[name] = {
             "model_id": model_id,
             "max_tokens": max_tokens,
+            "window_size": ws,
+            "window_mode": "full" if ws == FULL_CONTEXT else "sliding",
         }
 
     # Model presets for frontend dropdowns (single source of truth from config)
@@ -1176,6 +1182,8 @@ async def api_update_settings(body: dict = Body(...)):
                 setattr(settings, f"agent_{name}_model_id", str(cfg["model_id"]))
             if "max_tokens" in cfg:
                 setattr(settings, f"agent_{name}_max_tokens", int(cfg["max_tokens"]))
+            if "window_size" in cfg:
+                setattr(settings, f"agent_{name}_window_size", int(cfg["window_size"]))
 
     return await api_get_settings()
 
@@ -1188,14 +1196,14 @@ async def api_update_settings(body: dict = Body(...)):
 @app.get("/api/settings/mcp-servers")
 async def api_list_mcp_servers():
     """List all configured MCP servers."""
-    from agenticops.mcp import list_mcp_servers
+    from agenticops.mcp_manager import list_mcp_servers
     return list_mcp_servers()
 
 
 @app.put("/api/settings/mcp-servers/{name}")
 async def api_upsert_mcp_server(name: str, body: dict = Body(...)):
     """Create or update an MCP server config."""
-    from agenticops.mcp import upsert_mcp_server
+    from agenticops.mcp_manager import upsert_mcp_server
     if "command" not in body and "url" not in body:
         raise HTTPException(400, "MCP server must have 'command' (stdio) or 'url' (SSE)")
     return upsert_mcp_server(name, body)
@@ -1208,7 +1216,7 @@ async def api_import_mcp_servers(body: dict = Body(...)):
     Accepts: {"mcpServers": {"name": {...}, ...}}
     Merges into existing config (upsert semantics).
     """
-    from agenticops.mcp import upsert_mcp_server
+    from agenticops.mcp_manager import upsert_mcp_server
     servers = body.get("mcpServers", {})
     if not isinstance(servers, dict) or not servers:
         raise HTTPException(400, "Expected {\"mcpServers\": {\"name\": {...}, ...}}")
@@ -1226,7 +1234,7 @@ async def api_import_mcp_servers(body: dict = Body(...)):
 @app.delete("/api/settings/mcp-servers/{name}", status_code=204)
 async def api_delete_mcp_server(name: str):
     """Delete an MCP server config."""
-    from agenticops.mcp import delete_mcp_server
+    from agenticops.mcp_manager import delete_mcp_server
     if not delete_mcp_server(name):
         raise HTTPException(404, f"MCP server '{name}' not found")
 
@@ -1234,7 +1242,7 @@ async def api_delete_mcp_server(name: str):
 @app.post("/api/settings/mcp-servers/reload")
 async def api_reload_mcp_servers():
     """Reload MCP clients from config (stop + start)."""
-    from agenticops.mcp import reload_mcp_clients
+    from agenticops.mcp_manager import reload_mcp_clients
     clients = reload_mcp_clients()
     return {"reloaded": len(clients)}
 
@@ -1605,10 +1613,10 @@ async def api_list_resources(
     account_id: Optional[int] = None,
     status: Optional[str] = None,
     q: Optional[str] = Query(None, description="Search by resource ID, name, or type"),
-    limit: int = Query(default=50, ge=1),
+    limit: Optional[int] = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
 ):
-    """List resources with filtering and pagination."""
+    """List resources with filtering and optional pagination."""
     with get_db_session() as session:
         query = session.query(CloudResource)
 
@@ -1624,12 +1632,15 @@ async def api_list_resources(
             pattern = f"%{q}%"
             query = query.filter(
                 CloudResource.resource_id.ilike(pattern)
-                | CloudResource.resource_name.ilike(pattern)
+                | CloudResource.name.ilike(pattern)
                 | CloudResource.resource_type.ilike(pattern)
             )
 
         total = query.count()
-        resources = query.offset(offset).limit(limit).all()
+        q_paged = query.offset(offset)
+        if limit is not None:
+            q_paged = q_paged.limit(limit)
+        resources = q_paged.all()
         return {
             "total": total,
             "items": [ResourceResponse.from_resource(r) for r in resources],
@@ -2159,6 +2170,7 @@ async def api_create_health_issue(data: HealthIssueCreate):
     with get_db_session() as session:
         issue = HealthIssue(
             resource_id=data.resource_id,
+            provider=data.provider or "aws",
             severity=data.severity,
             source=data.source,
             title=data.title,
@@ -3802,6 +3814,164 @@ async def api_get_audit_stats(request: Request, hours: int = Query(24, le=720)):
 
 
 # ============================================================================
+# Agent Logs API Endpoints (Token Tracking)
+# ============================================================================
+
+
+@app.get("/api/agent-logs")
+async def api_list_agent_logs(
+    agent_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List agent log entries with optional filters."""
+    from agenticops.models import AgentLog
+
+    with get_db_session() as db:
+        q = db.query(AgentLog)
+        if agent_name:
+            q = q.filter(AgentLog.agent_name == agent_name)
+        if trace_id:
+            q = q.filter(AgentLog.trace_id == trace_id)
+        if status:
+            q = q.filter(AgentLog.status == status)
+        total = q.count()
+        rows = q.order_by(AgentLog.created_at.desc()).offset(offset).limit(limit).all()
+        return {
+            "total": total,
+            "items": [
+                {
+                    "id": r.id,
+                    "agent_name": r.agent_name,
+                    "action": r.action,
+                    "input_summary": r.input_summary,
+                    "output_summary": r.output_summary,
+                    "tool_calls": r.tool_calls,
+                    "input_tokens": r.input_tokens,
+                    "output_tokens": r.output_tokens,
+                    "cache_read_tokens": r.cache_read_tokens,
+                    "duration_ms": r.duration_ms,
+                    "status": r.status,
+                    "error": r.error,
+                    "trace_id": r.trace_id,
+                    "parent_agent": r.parent_agent,
+                    "model_id": r.model_id,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ],
+        }
+
+
+@app.get("/api/agent-logs/timeline/{trace_id}")
+async def api_agent_log_timeline(trace_id: str):
+    """Get agent call chain for a single trace with aggregated totals."""
+    from agenticops.models import AgentLog
+
+    with get_db_session() as db:
+        rows = (
+            db.query(AgentLog)
+            .filter(AgentLog.trace_id == trace_id)
+            .order_by(AgentLog.created_at.asc())
+            .all()
+        )
+        if not rows:
+            raise HTTPException(404, f"No logs found for trace {trace_id}")
+
+        calls = []
+        total_input = 0
+        total_output = 0
+        total_cache_read = 0
+        total_duration = 0
+        for r in rows:
+            total_input += r.input_tokens
+            total_output += r.output_tokens
+            total_cache_read += r.cache_read_tokens
+            total_duration += r.duration_ms
+            calls.append({
+                "id": r.id,
+                "agent_name": r.agent_name,
+                "action": r.action,
+                "parent_agent": r.parent_agent,
+                "input_tokens": r.input_tokens,
+                "output_tokens": r.output_tokens,
+                "cache_read_tokens": r.cache_read_tokens,
+                "tool_calls": r.tool_calls,
+                "duration_ms": r.duration_ms,
+                "status": r.status,
+                "model_id": r.model_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
+
+        return {
+            "trace_id": trace_id,
+            "calls": calls,
+            "totals": {
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "cache_read_tokens": total_cache_read,
+                "duration_ms": total_duration,
+                "call_count": len(calls),
+            },
+        }
+
+
+@app.get("/api/agent-logs/summary")
+async def api_agent_log_summary(hours: int = Query(24, le=720)):
+    """Per-agent token consumption aggregation over a time window."""
+    from agenticops.models import AgentLog
+
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    with get_db_session() as db:
+        rows = (
+            db.query(
+                AgentLog.agent_name,
+                func.count(AgentLog.id).label("call_count"),
+                func.sum(AgentLog.input_tokens).label("total_input"),
+                func.sum(AgentLog.output_tokens).label("total_output"),
+                func.sum(AgentLog.cache_read_tokens).label("total_cache_read"),
+                func.sum(AgentLog.duration_ms).label("total_duration_ms"),
+                func.avg(AgentLog.duration_ms).label("avg_duration_ms"),
+            )
+            .filter(AgentLog.created_at >= cutoff)
+            .group_by(AgentLog.agent_name)
+            .all()
+        )
+        agents = []
+        grand_input = 0
+        grand_output = 0
+        grand_cache_read = 0
+        for r in rows:
+            inp = r.total_input or 0
+            out = r.total_output or 0
+            cr = r.total_cache_read or 0
+            grand_input += inp
+            grand_output += out
+            grand_cache_read += cr
+            agents.append({
+                "agent_name": r.agent_name,
+                "call_count": r.call_count,
+                "total_input_tokens": inp,
+                "total_output_tokens": out,
+                "total_cache_read_tokens": cr,
+                "total_duration_ms": r.total_duration_ms or 0,
+                "avg_duration_ms": round(r.avg_duration_ms or 0),
+            })
+        return {
+            "period_hours": hours,
+            "agents": agents,
+            "totals": {
+                "input_tokens": grand_input,
+                "output_tokens": grand_output,
+                "cache_read_tokens": grand_cache_read,
+            },
+        }
+
+
+# ============================================================================
 # Schedule API Endpoints
 # ============================================================================
 
@@ -3999,6 +4169,20 @@ async def api_list_skills():
     return result
 
 
+@app.get("/api/skills/improvements")
+async def api_list_skill_improvements():
+    """List pending skill improvement suggestions."""
+    from agenticops.skills.improvement_store import list_pending
+    return list_pending()
+
+
+@app.get("/api/skills/improvements/history")
+async def api_skill_improvements_history(limit: int = 50):
+    """Past improvement records with status (completed/failed)."""
+    from agenticops.skills.improvement_store import list_history
+    return list_history(limit=limit)
+
+
 @app.get("/api/skills/{name}")
 async def api_get_skill(name: str):
     """Return full skill detail including SKILL.md body and references."""
@@ -4169,6 +4353,83 @@ async def api_delete_skill(name: str):
                 return {"deleted": True, "name": name}
             raise HTTPException(status_code=500, detail="Failed to delete skill")
     raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+
+@app.put("/api/skills/{name}")
+async def api_update_skill(name: str, body: dict = Body(...)):
+    """Update a draft skill's SKILL.md content. Only drafts are editable."""
+    from agenticops.skills.evolution import update_draft_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+    content = body.get("content", "")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="content is required")
+    result = update_draft_skill(name, content)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Draft skill '{name}' not found")
+    _invalidate_skills_cache()
+    return {"updated": True, "name": name, "path": str(result)}
+
+
+@app.post("/api/skills/{name}/review")
+async def api_review_skill(name: str):
+    """Get diff data for a draft skill vs its published version."""
+    from agenticops.skills.review import review_draft_skill
+    result = review_draft_skill(name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Draft skill '{name}' not found or not a draft")
+    return result
+
+
+@app.post("/api/skills/{name}/promote")
+async def api_promote_skill(name: str):
+    """Promote a draft skill to published. The current published version is backed up."""
+    from agenticops.skills.review import promote_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+    success = promote_skill(name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Draft skill '{name}' not found or promotion failed")
+    _invalidate_skills_cache()
+    return {"promoted": True, "name": name}
+
+
+@app.post("/api/skills/{name}/improve")
+async def api_improve_skill(name: str, body: dict = Body(...)):
+    """Use LLM to auto-improve an existing skill. Creates a draft."""
+    from agenticops.skills.evolution import auto_improve_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+    from agenticops.skills.improvement_store import add_improvement, update_improvement
+    improvement = body.get("improvement", "")
+    if not improvement.strip():
+        raise HTTPException(status_code=400, detail="improvement description is required")
+    rec = add_improvement(name, improvement, source="web", trigger="manual")
+    result = auto_improve_skill(name, improvement)
+    if "error" in result:
+        update_improvement(rec["id"], "failed", result)
+    else:
+        update_improvement(rec["id"], "completed", result)
+    _invalidate_skills_cache()
+    return result
+
+
+@app.post("/api/skills/{name}/improve-auto")
+async def api_improve_skill_auto(name: str, body: dict = Body(...)):
+    """Trigger auto-improvement from Web Portal with source/trigger tracking."""
+    from agenticops.skills.evolution import auto_improve_skill
+    from agenticops.skills.loader import _invalidate_skills_cache
+    from agenticops.skills.improvement_store import add_improvement, update_improvement
+    improvement = body.get("improvement", "")
+    source = body.get("source", "web")
+    trigger = body.get("trigger", "auto")
+    if not improvement.strip():
+        raise HTTPException(status_code=400, detail="improvement description is required")
+    rec = add_improvement(name, improvement, source=source, trigger=trigger)
+    result = auto_improve_skill(name, improvement)
+    if "error" in result:
+        update_improvement(rec["id"], "failed", result)
+        raise HTTPException(status_code=500, detail=result["error"])
+    update_improvement(rec["id"], "completed", result)
+    _invalidate_skills_cache()
+    return result
 
 
 # ============================================================================
@@ -4792,6 +5053,11 @@ async def api_send_chat_message(session_id: str, request: Request):
             if all(p in VALID_SCAN_FOCUS for p in parts):
                 set_scan_focus(scan_focus_req)
         agent = _chat_sessions.get_or_create(session_id)
+        # Set trace_id for this chat turn so sub-agent logs are correlated
+        from agenticops.config import generate_trace_id, set_trace_id
+        _chat_trace_id = generate_trace_id()
+        set_trace_id(_chat_trace_id)
+        _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
         input_tokens = 0
@@ -4852,6 +5118,26 @@ async def api_send_chat_message(session_id: str, request: Request):
                             sess.name = title
                             sess.updated_at = datetime.utcnow()
                             yield {"event": "session_renamed", "data": json.dumps({"name": title})}
+
+            # Log main agent call metrics
+            try:
+                from agenticops.services.agent_log_service import log_agent_call
+                from agenticops.config import get_agent_model_config
+                _main_model_id, _ = get_agent_model_config("main")
+                log_agent_call(
+                    agent_name="main",
+                    action="chat",
+                    input_summary=user_content[:500],
+                    output_summary=accumulated[:500],
+                    tool_calls=len(tool_calls),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration_ms=int((time.monotonic() - _chat_start_time) * 1000),
+                    trace_id=_chat_trace_id,
+                    model_id=_main_model_id,
+                )
+            except Exception:
+                logger.debug("Failed to log main agent call", exc_info=True)
 
             yield {
                 "event": "done",

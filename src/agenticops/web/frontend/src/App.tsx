@@ -14,6 +14,9 @@ const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
+const AgentMetrics = lazy(() => import("@/pages/AgentMetrics"));
+const Skills = lazy(() => import("@/pages/Skills"));
+const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -115,6 +118,30 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <ResourceDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="agent-metrics"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <AgentMetrics />
+                </Suspense>
+              }
+            />
+            <Route
+              path="skills"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Skills />
+                </Suspense>
+              }
+            />
+            <Route
+              path="skills/:name"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <SkillDetail />
                 </Suspense>
               }
             />

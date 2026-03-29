@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/im/feishu_ws.py
+# hypothesis_version: 6.151.9
+
+[120, 200, 300, 500, 1024, '\nShutting down...', '/send_to ', '/sendto ', '@_user_\\d+\\s*', 'File logging → %s', 'Lark', '__main__', 'agenticops.im', 'agenticops.notify', 'alert', 'assistant', 'both', 'channel_driven', 'chat_id', 'default', 'feishu', 'feishu-agent', 'feishu-ws', 'feishu_ws.log', 'logs', 'platform', 'text', 'user', 'utf-8', '抱歉，处理消息时出错，请稍后重试。', '消息处理中，请稍后再试。']

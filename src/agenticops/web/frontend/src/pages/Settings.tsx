@@ -717,8 +717,12 @@ function AgentModelsCard() {
     updateMut.mutate({ agent_models: { [agentName]: { max_tokens: maxTokens } } });
   }
 
+  function handleWindowSizeChange(agentName: string, windowSize: number) {
+    updateMut.mutate({ agent_models: { [agentName]: { window_size: windowSize } } });
+  }
+
   function handleReset(agentName: string) {
-    updateMut.mutate({ agent_models: { [agentName]: { model_id: "", max_tokens: 0 } } });
+    updateMut.mutate({ agent_models: { [agentName]: { model_id: "", max_tokens: 0, window_size: 0 } } });
   }
 
   if (settingsQ.isLoading) return <Card><CardBody><Spinner /></CardBody></Card>;
@@ -743,6 +747,7 @@ function AgentModelsCard() {
                 <th className="pb-2 pr-4">Tier</th>
                 <th className="pb-2 pr-4">Model</th>
                 <th className="pb-2 pr-4">Max Tokens</th>
+                <th className="pb-2 pr-4">Window</th>
                 <th className="pb-2"></th>
               </tr>
             </thead>
@@ -779,6 +784,36 @@ function AgentModelsCard() {
                         disabled={updateMut.isPending}
                         className="w-24 px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                       />
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={cfg.window_size === -1 ? "-1" : cfg.window_size === 0 ? "0" : "custom"}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === "-1" || v === "0") handleWindowSizeChange(name, parseInt(v));
+                            else if (v === "custom") handleWindowSizeChange(name, 20);
+                          }}
+                          disabled={updateMut.isPending}
+                          className="px-2 py-1 border border-border rounded text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                        >
+                          <option value="0">Auto</option>
+                          <option value="-1">Full Context</option>
+                          <option value="custom">Custom</option>
+                        </select>
+                        {cfg.window_size > 0 && (
+                          <input
+                            type="number"
+                            value={cfg.window_size}
+                            onChange={(e) => handleWindowSizeChange(name, Math.max(1, parseInt(e.target.value) || 1))}
+                            disabled={updateMut.isPending}
+                            className="w-20 px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                          />
+                        )}
+                        <Badge className={cfg.window_mode === "full" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}>
+                          {cfg.window_mode === "full" ? "Full" : "Sliding"}
+                        </Badge>
+                      </div>
                     </td>
                     <td className="py-2.5">
                       <button

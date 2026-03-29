@@ -107,7 +107,6 @@ class AWSAccount(Base):
 
     # Relationships
     resources: Mapped[list["AWSResource"]] = relationship(back_populates="account")
-    monitoring_configs: Mapped[list["MonitoringConfig"]] = relationship(back_populates="account")
 
 
 # ============================================================================
@@ -217,7 +216,7 @@ class MonitoringConfig(Base):
     __tablename__ = "monitoring_configs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("aws_accounts.id"))
+    account_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # legacy aws_accounts FK, kept for old rows
     service_type: Mapped[str] = mapped_column(String(50))  # e.g., EC2, Lambda
     is_enabled: Mapped[bool] = mapped_column(default=True)
     metrics_config: Mapped[dict] = mapped_column(JSON, default=dict)  # Which metrics to collect
@@ -228,13 +227,12 @@ class MonitoringConfig(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    # Multi-cloud FK (nullable for backward compat)
+    # Multi-cloud FK
     cloud_account_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("cloud_accounts.id"), nullable=True
     )
 
     # Relationships
-    account: Mapped["AWSAccount"] = relationship(back_populates="monitoring_configs")
     cloud_account: Mapped[Optional["CloudAccount"]] = relationship(
         back_populates="monitoring_configs", foreign_keys=[cloud_account_id]
     )
@@ -247,7 +245,7 @@ class MetricDataPoint(Base):
     __table_args__ = (Index("idx_metric_timestamp", "resource_id", "metric_name", "timestamp"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    resource_id: Mapped[str] = mapped_column(String(100))
+    resource_id: Mapped[str] = mapped_column(String(500))
     metric_namespace: Mapped[str] = mapped_column(String(100))
     metric_name: Mapped[str] = mapped_column(String(100))
     dimensions: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -273,9 +271,9 @@ class Anomaly(Base):
     __table_args__ = (Index("idx_anomaly_severity_status", "severity", "status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    resource_id: Mapped[str] = mapped_column(String(100))
+    resource_id: Mapped[str] = mapped_column(String(500))
     resource_type: Mapped[str] = mapped_column(String(50))
-    region: Mapped[str] = mapped_column(String(20))
+    region: Mapped[str] = mapped_column(String(50))
     anomaly_type: Mapped[str] = mapped_column(String(50))  # metric_spike, log_error, etc.
     severity: Mapped[str] = mapped_column(String(20), default=AnomalySeverity.MEDIUM.value)
     title: Mapped[str] = mapped_column(String(200))
@@ -406,7 +404,8 @@ class HealthIssue(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    resource_id: Mapped[str] = mapped_column(String(200))  # AWS resource ID
+    resource_id: Mapped[str] = mapped_column(String(500))  # Cloud resource ID / ARN
+    provider: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # aws|azure|gcp|alicloud
     severity: Mapped[str] = mapped_column(String(20))  # critical, high, medium, low
     source: Mapped[str] = mapped_column(
         String(50)
@@ -549,6 +548,10 @@ class AgentLog(Base):
     """Agent execution audit trail."""
 
     __tablename__ = "agent_logs"
+    __table_args__ = (
+        Index("idx_agent_log_trace", "trace_id"),
+        Index("idx_agent_log_agent_time", "agent_name", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     agent_name: Mapped[str] = mapped_column(String(50))
@@ -558,9 +561,13 @@ class AgentLog(Base):
     tool_calls: Mapped[int] = mapped_column(default=0)
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(default=0)
     duration_ms: Mapped[int] = mapped_column(default=0)
     status: Mapped[str] = mapped_column(String(20), default="success")
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    parent_agent: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -730,7 +737,7 @@ class AlertEvent(Base):
     severity: Mapped[str] = mapped_column(String(20))
     title: Mapped[str] = mapped_column(String(500))
     description: Mapped[str] = mapped_column(Text, default="")
-    resource_hint: Mapped[str] = mapped_column(String(200), default="")  # best-effort resource ID
+    resource_hint: Mapped[str] = mapped_column(String(500), default="")  # best-effort resource ID
     raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     health_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # linked HealthIssue
     status: Mapped[str] = mapped_column(String(30), default="received")  # received, processed, ignored, error
@@ -946,6 +953,52 @@ def init_db(engine=None):
                 ))
                 conn.commit()
 
+    # Migration: add token tracking columns to agent_logs
+    if insp.has_table("agent_logs"):
+        cols = {c["name"] for c in insp.get_columns("agent_logs")}
+        new_cols = []
+        if "trace_id" not in cols:
+            new_cols.append("ALTER TABLE agent_logs ADD COLUMN trace_id VARCHAR(36)")
+        if "parent_agent" not in cols:
+            new_cols.append("ALTER TABLE agent_logs ADD COLUMN parent_agent VARCHAR(50)")
+        if "cache_read_tokens" not in cols:
+            new_cols.append("ALTER TABLE agent_logs ADD COLUMN cache_read_tokens INTEGER DEFAULT 0")
+        if "model_id" not in cols:
+            new_cols.append("ALTER TABLE agent_logs ADD COLUMN model_id VARCHAR(100)")
+        if new_cols:
+            with engine.connect() as conn:
+                for stmt in new_cols:
+                    conn.execute(text(stmt))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_log_trace ON agent_logs(trace_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_log_agent_time ON agent_logs(agent_name, created_at)"))
+                conn.commit()
+
+    # Migration: add provider column to health_issues if missing, backfill 'aws'
+    if insp.has_table("health_issues"):
+        columns = {col["name"] for col in insp.get_columns("health_issues")}
+        if "provider" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN provider VARCHAR(20)"))
+                conn.execute(text("UPDATE health_issues SET provider = 'aws' WHERE provider IS NULL"))
+                conn.commit()
+
+    # Migration: widen resource_id columns for multi-cloud support (PostgreSQL only;
+    # SQLite ignores VARCHAR length so ALTER TYPE is not needed there)
+    is_postgres = not str(engine.url).startswith("sqlite")
+    if is_postgres:
+        _pg_widen = [
+            ("health_issues", "resource_id", "VARCHAR(500)"),
+            ("metric_data_points", "resource_id", "VARCHAR(500)"),
+            ("anomalies", "resource_id", "VARCHAR(500)"),
+            ("anomalies", "region", "VARCHAR(50)"),
+            ("alert_events", "resource_hint", "VARCHAR(500)"),
+        ]
+        for tbl, col, new_type in _pg_widen:
+            if insp.has_table(tbl):
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE {new_type}"))
+                    conn.commit()
+
     Base.metadata.create_all(engine)
 
     # Migration: migrate AWSAccount rows → CloudAccount (if aws_accounts exists and cloud_accounts is empty)
@@ -984,13 +1037,25 @@ def init_db(engine=None):
                     conn.commit()
 
     # Migration: rename old tables to _legacy_* (keep data, stop confusion)
+    # Also drop their indexes — SQLite index names are global, so they would
+    # collide with identical indexes on the fresh aws_accounts/aws_resources
+    # tables that create_all produces from the still-existing ORM classes.
     if insp.has_table("aws_accounts") and not insp.has_table("_legacy_aws_accounts"):
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE aws_accounts RENAME TO _legacy_aws_accounts"))
             conn.commit()
     if insp.has_table("aws_resources") and not insp.has_table("_legacy_aws_resources"):
         with engine.connect() as conn:
+            conn.execute(text("DROP INDEX IF EXISTS idx_resource_type_region"))
+            conn.execute(text("DROP INDEX IF EXISTS idx_resource_account"))
             conn.execute(text("ALTER TABLE aws_resources RENAME TO _legacy_aws_resources"))
+            conn.commit()
+    # If legacy tables already exist, make sure stale indexes are gone so
+    # create_all can recreate the (empty) aws_resources table without conflict
+    if insp.has_table("_legacy_aws_resources"):
+        with engine.connect() as conn:
+            conn.execute(text("DROP INDEX IF EXISTS idx_resource_type_region"))
+            conn.execute(text("DROP INDEX IF EXISTS idx_resource_account"))
             conn.commit()
 
     # Ensure graph tables exist (used by GraphStore, raw SQL for performance)

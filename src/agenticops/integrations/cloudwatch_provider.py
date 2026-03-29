@@ -7,7 +7,6 @@ import time
 from datetime import datetime
 from typing import Any
 
-import boto3
 from botocore.exceptions import ClientError
 
 from agenticops.config import settings
@@ -82,31 +81,42 @@ class CloudWatchProvider(MonitoringProvider):
     # ------------------------------------------------------------------
 
     def _get_client(self, service: str) -> Any:
-        """Return a boto3 client, reusing assumed-role sessions when possible.
+        """Return a boto3 client via provider layer.
 
         Lookup order:
         1. Locally cached client for this service.
-        2. Active assumed-role session from ``aws_tools._session_cache``.
-        3. Default boto3 session for the configured region.
+        2. Provider-resolved session from first enabled AWS account.
         """
         if service in self._clients:
             return self._clients[service]
 
-        session: boto3.Session | None = None
+        session = None
 
-        # Try to reuse an existing assumed-role session for our region
+        # Resolve session via provider layer
         try:
-            from agenticops.tools.aws_tools import _session_cache
+            from agenticops.models import CloudAccount, get_db_session
+            from agenticops.providers import get_provider
+            from types import SimpleNamespace
 
-            for key, cached_session in _session_cache.items():
-                if key.endswith(f":{self.region}"):
-                    session = cached_session
-                    break
+            with get_db_session() as db:
+                acct = db.query(CloudAccount).filter(
+                    CloudAccount.is_enabled == True, CloudAccount.provider == "aws"  # noqa: E712
+                ).first()
+                if acct:
+                    snap = SimpleNamespace(
+                        id=acct.id, name=acct.name, provider=acct.provider,
+                        credentials=dict(acct.credentials or {}),
+                        regions=list(acct.regions or []), labels=dict(acct.labels or {}),
+                    )
+            if acct:
+                provider = get_provider(snap)
+                if provider.resolve_credentials():
+                    session = provider.sdk_session()
         except Exception:
-            # aws_tools may not be importable in all environments
-            pass
+            logger.debug("Failed to resolve provider session for CloudWatch", exc_info=True)
 
         if session is None:
+            import boto3
             session = boto3.Session(region_name=self.region)
 
         client = session.client(service, region_name=self.region)

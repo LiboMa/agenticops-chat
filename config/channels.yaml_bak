@@ -1,0 +1,57 @@
+channels:
+  feishu-ops:
+    type: feishu
+    enabled: false
+    app_name: default
+    chat_id: oc_b972a0f206308e53156f63c544aa1a06
+  feishu-alert:
+    type: feishu
+    role: alert
+    enabled: true
+    app_name: default
+    chat_id: oc_aa7c42972267ca070bf3977ec8e222bd
+  dingtalk-e2e-test:
+    type: dingtalk
+    enabled: false
+    app_name: default
+    chat_id: cid_placeholder
+  wecom-e2e-test:
+    type: wecom
+    enabled: false
+    app_name: default
+    touser: '@all'
+  slack-alerts:
+    type: slack
+    enabled: false 
+    app_name: default
+    chat_id: C0AK72GGX3Q
+  ops-reports:
+    type: sns-report
+    enabled: false
+    topic_arn: arn:aws:sns:us-east-1:533267047935:agenticops-reports
+    region: us-east-1
+    s3_bucket: agenticops-reports-533267047935
+    s3_prefix: reports/
+    s3_region: us-east-1
+    url_expiry: 604800
+    formats:
+    - html
+    - markdown
+    report_types: []
+    ses_sender: malibo@amazon.com
+    ses_recipients:
+    - malibo@amazon.com
+  ops-report-html:
+    type: ses
+    enabled: false
+    sender: malibo@amazon.com
+    to: malibo@amazon.com
+    region: us-east-1
+    s3_bucket: agenticops-reports-533267047935
+    s3_prefix: reports/
+    s3_region: us-east-1
+    url_expiry: 604800
+    formats:
+    - html
+    - markdown
+    ses: 'on'

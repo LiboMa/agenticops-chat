@@ -7,7 +7,6 @@ Exposed as a tool for the Main Agent (agents-as-tools pattern).
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -196,7 +195,7 @@ def _build_detect_agent_for_account(
     Returns:
         Agent instance pre-configured for the given account
     """
-    from agenticops.config import get_agent_model_config, get_agent_window_size
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
     model_id, max_tokens = get_agent_model_config("detect")
     cache_kwargs: dict = {}
@@ -223,9 +222,7 @@ def _build_detect_agent_for_account(
         system_prompt=build_system_prompt(base_prompt, include_account=False, agent_name="detect"),
         model=model,
         callback_handler=None,
-        conversation_manager=SlidingWindowConversationManager(
-            window_size=get_agent_window_size("detect"), per_turn=True
-        ),
+        conversation_manager=get_agent_conversation_manager("detect"),
         tools=[
             cli_tool,
             get_managed_resources,
@@ -266,7 +263,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
         # Check account count to decide parallel vs single-agent mode.
         # Fallback to single-agent if DB is unavailable.
@@ -320,9 +317,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 system_prompt=_bsp(DETECT_SYSTEM_PROMPT, include_account=False, agent_name="detect"),
                 model=model,
                 callback_handler=None,
-                conversation_manager=SlidingWindowConversationManager(
-                    window_size=get_agent_window_size("detect"), per_turn=True
-                ),
+                conversation_manager=get_agent_conversation_manager("detect"),
                 tools=[
                     assume_role,
                     get_active_account,
@@ -352,7 +347,10 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
             )
 
             from agenticops.agents.preamble import invoke_with_retry
-            result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
+            from agenticops.services.agent_log_service import track_agent
+            with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent="main") as tracker:
+                result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
+                tracker.set_result(result)
             return str(result)
     except Exception as e:
         logger.exception("Detect agent failed")

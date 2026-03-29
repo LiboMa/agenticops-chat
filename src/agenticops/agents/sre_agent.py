@@ -8,7 +8,6 @@ produces plans. Exposed as a tool for the Main Agent (agents-as-tools pattern).
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -200,7 +199,7 @@ TOOL SELECTION — accuracy first:
 
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
-    from agenticops.config import get_agent_model_config, get_agent_window_size
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
     model_id, max_tokens = get_agent_model_config("sre")
     cache_kwargs: dict = {}
@@ -216,9 +215,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre", agent_name="sre"),
         model=model,
         callback_handler=None,
-        conversation_manager=SlidingWindowConversationManager(
-            window_size=get_agent_window_size("sre"), per_turn=True
-        ),
+        conversation_manager=get_agent_conversation_manager("sre"),
         tools=[
             assume_role,
             get_active_account,
@@ -296,11 +293,14 @@ def sre_agent(issue_id: int) -> str:
             pass
 
         from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.services.agent_log_service import track_agent
         agent = _create_sre_agent(cli_tool=cli_tool)
-        result = invoke_with_retry(agent,
-            f"Generate a Fix Plan for HealthIssue #{issue_id}. "
-            f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."
-        )
+        with track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent,
+                f"Generate a Fix Plan for HealthIssue #{issue_id}. "
+                f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."
+            )
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("SRE agent failed")
@@ -326,14 +326,17 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
     """
     try:
         from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.services.agent_log_service import track_agent
         cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
         agent = _create_sre_agent(cli_tools=cli_tools)
-        result = invoke_with_retry(agent,
-            f"General AWS investigation (Mode B). Region: {region}\n"
-            f"Query: {query}\n"
-            f"Use get_active_account + assume_role first, then use the best tool for this query. "
-            f"If no specialized tool covers the service, use run_aws_cli_readonly with --query filters."
-        )
+        with track_agent("sre", "query", f"region={region} query={query[:200]}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent,
+                f"General AWS investigation (Mode B). Region: {region}\n"
+                f"Query: {query}\n"
+                f"Use get_active_account + assume_role first, then use the best tool for this query. "
+                f"If no specialized tool covers the service, use run_aws_cli_readonly with --query filters."
+            )
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("SRE query failed")

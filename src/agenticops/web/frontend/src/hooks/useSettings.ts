@@ -15,7 +15,7 @@ export interface AppSettings {
   model_presets: { label: string; value: string }[];
 }
 
-type AgentModelPatch = { model_id?: string; max_tokens?: number };
+type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };
 type SettingsPatch = Partial<Omit<AppSettings, "agent_models">> & { agent_models?: Record<string, AgentModelPatch> };
 
 export function useSettings() {

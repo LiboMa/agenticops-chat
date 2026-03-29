@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from starlette.testclient import TestClient
 from agenticops.models import (
-    Base, AWSAccount, AWSResource, HealthIssue, FixPlan, RCAResult,
+    Base, CloudAccount, CloudResource, HealthIssue, FixPlan, RCAResult,
     FixExecution, get_engine, get_db_session, init_db,
 )
 from agenticops.web.app import app
@@ -25,17 +25,18 @@ def seed_data():
     """Seed a resource with related issues and fix plans."""
     uid = uuid.uuid4().hex[:8]
     with get_db_session() as db:
-        acct = AWSAccount(
-            name=f"test-rd-{uid}", account_id=f"1234{uid[:8].ljust(8, '0')}",
-            role_arn="arn:aws:iam::role/test", regions=["us-east-1"],
+        acct = CloudAccount(
+            name=f"test-rd-{uid}", provider="aws",
+            credentials={"account_id": f"1234{uid[:8].ljust(8, '0')}", "role_arn": "arn:aws:iam::role/test"},
+            regions=["us-east-1"],
         )
         db.add(acct)
         db.flush()
         res_id = f"i-{uid}"
-        res = AWSResource(
-            account_id=acct.id, resource_id=res_id, resource_type="EC2",
-            resource_name="web-prod", region="us-east-1", status="running",
-            resource_metadata={"instance_type": "t3.large", "vpc_id": f"vpc-{uid}"},
+        res = CloudResource(
+            account_id=acct.id, provider="aws", resource_id=res_id, resource_type="EC2",
+            name="web-prod", region="us-east-1", status="running",
+            raw_data={"instance_type": "t3.large", "vpc_id": f"vpc-{uid}"},
             tags={"env": "prod"},
         )
         db.add(res)
@@ -113,21 +114,22 @@ def test_resource_related_infra(client):
     """Infrastructure resources get 'contains' populated."""
     uid = uuid.uuid4().hex[:8]
     with get_db_session() as db:
-        acct = AWSAccount(
-            name=f"test-rd-infra-{uid}", account_id=f"2222{uid[:8].ljust(8, '0')}",
-            role_arn="arn:aws:iam::role/t2", regions=["us-east-1"],
+        acct = CloudAccount(
+            name=f"test-rd-infra-{uid}", provider="aws",
+            credentials={"account_id": f"2222{uid[:8].ljust(8, '0')}", "role_arn": "arn:aws:iam::role/t2"},
+            regions=["us-east-1"],
         )
         db.add(acct)
         db.flush()
-        vpc = AWSResource(
-            account_id=acct.id, resource_id="vpc-222", resource_type="VPC",
-            resource_name="prod-vpc", region="us-east-1", status="available",
-            resource_metadata={"cidr_block": "10.0.0.0/16"}, tags={},
+        vpc = CloudResource(
+            account_id=acct.id, provider="aws", resource_id="vpc-222", resource_type="VPC",
+            name="prod-vpc", region="us-east-1", status="available",
+            raw_data={"cidr_block": "10.0.0.0/16"}, tags={},
         )
-        ec2 = AWSResource(
-            account_id=acct.id, resource_id="i-in-vpc", resource_type="EC2",
-            resource_name="server", region="us-east-1", status="running",
-            resource_metadata={"vpc_id": "vpc-222"}, tags={},
+        ec2 = CloudResource(
+            account_id=acct.id, provider="aws", resource_id="i-in-vpc", resource_type="EC2",
+            name="server", region="us-east-1", status="running",
+            raw_data={"vpc_id": "vpc-222"}, tags={},
         )
         db.add_all([vpc, ec2])
         db.flush()

@@ -36,15 +36,35 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
 def _ensure_aws_session(region: str) -> None:
-    """Ensure AWS session exists for the given region."""
-    import boto3
+    """Ensure AWS session exists for the given region via provider layer."""
     import agenticops.tools.aws_tools as aws_tools_module
 
     for key in aws_tools_module._session_cache:
         if key.endswith(f":{region}"):
             return
-    session = boto3.Session(region_name=region)
-    aws_tools_module._session_cache[f"web:{region}"] = session
+
+    # Resolve credentials for the first enabled AWS account
+    from agenticops.models import CloudAccount, get_db_session
+    from agenticops.providers import get_provider
+    from types import SimpleNamespace
+
+    try:
+        with get_db_session() as db:
+            acct = db.query(CloudAccount).filter(
+                CloudAccount.is_enabled == True, CloudAccount.provider == "aws"  # noqa: E712
+            ).first()
+            if not acct:
+                return
+            snap = SimpleNamespace(
+                id=acct.id, name=acct.name, provider=acct.provider,
+                credentials=dict(acct.credentials or {}),
+                regions=list(acct.regions or []), labels=dict(acct.labels or {}),
+            )
+        provider = get_provider(snap)
+        if provider.resolve_credentials():
+            aws_tools_module._session_cache[f"web:{region}"] = provider.sdk_session()
+    except Exception:
+        logger.debug("Failed to resolve AWS session for graph API", exc_info=True)
 
 
 def _build_vpc_graph(region: str, vpc_id: str) -> InfraGraph:

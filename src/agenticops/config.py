@@ -324,7 +324,7 @@ class Settings(BaseSettings):
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable Slack Socket Mode (AIOPS_SLACK_WS_ENABLED=true)",
     )
     skills_draft_dir: Path = Field(
@@ -346,6 +346,18 @@ class Settings(BaseSettings):
     skills_max_body_chars: int = Field(
         default=8000,
         description="Max characters for skill body content returned by activate_skill",
+    )
+    skills_auto_improve_enabled: bool = Field(
+        default=True,
+        description="Master switch for skill self-improvement features (AIOPS_SKILLS_AUTO_IMPROVE_ENABLED)",
+    )
+    skills_post_resolution_review: bool = Field(
+        default=True,
+        description="Auto-review skills after issue resolution for gaps (AIOPS_SKILLS_POST_RESOLUTION_REVIEW)",
+    )
+    skills_improvement_notify: bool = Field(
+        default=True,
+        description="Notify when skill improvement drafts are created (AIOPS_SKILLS_IMPROVEMENT_NOTIFY)",
     )
     file_tools_admin_mode: bool = Field(
         default=True,
@@ -607,6 +619,28 @@ AGENT_TIER_DEFAULTS: dict[str, str] = {
     "reporter": "bedrock_model_id_cheap",
 }
 
+# Sentinel: use NullConversationManager (keep full context, no sliding window)
+FULL_CONTEXT = -1
+
+# Per-model-family window size defaults (used when agent_X_window_size == 0)
+MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
+    "claude-opus-4-6": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
+    },
+    "claude-sonnet-4-6": {
+        "main": 100, "scan": 80, "detect": 80,
+        "rca": 200, "sre": 200,
+        "executor": 20, "reporter": 80,
+    },
+    "claude-haiku-4-5": {
+        "main": 60, "scan": 40, "detect": 40,
+        "rca": 80, "sre": 80,
+        "executor": 20, "reporter": 40,
+    },
+}
+
 
 def get_agent_model_config(agent_name: str) -> tuple[str, int]:
     """Return (model_id, max_tokens) for a given agent.
@@ -625,13 +659,39 @@ def get_agent_model_config(agent_name: str) -> tuple[str, int]:
 
 
 def get_agent_window_size(agent_name: str) -> int:
-    """Return the sliding window size for a given agent.
+    """Return the window size for a given agent.
 
-    Uses agent_X_window_size if set (>0), otherwise falls back to
-    the global bedrock_window_size.
+    Priority:
+    1. Explicit override (agent_X_window_size > 0) -> use it
+    2. Auto (agent_X_window_size == 0) -> look up MODEL_WINDOW_DEFAULTS by model family
+    3. Fallback -> bedrock_window_size
     """
     override = getattr(settings, f"agent_{agent_name}_window_size", 0)
-    return override if override > 0 else settings.bedrock_window_size
+    if override > 0:
+        return override
+
+    # Auto mode: resolve from model family defaults
+    model_id, _ = get_agent_model_config(agent_name)
+    for family, defaults in MODEL_WINDOW_DEFAULTS.items():
+        if family in model_id:
+            return defaults.get(agent_name, settings.bedrock_window_size)
+    return settings.bedrock_window_size
+
+
+def get_agent_conversation_manager(agent_name: str):
+    """Return the appropriate conversation manager for an agent.
+
+    Returns NullConversationManager for FULL_CONTEXT agents (no trimming),
+    or SlidingWindowConversationManager for bounded window agents.
+    """
+    from strands.agent.conversation_manager import (
+        NullConversationManager,
+        SlidingWindowConversationManager,
+    )
+    ws = get_agent_window_size(agent_name)
+    if ws == FULL_CONTEXT:
+        return NullConversationManager()
+    return SlidingWindowConversationManager(window_size=ws, per_turn=True)
 
 
 def save_to_yaml(keys: dict[str, Any]) -> None:

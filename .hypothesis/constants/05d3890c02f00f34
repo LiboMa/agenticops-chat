@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/pipeline/health_patrol.py
+# hypothesis_version: 6.151.9
+
+[1000, 2000, ',', 'HealthPatrol', 'account', 'account_id', 'alerts', 'all', 'config', 'count', 'deep', 'detect_result', 'external_id', 'name', 'note', 'provider', 'providers', 'resource_hint', 'role_arn', 'run_detect', 'scope', 'severity', 'source', 'title']

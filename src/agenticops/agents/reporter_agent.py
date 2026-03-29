@@ -8,7 +8,6 @@ structured reports. Exposed as a tool for the Main Agent
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from botocore.config import Config as BotocoreConfig
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
@@ -112,7 +111,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
         model_id, max_tokens = get_agent_model_config("reporter")
         cache_kwargs: dict = {}
@@ -131,9 +130,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             system_prompt=build_system_prompt(REPORTER_SYSTEM_PROMPT, include_account=False, agent_name="reporter"),
             model=model,
             callback_handler=None,
-            conversation_manager=SlidingWindowConversationManager(
-                window_size=get_agent_window_size("reporter"), per_turn=True
-            ),
+            conversation_manager=get_agent_conversation_manager("reporter"),
             tools=[
                 get_active_account,
                 get_managed_resources,
@@ -153,11 +150,14 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         )
 
         from agenticops.agents.preamble import invoke_with_retry
-        result = invoke_with_retry(agent,
-            f"Generate a {report_type} report. Scope: {scope}. "
-            f"Follow the report generation protocol.",
-            max_retries=3, backoff=5.0,
-        )
+        from agenticops.services.agent_log_service import track_agent
+        with track_agent("reporter", "generate_report", f"type={report_type} scope={scope}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent,
+                f"Generate a {report_type} report. Scope: {scope}. "
+                f"Follow the report generation protocol.",
+                max_retries=3, backoff=5.0,
+            )
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("Reporter agent failed")

@@ -581,9 +581,16 @@ class OpsAgent:
                 elif self.account:
                     account = self.account
                 else:
-                    account = session.query(CloudAccount).filter_by(is_enabled=True).first()
-                    if not account:
+                    enabled = session.query(CloudAccount).filter_by(is_enabled=True).all()
+                    if not enabled:
                         return "No active account found."
+                    elif len(enabled) == 1:
+                        account = enabled[0]
+                    else:
+                        return json.dumps({
+                            "error": f"Multiple accounts enabled ({len(enabled)}). Specify account_name.",
+                            "accounts": [a.name for a in enabled],
+                        })
 
                 # Get or create config
                 config = session.query(MonitoringConfig).filter_by(
@@ -787,12 +794,10 @@ class OpsAgent:
                 if account.is_enabled:
                     return f"Account '{account_name}' is already active."
 
-                # Deactivate all others
-                session.query(CloudAccount).update({"is_enabled": False})
                 account.is_enabled = True
                 session.commit()
 
-                return f"Account '{account_name}' is now active. All other accounts have been deactivated."
+                return f"Account '{account_name}' is now active."
 
             except Exception as e:
                 session.rollback()

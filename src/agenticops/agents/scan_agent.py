@@ -7,7 +7,6 @@ using dynamic provider CLI tools. Exposed as a tool for the Main Agent (agents-a
 import logging
 
 from strands import Agent, tool
-from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.model import CacheConfig
 
@@ -158,7 +157,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         Summary of discovered resources with counts per account, region, and type.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_window_size
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
 
         model_id, max_tokens = get_agent_model_config("scan")
         cache_kwargs: dict = {}
@@ -186,15 +185,16 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             system_prompt=build_system_prompt(SCAN_SYSTEM_PROMPT, include_account=False, agent_type="scan", agent_name="scan"),
             model=bedrock_model,
             callback_handler=None,
-            conversation_manager=SlidingWindowConversationManager(
-                window_size=get_agent_window_size("scan"), per_turn=True
-            ),
+            conversation_manager=get_agent_conversation_manager("scan"),
             tools=tools,
         )
 
         from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.services.agent_log_service import track_agent
         prompt = f"Scan resources. Services: {services}. Regions: {regions}."
-        result = invoke_with_retry(agent, prompt)
+        with track_agent("scan", "scan_resources", f"services={services} regions={regions}", parent_agent="main") as tracker:
+            result = invoke_with_retry(agent, prompt)
+            tracker.set_result(result)
         return str(result)
     except Exception as e:
         logger.exception("Scan agent failed")

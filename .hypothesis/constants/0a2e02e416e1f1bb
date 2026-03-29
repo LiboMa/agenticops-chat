@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/providers/alicloud.py
+# hypothesis_version: 6.151.9
+
+['\n... (truncated)', '$(', '&&', '(no output)', '--region', ';', '<', '>', '[^a-zA-Z0-9_]', '_', '_resolved_creds', '`', 'access_key_id', 'access_key_secret', 'alicloud', 'aliyun ', 'assume_role', 'cn-hangzhou', 'profile_name', 'role_arn', 'role_session_name', 'session_name', '|']

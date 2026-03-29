@@ -51,6 +51,7 @@ export interface MergedAlert {
 export interface Anomaly {
   id: number;
   resource_id: string;
+  provider?: string;
   resource_type: string;
   region: string;
   anomaly_type: string;
@@ -266,6 +267,28 @@ export interface SkillDraftRequest {
   references?: Record<string, string>;
 }
 
+export interface SkillReviewData {
+  name: string;
+  draft_content: string;
+  published_content: string | null;
+  diff_summary: string;
+  is_new: boolean;
+}
+
+export interface SkillUpdateRequest {
+  content: string;
+}
+
+export interface SkillImproveRequest {
+  improvement: string;
+}
+
+export interface SkillImproveResponse {
+  skill_name: string;
+  draft_path: string;
+  action: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Schedules                                                          */
 /* ------------------------------------------------------------------ */
@@ -427,6 +450,54 @@ export type McpServersMap = Record<string, McpServerConfig>;
 export interface AgentModelConfig {
   model_id: string;
   max_tokens: number;
+  window_size: number;      // -1 = full, 0 = auto, >0 = manual
+  window_mode: "full" | "sliding";
+}
+
+/* ------------------------------------------------------------------ */
+/*  Agent Logs & Metrics                                               */
+/* ------------------------------------------------------------------ */
+
+export interface AgentLogEntry {
+  id: number;
+  trace_id: string | null;
+  parent_agent: string | null;
+  agent_name: string;
+  action: string;
+  input_summary: string;
+  output_summary: string;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  duration_ms: number;
+  model_id: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+export interface AgentLogTimeline {
+  trace_id: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_duration_ms: number;
+  entries: AgentLogEntry[];
+}
+
+export interface AgentLogSummary {
+  hours: number;
+  per_agent: Record<string, {
+    calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    total_duration_ms: number;
+    errors: number;
+    tool_calls: number;
+  }>;
+  total_input_tokens: number;
+  total_output_tokens: number;
 }
 
 /* ------------------------------------------------------------------ */

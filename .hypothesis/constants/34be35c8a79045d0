@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/services/agent_log_service.py
+# hypothesis_version: 6.151.9
+
+[500, 1000, 'cacheReadInputTokens', 'cache_read_tokens', 'call_count', 'error', 'inputTokens', 'input_tokens', 'outputTokens', 'output_summary', 'output_tokens', 'status', 'success', 'tool_call_count']

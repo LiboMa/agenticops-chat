@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/providers/azure.py
+# hypothesis_version: 6.151.9
+
+['\n... (truncated)', '$(', '&&', '(no output)', '--output', '--subscription', '-o ', ';', '<', '>', 'ARM_CLIENT_ID', 'ARM_CLIENT_SECRET', 'ARM_TENANT_ID', '[^a-zA-Z0-9_]', '_', '_credential', '`', 'az ', 'azure', 'client_id', 'client_secret', 'subscription_id', 'tenant_id', '|']

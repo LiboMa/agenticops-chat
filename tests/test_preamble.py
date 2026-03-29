@@ -191,6 +191,10 @@ class TestGetAgentWindowSize:
         with patch("agenticops.config.settings") as mock:
             mock.agent_scan_window_size = 0
             mock.bedrock_window_size = 40
+            mock.agent_scan_model_id = ""
+            mock.bedrock_model_id = "unknown-model"
+            mock.agent_scan_max_tokens = 0
+            mock.bedrock_max_tokens = 16384
             assert get_agent_window_size("scan") == 40
 
     def test_unknown_agent_falls_back_to_global(self):
@@ -256,14 +260,14 @@ class TestPerAgentWindowSizeConfig:
             assert isinstance(val, int), f"agent_{name}_window_size should be int, got {type(val)}"
 
     def test_rca_window_size_from_yaml(self):
-        """RCA window size should be set to 60 via settings.yaml."""
+        """RCA window size should be 0 (auto) via settings.yaml."""
         from agenticops.config import settings
-        assert settings.agent_rca_window_size == 60
+        assert settings.agent_rca_window_size == 0
 
     def test_sre_window_size_from_yaml(self):
-        """SRE window size should be set to 60 via settings.yaml."""
+        """SRE window size should be 0 (auto) via settings.yaml."""
         from agenticops.config import settings
-        assert settings.agent_sre_window_size == 60
+        assert settings.agent_sre_window_size == 0
 
     def test_executor_window_size_from_yaml(self):
         """Executor window size should be set to 20 via settings.yaml."""

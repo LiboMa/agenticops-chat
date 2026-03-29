@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/providers/aws.py
+# hypothesis_version: 6.151.9
+
+['\n... (truncated)', '$(', '&&', '(no output)', '--force', '--output', ';', '<', '>', 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN', 'AccessKeyId', 'Credentials', 'SecretAccessKey', 'SessionToken', '[^a-zA-Z0-9_]', '_', '_session', '`', 'access_key_id', 'arn:aws-cn:', 'arn:aws-us-gov:', 'aws', 'aws ', 'cn-north-1', 'iam attach-', 'iam create-user', 'iam delete-user', 'profile_name', 'region_name', 'role_arn', 's3 rm --recursive', 'secret_access_key', 'session_token', 'sts', 'us-east-1', 'us-gov-west-1', '|']

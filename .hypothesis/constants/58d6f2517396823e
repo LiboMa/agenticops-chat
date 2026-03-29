@@ -1,0 +1,4 @@
+# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/agent/ops_agent.py
+# hypothesis_version: 6.151.9
+
+[4096, '%Y-%m-%d %H:%M', '**Cloud Accounts:**', '**System Status**', ',', ', ', '=', 'Disabled', 'Enabled', 'Inactive', 'Never', 'No anomalies found.', 'No reports found.', 'account_id', 'accounts', 'acknowledged', 'all', 'analyze', 'analyze_anomaly', 'anomalies', 'args', 'completion_tokens', 'critical', 'daily', 'detect', 'detect_anomalies', 'error', 'generate_report', 'get_metrics', 'id', 'input_tokens', 'inventory', 'list', 'list_anomalies', 'list_resources', 'max_tokens', 'metrics', 'name', 'open', 'output_tokens', 'prompt_tokens', 'report', 'resolved', 'response_metadata', 'scan', 'scan_resources', 'token_usage', 'tool_calls', 'usage', 'value', '|---|---|---|---|', '✓ Active']
