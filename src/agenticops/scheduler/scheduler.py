@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Callable
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Boolean, JSON
@@ -109,7 +109,7 @@ class CronParser:
     def next_run(self, after: Optional[datetime] = None) -> datetime:
         """Calculate the next run time after the given datetime."""
         if after is None:
-            after = datetime.utcnow()
+            after = datetime.now(timezone.utc)
 
         # Start from the next minute
         candidate = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
@@ -175,7 +175,7 @@ class Scheduler:
                 for ex in stale:
                     ex.status = "failed"
                     ex.error = "Stale: process restarted before completion"
-                    ex.completed_at = datetime.utcnow()
+                    ex.completed_at = datetime.now(timezone.utc)
                 if stale:
                     logger.info(f"Cleaned up {len(stale)} stale 'running' executions")
         except Exception as e:
@@ -208,7 +208,7 @@ class Scheduler:
 
     def _check_schedules(self):
         """Check and execute due schedules."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Phase 1: read all enabled schedules and close the session
         due: list[dict] = []
@@ -299,7 +299,7 @@ class Scheduler:
             execution = ScheduleExecution(
                 schedule_id=schedule_id,
                 status="running",
-                started_at=datetime.utcnow(),
+                started_at=datetime.now(timezone.utc),
             )
             session.add(execution)
             session.flush()
@@ -383,7 +383,7 @@ class Scheduler:
                 ).first()
                 if execution:
                     execution.status = "failed" if any_failed else "completed"
-                    execution.completed_at = datetime.utcnow()
+                    execution.completed_at = datetime.now(timezone.utc)
                     execution.duration_ms = total_duration_ms
                     execution.result = {
                         "pipeline": pipeline_name,
@@ -409,7 +409,7 @@ class Scheduler:
                 ).first()
                 if execution:
                     execution.status = "failed"
-                    execution.completed_at = datetime.utcnow()
+                    execution.completed_at = datetime.now(timezone.utc)
                     execution.error = str(e)
 
             # Auto-notify on failure
@@ -430,7 +430,7 @@ class Scheduler:
                 ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
                 if ex:
                     ex.status = "failed"
-                    ex.completed_at = datetime.utcnow()
+                    ex.completed_at = datetime.now(timezone.utc)
                     ex.error = "AgentChain config missing required 'prompt' field"
             return
 
@@ -481,7 +481,7 @@ class Scheduler:
                 from agenticops.storage.backend import get_storage_backend
 
                 backend = get_storage_backend()
-                ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 safe_name = "".join(
                     c if c.isalnum() or c in "-_" else "_"
                     for c in schedule.name[:50]
@@ -497,7 +497,7 @@ class Scheduler:
         with get_db_session() as session:
             ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
             if ex:
-                ex.completed_at = datetime.utcnow()
+                ex.completed_at = datetime.now(timezone.utc)
                 ex.duration_ms = int((ex.completed_at - ex.started_at).total_seconds() * 1000)
                 if timed_out:
                     ex.status = "failed"

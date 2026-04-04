@@ -1,7 +1,7 @@
 """Report Generator - Daily and on-demand reports."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -33,7 +33,7 @@ class ReportGenerator:
     ) -> str:
         """Generate daily operations report."""
         if date is None:
-            date = datetime.utcnow()
+            date = datetime.now(timezone.utc)
 
         start_time = date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_time = start_time + timedelta(days=1)
@@ -101,7 +101,7 @@ class ReportGenerator:
         lines = [
             f"# Daily Operations Report",
             f"**Date**: {date.strftime('%Y-%m-%d')}",
-            f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
             "---",
             "",
@@ -224,7 +224,7 @@ class ReportGenerator:
             f"# Anomaly Report",
             "",
             f"**ID**: {anomaly.id}",
-            f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
             "---",
             "",
@@ -322,7 +322,7 @@ class ReportGenerator:
             lines = [
                 "# Resource Inventory Report",
                 "",
-                f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
                 f"**Total Resources**: {len(resources)}",
                 "",
                 "---",
@@ -392,7 +392,7 @@ class ReportGenerator:
             else:
                 regions = ["us-east-1"]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         lines = [
             "# Network Health Report",
             f"**Generated**: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
@@ -549,7 +549,7 @@ class ReportGenerator:
 
         try:
             # Save to file
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             filename = f"{report_type}_{timestamp}.md"
             file_path = settings.reports_dir / filename
 

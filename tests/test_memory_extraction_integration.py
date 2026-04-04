@@ -7,7 +7,7 @@ Validates Requirements: 5.1, 6.2, 7.2
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +23,7 @@ from agenticops.models import ChatMessage, ChatSession, get_db_session
 def session_with_messages():
     """Create a session with a few messages for testing."""
     sid = "mem-extract-test-001"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with get_db_session() as db:
         session = ChatSession(
             session_id=sid, name="Memory Extract Test",
@@ -45,7 +45,7 @@ def session_with_messages():
 def empty_session():
     """Create a session with no messages."""
     sid = "mem-extract-empty-002"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with get_db_session() as db:
         session = ChatSession(
             session_id=sid, name="Empty Session",
@@ -198,7 +198,7 @@ class TestRemoveStaleMemoryIntegration:
         sid = "stale-test-001"
         # Manually inject a stale agent
         mgr._agents[sid] = MagicMock()
-        mgr._last_activity[sid] = datetime.utcnow() - timedelta(hours=2)
+        mgr._last_activity[sid] = datetime.now(timezone.utc) - timedelta(hours=2)
 
         mgr._remove_stale()
 
@@ -216,7 +216,7 @@ class TestRemoveStaleMemoryIntegration:
         mgr = ChatSessionManager()
         sid = "stale-crash-002"
         mgr._agents[sid] = MagicMock()
-        mgr._last_activity[sid] = datetime.utcnow() - timedelta(hours=2)
+        mgr._last_activity[sid] = datetime.now(timezone.utc) - timedelta(hours=2)
 
         with caplog.at_level(logging.ERROR):
             mgr._remove_stale()
@@ -232,7 +232,7 @@ class TestRemoveStaleMemoryIntegration:
         mgr = ChatSessionManager()
         sid = "active-test-003"
         mgr._agents[sid] = MagicMock()
-        mgr._last_activity[sid] = datetime.utcnow()  # just now — not stale
+        mgr._last_activity[sid] = datetime.now(timezone.utc)  # just now — not stale
 
         mgr._remove_stale()
 

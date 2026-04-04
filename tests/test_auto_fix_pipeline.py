@@ -11,7 +11,7 @@ Run:
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -538,7 +538,7 @@ class TestFullE2EPipeline:
         plan = db_session.query(FixPlan).filter_by(id=plan_id).first()
         plan.status = "approved"
         plan.approved_by = "agent:auto-pipeline"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
         issue.status = "fix_approved"
         db_session.commit()

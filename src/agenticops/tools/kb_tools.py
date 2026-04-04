@@ -6,7 +6,7 @@ Supports hybrid search (vector + keyword) and case study distillation.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -590,7 +590,7 @@ def _parse_distilled_case(distilled: dict, context: dict) -> "CaseStudy":
         Resolution,
     )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     case_id = f"case_{now.strftime('%Y%m%d')}_{context['issue_id']:03d}"
 
     tags = distilled.get("tags", [])

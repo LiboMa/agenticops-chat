@@ -12,7 +12,7 @@ import threading
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from slack_sdk.socket_mode import SocketModeClient
@@ -372,7 +372,7 @@ class SlackWSService:
                     )
                 )
                 db.commit()
-                session.last_activity_at = datetime.utcnow()
+                session.last_activity_at = datetime.now(timezone.utc)
                 db.commit()
         except Exception:
             logger.debug("Failed to persist Slack IM messages", exc_info=True)

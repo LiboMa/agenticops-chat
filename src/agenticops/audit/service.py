@@ -1,7 +1,7 @@
 """Audit logging service for AgenticOps."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
@@ -225,7 +225,7 @@ class AuditService:
         Returns:
             List of AuditLog entries for the user
         """
-        start_time = datetime.utcnow() - timedelta(days=days)
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
         return AuditService.query(
             user_id=user_id,
             start_time=start_time,
@@ -248,7 +248,7 @@ class AuditService:
         Returns:
             List of recent AuditLog entries
         """
-        start_time = datetime.utcnow() - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         return AuditService.query(
             entity_type=entity_type,
             start_time=start_time,
@@ -297,7 +297,7 @@ class AuditService:
         Returns:
             Number of deleted entries
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         with get_db_session() as session:
             count = session.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete()

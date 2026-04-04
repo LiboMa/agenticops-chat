@@ -6,7 +6,7 @@ and list recent reports.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from strands import tool
 
@@ -51,7 +51,7 @@ def save_report(
     from agenticops.storage import get_storage_backend
 
     backend = get_storage_backend()
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     key = f"{report_type.lower()}/{report_type.lower()}-{timestamp}.md"
 
     try:

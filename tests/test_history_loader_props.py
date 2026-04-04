@@ -209,7 +209,7 @@ class TestToolResultPairingProperty:
 # ---------------------------------------------------------------------------
 
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from agenticops.web.session_manager import _load_history_messages
 
@@ -241,7 +241,7 @@ def _make_mock_msg(role: str, content: str, minutes_ago: int = 0):
     m.role = role
     m.content = content
     m.tool_calls = None
-    m.created_at = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    m.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return m
 
 
@@ -249,7 +249,7 @@ def _make_mock_summary(text: str, minutes_ago: int = 0):
     """Create a mock SessionSummary row."""
     s = MagicMock()
     s.summary_text = text
-    s.created_at = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    s.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return s
 
 

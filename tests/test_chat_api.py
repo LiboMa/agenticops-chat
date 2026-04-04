@@ -3,7 +3,7 @@
 Validates Requirements: 3.1-3.6, 3.9, 3.10
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from starlette.testclient import TestClient
@@ -25,7 +25,7 @@ def _seed_sessions():
         "archived": "meta-test-archived-002",
         "pinned_starred": "meta-test-pinstar-003",
     }
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with get_db_session() as db:
         s1 = ChatSession(
             session_id=ids["normal"], name="Normal Session",

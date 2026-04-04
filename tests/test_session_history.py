@@ -1,7 +1,7 @@
 """Tests for session history restoration in ChatSessionManager."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +19,7 @@ def _make_msg(role: str, content: str, tool_calls=None, minutes_ago: int = 0):
     m.role = role
     m.content = content
     m.tool_calls = tool_calls
-    m.created_at = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    m.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return m
 
 
@@ -34,7 +34,7 @@ def _make_summary(summary_text: str, minutes_ago: int = 0):
     """Create a mock SessionSummary row."""
     s = MagicMock()
     s.summary_text = summary_text
-    s.created_at = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    s.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return s
 
 

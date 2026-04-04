@@ -1,7 +1,7 @@
 """Tests for resource detail API endpoints."""
 import pytest
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from starlette.testclient import TestClient
 from agenticops.models import (
     Base, AWSAccount, AWSResource, HealthIssue, FixPlan, RCAResult,
@@ -43,13 +43,13 @@ def seed_data():
         issue1 = HealthIssue(
             resource_id=res_id, severity="high", source="metric_anomaly",
             title="CPU spike", description="CPU at 95%", status="open",
-            detected_at=datetime.utcnow(),
+            detected_at=datetime.now(timezone.utc),
         )
         issue2 = HealthIssue(
             resource_id=res_id, severity="medium", source="log_pattern",
             title="Disk full", description="Disk 90%", status="resolved",
-            detected_at=datetime.utcnow() - timedelta(days=3),
-            resolved_at=datetime.utcnow() - timedelta(days=2),
+            detected_at=datetime.now(timezone.utc) - timedelta(days=3),
+            resolved_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
         db.add_all([issue1, issue2])
         db.flush()

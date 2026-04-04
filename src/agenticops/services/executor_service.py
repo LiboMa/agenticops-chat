@@ -7,7 +7,7 @@ ChatSessionManager (daemon thread + periodic polling).
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agenticops.config import settings
 
@@ -76,7 +76,7 @@ class ExecutorService:
             if not execution or execution.status != "running":
                 return False
             execution.status = "aborted"
-            execution.completed_at = datetime.utcnow()
+            execution.completed_at = datetime.now(timezone.utc)
             execution.error_message = "Cancelled by operator"
             session.commit()
             logger.info("Execution #%d marked as aborted (cancellation requested)", execution_id)
@@ -119,7 +119,7 @@ class ExecutorService:
             result = session.execute(
                 update(FixExecution)
                 .where(FixExecution.id == pending.id, FixExecution.status == "pending")
-                .values(status="running", started_at=datetime.utcnow())
+                .values(status="running", started_at=datetime.now(timezone.utc))
             )
             session.commit()
 
@@ -194,7 +194,7 @@ class ExecutorService:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
             if execution and execution.status == "running":
                 execution.status = "failed"
-                execution.completed_at = datetime.utcnow()
+                execution.completed_at = datetime.now(timezone.utc)
                 execution.error_message = f"Agent crashed: {error[:500]}"
                 plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
                 if plan:
@@ -209,7 +209,7 @@ class ExecutorService:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
             if execution and execution.status == "running":
                 execution.status = "failed"
-                execution.completed_at = datetime.utcnow()
+                execution.completed_at = datetime.now(timezone.utc)
                 execution.error_message = (
                     f"Execution timed out after {settings.executor_total_timeout}s"
                 )

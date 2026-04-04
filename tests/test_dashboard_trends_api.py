@@ -1,7 +1,7 @@
 """Tests for dashboard trends API."""
 import pytest
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from starlette.testclient import TestClient
 from agenticops.models import (
     Base, AWSAccount, AWSResource, HealthIssue, FixPlan, RCAResult,
@@ -22,7 +22,7 @@ def client():
 
 @pytest.fixture
 def seed_trends():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     uid = uuid.uuid4().hex[:8]
     with get_db_session() as db:
         acct = AWSAccount(

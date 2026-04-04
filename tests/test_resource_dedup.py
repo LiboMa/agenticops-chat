@@ -1,7 +1,7 @@
 """Tests for resource-based similar issue merging (deduplication)."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -24,12 +24,12 @@ def _make_health_issue(**kwargs):
         "metric_data": {},
         "related_changes": [],
         "occurrence_count": 1,
-        "last_seen": datetime.utcnow(),
-        "detected_at": datetime.utcnow(),
+        "last_seen": datetime.now(timezone.utc),
+        "detected_at": datetime.now(timezone.utc),
         "detected_by": "detect_agent",
         "alarm_name": None,
         "fingerprint": "abc",
-        "first_seen": datetime.utcnow(),
+        "first_seen": datetime.now(timezone.utc),
         "trace_id": None,
         "resolved_at": None,
     }

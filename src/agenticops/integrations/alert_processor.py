@@ -221,12 +221,12 @@ def _merge_into_webhook_issue(session, existing, alert) -> None:
     Mirrors _merge_into_existing_issue() in metadata_tools but operates on
     AlertPayload objects to avoid circular imports.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
     _MERGED_ALERTS_CAP = 50
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     snapshot = {
         "timestamp": now.isoformat(),

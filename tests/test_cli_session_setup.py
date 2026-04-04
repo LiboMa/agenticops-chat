@@ -4,7 +4,7 @@ Validates: Requirement 9.8
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -51,7 +51,7 @@ def _seed_sessions():
         "older": f"cli-test-older-{uuid.uuid4().hex[:8]}",
         "archived": f"cli-test-archived-{uuid.uuid4().hex[:8]}",
     }
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     db_ids = {}
     with get_db_session() as db:
         s1 = ChatSession(

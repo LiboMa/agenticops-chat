@@ -3,7 +3,7 @@
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from strands import Agent
@@ -54,7 +54,7 @@ class IMChatSessionManager:
             self._remove_stale()
 
     def _remove_stale(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with self._lock:
             stale = [k for k, ts in self._last_activity.items() if now - ts > self._ttl]
             for k in stale:
@@ -73,7 +73,7 @@ class IMChatSessionManager:
             if key not in self._agents:
                 logger.info("Creating IM agent for %s", key)
                 self._agents[key] = create_main_agent()
-            self._last_activity[key] = datetime.utcnow()
+            self._last_activity[key] = datetime.now(timezone.utc)
             return self._agents[key]
 
     def get_notifier(self, platform: str, chat_id: str, app_name: str = "default") -> Optional[IMNotifier]:

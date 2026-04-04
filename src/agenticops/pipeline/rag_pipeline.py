@@ -14,7 +14,7 @@ Reuses existing infrastructure from kb_tools.py (search, embed, write).
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -61,7 +61,7 @@ def run_rag_pipeline(health_issue_id: int) -> RAGPipelineResult:
             error="RAG pipeline is disabled (AIOPS_RAG_PIPELINE_ENABLED=false)",
         )
 
-    start = datetime.utcnow()
+    start = datetime.now(timezone.utc)
     result = RAGPipelineResult(
         health_issue_id=health_issue_id,
         success=False,
@@ -140,7 +140,7 @@ def run_rag_pipeline(health_issue_id: int) -> RAGPipelineResult:
         result.error = str(e)
         result.steps.append({"step": "error", "status": "failed", "error": str(e)})
 
-    elapsed = (datetime.utcnow() - start).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - start).total_seconds()
     result.duration_ms = int(elapsed * 1000)
     return result
 
@@ -361,7 +361,7 @@ def _save_sop_record(filename: str, file_path: str, case_data: dict, action: str
             if existing:
                 existing.quality_score = quality
                 existing.issue_pattern = (case_data.get("issue_pattern", "") or "")[:500]
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
                 if existing.status == "draft":
                     existing.status = initial_status
             else:

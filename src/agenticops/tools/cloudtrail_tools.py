@@ -5,7 +5,7 @@ New in v2 - critical for RCA: 80% of issues are caused by changes.
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 from strands import tool
@@ -37,7 +37,7 @@ def lookup_cloudtrail_events(
     except RuntimeError as e:
         return str(e)
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=min(hours, 24))
 
     try:

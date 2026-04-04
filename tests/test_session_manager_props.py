@@ -10,7 +10,7 @@ last_activity exceeds the TTL and keeps agents within the TTL window.
 """
 
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from hypothesis import given, settings
@@ -62,7 +62,7 @@ def _build_manager(ttl_minutes: int, agents_with_offsets: dict[str, int]) -> Cha
     mgr._ttl = timedelta(minutes=ttl_minutes)
     mgr._session_locks = {}
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     mgr._agents = {}
     mgr._last_activity = {}
     for sid, offset in agents_with_offsets.items():

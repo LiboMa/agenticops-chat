@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from botocore.exceptions import ClientError, BotoCoreError
@@ -22,7 +22,7 @@ class ScanResult:
     service: str
     resources: list[dict] = field(default_factory=list)
     error: Optional[str] = None
-    scanned_at: datetime = field(default_factory=datetime.utcnow)
+    scanned_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def success(self) -> bool:
@@ -370,7 +370,7 @@ class AWSScanner:
                             saved_count += 1
 
             # Update account last_scanned_at
-            self.account.last_scanned_at = datetime.utcnow()
+            self.account.last_scanned_at = datetime.now(timezone.utc)
             session.commit()
 
         except Exception as e:

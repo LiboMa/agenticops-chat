@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
@@ -102,7 +102,7 @@ class FeishuGateway(IMGateway):
             sender_name=sender.get("sender_id", {}).get("user_id", "unknown"),
             content=text.strip(),
             message_id=message.get("message_id", ""),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             is_group=(chat_type == "group"),
             app_name=self.app_name,
         )

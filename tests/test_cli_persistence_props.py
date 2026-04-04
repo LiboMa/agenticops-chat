@@ -12,7 +12,7 @@ match exactly.
 
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from hypothesis import given, settings as h_settings, HealthCheck
@@ -54,7 +54,7 @@ _content_st = st.text(
 def _make_session_ctx():
     """Create a DB ChatSession + ChatContext, clean up on exit."""
     sid = f"prop13-{uuid.uuid4().hex[:8]}"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with get_db_session() as db:
         row = ChatSession(
             session_id=sid,
