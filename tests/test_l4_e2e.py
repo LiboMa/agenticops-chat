@@ -50,6 +50,10 @@ def test_db(tmp_path):
     settings.ensure_dirs()
 
     engine = models_mod.get_engine()
+    # Enable WAL mode to allow concurrent reads/writes in tests
+    with engine.connect() as conn:
+        conn.execute(models_mod.text("PRAGMA journal_mode=WAL"))
+        conn.commit()
     Base.metadata.create_all(engine)
 
     session = get_session()
@@ -257,7 +261,7 @@ class TestL4Lifecycle:
         plan.approved_by = "test"
         plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
-        session.flush()
+        session.commit()  # commit to release SQLite write lock before save_execution_result
 
         # Simulate successful execution via metadata tool
         from agenticops.tools.metadata_tools import save_execution_result
@@ -306,7 +310,7 @@ class TestL4Lifecycle:
         plan.approved_by = "test"
         plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
-        session.flush()
+        session.commit()  # commit to release SQLite write lock before save_execution_result
 
         from agenticops.tools.metadata_tools import save_execution_result
 

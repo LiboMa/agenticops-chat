@@ -137,7 +137,7 @@ class TestPreferredFormat:
         assert "preferred_format" in _CHANNEL_RESERVED_KEYS
 
     def test_default_format_map_has_all_types(self):
-        expected_types = {"feishu", "dingtalk", "wecom", "slack", "email", "sns", "sns-report", "webhook"}
+        expected_types = {"feishu", "dingtalk", "wecom", "slack", "email", "sns", "ses", "sns-report", "webhook"}
         assert set(_DEFAULT_PREFERRED_FORMAT.keys()) == expected_types
 
     def test_default_format_values(self):

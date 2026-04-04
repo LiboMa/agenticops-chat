@@ -77,7 +77,7 @@ def test_build_detect_agent_for_account_has_correct_tools(
     tools = call_kwargs["tools"]
 
     # Should have exactly 17 tools
-    assert len(tools) == 17
+    assert len(tools) == 20
 
     # First tool should be the cli_tool
     assert tools[0] == mock_cli_tool
