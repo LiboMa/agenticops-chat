@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTask
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -110,8 +110,7 @@ class AccountResponse(BaseModel):
     created_at: datetime
     last_scanned_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
     def redact_secrets(self):
@@ -139,8 +138,7 @@ class ResourceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def from_resource(cls, r) -> "ResourceResponse":
@@ -189,8 +187,7 @@ class AnomalyResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RCAResponse(BaseModel):
@@ -208,8 +205,7 @@ class RCAResponse(BaseModel):
     model_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportResponse(BaseModel):
@@ -224,8 +220,7 @@ class ReportResponse(BaseModel):
     report_metadata: dict
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportGenerateRequest(BaseModel):
@@ -274,8 +269,7 @@ class AlertEventResponse(BaseModel):
     received_at: datetime
     raw_payload: dict
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class HealthIssueCreate(BaseModel):
@@ -321,8 +315,7 @@ class HealthIssueResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
@@ -402,8 +395,7 @@ class FixPlanResponse(BaseModel):
     created_at: datetime
     account_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FixExecutionResponse(BaseModel):
@@ -423,8 +415,7 @@ class FixExecutionResponse(BaseModel):
     duration_ms: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -472,8 +463,7 @@ class ScheduleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleExecutionResponse(BaseModel):
@@ -487,8 +477,7 @@ class ScheduleExecutionResponse(BaseModel):
     result: dict
     error: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -533,8 +522,7 @@ class NotificationLogResponse(BaseModel):
     error: Optional[str]
     sent_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NotificationSendRequest(BaseModel):
@@ -655,8 +643,7 @@ class ChatMessageResponse(BaseModel):
     attachments: Optional[list] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatSessionResponse(BaseModel):
@@ -671,8 +658,7 @@ class ChatSessionResponse(BaseModel):
     starred: bool = False
     archived: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatSessionDetail(ChatSessionResponse):
@@ -689,8 +675,7 @@ class MemoryFactResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MemoryExperienceResponse(BaseModel):
@@ -700,8 +685,7 @@ class MemoryExperienceResponse(BaseModel):
     content_text: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -742,8 +726,7 @@ class UserResponse(BaseModel):
     last_login_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class APIKeyCreate(BaseModel):
@@ -764,8 +747,7 @@ class APIKeyResponse(BaseModel):
     expires_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class APIKeyCreatedResponse(BaseModel):
@@ -1756,8 +1738,7 @@ class FixPlanWithExecutionsResponse(BaseModel):
     created_at: datetime
     executions: List[FixExecutionResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RelatedResourceItem(BaseModel):
@@ -3684,8 +3665,7 @@ class AuditLogResponse(BaseModel):
     new_values: Optional[dict]
     ip_address: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @app.get("/api/audit", response_model=List[AuditLogResponse])
