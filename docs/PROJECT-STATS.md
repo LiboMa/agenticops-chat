@@ -1,8 +1,8 @@
 # AgenticOps — Project Statistics
 
-**Version**: 1.0.0 (MVP)
-**Date**: 2026-03-26
-**Branch**: `feature/multi-cloud-provider`
+**Version**: 0.9.0-beta
+**Date**: 2026-04-04
+**Branch**: `main`
 
 ---
 
