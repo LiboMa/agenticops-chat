@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional, Generator
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import NullPool, StaticPool
 
@@ -946,7 +947,18 @@ def init_db(engine=None):
                 ))
                 conn.commit()
 
-    Base.metadata.create_all(engine)
+    # Use create_all for new tables; existing indexes may conflict, so fall
+    # back to per-table creation when a blanket create_all raises.
+    try:
+        Base.metadata.create_all(engine)
+    except OperationalError:
+        # Likely a duplicate-index error on an existing table (SQLite).
+        # Create tables individually with checkfirst to minimise blast radius.
+        for table in Base.metadata.sorted_tables:
+            try:
+                table.create(engine, checkfirst=True)
+            except OperationalError:
+                pass
 
     # Migration: migrate AWSAccount rows → CloudAccount (if aws_accounts exists and cloud_accounts is empty)
     # Re-inspect after create_all to see newly created tables
