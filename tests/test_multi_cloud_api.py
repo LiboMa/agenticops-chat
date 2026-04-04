@@ -30,7 +30,14 @@ def client(tmp_path):
             session.close()
 
     with patch("agenticops.web.app.get_db_session", test_db_session), \
-         patch("agenticops.web.app.init_db"):
+         patch("agenticops.web.app.init_db"), \
+         patch("agenticops.web.app._chat_sessions") as mock_cs, \
+         patch("agenticops.web.app._executor_service") as mock_es, \
+         patch("agenticops.scheduler.scheduler.Scheduler.start"), \
+         patch("agenticops.scheduler.scheduler.Scheduler.stop"), \
+         patch("agenticops.web.app.settings", wraps=__import__("agenticops.web.app", fromlist=["settings"]).settings) as mock_settings:
+        mock_settings.feishu_ws_enabled = False
+        mock_settings.slack_ws_enabled = False
         with TestClient(app) as c:
             yield c
 
