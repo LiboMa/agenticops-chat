@@ -45,7 +45,7 @@ class NotificationLog(Base):
     severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20))  # sent, failed
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================================

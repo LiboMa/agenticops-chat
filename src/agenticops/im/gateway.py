@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
@@ -16,7 +16,7 @@ class IMInboundMessage:
     sender_name: str        # Sender display name
     content: str            # Message text content
     message_id: str         # Platform message ID (for dedup)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     is_group: bool = True   # Group chat vs direct message
     app_name: str = "default"  # Corresponding YAML app name
 
