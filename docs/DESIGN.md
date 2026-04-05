@@ -113,6 +113,23 @@ src/agenticops/
 ├── data/                    # DATA - 数据工具模块
 │   └── ...                  # 数据实用工具
 │
+├── memory/                  # MEMORY - Agent记忆模块
+│   ├── __init__.py
+│   └── agent_memory.py     # 4类记忆 (Episodic/Procedural/Semantic/Reflection)
+│
+├── mcp.py                   # MCP - Model Context Protocol 集成
+│
+├── proactive/               # PROACTIVE - 主动巡检模块
+│   └── ...                  # 主动发现与预警
+│
+├── scanner/                 # SCANNER - 安全/合规扫描模块
+│   ├── commands.py         # 扫描命令定义
+│   ├── engine.py           # 扫描引擎
+│   └── parsers.py          # 结果解析器
+│
+├── utils/                   # UTILS - 通用工具模块
+│   └── ...                  # 时间、格式化等工具函数
+│
 ├── pipeline/                # PIPELINE - 管道编排模块
 │   └── orchestrator.py     # 多步骤管道编排器
 │
