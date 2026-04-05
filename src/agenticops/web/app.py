@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
@@ -1259,7 +1259,7 @@ async def api_health():
     db_start = time.time()
     try:
         with get_db_session() as session:
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
         checks["database"] = HealthCheckResult(
             status="ok",
             latency_ms=int((time.time() - db_start) * 1000),
