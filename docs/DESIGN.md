@@ -92,6 +92,16 @@ src/agenticops/
 ├── report/                  # REPORT - 报告模块
 │   └── generator.py        # 多格式报告生成
 │
+├── providers/               # PROVIDERS - 多云提供商抽象模块
+│   ├── base.py             # 云提供商抽象基类
+│   ├── aws.py              # AWS 提供商实现
+│   ├── azure.py            # Azure 提供商实现
+│   ├── gcp.py              # GCP 提供商实现
+│   └── alicloud.py         # 阿里云提供商实现
+│
+├── checker/                 # CHECKER - 并行健康检查模块
+│   └── engine.py           # 多账户并行 Agent 健康检查引擎
+│
 ├── agents/                  # AGENTS - Strands多智能体模块
 │   ├── scan_agent.py       # Scan Agent — 资源扫描智能体
 │   ├── detect_agent.py     # Detect Agent — 异常检测智能体
@@ -154,11 +164,15 @@ src/agenticops/
 │   ├── feishu_gateway.py   # 飞书HTTP回调网关
 │   ├── dingtalk_gateway.py # 钉钉HTTP回调网关
 │   ├── wecom_gateway.py    # 企业微信HTTP回调网关
+│   ├── slack_gateway.py    # Slack HTTP回调网关
+│   ├── slack_ws.py         # Slack WebSocket (Socket Mode) 长连接
+│   ├── alert_pipeline.py   # 告警 → Agent 自动分析管线
 │   ├── gateway.py          # IM网关抽象基类
 │   └── session_manager.py  # IM会话Agent管理
 │
 ├── notify/                  # NOTIFY - 通知模块
 │   ├── notifier.py         # 多渠道通知 (Feishu/Slack/Email/DingTalk/WeCom/SNS/Webhook)
+│   ├── report_formatter.py # 报告格式化 (Markdown → 飞书/Slack rich text)
 │   └── im_config.py        # YAML-only频道配置 (channels.yaml) + IM应用凭证管理
 │
 ├── auth/                    # AUTH - 认证模块
@@ -173,7 +187,8 @@ src/agenticops/
 │   ├── main.py             # ~3200行, kubectl风格命令 + 35个聊天斜杠命令
 │   ├── context.py          # ChatContext 会话状态
 │   ├── display.py          # ThinkingDisplay 进度显示 + TokenUsage 统计
-│   └── formatters.py       # 表格样式、Markdown/JSON渲染
+│   ├── formatters.py       # 表格样式、Markdown/JSON渲染
+│   └── init_helpers.py     # CLI 初始化辅助 (向导、配置检查)
 │
 ├── chat/                    # CHAT - 聊天预处理模块
 │   ├── preprocessor.py     # I#/R# 引用解析、@file、多模态
@@ -182,10 +197,14 @@ src/agenticops/
 │   └── channel.py          # /channel 命令处理器
 │
 ├── integrations/            # INTEGRATIONS - 外部集成
+│   ├── base.py             # 告警提供商抽象基类
+│   ├── alert_processor.py  # 告警处理器 (webhook → HealthIssue)
+│   ├── cloudwatch_provider.py # CloudWatch Alarm 告警源
+│   ├── datadog_provider.py # Datadog 告警源
 │   └── parsers.py          # Prometheus/CloudWatch/Datadog/PagerDuty 告警解析
 │
 └── web/                     # WEB - Web仪表板
-    ├── app.py              # FastAPI + 81 REST API端点 + SSE Chat + Webhook
+    ├── app.py              # FastAPI + 152 REST API端点 + SSE Chat + Webhook
     ├── session_manager.py  # ChatSessionManager (per-session Agent, TTL清理)
     └── frontend/           # React + TypeScript + Tailwind (16页面, 22 hooks)
 ```
