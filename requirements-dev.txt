@@ -1,0 +1,3 @@
+# Dev dependencies — single entry point for all environments
+# Usage: pip install -r requirements-dev.txt
+-e ".[dev]"
