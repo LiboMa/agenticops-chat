@@ -208,7 +208,9 @@ class Scheduler:
 
     def _check_schedules(self):
         """Check and execute due schedules."""
-        now = datetime.now(timezone.utc)
+        # Use naive UTC — SQLite returns naive datetimes, so comparison
+        # must be naive-to-naive to avoid TypeError.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Phase 1: read all enabled schedules and close the session
         due: list[dict] = []

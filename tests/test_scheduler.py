@@ -434,10 +434,7 @@ class TestCheckSchedules:
 
     def test_executes_due_schedule(self, patch_db):
         """Schedule with past next_run_at should be executed."""
-        # SQLite returns naive datetimes; patch datetime.now to return naive UTC
-        # to match what _check_schedules uses
-        naive_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        past = naive_now - timedelta(minutes=5)
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
         with patch_db() as session:
             s = Schedule(
                 name="due-test",
@@ -450,16 +447,12 @@ class TestCheckSchedules:
             session.flush()
 
         scheduler = Scheduler()
-        # Patch datetime.now inside scheduler module to return naive UTC
-        with patch("agenticops.scheduler.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = naive_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            with patch.object(scheduler, "_execute_schedule_by_info") as mock_exec:
-                scheduler._check_schedules()
-                mock_exec.assert_called_once()
-                call_info = mock_exec.call_args[0][0]
-                assert call_info["name"] == "due-test"
-                assert call_info["pipeline_name"] == "FullScan"
+        with patch.object(scheduler, "_execute_schedule_by_info") as mock_exec:
+            scheduler._check_schedules()
+            mock_exec.assert_called_once()
+            call_info = mock_exec.call_args[0][0]
+            assert call_info["name"] == "due-test"
+            assert call_info["pipeline_name"] == "FullScan"
 
     def test_skips_disabled_schedule(self, patch_db):
         """Disabled schedules should not be checked."""
@@ -501,8 +494,7 @@ class TestCheckSchedules:
 
     def test_updates_last_and_next_run(self, patch_db):
         """After execution, last_run_at and next_run_at should be updated."""
-        naive_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        past = naive_now - timedelta(minutes=5)
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
         with patch_db() as session:
             s = Schedule(
                 name="update-times",
@@ -515,11 +507,8 @@ class TestCheckSchedules:
             session.flush()
 
         scheduler = Scheduler()
-        with patch("agenticops.scheduler.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = naive_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            with patch.object(scheduler, "_execute_schedule_by_info"):
-                scheduler._check_schedules()
+        with patch.object(scheduler, "_execute_schedule_by_info"):
+            scheduler._check_schedules()
 
         with patch_db() as session:
             s = session.query(Schedule).filter_by(name="update-times").first()
