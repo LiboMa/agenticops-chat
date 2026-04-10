@@ -137,8 +137,11 @@ src/agenticops/
 │   ├── engine.py           # 扫描引擎
 │   └── parsers.py          # 结果解析器
 │
-├── utils/                   # UTILS - 通用工具模块
-│   └── ...                  # 时间、格式化等工具函数
+├── storage/                 # STORAGE - 报告存储模块
+│   ├── __init__.py          # StorageBackend, get_storage_backend
+│   └── backend.py           # 可插拔存储后端 (LocalBackend / S3Backend)
+│
+├── utils/                   # UTILS - 通用工具模块 (当前为空，保留备用)
 │
 ├── pipeline/                # PIPELINE - 管道编排模块
 │   └── orchestrator.py     # 多步骤管道编排器
@@ -460,7 +463,21 @@ SQS:
 | anomaly | 单个异常详情+RCA | Markdown |
 | inventory | 资源清单按服务分组 | Markdown |
 
-### 3.6 AGENT - Strands 多智能体系统
+### 3.6 STORAGE - 报告存储
+
+**模块**: `storage/backend.py`
+
+可插拔的报告持久化层，通过 `settings.report_storage` 配置选择后端：
+
+| 后端 | 类 | 用途 |
+|------|-----|------|
+| local | `LocalBackend` | 本地文件系统，开发/测试用 |
+| s3 | `S3Backend` | AWS S3，生产环境 |
+
+**接口**: `StorageBackend` ABC — `write(key, content)`, `read(uri)`, `exists(uri)`, `delete(uri)`, `presigned_url(uri)`
+**工厂**: `get_storage_backend()` — 延迟实例化，按配置返回对应后端
+
+### 3.7 AGENT - Strands 多智能体系统
 
 **架构**: 基于 Strands Agents SDK 的多智能体编排（agent-as-tool 模式），共 7 个专用 Agent，40+ 工具函数。所有 Agent 使用集中配置：`settings.bedrock_model_id*`, `settings.bedrock_max_tokens`, `settings.bedrock_window_size`，并通过 `SlidingWindowConversationManager(window_size=40, per_turn=True)` 防止上下文溢出。
 
