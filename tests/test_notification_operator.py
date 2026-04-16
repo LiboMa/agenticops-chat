@@ -469,6 +469,236 @@ class TestDistributeReport:
 # ============================================================================
 
 
+# ============================================================================
+# share_content tool tests
+# ============================================================================
+
+
+class TestShareContent:
+    """Tests for the share_content tool."""
+
+    def test_missing_subject(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        result = share_content(subject="", body="hello")
+        data = json.loads(result)
+        assert data["success"] is False
+        assert "required" in data["message"]
+
+    def test_missing_body(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        result = share_content(subject="test", body="")
+        data = json.loads(result)
+        assert data["success"] is False
+        assert "required" in data["message"]
+
+    def test_short_content_sends_directly(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            result = share_content(
+                subject="Short msg",
+                body="Short body text",
+                channel_names="test-feishu",
+            )
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "test-feishu" in data["channels_sent"]
+        assert "presigned_url" not in data
+
+    def test_long_content_uploads_to_s3(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        long_body = "x" * 5000
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.storage.backend.get_storage_backend") as mock_backend:
+                mock_be = MagicMock()
+                mock_be.write.return_value = "s3://bucket/shared/test.md"
+                mock_be.presigned_url.return_value = "https://s3.example.com/presigned"
+                mock_backend.return_value = mock_be
+
+                result = share_content(
+                    subject="Long report",
+                    body=long_body,
+                    channel_names="test-feishu",
+                )
+        data = json.loads(result)
+        assert data["success"] is True
+        assert data["presigned_url"] == "https://s3.example.com/presigned"
+
+    def test_force_upload_to_s3(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.storage.backend.get_storage_backend") as mock_backend:
+                mock_be = MagicMock()
+                mock_be.write.return_value = "s3://bucket/shared/test.md"
+                mock_be.presigned_url.return_value = "https://s3.example.com/presigned"
+                mock_backend.return_value = mock_be
+
+                result = share_content(
+                    subject="Forced upload",
+                    body="Short body",
+                    channel_names="test-feishu",
+                    upload_to_s3=True,
+                )
+        data = json.loads(result)
+        assert data["presigned_url"] == "https://s3.example.com/presigned"
+
+    def test_s3_upload_failure_fallback(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.storage.backend.get_storage_backend") as mock_backend:
+                mock_backend.side_effect = Exception("S3 error")
+
+                result = share_content(
+                    subject="Fallback test",
+                    body="x" * 5000,
+                    channel_names="test-feishu",
+                )
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "presigned_url" not in data
+
+    def test_all_channels_when_no_names(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={
+                "test-feishu": True,
+                "test-slack": True,
+            })
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.tools.notification_tools._send_html_content", return_value=True):
+                result = share_content(subject="All channels", body="hello")
+        data = json.loads(result)
+        assert data["success"] is True
+
+    def test_html_channel_routing(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.tools.notification_tools._send_html_content", return_value=True) as mock_html:
+            with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+                mock_instance = MagicMock()
+                mock_instance.send_notification = AsyncMock(return_value={})
+                mock_cls.return_value = mock_instance
+
+                result = share_content(
+                    subject="HTML test",
+                    body="content here",
+                    channel_names="test-email",
+                )
+        data = json.loads(result)
+        assert "test-email" in data["channels_sent"]
+        mock_html.assert_called_once()
+
+    def test_html_channel_failure(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.tools.notification_tools._send_html_content", side_effect=Exception("HTML fail")):
+            with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+                mock_instance = MagicMock()
+                mock_instance.send_notification = AsyncMock(return_value={})
+                mock_cls.return_value = mock_instance
+
+                result = share_content(
+                    subject="HTML fail",
+                    body="content here",
+                    channel_names="test-email",
+                )
+        data = json.loads(result)
+        assert "test-email" in data["channels_failed"]
+
+    def test_notification_manager_failure(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_cls.side_effect = Exception("NM fail")
+
+            result = share_content(
+                subject="NM fail test",
+                body="hello",
+                channel_names="test-feishu",
+            )
+        data = json.loads(result)
+        assert "test-feishu" in data["channels_failed"]
+
+    def test_expiry_hours_clamped(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.storage.backend.get_storage_backend") as mock_backend:
+                mock_be = MagicMock()
+                mock_be.write.return_value = "s3://bucket/shared/test.md"
+                mock_be.presigned_url.return_value = "https://s3.example.com/url"
+                mock_backend.return_value = mock_be
+
+                # 999 hours should be clamped to 168
+                result = share_content(
+                    subject="Clamp test",
+                    body="Short",
+                    channel_names="test-feishu",
+                    upload_to_s3=True,
+                    expiry_hours=999,
+                )
+                # Verify presigned_url was called with 168 * 3600
+                mock_be.presigned_url.assert_called_once()
+                _, kwargs = mock_be.presigned_url.call_args
+                if "expiry" in kwargs:
+                    assert kwargs["expiry"] == 168 * 3600
+                else:
+                    args = mock_be.presigned_url.call_args[0]
+                    assert args[1] == 168 * 3600
+
+    def test_s3_presigned_url_none_fallback(self, channels_yaml, db_session):
+        from agenticops.tools.notification_tools import share_content
+
+        with patch("agenticops.notify.notifier.NotificationManager") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.send_notification = AsyncMock(return_value={"test-feishu": True})
+            mock_cls.return_value = mock_instance
+
+            with patch("agenticops.storage.backend.get_storage_backend") as mock_backend:
+                mock_be = MagicMock()
+                mock_be.write.return_value = "s3://bucket/shared/test.md"
+                mock_be.presigned_url.return_value = None
+                mock_backend.return_value = mock_be
+
+                result = share_content(
+                    subject="No presigned",
+                    body="x" * 5000,
+                    channel_names="test-feishu",
+                )
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "presigned_url" not in data
+
+
 class TestSendToChannel:
     """Quick sanity checks for the send_to_channel tool."""
 
