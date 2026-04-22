@@ -321,6 +321,127 @@ class TestWriteLocalFile:
 
 # ── _register_local_doc tests ────────────────────────────────────────
 
+# ── read_document tests ──────────────────────────────────────────────
+
+class TestReadDocument:
+    """Tests for the read_document tool — text-based docs, blocked paths, errors."""
+
+    def test_read_markdown(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        md = tmp_files / "doc.md"
+        md.write_text("# Hello\n\nWorld")
+        result = read_document(str(md))
+        assert "doc.md" in result
+        assert "# Hello" in result
+        assert "World" in result
+
+    def test_read_csv(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        csv = tmp_files / "data.csv"
+        csv.write_text("a,b,c\n1,2,3\n")
+        result = read_document(str(csv))
+        assert "data.csv" in result
+        assert "a,b,c" in result
+
+    def test_read_json(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        jf = tmp_files / "config.json"
+        jf.write_text('{"key": "value"}')
+        result = read_document(str(jf))
+        assert '"key"' in result
+
+    def test_read_html(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        hf = tmp_files / "page.html"
+        hf.write_text("<html><body>Hello</body></html>")
+        result = read_document(str(hf))
+        assert "page.html" in result
+        assert "Hello" in result
+
+    def test_read_yaml(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        yf = tmp_files / "config.yaml"
+        yf.write_text("key: value\n")
+        result = read_document(str(yf))
+        assert "key: value" in result
+
+    def test_read_txt(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        tf = tmp_files / "readme.txt"
+        tf.write_text("Some readme content")
+        result = read_document(str(tf))
+        assert "readme.txt" in result
+        assert "Some readme content" in result
+
+    def test_read_nonexistent(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        result = read_document(str(tmp_files / "no_such_file.md"))
+        assert "not found" in result.lower()
+
+    def test_read_directory(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        result = read_document(str(tmp_files / "subdir"))
+        assert "not a file" in result.lower()
+
+    def test_read_blocked_path(self):
+        from agenticops.tools.file_tools import read_document
+        result = read_document("/etc/shadow")
+        assert "ACCESS DENIED" in result
+
+    def test_read_unsupported_extension(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        bf = tmp_files / "data.bin"
+        bf.write_bytes(b"\x00\x01\x02")
+        result = read_document(str(bf))
+        assert "unsupported" in result.lower()
+
+    def test_read_large_text_file_rejected(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        lf = tmp_files / "huge.md"
+        lf.write_text("x" * (11 * 1024 * 1024))  # >10 MB
+        result = read_document(str(lf))
+        assert "too large" in result.lower()
+
+    def test_read_permission_denied(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        pf = tmp_files / "secret.md"
+        pf.write_text("secret")
+        pf.chmod(0o000)
+        try:
+            result = read_document(str(pf))
+            assert "error" in result.lower() or "permission" in result.lower()
+        finally:
+            pf.chmod(0o644)
+
+    def test_read_pdf_no_library(self, tmp_files):
+        """When pymupdf and pypdf are both unavailable, should report it."""
+        from agenticops.tools.file_tools import read_document
+        pf = tmp_files / "doc.pdf"
+        pf.write_bytes(b"%PDF-1.4 fake")
+        with patch.dict("sys.modules", {"pymupdf": None, "pypdf": None}):
+            result = read_document(str(pf))
+            # Either an error or a library-not-installed message
+            assert "pdf" in result.lower() or "error" in result.lower()
+
+    def test_read_docx_no_library(self, tmp_files):
+        """When python-docx is unavailable, should report it."""
+        from agenticops.tools.file_tools import read_document
+        df = tmp_files / "doc.docx"
+        df.write_bytes(b"PK\x03\x04 fake docx")
+        with patch.dict("sys.modules", {"docx": None}):
+            result = read_document(str(df))
+            assert "docx" in result.lower() or "error" in result.lower()
+
+    def test_read_xlsx_no_library(self, tmp_files):
+        """When openpyxl is unavailable, should report it."""
+        from agenticops.tools.file_tools import read_document
+        xf = tmp_files / "data.xlsx"
+        xf.write_bytes(b"PK\x03\x04 fake xlsx")
+        with patch.dict("sys.modules", {"openpyxl": None}):
+            result = read_document(str(xf))
+            assert "xlsx" in result.lower() or "error" in result.lower()
+
+
 class TestRegisterLocalDoc:
     def test_register_does_not_crash_on_import_error(self):
         """_register_local_doc is best-effort and should never raise."""
