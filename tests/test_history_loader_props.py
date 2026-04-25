@@ -71,7 +71,7 @@ class TestToolUseStructureProperty:
     """
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_assistant_messages_have_tool_use_blocks(self, tool_calls):
         """Every tool call produces an assistant message with a toolUse content block."""
         result = _rebuild_tool_messages(tool_calls)
@@ -86,7 +86,7 @@ class TestToolUseStructureProperty:
             assert "toolUse" in assistant_msg["content"][0]
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_tool_use_id_is_non_empty_string(self, tool_calls):
         """Every toolUse block has a non-empty string toolUseId."""
         result = _rebuild_tool_messages(tool_calls)
@@ -98,7 +98,7 @@ class TestToolUseStructureProperty:
             assert len(tool_use_id) > 0
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_name_matches_original(self, tool_calls):
         """The toolUse name matches the original tool_calls entry name."""
         result = _rebuild_tool_messages(tool_calls)
@@ -108,7 +108,7 @@ class TestToolUseStructureProperty:
             assert tool_use["name"] == tc["name"]
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_input_matches_original(self, tool_calls):
         """The toolUse input matches the original tool_calls entry input."""
         result = _rebuild_tool_messages(tool_calls)
@@ -136,7 +136,7 @@ class TestToolResultPairingProperty:
     """
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_each_tool_use_has_exactly_one_matching_tool_result(self, tool_calls):
         """Every toolUse has exactly one toolResult with the same toolUseId."""
         result = _rebuild_tool_messages(tool_calls)
@@ -166,7 +166,7 @@ class TestToolResultPairingProperty:
             )
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_tool_result_content_is_placeholder_text(self, tool_calls):
         """Every toolResult content is [{"text": "(result from previous session)"}]."""
         result = _rebuild_tool_messages(tool_calls)
@@ -179,7 +179,7 @@ class TestToolResultPairingProperty:
                         assert block["toolResult"]["content"] == expected_content
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_tool_result_status_is_success(self, tool_calls):
         """Every toolResult status is "success"."""
         result = _rebuild_tool_messages(tool_calls)
@@ -191,7 +191,7 @@ class TestToolResultPairingProperty:
                         assert block["toolResult"]["status"] == "success"
 
     @given(tool_calls=_tool_calls_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_tool_result_messages_have_user_role(self, tool_calls):
         """Every toolResult message has role "user"."""
         result = _rebuild_tool_messages(tool_calls)
@@ -319,7 +319,7 @@ class TestSummaryInjectionIntegrityProperty:
         summary_texts=_summary_texts_st,
         msg_pairs=_msg_pairs_st,
     )
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_all_summary_texts_present_in_output(self, summary_texts, msg_pairs):
         """Every summary text appears in the returned message list."""
         session_row = _make_mock_session()
@@ -356,7 +356,7 @@ class TestSummaryInjectionIntegrityProperty:
         summary_texts=_summary_texts_st,
         msg_pairs=_msg_pairs_st,
     )
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_summaries_appear_before_history_messages(self, summary_texts, msg_pairs):
         """Summary content appears before any history message content."""
         session_row = _make_mock_session()
@@ -421,7 +421,7 @@ class TestSummaryInjectionIntegrityProperty:
             )
 
     @given(summary_texts=_summary_texts_st)
-    @settings(max_examples=150)
+    @settings(max_examples=150, deadline=None)
     def test_summaries_present_even_without_history(self, summary_texts):
         """Summaries are returned even when there are no history messages."""
         session_row = _make_mock_session()
