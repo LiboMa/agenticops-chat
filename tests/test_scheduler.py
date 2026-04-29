@@ -693,3 +693,350 @@ class TestRunNow:
             # run_now queries for execution after _execute_schedule_by_info
             # Since we mocked execution, there may be no record
             # but it should not crash
+
+
+# ============================================================================
+# Pipeline Execution Tests (coverage for _execute_schedule_by_info lines 343+)
+# ============================================================================
+
+
+class TestPipelineExecution:
+    """Test the actual pipeline execution path in _execute_schedule_by_info."""
+
+    def _make_schedule(self, patch_db, name, pipeline, config=None):
+        with patch_db() as session:
+            s = Schedule(
+                name=name,
+                pipeline_name=pipeline,
+                cron_expression="0 0 * * *",
+                config=config or {},
+            )
+            session.add(s)
+            session.flush()
+            return s.id
+
+    def test_successful_pipeline_execution(self, patch_db):
+        """Full pipeline execution with mocked account and pipeline."""
+        sid = self._make_schedule(patch_db, "pipe-ok", "FullScan")
+
+        mock_account = MagicMock()
+        mock_account.name = "test-acct"
+        mock_account.is_enabled = True
+
+        mock_step = MagicMock()
+        mock_step.step_name = "scan"
+        mock_step.status = MagicMock(value="completed")
+        mock_step.data = {"items": 5}
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.duration_ms = 2500
+        mock_result.step_results = [mock_step]
+
+        mock_pipeline_cls = MagicMock()
+        mock_pipeline_inst = MagicMock()
+        mock_pipeline_inst.execute = MagicMock(return_value=mock_result)
+        mock_pipeline_cls.return_value = mock_pipeline_inst
+
+        info = {"id": sid, "name": "pipe-ok", "pipeline_name": "FullScan",
+                "account_name": None, "config": {}}
+
+        # Insert a real CloudAccount so the scheduler can query it
+        with patch_db() as session:
+            from agenticops.models import CloudAccount
+            ca = CloudAccount(
+                name="test-acct", provider="aws", is_enabled=True,
+                credentials={"key": "val"},
+            )
+            session.add(ca)
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.pipeline.FullScanPipeline", mock_pipeline_cls), \
+             patch("asyncio.run", return_value=mock_result), \
+             patch("agenticops.scheduler.scheduler.notify_schedule_result", create=True):
+
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        with patch_db() as session:
+            ex = session.query(ScheduleExecution).filter_by(
+                schedule_id=sid
+            ).first()
+            assert ex is not None
+            assert ex.status == "completed"
+            assert ex.duration_ms == 2500
+            assert ex.result["pipeline"] == "FullScan"
+
+    def test_pipeline_execution_with_failure(self, patch_db):
+        """Pipeline that returns success=False should mark execution failed."""
+        sid = self._make_schedule(patch_db, "pipe-fail", "Monitoring")
+
+        mock_result = MagicMock()
+        mock_result.success = False
+        mock_result.duration_ms = 1000
+        mock_result.step_results = []
+
+        # Insert a mock account
+        with patch_db() as session:
+            from agenticops.models import CloudAccount
+            ca = CloudAccount(
+                name="fail-acct", provider="aws", is_enabled=True,
+                credentials={"key": "val"},
+            )
+            session.add(ca)
+
+        info = {"id": sid, "name": "pipe-fail", "pipeline_name": "Monitoring",
+                "account_name": None, "config": {}}
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.pipeline.MonitoringPipeline") as MockPipe, \
+             patch("asyncio.run", return_value=mock_result):
+            MockPipe.return_value = MagicMock()
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        with patch_db() as session:
+            ex = session.query(ScheduleExecution).filter_by(
+                schedule_id=sid
+            ).first()
+            assert ex is not None
+            assert ex.status == "failed"
+
+    def test_healthpatrol_passes_config(self, patch_db):
+        """HealthPatrol pipeline should receive config kwarg."""
+        sid = self._make_schedule(
+            patch_db, "hp-cfg", "HealthPatrol",
+            config={"threshold": 0.9},
+        )
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.duration_ms = 500
+        mock_result.step_results = []
+
+        with patch_db() as session:
+            from agenticops.models import CloudAccount
+            ca = CloudAccount(
+                name="hp-acct", provider="aws", is_enabled=True,
+                credentials={"key": "val"},
+            )
+            session.add(ca)
+
+        info = {"id": sid, "name": "hp-cfg", "pipeline_name": "HealthPatrol",
+                "account_name": None, "config": {"threshold": 0.9}}
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.pipeline.HealthPatrolPipeline") as MockHP, \
+             patch("asyncio.run", return_value=mock_result):
+            MockHP.return_value = MagicMock()
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+            # HealthPatrol should be called with config=
+            MockHP.assert_called_once()
+            _, kwargs = MockHP.call_args
+            assert "config" in kwargs
+            assert kwargs["config"] == {"threshold": 0.9}
+
+    def test_pipeline_with_specific_account(self, patch_db):
+        """Execution with account_name filters to that account only."""
+        sid = self._make_schedule(patch_db, "acct-filter", "DailyReport")
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.duration_ms = 300
+        mock_result.step_results = []
+
+        with patch_db() as session:
+            from agenticops.models import CloudAccount
+            session.add(CloudAccount(
+                name="target-acct", provider="aws", is_enabled=True,
+                credentials={"key": "val"},
+            ))
+            session.add(CloudAccount(
+                name="other-acct", provider="gcp", is_enabled=True,
+                credentials={"key": "val"},
+            ))
+
+        info = {"id": sid, "name": "acct-filter", "pipeline_name": "DailyReport",
+                "account_name": "target-acct", "config": {}}
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.pipeline.DailyReportPipeline") as MockDR, \
+             patch("asyncio.run", return_value=mock_result):
+            MockDR.return_value = MagicMock()
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        with patch_db() as session:
+            ex = session.query(ScheduleExecution).filter_by(
+                schedule_id=sid
+            ).first()
+            assert ex is not None
+            assert ex.status == "completed"
+            # Should only have run for target-acct
+            assert "target-acct" in ex.result.get("accounts", [])
+            assert "other-acct" not in ex.result.get("accounts", [])
+
+
+# ============================================================================
+# AgentChain Execution Tests (coverage for _execute_agent_chain lines 421+)
+# ============================================================================
+
+
+class TestAgentChainExecution:
+    """Test agent chain execution paths."""
+
+    def _make_agent_schedule(self, patch_db, name, config):
+        with patch_db() as session:
+            s = Schedule(
+                name=name,
+                pipeline_name="AgentChain",
+                cron_expression="0 0 * * *",
+                config=config,
+            )
+            session.add(s)
+            session.flush()
+            return s.id
+
+    def test_agent_chain_success(self, patch_db):
+        """Successful AgentChain execution with prompt."""
+        sid = self._make_agent_schedule(
+            patch_db, "agent-ok",
+            {"prompt": "Run daily health check", "timeout_seconds": 5},
+        )
+
+        info = {"id": sid, "name": "agent-ok", "pipeline_name": "AgentChain",
+                "account_name": None,
+                "config": {"prompt": "Run daily health check", "timeout_seconds": 5}}
+
+        mock_agent = MagicMock(return_value="All systems healthy")
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.agents.main_agent.create_main_agent", return_value=mock_agent), \
+             patch("agenticops.services.notification_service.set_schedule_running"), \
+             patch("agenticops.services.notification_service.notify_schedule_result"):
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        with patch_db() as session:
+            ex = session.query(ScheduleExecution).filter_by(
+                schedule_id=sid
+            ).first()
+            assert ex is not None
+            assert ex.status == "completed"
+            assert "All systems healthy" in ex.result.get("agent_output", "")
+
+    def test_agent_chain_with_skills_and_report(self, patch_db):
+        """AgentChain with skills and report_type builds enhanced prompt."""
+        sid = self._make_agent_schedule(
+            patch_db, "agent-enhanced",
+            {
+                "prompt": "Check prod",
+                "skills": ["aws-scan", "k8s-check"],
+                "report_type": "executive",
+                "timeout_seconds": 5,
+            },
+        )
+
+        info = {"id": sid, "name": "agent-enhanced", "pipeline_name": "AgentChain",
+                "account_name": None,
+                "config": {
+                    "prompt": "Check prod",
+                    "skills": ["aws-scan", "k8s-check"],
+                    "report_type": "executive",
+                    "timeout_seconds": 5,
+                }}
+
+        captured_prompt = []
+
+        def fake_agent(prompt):
+            captured_prompt.append(prompt)
+            return "Executive report done"
+
+        mock_create = MagicMock(return_value=fake_agent)
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.agents.main_agent.create_main_agent", mock_create), \
+             patch("agenticops.services.notification_service.set_schedule_running"), \
+             patch("agenticops.services.notification_service.notify_schedule_result"):
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        assert len(captured_prompt) == 1
+        assert "aws-scan" in captured_prompt[0]
+        assert "k8s-check" in captured_prompt[0]
+        assert "executive" in captured_prompt[0]
+        assert "Check prod" in captured_prompt[0]
+
+    def test_agent_chain_with_notify_channels(self, patch_db):
+        """AgentChain delivers output to notify_channels via share_content."""
+        sid = self._make_agent_schedule(
+            patch_db, "agent-notify",
+            {
+                "prompt": "Generate report",
+                "notify_channels": ["slack", "email"],
+                "timeout_seconds": 5,
+            },
+        )
+
+        info = {"id": sid, "name": "agent-notify", "pipeline_name": "AgentChain",
+                "account_name": None,
+                "config": {
+                    "prompt": "Generate report",
+                    "notify_channels": ["slack", "email"],
+                    "timeout_seconds": 5,
+                }}
+
+        mock_agent = MagicMock(return_value="Report content here")
+        mock_share = MagicMock()
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.agents.main_agent.create_main_agent", return_value=mock_agent), \
+             patch("agenticops.services.notification_service.set_schedule_running"), \
+             patch("agenticops.services.notification_service.notify_schedule_result"), \
+             patch("agenticops.storage.backend.get_storage_backend") as mock_storage, \
+             patch("agenticops.tools.notification_tools.share_content", mock_share):
+            mock_backend = MagicMock()
+            mock_backend.write.return_value = "s3://bucket/key"
+            mock_backend.presigned_url.return_value = "https://presigned.url"
+            mock_storage.return_value = mock_backend
+
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        mock_share.assert_called_once()
+        call_kwargs = mock_share.call_args
+        assert "slack,email" in str(call_kwargs)
+
+    def test_agent_chain_timeout(self, patch_db):
+        """AgentChain that exceeds timeout should mark execution as failed."""
+        sid = self._make_agent_schedule(
+            patch_db, "agent-timeout",
+            {"prompt": "Slow task", "timeout_seconds": 1},
+        )
+
+        info = {"id": sid, "name": "agent-timeout", "pipeline_name": "AgentChain",
+                "account_name": None,
+                "config": {"prompt": "Slow task", "timeout_seconds": 1}}
+
+        def slow_agent(prompt):
+            import time
+            time.sleep(10)
+            return "Should not finish"
+
+        mock_create = MagicMock(return_value=slow_agent)
+
+        with patch("agenticops.scheduler.scheduler.get_db_session", patch_db), \
+             patch("agenticops.agents.main_agent.create_main_agent", mock_create), \
+             patch("agenticops.services.notification_service.set_schedule_running"), \
+             patch("agenticops.services.notification_service.notify_schedule_result"):
+            scheduler = Scheduler()
+            scheduler._execute_schedule_by_info(info)
+
+        with patch_db() as session:
+            ex = session.query(ScheduleExecution).filter_by(
+                schedule_id=sid
+            ).first()
+            assert ex is not None
+            assert ex.status == "failed"
+            assert "Timed out" in (ex.error or "")

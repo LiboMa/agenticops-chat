@@ -500,7 +500,10 @@ class Scheduler:
             ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
             if ex:
                 ex.completed_at = datetime.now(timezone.utc)
-                ex.duration_ms = int((ex.completed_at - ex.started_at).total_seconds() * 1000)
+                # Ensure both are naive UTC to avoid aware/naive mismatch from SQLite
+                _started = ex.started_at.replace(tzinfo=None) if ex.started_at else ex.completed_at.replace(tzinfo=None)
+                _completed = ex.completed_at.replace(tzinfo=None) if ex.completed_at.tzinfo else ex.completed_at
+                ex.duration_ms = int((_completed - _started).total_seconds() * 1000)
                 if timed_out:
                     ex.status = "failed"
                     ex.error = f"Timed out after {timeout_seconds}s"
