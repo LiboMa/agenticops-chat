@@ -272,9 +272,13 @@ class AuthService:
             )
 
             if api_key:
-                # Check expiry
-                if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
-                    return None
+                # Check expiry (handle both naive and aware datetimes from DB)
+                if api_key.expires_at:
+                    exp = api_key.expires_at
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=timezone.utc)
+                    if exp < datetime.now(timezone.utc):
+                        return None
 
                 # Update last used
                 api_key.last_used_at = datetime.now(timezone.utc)
