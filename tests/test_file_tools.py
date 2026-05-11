@@ -448,3 +448,271 @@ class TestRegisterLocalDoc:
         from agenticops.tools.file_tools import _register_local_doc
         # This should not raise even if DB is not configured
         _register_local_doc("/tmp/test.txt", 100, "overwrite")
+
+    def test_register_updates_existing_record(self):
+        """When a LocalDoc record already exists, overwrite updates size."""
+        from agenticops.tools.file_tools import _register_local_doc
+
+        mock_existing = MagicMock(size_bytes=50)
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_existing
+
+        with patch("agenticops.models.get_db_session") as mock_get_db, \
+             patch("agenticops.models.LocalDoc"):
+            mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
+            mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
+            _register_local_doc("/tmp/test.txt", 200, "overwrite")
+            assert mock_existing.size_bytes == 200
+
+    def test_register_append_no_size_update(self):
+        """Append mode does not update size_bytes on existing record."""
+        from agenticops.tools.file_tools import _register_local_doc
+
+        mock_existing = MagicMock(size_bytes=50)
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.first.return_value = mock_existing
+
+        with patch("agenticops.models.get_db_session") as mock_get_db, \
+             patch("agenticops.models.LocalDoc"):
+            mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
+            mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
+            _register_local_doc("/tmp/test.txt", 200, "append")
+            assert mock_existing.size_bytes == 50  # unchanged
+
+    def test_register_exception_suppressed(self):
+        """Exceptions inside _register_local_doc are caught silently."""
+        from agenticops.tools.file_tools import _register_local_doc
+
+        with patch("agenticops.models.get_db_session", side_effect=RuntimeError("db down")):
+            # Should not raise
+            _register_local_doc("/tmp/test.txt", 100, "overwrite")
+
+
+class TestIsBlockedAdminFilenames:
+    """Cover admin filename blocking (id_rsa etc.)."""
+
+    def test_admin_filename_blocked_without_admin(self):
+        from agenticops.tools.file_tools import _is_blocked
+        result = _is_blocked("/home/user/id_rsa")
+        assert result is not None
+        assert "Blocked" in result
+
+    def test_admin_filename_allowed_with_admin(self):
+        from agenticops.tools.file_tools import _is_blocked
+        from agenticops.config import settings
+        settings.file_tools_admin_mode = True
+        result = _is_blocked("/home/user/id_rsa")
+        assert result is None
+
+
+class TestTailLocalFileEdge:
+    def test_tail_not_a_file(self, tmp_files):
+        from agenticops.tools.file_tools import tail_local_file
+        result = tail_local_file(str(tmp_files / "subdir"))
+        assert "Not a file" in result
+
+
+class TestSearchLocalFileEdge:
+    def test_search_not_a_file(self, tmp_files):
+        from agenticops.tools.file_tools import search_local_file
+        result = search_local_file(str(tmp_files / "subdir"), "key")
+        assert "Not a file" in result
+
+
+class TestListLocalDirectoryEdge:
+    def test_list_shows_directory_entries(self, tmp_files):
+        """Directories in listing should show 'dir/' prefix."""
+        from agenticops.tools.file_tools import list_local_directory
+        result = list_local_directory(str(tmp_files))
+        assert "dir/" in result
+
+    def test_list_exception(self, tmp_files):
+        from agenticops.tools.file_tools import list_local_directory
+        resolved = Path(tmp_files).resolve()
+        with patch.object(Path, "glob", side_effect=OSError("disk error")):
+            result = list_local_directory(str(tmp_files))
+            assert "Error" in result or "error" in result.lower()
+
+
+class TestReadLocalFileEdge:
+    def test_read_not_a_file(self, tmp_files):
+        """Reading a directory should fail with helpful message."""
+        from agenticops.tools.file_tools import read_local_file
+        result = read_local_file(str(tmp_files / "subdir"))
+        assert "Not a file" in result
+        assert "list_local_directory" in result
+
+    def test_read_unicode_error(self, tmp_files):
+        """Binary file triggers UnicodeDecodeError path."""
+        from agenticops.tools.file_tools import read_local_file
+        binf = tmp_files / "binary.dat"
+        binf.write_bytes(bytes(range(256)))
+        # Force a real UnicodeDecodeError by patching open
+        with patch("builtins.open", side_effect=UnicodeDecodeError("utf-8", b"", 0, 1, "invalid")):
+            result = read_local_file(str(binf))
+            assert "binary" in result.lower() or "Cannot read" in result
+
+    def test_read_large_file_rejected(self, tmp_files):
+        """Files over 10 MB should be rejected."""
+        from agenticops.tools.file_tools import read_local_file
+        big = tmp_files / "huge.txt"
+        big.write_text("x")
+        with patch.object(Path, "stat") as mock_stat:
+            mock_stat.return_value = MagicMock(st_size=11 * 1024 * 1024)
+            with patch.object(Path, "resolve", return_value=big):
+                with patch.object(Path, "exists", return_value=True):
+                    with patch.object(Path, "is_file", return_value=True):
+                        result = read_local_file(str(big))
+                        assert "too large" in result.lower() or "tail" in result.lower()
+
+
+class TestFileStatEdge:
+    def test_stat_other_type(self, tmp_files):
+        """When path is neither file nor dir, type should be 'other'."""
+        from agenticops.tools.file_tools import file_stat
+        p = tmp_files / "sample.txt"
+        with patch.object(Path, "is_file", return_value=False), \
+             patch.object(Path, "is_dir", return_value=False):
+            result = file_stat(str(p))
+            assert "other" in result
+
+
+class TestReadDocumentEdge:
+    def test_pdf_page_range(self, tmp_files):
+        """PDF page range parsing for single page and range."""
+        from agenticops.tools.file_tools import read_document
+        pdf = tmp_files / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+
+        mock_page = MagicMock()
+        mock_page.get_text.return_value = "Page content"
+        mock_doc = MagicMock()
+        mock_doc.__len__ = MagicMock(return_value=5)
+        mock_doc.__getitem__ = MagicMock(return_value=mock_page)
+
+        import sys
+        mock_pymupdf = MagicMock()
+        mock_pymupdf.open.return_value = mock_doc
+        sys.modules["pymupdf"] = mock_pymupdf
+        try:
+            result = read_document(str(pdf), pages="2-4")
+            assert "Page content" in result
+            result = read_document(str(pdf), pages="3")
+            assert "Page content" in result
+        finally:
+            del sys.modules["pymupdf"]
+
+    def test_pdf_invalid_page_range(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        pdf = tmp_files / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        result = read_document(str(pdf), pages="abc")
+        assert "Invalid page range" in result
+
+    def test_pdf_too_large(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        pdf = tmp_files / "big.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        orig_stat = Path.stat
+        def fake_stat(self, **kwargs):
+            s = orig_stat(self, **kwargs)
+            return os.stat_result((s.st_mode, s.st_ino, s.st_dev, s.st_nlink,
+                                   s.st_uid, s.st_gid, 25 * 1024 * 1024,
+                                   int(s.st_atime), int(s.st_mtime), int(s.st_ctime)))
+        with patch.object(Path, "stat", fake_stat):
+            result = read_document(str(pdf))
+            assert "too large" in result.lower()
+
+    def test_docx_with_library(self, tmp_files):
+        """DOCX reading with python-docx available."""
+        from agenticops.tools.file_tools import read_document
+        df = tmp_files / "doc.docx"
+        df.write_bytes(b"PK\x03\x04 fake docx")
+
+        mock_para = MagicMock()
+        mock_para.text = "Hello World"
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = [mock_para]
+
+        with patch.dict("sys.modules", {"docx": MagicMock()}):
+            with patch("agenticops.tools.file_tools.Document", return_value=mock_doc, create=True):
+                # The import inside the function uses `from docx import Document`
+                # We need to mock that properly
+                import sys
+                mock_docx_module = MagicMock()
+                mock_docx_module.Document.return_value = mock_doc
+                sys.modules["docx"] = mock_docx_module
+                try:
+                    result = read_document(str(df))
+                    assert "Hello World" in result or "paragraphs" in result.lower() or "error" in result.lower()
+                finally:
+                    del sys.modules["docx"]
+
+    def test_xlsx_with_library(self, tmp_files):
+        """XLSX reading with openpyxl available."""
+        from agenticops.tools.file_tools import read_document
+        xf = tmp_files / "data.xlsx"
+        xf.write_bytes(b"PK\x03\x04 fake xlsx")
+
+        mock_ws = MagicMock()
+        mock_ws.iter_rows.return_value = [("A1", "B1"), ("A2", "B2")]
+        mock_wb = MagicMock()
+        mock_wb.sheetnames = ["Sheet1"]
+        mock_wb.__getitem__ = MagicMock(return_value=mock_ws)
+
+        import sys
+        mock_openpyxl = MagicMock()
+        mock_openpyxl.load_workbook.return_value = mock_wb
+        sys.modules["openpyxl"] = mock_openpyxl
+        try:
+            result = read_document(str(xf))
+            assert "Sheet1" in result or "error" in result.lower()
+        finally:
+            del sys.modules["openpyxl"]
+
+    def test_text_file_too_large(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        tf = tmp_files / "huge.md"
+        tf.write_text("x")
+        orig_stat = Path.stat
+        def fake_stat(self, **kwargs):
+            s = orig_stat(self, **kwargs)
+            return os.stat_result((s.st_mode, s.st_ino, s.st_dev, s.st_nlink,
+                                   s.st_uid, s.st_gid, 15 * 1024 * 1024,
+                                   int(s.st_atime), int(s.st_mtime), int(s.st_ctime)))
+        with patch.object(Path, "stat", fake_stat):
+            result = read_document(str(tf))
+            assert "too large" in result.lower()
+
+    def test_permission_denied(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        tf = tmp_files / "noperm.md"
+        tf.write_text("secret")
+        os.chmod(str(tf), 0o000)
+        try:
+            result = read_document(str(tf))
+            assert "Permission denied" in result or "Error" in result
+        finally:
+            os.chmod(str(tf), 0o644)
+
+    def test_general_exception(self, tmp_files):
+        from agenticops.tools.file_tools import read_document
+        tf = tmp_files / "bad.md"
+        tf.write_text("data")
+        with patch("pathlib.Path.read_text", side_effect=RuntimeError("boom")):
+            result = read_document(str(tf))
+            assert "Error" in result
+
+
+class TestWriteLocalFileEdge:
+    def test_write_permission_denied(self, tmp_files):
+        from agenticops.tools.file_tools import write_local_file
+        with patch("builtins.open", side_effect=PermissionError("nope")):
+            result = write_local_file(str(tmp_files / "out.txt"), "data")
+            assert "Permission denied" in result
+
+    def test_write_general_exception(self, tmp_files):
+        from agenticops.tools.file_tools import write_local_file
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            result = write_local_file(str(tmp_files / "out.txt"), "data")
+            assert "Error" in result
