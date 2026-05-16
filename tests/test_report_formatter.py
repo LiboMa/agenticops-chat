@@ -208,3 +208,118 @@ class TestFormatReport:
             results = format_report("T", "C", ["html", "markdown"])
             # markdown should still succeed
             assert any(r.format == "markdown" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# _to_html / _to_newsletter_html — markdown-missing fallback
+# ---------------------------------------------------------------------------
+
+class TestHtmlFallbackWithoutMarkdown:
+    def test_to_html_fallback_no_markdown(self):
+        """When the markdown package is missing, _to_html returns a plain <pre> fallback."""
+        with patch("agenticops.notify.report_formatter._HAS_MARKDOWN", False):
+            from agenticops.notify.report_formatter import _to_html
+            r = _to_html("Title", "**bold**", "report")
+            assert r.format == "html"
+            assert b"<pre>" in r.content
+            assert b"**bold**" in r.content
+
+    def test_newsletter_fallback_no_markdown(self):
+        """Newsletter also falls back to <pre> without markdown."""
+        with patch("agenticops.notify.report_formatter._HAS_MARKDOWN", False):
+            from agenticops.notify.report_formatter import _to_newsletter_html
+            r = _to_newsletter_html("Title", "content", {})
+            assert r.format == "html"
+            assert b"<pre>" in r.content
+
+
+# ---------------------------------------------------------------------------
+# _to_pdf with mocked weasyprint
+# ---------------------------------------------------------------------------
+
+class TestToPdfWithMock:
+    def test_pdf_generation_with_weasyprint(self):
+        """Simulate weasyprint being available and verify PDF output."""
+        mock_weasyprint = MagicMock()
+        mock_weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.4 fake"
+
+        with patch("agenticops.notify.report_formatter._HAS_WEASYPRINT", True), \
+             patch.dict("sys.modules", {"weasyprint": mock_weasyprint}):
+            from agenticops.notify.report_formatter import _to_pdf
+            r = _to_pdf("Title", "# Hello", "report")
+            assert r is not None
+            assert r.format == "pdf"
+            assert r.content == b"%PDF-1.4 fake"
+            assert r.content_type == "application/pdf"
+            assert r.extension == ".pdf"
+            mock_weasyprint.HTML.assert_called_once()
+
+    def test_pdf_skipped_without_weasyprint(self):
+        """When weasyprint is missing, _to_pdf returns None with a warning."""
+        with patch("agenticops.notify.report_formatter._HAS_WEASYPRINT", False):
+            from agenticops.notify.report_formatter import _to_pdf
+            r = _to_pdf("Title", "content", "report")
+            assert r is None
+
+
+# ---------------------------------------------------------------------------
+# _to_docx with mocked python-docx
+# ---------------------------------------------------------------------------
+
+class TestToDocxWithMock:
+    def test_docx_skipped_without_docx(self):
+        """When python-docx is missing, _to_docx returns None."""
+        with patch("agenticops.notify.report_formatter._HAS_DOCX", False):
+            from agenticops.notify.report_formatter import _to_docx
+            r = _to_docx("Title", "content", "report")
+            assert r is None
+
+    def test_docx_generation_with_mock(self):
+        """Simulate python-docx being available; cover the full _to_docx path."""
+        from io import BytesIO
+
+        # Build a mock Document that records calls
+        mock_doc = MagicMock()
+        mock_doc.styles.__iter__ = MagicMock(return_value=iter([]))
+        mock_doc.styles.__contains__ = MagicMock(return_value=False)
+
+        # Make save write some bytes
+        def fake_save(buf):
+            buf.write(b"PK\x03\x04fake-docx")
+
+        mock_doc.save.side_effect = fake_save
+
+        mock_docx_module = MagicMock()
+        mock_docx_module.Document.return_value = mock_doc
+
+        mock_shared = MagicMock()
+
+        content = (
+            "# Heading 1\n"
+            "## Heading 2\n"
+            "### Heading 3\n"
+            "\n"
+            "- bullet item\n"
+            "* another bullet\n"
+            "1. numbered item\n"
+            "```python\ncode\n```\n"
+            "Normal paragraph\n"
+        )
+
+        with patch("agenticops.notify.report_formatter._HAS_DOCX", True), \
+             patch.dict("sys.modules", {
+                 "docx": mock_docx_module,
+                 "docx.shared": mock_shared,
+             }):
+            from agenticops.notify.report_formatter import _to_docx
+            r = _to_docx("Test Report", content, "incident")
+
+        assert r is not None
+        assert r.format == "docx"
+        assert r.extension == ".docx"
+        assert r.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assert len(r.content) > 0
+        # Document was used
+        mock_docx_module.Document.assert_called_once()
+        mock_doc.add_heading.assert_called()  # headings parsed
+        mock_doc.add_paragraph.assert_called()  # paragraphs added
