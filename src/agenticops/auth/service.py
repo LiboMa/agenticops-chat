@@ -138,6 +138,9 @@ class AuthService:
             user = session.query(User).filter_by(email=email, is_active=True).first()
             if user and verify_password(password, user.password_hash):
                 user.last_login_at = datetime.utcnow()
+                # Eagerly load attributes before session closes
+                session.flush()
+                session.expunge(user)
                 return user
             return None
 
@@ -192,6 +195,8 @@ class AuthService:
                     id=db_session.user_id,
                     is_active=True,
                 ).first()
+                if user:
+                    session.expunge(user)
                 return user
 
         return None
