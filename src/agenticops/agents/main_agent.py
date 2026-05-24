@@ -45,6 +45,9 @@ from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
 from agenticops.tools.notification_tools import share_content
 from agenticops.tools.memory_tools import record_agent_feedback, search_agent_memory
+from agenticops.tools.schedule_tools import (
+    run_task, create_schedule, list_schedules, manage_schedule, get_schedule_history
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,13 @@ ROUTING RULES:
 9.5. Skills: Use list_skills to show available domain skills. Use activate_skill to load skill
      knowledge for answering domain questions. Use read_skill_reference for deep-dive material.
      Use search_skill_registry to find skills by keyword across local and remote registries.
+9.7. SCHEDULES & TASKS: When the user asks to run a task, create a schedule, or manage schedules:
+     - "run/execute/check <something> now" → call run_task(prompt=<task description>)
+     - "every/daily/weekly/hourly <something>" → call create_schedule(name, prompt, cron)
+     - "list schedules/tasks" → call list_schedules()
+     - "disable/enable/delete schedule" → call manage_schedule(id, action)
+     - "show history/results for schedule" → call get_schedule_history(id)
+     Parse cron expressions from natural language (e.g., "every day at 8am" = "0 8 * * *").
 9.6. SKILL SELF-IMPROVEMENT: When a sub-agent reports inability to handle a scenario, finds no
      matching skill, or you identify a gap in existing skill coverage:
      1. Use create_skill(name, description) to generate a new skill from a description, OR
@@ -249,6 +259,12 @@ If the user explicitly requests a different scope, honor their request over this
             # Agent Memory tools (feedback recording + cross-agent search)
             record_agent_feedback,
             search_agent_memory,
+            # Schedule & Task tools (create/manage schedules and one-shot tasks)
+            run_task,
+            create_schedule,
+            list_schedules,
+            manage_schedule,
+            get_schedule_history,
             # MCP tool providers (external servers)
             *get_mcp_clients(),
         ],

@@ -388,6 +388,28 @@ flowchart LR
 - `publish=True` saves directly to production `skills/` directory — no draft/promote workflow needed
 - Skill is immediately activated and usable in the current session and all future sessions
 
+### Schedule & Task Management via Chat
+
+Agents can create and manage schedules/tasks through natural language:
+
+```mermaid
+flowchart LR
+    U["User: 'every day at 8am<br/>check RDS backup status'"] --> A["Agent parses intent"]
+    A --> CS["create_schedule(name, prompt, cron='0 8 * * *')"]
+    CS --> DB["Schedule record in DB"]
+    DB --> SCH["Scheduler executes on cron"]
+
+    U2["User: 'check all S3<br/>buckets for public access'"] --> A2["Agent parses intent"]
+    A2 --> RT["run_task(prompt)"]
+    RT --> ONCE["@once Schedule → immediate execution"]
+```
+
+**Tools:** `run_task` (one-shot) | `create_schedule` (recurring) | `list_schedules` | `manage_schedule` | `get_schedule_history`
+
+**CLI shortcut:** `/run <description>` — executes one-shot task immediately
+
+**Report template:** Tasks append report instructions to the prompt. Users can provide custom Markdown templates or use the default format (summary → findings → recommendations).
+
 ---
 
 ## Chat Preprocessing Pipeline

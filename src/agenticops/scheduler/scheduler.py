@@ -218,6 +218,19 @@ class Scheduler:
             schedules = session.query(Schedule).filter_by(is_enabled=True).all()
             for s in schedules:
                 try:
+                    # One-shot tasks: execute immediately if enabled
+                    if s.cron_expression == "@once":
+                        if s.next_run_at is None:
+                            due.append({
+                                "id": s.id,
+                                "name": s.name,
+                                "pipeline_name": s.pipeline_name,
+                                "account_name": s.account_name,
+                                "config": dict(s.config) if s.config else {},
+                                "next_run": None,
+                            })
+                        continue
+
                     cron = CronParser(s.cron_expression)
                     if s.next_run_at and s.next_run_at <= now:
                         # Snapshot the fields we need — no lazy access later
@@ -253,7 +266,11 @@ class Scheduler:
                     obj = session.query(Schedule).filter_by(id=info["id"]).first()
                     if obj:
                         obj.last_run_at = now
-                        obj.next_run_at = info["next_run"]
+                        if info.get("next_run") is None:
+                            # @once task: disable after execution
+                            obj.is_enabled = False
+                        else:
+                            obj.next_run_at = info["next_run"]
             except Exception as e:
                 logger.error(f"Error updating schedule '{info['name']}': {e}")
 
@@ -439,13 +456,14 @@ class Scheduler:
         notify_channels = config.get("notify_channels", [])
         timeout_seconds = config.get("timeout_seconds", 300)
 
-        # Build enhanced prompt (notify_channels handled externally via share_content)
+        # Build enhanced prompt with report instructions
+        from agenticops.tools.schedule_tools import build_enhanced_prompt
+        base_prompt = build_enhanced_prompt(config)
+
         parts = []
         if skills:
             parts.append(f"First activate these skills: {', '.join(skills)}.")
-        parts.append(prompt)
-        if report_type:
-            parts.append(f"Generate a {report_type} type report.")
+        parts.append(base_prompt)
         enhanced_prompt = " ".join(parts)
 
         response_text = ""

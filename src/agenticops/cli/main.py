@@ -3006,6 +3006,16 @@ def _slash_schedule(ctx: ChatContext, args: list) -> str:
     return "[yellow]Usage: /schedule [list | run <name> | enable <name> | disable <name>][/yellow]"
 
 
+def _slash_run(ctx: ChatContext, args: list) -> str:
+    """Handle /run command — execute a one-shot task immediately via Agent."""
+    if not args:
+        return "[yellow]Usage: /run <task description>[/yellow]\nExample: /run check all S3 buckets for public access"
+
+    # Send as a message to the Agent, which will call run_task tool
+    task_desc = " ".join(args)
+    return f"__agent__:Execute this task immediately: {task_desc}"
+
+
 def _slash_notify(ctx: ChatContext, args: list) -> str:
     """Handle /notify commands."""
     import asyncio
@@ -3437,6 +3447,7 @@ SLASH_COMMANDS = {
 
     # Automation
     "schedule": _slash_schedule,
+    "run": _slash_run,
     "notify": _slash_notify,
 
     # Send to channels/IM
@@ -4156,10 +4167,15 @@ def chat(
                 if result == "__EXIT__":
                     console.print("[yellow]Goodbye![/yellow]")
                     break
-                if result:
+                if result and result.startswith("__agent__:"):
+                    # Forward to agent as user input
+                    user_input = result[len("__agent__:"):]
+                elif result:
                     ctx.add_to_history("system", result)
                     print_with_truncation(console, result, ctx, header="System")
-                continue
+                    continue
+                else:
+                    continue
 
             # Store user input in history
             ctx.add_to_history("user", user_input)
