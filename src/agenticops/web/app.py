@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
@@ -1134,6 +1134,9 @@ async def api_get_settings():
         "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
         "notifications_consolidated": settings.notifications_consolidated,
         "bedrock_cache_enabled": settings.bedrock_cache_enabled,
+        "skills_auto_improve_enabled": settings.skills_auto_improve_enabled,
+        "skills_post_resolution_review": settings.skills_post_resolution_review,
+        "skills_improvement_notify": settings.skills_improvement_notify,
         "agent_models": agent_models,
         "model_presets": model_presets,
     }
@@ -1148,6 +1151,8 @@ async def api_update_settings(body: dict = Body(...)):
         "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
         "notifications_enabled", "executor_auto_approve_l0_l1",
         "notifications_consolidated", "bedrock_cache_enabled",
+        "skills_auto_improve_enabled", "skills_post_resolution_review",
+        "skills_improvement_notify",
     }
     ALL_KEYS = BOOL_KEYS | {"scan_focus", "agent_models"}
     unknown = set(body.keys()) - ALL_KEYS
@@ -3837,32 +3842,28 @@ async def api_list_agent_logs(
             q = q.filter(AgentLog.trace_id == trace_id)
         if status:
             q = q.filter(AgentLog.status == status)
-        total = q.count()
         rows = q.order_by(AgentLog.created_at.desc()).offset(offset).limit(limit).all()
-        return {
-            "total": total,
-            "items": [
-                {
-                    "id": r.id,
-                    "agent_name": r.agent_name,
-                    "action": r.action,
-                    "input_summary": r.input_summary,
-                    "output_summary": r.output_summary,
-                    "tool_calls": r.tool_calls,
-                    "input_tokens": r.input_tokens,
-                    "output_tokens": r.output_tokens,
-                    "cache_read_tokens": r.cache_read_tokens,
-                    "duration_ms": r.duration_ms,
-                    "status": r.status,
-                    "error": r.error,
-                    "trace_id": r.trace_id,
-                    "parent_agent": r.parent_agent,
-                    "model_id": r.model_id,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                }
-                for r in rows
-            ],
-        }
+        return [
+            {
+                "id": r.id,
+                "agent_name": r.agent_name,
+                "action": r.action,
+                "input_summary": r.input_summary,
+                "output_summary": r.output_summary,
+                "tool_calls": r.tool_calls,
+                "input_tokens": r.input_tokens,
+                "output_tokens": r.output_tokens,
+                "cache_read_tokens": r.cache_read_tokens,
+                "duration_ms": r.duration_ms,
+                "status": r.status,
+                "error": r.error,
+                "trace_id": r.trace_id,
+                "parent_agent": r.parent_agent,
+                "model_id": r.model_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
 
 
 @app.get("/api/agent-logs/timeline/{trace_id}")
@@ -3934,40 +3935,64 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
                 func.sum(AgentLog.output_tokens).label("total_output"),
                 func.sum(AgentLog.cache_read_tokens).label("total_cache_read"),
                 func.sum(AgentLog.duration_ms).label("total_duration_ms"),
-                func.avg(AgentLog.duration_ms).label("avg_duration_ms"),
+                func.sum(AgentLog.tool_calls).label("total_tool_calls"),
+                func.sum(
+                    case((AgentLog.status != "success", 1), else_=0)
+                ).label("error_count"),
             )
             .filter(AgentLog.created_at >= cutoff)
             .group_by(AgentLog.agent_name)
             .all()
         )
-        agents = []
+        per_agent = {}
         grand_input = 0
         grand_output = 0
-        grand_cache_read = 0
         for r in rows:
             inp = r.total_input or 0
             out = r.total_output or 0
-            cr = r.total_cache_read or 0
             grand_input += inp
             grand_output += out
-            grand_cache_read += cr
-            agents.append({
-                "agent_name": r.agent_name,
-                "call_count": r.call_count,
-                "total_input_tokens": inp,
-                "total_output_tokens": out,
-                "total_cache_read_tokens": cr,
+            per_agent[r.agent_name] = {
+                "calls": r.call_count,
+                "input_tokens": inp,
+                "output_tokens": out,
+                "cache_read_tokens": r.total_cache_read or 0,
                 "total_duration_ms": r.total_duration_ms or 0,
-                "avg_duration_ms": round(r.avg_duration_ms or 0),
-            })
+                "errors": r.error_count or 0,
+                "tool_calls": r.total_tool_calls or 0,
+            }
+
+        # Per-model aggregation
+        model_rows = (
+            db.query(
+                AgentLog.model_id,
+                func.count(AgentLog.id).label("call_count"),
+                func.sum(AgentLog.input_tokens).label("total_input"),
+                func.sum(AgentLog.output_tokens).label("total_output"),
+                func.sum(AgentLog.cache_read_tokens).label("total_cache_read"),
+                func.sum(AgentLog.duration_ms).label("total_duration_ms"),
+            )
+            .filter(AgentLog.created_at >= cutoff, AgentLog.model_id.isnot(None))
+            .group_by(AgentLog.model_id)
+            .all()
+        )
+        per_model = {}
+        for r in model_rows:
+            model_name = r.model_id or "unknown"
+            per_model[model_name] = {
+                "calls": r.call_count,
+                "input_tokens": r.total_input or 0,
+                "output_tokens": r.total_output or 0,
+                "cache_read_tokens": r.total_cache_read or 0,
+                "total_duration_ms": r.total_duration_ms or 0,
+            }
+
         return {
-            "period_hours": hours,
-            "agents": agents,
-            "totals": {
-                "input_tokens": grand_input,
-                "output_tokens": grand_output,
-                "cache_read_tokens": grand_cache_read,
-            },
+            "hours": hours,
+            "per_agent": per_agent,
+            "per_model": per_model,
+            "total_input_tokens": grand_input,
+            "total_output_tokens": grand_output,
         }
 
 
@@ -4170,17 +4195,36 @@ async def api_list_skills():
 
 
 @app.get("/api/skills/improvements")
-async def api_list_skill_improvements():
-    """List pending skill improvement suggestions."""
-    from agenticops.skills.improvement_store import list_pending
-    return list_pending()
+async def api_list_skill_improvements(status: str = "all", limit: int = 50):
+    """List skill improvements, optionally filtered by status."""
+    from agenticops.skills.improvement_store import list_pending, list_history, list_all
+    if status == "pending":
+        return list_pending()
+    elif status == "history":
+        return list_history(limit)
+    else:
+        return list_all(limit)
 
 
 @app.get("/api/skills/improvements/history")
 async def api_skill_improvements_history(limit: int = 50):
-    """Past improvement records with status (completed/failed)."""
+    """Backward-compatible alias."""
     from agenticops.skills.improvement_store import list_history
     return list_history(limit=limit)
+
+
+@app.post("/api/skills/improvements/batch-dismiss")
+async def api_batch_dismiss_improvements(body: dict):
+    """Dismiss multiple improvement records by setting status to 'dismissed'."""
+    from agenticops.skills.improvement_store import update_improvement
+    ids = body.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    results = []
+    for record_id in ids:
+        updated = update_improvement(record_id, "dismissed")
+        results.append({"id": record_id, "dismissed": updated is not None})
+    return {"results": results}
 
 
 @app.get("/api/skills/{name}")
@@ -4393,42 +4437,29 @@ async def api_promote_skill(name: str):
 
 
 @app.post("/api/skills/{name}/improve")
-async def api_improve_skill(name: str, body: dict = Body(...)):
+async def api_improve_skill(name: str, body: dict = Body(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     """Use LLM to auto-improve an existing skill. Creates a draft."""
-    from agenticops.skills.evolution import auto_improve_skill
-    from agenticops.skills.loader import _invalidate_skills_cache
-    from agenticops.skills.improvement_store import add_improvement, update_improvement
+    from agenticops.services.skill_improvement_service import trigger_skill_improvement, run_skill_improvement
     improvement = body.get("improvement", "")
     if not improvement.strip():
         raise HTTPException(status_code=400, detail="improvement description is required")
-    rec = add_improvement(name, improvement, source="web", trigger="manual")
-    result = auto_improve_skill(name, improvement)
+    result = trigger_skill_improvement(
+        skill_name=name,
+        gap_description=improvement,
+        trigger=body.get("trigger", "manual"),
+        source=body.get("source", "web"),
+    )
     if "error" in result:
-        update_improvement(rec["id"], "failed", result)
-    else:
-        update_improvement(rec["id"], "completed", result)
-    _invalidate_skills_cache()
-    return result
+        raise HTTPException(status_code=400, detail=result["error"])
 
+    # Schedule LLM generation in background
+    background_tasks.add_task(
+        run_skill_improvement,
+        record_id=result["record_id"],
+        skill_name=name,
+        gap_description=improvement,
+    )
 
-@app.post("/api/skills/{name}/improve-auto")
-async def api_improve_skill_auto(name: str, body: dict = Body(...)):
-    """Trigger auto-improvement from Web Portal with source/trigger tracking."""
-    from agenticops.skills.evolution import auto_improve_skill
-    from agenticops.skills.loader import _invalidate_skills_cache
-    from agenticops.skills.improvement_store import add_improvement, update_improvement
-    improvement = body.get("improvement", "")
-    source = body.get("source", "web")
-    trigger = body.get("trigger", "auto")
-    if not improvement.strip():
-        raise HTTPException(status_code=400, detail="improvement description is required")
-    rec = add_improvement(name, improvement, source=source, trigger=trigger)
-    result = auto_improve_skill(name, improvement)
-    if "error" in result:
-        update_improvement(rec["id"], "failed", result)
-        raise HTTPException(status_code=500, detail=result["error"])
-    update_improvement(rec["id"], "completed", result)
-    _invalidate_skills_cache()
     return result
 
 

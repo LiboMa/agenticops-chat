@@ -132,6 +132,74 @@ function TokenSummary({ hours, onHoursChange }: { hours: number; onHoursChange: 
   );
 }
 
+/* ── Model Summary Section ─────────────────────────────────────── */
+
+function ModelSummary({ hours }: { hours: number }) {
+  const summaryQ = useAgentLogSummary(hours);
+
+  if (summaryQ.isLoading || summaryQ.error || !summaryQ.data?.per_model) return null;
+
+  const models = Object.entries(summaryQ.data.per_model);
+  if (models.length === 0) return null;
+
+  // Shorten model ID for display: "global.anthropic.claude-sonnet-4-6" -> "claude-sonnet-4-6"
+  const shortName = (id: string) => {
+    const parts = id.split(".");
+    return parts.length > 2 ? parts.slice(2).join(".") : id;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">Model Usage</h2>
+      </CardHeader>
+      <CardBody>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
+                <th className="pb-2 pr-4">Model</th>
+                <th className="pb-2 pr-4">Calls</th>
+                <th className="pb-2 pr-4">Input Tokens</th>
+                <th className="pb-2 pr-4">Output Tokens</th>
+                <th className="pb-2 pr-4">Cache Read</th>
+                <th className="pb-2">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models
+                .sort(([, a], [, b]) => (b.input_tokens + b.output_tokens) - (a.input_tokens + a.output_tokens))
+                .map(([model, stats]) => {
+                  const maxTokens = Math.max(...models.map(([, s]) => s.input_tokens + s.output_tokens), 1);
+                  const pct = ((stats.input_tokens + stats.output_tokens) / maxTokens) * 100;
+                  return (
+                    <tr key={model} className="border-b border-border">
+                      <td className="py-2.5 pr-4 font-medium text-foreground">
+                        <span className="text-xs font-mono">{shortName(model)}</span>
+                      </td>
+                      <td className="py-2.5 pr-4 font-mono">{stats.calls}</td>
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs">{formatTokens(stats.input_tokens)}</span>
+                          <div className="flex-1 h-2 bg-secondary rounded-full max-w-[80px]">
+                            <div className="h-2 bg-green-500 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2.5 pr-4 font-mono text-xs">{formatTokens(stats.output_tokens)}</td>
+                      <td className="py-2.5 pr-4 font-mono text-xs">{formatTokens(stats.cache_read_tokens)}</td>
+                      <td className="py-2.5 font-mono text-xs">{formatDuration(stats.total_duration_ms)}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── Agent Call Log Section ──────────────────────────────────────── */
 
 function AgentCallLog({ onSelectTrace }: { onSelectTrace: (traceId: string) => void }) {
@@ -320,6 +388,7 @@ export default function AgentMetrics() {
 
       <div className="space-y-6">
         <TokenSummary hours={hours} onHoursChange={setHours} />
+        <ModelSummary hours={hours} />
         <AgentCallLog onSelectTrace={setSelectedTrace} />
       </div>
 

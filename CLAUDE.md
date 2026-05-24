@@ -144,3 +144,11 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 - **Always use `git push --no-verify`** to bypass Code Defender hooks
 - **Always Test the code** before commit it
 
+
+## WHEN Code Development, vibe coding
+1.有问题向我提问 
+2.不要生成无关代码. 
+3.从最简单的方案入手 
+4.写第一行代码前，把模糊指令转化为可量化的标准
+5.不碰与需求无关的代码，每行改动都对应明确的要求. 
+6. Each Time, 请从Plan Mode 开始

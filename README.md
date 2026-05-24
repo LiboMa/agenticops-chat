@@ -18,12 +18,15 @@ AgenticOps (`aiops`) uses 7 specialized AI agents (built on [Strands Agents SDK]
 | **Monitor & Detect** | CloudWatch alarms/metrics, Z-score anomaly detection, Prometheus/CloudWatch/Datadog webhook intake |
 | **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, network topology, Knowledge Base search |
 | **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — fully autonomous for low-risk fixes |
-| **Agent Skills** | 10 domain skills (Linux, Network, K8s, DB, Elasticsearch, Monitoring, Log, AWS Compute/Storage, Local OS) |
+| **Agent Skills** | 15 domain skills with self-improvement: auto-creation from resolved cases, LLM-driven refinement, draft/promote workflow |
+| **Agent Metrics** | Per-agent and per-model token consumption tracking, call logs, trace timeline |
 | **Network Topology** | VPC graph engine with SPOF detection, capacity risk, dependency chain, change simulation |
 | **Knowledge Base** | Hybrid vector (Titan V2) + keyword search; auto-distills resolved cases into reusable SOPs |
 | **Report** | Daily/weekly/incident/inventory reports with multi-channel distribution |
+| **Scheduled Pipelines** | Cron-based task scheduling: FullScan, Monitoring, DailyReport, HealthPatrol, AgentChain (prompt-driven) |
 | **Notify** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook — YAML-configured |
 | **IM Bots** | Feishu/Slack WebSocket bots with alert channel routing (agent-verified, not regex) |
+| **MCP Servers** | Claude Desktop-compatible MCP server integration for extended tool access |
 
 ## Multi-Agent Architecture
 
@@ -44,10 +47,12 @@ IM Bots ────────────┘         ├──► Detect Agen
 | **Main** | Opus 4.6 | Pure router — dispatches to specialists |
 | **RCA** | Opus 4.6 | Root cause analysis with Skills + KB |
 | **SRE** | Opus 4.6 | Fix plan generation (never executes) |
-| **Executor** | Opus 4.6 | Multi-backend execution (AWS/SSM/kubectl) |
-| **Scan** | Haiku 4.5 | Resource discovery (cost-optimized) |
-| **Detect** | Haiku 4.5 | Health monitoring (cost-optimized) |
+| **Executor** | Sonnet 4.6 | Multi-backend execution (AWS/SSM/kubectl) |
+| **Scan** | Sonnet 4.6 | Resource discovery |
+| **Detect** | Sonnet 4.6 | Health monitoring + anomaly detection |
 | **Reporter** | Haiku 4.5 | Report generation (cost-optimized) |
+
+Per-agent model overrides via `config/settings.yaml` or `AIOPS_AGENT_{NAME}_MODEL_ID` env vars.
 
 ### Auto-Fix Pipeline
 
@@ -185,30 +190,29 @@ aiops run scan|detect|analyze|report|schedule|notify [options]
 
 ## Web Dashboard
 
-React SPA with 16 pages, served by FastAPI at `http://localhost:8000`.
+React SPA with 13 pages, served by FastAPI at `http://localhost:8000`.
 
-**Tech stack**: React 18, TypeScript, Tailwind CSS, TanStack Query, React Flow
+**Tech stack**: React 18, TypeScript, Tailwind CSS, TanStack Query, Vite
 
 | Page | Description |
 |------|-------------|
 | **Dashboard** | Overview stats, critical issues, recent activity |
 | **Chat** | SSE streaming chat with file upload, session management |
-| **Resources** | AWS resource inventory with type filtering |
-| **Anomalies** | Health issue list with severity/status badges |
-| **Anomaly Detail** | Issue detail + pipeline timeline + action bar |
-| **Fix Plans** | Fix plan list + runbook UI |
-| **Fix Plan Detail** | Steps, pre/post checks, execution history |
-| **Network** | Interactive VPC topology with SRE analysis panel |
-| **Reports** | Report browser with detail view |
-| **Schedules** | CRUD + execution history + "Run Now" |
-| **Notifications** | Channel management + test-send + log viewer |
-| **Accounts** | AWS account management |
-| **Audit Log** | Complete operation audit trail |
-| **Settings** | Runtime configuration |
+| **Issues & Plans** | Health issues + fix plans in unified view with severity/status filtering |
+| **Issue Detail** | Issue detail + pipeline timeline + RCA + action bar |
+| **Resources** | AWS resource inventory with type/region filtering |
+| **Resource Detail** | Resource metadata, tags, related issues |
+| **Schedules** | CRUD + execution history + "Run Now" + cron builder |
+| **Schedule Detail** | Execution logs, pipeline config |
+| **Reports** | Report browser by type (daily/incident/inventory) |
+| **Agent Metrics** | Per-agent & per-model token consumption, call logs, trace timeline |
+| **Skills** | Skill catalog with domain filtering, draft/published status |
+| **Skill Detail** | Markdown viewer, inline editor, LLM improve, review diff, promote |
+| **Settings** | Runtime config, MCP servers, model presets, notification channels |
 
 ## API Reference
 
-~70 REST API endpoints served by FastAPI. Full OpenAPI docs at `http://localhost:8000/docs`.
+80+ REST API endpoints served by FastAPI. Full OpenAPI docs at `http://localhost:8000/docs`.
 
 | Category | Base Path | Count |
 |----------|-----------|-------|
@@ -218,16 +222,19 @@ React SPA with 16 pages, served by FastAPI at `http://localhost:8000`.
 | Resources | `/api/resources` | 5 |
 | Schedules | `/api/schedules` | 7 |
 | Notifications | `/api/notifications` | 7 |
-| Graph/Topology | `/api/graph`, `/api/network` | 18 |
+| Agent Logs/Metrics | `/api/agent-logs` | 3 |
+| Skills | `/api/skills` | 7 |
+| Graph/Topology | `/api/graph` | 12 |
 | Accounts | `/api/accounts` | 5 |
 | Auth | `/api/auth` | 3 |
 | Audit | `/api/audit` | 3 |
+| Settings/MCP | `/api/settings` | 8 |
 | Stats/Health | `/api/stats`, `/api/health` | 3 |
-| IM/Webhooks | `/api/im` | 8+ |
+| IM/Webhooks | `/api/im`, `/api/webhooks` | 8+ |
 
 ## Agent Skills
 
-10 domain skills loaded on demand (~636 tokens in system prompt, ~3-5K per activation):
+15 domain skills loaded on demand (~636 tokens in system prompt, ~3-5K per activation):
 
 | Skill | Domain |
 |-------|--------|
@@ -241,6 +248,13 @@ React SPA with 16 pages, served by FastAPI at `http://localhost:8000`.
 | `aws-compute` | EC2, ECS, EKS, Lambda troubleshooting |
 | `aws-storage` | S3, EBS, EFS, FSx troubleshooting |
 | `local-os-operator` | Local file read/search/tail (dynamic tools) |
+| `web-research` | Public URL fetch, SSL checks, service status pages |
+| `distributed-tracing` | X-Ray, OpenTelemetry, trace correlation |
+| `document-analysis` | PDF/doc parsing, report generation |
+| `notification-operator` | Multi-channel notification routing and delivery |
+| `security-engineer` | IAM, SecurityHub, GuardDuty, compliance checks |
+
+**Self-improving skills**: Skills auto-create from resolved cases and improve via LLM refinement. Draft → Review (diff) → Promote workflow in the web UI.
 
 Add new skills with zero code changes — see `skills/ADDING_SKILLS.md`.
 
@@ -266,22 +280,11 @@ NetworkX-based infrastructure graph with SRE analysis algorithms:
 
 HealthIssue fingerprint (SHA-256) prevents duplicates across both pipelines.
 
-## Validated: 10/10 Cases Passed
+## Configuration
 
-Closed-loop validation on EKS Lab (2026-03-06):
+Primary config: `config/settings.yaml` (YAML, single source of truth).
 
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Auto-fix rate | ≥7/10 | **10/10** |
-| Detection time | ≤3 min | **~2 min** |
-| MTTR | ≤10 min | **~6.3 min** |
-| Cost/cycle | ≤$3 | **~$2-3** |
-
-Cases: OOM Kill, Bad Image, Network Policy, DiskPressure, Pod Pending, Unhealthy Targets, CoreDNS Down, PVC Pending, HPA Maxed, Service Deleted.
-
-## Environment Variables
-
-All settings use `AIOPS_` prefix. Key ones:
+**Priority**: env vars (`AIOPS_*`) > `.env` file > `settings.yaml` > Python Field defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -298,17 +301,31 @@ All settings use `AIOPS_` prefix. Key ones:
 | `AIOPS_SCAN_FOCUS` | `all` | Resource categories filter |
 | `AIOPS_AGENT_OUTPUT_DETAIL` | `medium` | Output detail level |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` or `cloud` |
-| `AIOPS_API_AUTH_ENABLED` | `false` | API authentication middleware |
+| `AIOPS_BEDROCK_CACHE_ENABLED` | `true` | Prompt caching on all agents |
+| `AIOPS_MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | MCP servers config path |
+
+## Validated: 10/10 Cases Passed
+
+Closed-loop validation on EKS Lab (2026-03-06):
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Auto-fix rate | >=7/10 | **10/10** |
+| Detection time | <=3 min | **~2 min** |
+| MTTR | <=10 min | **~6.3 min** |
+| Cost/cycle | <=$3 | **~$2-3** |
+
+Cases: OOM Kill, Bad Image, Network Policy, DiskPressure, Pod Pending, Unhealthy Targets, CoreDNS Down, PVC Pending, HPA Maxed, Service Deleted.
 
 ## Project Structure
 
 ```
 src/agenticops/
 ├── agents/          # 7 Strands agents (main, scan, detect, rca, sre, executor, reporter)
-├── tools/           # Agent tools (metadata, AWS CLI, file tools)
-├── services/        # Pipeline services (auto-fix, RCA, notifications, events)
+├── tools/           # Agent tools (metadata, AWS CLI, web, notification, cloudwatch)
+├── services/        # Pipeline services (auto-fix, RCA, notifications, events, resolution)
 ├── graph/           # Infrastructure graph engine + SRE algorithms
-├── skills/          # Skill loader, security, execution, evolution
+├── skills/          # Skill loader, security, execution, improvement store
 ├── kb/              # Knowledge Base (vector store: SQLite/pgvector/S3)
 ├── cli/             # CLI entry + chat + init wizard + display
 ├── web/             # FastAPI backend + React SPA frontend
@@ -316,16 +333,20 @@ src/agenticops/
 ├── notify/          # Multi-channel notifications (YAML config)
 ├── im/              # IM bots (Feishu/Slack WebSocket)
 ├── integrations/    # Alert processor, source parsers
-├── pipeline/        # RAG pipeline, orchestrator, health patrol
+├── pipeline/        # Pipeline orchestrator, health patrol, presets
 ├── storage/         # Storage backends (local/S3)
+├── scanner/         # Resource scanning engine
+├── scan/            # AWS service scanner + region discovery
 ├── scheduler/       # Cron-based task scheduling
+├── monitor/         # CloudWatch metrics collector
 ├── auth/            # Authentication (JWT + API keys)
+├── audit/           # Audit trail service
 ├── models.py        # SQLAlchemy ORM models
 └── config.py        # Pydantic settings (AIOPS_ env prefix)
 
-skills/              # 10 domain skill packages (SKILL.md + references/)
-config/              # channels.yaml, im-apps.yaml, setup.json.example
-infra/               # CloudFormation, EKS lab, deploy scripts
+skills/              # 15 domain skill packages (SKILL.md + references/)
+config/              # settings.yaml, channels.yaml, im-apps.yaml, mcp-servers.json
+infra/               # CloudFormation, EKS lab, Terraform
 docs/                # WORKFLOW.md, MVP release notes, cases, use-cases
 ```
 

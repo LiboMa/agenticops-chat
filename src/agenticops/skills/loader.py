@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ── Module-level mtime cache ────────────────────────────────────────
 
 _cached_skills: list[SkillMetadata] | None = None
+_cached_skills_by_name: dict[str, SkillMetadata] | None = None
 _cached_mtime: float = 0.0
 _cached_xml: str | None = None
 
@@ -50,10 +51,20 @@ def _get_max_mtime(*directories: Path) -> float:
 
 def _invalidate_skills_cache() -> None:
     """Force cache invalidation."""
-    global _cached_skills, _cached_mtime, _cached_xml
+    global _cached_skills, _cached_skills_by_name, _cached_mtime, _cached_xml
     _cached_skills = None
+    _cached_skills_by_name = None
     _cached_mtime = 0.0
     _cached_xml = None
+
+
+def _get_skill_by_name(name: str) -> SkillMetadata | None:
+    """O(1) lookup of a skill by name."""
+    global _cached_skills_by_name
+    skills = discover_skills()
+    if _cached_skills_by_name is None:
+        _cached_skills_by_name = {s.name: s for s in skills}
+    return _cached_skills_by_name.get(name)
 
 
 @dataclass
@@ -155,7 +166,7 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
     Returns:
         List of SkillMetadata for each valid skill found.
     """
-    global _cached_skills, _cached_mtime, _cached_xml
+    global _cached_skills, _cached_skills_by_name, _cached_mtime, _cached_xml
 
     if not settings.skills_enabled:
         if _cached_skills is None:
@@ -171,8 +182,9 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
         return _cached_skills
 
     # Cache miss or stale — reload
-    # Also invalidate XML cache since skills changed
+    # Also invalidate XML and name-lookup caches since skills changed
     _cached_xml = None
+    _cached_skills_by_name = None
 
     skills = _scan_directory(directory, is_draft=False)
     draft_skills = _scan_directory(draft_dir, is_draft=True)
@@ -249,20 +261,19 @@ def load_skill_body(skill_name: str) -> str | None:
     Returns:
         SKILL.md body content (after frontmatter), or None if not found.
     """
-    skills = discover_skills()
-    for s in skills:
-        if s.name == skill_name:
-            content = (s.path / "SKILL.md").read_text(encoding="utf-8")
-            _, body = parse_frontmatter(content)
-            body = body.strip()
-            max_chars = settings.skills_max_body_chars
-            if len(body) > max_chars:
-                body = body[:max_chars] + (
-                    "\n\n[... truncated — use read_skill_reference() "
-                    "for detailed sections]"
-                )
-            return body
-    return None
+    s = _get_skill_by_name(skill_name)
+    if s is None:
+        return None
+    content = (s.path / "SKILL.md").read_text(encoding="utf-8")
+    _, body = parse_frontmatter(content)
+    body = body.strip()
+    max_chars = settings.skills_max_body_chars
+    if len(body) > max_chars:
+        body = body[:max_chars] + (
+            "\n\n[... truncated — use read_skill_reference() "
+            "for detailed sections]"
+        )
+    return body
 
 
 def load_skill_reference(skill_name: str, ref_path: str) -> str | None:
@@ -278,20 +289,19 @@ def load_skill_reference(skill_name: str, ref_path: str) -> str | None:
     Returns:
         Reference file content, or None if not found or path traversal detected.
     """
-    skills = discover_skills()
-    for s in skills:
-        if s.name == skill_name:
-            target = (s.path / ref_path).resolve()
-            # Path traversal protection
-            if not str(target).startswith(str(s.path.resolve())):
-                logger.warning(
-                    "Path traversal attempt blocked: %s -> %s", ref_path, target
-                )
-                return None
-            if not target.is_file():
-                return None
-            return target.read_text(encoding="utf-8")
-    return None
+    s = _get_skill_by_name(skill_name)
+    if s is None:
+        return None
+    target = (s.path / ref_path).resolve()
+    # Path traversal protection
+    if not str(target).startswith(str(s.path.resolve())):
+        logger.warning(
+            "Path traversal attempt blocked: %s -> %s", ref_path, target
+        )
+        return None
+    if not target.is_file():
+        return None
+    return target.read_text(encoding="utf-8")
 
 
 # ── Dynamic Tool Resolution ──────────────────────────────────────────
@@ -310,25 +320,24 @@ def resolve_skill_tools(skill_name: str) -> list[Any]:
         List of @tool decorated function objects, or empty list if skill
         has no tools declared or skill not found.
     """
-    skills = discover_skills()
-    for s in skills:
-        if s.name == skill_name:
-            if not s.tools:
-                return []
-            resolved = []
-            for dotted_path in s.tools:
-                try:
-                    module_path, func_name = dotted_path.rsplit(".", 1)
-                    module = importlib.import_module(module_path)
-                    func = getattr(module, func_name)
-                    resolved.append(func)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to resolve tool '%s' for skill '%s': %s",
-                        dotted_path, skill_name, e,
-                    )
-            return resolved
-    return []
+    s = _get_skill_by_name(skill_name)
+    if s is None:
+        return []
+    if not s.tools:
+        return []
+    resolved = []
+    for dotted_path in s.tools:
+        try:
+            module_path, func_name = dotted_path.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+            resolved.append(func)
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve tool '%s' for skill '%s': %s",
+                dotted_path, skill_name, e,
+            )
+    return resolved
 
 
 # ── Prompt Helper ────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import type {
   SkillDraftRequest,
   SkillReviewData,
   SkillImproveResponse,
+  SkillImprovementRecord,
 } from "@/api/types";
 
 export function useSkills() {
@@ -23,6 +24,7 @@ export function useSkill(name: string) {
     queryKey: ["skill", name],
     queryFn: () => apiFetch<SkillDetail>(`/skills/${encodeURIComponent(name)}`),
     enabled: !!name,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -114,11 +116,42 @@ export function usePromoteSkill() {
 export function useImproveSkill() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, improvement }: { name: string; improvement: string }) =>
+    mutationFn: ({ name, improvement, trigger }: { name: string; improvement: string; trigger?: string }) =>
       apiFetch<SkillImproveResponse>(`/skills/${encodeURIComponent(name)}/improve`, {
         method: "POST",
-        body: JSON.stringify({ improvement }),
+        body: JSON.stringify({ improvement, trigger: trigger ?? "manual", source: "web" }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["skill-improvements"] });
+    },
+  });
+}
+
+export function useSkillImprovements(status: "all" | "pending" | "history" = "all", limit = 50) {
+  return useQuery({
+    queryKey: ["skill-improvements", status, limit],
+    queryFn: () => apiFetch<SkillImprovementRecord[]>(`/skills/improvements?status=${status}&limit=${limit}`),
+    staleTime: 30_000,
+  });
+}
+
+export function useSkillImprovementHistory(limit = 50) {
+  return useQuery({
+    queryKey: ["skill-improvements", "history", limit],
+    queryFn: () => apiFetch<SkillImprovementRecord[]>(`/skills/improvements?status=history&limit=${limit}`),
+    staleTime: 30_000,
+  });
+}
+
+export function useBatchDismissImprovements() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      apiFetch<{ results: { id: string; dismissed: boolean }[] }>("/skills/improvements/batch-dismiss", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skill-improvements"] }),
   });
 }

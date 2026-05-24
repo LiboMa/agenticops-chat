@@ -94,7 +94,38 @@ def _run_post_resolution(health_issue_id: int) -> None:
                   "rag_action": rag_result.action if rag_result else None,
               })
 
-    # Step 3: Record pipeline run in DB (for observability)
+    # Step 3: Skill gap analysis (self-improving skills)
+    if settings.skills_auto_improve_enabled and settings.skills_post_resolution_review:
+        try:
+            from agenticops.services.skill_improvement_service import (
+                analyze_skill_gaps,
+                trigger_skill_improvement,
+                run_skill_improvement,
+            )
+
+            gaps = analyze_skill_gaps(health_issue_id)
+            for gap in gaps:
+                if gap.get("confidence", 0) >= 0.4:
+                    result = trigger_skill_improvement(
+                        skill_name=gap["skill_name"],
+                        gap_description=gap["gap_description"],
+                        trigger="post_resolution",
+                        source_issue_id=health_issue_id,
+                    )
+                    if "error" not in result:
+                        run_skill_improvement(
+                            record_id=result["record_id"],
+                            skill_name=gap["skill_name"],
+                            gap_description=gap["gap_description"],
+                        )
+                    logger.info(
+                        "Skill improvement triggered for '%s' from issue #%d (confidence=%.1f)",
+                        gap["skill_name"], health_issue_id, gap["confidence"],
+                    )
+        except Exception:
+            logger.exception("Skill gap analysis failed for HealthIssue #%d", health_issue_id)
+
+    # Step 4: Record pipeline run in DB (for observability)
     try:
         _record_pipeline_run(health_issue_id, rag_result)
     except Exception:

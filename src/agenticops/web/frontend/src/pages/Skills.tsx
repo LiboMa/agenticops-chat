@@ -5,12 +5,15 @@ import {
   useGenerateSkill,
   useSaveDraft,
   useImportSkill,
+  useSkillImprovements,
+  useSkillImprovementHistory,
+  useBatchDismissImprovements,
 } from "@/hooks/useSkills";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { useLocale } from "@/i18n/LocaleContext";
-import type { Skill, SkillGenerateResponse } from "@/api/types";
+import type { Skill, SkillGenerateResponse, SkillImprovementRecord } from "@/api/types";
 
 type Filter = "all" | "published" | "draft";
 
@@ -256,6 +259,162 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
   );
 }
 
+/* -- Improvement Queue -------------------------------------------- */
+
+function triggerLabel(trigger: string, source: string): string {
+  const issueMatch = source.match(/issue:(\d+)/);
+  const agentMatch = source.match(/agent:(\w+)/);
+  switch (trigger) {
+    case "post_resolution":
+      return issueMatch ? `After resolving Issue #${issueMatch[1]}` : "Post-resolution";
+    case "agent_detected":
+      return agentMatch ? `Agent: ${agentMatch[1]}` : "Agent-detected";
+    default:
+      return "Manual";
+  }
+}
+
+function TriggerBadge({ trigger, source }: { trigger: string; source: string }) {
+  const colors: Record<string, string> = {
+    manual: "bg-blue-100 text-blue-700",
+    post_resolution: "bg-purple-100 text-purple-700",
+    agent_detected: "bg-amber-100 text-amber-700",
+    auto: "bg-cyan-100 text-cyan-700",
+  };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[trigger] ?? "bg-secondary text-muted-foreground"}`}>
+      {triggerLabel(trigger, source)}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    pending: "bg-amber-100 text-amber-700",
+    completed: "bg-emerald-100 text-emerald-700",
+    failed: "bg-red-100 text-red-700",
+  };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? "bg-secondary text-muted-foreground"}`}>
+      {status}
+    </span>
+  );
+}
+
+function ImprovementQueue() {
+  const [showHistory, setShowHistory] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const pendingQ = useSkillImprovements("pending");
+  const historyQ = useSkillImprovementHistory();
+  const batchDismiss = useBatchDismissImprovements();
+  const records: SkillImprovementRecord[] = showHistory
+    ? (historyQ.data ?? [])
+    : (pendingQ.data ?? []);
+
+  const total = (pendingQ.data?.length ?? 0) + (historyQ.data?.length ?? 0);
+  if (total === 0 && !pendingQ.isLoading) return null;
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchDismiss = () => {
+    if (selected.size === 0) return;
+    batchDismiss.mutate([...selected], {
+      onSuccess: () => setSelected(new Set()),
+    });
+  };
+
+  return (
+    <Card>
+      <CardBody>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-foreground">
+            Improvement Queue
+            {(pendingQ.data?.length ?? 0) > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-primary-600 rounded-full">
+                {pendingQ.data!.length}
+              </span>
+            )}
+          </h3>
+          <div className="flex items-center gap-2">
+            {selected.size > 0 && !showHistory && (
+              <button
+                onClick={handleBatchDismiss}
+                disabled={batchDismiss.isPending}
+                className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
+              >
+                {batchDismiss.isPending ? "Dismissing..." : `Dismiss Selected (${selected.size})`}
+              </button>
+            )}
+            <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
+              <button
+                onClick={() => { setShowHistory(false); setSelected(new Set()); }}
+                className={`px-3 py-1 text-xs rounded-md transition-colors ${!showHistory ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                Pending
+              </button>
+              <button
+                onClick={() => { setShowHistory(true); setSelected(new Set()); }}
+                className={`px-3 py-1 text-xs rounded-md transition-colors ${showHistory ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                History
+              </button>
+            </div>
+          </div>
+        </div>
+        {pendingQ.isLoading ? (
+          <Spinner />
+        ) : records.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-3">
+            {showHistory ? "No improvement history yet." : "No pending improvements."}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {records.map((r) => (
+              <div key={r.id} className="flex items-start gap-3 p-3 rounded-lg border border-border">
+                {!showHistory && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(r.id)}
+                    onChange={() => toggleSelect(r.id)}
+                    className="mt-1 h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-500 cursor-pointer"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm text-foreground">{r.skill_name}</span>
+                    <TriggerBadge trigger={r.trigger} source={r.source} />
+                    <StatusBadge status={r.status} />
+                    {r.confidence != null && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        r.confidence >= 0.7 ? "bg-red-100 text-red-700" :
+                        r.confidence >= 0.4 ? "bg-amber-100 text-amber-700" :
+                        "bg-gray-100 text-muted-foreground"
+                      }`}>
+                        {Math.round(r.confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{r.improvement}</p>
+                  <span className="text-xs text-muted-foreground mt-1 block">
+                    {new Date(r.created_at).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 /* -- Main Skills Page ---------------------------------------------- */
 
 export default function Skills() {
@@ -335,6 +494,9 @@ export default function Skills() {
           className="flex-1 max-w-xs border border-border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
         />
       </div>
+
+      {/* Improvement Queue */}
+      <ImprovementQueue />
 
       {/* Skill Cards */}
       {filtered.length === 0 ? (

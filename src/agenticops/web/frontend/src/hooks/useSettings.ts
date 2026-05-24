@@ -11,6 +11,9 @@ export interface AppSettings {
   executor_auto_approve_l0_l1: boolean;
   notifications_consolidated: boolean;
   bedrock_cache_enabled: boolean;
+  skills_auto_improve_enabled: boolean;
+  skills_post_resolution_review: boolean;
+  skills_improvement_notify: boolean;
   agent_models: Record<string, AgentModelConfig>;
   model_presets: { label: string; value: string }[];
 }

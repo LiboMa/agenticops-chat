@@ -284,9 +284,24 @@ export interface SkillImproveRequest {
 }
 
 export interface SkillImproveResponse {
+  record_id: string;
   skill_name: string;
+  trigger: string;
+  status: string;
   draft_path: string;
-  action: string;
+}
+
+export interface SkillImprovementRecord {
+  id: string;
+  skill_name: string;
+  improvement: string;
+  source: string;
+  trigger: string;
+  status: string;
+  confidence?: number;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -495,6 +510,13 @@ export interface AgentLogSummary {
     total_duration_ms: number;
     errors: number;
     tool_calls: number;
+  }>;
+  per_model: Record<string, {
+    calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    total_duration_ms: number;
   }>;
   total_input_tokens: number;
   total_output_tokens: number;

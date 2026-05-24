@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -121,6 +121,60 @@ function DeleteConfirmDialog({
   );
 }
 
+/* -- Line Diff Helper --------------------------------------------- */
+
+type DiffLine = { type: "same" | "added" | "removed"; text: string };
+
+function computeLineDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const result: DiffLine[] = [];
+
+  // Simple greedy diff: walk both arrays with two pointers,
+  // using bounded look-ahead to find the best re-sync point.
+  let oi = 0, ni = 0;
+  while (oi < oldLines.length && ni < newLines.length) {
+    if (oldLines[oi] === newLines[ni]) {
+      result.push({ type: "same", text: newLines[ni] });
+      oi++; ni++;
+    } else {
+      // Look ahead in new for current old line
+      let foundInNew = -1;
+      for (let j = ni + 1; j < Math.min(ni + 10, newLines.length); j++) {
+        if (newLines[j] === oldLines[oi]) { foundInNew = j; break; }
+      }
+      // Look ahead in old for current new line
+      let foundInOld = -1;
+      for (let j = oi + 1; j < Math.min(oi + 10, oldLines.length); j++) {
+        if (oldLines[j] === newLines[ni]) { foundInOld = j; break; }
+      }
+
+      if (foundInNew !== -1 && (foundInOld === -1 || foundInNew - ni <= foundInOld - oi)) {
+        for (let j = ni; j < foundInNew; j++) {
+          result.push({ type: "added", text: newLines[j] });
+        }
+        ni = foundInNew;
+      } else if (foundInOld !== -1) {
+        for (let j = oi; j < foundInOld; j++) {
+          result.push({ type: "removed", text: oldLines[j] });
+        }
+        oi = foundInOld;
+      } else {
+        result.push({ type: "removed", text: oldLines[oi] });
+        result.push({ type: "added", text: newLines[ni] });
+        oi++; ni++;
+      }
+    }
+  }
+  while (oi < oldLines.length) {
+    result.push({ type: "removed", text: oldLines[oi++] });
+  }
+  while (ni < newLines.length) {
+    result.push({ type: "added", text: newLines[ni++] });
+  }
+  return result;
+}
+
 /* -- Main Page ---------------------------------------------------- */
 
 export default function SkillDetail() {
@@ -141,11 +195,21 @@ export default function SkillDetail() {
   const [showDelete, setShowDelete] = useState(false);
   const [actionMsg, setActionMsg] = useState("");
 
+  const bodyHtml = useMemo(
+    () => (skill?.body_markdown ? renderMarkdown(skill.body_markdown) : ""),
+    [skill?.body_markdown],
+  );
+
+  const diffLines = useMemo(
+    () => reviewMut.data
+      ? computeLineDiff(reviewMut.data.published_content || "", reviewMut.data.draft_content || "")
+      : [],
+    [reviewMut.data],
+  );
+
   if (isLoading) return <Spinner label="Loading skill..." />;
   if (error) return <ErrorBanner message={(error as Error).message} onRetry={() => refetch()} />;
   if (!skill) return null;
-
-  const bodyHtml = skill.body_markdown ? renderMarkdown(skill.body_markdown) : "";
 
   const handleStartEdit = () => {
     setEditContent(skill.body_markdown ?? "");
@@ -228,14 +292,14 @@ export default function SkillDetail() {
               <p className="text-sm text-muted-foreground mt-1">{skill.description}</p>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowImprove(true)}
+                className="px-3 py-1.5 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
+              >
+                Improve
+              </button>
               {skill.is_draft && (
                 <>
-                  <button
-                    onClick={() => setShowImprove(true)}
-                    className="px-3 py-1.5 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
-                  >
-                    Improve
-                  </button>
                   <button
                     onClick={handleReview}
                     disabled={reviewMut.isPending}
@@ -370,23 +434,30 @@ export default function SkillDetail() {
                 <Badge className="ml-2 bg-amber-100 text-amber-700">New Skill</Badge>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <h3 className="text-sm font-medium text-foreground mb-2">Draft</h3>
-                <pre className="bg-secondary border border-border rounded-lg p-3 text-xs text-foreground max-h-96 overflow-y-auto whitespace-pre-wrap">
-                  {reviewMut.data.draft_content}
-                </pre>
+            <div className="border border-border rounded-lg overflow-hidden">
+              <div className="bg-secondary px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border flex gap-4">
+                <span className="text-red-600">- Removed</span>
+                <span className="text-emerald-600">+ Added</span>
               </div>
-              <div>
-                <h3 className="text-sm font-medium text-foreground mb-2">Published</h3>
-                {reviewMut.data.published_content ? (
-                  <pre className="bg-secondary border border-border rounded-lg p-3 text-xs text-foreground max-h-96 overflow-y-auto whitespace-pre-wrap">
-                    {reviewMut.data.published_content}
-                  </pre>
-                ) : (
-                  <p className="text-sm text-muted-foreground italic">No published version</p>
-                )}
-              </div>
+              <pre className="text-xs leading-relaxed max-h-[32rem] overflow-y-auto">
+                {diffLines.map((line, i) => (
+                  <div
+                    key={i}
+                    className={
+                      line.type === "added"
+                        ? "bg-emerald-50 text-emerald-800 px-3"
+                        : line.type === "removed"
+                        ? "bg-red-50 text-red-800 px-3"
+                        : "px-3 text-foreground"
+                    }
+                  >
+                    <span className="inline-block w-4 text-muted-foreground select-none">
+                      {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
+                    </span>
+                    {line.text || "\u00A0"}
+                  </div>
+                ))}
+              </pre>
             </div>
             {skill.is_draft && (
               <div className="flex justify-end gap-2 mt-4">

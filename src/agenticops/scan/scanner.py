@@ -316,6 +316,11 @@ class AWSScanner:
         saved_count = 0
 
         try:
+            # Track resource IDs added in this batch to avoid duplicate
+            # INSERTs for global resources (e.g. S3 buckets appear in every
+            # region scan but share one resource_id).
+            seen_in_batch: set[str] = set()
+
             # Prevent autoflush during queries to avoid premature
             # INSERT that triggers UNIQUE constraint violations.
             with session.no_autoflush:
@@ -326,6 +331,11 @@ class AWSScanner:
                     for resource_data in result.resources:
                         short_id = resource_data["resource_id"]
                         rid = resource_data.get("resource_arn") or short_id
+
+                        # Skip if already processed in this batch
+                        if rid in seen_in_batch:
+                            continue
+                        seen_in_batch.add(rid)
 
                         # Look up by canonical ID (ARN) first
                         existing = (

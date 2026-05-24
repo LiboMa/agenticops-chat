@@ -994,6 +994,27 @@ export default function Settings() {
                 onChange={(v) => patchSetting("bedrock_cache_enabled", v)}
                 saving={updateMut.isPending}
               />
+              <SettingToggle
+                label="Skill Auto-Improve"
+                description="Enable agents and post-resolution pipeline to suggest skill improvements"
+                enabled={s.skills_auto_improve_enabled}
+                onChange={(v) => patchSetting("skills_auto_improve_enabled", v)}
+                saving={updateMut.isPending}
+              />
+              <SettingToggle
+                label="Post-Resolution Skill Review"
+                description="Analyze skill gaps after each issue is resolved"
+                enabled={s.skills_post_resolution_review}
+                onChange={(v) => patchSetting("skills_post_resolution_review", v)}
+                saving={updateMut.isPending}
+              />
+              <SettingToggle
+                label="Skill Improvement Notify"
+                description="Send notification when skill improvement drafts are created"
+                enabled={s.skills_improvement_notify}
+                onChange={(v) => patchSetting("skills_improvement_notify", v)}
+                saving={updateMut.isPending}
+              />
             </div>
           ) : null}
         </CardBody>

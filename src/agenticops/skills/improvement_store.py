@@ -8,6 +8,7 @@ File: {data_dir}/skill_improvements.json
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import time
@@ -19,6 +20,10 @@ from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Module-level mtime cache — avoids re-reading/parsing JSON on every API call
+_cached_records: list[dict[str, Any]] | None = None
+_cached_mtime: float = 0.0
+
 
 def _store_path() -> Path:
     settings.ensure_dirs()
@@ -26,19 +31,46 @@ def _store_path() -> Path:
 
 
 def _load() -> list[dict[str, Any]]:
+    global _cached_records, _cached_mtime
     p = _store_path()
     if not p.exists():
+        _cached_records = []
+        _cached_mtime = 0.0
         return []
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        current_mtime = p.stat().st_mtime
+        if _cached_records is not None and current_mtime == _cached_mtime:
+            return _cached_records
+        with open(p, "r", encoding="utf-8") as fd:
+            fcntl.flock(fd, fcntl.LOCK_SH)
+            try:
+                records = json.loads(fd.read())
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        _cached_records = records
+        _cached_mtime = current_mtime
+        return records
     except (json.JSONDecodeError, OSError):
         logger.warning("Failed to read skill improvements store, returning empty")
+        _cached_records = []
+        _cached_mtime = 0.0
         return []
 
 
 def _save(records: list[dict[str, Any]]) -> None:
+    global _cached_records, _cached_mtime
     p = _store_path()
-    p.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
+    content = json.dumps(records, indent=2, default=str)
+    fd = open(p, "w", encoding="utf-8")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        fd.write(content)
+        fd.flush()
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
+    _cached_records = records
+    _cached_mtime = p.stat().st_mtime
 
 
 def add_improvement(
