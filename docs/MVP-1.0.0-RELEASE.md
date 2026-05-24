@@ -479,6 +479,9 @@ HealthIssue → RCA →  ──►  RAG Pipeline  ──►  SOP 匹配/创建  
 | 自动创建 Skill | 已实现 | Agent 检测无匹配 Skill → 询问用户确认 → 自动生成并发布激活（`create_skill(publish=True)`） |
 | Chat 创建 Schedule/Task | 已实现 | Agent tools: `run_task`（一次性）/ `create_schedule`（周期）/ `list_schedules` / `manage_schedule` / `get_schedule_history`；CLI: `/run` 快捷入口；Chat 支持自然语言删除/暂停/恢复任务 |
 | Schedule 前端优化 | 已实现 | Tab 过滤（All/Recurring/One-shot）、@once 状态 Badge、ScheduleDetail 展示 report_template 和 report_format |
+| Self-Improving Skills | 已实现 | 三触发源（手动/Post-resolution/Agent 检测）→ skill gap 分析 → LLM 生成改进草稿；`skill_improvement_service.py` + `improvement_store.py`（JSON file-based, mtime 缓存, fcntl 锁）；Settings 页面三开关；Skills 页面 improvement 历史 UI |
+| Scanner 去重优化 | 已实现 | 全局资源（如 S3）跨 region 扫描时 batch 内去重，避免 UNIQUE 约束冲突 |
+| Agent Logs API 优化 | 已实现 | `/api/agent-logs` 返回 flat list（去掉冗余 total wrapper）；summary 增加 tool_calls 和 error_count |
 | 自动 Skill 升级 | 计划中 | 根据多次案例反馈，自动优化 Skill 的决策树和参考文档 |
 | Skill 版本管理 | 计划中 | 草稿 → 审核 → 发布 → 归档生命周期 |
 | 跨案例学习 | 计划中 | 从相似案例中提取共性模式，合并进 Skill references |

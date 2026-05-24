@@ -388,6 +388,30 @@ flowchart LR
 - `publish=True` saves directly to production `skills/` directory — no draft/promote workflow needed
 - Skill is immediately activated and usable in the current session and all future sessions
 
+### Self-Improving Skills
+
+After resolving HealthIssues, the system analyzes whether existing skills had gaps:
+
+```mermaid
+flowchart LR
+    R["Issue Resolved"] --> A["analyze_skill_gaps()"]
+    A --> G{"Gap found?<br/>confidence ≥ 0.4"}
+    G -->|Yes| T["trigger_skill_improvement()"]
+    T --> LLM["LLM generates improvement draft"]
+    LLM --> S["Save to improvement_store.json"]
+    G -->|No| END["No action"]
+```
+
+**Three trigger sources:**
+- **Post-resolution** — automatic gap analysis after issue resolved (`skills_post_resolution_review`)
+- **Agent-detected** — any agent flags a skill gap during its work
+- **Manual** — user requests improvement via Chat or Web Portal
+
+**Settings** (Web → Settings page):
+- `skills_auto_improve_enabled` — master switch
+- `skills_post_resolution_review` — enable post-resolution trigger
+- `skills_improvement_notify` — send notifications on improvement
+
 ### Schedule & Task Management via Chat
 
 Agents can create and manage schedules/tasks through natural language:
