@@ -6,7 +6,7 @@ Wraps existing logic from monitor/cloudwatch.py and adds new alarm tools.
 import json
 import logging
 import time as time_module
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from botocore.exceptions import ClientError
@@ -88,7 +88,7 @@ def get_alarm_history(alarm_name: str, region: str, hours: int = 24) -> str:
     except RuntimeError as e:
         return str(e)
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=min(hours, 168))
 
     try:
@@ -166,7 +166,7 @@ def get_metrics(
     )
     dimensions = [{"Name": dim_name, "Value": dim_value}]
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=min(hours, 72))
 
     results = {}
@@ -238,7 +238,7 @@ def query_logs(
         | limit 50
         """
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=min(hours, 48))
 
     try:

@@ -1,14 +1,15 @@
 """Web Dashboard - React SPA + API backend."""
 
 import os
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
@@ -109,8 +110,7 @@ class AccountResponse(BaseModel):
     created_at: datetime
     last_scanned_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
     def redact_secrets(self):
@@ -138,8 +138,7 @@ class ResourceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def from_resource(cls, r) -> "ResourceResponse":
@@ -188,8 +187,7 @@ class AnomalyResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RCAResponse(BaseModel):
@@ -207,8 +205,7 @@ class RCAResponse(BaseModel):
     model_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportResponse(BaseModel):
@@ -223,8 +220,7 @@ class ReportResponse(BaseModel):
     report_metadata: dict
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportGenerateRequest(BaseModel):
@@ -273,8 +269,7 @@ class AlertEventResponse(BaseModel):
     received_at: datetime
     raw_payload: dict
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class HealthIssueCreate(BaseModel):
@@ -322,8 +317,7 @@ class HealthIssueResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
@@ -404,8 +398,7 @@ class FixPlanResponse(BaseModel):
     created_at: datetime
     account_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FixExecutionResponse(BaseModel):
@@ -425,8 +418,7 @@ class FixExecutionResponse(BaseModel):
     duration_ms: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -474,8 +466,7 @@ class ScheduleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleExecutionResponse(BaseModel):
@@ -489,8 +480,7 @@ class ScheduleExecutionResponse(BaseModel):
     result: dict
     error: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -535,8 +525,7 @@ class NotificationLogResponse(BaseModel):
     error: Optional[str]
     sent_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NotificationSendRequest(BaseModel):
@@ -657,8 +646,7 @@ class ChatMessageResponse(BaseModel):
     attachments: Optional[list] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatSessionResponse(BaseModel):
@@ -673,8 +661,7 @@ class ChatSessionResponse(BaseModel):
     starred: bool = False
     archived: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatSessionDetail(ChatSessionResponse):
@@ -691,8 +678,7 @@ class MemoryFactResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MemoryExperienceResponse(BaseModel):
@@ -702,8 +688,7 @@ class MemoryExperienceResponse(BaseModel):
     content_text: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================
@@ -744,8 +729,7 @@ class UserResponse(BaseModel):
     last_login_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class APIKeyCreate(BaseModel):
@@ -766,8 +750,7 @@ class APIKeyResponse(BaseModel):
     expires_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class APIKeyCreatedResponse(BaseModel):
@@ -784,11 +767,117 @@ class PasswordChangeRequest(BaseModel):
     old_password: str
     new_password: str
 
+
+# ============================================================================
+# Application Lifespan (startup + shutdown in async context manager)
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup and shutdown in a single async context manager."""
+    # --- Startup ---
+    _setup_service_logging()
+    init_db()
+    _chat_sessions.start_cleanup()
+    _executor_service.start()
+
+    # Start MCP servers
+    try:
+        from agenticops.mcp import start_mcp_clients
+        mcp_clients = start_mcp_clients()
+        if mcp_clients:
+            logger.info("MCP: %d server(s) started", len(mcp_clients))
+    except Exception as e:
+        logger.warning("MCP startup failed: %s", e)
+
+    # Start background cron scheduler
+    from agenticops.scheduler.scheduler import Scheduler
+    scheduler_instance = Scheduler()
+    scheduler_instance.start()
+    logger.info("Cron scheduler started")
+
+    # Start Feishu WebSocket long-connection if enabled
+    _startup_log = logging.getLogger(__name__)
+    if settings.feishu_ws_enabled:
+        try:
+            from agenticops.im.feishu_ws import start_feishu_ws
+            svc = start_feishu_ws()
+            if svc:
+                _startup_log.info(
+                    "Feishu WS: started=%s thread_alive=%s app=%s",
+                    svc._started,
+                    svc._thread.is_alive() if svc._thread else False,
+                    svc._app_name,
+                )
+                print(f"  Feishu WS: started (app={svc._app_name})")
+            else:
+                _startup_log.error("Feishu WS: start_feishu_ws() returned None — check im-apps.yaml")
+                print("  Feishu WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
+            print(f"  Feishu WS: FAILED — {e}")
+    else:
+        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
+
+    # Start Slack Socket Mode if enabled
+    if settings.slack_ws_enabled:
+        try:
+            from agenticops.im.slack_ws import start_slack_ws
+            slack_svc = start_slack_ws()
+            if slack_svc:
+                _startup_log.info(
+                    "Slack WS: started=%s thread_alive=%s app=%s",
+                    slack_svc._started,
+                    slack_svc._thread.is_alive() if slack_svc._thread else False,
+                    slack_svc._app_name,
+                )
+                print(f"  Slack WS: started (app={slack_svc._app_name})")
+            else:
+                _startup_log.warning("Slack WS: start_slack_ws() returned None — check im-apps.yaml")
+                print("  Slack WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
+            print(f"  Slack WS: FAILED — {e}")
+    else:
+        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
+
+    yield  # --- App is running ---
+
+    # --- Shutdown (guaranteed by async context manager) ---
+    _chat_sessions.stop_cleanup()
+    _executor_service.stop()
+
+    scheduler_instance.stop()
+    logger.info("Cron scheduler stopped")
+
+    # Stop MCP clients
+    try:
+        from agenticops.mcp import stop_mcp_clients
+        stop_mcp_clients()
+    except Exception:
+        pass
+
+    # Stop Feishu WebSocket service
+    try:
+        from agenticops.im.feishu_ws import stop_feishu_ws
+        stop_feishu_ws()
+    except Exception:
+        pass
+
+    # Stop Slack Socket Mode service
+    try:
+        from agenticops.im.slack_ws import stop_slack_ws
+        stop_slack_ws()
+    except Exception:
+        pass
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AgenticAIOps Dashboard",
     description="Agent-First Cloud Observability Platform",
-    version="0.1.0",
+    version="0.9.0-beta",
+    lifespan=lifespan,
 )
 
 # Graph API router
@@ -1305,7 +1394,7 @@ async def api_health():
     db_start = time.time()
     try:
         with get_db_session() as session:
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
         checks["database"] = HealthCheckResult(
             status="ok",
             latency_ms=int((time.time() - db_start) * 1000),
@@ -1374,7 +1463,7 @@ async def api_health():
     return HealthResponse(
         status=overall_status,
         version=__version__,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         checks=checks,
     )
 
@@ -1394,7 +1483,7 @@ async def api_stats():
 @app.get("/api/dashboard/trends")
 async def api_dashboard_trends(days: int = Query(default=7, ge=1, le=90)):
     """Dashboard trend data — 5 sparkline datasets."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     with get_db_session() as session:
         # 1) Issue trend: opened/resolved per day
@@ -1787,8 +1876,7 @@ class FixPlanWithExecutionsResponse(BaseModel):
     created_at: datetime
     executions: List[FixExecutionResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RelatedResourceItem(BaseModel):
@@ -2044,7 +2132,7 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
 
         issue.status = update.status
         if update.status == "resolved" and issue.resolved_at is None:
-            issue.resolved_at = datetime.utcnow()
+            issue.resolved_at = datetime.now(timezone.utc)
 
         # Auto-learn: dismissed issues create detect agent memory
         if update.status == "dismissed":
@@ -2241,7 +2329,7 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
             new_status == "resolved" and issue.status != "resolved"
         )
         if transitioning_to_resolved:
-            update_data["resolved_at"] = datetime.utcnow()
+            update_data["resolved_at"] = datetime.now(timezone.utc)
 
         for key, value in update_data.items():
             setattr(issue, key, value)
@@ -2654,7 +2742,7 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
 
         plan.status = "approved"
         plan.approved_by = approved_by
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
 
         # Sync HealthIssue status
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
@@ -3023,7 +3111,7 @@ async def api_approve_sop(sop_id: int, body: dict = Body(...)):
             raise HTTPException(status_code=409, detail=str(e))
         record.status = "active"
         record.approved_by = approved_by
-        record.reviewed_at = datetime.utcnow()
+        record.reviewed_at = datetime.now(timezone.utc)
     return {"status": "active", "approved_by": approved_by}
 
 
@@ -3039,7 +3127,7 @@ async def api_reject_sop(sop_id: int):
         except (InvalidSOPTransition, ValueError) as e:
             raise HTTPException(status_code=409, detail=str(e))
         record.status = "archived"
-        record.reviewed_at = datetime.utcnow()
+        record.reviewed_at = datetime.now(timezone.utc)
     return {"status": "archived"}
 
 
@@ -3320,7 +3408,7 @@ async def api_share_content(request: ShareContentRequest):
             from agenticops.storage.backend import get_storage_backend
 
             backend = get_storage_backend()
-            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.subject[:50])
             key = f"shared/{ts}_{safe_name}.md"
             uri = backend.write(key, request.body.encode("utf-8"), content_type="text/markdown")
@@ -3550,7 +3638,7 @@ async def api_login(request: Request, request_data: LoginRequest):
         email=user.email,
         name=user.name,
         is_admin=user.is_admin,
-        expires_at=datetime.utcnow() + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
     )
 
 
@@ -3716,8 +3804,7 @@ class AuditLogResponse(BaseModel):
     new_values: Optional[dict]
     ip_address: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @app.get("/api/audit", response_model=List[AuditLogResponse])
@@ -3752,7 +3839,7 @@ async def api_list_audit_logs(
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     logs = AuditService.query(
         action=action,
@@ -3824,7 +3911,7 @@ async def api_get_audit_stats(request: Request, hours: int = Query(24, le=720)):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     return {
         "period_hours": hours,
@@ -4054,7 +4141,7 @@ async def api_cron_preview(expr: str = ""):
         return {"valid": False, "error": "Empty expression"}
     try:
         parser = CronParser(expr.strip())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         runs = []
         t = now
         for _ in range(3):
@@ -4154,7 +4241,7 @@ async def api_run_schedule(schedule_id: int, background_tasks: BackgroundTasks):
         if not schedule:
             raise HTTPException(status_code=404, detail="Schedule not found")
         schedule_name = schedule.name
-        schedule.last_run_at = datetime.utcnow()
+        schedule.last_run_at = datetime.now(timezone.utc)
 
     def _run_in_background():
         try:
@@ -4758,7 +4845,7 @@ async def api_search(
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
 async def api_create_chat_session(payload: ChatSessionCreate):
     sid = str(uuid.uuid4())
-    name = payload.name or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    name = payload.name or f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     with get_db_session() as db:
         row = ChatSession(session_id=sid, name=name)
         db.add(row)
@@ -4841,7 +4928,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         archiving = payload.archived is True and not row.archived
         if payload.archived is not None:
             row.archived = payload.archived
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
         response = ChatSessionResponse(
@@ -5043,7 +5130,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             if row:
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=ch_result.message))
-                row.last_activity_at = datetime.utcnow()
+                row.last_activity_at = datetime.now(timezone.utc)
 
         async def _channel_stream():
             yield {"event": "text", "data": json.dumps({"token": ch_result.message})}
@@ -5063,7 +5150,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             if row:
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=send_result.message))
-                row.last_activity_at = datetime.utcnow()
+                row.last_activity_at = datetime.now(timezone.utc)
 
         async def _send_to_stream():
             yield {"event": "text", "data": json.dumps({"token": send_result.message})}
@@ -5087,7 +5174,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             attachments=attachments,
         )
         db.add(msg)
-        row.last_activity_at = datetime.utcnow()
+        row.last_activity_at = datetime.now(timezone.utc)
         db_session_pk = row.id
 
     async def _generate():
@@ -5166,7 +5253,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                         )
                         if title:
                             sess.name = title
-                            sess.updated_at = datetime.utcnow()
+                            sess.updated_at = datetime.now(timezone.utc)
                             yield {"event": "session_renamed", "data": json.dumps({"name": title})}
 
             # Log main agent call metrics
@@ -5662,7 +5749,7 @@ async def _handle_im_message(platform: str, msg) -> None:
         db.add(ChatMessageModel(session_id=row.id, role="user", content=msg.content))
         # Save assistant response
         db.add(ChatMessageModel(session_id=row.id, role="assistant", content=response_text))
-        row.last_activity_at = datetime.utcnow()
+        row.last_activity_at = datetime.now(timezone.utc)
 
     # Reply to IM
     if notifier:

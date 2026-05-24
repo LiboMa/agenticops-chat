@@ -2,7 +2,7 @@
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Tuple, Callable
 
@@ -164,7 +164,7 @@ class AuthService:
                 token_hash=token_hash,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                expires_at=datetime.utcnow() + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=AuthService.SESSION_DURATION_HOURS),
             )
             session.add(db_session)
 
@@ -186,7 +186,7 @@ class AuthService:
             db_session = (
                 session.query(Session)
                 .filter_by(token_hash=token_hash)
-                .filter(Session.expires_at > datetime.utcnow())
+                .filter(Session.expires_at > datetime.now(timezone.utc))
                 .first()
             )
 
@@ -242,7 +242,7 @@ class AuthService:
 
         expires_at = None
         if expires_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_days)
+            expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
 
         with get_db_session() as session:
             api_key = APIKey(
@@ -277,12 +277,16 @@ class AuthService:
             )
 
             if api_key:
-                # Check expiry
-                if api_key.expires_at and api_key.expires_at < datetime.utcnow():
-                    return None
+                # Check expiry (handle both naive and aware datetimes from DB)
+                if api_key.expires_at:
+                    exp = api_key.expires_at
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=timezone.utc)
+                    if exp < datetime.now(timezone.utc):
+                        return None
 
                 # Update last used
-                api_key.last_used_at = datetime.utcnow()
+                api_key.last_used_at = datetime.now(timezone.utc)
 
                 # Get user
                 user = session.query(User).filter_by(

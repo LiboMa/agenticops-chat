@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import base64
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from agenticops.im.gateway import IMGateway, IMInboundMessage
@@ -85,7 +85,7 @@ class DingTalkGateway(IMGateway):
             sender_name=payload.get("senderNick", "unknown"),
             content=text,
             message_id=payload.get("msgId", ""),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             is_group=(conversation_type == "2"),
             app_name=self.app_name,
         )

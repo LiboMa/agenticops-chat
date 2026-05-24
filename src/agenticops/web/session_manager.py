@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from strands import Agent
@@ -440,7 +440,7 @@ class ChatSessionManager:
             self._remove_stale()
 
     def _remove_stale(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with self._lock:
             stale = [sid for sid, ts in self._last_activity.items() if now - ts > self._ttl]
             for sid in stale:
@@ -465,7 +465,7 @@ class ChatSessionManager:
         # Fast path — agent already cached, no slow work
         with self._lock:
             if session_id in self._agents:
-                self._last_activity[session_id] = datetime.utcnow()
+                self._last_activity[session_id] = datetime.now(timezone.utc)
                 return self._agents[session_id]
             # Slow path needed — get or create a per-session lock
             sess_lock = self._session_locks.setdefault(session_id, threading.Lock())
@@ -475,7 +475,7 @@ class ChatSessionManager:
             # Double-check after acquiring per-session lock
             with self._lock:
                 if session_id in self._agents:
-                    self._last_activity[session_id] = datetime.utcnow()
+                    self._last_activity[session_id] = datetime.now(timezone.utc)
                     return self._agents[session_id]
 
             # Expensive work — outside global lock
@@ -508,7 +508,7 @@ class ChatSessionManager:
 
             with self._lock:
                 self._agents[session_id] = agent
-                self._last_activity[session_id] = datetime.utcnow()
+                self._last_activity[session_id] = datetime.now(timezone.utc)
                 return agent
 
     def remove(self, session_id: str):

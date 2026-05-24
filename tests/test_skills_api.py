@@ -184,6 +184,123 @@ class TestSkillReview:
             settings.skills_draft_dir = original
 
 
+class TestListDraftSkills:
+    """Tests for list_draft_skills function."""
+
+    def test_returns_only_draft_skills(self, tmp_skills_dir):
+        from agenticops.skills.review import list_draft_skills
+        from agenticops.skills.loader import _invalidate_skills_cache
+        from agenticops.config import settings
+
+        original_skills = settings.skills_dir
+        original_draft = settings.skills_draft_dir
+        settings.skills_dir = tmp_skills_dir / "skills"
+        settings.skills_draft_dir = tmp_skills_dir / "skills" / "draft"
+        try:
+            _invalidate_skills_cache()
+            drafts = list_draft_skills()
+            assert len(drafts) == 1
+            assert drafts[0].name == "redis-admin"
+            assert drafts[0].is_draft is True
+        finally:
+            settings.skills_dir = original_skills
+            settings.skills_draft_dir = original_draft
+            _invalidate_skills_cache()
+
+    def test_empty_when_no_drafts(self, tmp_skills_dir):
+        """When draft dir has no skills, returns empty list."""
+        from agenticops.skills.review import list_draft_skills
+        from agenticops.skills.loader import _invalidate_skills_cache
+        from agenticops.config import settings
+
+        empty_draft = tmp_skills_dir / "empty_draft"
+        empty_draft.mkdir()
+        original_skills = settings.skills_dir
+        original_draft = settings.skills_draft_dir
+        settings.skills_dir = tmp_skills_dir / "skills"
+        settings.skills_draft_dir = empty_draft
+        try:
+            _invalidate_skills_cache()
+            drafts = list_draft_skills()
+            assert drafts == []
+        finally:
+            settings.skills_dir = original_skills
+            settings.skills_draft_dir = original_draft
+            _invalidate_skills_cache()
+
+
+class TestReviewDraftSkill:
+    """Tests for review_draft_skill function."""
+
+    def test_review_existing_draft_with_published(self, tmp_skills_dir):
+        """Review a draft that has a corresponding published version."""
+        from agenticops.skills.review import review_draft_skill
+        from agenticops.config import settings
+
+        # Create a draft version of linux-admin (published already exists)
+        draft_linux = tmp_skills_dir / "skills" / "draft" / "linux-admin"
+        draft_linux.mkdir()
+        (draft_linux / "SKILL.md").write_text(
+            """---
+name: linux-admin
+description: "Updated Linux admin"
+---
+
+# Linux Admin v2
+
+## New Section
+- Added new diagnostics
+""",
+            encoding="utf-8",
+        )
+
+        original = settings.skills_draft_dir
+        settings.skills_draft_dir = tmp_skills_dir / "skills" / "draft"
+        try:
+            result = review_draft_skill("linux-admin")
+            assert result is not None
+            assert result["name"] == "linux-admin"
+            assert result["is_new"] is False
+            assert result["published_content"] is not None
+            assert "lines added" in result["diff_summary"]
+            assert "lines removed" in result["diff_summary"]
+        finally:
+            settings.skills_draft_dir = original
+
+    def test_review_new_draft_no_published(self, tmp_skills_dir):
+        """Review a draft with no published counterpart."""
+        from agenticops.skills.review import review_draft_skill
+        from agenticops.config import settings
+
+        original_draft = settings.skills_draft_dir
+        original_skills = settings.skills_dir
+        settings.skills_draft_dir = tmp_skills_dir / "skills" / "draft"
+        settings.skills_dir = tmp_skills_dir / "skills"
+        try:
+            result = review_draft_skill("redis-admin")
+            assert result is not None
+            assert result["name"] == "redis-admin"
+            assert result["is_new"] is True
+            assert result["published_content"] is None
+            assert "New skill" in result["diff_summary"]
+        finally:
+            settings.skills_draft_dir = original_draft
+            settings.skills_dir = original_skills
+
+    def test_review_nonexistent_draft(self, tmp_skills_dir):
+        """Returns None for a draft that doesn't exist."""
+        from agenticops.skills.review import review_draft_skill
+        from agenticops.config import settings
+
+        original = settings.skills_draft_dir
+        settings.skills_draft_dir = tmp_skills_dir / "skills" / "draft"
+        try:
+            result = review_draft_skill("nonexistent")
+            assert result is None
+        finally:
+            settings.skills_draft_dir = original
+
+
 # ── API endpoint tests (FastAPI TestClient) ──────────────────────────
 
 # We patch the skills functions at the endpoint level to avoid

@@ -306,7 +306,7 @@ def share_content(
     Returns:
         JSON with success, channels_sent, presigned_url (if uploaded).
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     if not subject or not body:
         return json.dumps({"success": False, "message": "subject and body are required"})
@@ -321,7 +321,7 @@ def share_content(
             from agenticops.storage.backend import get_storage_backend
 
             backend = get_storage_backend()
-            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in subject[:50])
             key = f"shared/{ts}_{safe_name}.md"
             uri = backend.write(key, body.encode("utf-8"), content_type="text/markdown")
@@ -459,11 +459,11 @@ def _send_html_content(
             loop.close()
 
     # 2. Upload HTML to S3 as .html file -> presigned URL
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
 
-    date_str = _dt.utcnow().strftime("%Y-%m-%d")
+    date_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
     safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in title[:50])
-    ts = _dt.utcnow().strftime("%H%M%S")
+    ts = _dt.now(_tz.utc).strftime("%H%M%S")
     s3_key = f"{s3_prefix}shared/{date_str}/{ts}_{safe_title}.html"
 
     # Use SNSReportNotifier for S3 upload (SESNotifier doesn't have _upload_to_s3)

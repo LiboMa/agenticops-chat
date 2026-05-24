@@ -5,7 +5,7 @@ Validates: Requirements 9.1, 9.2, 9.3, 9.5, 9.6, 9.7, 9.9
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -40,7 +40,7 @@ def ctx():
 @pytest.fixture
 def _seed_sessions():
     """Create test sessions with messages for /session command tests."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     ids = {
         "pinned": f"test-pinned-{uuid.uuid4().hex[:8]}",
         "starred": f"test-starred-{uuid.uuid4().hex[:8]}",

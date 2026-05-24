@@ -6,7 +6,7 @@ No regex classification, no confidence scores.
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agenticops.config import settings
 from agenticops.integrations.alert_processor import AlertProcessResult, process_alert
@@ -231,7 +231,7 @@ def _try_auto_resolve(title: str, text: str) -> int | None:
             issue = query.first()
             if issue:
                 issue.status = "resolved"
-                issue.resolved_at = datetime.utcnow()
+                issue.resolved_at = datetime.now(timezone.utc)
                 session.flush()
                 return issue.id
     except Exception:

@@ -261,3 +261,102 @@ class TestListReports:
         assert "summary" in report
         assert "file_path" in report
         assert "created_at" in report
+
+
+class TestGetReportContent:
+    """Tests for get_report_content helper."""
+
+    def test_read_existing_report(self, db_session):
+        """Test reading content of a saved report."""
+        from agenticops.tools.report_tools import save_report, get_report_content
+
+        markdown = "# My Report\n\nDetailed content here."
+        save_report(
+            report_type="daily",
+            title="Readable Report",
+            summary="Summary",
+            content_markdown=markdown,
+        )
+
+        report = db_session.query(Report).first()
+        content = get_report_content(report.file_path)
+        assert content is not None
+        assert "# My Report" in content
+        assert "Detailed content here." in content
+
+    def test_read_nonexistent_report(self):
+        """Test reading a report from a path that doesn't exist."""
+        from agenticops.tools.report_tools import get_report_content
+
+        result = get_report_content("/nonexistent/path/report.md")
+        assert result is None
+
+
+class TestSaveReportErrors:
+    """Tests for save_report error handling paths."""
+
+    def test_storage_write_failure(self, db_session, monkeypatch):
+        """Test that storage write failure returns an error message."""
+
+        class _FailBackend:
+            def write(self, key, data, content_type):
+                raise OSError("Disk full")
+
+        monkeypatch.setattr(
+            "agenticops.storage.get_storage_backend",
+            lambda: _FailBackend(),
+        )
+
+        from agenticops.tools.report_tools import save_report
+
+        result = save_report(
+            report_type="daily",
+            title="Should Fail",
+            summary="Fail",
+            content_markdown="# Fail",
+        )
+        assert "Error writing report file" in result
+
+    def test_db_write_failure_cleans_up_file(self, db_session, tmp_path, monkeypatch):
+        """Test that DB failure rolls back and removes the written file."""
+        from agenticops.tools.report_tools import save_report
+        from pathlib import Path
+
+        # Make session.commit() raise to trigger DB failure path
+        original_get_session = report_tools_get_session = None
+        import agenticops.models as models_mod
+
+        class _BrokenSession:
+            """Session wrapper that explodes on commit."""
+            def __init__(self, real):
+                self._real = real
+
+            def add(self, obj):
+                return self._real.add(obj)
+
+            def commit(self):
+                raise RuntimeError("DB write failed")
+
+            def rollback(self):
+                return self._real.rollback()
+
+            def close(self):
+                return self._real.close()
+
+            def query(self, *a, **kw):
+                return self._real.query(*a, **kw)
+
+        monkeypatch.setattr(
+            "agenticops.tools.report_tools.get_session",
+            lambda: _BrokenSession(models_mod.get_session()),
+        )
+
+        from agenticops.tools.report_tools import save_report
+
+        result = save_report(
+            report_type="daily",
+            title="DB Fail Test",
+            summary="S",
+            content_markdown="# DB Fail",
+        )
+        assert "Error saving report" in result

@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agenticops.models import (
     Base,
@@ -330,7 +330,7 @@ class TestApproveFixPlan:
             summary="Check if metric recovered",
             status="approved",
             approved_by="test",
-            approved_at=datetime.utcnow(),
+            approved_at=datetime.now(timezone.utc),
         )
         db_session.add(plan)
         db_session.commit()

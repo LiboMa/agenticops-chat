@@ -1,7 +1,7 @@
 """CloudWatch Monitor - Metrics and Logs collection."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from botocore.exceptions import ClientError
@@ -67,7 +67,7 @@ class CloudWatchMonitor:
         client = self._get_cloudwatch_client(region)
 
         if end_time is None:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
         if start_time is None:
             start_time = end_time - timedelta(hours=1)
 
@@ -126,7 +126,7 @@ class CloudWatchMonitor:
             metrics = AWS_SERVICES["EC2"].default_metrics
 
         dimensions = [{"Name": "InstanceId", "Value": instance_id}]
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=hours)
 
         results = {}
@@ -155,7 +155,7 @@ class CloudWatchMonitor:
             metrics = AWS_SERVICES["Lambda"].default_metrics
 
         dimensions = [{"Name": "FunctionName", "Value": function_name}]
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=hours)
 
         results = {}
@@ -184,7 +184,7 @@ class CloudWatchMonitor:
             metrics = AWS_SERVICES["RDS"].default_metrics
 
         dimensions = [{"Name": "DBInstanceIdentifier", "Value": db_identifier}]
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=hours)
 
         results = {}
@@ -228,7 +228,7 @@ class CloudWatchMonitor:
         dim_name, dim_value = dimension_map.get(service_type, ("ResourceId", resource_id))
         dimensions = [{"Name": dim_name, "Value": dim_value}]
 
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=hours)
 
         results = {}
@@ -304,7 +304,7 @@ class CloudWatchMonitor:
         client = self._get_logs_client(region)
 
         if end_time is None:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
         if start_time is None:
             start_time = end_time - timedelta(hours=1)
 
@@ -357,7 +357,7 @@ class CloudWatchMonitor:
         | filter @message like /(?i)(error|exception|fail|critical)/
         | sort @timestamp desc
         """
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=hours)
 
         return self.query_logs(

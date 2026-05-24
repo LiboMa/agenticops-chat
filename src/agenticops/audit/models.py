@@ -1,6 +1,6 @@
 """Audit logging models for AgenticOps."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import DateTime, String, Text, JSON, Index
@@ -21,7 +21,7 @@ class AuditLog(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     user_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # NULL for system actions
     user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     action: Mapped[str] = mapped_column(String(50))  # create, update, delete, login, logout, etc.

@@ -10,7 +10,7 @@ import logging
 import smtplib
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
@@ -45,7 +45,7 @@ class NotificationLog(Base):
     severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20))  # sent, failed
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================================
@@ -124,7 +124,7 @@ class SlackNotifier(Notifier):
                     "title": subject,
                     "text": body,
                     "footer": "AgenticAIOps",
-                    "ts": int(datetime.utcnow().timestamp()),
+                    "ts": int(datetime.now(timezone.utc).timestamp()),
                 }
             ],
         }
@@ -211,7 +211,7 @@ class EmailNotifier(Notifier):
                     <p style="color: #666; white-space: pre-wrap;">{body}</p>
                 </div>
                 <div style="padding: 10px; background-color: #e9e9e9; text-align: center; font-size: 12px; color: #666;">
-                    Sent by AgenticAIOps at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+                    Sent by AgenticAIOps at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
                 </div>
             </div>
         </body>
@@ -452,7 +452,7 @@ class SNSReportNotifier(Notifier):
         generated_formats: List[str] = []
 
         for fr in formatted:
-            date_str = datetime.utcnow().strftime("%Y-%m-%d")
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
             url = await loop.run_in_executor(
                 None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
@@ -828,7 +828,7 @@ class SESNotifier(Notifier):
         # Upload to S3 if bucket is configured
         if self.s3_bucket:
             for fr in formatted:
-                date_str = datetime.utcnow().strftime("%Y-%m-%d")
+                date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
                 url = await loop.run_in_executor(
                     None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
@@ -1019,7 +1019,7 @@ class FeishuNotifier(IMNotifier):
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": f"Severity: {(severity or 'info').upper()} | AgenticAIOps | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+                            "content": f"Severity: {(severity or 'info').upper()} | AgenticAIOps | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
                         }
                     ],
                 },
@@ -1110,7 +1110,7 @@ class DingTalkNotifier(IMNotifier):
             return False
 
         sev_label = (severity or "info").upper()
-        md_content = f"### [{sev_label}] {subject}\n\n{body}\n\n---\n*AgenticAIOps | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*"
+        md_content = f"### [{sev_label}] {subject}\n\n{body}\n\n---\n*AgenticAIOps | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*"
 
         try:
             token = await self._get_token()
@@ -1369,7 +1369,7 @@ class WebhookNotifier(Notifier):
                 .replace("{{subject}}", subject)
                 .replace("{{body}}", body)
                 .replace("{{severity}}", severity or "info")
-                .replace("{{timestamp}}", datetime.utcnow().isoformat())
+                .replace("{{timestamp}}", datetime.now(timezone.utc).isoformat())
             )
         else:
             # Default payload
@@ -1378,7 +1378,7 @@ class WebhookNotifier(Notifier):
                 "subject": subject,
                 "body": body,
                 "severity": severity,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         try:

@@ -475,7 +475,7 @@ class OpsAgent:
                 Confirmation message
             """
             from agenticops.models import Anomaly
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             session = get_session()
             try:
@@ -487,7 +487,7 @@ class OpsAgent:
                     return f"Anomaly #{anomaly_id} is already resolved."
 
                 anomaly.status = "resolved"
-                anomaly.resolved_at = datetime.utcnow()
+                anomaly.resolved_at = datetime.now(timezone.utc)
                 session.commit()
 
                 result = f"Anomaly #{anomaly_id} has been resolved."

@@ -1,0 +1,5 @@
+# Dev dependencies — single entry point for all environments
+# Usage: pip install -r requirements-dev.txt
+# Includes: pytest, pytest-asyncio, hypothesis, ruff, mypy, boto3-stubs
+# (see pyproject.toml [project.optional-dependencies] dev)
+-e ".[dev]"

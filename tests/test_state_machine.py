@@ -293,7 +293,7 @@ class TestUpdateHealthIssueStatusTool:
         update_health_issue_status(issue_id, "resolved")
 
         session = get_session()
-        issue = session.query(HealthIssue).get(issue_id)
+        issue = session.get(HealthIssue, issue_id)
         assert issue.resolved_at is not None
         session.close()
 

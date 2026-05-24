@@ -16,7 +16,7 @@ Follows the same pattern as rca_service.py.
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from agenticops.config import settings
@@ -133,7 +133,7 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
             # Approve L0/L1 plan
             plan.status = "approved"
             plan.approved_by = "agent:auto-pipeline"
-            plan.approved_at = datetime.utcnow()
+            plan.approved_at = datetime.now(timezone.utc)
 
             # Capture values before session closes
             risk_level = plan.risk_level

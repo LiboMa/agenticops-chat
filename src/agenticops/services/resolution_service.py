@@ -11,7 +11,7 @@ Non-blocking: all work happens in a daemon thread so the caller returns immediat
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agenticops.config import settings
 
@@ -142,7 +142,7 @@ def _record_pipeline_run(health_issue_id: int, rag_result) -> None:
             return
 
         # Store pipeline results as JSON in description addendum
-        pipeline_note = f"\n\n[Auto] Post-resolution pipeline ran at {datetime.utcnow().isoformat()}"
+        pipeline_note = f"\n\n[Auto] Post-resolution pipeline ran at {datetime.now(timezone.utc).isoformat()}"
         if rag_result:
             pipeline_note += f" | RAG: {rag_result.action}"
             if rag_result.sop_filename:

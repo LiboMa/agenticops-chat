@@ -5,7 +5,7 @@ shared with Web Dashboard, with graceful degradation on DB failure.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -34,7 +34,7 @@ def _ensure_db():
 def session_with_ctx():
     """Create a DB session and return a ChatContext linked to it."""
     sid = f"persist-test-{uuid.uuid4().hex[:8]}"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     with get_db_session() as db:
         row = ChatSession(
             session_id=sid,

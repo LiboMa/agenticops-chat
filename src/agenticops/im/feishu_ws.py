@@ -12,7 +12,7 @@ import threading
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -382,7 +382,7 @@ class FeishuWSService:
                     )
                 )
                 db.commit()
-                session.last_activity_at = datetime.utcnow()
+                session.last_activity_at = datetime.now(timezone.utc)
                 db.commit()
         except Exception:
             logger.debug("Failed to persist Feishu IM messages", exc_info=True)

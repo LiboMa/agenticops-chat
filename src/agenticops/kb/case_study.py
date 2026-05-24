@@ -7,7 +7,7 @@ Supports serialization to/from dict, markdown (YAML frontmatter).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -112,7 +112,7 @@ class CaseStudy:
             f"verified: {str(self.verified).lower()}",
             f"efficiency_score: {self.lessons_learned.efficiency_score}",
             f"reuse_count: {self.reuse_count}",
-            f"date: {self.meta.created_at or datetime.utcnow().strftime('%Y-%m-%d')}",
+            f"date: {self.meta.created_at or datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
             f"tags: [{tags_str}]",
             "---",
             "",

@@ -87,7 +87,7 @@ SHELL_BLOCKED_PATTERNS = [
     "mkfs",
     r"dd\s+if=",
     "shutdown", "reboot", "poweroff", "halt", "init 0", "init 6",
-    "passwd",
+    r"^passwd\b",
     r"curl.*\|\s*bash",
     r"curl.*\|\s*sh",
     r"wget.*\|\s*bash",
@@ -96,8 +96,8 @@ SHELL_BLOCKED_PATTERNS = [
     r">\s*/dev/sd",
     r">\s*/dev/null\s*2>&1\s*<\s*/dev/null",
     "format c:",
-    r"chmod\s+-R\s+777\s+/\s*$",
-    r"chown\s+-R.*\s+/\s*$",
+    r"chmod\s+-r\s+777\s+/\s*$",
+    r"chown\s+-r.*\s+/\s*$",
 ]
 
 
@@ -118,15 +118,23 @@ def classify_shell_command(cmd: str) -> str:
         if re.search(pattern, cmd_lower):
             return "blocked"
 
-    # Check readonly commands
+    # Check both readonly and write, preferring the longest prefix match
+    # so that "ip link set" (write) wins over "ip" (readonly).
+    best_match = None
+    best_len = 0
     for ro_cmd in SHELL_READONLY_COMMANDS:
         if cmd_lower == ro_cmd or cmd_lower.startswith(ro_cmd + " "):
-            return "readonly"
-
-    # Check write commands
+            if len(ro_cmd) > best_len:
+                best_match = "readonly"
+                best_len = len(ro_cmd)
     for wr_cmd in SHELL_WRITE_COMMANDS:
         if cmd_lower == wr_cmd or cmd_lower.startswith(wr_cmd + " "):
-            return "write"
+            if len(wr_cmd) > best_len:
+                best_match = "write"
+                best_len = len(wr_cmd)
+
+    if best_match:
+        return best_match
 
     # Unknown defaults to write (require confirmation)
     return "unknown"
@@ -152,7 +160,7 @@ KUBECTL_BLOCKED_PATTERNS = [
     r"delete\s+namespace\s+kube-system",
     r"delete\s+ns\s+kube-system",
     r"delete\s+--all\s+--all-namespaces",
-    r"delete\s+--all\s+-A",
+    r"delete\s+--all\s+-a",
     r"delete\s+clusterrole\b",
     r"delete\s+clusterrolebinding\b",
     r"delete\s+crd\s+--all",

@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from strands import tool
 
@@ -222,7 +222,7 @@ def save_resources(resources_json: str, account_id: int = 0, provider: str = "")
                     existing.raw_data = res_data.get("raw_data", existing.raw_data)
                     existing.tags = res_data.get("tags", existing.tags)
                     existing.region = region
-                    existing.scanned_at = datetime.utcnow()
+                    existing.scanned_at = datetime.now(timezone.utc)
                     updated += 1
                 else:
                     resource = CloudResource(
@@ -236,12 +236,12 @@ def save_resources(resources_json: str, account_id: int = 0, provider: str = "")
                         raw_data=res_data.get("raw_data", {}),
                         tags=res_data.get("tags", {}),
                         managed=res_data.get("managed", True),
-                        scanned_at=datetime.utcnow(),
+                        scanned_at=datetime.now(timezone.utc),
                     )
                     session.add(resource)
                     created += 1
 
-            cloud_acct.last_scanned_at = datetime.utcnow()
+            cloud_acct.last_scanned_at = datetime.now(timezone.utc)
             session.commit()
             return f"Saved {created} new resources, updated {updated} existing (account={cloud_acct.name}, provider={acct_provider})."
 
@@ -275,7 +275,7 @@ def _merge_into_existing_issue(
     Appends a snapshot to metric_data["merged_alerts"], escalates severity,
     updates description, bumps occurrence_count, and merges related_changes.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Build alert snapshot
     snapshot = {
@@ -392,7 +392,7 @@ def create_health_issue(
                 logger.info("Suppressed issue: title '%s' matched exclude pattern", title)
                 return f"Suppressed: issue title matched exclude pattern"
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         fingerprint = _compute_fingerprint(source, resource_id, title)
 
         # Fingerprint-based deduplication: match any active (non-resolved) issue
@@ -703,7 +703,7 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         issue.status = new_status
 
         if new_status == "resolved":
-            issue.resolved_at = datetime.utcnow()
+            issue.resolved_at = datetime.now(timezone.utc)
 
         session.commit()
 
@@ -1118,7 +1118,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
         plan.status = "approved"
         plan.approved_by = approved_by
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         session.commit()
 
         # Update health issue status
@@ -1253,8 +1253,8 @@ def save_execution_result(
             fix_plan_id=fix_plan_id,
             health_issue_id=health_issue_id,
             status=status,
-            started_at=datetime.utcnow(),
-            completed_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
             executed_by=executed_by,
             pre_check_results=_parse_json(pre_check_results, []),
             step_results=_parse_json(step_results, []),
@@ -1281,7 +1281,7 @@ def save_execution_result(
             issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
             if issue and issue.status in ("fix_approved", "fix_executed"):
                 issue.status = "resolved"
-                issue.resolved_at = datetime.utcnow()
+                issue.resolved_at = datetime.now(timezone.utc)
                 auto_resolved = True
 
         session.commit()

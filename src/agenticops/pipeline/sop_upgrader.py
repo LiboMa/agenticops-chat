@@ -5,7 +5,7 @@ Uses Bedrock LLM to produce structured markdown SOPs with YAML frontmatter.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agenticops.config import settings
 
@@ -98,7 +98,7 @@ def generate_new_sop(case_data: dict) -> str:
     issue_pattern = case_data.get("issue_pattern", "unknown issue")
     severity = case_data.get("severity", "medium")
     title = case_data.get("title", "Untitled SOP")
-    now = datetime.utcnow().strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Build keywords from available data
     keywords = _extract_keywords(case_data)
@@ -131,7 +131,7 @@ def upgrade_existing_sop(existing_sop_content: str, case_data: dict) -> str:
     Returns:
         Updated SOP markdown string with frontmatter.
     """
-    now = datetime.utcnow().strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     prompt = UPGRADE_SOP_PROMPT.format(
         existing_sop=existing_sop_content,

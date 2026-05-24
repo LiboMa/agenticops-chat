@@ -4,7 +4,7 @@
 
 AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM Multi-Agent 架构实现自动化的资源扫描、异常检测、根因分析、修复计划制定与执行，以及多渠道通知。支持 CLI、Web Dashboard、IM Bot（飞书/钉钉/企业微信）三入口。
 
-**版本**: 0.3.0
+**版本**: 0.9.0-beta
 **技术栈**: Python 3.11+, SQLAlchemy, FastAPI, Strands Agents SDK, AWS Bedrock (Claude Sonnet 4.6 / Haiku 4.5 / Opus 4.6)
 
 ---
@@ -69,7 +69,7 @@ AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM 
 
 ```
 src/agenticops/
-├── __init__.py              # 版本定义 (0.2.0)
+├── __init__.py              # 版本定义 (0.9.0-beta)
 ├── config.py                # 配置管理 (Pydantic Settings)
 ├── models.py                # 数据模型 (SQLAlchemy ORM + 连接池)
 │
@@ -92,6 +92,16 @@ src/agenticops/
 ├── report/                  # REPORT - 报告模块
 │   └── generator.py        # 多格式报告生成
 │
+├── providers/               # PROVIDERS - 多云提供商抽象模块
+│   ├── base.py             # 云提供商抽象基类
+│   ├── aws.py              # AWS 提供商实现
+│   ├── azure.py            # Azure 提供商实现
+│   ├── gcp.py              # GCP 提供商实现
+│   └── alicloud.py         # 阿里云提供商实现
+│
+├── checker/                 # CHECKER - 并行健康检查模块
+│   └── engine.py           # 多账户并行 Agent 健康检查引擎
+│
 ├── agents/                  # AGENTS - Strands多智能体模块
 │   ├── scan_agent.py       # Scan Agent — 资源扫描智能体
 │   ├── detect_agent.py     # Detect Agent — 异常检测智能体
@@ -112,6 +122,26 @@ src/agenticops/
 │
 ├── data/                    # DATA - 数据工具模块
 │   └── ...                  # 数据实用工具
+│
+├── memory/                  # MEMORY - Agent记忆模块
+│   ├── __init__.py
+│   └── agent_memory.py     # 4类记忆 (Episodic/Procedural/Semantic/Reflection)
+│
+├── mcp.py                   # MCP - Model Context Protocol 集成
+│
+├── proactive/               # PROACTIVE - 主动巡检模块
+│   └── ...                  # 主动发现与预警
+│
+├── scanner/                 # SCANNER - 安全/合规扫描模块
+│   ├── commands.py         # 扫描命令定义
+│   ├── engine.py           # 扫描引擎
+│   └── parsers.py          # 结果解析器
+│
+├── storage/                 # STORAGE - 报告存储模块
+│   ├── __init__.py          # StorageBackend, get_storage_backend
+│   └── backend.py           # 可插拔存储后端 (LocalBackend / S3Backend)
+│
+├── utils/                   # UTILS - 通用工具模块 (当前为空，保留备用)
 │
 ├── pipeline/                # PIPELINE - 管道编排模块
 │   └── orchestrator.py     # 多步骤管道编排器
@@ -137,11 +167,15 @@ src/agenticops/
 │   ├── feishu_gateway.py   # 飞书HTTP回调网关
 │   ├── dingtalk_gateway.py # 钉钉HTTP回调网关
 │   ├── wecom_gateway.py    # 企业微信HTTP回调网关
+│   ├── slack_gateway.py    # Slack HTTP回调网关
+│   ├── slack_ws.py         # Slack WebSocket (Socket Mode) 长连接
+│   ├── alert_pipeline.py   # 告警 → Agent 自动分析管线
 │   ├── gateway.py          # IM网关抽象基类
 │   └── session_manager.py  # IM会话Agent管理
 │
 ├── notify/                  # NOTIFY - 通知模块
 │   ├── notifier.py         # 多渠道通知 (Feishu/Slack/Email/DingTalk/WeCom/SNS/Webhook)
+│   ├── report_formatter.py # 报告格式化 (Markdown → 飞书/Slack rich text)
 │   └── im_config.py        # YAML-only频道配置 (channels.yaml) + IM应用凭证管理
 │
 ├── auth/                    # AUTH - 认证模块
@@ -156,7 +190,8 @@ src/agenticops/
 │   ├── main.py             # ~3200行, kubectl风格命令 + 35个聊天斜杠命令
 │   ├── context.py          # ChatContext 会话状态
 │   ├── display.py          # ThinkingDisplay 进度显示 + TokenUsage 统计
-│   └── formatters.py       # 表格样式、Markdown/JSON渲染
+│   ├── formatters.py       # 表格样式、Markdown/JSON渲染
+│   └── init_helpers.py     # CLI 初始化辅助 (向导、配置检查)
 │
 ├── chat/                    # CHAT - 聊天预处理模块
 │   ├── preprocessor.py     # I#/R# 引用解析、@file、多模态
@@ -165,10 +200,14 @@ src/agenticops/
 │   └── channel.py          # /channel 命令处理器
 │
 ├── integrations/            # INTEGRATIONS - 外部集成
+│   ├── base.py             # 告警提供商抽象基类
+│   ├── alert_processor.py  # 告警处理器 (webhook → HealthIssue)
+│   ├── cloudwatch_provider.py # CloudWatch Alarm 告警源
+│   ├── datadog_provider.py # Datadog 告警源
 │   └── parsers.py          # Prometheus/CloudWatch/Datadog/PagerDuty 告警解析
 │
 └── web/                     # WEB - Web仪表板
-    ├── app.py              # FastAPI + 81 REST API端点 + SSE Chat + Webhook
+    ├── app.py              # FastAPI + 152 REST API端点 + SSE Chat + Webhook
     ├── session_manager.py  # ChatSessionManager (per-session Agent, TTL清理)
     └── frontend/           # React + TypeScript + Tailwind (16页面, 22 hooks)
 ```
@@ -424,7 +463,21 @@ SQS:
 | anomaly | 单个异常详情+RCA | Markdown |
 | inventory | 资源清单按服务分组 | Markdown |
 
-### 3.6 AGENT - Strands 多智能体系统
+### 3.6 STORAGE - 报告存储
+
+**模块**: `storage/backend.py`
+
+可插拔的报告持久化层，通过 `settings.report_storage` 配置选择后端：
+
+| 后端 | 类 | 用途 |
+|------|-----|------|
+| local | `LocalBackend` | 本地文件系统，开发/测试用 |
+| s3 | `S3Backend` | AWS S3，生产环境 |
+
+**接口**: `StorageBackend` ABC — `write(key, content)`, `read(uri)`, `exists(uri)`, `delete(uri)`, `presigned_url(uri)`
+**工厂**: `get_storage_backend()` — 延迟实例化，按配置返回对应后端
+
+### 3.7 AGENT - Strands 多智能体系统
 
 **架构**: 基于 Strands Agents SDK 的多智能体编排（agent-as-tool 模式），共 7 个专用 Agent，40+ 工具函数。所有 Agent 使用集中配置：`settings.bedrock_model_id*`, `settings.bedrock_max_tokens`, `settings.bedrock_window_size`，并通过 `SlidingWindowConversationManager(window_size=40, per_turn=True)` 防止上下文溢出。
 

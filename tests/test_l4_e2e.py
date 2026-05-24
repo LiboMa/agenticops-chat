@@ -10,7 +10,7 @@ Does NOT require AWS credentials — tests the orchestration layer only.
 import json
 import time
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from agenticops.models import (
@@ -50,6 +50,10 @@ def test_db(tmp_path):
     settings.ensure_dirs()
 
     engine = models_mod.get_engine()
+    # Enable WAL mode to allow concurrent reads/writes in tests
+    with engine.connect() as conn:
+        conn.execute(models_mod.text("PRAGMA journal_mode=WAL"))
+        conn.commit()
     Base.metadata.create_all(engine)
 
     session = get_session()
@@ -210,7 +214,7 @@ class TestL4Lifecycle:
         # Approve the plan (L1 = auto-approvable)
         plan.status = "approved"
         plan.approved_by = "agent:main_agent"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
         session.commit()
 
@@ -226,7 +230,7 @@ class TestL4Lifecycle:
         # Approve first
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
         session.flush()
 
@@ -255,9 +259,9 @@ class TestL4Lifecycle:
         # Approve
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
-        session.flush()
+        session.commit()  # commit to release SQLite write lock before save_execution_result
 
         # Simulate successful execution via metadata tool
         from agenticops.tools.metadata_tools import save_execution_result
@@ -304,9 +308,9 @@ class TestL4Lifecycle:
 
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
-        session.flush()
+        session.commit()  # commit to release SQLite write lock before save_execution_result
 
         from agenticops.tools.metadata_tools import save_execution_result
 
@@ -357,7 +361,7 @@ class TestRAGPipeline:
 
         # Mark as resolved (needed for extract)
         issue.status = "resolved"
-        issue.resolved_at = datetime.utcnow()
+        issue.resolved_at = datetime.now(timezone.utc)
         session.commit()
 
         from agenticops.pipeline.rag_pipeline import _extract_case_data
@@ -483,7 +487,7 @@ class TestExecutorService:
         # Approve plan
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
         issue.status = "fix_approved"
         session.flush()
 

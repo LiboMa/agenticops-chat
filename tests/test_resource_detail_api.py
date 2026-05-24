@@ -1,18 +1,30 @@
 """Tests for resource detail API endpoints."""
 import pytest
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from starlette.testclient import TestClient
 from agenticops.models import (
     Base, CloudAccount, CloudResource, HealthIssue, FixPlan, RCAResult,
     FixExecution, get_engine, get_db_session, init_db,
 )
 from agenticops.web.app import app
+import agenticops.models as models_mod
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
+def setup_db(tmp_path):
+    """Use a fresh temp DB to avoid index conflicts with legacy tables."""
+    from agenticops.config import settings
+    orig_url = settings.database_url
+    orig_engine = models_mod._engine
+
+    settings.database_url = f"sqlite:///{tmp_path}/test_resource.db"
+    models_mod._engine = None
     init_db()
+    yield
+    models_mod._engine = None
+    settings.database_url = orig_url
+    models_mod._engine = orig_engine
 
 
 @pytest.fixture
@@ -44,13 +56,13 @@ def seed_data():
         issue1 = HealthIssue(
             resource_id=res_id, severity="high", source="metric_anomaly",
             title="CPU spike", description="CPU at 95%", status="open",
-            detected_at=datetime.utcnow(),
+            detected_at=datetime.now(timezone.utc),
         )
         issue2 = HealthIssue(
             resource_id=res_id, severity="medium", source="log_pattern",
             title="Disk full", description="Disk 90%", status="resolved",
-            detected_at=datetime.utcnow() - timedelta(days=3),
-            resolved_at=datetime.utcnow() - timedelta(days=2),
+            detected_at=datetime.now(timezone.utc) - timedelta(days=3),
+            resolved_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
         db.add_all([issue1, issue2])
         db.flush()
@@ -73,7 +85,7 @@ def seed_data():
             status="succeeded", duration_ms=1200,
         )
         db.add(execution)
-        return {"resource_id": res.id, "issue1_id": issue1.id, "issue2_id": issue2.id}
+        return {"resource_id": res.id, "aws_resource_id": res_id, "issue1_id": issue1.id, "issue2_id": issue2.id}
 
 
 def test_resource_issues(client, seed_data):
@@ -105,7 +117,7 @@ def test_resource_related_compute(client, seed_data):
     data = resp.json()
     assert "network" in data
     assert "contains" in data
-    # vpc_id from metadata should appear (unlinked, since no VPC resource exists)
+    # vpc_id from raw_data should appear (unlinked, since no VPC resource exists)
     assert len(data["network"]) > 0
     assert data["network"][0]["resource_type"] == "VPC"
 

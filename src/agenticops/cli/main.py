@@ -6,7 +6,7 @@ import os
 import sys
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
@@ -977,13 +977,13 @@ def update_issue(
                 console.print("[yellow]Issue is already resolved.[/yellow]")
                 return
             item.status = "resolved"
-            item.resolved_at = datetime.utcnow()
+            item.resolved_at = datetime.now(timezone.utc)
             console.print(f"[green]issue/{issue_id} resolved[/green]")
 
         if status:
             item.status = status
             if status == "resolved":
-                item.resolved_at = datetime.utcnow()
+                item.resolved_at = datetime.now(timezone.utc)
             console.print(f"[green]issue/{issue_id} status set to {status}[/green]")
 
         session.commit()
@@ -1194,7 +1194,7 @@ def logs_audit(
     from agenticops.audit import AuditService
 
     init_db()
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     logs = AuditService.query(
         action=action,
@@ -2103,7 +2103,7 @@ def _slash_resolve(ctx: ChatContext, args: list) -> str:
             return "[yellow]Issue is already resolved.[/yellow]"
 
         item.status = "resolved"
-        item.resolved_at = datetime.utcnow()
+        item.resolved_at = datetime.now(timezone.utc)
         session.commit()
 
         return f"[green]Issue #{issue_id} resolved.[/green]"
@@ -2300,7 +2300,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
 
         plan.status = "approved"
         plan.approved_by = approver.strip()
-        plan.approved_at = datetime.utcnow()
+        plan.approved_at = datetime.now(timezone.utc)
 
         # Sync HealthIssue status
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
@@ -2355,7 +2355,7 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             health_issue_id=plan.health_issue_id,
             status="pending",
             executed_by="cli_user",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         plan.status = "executing"
         session.add(execution)
@@ -3843,7 +3843,7 @@ def _cli_persist_message(
         return
     try:
         from agenticops.models import ChatSession, ChatMessage, get_db_session
-        from datetime import datetime as _dt
+        from datetime import datetime as _dt, timezone as _tz
 
         with get_db_session() as db:
             db.add(ChatMessage(
@@ -3858,7 +3858,7 @@ def _cli_persist_message(
                 ChatSession.id == ctx.db_session_id
             ).first()
             if row:
-                row.last_activity_at = _dt.utcnow()
+                row.last_activity_at = _dt.now(_tz.utc)
     except Exception:
         logger.warning(
             "Failed to persist %s message to DB for session %s — "
@@ -3948,10 +3948,10 @@ def _cli_setup_db_session(
                     "[yellow]No active sessions found. Creating a new session.[/yellow]"
                 )
                 sid = str(_uuid.uuid4())
-                from datetime import datetime as _dt
+                from datetime import datetime as _dt, timezone as _tz
                 row = ChatSession(
                     session_id=sid,
-                    name=f"CLI Chat {_dt.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                    name=f"CLI Chat {_dt.now(_tz.utc).strftime('%Y-%m-%d %H:%M')}",
                 )
                 db.add(row)
                 db.flush()
@@ -3977,11 +3977,11 @@ def _cli_setup_db_session(
     else:
         # Default: create a new DB session
         sid = str(_uuid.uuid4())
-        from datetime import datetime as _dt
+        from datetime import datetime as _dt, timezone as _tz
         with get_db_session() as db:
             row = ChatSession(
                 session_id=sid,
-                name=f"CLI Chat {_dt.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                name=f"CLI Chat {_dt.now(_tz.utc).strftime('%Y-%m-%d %H:%M')}",
             )
             db.add(row)
             db.flush()

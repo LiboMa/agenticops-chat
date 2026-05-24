@@ -2,7 +2,7 @@
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -24,9 +24,9 @@ def _seed_session():
         sess = ChatSession(
             session_id="rename-test-001",
             name="Chat 2026-03-22 10:00",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-            last_activity_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            last_activity_at=datetime.now(timezone.utc),
         )
         db.add(sess)
         db.flush()

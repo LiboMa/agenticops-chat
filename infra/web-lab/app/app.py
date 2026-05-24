@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import pymysql
 
-app = Flask(__name__)
+app, timezone= Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 
 # Database config from environment
@@ -96,7 +96,7 @@ def login():
                     # Update login stats
                     cur.execute(
                         "UPDATE users SET last_login=%s, login_count=login_count+1 WHERE id=%s",
-                        (datetime.utcnow(), user["id"]),
+                        (datetime.now(timezone.utc), user["id"]),
                     )
                     conn.commit()
                     session["user"] = username
@@ -159,7 +159,7 @@ def dashboard():
         "hostname": os.uname().nodename,
         "db_host": DB_HOST,
         "db_name": DB_NAME,
-        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
 
     # Get user list for admin
