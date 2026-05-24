@@ -858,6 +858,25 @@ async def startup():
     global _scheduler_instance
     _setup_service_logging()
     init_db()
+
+    # Seed default admin user if auth is enabled and no users exist
+    if settings.api_auth_enabled:
+        try:
+            from agenticops.auth import AuthService
+            from agenticops.auth.models import User
+            with get_db_session() as session:
+                if session.query(User).count() == 0:
+                    admin_password = getattr(settings, "admin_password", None) or os.environ.get("AIOPS_ADMIN_PASSWORD", "aiops2026")
+                    AuthService.create_user(
+                        email="admin",
+                        password=admin_password,
+                        name="Administrator",
+                        is_admin=True,
+                    )
+                    logger.info("Auth: seeded default admin user (admin / ***)")
+        except Exception as e:
+            logger.warning("Auth seed failed: %s", e)
+
     _chat_sessions.start_cleanup()
     _executor_service.start()
 

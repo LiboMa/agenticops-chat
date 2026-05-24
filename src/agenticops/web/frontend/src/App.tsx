@@ -1,9 +1,11 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Spinner";
+import { getAuthToken } from "@/api/client";
 
+const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
@@ -17,6 +19,12 @@ const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
 const AgentMetrics = lazy(() => import("@/pages/AgentMetrics"));
 const Skills = lazy(() => import("@/pages/Skills"));
 const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const token = getAuthToken();
+  if (!token) return <Navigate to="/app/login" replace />;
+  return <>{children}</>;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,7 +40,15 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/app" element={<AppShell />}>
+          <Route
+            path="/app/login"
+            element={
+              <Suspense fallback={<Spinner />}>
+                <Login />
+              </Suspense>
+            }
+          />
+          <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
             <Route
               index
               element={

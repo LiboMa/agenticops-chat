@@ -1,6 +1,7 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/hooks/useAuth";
 
 const ROUTE_LABELS: Record<string, string> = {
   "/app": "nav.dashboard",
@@ -13,8 +14,10 @@ const ROUTE_LABELS: Record<string, string> = {
 
 export function MinimalTopBar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { t, locale, setLocale } = useLocale();
   const { theme, toggle } = useTheme();
+  const { user, logout } = useAuth();
 
   const segments = location.pathname.replace(/\/+$/, "").split("/");
   const basePath = "/" + segments.slice(1, 3).join("/");
@@ -24,6 +27,18 @@ export function MinimalTopBar() {
     <header className="h-9 border-b border-border flex items-center justify-between px-4 sticky top-0 z-20 bg-background/80 backdrop-blur-sm">
       <span className="text-sm font-medium text-foreground">{t(labelKey)}</span>
       <div className="flex items-center gap-1.5">
+        {/* User + Logout */}
+        {user && (
+          <>
+            <span className="text-[11px] text-muted-foreground">{user.email}</span>
+            <button
+              onClick={async () => { await logout(); navigate("/app/login", { replace: true }); }}
+              className="px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground bg-secondary hover:bg-muted border border-border rounded transition-colors"
+            >
+              Logout
+            </button>
+          </>
+        )}
         {/* Locale toggle */}
         <button
           onClick={() => setLocale(locale === "en" ? "zh" : "en")}

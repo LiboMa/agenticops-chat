@@ -370,6 +370,10 @@ class Settings(BaseSettings):
         default=False,
         description="Enable API authentication (AIOPS_API_AUTH_ENABLED=true to enable)",
     )
+    admin_password: str = Field(
+        default="aiops2026",
+        description="Default admin password for initial seed",
+    )
 
     # Agent output detail level
     agent_output_detail: str = Field(
