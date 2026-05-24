@@ -60,6 +60,48 @@ description: "{description}"
     return draft_dir
 
 
+def create_published_skill(
+    name: str,
+    description: str,
+    content: str,
+    references: Optional[dict[str, str]] = None,
+) -> Path:
+    """Write a new SKILL.md directly to the published skills directory.
+
+    Same as create_draft_skill but targets skills_dir (production).
+    Used when user has confirmed skill creation.
+
+    Args:
+        name: Skill name (used as directory name).
+        description: Short description for YAML frontmatter.
+        content: Full SKILL.md body content (after frontmatter).
+        references: Optional dict of {filename: content} for references/ files.
+
+    Returns:
+        Path to the created skill directory.
+    """
+    pub_dir = settings.skills_dir / name
+    pub_dir.mkdir(parents=True, exist_ok=True)
+
+    skill_md = f"""---
+name: {name}
+description: "{description}"
+---
+
+{content}
+"""
+    (pub_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
+    if references:
+        refs_dir = pub_dir / "references"
+        refs_dir.mkdir(exist_ok=True)
+        for filename, ref_content in references.items():
+            (refs_dir / filename).write_text(ref_content, encoding="utf-8")
+
+    logger.info("Created published skill '%s' at %s", name, pub_dir)
+    return pub_dir
+
+
 def update_draft_skill(name: str, updated_content: str) -> Path | None:
     """Update an existing draft skill's SKILL.md content.
 

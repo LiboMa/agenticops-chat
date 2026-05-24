@@ -85,7 +85,14 @@ def activate_skill(skill_name: str, agent: Any = None) -> str:
     if body is None:
         skills = discover_skills()
         available = ", ".join(s.name for s in skills)
-        return f"Skill '{skill_name}' not found. Available: {available}"
+        return (
+            f"Skill '{skill_name}' not found.\n"
+            f"Available skills: {available or '(none)'}\n\n"
+            f"If no existing skill covers this domain, you can create one:\n"
+            f"1. Ask the user: \"I don't have a skill for '{skill_name}'. Should I create one?\"\n"
+            f"2. If confirmed, call: create_skill(name=\"{skill_name}\", "
+            f"description=\"<what it should cover>\", publish=True)"
+        )
 
     # List available references
     skills = discover_skills()
@@ -160,37 +167,71 @@ def read_skill_reference(skill_name: str, reference_path: str) -> str:
 
 
 @tool
-def create_skill(name: str, description: str) -> str:
-    """Create a new draft skill by generating content from a description.
+def create_skill(name: str, description: str, publish: bool = False) -> str:
+    """Create a new skill by generating content from a description.
 
     Uses LLM to generate a complete SKILL.md with decision trees, diagnostic
-    procedures, and command references. The skill is created as a draft and
-    immediately available for activation.
+    procedures, and command references.
+
+    When publish=True (user confirmed), the skill is saved directly to the
+    published skills directory and immediately activated. When publish=False,
+    it is saved as a draft.
+
+    IMPORTANT: Always ask the user for confirmation before calling with publish=True.
 
     Args:
         name: Skill name (lowercase, hyphenated, e.g., 'redis-admin').
         description: Natural language description of what the skill should cover.
+        publish: If True, save as published and auto-activate. Default False (draft).
 
     Returns:
-        Success message with path, or error message.
+        Success message with activated skill content (if publish=True), or draft path.
     """
-    from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
+    from agenticops.skills.evolution import (
+        generate_skill_from_description,
+        create_draft_skill,
+        create_published_skill,
+    )
     from agenticops.skills.loader import _invalidate_skills_cache
 
     result = generate_skill_from_description(description)
     if "error" in result:
         return f"Failed to generate skill: {result['error']}"
 
-    path = create_draft_skill(
-        name=result.get("name", name),
-        description=result.get("description", description)[:200],
-        content=result.get("content", ""),
-        references=result.get("references"),
-    )
+    skill_name = result.get("name", name)
+    skill_desc = result.get("description", description)[:200]
+    skill_content = result.get("content", "")
+    skill_refs = result.get("references")
+
+    if publish:
+        create_published_skill(
+            name=skill_name,
+            description=skill_desc,
+            content=skill_content,
+            references=skill_refs,
+        )
+    else:
+        create_draft_skill(
+            name=skill_name,
+            description=skill_desc,
+            content=skill_content,
+            references=skill_refs,
+        )
+
     _invalidate_skills_cache()
+
+    if publish:
+        body = load_skill_body(skill_name)
+        if body:
+            return (
+                f"Skill '{skill_name}' created and published.\n\n"
+                f'<activated_skill name="{skill_name}">\n{body}\n</activated_skill>\n\n'
+                f"Skill is now active and ready to use."
+            )
+
     return (
-        f"Draft skill '{result.get('name', name)}' created at {path}.\n"
-        f"It is now available — use activate_skill('{result.get('name', name)}') to load it."
+        f"Draft skill '{skill_name}' created.\n"
+        f"It is now available — use activate_skill('{skill_name}') to load it."
     )
 
 

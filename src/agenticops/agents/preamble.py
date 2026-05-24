@@ -33,6 +33,9 @@ AGENT SKILLS PROTOCOL:
 - Skills are READ-ONLY knowledge — they guide your tool usage but don't replace your tools.
 - Activate skills BEFORE starting investigation when the domain is clear (e.g., activate 'linux-admin'
   before running host diagnostics, activate 'kubernetes-admin' before debugging pods).
+- SKILL CREATION: If no existing skill covers the current problem domain, ask the user for confirmation,
+  then call create_skill(name, description, publish=True) to generate and immediately activate a new skill.
+  Never create a skill without user confirmation.
 """
 
 # ── Output Format Rule Templates ────────────────────────────────────

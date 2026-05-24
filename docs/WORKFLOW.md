@@ -367,6 +367,27 @@ flowchart LR
     CASES --> VEC
 ```
 
+### Auto-Create Skills
+
+When no existing skill matches the problem domain:
+
+```mermaid
+flowchart LR
+    A["Agent calls activate_skill"] --> B{"Skill exists?"}
+    B -->|Yes| C["Load & activate"]
+    B -->|No| D["Return guidance:<br/>suggest create_skill"]
+    D --> E["Agent asks user:<br/>'Should I create a skill for X?'"]
+    E -->|User confirms| F["create_skill(name, desc, publish=True)"]
+    F --> G["LLM generates SKILL.md"]
+    G --> H["Save to skills/ (published)"]
+    H --> I["Auto-activate in session"]
+```
+
+- Agent detects missing skill via `activate_skill` (not found) or by inspecting `<available_skills>`
+- Always asks user for confirmation before creating
+- `publish=True` saves directly to production `skills/` directory — no draft/promote workflow needed
+- Skill is immediately activated and usable in the current session and all future sessions
+
 ---
 
 ## Chat Preprocessing Pipeline
