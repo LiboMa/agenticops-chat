@@ -312,8 +312,15 @@ const columns: Column<Schedule>[] = [
   },
   {
     key: "cron_expression",
-    header: "Cron",
-    render: (r) => <span className="font-mono text-sm">{r.cron_expression}</span>,
+    header: "Type / Cron",
+    render: (r) =>
+      r.cron_expression === "@once" ? (
+        <Badge className={r.is_enabled ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>
+          {r.is_enabled ? "Running" : "Completed"}
+        </Badge>
+      ) : (
+        <span className="font-mono text-sm">{r.cron_expression}</span>
+      ),
   },
   {
     key: "is_enabled",
@@ -347,6 +354,8 @@ const columns: Column<Schedule>[] = [
   },
 ];
 
+type TabFilter = "all" | "recurring" | "one_shot";
+
 export default function Schedules() {
   const navigate = useNavigate();
   const { data: schedules, isLoading, error } = useSchedules();
@@ -357,6 +366,13 @@ export default function Schedules() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Schedule | null>(null);
   const [deleting, setDeleting] = useState<Schedule | null>(null);
+  const [tab, setTab] = useState<TabFilter>("all");
+
+  const filtered = (schedules ?? []).filter((s) => {
+    if (tab === "recurring") return s.cron_expression !== "@once";
+    if (tab === "one_shot") return s.cron_expression === "@once";
+    return true;
+  });
 
   if (isLoading) return <Spinner />;
   if (error) return <ErrorBanner message={(error as Error).message} />;
@@ -365,7 +381,24 @@ export default function Schedules() {
     <>
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">Schedules</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-semibold text-foreground">Schedules</h2>
+            <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
+              {(["all", "recurring", "one_shot"] as TabFilter[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    tab === t
+                      ? "bg-background text-foreground shadow-sm font-medium"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "all" ? "All" : t === "recurring" ? "Recurring" : "One-shot"}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             onClick={() => {
               setEditing(null);
@@ -407,10 +440,10 @@ export default function Schedules() {
               ),
             },
           ]}
-          data={schedules ?? []}
+          data={filtered}
           rowKey={(r) => r.id}
           onRowClick={(r) => navigate(`/app/schedules/${r.id}`)}
-          emptyMessage="No schedules configured."
+          emptyMessage={tab === "one_shot" ? "No one-shot tasks yet." : "No schedules configured."}
         />
       </Card>
 

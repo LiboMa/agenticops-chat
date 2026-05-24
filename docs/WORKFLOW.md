@@ -406,9 +406,17 @@ flowchart LR
 
 **Tools:** `run_task` (one-shot) | `create_schedule` (recurring) | `list_schedules` | `manage_schedule` | `get_schedule_history`
 
-**CLI shortcut:** `/run <description>` — executes one-shot task immediately
+**CLI shortcuts:**
+- `/run <description>` — executes one-shot task immediately (forwards to Agent as `run_task`)
+
+**Chat management:** Natural language delete/pause/resume via `manage_schedule(id, action)` — Agent understands "delete task 42", "pause schedule daily-rds-check", etc.
 
 **Report template:** Tasks append report instructions to the prompt. Users can provide custom Markdown templates or use the default format (summary → findings → recommendations).
+
+**Frontend (Schedules page):**
+- Tab filter: All | Recurring | One-shot — quickly switch between schedule types
+- One-shot tasks show status badges (Running / Completed) instead of cron expression
+- ScheduleDetail displays `report_template` and `report_format` when configured
 
 ---
 

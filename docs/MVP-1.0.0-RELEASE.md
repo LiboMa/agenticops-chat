@@ -477,7 +477,8 @@ HealthIssue → RCA →  ──►  RAG Pipeline  ──►  SOP 匹配/创建  
 | SOP 创建/升级 | 已实现 | `pipeline/sop_upgrader.py`：无匹配时自动生成新 SOP |
 | 草稿 Skill 生成 | 已实现 | `skills/evolution.py`：LLM 从描述生成 SKILL.md |
 | 自动创建 Skill | 已实现 | Agent 检测无匹配 Skill → 询问用户确认 → 自动生成并发布激活（`create_skill(publish=True)`） |
-| Chat 创建 Schedule/Task | 已实现 | Agent tools: `run_task`（一次性）/ `create_schedule`（周期）/ `list_schedules` / `manage_schedule` / `get_schedule_history`；CLI: `/run` 快捷入口 |
+| Chat 创建 Schedule/Task | 已实现 | Agent tools: `run_task`（一次性）/ `create_schedule`（周期）/ `list_schedules` / `manage_schedule` / `get_schedule_history`；CLI: `/run` 快捷入口；Chat 支持自然语言删除/暂停/恢复任务 |
+| Schedule 前端优化 | 已实现 | Tab 过滤（All/Recurring/One-shot）、@once 状态 Badge、ScheduleDetail 展示 report_template 和 report_format |
 | 自动 Skill 升级 | 计划中 | 根据多次案例反馈，自动优化 Skill 的决策树和参考文档 |
 | Skill 版本管理 | 计划中 | 草稿 → 审核 → 发布 → 归档生命周期 |
 | 跨案例学习 | 计划中 | 从相似案例中提取共性模式，合并进 Skill references |

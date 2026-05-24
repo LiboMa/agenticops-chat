@@ -168,6 +168,8 @@ export default function ScheduleDetail() {
                   const skills = Array.isArray(cfg.skills) ? (cfg.skills as string[]) : [];
                   const channels = Array.isArray(cfg.notify_channels) ? (cfg.notify_channels as string[]) : [];
                   const reportType = cfg.report_type as string | undefined;
+                  const reportTemplate = cfg.report_template as string | undefined;
+                  const reportFormat = cfg.report_format as string | undefined;
                   const timeout = cfg.timeout_seconds as number | undefined;
                   return (
                     <div className="bg-secondary rounded-lg p-4 space-y-2 text-sm">
@@ -197,6 +199,18 @@ export default function ScheduleDetail() {
                         <div>
                           <span className="font-medium text-foreground">Report Type:</span>{" "}
                           <span className="text-muted-foreground">{reportType}</span>
+                        </div>
+                      )}
+                      {reportFormat && (
+                        <div>
+                          <span className="font-medium text-foreground">Format:</span>{" "}
+                          <span className="text-muted-foreground">{reportFormat}</span>
+                        </div>
+                      )}
+                      {reportTemplate && (
+                        <div>
+                          <span className="font-medium text-foreground">Report Template:</span>
+                          <pre className="mt-1 text-muted-foreground text-xs bg-background rounded p-2 whitespace-pre-wrap">{reportTemplate}</pre>
                         </div>
                       )}
                       {timeout && (
