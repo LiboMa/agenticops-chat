@@ -1,4 +1,4 @@
-"""Tests for agenticops.mcp — boosting from 41% coverage."""
+"""Tests for agenticops.mcp_manager — boosting from 41% coverage."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, PropertyMock
 
-from agenticops.mcp import (
+from agenticops.mcp_manager import (
     _read_config,
     _write_config,
     _expand_env,
@@ -59,7 +59,7 @@ class TestConfigIO:
         fake_path = tmp_path / "nonexistent.json"
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = fake_path
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         result = _read_config()
         assert result == {"mcpServers": {}}
@@ -70,7 +70,7 @@ class TestConfigIO:
 
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         result = _read_config()
         assert "test" in result["mcpServers"]
@@ -81,7 +81,7 @@ class TestConfigIO:
 
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         result = _read_config()
         assert result == {"mcpServers": {}}
@@ -92,7 +92,7 @@ class TestConfigIO:
 
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         result = _read_config()
         assert result == {"mcpServers": {}}
@@ -103,7 +103,7 @@ class TestConfigIO:
 
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         result = _read_config()
         assert "mcpServers" in result
@@ -113,7 +113,7 @@ class TestConfigIO:
 
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
         _write_config({"mcpServers": {"s1": {"command": "test"}}})
         assert cfg_file.exists()
@@ -136,7 +136,7 @@ class TestCRUD:
         }))
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = self.cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
     def test_list_mcp_servers(self):
         servers = list_mcp_servers()
@@ -177,7 +177,7 @@ class TestBuildClients:
         self.cfg_file = tmp_path / "mcp.json"
         mock_settings = MagicMock()
         mock_settings.mcp_servers_config = self.cfg_file
-        monkeypatch.setattr("agenticops.mcp.settings", mock_settings)
+        monkeypatch.setattr("agenticops.mcp_manager.settings", mock_settings)
 
     def test_empty_config(self):
         self.cfg_file.write_text(json.dumps({"mcpServers": {}}))
@@ -202,7 +202,7 @@ class TestBuildClients:
         self.cfg_file.write_text(json.dumps({
             "mcpServers": {"my_server": {"command": "echo", "args": ["hi"]}}
         }))
-        with patch("agenticops.mcp.MCPClient") as mock_cls:
+        with patch("agenticops.mcp_manager.MCPClient") as mock_cls:
             mock_cls.return_value = MagicMock()
             clients = _build_clients()
             assert len(clients) == 1
@@ -211,7 +211,7 @@ class TestBuildClients:
         self.cfg_file.write_text(json.dumps({
             "mcpServers": {"sse_server": {"url": "http://localhost:8080/sse"}}
         }))
-        with patch("agenticops.mcp.MCPClient") as mock_cls:
+        with patch("agenticops.mcp_manager.MCPClient") as mock_cls:
             mock_cls.return_value = MagicMock()
             clients = _build_clients()
             assert len(clients) == 1
@@ -220,7 +220,7 @@ class TestBuildClients:
         self.cfg_file.write_text(json.dumps({
             "mcpServers": {"env_server": {"command": "node", "env": {"KEY": "val"}}}
         }))
-        with patch("agenticops.mcp.MCPClient") as mock_cls:
+        with patch("agenticops.mcp_manager.MCPClient") as mock_cls:
             mock_cls.return_value = MagicMock()
             clients = _build_clients()
             assert len(clients) == 1
@@ -229,14 +229,14 @@ class TestBuildClients:
         self.cfg_file.write_text(json.dumps({
             "mcpServers": {"bad_server": {"command": "echo"}}
         }))
-        with patch("agenticops.mcp.MCPClient", side_effect=Exception("fail")):
+        with patch("agenticops.mcp_manager.MCPClient", side_effect=Exception("fail")):
             clients = _build_clients()
             assert len(clients) == 0
 
 
 class TestStopClients:
     def test_stop_clears_list(self):
-        import agenticops.mcp as mcp_mod
+        import agenticops.mcp_manager as mcp_mod
         mock_client = MagicMock()
         mcp_mod._mcp_clients.clear()
         mcp_mod._mcp_clients.append(mock_client)
@@ -246,7 +246,7 @@ class TestStopClients:
         mock_client.stop.assert_called_once()
 
     def test_stop_handles_exception(self):
-        import agenticops.mcp as mcp_mod
+        import agenticops.mcp_manager as mcp_mod
         mock_client = MagicMock()
         mock_client.stop.side_effect = RuntimeError("stop failed")
         mcp_mod._mcp_clients.clear()
