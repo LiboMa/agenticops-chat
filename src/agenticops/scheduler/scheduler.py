@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Callable
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Boolean, JSON
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agenticops.models import Base, get_db_session, init_db
@@ -31,6 +31,7 @@ class Schedule(Base):
     cron_expression: Mapped[str] = mapped_column(String(100))
     account_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_retries: Mapped[int] = mapped_column(Integer, default=0)  # 0 = no retry
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -51,10 +52,11 @@ class ScheduleExecution(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     schedule_id: Mapped[int] = mapped_column(ForeignKey("schedules.id"))
-    status: Mapped[str] = mapped_column(String(20))  # running, completed, failed
+    status: Mapped[str] = mapped_column(String(20))  # running, completed, failed, retrying
     started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -457,7 +459,7 @@ class Scheduler:
         skills = config.get("skills", [])
         report_type = config.get("report_type")
         notify_channels = config.get("notify_channels", [])
-        timeout_seconds = config.get("timeout_seconds", 300)
+        timeout_seconds = config.get("timeout_seconds", 0)  # 0 = unlimited
 
         # Build enhanced prompt with report instructions
         from agenticops.tools.schedule_tools import build_enhanced_prompt
@@ -489,7 +491,7 @@ class Scheduler:
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        thread.join(timeout=timeout_seconds)
+        thread.join(timeout=timeout_seconds if timeout_seconds > 0 else None)
 
         if thread.is_alive():
             timed_out = True
@@ -515,11 +517,13 @@ class Scheduler:
             except Exception:
                 logger.debug("Failed to upload schedule output to storage", exc_info=True)
 
+        # Determine if execution failed (timeout or exception in _run)
+        exec_failed = timed_out or (not response_text)
+
         with get_db_session() as session:
             ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
             if ex:
                 ex.completed_at = datetime.now(timezone.utc)
-                # Ensure both are naive UTC to avoid aware/naive mismatch from SQLite
                 _started = ex.started_at.replace(tzinfo=None) if ex.started_at else ex.completed_at.replace(tzinfo=None)
                 _completed = ex.completed_at.replace(tzinfo=None) if ex.completed_at.tzinfo else ex.completed_at
                 ex.duration_ms = int((_completed - _started).total_seconds() * 1000)
@@ -527,6 +531,10 @@ class Scheduler:
                     ex.status = "failed"
                     ex.error = f"Timed out after {timeout_seconds}s"
                     ex.result = {"agent_output": response_text or "(partial)", "prompt": prompt}
+                elif not response_text:
+                    ex.status = "failed"
+                    ex.error = "Agent returned empty response"
+                    ex.result = {"prompt": prompt}
                 else:
                     result_data: Dict[str, Any] = {"agent_output": response_text, "prompt": prompt}
                     if presigned_url:
@@ -534,10 +542,39 @@ class Scheduler:
                     ex.status = "completed"
                     ex.result = result_data
 
+        # Retry logic: if failed and retries remaining, re-execute
+        max_retries = schedule.max_retries if hasattr(schedule, "max_retries") else config.get("max_retries", 0)
+        current_retry = config.get("_retry_count", 0)
+        if exec_failed and max_retries > 0 and current_retry < max_retries:
+            retry_num = current_retry + 1
+            logger.info(f"Retrying '{schedule.name}' (attempt {retry_num}/{max_retries})")
+            with get_db_session() as session:
+                ex = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                if ex:
+                    ex.retry_count = retry_num
+                    ex.status = "retrying"
+            # Re-execute with incremented retry count
+            retry_config = dict(config)
+            retry_config["_retry_count"] = retry_num
+            retry_info = {
+                "id": schedule.id,
+                "name": schedule.name,
+                "pipeline_name": schedule.pipeline_name,
+                "account_name": schedule.account_name,
+                "config": retry_config,
+            }
+            self._execute_schedule_by_info(retry_info)
+            return  # Skip notification — will notify on final attempt
+
         # Notify — include content summary + presigned URL for notify_channels
         try:
             from agenticops.services.notification_service import notify_schedule_result
-            notify_schedule_result(schedule.name, not timed_out, presigned_url=presigned_url or "")
+            error_detail = ""
+            if exec_failed:
+                error_detail = f"Timed out after {timeout_seconds}s" if timed_out else "Agent returned empty response"
+                if current_retry > 0:
+                    error_detail += f" (after {current_retry + 1} attempts)"
+            notify_schedule_result(schedule.name, not exec_failed, error_detail, presigned_url=presigned_url or "")
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 

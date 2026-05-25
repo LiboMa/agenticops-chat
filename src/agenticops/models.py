@@ -1000,12 +1000,24 @@ def init_db(engine=None):
                     conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE {new_type}"))
                     conn.commit()
 
-    # Migration: add schedule_type column to schedules if missing
+    # Migration: add schedule_type and max_retries columns to schedules if missing
     if insp.has_table("schedules"):
         columns = {col["name"] for col in insp.get_columns("schedules")}
         if "schedule_type" not in columns:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE schedules ADD COLUMN schedule_type VARCHAR(20) DEFAULT 'recurring'"))
+                conn.commit()
+        if "max_retries" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE schedules ADD COLUMN max_retries INTEGER DEFAULT 0"))
+                conn.commit()
+
+    # Migration: add retry_count column to schedule_executions if missing
+    if insp.has_table("schedule_executions"):
+        columns = {col["name"] for col in insp.get_columns("schedule_executions")}
+        if "retry_count" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE schedule_executions ADD COLUMN retry_count INTEGER DEFAULT 0"))
                 conn.commit()
 
     # Ensure all ORM models are registered in metadata before create_all

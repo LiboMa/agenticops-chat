@@ -75,7 +75,8 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
   const [selectedSkills, setSelectedSkills] = useState<string[]>((initConfig.skills as string[]) ?? []);
   const [reportType, setReportType] = useState((initConfig.report_type as string) ?? "");
   const [selectedChannels, setSelectedChannels] = useState<string[]>((initConfig.notify_channels as string[]) ?? []);
-  const [timeout, setTimeout] = useState((initConfig.timeout_seconds as number) ?? 300);
+  const [timeout, setTimeout] = useState((initConfig.timeout_seconds as number) ?? 0);
+  const [maxRetries, setMaxRetries] = useState((initConfig.max_retries as number) ?? 0);
   // HealthPatrol fields
   const [hpScope, setHpScope] = useState((initConfig.scope as string) ?? "all");
   const [hpDeep, setHpDeep] = useState((initConfig.deep as boolean) ?? false);
@@ -95,7 +96,8 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
       if (selectedSkills.length > 0) config.skills = selectedSkills;
       if (reportType) config.report_type = reportType;
       if (selectedChannels.length > 0) config.notify_channels = selectedChannels;
-      if (timeout !== 300) config.timeout_seconds = timeout;
+      if (timeout > 0) config.timeout_seconds = timeout;
+      if (maxRetries > 0) config.max_retries = maxRetries;
     }
     if (isHealthPatrol) {
       if (hpScope !== "all") config.scope = hpScope;
@@ -254,7 +256,13 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
                 </div>
                 <div className="w-28">
                   <label className="block text-sm font-medium text-foreground mb-1">Timeout (s)</label>
-                  <input type="number" min={30} max={3600} value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} className={inputCls} />
+                  <input type="number" min={0} value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} placeholder="0 = unlimited" className={inputCls} />
+                  <p className="text-xs text-muted-foreground mt-0.5">0 = unlimited</p>
+                </div>
+                <div className="w-28">
+                  <label className="block text-sm font-medium text-foreground mb-1">Retries</label>
+                  <input type="number" min={0} max={5} value={maxRetries} onChange={(e) => setMaxRetries(Number(e.target.value))} className={inputCls} />
+                  <p className="text-xs text-muted-foreground mt-0.5">0 = no retry</p>
                 </div>
               </div>
             </div>

@@ -435,6 +435,7 @@ class ScheduleCreate(BaseModel):
     cron_expression: str = Field(..., max_length=100)
     account_name: Optional[str] = Field(None, max_length=100)
     is_enabled: bool = True
+    max_retries: int = Field(default=0, ge=0, le=5)
     config: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -463,6 +464,7 @@ class ScheduleResponse(BaseModel):
     cron_expression: str
     account_name: Optional[str]
     is_enabled: bool
+    max_retries: int = 0
     config: dict
     last_run_at: Optional[datetime]
     next_run_at: Optional[datetime]
@@ -4286,6 +4288,7 @@ async def api_create_schedule(data: ScheduleCreate):
             cron_expression=data.cron_expression,
             account_name=data.account_name,
             is_enabled=data.is_enabled,
+            max_retries=data.max_retries,
             config=data.config,
         )
         session.add(schedule)
