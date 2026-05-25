@@ -236,6 +236,10 @@ class Settings(BaseSettings):
         default="us-east-1",
         description="S3 region for report storage (AIOPS_REPORT_S3_REGION)",
     )
+    report_presigned_url_expiry: int = Field(
+        default=604800,
+        description="Presigned URL expiry in seconds for report download links (default 7 days)",
+    )
 
     # Deployment profile
     deployment_profile: str = Field(

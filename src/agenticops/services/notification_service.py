@@ -251,14 +251,35 @@ def notify_report_saved(
 
     Also triggers rich report distribution to any enabled sns-report channels.
     """
-    # Plain text notification (existing behaviour)
+    body = (
+        f"A new {report_type} report has been generated.\n\n"
+        f"Report #{report_id}: {title}"
+    )
+
+    # Append presigned download URL when S3 storage is configured
+    if settings.report_storage == "s3" and settings.report_s3_bucket:
+        try:
+            from agenticops.models import Report
+            from agenticops.storage.backend import get_storage_backend
+
+            with get_db_session() as db:
+                report = db.query(Report).filter_by(id=report_id).first()
+            if report and report.file_path:
+                backend = get_storage_backend()
+                url = backend.presigned_url(
+                    report.file_path,
+                    expiry=settings.report_presigned_url_expiry,
+                )
+                if url:
+                    body += f"\n\nDownload: {url}"
+        except Exception:
+            logger.debug("Failed to generate presigned URL for report #%d", report_id, exc_info=True)
+
+    # Plain text notification
     notify_event(
         event_type="report_saved",
         subject=f"Report #{report_id} Generated: {title}",
-        body=(
-            f"A new {report_type} report has been generated.\n\n"
-            f"Report #{report_id}: {title}"
-        ),
+        body=body,
     )
 
     # Rich report distribution to sns-report channels
@@ -418,7 +439,7 @@ def _run_im_origin_notify(
 
 
 def notify_schedule_result(
-    name: str, success: bool, error: str = ""
+    name: str, success: bool, error: str = "", presigned_url: str = ""
 ) -> None:
     """Notify: scheduled pipeline completed or failed."""
     status = "completed" if success else "failed"
@@ -426,6 +447,8 @@ def notify_schedule_result(
     body = f"Scheduled pipeline '{name}' {status}."
     if error:
         body += f"\nError: {error[:300]}"
+    if presigned_url:
+        body += f"\n\nOutput download: {presigned_url}"
     notify_event(
         event_type="schedule_result",
         subject=f"Schedule '{name}' {status.upper()}",
