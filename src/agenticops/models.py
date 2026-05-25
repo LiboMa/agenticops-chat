@@ -1000,9 +1000,11 @@ def init_db(engine=None):
                     conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE {new_type}"))
                     conn.commit()
 
-    # Ensure auth models are registered in metadata before create_all
+    # Ensure all models are registered in metadata before create_all
     import agenticops.auth.models  # noqa: F401
     import agenticops.audit.models  # noqa: F401
+    import agenticops.scheduler.scheduler  # noqa: F401
+    import agenticops.notify.notifier  # noqa: F401
 
     Base.metadata.create_all(engine)
 
