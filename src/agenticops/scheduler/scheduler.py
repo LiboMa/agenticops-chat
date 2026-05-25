@@ -536,7 +536,7 @@ class Scheduler:
         # Notify — include content summary + presigned URL for notify_channels
         try:
             from agenticops.services.notification_service import notify_schedule_result
-            notify_schedule_result(schedule.name, not timed_out)
+            notify_schedule_result(schedule.name, not timed_out, presigned_url=presigned_url or "")
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 

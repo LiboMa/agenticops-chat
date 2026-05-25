@@ -48,6 +48,7 @@ def save_report(
         metadata_parsed = {}
 
     # Write via storage backend (local or S3)
+    from agenticops.config import settings
     from agenticops.storage import get_storage_backend
 
     backend = get_storage_backend()
@@ -80,9 +81,13 @@ def save_report(
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
+        # Generate presigned URL for S3-stored reports
+        download_url = backend.presigned_url(uri, expiry=settings.report_presigned_url_expiry)
+        display_path = download_url or uri
+
         return (
             f"Report #{report.id} saved: [{report_type.upper()}] {title}. "
-            f"File: {uri}"
+            f"File: {display_path}"
         )
     except Exception as e:
         session.rollback()

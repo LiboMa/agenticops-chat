@@ -268,6 +268,7 @@ export default function ScheduleDetail() {
                 <tbody className="divide-y divide-border">
                   {executions.data.map((ex) => {
                     const agentOutput = (ex.result as Record<string, unknown>)?.agent_output as string | undefined;
+                    const presignedUrl = (ex.result as Record<string, unknown>)?.presigned_url as string | undefined;
                     const isExpanded = expandedExec === ex.id;
                     return (
                       <tr key={ex.id} className="hover:bg-secondary align-top">
@@ -299,16 +300,28 @@ export default function ScheduleDetail() {
                           {ex.error || "-"}
                         </td>
                         <td className="px-4 py-2 text-sm">
-                          {agentOutput ? (
-                            <button
-                              onClick={() => setExpandedExec(isExpanded ? null : ex.id)}
-                              className="text-primary-600 hover:underline text-xs"
-                            >
-                              {isExpanded ? "Hide" : "Show"}
-                            </button>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {agentOutput ? (
+                              <button
+                                onClick={() => setExpandedExec(isExpanded ? null : ex.id)}
+                                className="text-primary-600 hover:underline text-xs"
+                              >
+                                {isExpanded ? "Hide" : "Show"}
+                              </button>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                            {presignedUrl && (
+                              <a
+                                href={presignedUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary-600 hover:underline text-xs"
+                              >
+                                Download
+                              </a>
+                            )}
+                          </div>
                           {isExpanded && agentOutput && (
                             <pre className="mt-2 bg-secondary rounded p-3 text-xs text-foreground whitespace-pre-wrap max-h-64 overflow-y-auto">
                               {agentOutput}

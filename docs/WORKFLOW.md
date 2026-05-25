@@ -754,6 +754,8 @@ generate an inventory report for EC2
 
 **Auto-notifications:** When `AIOPS_NOTIFICATIONS_ENABLED=true`, the pipeline automatically sends notifications at 7 event points (issue created, RCA completed, fix planned, fix approved, execution result, report saved, schedule result).
 
+**Pre-signed download URLs:** When S3 storage is configured (`AIOPS_REPORT_STORAGE=s3`), report and schedule notifications automatically include a time-limited download link (default 7 days, configurable via `AIOPS_REPORT_PRESIGNED_URL_EXPIRY`). Works across all channels — Email, Slack, Feishu.
+
 ---
 
 ### Tutorial 12: IM Bot (Feishu / DingTalk / WeCom)
