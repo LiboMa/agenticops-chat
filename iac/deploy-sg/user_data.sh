@@ -91,7 +91,7 @@ cd "$APP_DIR"
 rm -rf .venv
 UV_PYTHON_INSTALL_DIR=/opt/uv-python uv venv .venv --python 3.12
 source .venv/bin/activate
-uv pip install -e .
+uv pip install -e ".[im,files,reports]"
 
 # -----------------------------------------------------------------------------
 # Frontend: Build React SPA

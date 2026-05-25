@@ -63,7 +63,7 @@ const PRESET_ICONS: Record<CronPreset["icon"], LucideIcon> = {
 /* ------------------------------------------------------------------ */
 
 function relativeTime(iso: string): string {
-  const d = new Date(iso + "Z");
+  const d = new Date(iso);
   const now = new Date();
   const diffMs = d.getTime() - now.getTime();
   if (diffMs < 0) return "now";
@@ -410,7 +410,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               <Timer className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {preview.next_runs.map((r, i) => {
-                  const d = new Date(r + "Z");
+                  const d = new Date(r);
                   const fmt = new Intl.DateTimeFormat(undefined, {
                     month: "short",
                     day: "numeric",
