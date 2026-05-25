@@ -47,8 +47,9 @@ if ! command -v uv &>/dev/null && [ ! -f /root/.local/bin/uv ]; then
 fi
 export PATH="/root/.local/bin:/usr/local/bin:$PATH"
 
-# Install Python 3.12 via uv
-uv python install 3.12
+# Install Python 3.12 via uv (to shared location accessible by service user)
+UV_PYTHON_INSTALL_DIR=/opt/uv-python uv python install 3.12
+chmod -R a+rx /opt/uv-python
 
 # -----------------------------------------------------------------------------
 # Install Node.js 20 (for frontend build)
@@ -76,9 +77,9 @@ cd "$APP_DIR"
 # -----------------------------------------------------------------------------
 # Backend: Python environment via uv
 # -----------------------------------------------------------------------------
-if [ ! -d ".venv" ]; then
-  uv venv .venv --python 3.12
-fi
+# Recreate venv to ensure correct Python path
+rm -rf .venv
+UV_PYTHON_INSTALL_DIR=/opt/uv-python uv venv .venv --python 3.12
 source .venv/bin/activate
 uv pip install -e .
 
@@ -94,6 +95,7 @@ cd "$APP_DIR"
 # Permissions
 # -----------------------------------------------------------------------------
 mkdir -p "$APP_DIR/data"
+chmod -R +x "$APP_DIR/.venv/bin/"
 chown -R agenticops:agenticops "$APP_DIR"
 cp /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
 

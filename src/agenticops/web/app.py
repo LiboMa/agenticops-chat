@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, text
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
@@ -797,18 +797,28 @@ async def lifespan(app: FastAPI):
     scheduler_instance.start()
     logger.info("Cron scheduler started")
 
-    # Start Feishu WebSocket long-connection if enabled
+    # Auto-detect IM WS from channels.yaml (fallback to config override)
     _startup_log = logging.getLogger(__name__)
-    if settings.feishu_ws_enabled:
+    try:
+        from agenticops.notify.im_config import load_channels
+        _channels = load_channels()
+        _has_feishu_channel = any(c.channel_type == "feishu" and c.is_enabled for c in _channels)
+        _has_slack_channel = any(c.channel_type == "slack" and c.is_enabled for c in _channels)
+    except Exception:
+        _has_feishu_channel = False
+        _has_slack_channel = False
+
+    if _has_feishu_channel or settings.feishu_ws_enabled:
         try:
             from agenticops.im.feishu_ws import start_feishu_ws
             svc = start_feishu_ws()
             if svc:
                 _startup_log.info(
-                    "Feishu WS: started=%s thread_alive=%s app=%s",
+                    "Feishu WS: started=%s thread_alive=%s app=%s (auto-detected=%s)",
                     svc._started,
                     svc._thread.is_alive() if svc._thread else False,
                     svc._app_name,
+                    _has_feishu_channel,
                 )
                 print(f"  Feishu WS: started (app={svc._app_name})")
             else:
@@ -818,19 +828,19 @@ async def lifespan(app: FastAPI):
             _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
             print(f"  Feishu WS: FAILED — {e}")
     else:
-        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
+        _startup_log.info("Feishu WS: disabled (no enabled feishu channel in channels.yaml)")
 
-    # Start Slack Socket Mode if enabled
-    if settings.slack_ws_enabled:
+    if _has_slack_channel or settings.slack_ws_enabled:
         try:
             from agenticops.im.slack_ws import start_slack_ws
             slack_svc = start_slack_ws()
             if slack_svc:
                 _startup_log.info(
-                    "Slack WS: started=%s thread_alive=%s app=%s",
+                    "Slack WS: started=%s thread_alive=%s app=%s (auto-detected=%s)",
                     slack_svc._started,
                     slack_svc._thread.is_alive() if slack_svc._thread else False,
                     slack_svc._app_name,
+                    _has_slack_channel,
                 )
                 print(f"  Slack WS: started (app={slack_svc._app_name})")
             else:
@@ -840,7 +850,7 @@ async def lifespan(app: FastAPI):
             _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
             print(f"  Slack WS: FAILED — {e}")
     else:
-        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
+        _startup_log.info("Slack WS: disabled (no enabled slack channel in channels.yaml)")
 
     yield  # --- App is running ---
 
@@ -985,18 +995,28 @@ async def startup():
     _scheduler_instance.start()
     logger.info("Cron scheduler started")
 
-    # Start Feishu WebSocket long-connection if enabled
+    # Auto-detect IM WS from channels.yaml (fallback to config override)
     _startup_log = logging.getLogger(__name__)
-    if settings.feishu_ws_enabled:
+    try:
+        from agenticops.notify.im_config import load_channels
+        _channels = load_channels()
+        _has_feishu_channel = any(c.channel_type == "feishu" and c.is_enabled for c in _channels)
+        _has_slack_channel = any(c.channel_type == "slack" and c.is_enabled for c in _channels)
+    except Exception:
+        _has_feishu_channel = False
+        _has_slack_channel = False
+
+    if _has_feishu_channel or settings.feishu_ws_enabled:
         try:
             from agenticops.im.feishu_ws import start_feishu_ws
             svc = start_feishu_ws()
             if svc:
                 _startup_log.info(
-                    "Feishu WS: started=%s thread_alive=%s app=%s",
+                    "Feishu WS: started=%s thread_alive=%s app=%s (auto-detected=%s)",
                     svc._started,
                     svc._thread.is_alive() if svc._thread else False,
                     svc._app_name,
+                    _has_feishu_channel,
                 )
                 print(f"  Feishu WS: started (app={svc._app_name})")
             else:
@@ -1006,19 +1026,19 @@ async def startup():
             _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
             print(f"  Feishu WS: FAILED — {e}")
     else:
-        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
+        _startup_log.info("Feishu WS: disabled (no enabled feishu channel in channels.yaml)")
 
-    # Start Slack Socket Mode if enabled
-    if settings.slack_ws_enabled:
+    if _has_slack_channel or settings.slack_ws_enabled:
         try:
             from agenticops.im.slack_ws import start_slack_ws
             slack_svc = start_slack_ws()
             if slack_svc:
                 _startup_log.info(
-                    "Slack WS: started=%s thread_alive=%s app=%s",
+                    "Slack WS: started=%s thread_alive=%s app=%s (auto-detected=%s)",
                     slack_svc._started,
                     slack_svc._thread.is_alive() if slack_svc._thread else False,
                     slack_svc._app_name,
+                    _has_slack_channel,
                 )
                 print(f"  Slack WS: started (app={slack_svc._app_name})")
             else:
@@ -1028,7 +1048,7 @@ async def startup():
             _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
             print(f"  Slack WS: FAILED — {e}")
     else:
-        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
+        _startup_log.info("Slack WS: disabled (no enabled slack channel in channels.yaml)")
 
 
 @app.on_event("shutdown")
@@ -1234,6 +1254,16 @@ async def api_get_settings():
         for alias, model_id in MODEL_ALIASES.items()
     ]
 
+    # IM WS auto-detect status from channels.yaml
+    try:
+        from agenticops.notify.im_config import load_channels
+        _channels = load_channels()
+        feishu_ws_active = any(c.channel_type == "feishu" and c.is_enabled for c in _channels)
+        slack_ws_active = any(c.channel_type == "slack" and c.is_enabled for c in _channels)
+    except Exception:
+        feishu_ws_active = False
+        slack_ws_active = False
+
     return {
         "scan_focus": settings.scan_focus,
         "executor_enabled": settings.executor_enabled,
@@ -1248,13 +1278,22 @@ async def api_get_settings():
         "skills_improvement_notify": settings.skills_improvement_notify,
         "agent_models": agent_models,
         "model_presets": model_presets,
+        # IM WebSocket status (read-only, derived from channels.yaml)
+        "feishu_ws_active": feishu_ws_active,
+        "slack_ws_active": slack_ws_active,
+        # Report S3 storage config
+        "report_storage": settings.report_storage,
+        "report_s3_bucket": settings.report_s3_bucket,
+        "report_s3_prefix": settings.report_s3_prefix,
+        "report_s3_region": settings.report_s3_region,
+        "report_presigned_url_expiry": settings.report_presigned_url_expiry,
     }
 
 
 @app.patch("/api/settings")
 async def api_update_settings(body: dict = Body(...)):
     """Update runtime settings (session-level, resets on restart)."""
-    from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus
+    from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
     BOOL_KEYS = {
         "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
@@ -1263,7 +1302,11 @@ async def api_update_settings(body: dict = Body(...)):
         "skills_auto_improve_enabled", "skills_post_resolution_review",
         "skills_improvement_notify",
     }
-    ALL_KEYS = BOOL_KEYS | {"scan_focus", "agent_models"}
+    # Report S3 config (persisted to settings.yaml)
+    REPORT_STR_KEYS = {"report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region"}
+    REPORT_INT_KEYS = {"report_presigned_url_expiry"}
+
+    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | {"scan_focus", "agent_models"}
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -1298,6 +1341,25 @@ async def api_update_settings(body: dict = Body(...)):
                 setattr(settings, f"agent_{name}_max_tokens", int(cfg["max_tokens"]))
             if "window_size" in cfg:
                 setattr(settings, f"agent_{name}_window_size", int(cfg["window_size"]))
+
+    # Report S3 config — update in-memory + persist to settings.yaml
+    report_changed = False
+    for key in REPORT_STR_KEYS:
+        if key in body:
+            if key == "report_storage" and body[key] not in ("local", "s3"):
+                raise HTTPException(400, "report_storage must be 'local' or 's3'")
+            setattr(settings, key, str(body[key]))
+            report_changed = True
+    for key in REPORT_INT_KEYS:
+        if key in body:
+            setattr(settings, key, int(body[key]))
+            report_changed = True
+    if report_changed:
+        yaml_updates = {}
+        for key in REPORT_STR_KEYS | REPORT_INT_KEYS:
+            if key in body:
+                yaml_updates[key] = getattr(settings, key)
+        save_to_yaml(yaml_updates)
 
     return await api_get_settings()
 
@@ -5569,7 +5631,11 @@ async def api_im_bots():
     if feishu_apps:
         try:
             from agenticops.im.feishu_ws import _feishu_ws_service
-            ws_enabled = settings.feishu_ws_enabled
+            from agenticops.notify.im_config import load_channels as _load_ch
+            _ch = _load_ch()
+            ws_enabled = settings.feishu_ws_enabled or any(
+                c.channel_type == "feishu" and c.is_enabled for c in _ch
+            )
             ws_started = _feishu_ws_service is not None and _feishu_ws_service._started
             ws_thread_alive = (
                 _feishu_ws_service is not None
@@ -5613,7 +5679,11 @@ async def api_im_bots():
     if slack_apps:
         try:
             from agenticops.im.slack_ws import _slack_ws_service
-            slack_ws_enabled = settings.slack_ws_enabled
+            from agenticops.notify.im_config import load_channels as _load_ch2
+            _ch2 = _load_ch2()
+            slack_ws_enabled = settings.slack_ws_enabled or any(
+                c.channel_type == "slack" and c.is_enabled for c in _ch2
+            )
             slack_ws_started = _slack_ws_service is not None and _slack_ws_service._started
             slack_ws_thread_alive = (
                 _slack_ws_service is not None

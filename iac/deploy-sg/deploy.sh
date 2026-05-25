@@ -172,6 +172,9 @@ case "$ACTION" in
 #!/bin/bash
 set -euo pipefail
 export PATH="/root/.local/bin:/usr/local/bin:\$PATH"
+export HOME="\${HOME:-/root}"
+export UV_PYTHON_INSTALL_DIR=/opt/uv-python
+git config --global --add safe.directory /opt/agenticops
 
 cd /opt/agenticops
 git pull origin ${GIT_BRANCH}
@@ -186,6 +189,7 @@ npm install --silent
 npm run build
 cd /opt/agenticops
 
+chmod -R +x .venv/bin/
 chown -R agenticops:agenticops /opt/agenticops
 systemctl restart agenticops
 sleep 3
