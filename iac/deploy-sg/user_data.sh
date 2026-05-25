@@ -32,9 +32,19 @@ echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y \
-  git curl unzip \
+  git curl unzip jq \
   build-essential libffi-dev libssl-dev \
   ca-certificates gnupg
+
+# -----------------------------------------------------------------------------
+# Install AWS CLI v2
+# -----------------------------------------------------------------------------
+if ! command -v aws &>/dev/null; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -qo /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/awscliv2.zip /tmp/aws
+fi
 
 # Create app user
 useradd -r -m -s /bin/bash agenticops 2>/dev/null || true
