@@ -60,9 +60,10 @@ interface FormModalProps {
   saving: boolean;
 }
 
-function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps) {
+function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: FormModalProps & { defaultType?: "recurring" | "one_time" }) {
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? "");
+  const [scheduleType, setScheduleType] = useState<"recurring" | "one_time">(initial?.schedule_type ?? defaultType ?? "recurring");
   const [pipelineName, setPipelineName] = useState(initial?.pipeline_name ?? "FullScan");
   const [cronExpression, setCronExpression] = useState(initial?.cron_expression ?? "");
   const [accountName, setAccountName] = useState(initial?.account_name ?? "");
@@ -104,6 +105,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
     const base = {
       name,
       pipeline_name: pipelineName,
+      schedule_type: scheduleType,
       cron_expression: cronExpression,
       account_name: accountName || undefined,
       is_enabled: isEnabled,
@@ -125,6 +127,33 @@ function ScheduleFormModal({ initial, onClose, onSave, saving }: FormModalProps)
           {isEdit ? "Edit Schedule" : "New Schedule"}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-3">
+          {/* Type selector */}
+          {!isEdit && (
+            <div className="flex gap-2 mb-1">
+              <button
+                type="button"
+                onClick={() => setScheduleType("recurring")}
+                className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                  scheduleType === "recurring"
+                    ? "bg-primary-50 border-primary-300 text-primary-700"
+                    : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                Schedule Job
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleType("one_time")}
+                className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                  scheduleType === "one_time"
+                    ? "bg-primary-50 border-primary-300 text-primary-700"
+                    : "bg-background border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                One-time Task
+              </button>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Name</label>
             <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
@@ -369,8 +398,9 @@ export default function Schedules() {
   const [tab, setTab] = useState<TabFilter>("all");
 
   const filtered = (schedules ?? []).filter((s) => {
-    if (tab === "recurring") return s.cron_expression !== "@once";
-    if (tab === "one_shot") return s.cron_expression === "@once";
+    const isOneTime = s.schedule_type === "one_time" || s.cron_expression === "@once";
+    if (tab === "recurring") return !isOneTime;
+    if (tab === "one_shot") return isOneTime;
     return true;
   });
 
@@ -450,6 +480,7 @@ export default function Schedules() {
       {formOpen && (
         <ScheduleFormModal
           initial={editing}
+          defaultType={tab === "one_shot" ? "one_time" : "recurring"}
           saving={createMut.isPending || updateMut.isPending}
           onClose={() => {
             setFormOpen(false);

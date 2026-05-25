@@ -1000,6 +1000,14 @@ def init_db(engine=None):
                     conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE {new_type}"))
                     conn.commit()
 
+    # Migration: add schedule_type column to schedules if missing
+    if insp.has_table("schedules"):
+        columns = {col["name"] for col in insp.get_columns("schedules")}
+        if "schedule_type" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE schedules ADD COLUMN schedule_type VARCHAR(20) DEFAULT 'recurring'"))
+                conn.commit()
+
     # Ensure all ORM models are registered in metadata before create_all
     import agenticops.auth.models  # noqa: F401
     import agenticops.audit.models  # noqa: F401

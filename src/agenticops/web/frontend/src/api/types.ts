@@ -308,10 +308,13 @@ export interface SkillImprovementRecord {
 /*  Schedules                                                          */
 /* ------------------------------------------------------------------ */
 
+export type ScheduleType = "recurring" | "one_time";
+
 export interface Schedule {
   id: number;
   name: string;
   pipeline_name: string;
+  schedule_type: ScheduleType;
   cron_expression: string;
   account_name: string | null;
   is_enabled: boolean;
@@ -325,6 +328,7 @@ export interface Schedule {
 export interface ScheduleCreate {
   name: string;
   pipeline_name: string;
+  schedule_type?: ScheduleType;
   cron_expression: string;
   account_name?: string;
   is_enabled?: boolean;
@@ -334,6 +338,7 @@ export interface ScheduleCreate {
 export interface ScheduleUpdate {
   name?: string;
   pipeline_name?: string;
+  schedule_type?: ScheduleType;
   cron_expression?: string;
   account_name?: string;
   is_enabled?: boolean;

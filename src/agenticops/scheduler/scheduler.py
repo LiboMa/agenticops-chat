@@ -27,6 +27,7 @@ class Schedule(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
     pipeline_name: Mapped[str] = mapped_column(String(100))
+    schedule_type: Mapped[str] = mapped_column(String(20), default="recurring")  # recurring | one_time
     cron_expression: Mapped[str] = mapped_column(String(100))
     account_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -663,6 +664,12 @@ class Scheduler:
         # Execute outside any session
         scheduler = Scheduler()
         scheduler._execute_schedule_by_info(info)
+
+        # Auto-disable one_time schedules after execution
+        with get_db_session() as session:
+            sched = session.query(Schedule).filter_by(id=schedule_id).first()
+            if sched and sched.schedule_type == "one_time":
+                sched.is_enabled = False
 
         # Query the result in a fresh session
         with get_db_session() as session:

@@ -431,6 +431,7 @@ class ScheduleCreate(BaseModel):
     """Schema for creating a schedule."""
     name: str = Field(..., max_length=100)
     pipeline_name: str = Field(..., max_length=100)
+    schedule_type: str = Field(default="recurring", pattern="^(recurring|one_time)$")
     cron_expression: str = Field(..., max_length=100)
     account_name: Optional[str] = Field(None, max_length=100)
     is_enabled: bool = True
@@ -458,6 +459,7 @@ class ScheduleResponse(BaseModel):
     id: int
     name: str
     pipeline_name: str
+    schedule_type: str = "recurring"
     cron_expression: str
     account_name: Optional[str]
     is_enabled: bool
@@ -4280,6 +4282,7 @@ async def api_create_schedule(data: ScheduleCreate):
         schedule = Schedule(
             name=data.name,
             pipeline_name=data.pipeline_name,
+            schedule_type=data.schedule_type,
             cron_expression=data.cron_expression,
             account_name=data.account_name,
             is_enabled=data.is_enabled,

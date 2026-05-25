@@ -68,6 +68,7 @@ def run_task(
         schedule = Schedule(
             name=schedule_name,
             pipeline_name="AgentChain",
+            schedule_type="one_time",
             cron_expression="@once",
             is_enabled=True,
             config=config,
@@ -150,6 +151,7 @@ def create_schedule(
         schedule = Schedule(
             name=name,
             pipeline_name="AgentChain",
+            schedule_type="recurring",
             cron_expression=cron,
             account_name=account_name or None,
             is_enabled=True,
@@ -196,7 +198,7 @@ def list_schedules(include_completed: bool = False) -> str:
     lines = [f"Schedules ({len(schedules)}):"]
     for s in schedules:
         status = "enabled" if s.is_enabled else "disabled"
-        stype = "one-shot" if s.cron_expression == "@once" else f"cron: {s.cron_expression}"
+        stype = "one-time" if (s.schedule_type == "one_time" or s.cron_expression == "@once") else f"cron: {s.cron_expression}"
         prompt_preview = (s.config or {}).get("prompt", "")[:60]
         lines.append(
             f"\n  [{s.id}] {s.name} ({status})"
