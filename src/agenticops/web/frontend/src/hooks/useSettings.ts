@@ -16,6 +16,15 @@ export interface AppSettings {
   skills_improvement_notify: boolean;
   agent_models: Record<string, AgentModelConfig>;
   model_presets: { label: string; value: string }[];
+  // IM WebSocket status (read-only, auto-detected from channels.yaml)
+  feishu_ws_active: boolean;
+  slack_ws_active: boolean;
+  // Report S3 storage config
+  report_storage: string;
+  report_s3_bucket: string;
+  report_s3_prefix: string;
+  report_s3_region: string;
+  report_presigned_url_expiry: number;
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };

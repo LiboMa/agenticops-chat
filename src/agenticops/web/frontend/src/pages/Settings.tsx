@@ -834,6 +834,131 @@ function AgentModelsCard() {
   );
 }
 
+/* ── IM Connections (read-only) ─────────────────────────────────── */
+
+function IMConnectionsCard({ feishuActive, slackActive }: { feishuActive: boolean; slackActive: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">IM Connections</h2>
+        <span className="text-xs text-muted-foreground">Auto-detected from channels.yaml</span>
+      </CardHeader>
+      <CardBody>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">Feishu WebSocket</span>
+            </div>
+            <Badge className={feishuActive ? "bg-green-100 text-green-700" : "bg-secondary text-muted-foreground"}>
+              {feishuActive ? "Active" : "Inactive"}
+            </Badge>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">Slack Socket Mode</span>
+            </div>
+            <Badge className={slackActive ? "bg-green-100 text-green-700" : "bg-secondary text-muted-foreground"}>
+              {slackActive ? "Active" : "Inactive"}
+            </Badge>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-3">
+          Add an enabled feishu/slack channel in <code className="bg-secondary px-1 rounded">config/channels.yaml</code> to activate WebSocket connections.
+        </p>
+      </CardBody>
+    </Card>
+  );
+}
+
+/* ── Report Storage ────────────────────────────────────────────── */
+
+function ReportStorageCard({
+  settings: s,
+  onSave,
+  saving,
+}: {
+  settings: import("@/hooks/useSettings").AppSettings;
+  onSave: (patch: Record<string, unknown>) => void;
+  saving: boolean;
+}) {
+  const [storage, setStorage] = useState(s.report_storage);
+  const [bucket, setBucket] = useState(s.report_s3_bucket);
+  const [prefix, setPrefix] = useState(s.report_s3_prefix);
+  const [region, setRegion] = useState(s.report_s3_region);
+  const [expiry, setExpiry] = useState(s.report_presigned_url_expiry);
+
+  const dirty =
+    storage !== s.report_storage ||
+    bucket !== s.report_s3_bucket ||
+    prefix !== s.report_s3_prefix ||
+    region !== s.report_s3_region ||
+    expiry !== s.report_presigned_url_expiry;
+
+  const handleSave = () => {
+    onSave({
+      report_storage: storage,
+      report_s3_bucket: bucket,
+      report_s3_prefix: prefix,
+      report_s3_region: region,
+      report_presigned_url_expiry: expiry,
+    });
+  };
+
+  const inputClass = "w-full px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary-500";
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">Report Storage</h2>
+        <span className="text-xs text-muted-foreground">Configure where reports are stored</span>
+      </CardHeader>
+      <CardBody>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">Storage Backend</label>
+            <select value={storage} onChange={(e) => setStorage(e.target.value)} className={inputClass}>
+              <option value="local">Local Filesystem</option>
+              <option value="s3">Amazon S3</option>
+            </select>
+          </div>
+
+          {storage === "s3" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">S3 Bucket</label>
+                <input value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="my-reports-bucket" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">S3 Prefix</label>
+                <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="reports/" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">S3 Region</label>
+                <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Pre-signed URL Expiry (seconds)</label>
+                <input type="number" value={expiry} onChange={(e) => setExpiry(Number(e.target.value))} min={60} className={inputClass} />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Default: 604800 (7 days). URLs in reports/notifications expire after this.
+                </p>
+              </div>
+            </>
+          )}
+
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── Main Settings page ─────────────────────────────────────────── */
 
 export default function Settings() {
@@ -1025,6 +1150,12 @@ export default function Settings() {
 
       {/* ── Agent Models ─────────────────────────────────────── */}
       <AgentModelsCard />
+
+      {/* ── IM Connections (read-only status) ────────────────── */}
+      {s && <IMConnectionsCard feishuActive={s.feishu_ws_active} slackActive={s.slack_ws_active} />}
+
+      {/* ── Report Storage ───────────────────────────────────── */}
+      {s && <ReportStorageCard settings={s} onSave={(patch) => updateMut.mutate(patch)} saving={updateMut.isPending} />}
         </Tabs.Content>
 
         {/* ── Accounts Tab ─────────────────────────────────────── */}

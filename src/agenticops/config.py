@@ -324,7 +324,7 @@ class Settings(BaseSettings):
         description="Path to notification channels YAML (sole source of truth)",
     )
     feishu_ws_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable Feishu WebSocket long-connection (AIOPS_FEISHU_WS_ENABLED=true)",
     )
     slack_ws_enabled: bool = Field(

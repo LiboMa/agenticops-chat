@@ -4447,20 +4447,30 @@ def service_start(
 
 def _print_service_info(host: str, port: int, *, frontend: bool = False) -> None:
     """Print service startup summary."""
+    # Auto-detect IM WS from channels.yaml (same logic as app.py startup)
+    try:
+        from agenticops.notify.im_config import load_channels
+        _channels = load_channels()
+        _feishu_active = any(c.channel_type == "feishu" and c.is_enabled for c in _channels) or settings.feishu_ws_enabled
+        _slack_active = any(c.channel_type == "slack" and c.is_enabled for c in _channels) or settings.slack_ws_enabled
+    except Exception:
+        _feishu_active = settings.feishu_ws_enabled
+        _slack_active = settings.slack_ws_enabled
+
     console.print(f"  Backend API   : http://{host}:{port}")
     if frontend:
         console.print(f"  Vite dev      : http://localhost:5173/app/  (hot-reload)")
     else:
         console.print(f"  Web dashboard : http://{host}:{port}/app/")
-    console.print(f"  Feishu WS     : {'enabled' if settings.feishu_ws_enabled else 'disabled'}")
-    console.print(f"  Slack WS      : {'enabled' if settings.slack_ws_enabled else 'disabled'}")
+    console.print(f"  Feishu WS     : {'enabled' if _feishu_active else 'disabled'}")
+    console.print(f"  Slack WS      : {'enabled' if _slack_active else 'disabled'}")
     console.print(f"  PID file      : {_SERVICE_PID_FILE}")
     console.print(f"  Logs:")
     console.print(f"    backend.log   : {_SERVICE_LOG_DIR / 'backend.log'}")
     console.print(f"    frontend.log  : {_SERVICE_LOG_DIR / 'frontend.log'}")
-    if settings.feishu_ws_enabled:
+    if _feishu_active:
         console.print(f"    feishu_ws.log : {_SERVICE_LOG_DIR / 'feishu_ws.log'}")
-    if settings.slack_ws_enabled:
+    if _slack_active:
         console.print(f"    slack_ws.log  : {_SERVICE_LOG_DIR / 'slack_ws.log'}")
 
 
