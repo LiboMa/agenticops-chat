@@ -177,11 +177,12 @@ export UV_PYTHON_INSTALL_DIR=/opt/uv-python
 git config --global --add safe.directory /opt/agenticops
 
 cd /opt/agenticops
+git checkout -- .
 git pull origin ${GIT_BRANCH}
 
 # Backend
 source .venv/bin/activate
-uv pip install -e .
+uv pip install -e ".[im,files,reports]"
 
 # Frontend
 cd src/agenticops/web/frontend
