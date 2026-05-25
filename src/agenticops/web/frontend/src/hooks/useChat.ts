@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { getAuthToken } from "@/api/client";
 import type { ChatSession } from "@/api/types";
 
 interface ToolCall {
@@ -36,6 +37,10 @@ export function useChat(sessionId: string | null) {
       try {
         let res: Response;
 
+        const authHeaders: Record<string, string> = {};
+        const token = getAuthToken();
+        if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
         if (file) {
           const formData = new FormData();
           formData.append("content", content);
@@ -46,6 +51,7 @@ export function useChat(sessionId: string | null) {
 
           res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
             method: "POST",
+            headers: authHeaders,
             body: formData,
             signal: abortRef.current.signal,
           });
@@ -57,7 +63,7 @@ export function useChat(sessionId: string | null) {
 
           res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...authHeaders },
             body: JSON.stringify(body),
             signal: abortRef.current.signal,
           });

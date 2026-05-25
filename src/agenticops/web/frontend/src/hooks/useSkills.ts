@@ -56,8 +56,12 @@ export function useImportSkill() {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append("file", file);
+      const headers: Record<string, string> = {};
+      const token = localStorage.getItem("aiops_token");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
       const res = await fetch("/api/skills/import", {
         method: "POST",
+        headers,
         body: formData,
       });
       if (!res.ok) {
