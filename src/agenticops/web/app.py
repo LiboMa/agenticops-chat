@@ -220,6 +220,7 @@ class ReportResponse(BaseModel):
     content_markdown: str
     content_html: Optional[str]
     file_path: Optional[str]
+    download_url: Optional[str] = None
     report_metadata: dict
     created_at: datetime
 
@@ -3186,7 +3187,22 @@ async def api_kb_stats():
 # ============================================================================
 
 
-@app.get("/api/reports", response_model=List[ReportResponse])
+def _enrich_report(report: Report) -> dict:
+    """Build ReportResponse dict with download_url when S3 is configured."""
+    data = ReportResponse.model_validate(report).model_dump()
+    if report.file_path and settings.report_storage == "s3" and settings.report_s3_bucket:
+        try:
+            from agenticops.storage.backend import get_storage_backend
+            backend = get_storage_backend()
+            data["download_url"] = backend.presigned_url(
+                report.file_path, expiry=settings.report_presigned_url_expiry
+            )
+        except Exception:
+            pass
+    return data
+
+
+@app.get("/api/reports")
 async def api_list_reports(
     report_type: Optional[str] = None,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
@@ -3200,17 +3216,17 @@ async def api_list_reports(
             query = query.filter_by(report_type=report_type)
 
         reports = query.offset(offset).limit(limit).all()
-        return [ReportResponse.model_validate(r) for r in reports]
+        return [_enrich_report(r) for r in reports]
 
 
-@app.get("/api/reports/{report_id}", response_model=ReportResponse)
+@app.get("/api/reports/{report_id}")
 async def api_get_report(report_id: int):
     """Get report by ID."""
     with get_db_session() as session:
         report = session.query(Report).filter_by(id=report_id).first()
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
-        return ReportResponse.model_validate(report)
+        return _enrich_report(report)
 
 
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
