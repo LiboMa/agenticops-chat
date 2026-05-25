@@ -55,6 +55,7 @@ Community modules (`terraform-aws-modules/vpc/aws`, `terraform-aws-modules/eks/a
 - **OIDC:** enabled (required for IRSA — Karpenter, EBS CSI, LB Controller)
 - **CloudWatch logging:** api, audit, authenticator, controllerManager, scheduler
 - **Managed addons:** vpc-cni, coredns, kube-proxy, aws-ebs-csi-driver (with IRSA)
+- **Optional addon:** aws-guardduty-agent (EKS Runtime Monitoring) — gated by `enable_guardduty` variable (default: `false`). Requires GuardDuty enabled at account level.
 
 ### Managed Node Groups
 

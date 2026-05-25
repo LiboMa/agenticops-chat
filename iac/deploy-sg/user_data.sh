@@ -1,0 +1,151 @@
+#!/bin/bash
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# AgenticOps EC2 Bootstrap — Ubuntu 24.04
+# Python: uv | Frontend: Node.js 20 | Code: git clone
+#
+# Can be invoked by:
+#   1. Terraform templatefile (variables injected at plan time)
+#   2. deploy.sh setup/redeploy (uses env var defaults below)
+# -----------------------------------------------------------------------------
+
+# Defaults (overridden by Terraform templatefile or environment)
+APP_PORT="${app_port:-8000}"
+BEDROCK_REGION="${bedrock_region:-us-east-1}"
+BEDROCK_MODEL="${bedrock_model:-global.anthropic.claude-opus-4-6-v1}"
+ADMIN_PASSWORD="${admin_password:-aiops2026}"
+GIT_BRANCH="${git_branch:-main}"
+APP_DIR="/opt/agenticops"
+GIT_REPO="https://github.com/LiboMa/agenticops-chat.git"
+
+# Ensure HOME is set (SSM agent may not set it)
+export HOME="${HOME:-/root}"
+
+echo "=== AgenticOps Setup Started: $(date) ==="
+echo "Branch: $GIT_BRANCH | Port: $APP_PORT | Region: $BEDROCK_REGION"
+
+# Force apt to use IPv4 (NAT Gateway does not support IPv6)
+echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
+# System packages
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y \
+  git curl unzip \
+  build-essential libffi-dev libssl-dev \
+  ca-certificates gnupg
+
+# Create app user
+useradd -r -m -s /bin/bash agenticops 2>/dev/null || true
+
+# -----------------------------------------------------------------------------
+# Install uv (Python package manager)
+# -----------------------------------------------------------------------------
+if ! command -v uv &>/dev/null && [ ! -f /root/.local/bin/uv ]; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+export PATH="/root/.local/bin:/usr/local/bin:$PATH"
+
+# Install Python 3.12 via uv
+uv python install 3.12
+
+# -----------------------------------------------------------------------------
+# Install Node.js 20 (for frontend build)
+# -----------------------------------------------------------------------------
+if ! command -v node &>/dev/null; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+fi
+
+# -----------------------------------------------------------------------------
+# Clone / Update repository
+# -----------------------------------------------------------------------------
+git config --global --add safe.directory "$APP_DIR"
+
+if [ -d "$APP_DIR/.git" ]; then
+  cd "$APP_DIR"
+  git fetch origin
+  git reset --hard "origin/$GIT_BRANCH"
+else
+  git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" "$APP_DIR"
+fi
+
+cd "$APP_DIR"
+
+# -----------------------------------------------------------------------------
+# Backend: Python environment via uv
+# -----------------------------------------------------------------------------
+if [ ! -d ".venv" ]; then
+  uv venv .venv --python 3.12
+fi
+source .venv/bin/activate
+uv pip install -e .
+
+# -----------------------------------------------------------------------------
+# Frontend: Build React SPA
+# -----------------------------------------------------------------------------
+cd "$APP_DIR/src/agenticops/web/frontend"
+npm install --silent
+npm run build
+cd "$APP_DIR"
+
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+mkdir -p "$APP_DIR/data"
+chown -R agenticops:agenticops "$APP_DIR"
+cp /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
+
+# -----------------------------------------------------------------------------
+# Environment config
+# -----------------------------------------------------------------------------
+cat > /etc/agenticops.env <<ENVEOF
+AIOPS_BEDROCK_REGION=$BEDROCK_REGION
+AIOPS_BEDROCK_MODEL_ID=$BEDROCK_MODEL
+AIOPS_DATABASE_URL=sqlite:///$APP_DIR/data/agenticops.db
+AIOPS_API_AUTH_ENABLED=true
+AIOPS_ADMIN_PASSWORD=$ADMIN_PASSWORD
+AIOPS_DEPLOYMENT_PROFILE=cloud
+PATH=$APP_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ENVEOF
+
+# -----------------------------------------------------------------------------
+# Systemd service
+# -----------------------------------------------------------------------------
+cat > /etc/systemd/system/agenticops.service <<SVCEOF
+[Unit]
+Description=AgenticOps Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=agenticops
+Group=agenticops
+WorkingDirectory=$APP_DIR
+EnvironmentFile=/etc/agenticops.env
+ExecStart=$APP_DIR/.venv/bin/uvicorn agenticops.web.app:app --host 0.0.0.0 --port $APP_PORT --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable agenticops
+systemctl restart agenticops
+
+# Wait and verify
+sleep 3
+if curl -sf "http://localhost:$APP_PORT/api/health" > /dev/null; then
+  echo "=== AgenticOps Setup Complete: $(date) ==="
+  echo "Health check: OK"
+else
+  echo "=== WARNING: Health check failed ==="
+  journalctl -u agenticops --no-pager -n 20
+fi
+
+echo "Python: $(.venv/bin/python --version)"
+echo "uv: $(uv --version)"
+echo "Node: $(node --version)"

@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+
+# Node
+node_modules
+src/agenticops/web/frontend/node_modules
+
+# Data
+data/
+*.db
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Testing
+.hypothesis
+.pytest_cache
+htmlcov
+.coverage
+
+# Infra
+infra/
+.terraform
+
+# Docs (not needed in container)
+docs/
+RAW-*.md
+
+# Claude
+.claude/

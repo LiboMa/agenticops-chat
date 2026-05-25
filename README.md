@@ -346,9 +346,84 @@ src/agenticops/
 
 skills/              # 15 domain skill packages (SKILL.md + references/)
 config/              # settings.yaml, channels.yaml, im-apps.yaml, mcp-servers.json
-infra/               # CloudFormation, EKS lab, Terraform
+iac/
+└── deploy-sg/       # Terraform: CloudFront → ALB → EC2 (Singapore)
+infra/
+├── cloud-deploy/    # CloudFormation template + deploy script
+└── eks-lab-tf/      # EKS lab Terraform (10 scenario validation)
+Dockerfile           # Container image for ECS/EKS deployment
 docs/                # WORKFLOW.md, MVP release notes, cases, use-cases
 ```
+
+## AWS Deployment (Singapore)
+
+One-click Terraform deployment: CloudFront → ALB → EC2 (t3.medium) in ap-southeast-1.
+
+### Architecture
+
+```
+Internet (HTTPS) → CloudFront → ALB (SG: CF prefix-list only) → EC2 (private subnet, port 8000)
+                                                                   ↓
+                                                              EBS gp3 (SQLite)
+                                                                   ↓
+                                                          Bedrock API (us-east-1)
+```
+
+### Deploy
+
+```bash
+cd iac/deploy-sg
+
+# Review plan
+./deploy.sh plan
+
+# Deploy (one-click)
+./deploy.sh apply
+
+# Destroy
+./deploy.sh destroy
+```
+
+**Prerequisites**: AWS CLI configured, Terraform >= 1.5, `ap-southeast-1` access.
+
+**Default login**: `admin` / `aiops2026` (changeable via `AIOPS_ADMIN_PASSWORD`)
+
+### Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `region` | `ap-southeast-1` | AWS region |
+| `instance_type` | `t3.medium` | EC2 instance type |
+| `vpc_id` | `""` (new VPC) | Use existing VPC (optional) |
+| `admin_password` | `aiops2026` | Admin user password |
+| `bedrock_region` | `us-east-1` | Bedrock API region |
+
+## Docker
+
+```bash
+# Build (for future ECS/EKS)
+docker build -t agenticops .
+
+# Run
+docker run -p 8000:8000 \
+  -e AIOPS_BEDROCK_REGION=us-east-1 \
+  -e AIOPS_API_AUTH_ENABLED=true \
+  -e AWS_ACCESS_KEY_ID=... \
+  -e AWS_SECRET_ACCESS_KEY=... \
+  agenticops
+```
+
+## Authentication
+
+When `AIOPS_API_AUTH_ENABLED=true` (default for cloud deployments):
+
+- **Login**: `POST /api/auth/login` with `{"email": "admin", "password": "aiops2026"}`
+- **Session token**: Returned in login response, valid for 24 hours
+- **API keys**: `POST /api/users/me/api-keys` for long-lived access
+- **Protected routes**: All `/api/*` except `/api/health` and `/api/auth/login`
+- **Frontend**: Login page at `/app/login`, auto-redirect on 401
+
+Default admin user is auto-seeded on first startup when no users exist.
 
 ## Development
 

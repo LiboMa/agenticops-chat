@@ -1,6 +1,6 @@
 ---
 agent: detect
-confidence: 4
+confidence: 3
 created_at: '2026-03-26'
 last_confirmed: '2026-03-26'
 related_issue_id: 281

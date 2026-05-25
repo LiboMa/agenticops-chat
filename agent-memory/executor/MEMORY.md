@@ -1,4 +1,3 @@
 # Executor Agent Memory
 
-- [Fix Plan Idempotency Guard Before Executing Any F](fix_plan_idempotency_guard_before_executing_any_f.md) — Fix plan idempotency guard: Before executing ANY fix step, verify current resour [confidence: 5]
-- [When Aws Cli Tool Returns Tool Result Was Too Lar](when_aws_cli_tool_returns_tool_result_was_too_lar.md) — When AWS CLI tool returns "tool result was too large" error: 1) Retry the comman [confidence: 5]
+- [Sre Query](sre_query.md) — 【日期精确性规则】任何涉及日期、时间、执行窗口、超时计算的操作，必须先通过工具（sre_query执行`date`命令 或 datetime工具）获取真实系统时 [confidence: 5]
