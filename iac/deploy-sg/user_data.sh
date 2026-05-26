@@ -10,17 +10,17 @@ set -euo pipefail
 #   2. deploy.sh setup/redeploy (uses env var defaults below)
 # -----------------------------------------------------------------------------
 
-# Defaults (overridden by Terraform templatefile or environment)
-APP_PORT="${app_port:-8000}"
-BEDROCK_REGION="${bedrock_region:-us-east-1}"
-BEDROCK_MODEL="${bedrock_model:-global.anthropic.claude-opus-4-6-v1}"
-ADMIN_PASSWORD="${admin_password:-aiops2026}"
-GIT_BRANCH="${git_branch:-main}"
+# Variables injected by Terraform templatefile
+APP_PORT="${app_port}"
+BEDROCK_REGION="${bedrock_region}"
+BEDROCK_MODEL="${bedrock_model}"
+ADMIN_PASSWORD="${admin_password}"
+GIT_BRANCH="${git_branch}"
 APP_DIR="/opt/agenticops"
 GIT_REPO="https://github.com/LiboMa/agenticops-chat.git"
 
 # Ensure HOME is set (SSM agent may not set it)
-export HOME="${HOME:-/root}"
+export HOME="$${HOME:-/root}"
 
 echo "=== AgenticOps Setup Started: $(date) ==="
 echo "Branch: $GIT_BRANCH | Port: $APP_PORT | Region: $BEDROCK_REGION"
@@ -46,8 +46,11 @@ if ! command -v aws &>/dev/null; then
   rm -rf /tmp/awscliv2.zip /tmp/aws
 fi
 
-# Create app user
+# Create app user with sudo privileges
 useradd -r -m -s /bin/bash agenticops 2>/dev/null || true
+usermod -aG sudo agenticops 2>/dev/null || true
+echo "agenticops ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agenticops
+chmod 0440 /etc/sudoers.d/agenticops
 
 # -----------------------------------------------------------------------------
 # Install uv (Python package manager)
@@ -108,6 +111,12 @@ mkdir -p "$APP_DIR/data"
 chmod -R +x "$APP_DIR/.venv/bin/"
 chown -R agenticops:agenticops "$APP_DIR"
 cp /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
+
+# -----------------------------------------------------------------------------
+# Clear MCP servers config (avoid startup failures from stale local configs)
+# -----------------------------------------------------------------------------
+mkdir -p "$APP_DIR/config"
+echo '{"mcpServers": {}}' > "$APP_DIR/config/mcp-servers.json"
 
 # -----------------------------------------------------------------------------
 # Environment config

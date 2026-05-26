@@ -58,6 +58,16 @@ resource "aws_security_group_rule" "ec2_ingress_alb" {
   description              = "App port from ALB"
 }
 
+resource "aws_security_group_rule" "ec2_ingress_ssh" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = var.ssh_allowed_cidrs
+  security_group_id = aws_security_group.ec2.id
+  description       = "SSH from allowed CIDRs"
+}
+
 resource "aws_security_group_rule" "ec2_egress_all" {
   type              = "egress"
   from_port         = 0

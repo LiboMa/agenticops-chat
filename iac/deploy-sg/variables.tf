@@ -55,13 +55,25 @@ variable "private_subnet_ids" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.medium"
+  default     = "c5.xlarge"
 }
 
 variable "key_name" {
-  description = "SSH key pair name (optional, SSM preferred)"
+  description = "SSH key pair name (optional, auto-created from local pubkey if empty)"
   type        = string
   default     = ""
+}
+
+variable "ssh_public_key_path" {
+  description = "Path to SSH public key file for EC2 access"
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+}
+
+variable "ssh_allowed_cidrs" {
+  description = "CIDR blocks allowed to SSH (default: anywhere)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 
 variable "ebs_volume_size" {
@@ -103,6 +115,28 @@ variable "git_branch" {
   description = "Git branch to deploy"
   type        = string
   default     = "main"
+}
+
+# -----------------------------------------------------------------------------
+# DNS & SSL
+# -----------------------------------------------------------------------------
+
+variable "domain_name" {
+  description = "Custom domain name for CloudFront"
+  type        = string
+  default     = "agenticops.tinyboat.blog"
+}
+
+variable "acm_certificate_arn" {
+  description = "ACM certificate ARN (must be in us-east-1 for CloudFront)"
+  type        = string
+  default     = "arn:aws:acm:us-east-1:533267047935:certificate/58547364-f524-4695-a3b8-3e990c6263b1"
+}
+
+variable "route53_zone_id" {
+  description = "Route53 hosted zone ID"
+  type        = string
+  default     = "Z02657523IKMDPFJE34YX"
 }
 
 # -----------------------------------------------------------------------------

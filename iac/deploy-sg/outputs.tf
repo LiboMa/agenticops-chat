@@ -2,6 +2,11 @@
 # Outputs
 # -----------------------------------------------------------------------------
 
+output "app_url" {
+  description = "Application URL (custom domain)"
+  value       = "https://${var.domain_name}"
+}
+
 output "cloudfront_url" {
   description = "CloudFront distribution URL (HTTPS)"
   value       = "https://${aws_cloudfront_distribution.app.domain_name}"
@@ -25,6 +30,16 @@ output "ec2_instance_id" {
 output "vpc_id" {
   description = "VPC ID used for deployment"
   value       = local.vpc_id
+}
+
+output "ec2_public_ip" {
+  description = "EC2 public IP address"
+  value       = aws_instance.app.public_ip
+}
+
+output "ssh_command" {
+  description = "SSH command to connect"
+  value       = "ssh ubuntu@${aws_instance.app.public_ip}"
 }
 
 output "ssm_command" {

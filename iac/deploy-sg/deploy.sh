@@ -155,10 +155,19 @@ case "$ACTION" in
     ;;
 
   setup)
-    # Re-run full setup on existing instance
+    # Re-run full setup on existing instance (substitute Terraform template vars)
     INSTANCE_ID=$(terraform output -raw ec2_instance_id)
     CF_URL=$(terraform output -raw cloudfront_url)
-    run_on_instance "$INSTANCE_ID" "$SCRIPT_DIR/user_data.sh" "Running full setup"
+    SETUP_SCRIPT=$(mktemp /tmp/setup-XXXXX.sh)
+    sed -e "s/\${app_port}/8000/g" \
+        -e "s/\${bedrock_region}/us-east-1/g" \
+        -e "s/\${bedrock_model}/global.anthropic.claude-opus-4-6-v1/g" \
+        -e "s/\${admin_password}/aiops2026/g" \
+        -e "s/\${git_branch}/${GIT_BRANCH}/g" \
+        -e 's/\$\${/\${/g' \
+        "$SCRIPT_DIR/user_data.sh" > "$SETUP_SCRIPT"
+    run_on_instance "$INSTANCE_ID" "$SETUP_SCRIPT" "Running full setup"
+    rm -f "$SETUP_SCRIPT"
     ;;
 
   redeploy)
@@ -212,6 +221,7 @@ esac
 
 INSTANCE_ID=${INSTANCE_ID:-$(terraform output -raw ec2_instance_id 2>/dev/null || echo "unknown")}
 CF_URL=${CF_URL:-$(terraform output -raw cloudfront_url 2>/dev/null || echo "unknown")}
+PUBLIC_IP=$(terraform output -raw ec2_public_ip 2>/dev/null || echo "unknown")
 
 echo ""
 echo "============================================"
@@ -221,11 +231,12 @@ echo ""
 echo "  URL:         $CF_URL"
 echo "  Login:       admin / aiops2026"
 echo "  Instance:    $INSTANCE_ID"
+echo "  Public IP:   $PUBLIC_IP"
 echo "  Region:      $REGION"
 echo ""
+echo "  SSH:         ssh ubuntu@$PUBLIC_IP"
 echo "  SSM Access:  aws ssm start-session --target $INSTANCE_ID --region $REGION"
 echo "  Logs:        journalctl -u agenticops -f"
-echo "  Setup log:   /var/log/agenticops-setup.log"
 echo ""
 echo "  Redeploy:    ./deploy.sh redeploy [branch]"
 echo "  Full setup:  ./deploy.sh setup"
