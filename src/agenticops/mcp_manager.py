@@ -152,10 +152,20 @@ def _build_clients() -> List[MCPClient]:
                 # Stdio transport (default)
                 from mcp.client.stdio import stdio_client, StdioServerParameters
 
+                # Resolve relative paths in env values to project root
+                server_env = None
+                if expanded.get("env"):
+                    project_root = str(Path(__file__).parent.parent.parent)
+                    server_env = {**os.environ}
+                    for k, v in expanded["env"].items():
+                        if isinstance(v, str) and v.startswith("./"):
+                            v = str(Path(project_root) / v[2:])
+                        server_env[k] = v
+
                 params = StdioServerParameters(
                     command=expanded["command"],
                     args=expanded.get("args", []),
-                    env={**os.environ, **expanded["env"]} if expanded.get("env") else None,
+                    env=server_env,
                 )
                 client = MCPClient(
                     transport_callable=lambda p=params: stdio_client(p),
