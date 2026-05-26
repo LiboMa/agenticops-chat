@@ -21,10 +21,20 @@ from agenticops.config import settings
 # When True, suppresses auto report distribution to avoid duplicate emails.
 _schedule_running: ContextVar[bool] = ContextVar("_schedule_running", default=False)
 
+# ── Pipeline batch guard ──────────────────────────────────────────
+# When True, suppresses per-issue notifications during batch operations
+# (Scan, Detect, RCA, Health Patrol). Only the final report is sent.
+_batch_mode: ContextVar[bool] = ContextVar("_batch_mode", default=False)
+
 
 def set_schedule_running(value: bool) -> None:
     """Set the schedule-running guard (call from scheduler)."""
     _schedule_running.set(value)
+
+
+def set_batch_mode(value: bool) -> None:
+    """Suppress per-issue notifications during batch operations (Scan/Detect/RCA/Patrol)."""
+    _batch_mode.set(value)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +51,15 @@ def _buffer_or_send(
     body: str,
     severity: str | None = None,
 ) -> None:
-    """Buffer the notification if consolidation is on, otherwise send immediately."""
+    """Buffer the notification if consolidation is on, otherwise send immediately.
+
+    In batch mode (Scan/Detect/RCA/Patrol), all per-issue notifications are
+    suppressed — only the final report is sent at the end.
+    """
+    # Suppress per-issue notifications in batch mode OR scheduled runs
+    if _batch_mode.get(False) or _schedule_running.get(False):
+        logger.debug("Batch/schedule mode: suppressing %s notification for issue %s", event_type, issue_id)
+        return
     if not settings.notifications_consolidated or issue_id is None:
         notify_event(event_type, subject, body, severity)
         return

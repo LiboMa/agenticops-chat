@@ -192,6 +192,8 @@ def rca_agent(issue_id: int) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+        from agenticops.services.notification_service import set_batch_mode
+        set_batch_mode(True)
 
         # Resolve provider CLI tool from issue's account
         cli_tool = None
@@ -276,3 +278,6 @@ def rca_agent(issue_id: int) -> str:
     except Exception as e:
         logger.exception("RCA agent failed")
         return f"RCA agent error: {e}"
+    finally:
+        from agenticops.services.notification_service import set_batch_mode
+        set_batch_mode(False)

@@ -264,6 +264,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+        from agenticops.services.notification_service import set_batch_mode
+        set_batch_mode(True)
 
         # Check account count to decide parallel vs single-agent mode.
         # Fallback to single-agent if DB is unavailable.
@@ -355,3 +357,6 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     except Exception as e:
         logger.exception("Detect agent failed")
         return f"Detect agent error: {e}"
+    finally:
+        from agenticops.services.notification_service import set_batch_mode
+        set_batch_mode(False)
