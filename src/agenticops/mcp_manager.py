@@ -152,11 +152,16 @@ def _build_clients() -> List[MCPClient]:
                 # Stdio transport (default)
                 from mcp.client.stdio import stdio_client, StdioServerParameters
 
-                # Resolve relative paths in env values to project root
-                server_env = None
+                # Build env: merge os.environ + user env + auto-inject AWS_CONFIG_FILE
+                project_root = str(Path(__file__).parent.parent.parent)
+                server_env = {**os.environ}
+
+                # Auto-inject clean AWS config to avoid ~/.aws/config plugin issues
+                clean_aws_cfg = Path(project_root) / "config" / "aws-mcp.cfg"
+                if clean_aws_cfg.is_file() and "AWS_CONFIG_FILE" not in (expanded.get("env") or {}):
+                    server_env["AWS_CONFIG_FILE"] = str(clean_aws_cfg)
+
                 if expanded.get("env"):
-                    project_root = str(Path(__file__).parent.parent.parent)
-                    server_env = {**os.environ}
                     for k, v in expanded["env"].items():
                         if isinstance(v, str) and v.startswith("./"):
                             v = str(Path(project_root) / v[2:])
