@@ -17,16 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 def _safe_mcp_clients() -> list:
-    """Return MCP clients that can successfully start, skipping broken ones."""
-    clients = []
-    for client in get_mcp_clients():
-        try:
-            # Pre-start to verify connectivity — Strands will reuse if already started
-            client.start()
-            clients.append(client)
-        except Exception as e:
-            logger.warning("MCP client '%s' failed to start, skipping: %s", getattr(client, '_prefix', '?'), e)
-    return clients
+    """Return MCP clients list (may fail at Agent init time — handled by caller)."""
+    try:
+        return get_mcp_clients()
+    except Exception as e:
+        logger.warning("Failed to get MCP clients: %s", e)
+        return []
 from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
@@ -230,13 +226,16 @@ If the user explicitly requests a different scope, honor their request over this
 
     prompt = MAIN_SYSTEM_PROMPT + focus_section
 
-    agent = Agent(
-        system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
-        model=model,
-        conversation_manager=get_agent_conversation_manager("main"),
-        tools=[
-            # Sub-agents as tools
-            scan_agent,
+    mcp_tools = _safe_mcp_clients()
+
+    def _build_agent(tools_extra: list) -> Agent:
+        return Agent(
+            system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
+            model=model,
+            conversation_manager=get_agent_conversation_manager("main"),
+            tools=[
+                # Sub-agents as tools
+                scan_agent,
             detect_agent,
             rca_agent,
             sre_agent,
@@ -280,9 +279,19 @@ If the user explicitly requests a different scope, honor their request over this
             list_schedules,
             manage_schedule,
             get_schedule_history,
-            # MCP tool providers (external servers) — graceful degradation
-            *_safe_mcp_clients(),
+            # MCP tool providers (external servers)
+            *tools_extra,
         ],
     )
+
+    # Try with MCP tools first, fall back to without if MCP fails
+    try:
+        agent = _build_agent(mcp_tools)
+    except (ValueError, Exception) as e:
+        if "MCP" in str(e) or "mcp" in str(e):
+            logger.warning("MCP tools failed to load, creating agent without MCP: %s", e)
+            agent = _build_agent([])
+        else:
+            raise
 
     return agent
