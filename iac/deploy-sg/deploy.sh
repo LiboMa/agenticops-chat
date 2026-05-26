@@ -201,8 +201,11 @@ cd /opt/agenticops
 
 chmod -R +x .venv/bin/
 chown -R agenticops:agenticops /opt/agenticops
-# Ensure uvx symlink exists (needed by MCP servers)
-ln -sf /usr/local/bin/uv /usr/local/bin/uvx
+# Ensure uvx exists (needed by MCP servers)
+if [ ! -f /usr/local/bin/uvx ] || ! /usr/local/bin/uvx --version &>/dev/null; then
+  sudo -u agenticops bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' 2>/dev/null
+  cp /home/agenticops/.local/bin/uvx /usr/local/bin/uvx 2>/dev/null || true
+fi
 systemctl restart agenticops
 sleep 3
 curl -sf http://localhost:8000/api/health && echo "HEALTH OK" || echo "HEALTH FAILED"

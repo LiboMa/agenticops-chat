@@ -111,7 +111,11 @@ mkdir -p "$APP_DIR/data"
 chmod -R +x "$APP_DIR/.venv/bin/"
 chown -R agenticops:agenticops "$APP_DIR"
 cp /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
-ln -sf /usr/local/bin/uv /usr/local/bin/uvx
+cp /root/.local/bin/uvx /usr/local/bin/uvx 2>/dev/null || true
+
+# Also install uv/uvx for the agenticops user (MCP servers run as this user)
+sudo -u agenticops bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' 2>/dev/null || true
+cp /home/agenticops/.local/bin/uvx /usr/local/bin/uvx 2>/dev/null || true
 
 # -----------------------------------------------------------------------------
 # Clear MCP servers config (avoid startup failures from stale local configs)
