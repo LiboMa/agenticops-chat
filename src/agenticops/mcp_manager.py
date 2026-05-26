@@ -128,7 +128,9 @@ def _build_clients() -> List[MCPClient]:
             continue
 
         expanded = _expand_env(cfg)
-        prefix = f"{name}_"
+        # Bedrock requires tool names match [a-zA-Z0-9_-]+ — sanitize prefix
+        safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
+        prefix = f"{safe_name}_"
 
         try:
             if "url" in expanded:
