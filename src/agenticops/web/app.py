@@ -807,7 +807,7 @@ async def lifespan(app: FastAPI):
 
     # Start MCP servers
     try:
-        from agenticops.mcp import start_mcp_clients
+        from agenticops.mcp_manager import start_mcp_clients
         mcp_clients = start_mcp_clients()
         if mcp_clients:
             logger.info("MCP: %d server(s) started", len(mcp_clients))
@@ -886,7 +886,7 @@ async def lifespan(app: FastAPI):
 
     # Stop MCP clients
     try:
-        from agenticops.mcp import stop_mcp_clients
+        from agenticops.mcp_manager import stop_mcp_clients
         stop_mcp_clients()
     except Exception:
         pass
