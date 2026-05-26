@@ -38,7 +38,7 @@ def set_batch_mode(value: bool) -> None:
 
 logger = logging.getLogger(__name__)
 
-# ── Consolidated notification buffer ───────────────────────────────
+# ── Consolidated notification buffer (legacy, kept for flush_consolidated) ──
 
 _consolidated_buffer: dict[int, list[dict]] = {}
 _buffer_lock = threading.Lock()
@@ -51,25 +51,20 @@ def _buffer_or_send(
     body: str,
     severity: str | None = None,
 ) -> None:
-    """Buffer the notification if consolidation is on, otherwise send immediately.
+    """Decide whether to send, buffer, or suppress a per-issue notification.
 
-    In batch mode (Scan/Detect/RCA/Patrol), all per-issue notifications are
-    suppressed — only the final report is sent at the end.
+    Behavior controlled by `notifications_consolidated` config:
+      - True:  suppress all per-issue notifications (only final report sent)
+      - False: send immediately per event
+
+    Also suppressed when _batch_mode or _schedule_running is active
+    (agents/scheduler set these dynamically for debug/dev flexibility).
     """
-    # Suppress per-issue notifications in batch mode OR scheduled runs
-    if _batch_mode.get(False) or _schedule_running.get(False):
-        logger.debug("Batch/schedule mode: suppressing %s notification for issue %s", event_type, issue_id)
+    # Suppress: config consolidated OR batch/schedule mode
+    if settings.notifications_consolidated or _batch_mode.get(False) or _schedule_running.get(False):
+        logger.debug("Consolidated/batch mode: suppressing %s for issue %s", event_type, issue_id)
         return
-    if not settings.notifications_consolidated or issue_id is None:
-        notify_event(event_type, subject, body, severity)
-        return
-    with _buffer_lock:
-        _consolidated_buffer.setdefault(issue_id, []).append({
-            "event_type": event_type,
-            "subject": subject,
-            "body": body,
-            "severity": severity,
-        })
+    notify_event(event_type, subject, body, severity)
 
 
 def flush_consolidated(issue_id: int) -> None:

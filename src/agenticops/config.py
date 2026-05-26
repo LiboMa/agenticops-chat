@@ -161,8 +161,8 @@ class Settings(BaseSettings):
 
     # Notification consolidation
     notifications_consolidated: bool = Field(
-        default=False,
-        description="Send single pipeline summary instead of per-stage notifications",
+        default=True,
+        description="Suppress per-issue notifications during Scan/Detect/RCA — only final report is sent. Set False for dev/debug to see every notification.",
     )
 
     # CORS
