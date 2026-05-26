@@ -15,7 +15,7 @@ export interface AppSettings {
   skills_post_resolution_review: boolean;
   skills_improvement_notify: boolean;
   agent_models: Record<string, AgentModelConfig>;
-  model_presets: { label: string; value: string }[];
+  model_presets: { label: string; value: string; context_window?: number }[];
   // IM WebSocket status (read-only, auto-detected from channels.yaml)
   feishu_ws_active: boolean;
   slack_ws_active: boolean;

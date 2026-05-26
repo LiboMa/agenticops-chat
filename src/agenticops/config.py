@@ -121,6 +121,10 @@ class Settings(BaseSettings):
         },
         description="Friendly name → model ID mapping for /model command and UI dropdowns",
     )
+    custom_models: list[dict] = Field(
+        default_factory=list,
+        description="Additional models for presets (list of {model_id, label, context_window})",
+    )
 
     # Per-agent model configuration (set explicitly in settings.yaml)
     agent_main_model_id: str = Field(default="", description="Model for main agent")

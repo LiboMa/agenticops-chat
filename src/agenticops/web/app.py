@@ -1271,11 +1271,16 @@ async def api_get_settings():
             "window_mode": "full" if ws == FULL_CONTEXT else "sliding",
         }
 
-    # Model presets for frontend dropdowns (single source of truth from config)
-    model_presets = [
-        {"label": alias.capitalize() + " " + _model_version_label(model_id), "value": model_id}
-        for alias, model_id in MODEL_ALIASES.items()
-    ]
+    # Model presets — dynamic from Bedrock API + custom_models (cached)
+    try:
+        from agenticops.services.model_service import get_model_presets
+        model_presets = get_model_presets()
+    except Exception:
+        # Fallback to static aliases
+        model_presets = [
+            {"label": alias.capitalize() + " " + _model_version_label(model_id), "value": model_id}
+            for alias, model_id in MODEL_ALIASES.items()
+        ]
 
     # IM WS auto-detect status from channels.yaml
     try:
@@ -1385,6 +1390,26 @@ async def api_update_settings(body: dict = Body(...)):
         save_to_yaml(yaml_updates)
 
     return await api_get_settings()
+
+
+# ============================================================================
+# Models — Dynamic model listing
+# ============================================================================
+
+
+@app.get("/api/models")
+async def api_list_models():
+    """Return available Bedrock Claude models (cached, with 1M context variants)."""
+    from agenticops.services.model_service import get_model_presets
+    return await asyncio.to_thread(get_model_presets)
+
+
+@app.post("/api/models/refresh")
+async def api_refresh_models():
+    """Force refresh the model cache from Bedrock API."""
+    from agenticops.services.model_service import get_model_presets, invalidate_cache
+    invalidate_cache()
+    return await asyncio.to_thread(get_model_presets)
 
 
 # ============================================================================

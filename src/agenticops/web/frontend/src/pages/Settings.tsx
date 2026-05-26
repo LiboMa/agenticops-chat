@@ -683,9 +683,9 @@ function ExcludePatternsCard() {
 
 // MODEL_PRESETS loaded from GET /api/settings → s.model_presets (single source: config.py)
 const MODEL_PRESETS_FALLBACK = [
-  { label: "Opus", value: "opus" },
-  { label: "Sonnet", value: "sonnet" },
-  { label: "Haiku", value: "haiku" },
+  { label: "Opus 4.6", value: "global.anthropic.claude-opus-4-6-v1" },
+  { label: "Sonnet 4.6", value: "global.anthropic.claude-sonnet-4-6" },
+  { label: "Haiku 4.5", value: "global.anthropic.claude-haiku-4-5-20251001-v1:0" },
 ];
 
 const AGENT_LABELS: Record<string, { label: string; tier: string }> = {

@@ -3555,7 +3555,7 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
                 return f"[green]main → {MODEL_ALIASES[alias]} (saved)[/green]"
             valid = ", ".join(f"{k} ({v})" for k, v in MODEL_ALIASES.items())
             return f"[yellow]Invalid model '{alias}'. Use:[/yellow]\n  {valid}"
-        # No args — show all agents with resolved models
+        # No args — show all agents with resolved models + available models
         lines = []
         for name in AGENT_NAMES:
             model_id, max_tokens = get_agent_model_config(name)
@@ -3570,8 +3570,19 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
         header = f"[cyan]Main agent: {main_short}[/cyan]"
         table = "\n".join(lines)
         aliases = "|".join(MODEL_ALIASES.keys())
+
+        # Show available models from dynamic service
+        try:
+            from agenticops.services.model_service import get_model_presets
+            presets = get_model_presets()
+            model_lines = [f"  {p['label']:25s} {p['value']}" for p in presets[:12]]
+            available = "\n".join(model_lines)
+            available_section = f"\n\n[cyan]Available models ({len(presets)}):[/cyan]\n{available}"
+        except Exception:
+            available_section = ""
+
         return (
-            f"{header}\n\n[cyan]All agents:[/cyan]\n{table}\n\n"
+            f"{header}\n\n[cyan]All agents:[/cyan]\n{table}{available_section}\n\n"
             f"  /model <{aliases}>          Switch main agent\n"
             f"  /model <agent> <{aliases}>  Switch specific agent\n"
             f"  /model reset                        Clear all overrides\n"
