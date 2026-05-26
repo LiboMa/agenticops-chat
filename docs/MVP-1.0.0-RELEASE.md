@@ -61,10 +61,12 @@ AgenticOps（`aiops`）是一个基于多智能体架构的 **AI 运维助手**�
 | **Cheap** | Haiku 4.5 | Scan/Detect/Reporter — 工具编排为主 | $0.80 | $4.00 |
 | **Strong** | Opus 4.6 | RCA/SRE — 复杂推理 | $15.00 | $75.00 |
 
-可用 Model ID:
-- Opus 4.6: `anthropic.claude-opus-4-6-v1` / `global.anthropic.claude-opus-4-6-v1`
-- Sonnet 4.6: `anthropic.claude-sonnet-4-6` / `global.anthropic.claude-sonnet-4-6`
-- Haiku 4.5: `anthropic.claude-haiku-4-5-20251001-v1:0` / `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+可用模型（动态获取自 Bedrock API，24h 缓存）:
+- Opus 4.7/4.6/4.5: `global.anthropic.claude-opus-4-7` / `global.anthropic.claude-opus-4-6-v1`
+- Sonnet 4.6/4.5: `global.anthropic.claude-sonnet-4-6` / `global.anthropic.claude-sonnet-4-5-*`
+- Haiku 4.5: `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+
+> 模型列表通过 `/api/models` 端点动态获取，`settings.yaml` 的 `custom_models` 可添加额外模型。
 
 > 当前分层 (Opus+Haiku): 单次修复 ~$1.36
 > 优化分层 (Opus+Sonnet+Haiku): 单次修复 ~$0.58 (降低 57%)
@@ -478,7 +480,12 @@ HealthIssue → RCA →  ──►  RAG Pipeline  ──►  SOP 匹配/创建  
 | 草稿 Skill 生成 | 已实现 | `skills/evolution.py`：LLM 从描述生成 SKILL.md |
 | 自动创建 Skill | 已实现 | Agent 检测无匹配 Skill → 询问用户确认 → 自动生成并发布激活（`create_skill(publish=True)`） |
 | Chat 创建 Schedule/Task | 已实现 | Agent tools: `run_task`（一次性）/ `create_schedule`（周期）/ `list_schedules` / `manage_schedule` / `get_schedule_history`；CLI: `/run` 快捷入口；Chat 支持自然语言删除/暂停/恢复任务 |
-| Schedule 前端优化 | 已实现 | Tab 过滤（All/Recurring/One-shot）、@once 状态 Badge、ScheduleDetail 展示 report_template 和 report_format |
+| Schedule 前端优化 | 已实现 | Type toggle（Recurring/One-time）、搜索+分页、拖拽缩放对话框、`schedule_type` 字段区分；unlimited timeout + retry 机制 |
+| 动态模型选择 | 已实现 | Bedrock API 动态获取可用 Claude 模型（24h 缓存）+ settings.yaml fallback；`/api/models` 端点；CLI `/model` 显示完整列表 |
+| MCP Server 集成 | 已实现 | Bedrock tool name 自动 sanitize（去除 `.`）；AWS_CONFIG_FILE 自动注入避免 plugin 冲突；启动失败 graceful degradation |
+| 通知合并模式 | 已实现 | `notifications_consolidated=true`（默认）抑制 Scan/Detect/RCA 逐条通知，只发最终报告；`false` 用于 dev/debug |
+| IM WS 自动检测 | 已实现 | 从 `channels.yaml` 自动检测 feishu/slack enabled channel 并启动 WebSocket，无需手动配置 `feishu_ws_enabled` |
+| Report S3 Web 配置 | 已实现 | Web Settings 可编辑 report_storage/s3_bucket/prefix/region/expiry 并持久化到 settings.yaml |
 | Self-Improving Skills | 已实现 | 三触发源（手动/Post-resolution/Agent 检测）→ skill gap 分析 → LLM 生成改进草稿；`skill_improvement_service.py` + `improvement_store.py`（JSON file-based, mtime 缓存, fcntl 锁）；Settings 页面三开关；Skills 页面 improvement 历史 UI |
 | Report Pre-signed URL | 已实现 | S3 配置后，报告/任务通知自动附带 7 天有效下载链接（Email/Slack/Feishu 通用），`AIOPS_REPORT_PRESIGNED_URL_EXPIRY` 可配置 |
 | Scanner 去重优化 | 已实现 | 全局资源（如 S3）跨 region 扫描时 batch 内去重，避免 UNIQUE 约束冲突 |

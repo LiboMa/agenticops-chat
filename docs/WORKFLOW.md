@@ -437,10 +437,16 @@ flowchart LR
 
 **Report template:** Tasks append report instructions to the prompt. Users can provide custom Markdown templates or use the default format (summary → findings → recommendations).
 
+**Execution config:**
+- `timeout_seconds: 0` — unlimited by default (tasks run until completion)
+- `max_retries: 0-5` — auto-retry on failure, notification sent only on final attempt
+- `schedule_type: recurring | one_time` — explicitly distinguishes recurring schedules from one-time tasks
+
 **Frontend (Schedules page):**
-- Tab filter: All | Recurring | One-shot — quickly switch between schedule types
-- One-shot tasks show status badges (Running / Completed) instead of cron expression
-- ScheduleDetail displays `report_template` and `report_format` when configured
+- Type toggle: `[Recurring | One-time]` in creation dialog — separate forms for each type
+- Tab filter: All | Recurring | One-shot with search and pagination (10/page)
+- Draggable + resizable creation dialog
+- One-time tasks auto-disable after execution
 
 ---
 
@@ -752,9 +758,13 @@ generate an inventory report for EC2
 
 **Supported channel types:** Feishu, DingTalk, WeCom, Slack, Email (SES), SNS, Webhook.
 
-**Auto-notifications:** When `AIOPS_NOTIFICATIONS_ENABLED=true`, the pipeline automatically sends notifications at 7 event points (issue created, RCA completed, fix planned, fix approved, execution result, report saved, schedule result).
+**Auto-notifications:** When `AIOPS_NOTIFICATIONS_ENABLED=true`, the pipeline sends notifications on key events (report saved, schedule result, execution result).
+
+**Consolidated mode (default):** `AIOPS_NOTIFICATIONS_CONSOLIDATED=true` suppresses per-issue notifications during Scan/Detect/RCA operations — only the final report is sent. Set to `false` for dev/debug to see every notification individually.
 
 **Pre-signed download URLs:** When S3 storage is configured (`AIOPS_REPORT_STORAGE=s3`), report and schedule notifications automatically include a time-limited download link (default 7 days, configurable via `AIOPS_REPORT_PRESIGNED_URL_EXPIRY`). Works across all channels — Email, Slack, Feishu.
+
+**IM WebSocket auto-detect:** Feishu/Slack WS connections start automatically when an enabled channel of that type exists in `config/channels.yaml`. No need to set `AIOPS_FEISHU_WS_ENABLED` manually.
 
 ---
 
