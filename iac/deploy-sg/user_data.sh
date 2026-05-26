@@ -111,6 +111,7 @@ mkdir -p "$APP_DIR/data"
 chmod -R +x "$APP_DIR/.venv/bin/"
 chown -R agenticops:agenticops "$APP_DIR"
 cp /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
+ln -sf /usr/local/bin/uv /usr/local/bin/uvx
 
 # -----------------------------------------------------------------------------
 # Clear MCP servers config (avoid startup failures from stale local configs)

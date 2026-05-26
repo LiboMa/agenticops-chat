@@ -201,6 +201,8 @@ cd /opt/agenticops
 
 chmod -R +x .venv/bin/
 chown -R agenticops:agenticops /opt/agenticops
+# Ensure uvx symlink exists (needed by MCP servers)
+ln -sf /usr/local/bin/uv /usr/local/bin/uvx
 systemctl restart agenticops
 sleep 3
 curl -sf http://localhost:8000/api/health && echo "HEALTH OK" || echo "HEALTH FAILED"
