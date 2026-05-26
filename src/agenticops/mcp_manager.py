@@ -133,6 +133,9 @@ def _build_clients() -> List[MCPClient]:
         prefix = f"{safe_name}_"
 
         try:
+            # Allow per-server startup_timeout override (default 30s)
+            startup_timeout = int(expanded.get("startup_timeout", 30))
+
             if "url" in expanded:
                 # SSE transport
                 from mcp.client.sse import sse_client
@@ -143,6 +146,7 @@ def _build_clients() -> List[MCPClient]:
                         headers=headers,
                     ),
                     prefix=prefix,
+                    startup_timeout=startup_timeout,
                 )
             else:
                 # Stdio transport (default)
@@ -156,6 +160,7 @@ def _build_clients() -> List[MCPClient]:
                 client = MCPClient(
                     transport_callable=lambda p=params: stdio_client(p),
                     prefix=prefix,
+                    startup_timeout=startup_timeout,
                 )
 
             clients.append(client)
