@@ -12,6 +12,21 @@ from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.mcp_manager import get_mcp_clients
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_mcp_clients() -> list:
+    """Return MCP clients that can successfully start, skipping broken ones."""
+    clients = []
+    for client in get_mcp_clients():
+        try:
+            # Pre-start to verify connectivity — Strands will reuse if already started
+            client.start()
+            clients.append(client)
+        except Exception as e:
+            logger.warning("MCP client '%s' failed to start, skipping: %s", getattr(client, '_prefix', '?'), e)
+    return clients
 from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
@@ -265,8 +280,8 @@ If the user explicitly requests a different scope, honor their request over this
             list_schedules,
             manage_schedule,
             get_schedule_history,
-            # MCP tool providers (external servers)
-            *get_mcp_clients(),
+            # MCP tool providers (external servers) — graceful degradation
+            *_safe_mcp_clients(),
         ],
     )
 
