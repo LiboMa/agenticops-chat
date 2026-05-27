@@ -59,6 +59,11 @@ from agenticops.tools.memory_tools import record_agent_feedback, search_agent_me
 from agenticops.tools.schedule_tools import (
     run_task, create_schedule, list_schedules, manage_schedule, get_schedule_history
 )
+from agenticops.tools.mcp_tools import (
+    list_mcp_servers as list_mcp_servers_tool,
+    validate_mcp_servers, add_mcp_server, remove_mcp_server,
+    toggle_mcp_server, reload_mcp_servers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +284,13 @@ If the user explicitly requests a different scope, honor their request over this
             list_schedules,
             manage_schedule,
             get_schedule_history,
+            # MCP management tools (list/add/remove/validate/reload via Chat)
+            list_mcp_servers_tool,
+            validate_mcp_servers,
+            add_mcp_server,
+            remove_mcp_server,
+            toggle_mcp_server,
+            reload_mcp_servers,
             # MCP tool providers (external servers)
             *tools_extra,
         ],
