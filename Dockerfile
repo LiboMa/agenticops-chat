@@ -44,7 +44,8 @@ RUN mkdir -p /app/data /app/logs /app/config && \
 USER agenticops
 
 # Environment defaults
-ENV AIOPS_DEPLOYMENT_PROFILE=cloud \
+ENV AIOPS_PROJECT_ROOT=/app \
+    AIOPS_DEPLOYMENT_PROFILE=cloud \
     AIOPS_DATABASE_URL=sqlite:////app/data/agenticops.db \
     AIOPS_API_AUTH_ENABLED=true
 

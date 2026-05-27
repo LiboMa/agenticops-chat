@@ -16,8 +16,11 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-# Project root directory (where pyproject.toml is located)
-PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+# Project root directory — env var takes priority, then auto-detect from source tree
+PROJECT_ROOT = Path(
+    __import__("os").environ.get("AIOPS_PROJECT_ROOT", "")
+    or str(Path(__file__).parent.parent.parent.resolve())
+)
 
 # Default YAML config path (can be overridden via AIOPS_CONFIG_FILE env var)
 _YAML_CONFIG_PATH = Path(__import__("os").environ.get(
