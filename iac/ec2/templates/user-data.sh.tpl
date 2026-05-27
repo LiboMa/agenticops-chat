@@ -24,7 +24,9 @@ if ! command -v aws &>/dev/null; then
 fi
 
 # Prepare app directory
+# Prepare data dir with correct ownership (container runs as uid 999)
 mkdir -p /opt/agenticops/data
+chown -R 999:999 /opt/agenticops/data
 
 # Write .env
 cat > /opt/agenticops/.env << 'ENVEOF'
