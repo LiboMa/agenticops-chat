@@ -132,7 +132,7 @@ AIOPS_DATABASE_URL=sqlite:///$APP_DIR/data/agenticops.db
 AIOPS_API_AUTH_ENABLED=true
 AIOPS_ADMIN_PASSWORD=$ADMIN_PASSWORD
 AIOPS_DEPLOYMENT_PROFILE=cloud
-PATH=$APP_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin
+PATH=$APP_DIR/.venv/bin:/home/agenticops/.local/bin:/usr/local/bin:/usr/bin:/bin
 ENVEOF
 
 # -----------------------------------------------------------------------------
