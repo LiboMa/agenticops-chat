@@ -150,7 +150,16 @@ def _build_clients() -> List[MCPClient]:
                 )
             else:
                 # Stdio transport (default)
+                import shutil
                 from mcp.client.stdio import stdio_client, StdioServerParameters
+
+                # Validate command exists before attempting to spawn subprocess
+                cmd = expanded["command"]
+                if not shutil.which(cmd):
+                    logger.warning(
+                        "MCP server '%s' skipped: command '%s' not found in PATH", name, cmd
+                    )
+                    continue
 
                 # Build env: start from SAFE base (not full os.environ) to avoid
                 # VIRTUAL_ENV / UV_* vars causing recursive subprocess spawning.
