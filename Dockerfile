@@ -36,8 +36,8 @@ COPY config/settings.yaml ./config/settings.yaml
 COPY skills/ ./skills/
 COPY agent-memory/ ./agent-memory/
 
-# Create data directory + empty MCP config (cloud: no stdio MCP)
-RUN mkdir -p /app/data /app/config && \
+# Create data + logs directories + empty MCP config (cloud: no stdio MCP)
+RUN mkdir -p /app/data /app/logs /app/config && \
     echo '{"mcpServers": {}}' > /app/config/mcp-servers.json && \
     chown -R agenticops:agenticops /app
 

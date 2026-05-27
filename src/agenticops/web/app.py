@@ -945,7 +945,12 @@ def _setup_service_logging() -> None:
     """Configure file-based logging for backend + frontend (access) logs."""
     import logging.handlers
 
-    log_dir = Path(__file__).parent.parent.parent.parent / "logs"
+    # Use /app/logs in Docker (AIOPS_DEPLOYMENT_PROFILE=cloud), otherwise project root
+    from agenticops.config import settings
+    if settings.deployment_profile == "cloud":
+        log_dir = Path("/app/logs")
+    else:
+        log_dir = Path(__file__).parent.parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
 
     fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s [%(trace_id)s] %(message)s")
