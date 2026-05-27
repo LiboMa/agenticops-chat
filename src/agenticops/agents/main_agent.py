@@ -64,6 +64,13 @@ from agenticops.tools.mcp_tools import (
     validate_mcp_servers, add_mcp_server, remove_mcp_server,
     toggle_mcp_server, reload_mcp_servers,
 )
+from agenticops.tools.im_tools import (
+    list_im_channels, add_im_channel, remove_im_channel,
+    toggle_im_channel, list_im_apps, set_im_app, import_im_config,
+)
+from agenticops.tools.account_tools import (
+    list_cloud_accounts, add_cloud_account, update_cloud_account, remove_cloud_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +298,19 @@ If the user explicitly requests a different scope, honor their request over this
             remove_mcp_server,
             toggle_mcp_server,
             reload_mcp_servers,
+            # IM & Channel management (Chat CRUD for channels.yaml + im-apps.yaml)
+            list_im_channels,
+            add_im_channel,
+            remove_im_channel,
+            toggle_im_channel,
+            list_im_apps,
+            set_im_app,
+            import_im_config,
+            # Cloud Account management (credentials masked, write-only)
+            list_cloud_accounts,
+            add_cloud_account,
+            update_cloud_account,
+            remove_cloud_account,
             # MCP tool providers (external servers)
             *tools_extra,
         ],
