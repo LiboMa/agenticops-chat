@@ -168,6 +168,68 @@ def list_apps() -> Dict[str, list]:
     return result
 
 
+def get_apps_detail() -> Dict[str, Dict[str, dict]]:
+    """Return all IM apps with their full config (for API masking layer)."""
+    data = _load_raw()
+    result: Dict[str, Dict[str, dict]] = {}
+    for platform in ("feishu", "dingtalk", "wecom", "slack"):
+        apps = data.get(platform, {})
+        if apps:
+            result[platform] = dict(apps)
+    return result
+
+
+def save_app(platform: str, app_name: str, config: dict) -> None:
+    """Add or update an IM app in im-apps.yaml."""
+    global _cached_data, _cached_mtime
+
+    config_path: Path = settings.im_apps_config
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+    else:
+        raw = {}
+
+    if platform not in raw:
+        raw[platform] = {}
+    raw[platform][app_name] = config
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # Invalidate cache
+    _cached_data = None
+    _cached_mtime = 0.0
+
+
+def delete_app(platform: str, app_name: str) -> bool:
+    """Remove an IM app from im-apps.yaml. Returns True if found and removed."""
+    global _cached_data, _cached_mtime
+
+    config_path: Path = settings.im_apps_config
+    if not config_path.exists():
+        return False
+
+    with open(config_path) as f:
+        raw = yaml.safe_load(f) or {}
+
+    if platform not in raw or app_name not in raw[platform]:
+        return False
+
+    del raw[platform][app_name]
+    if not raw[platform]:
+        del raw[platform]
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    _cached_data = None
+    _cached_mtime = 0.0
+    return True
+
+
 # ── Notification Channels (channels.yaml) ─────────────────────────
 
 _CHANNEL_RESERVED_KEYS = frozenset(("type", "enabled", "severity_filter", "preferred_format", "role", "alert_senders"))

@@ -34,6 +34,15 @@ import {
   useDeleteAgentMemory,
   type AgentMemory,
 } from "@/hooks/useAgentMemory";
+import {
+  useImApps,
+  useUpsertImApp,
+  useDeleteImApp,
+  useChannels,
+  useUpsertChannel,
+  useDeleteChannel,
+  useToggleChannel,
+} from "@/hooks/useImApps";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig } from "@/api/types";
 
@@ -959,6 +968,208 @@ function ReportStorageCard({
   );
 }
 
+/* ── IM Bots Tab ───────────────────────────────────────────────── */
+
+const IM_PLATFORMS = ["feishu", "slack", "dingtalk", "wecom"] as const;
+const IM_FIELDS: Record<string, { label: string; secret: boolean }[]> = {
+  feishu: [{ label: "app_id", secret: false }, { label: "app_secret", secret: true }],
+  slack: [{ label: "bot_token", secret: true }, { label: "app_token", secret: true }],
+  dingtalk: [{ label: "app_key", secret: false }, { label: "app_secret", secret: true }],
+  wecom: [{ label: "corp_id", secret: false }, { label: "agent_id", secret: false }, { label: "secret", secret: true }],
+};
+
+function ImBotsTab() {
+  const appsQ = useImApps();
+  const channelsQ = useChannels();
+  const upsertApp = useUpsertImApp();
+  const deleteApp = useDeleteImApp();
+  const upsertChannel = useUpsertChannel();
+  const deleteChannel = useDeleteChannel();
+  const toggleChannel = useToggleChannel();
+
+  const [showAppForm, setShowAppForm] = useState(false);
+  const [appPlatform, setAppPlatform] = useState<string>("feishu");
+  const [appName, setAppName] = useState("default");
+  const [appFields, setAppFields] = useState<Record<string, string>>({});
+
+  const [showChForm, setShowChForm] = useState(false);
+  const [chName, setChName] = useState("");
+  const [chType, setChType] = useState("feishu");
+  const [chChatId, setChChatId] = useState("");
+  const [chEnabled, setChEnabled] = useState(true);
+
+  const handleSaveApp = () => {
+    upsertApp.mutate({ platform: appPlatform, name: appName, config: appFields }, {
+      onSuccess: () => { setShowAppForm(false); setAppFields({}); },
+    });
+  };
+
+  const handleSaveChannel = () => {
+    const data: Record<string, unknown> = { type: chType, enabled: chEnabled };
+    if (chChatId) data.chat_id = chChatId;
+    upsertChannel.mutate({ name: chName, data }, {
+      onSuccess: () => { setShowChForm(false); setChName(""); setChChatId(""); },
+    });
+  };
+
+  const inputCls = "w-full px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary-500";
+
+  return (
+    <>
+      {/* IM Apps */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-foreground">IM Bot Apps</h2>
+          <button onClick={() => setShowAppForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
+            Add App
+          </button>
+        </CardHeader>
+        <CardBody>
+          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load" /> : (
+            <div className="space-y-3">
+              {Object.entries(appsQ.data || {}).map(([platform, apps]) =>
+                Object.entries(apps).map(([name, cfg]) => (
+                  <div key={`${platform}/${name}`} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                    <div>
+                      <span className="text-sm font-medium text-foreground">{platform}/{name}</span>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join(", ")}
+                      </p>
+                    </div>
+                    <button onClick={() => deleteApp.mutate({ platform, name })} className="text-xs text-red-600 hover:underline">
+                      Delete
+                    </button>
+                  </div>
+                ))
+              )}
+              {!Object.keys(appsQ.data || {}).length && (
+                <p className="text-sm text-muted-foreground">No IM apps configured.</p>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* Channels */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-foreground">Notification Channels</h2>
+          <button onClick={() => setShowChForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
+            Add Channel
+          </button>
+        </CardHeader>
+        <CardBody>
+          {channelsQ.isLoading ? <Spinner /> : (
+            <div className="space-y-2">
+              {(channelsQ.data || []).map((ch) => (
+                <div key={ch.name} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div
+                      onClick={() => toggleChannel.mutate({ name: ch.name, enabled: !ch.enabled })}
+                      className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors ${ch.enabled ? "bg-primary-500" : "bg-muted-foreground/30"}`}
+                    >
+                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${ch.enabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium text-foreground">{ch.name}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{ch.type} · {ch.role}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => deleteChannel.mutate(ch.name)} className="text-xs text-red-600 hover:underline">
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {!(channelsQ.data || []).length && (
+                <p className="text-sm text-muted-foreground">No channels configured.</p>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* Add App Modal */}
+      {showAppForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-background rounded-xl shadow-lg w-full max-w-md p-5 border border-border/50">
+            <h3 className="text-base font-semibold mb-4">Add IM Bot App</h3>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Platform</label>
+                  <select value={appPlatform} onChange={(e) => { setAppPlatform(e.target.value); setAppFields({}); }} className={inputCls}>
+                    {IM_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">App Name</label>
+                  <input value={appName} onChange={(e) => setAppName(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+              {(IM_FIELDS[appPlatform] || []).map((f) => (
+                <div key={f.label}>
+                  <label className="block text-xs text-muted-foreground mb-1">{f.label}</label>
+                  <input
+                    type={f.secret ? "password" : "text"}
+                    value={appFields[f.label] || ""}
+                    onChange={(e) => setAppFields({ ...appFields, [f.label]: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              ))}
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setShowAppForm(false)} className="px-3 py-1.5 text-sm text-muted-foreground">Cancel</button>
+                <button onClick={handleSaveApp} disabled={upsertApp.isPending} className="px-4 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">
+                  {upsertApp.isPending ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Channel Modal */}
+      {showChForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-background rounded-xl shadow-lg w-full max-w-md p-5 border border-border/50">
+            <h3 className="text-base font-semibold mb-4">Add Channel</h3>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Name</label>
+                  <input value={chName} onChange={(e) => setChName(e.target.value)} placeholder="feishu-ops" className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Type</label>
+                  <select value={chType} onChange={(e) => setChType(e.target.value)} className={inputCls}>
+                    {["feishu", "slack", "dingtalk", "wecom", "email", "ses", "sns", "sns-report", "webhook"].map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Chat ID / Webhook URL</label>
+                <input value={chChatId} onChange={(e) => setChChatId(e.target.value)} placeholder="oc_xxx or https://..." className={inputCls} />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={chEnabled} onChange={(e) => setChEnabled(e.target.checked)} className="rounded border-border" />
+                <span className="text-sm text-foreground">Enabled</span>
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setShowChForm(false)} className="px-3 py-1.5 text-sm text-muted-foreground">Cancel</button>
+                <button onClick={handleSaveChannel} disabled={!chName || upsertChannel.isPending} className="px-4 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50">
+                  {upsertChannel.isPending ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ── Main Settings page ─────────────────────────────────────────── */
 
 export default function Settings() {
@@ -1018,6 +1229,7 @@ export default function Settings() {
           <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>
           <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
           <Tabs.Trigger value="skills" className={tabTriggerClass}>{t("settings.skills")}</Tabs.Trigger>
+          <Tabs.Trigger value="im-bots" className={tabTriggerClass}>IM Bots</Tabs.Trigger>
           <Tabs.Trigger value="mcp" className={tabTriggerClass}>{t("settings.mcp")}</Tabs.Trigger>
           <Tabs.Trigger value="memory" className={tabTriggerClass}>Agent Memory</Tabs.Trigger>
         </Tabs.List>
@@ -1229,6 +1441,11 @@ export default function Settings() {
         {/* ── Skills Tab ───────────────────────────────────────── */}
         <Tabs.Content value="skills">
           <SkillsTab />
+        </Tabs.Content>
+
+        {/* ── IM Bots Tab ─────────────────────────────────────── */}
+        <Tabs.Content value="im-bots" className="space-y-6">
+          <ImBotsTab />
         </Tabs.Content>
 
         {/* ── MCP Servers Tab ──────────────────────────────────── */}

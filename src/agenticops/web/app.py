@@ -1415,6 +1415,109 @@ async def api_refresh_models():
 
 
 # ============================================================================
+# IM Apps & Channels
+# ============================================================================
+
+_SENSITIVE_IM_KEYS = {"app_secret", "secret", "bot_token", "app_token", "password", "access_key_secret"}
+
+
+def _mask_im_secrets(config: dict) -> dict:
+    """Mask sensitive IM app credential values."""
+    return {
+        k: f"****{str(v)[-4:]}" if k.lower() in _SENSITIVE_IM_KEYS and v and len(str(v)) >= 4 else v
+        for k, v in config.items()
+    }
+
+
+@app.get("/api/settings/im-apps")
+async def api_list_im_apps():
+    """List all IM bot apps with masked secrets."""
+    from agenticops.notify.im_config import get_apps_detail
+    apps = get_apps_detail()
+    # Mask secrets in response
+    masked = {}
+    for platform, platform_apps in apps.items():
+        masked[platform] = {
+            name: _mask_im_secrets(cfg) for name, cfg in platform_apps.items()
+        }
+    return masked
+
+
+@app.put("/api/settings/im-apps/{platform}/{name}")
+async def api_upsert_im_app(platform: str, name: str, body: dict = Body(...)):
+    """Create or update an IM bot app credential."""
+    from agenticops.notify.im_config import save_app
+    valid = {"feishu", "dingtalk", "wecom", "slack"}
+    if platform not in valid:
+        raise HTTPException(400, f"Invalid platform. Valid: {', '.join(sorted(valid))}")
+    save_app(platform, name, body)
+    return {"platform": platform, "name": name, "status": "saved"}
+
+
+@app.delete("/api/settings/im-apps/{platform}/{name}")
+async def api_delete_im_app(platform: str, name: str):
+    """Delete an IM bot app."""
+    from agenticops.notify.im_config import delete_app
+    if not delete_app(platform, name):
+        raise HTTPException(404, f"App '{platform}/{name}' not found")
+    return {"status": "deleted"}
+
+
+@app.get("/api/settings/channels")
+async def api_list_channels():
+    """List all notification channels."""
+    from agenticops.notify.im_config import load_channels
+    channels = load_channels()
+    return [
+        {
+            "name": c.name,
+            "type": c.channel_type,
+            "enabled": c.is_enabled,
+            "role": c.role,
+            "preferred_format": c.preferred_format,
+            "config": {k: v for k, v in c.config.items()
+                       if "token" not in k.lower() and "secret" not in k.lower()},
+        }
+        for c in channels
+    ]
+
+
+@app.put("/api/settings/channels/{name}")
+async def api_upsert_channel(name: str, body: dict = Body(...)):
+    """Create or update a notification channel."""
+    from agenticops.notify.im_config import save_channel
+    channel_type = body.pop("type", "")
+    if not channel_type:
+        raise HTTPException(400, "Field 'type' is required")
+    enabled = body.pop("enabled", True)
+    role = body.pop("role", "chat")
+    save_channel(name, channel_type, body, is_enabled=enabled)
+    return {"name": name, "type": channel_type, "status": "saved"}
+
+
+@app.delete("/api/settings/channels/{name}")
+async def api_delete_channel(name: str):
+    """Delete a notification channel."""
+    from agenticops.notify.im_config import delete_channel
+    if not delete_channel(name):
+        raise HTTPException(404, f"Channel '{name}' not found")
+    return {"status": "deleted"}
+
+
+@app.patch("/api/settings/channels/{name}/toggle")
+async def api_toggle_channel(name: str, body: dict = Body(...)):
+    """Enable or disable a channel."""
+    from agenticops.notify.im_config import load_channels, save_channel
+    enabled = body.get("enabled", True)
+    channels = load_channels()
+    ch = next((c for c in channels if c.name == name), None)
+    if not ch:
+        raise HTTPException(404, f"Channel '{name}' not found")
+    save_channel(name, ch.channel_type, ch.config, is_enabled=enabled)
+    return {"name": name, "enabled": enabled}
+
+
+# ============================================================================
 # MCP Servers
 # ============================================================================
 
