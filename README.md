@@ -2,7 +2,7 @@
 
 Agent-First Cloud Operations Platform — multi-agent AI operations with interactive CLI, React dashboard, IM integration, and autonomous remediation.
 
-> **Version**: 1.0.0-MVP | **Detailed Release Notes**: [docs/MVP-1.0.0-RELEASE.md](docs/MVP-1.0.0-RELEASE.md)
+> **Version**: 1.0.1 | **Release Notes**: [docs/MVP-1.0.1-RELEASE.md](docs/MVP-1.0.1-RELEASE.md) | [v1.0.0](docs/MVP-1.0.0-RELEASE.md)
 
 ## Overview
 
@@ -26,7 +26,8 @@ AgenticOps (`aiops`) uses 7 specialized AI agents (built on [Strands Agents SDK]
 | **Scheduled Pipelines** | Cron-based task scheduling: FullScan, Monitoring, DailyReport, HealthPatrol, AgentChain (prompt-driven) |
 | **Notify** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook — YAML-configured |
 | **IM Bots** | Feishu/Slack WebSocket bots with alert channel routing (agent-verified, not regex) |
-| **MCP Servers** | Claude Desktop-compatible MCP server integration for extended tool access |
+| **MCP Servers** | Claude Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload, graceful degradation |
+| **Dynamic Models** | Bedrock API auto-discovery of available Claude models (cached), per-agent assignment, CLI/Web switching |
 
 ## Multi-Agent Architecture
 
@@ -53,6 +54,7 @@ IM Bots ────────────┘         ├──► Detect Agen
 | **Reporter** | Haiku 4.5 | Report generation (cost-optimized) |
 
 Per-agent model overrides via `config/settings.yaml` or `AIOPS_AGENT_{NAME}_MODEL_ID` env vars.
+Available models fetched dynamically from Bedrock (`/api/models`). Switch via CLI `/model` or Web Settings.
 
 ### Auto-Fix Pipeline
 

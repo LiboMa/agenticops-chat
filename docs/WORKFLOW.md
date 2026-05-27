@@ -448,6 +448,25 @@ flowchart LR
 - Draggable + resizable creation dialog
 - One-time tasks auto-disable after execution
 
+### MCP Server Management
+
+External tool providers via Model Context Protocol (Claude Desktop-compatible `mcp-servers.json`).
+
+**Manage via Chat:**
+```
+User: "list mcp servers"         → list_mcp_servers
+User: "add mcp server awslabs.aws-api-mcp-server command uvx args awslabs.aws-api-mcp-server@latest"
+User: "validate mcp"             → validate_mcp_servers
+User: "reload mcp"               → reload_mcp_servers (hot-reload, no restart needed)
+User: "disable awslabs.aws-api-mcp-server" → toggle_mcp_server
+```
+
+**Also available:** Web Settings (MCP Servers card), API (`/api/settings/mcp-servers/*`)
+
+**Lifecycle:** Lazy-start — MCP servers start on first chat message, not at app startup. Hot-reload validates config before applying.
+
+**Security:** Tool names sanitized for Bedrock (`[a-zA-Z0-9_-]+`), subprocess env isolated (no VIRTUAL_ENV leak), `config/aws-mcp.cfg` auto-injected to avoid `~/.aws/config` plugin conflicts.
+
 ---
 
 ## Chat Preprocessing Pipeline
