@@ -1,6 +1,6 @@
 # =============================================================================
 # AgenticOps — Production Container (multi-stage)
-# Stage 1: Build frontend | Stage 2: Python runtime
+# Stage 1: Build frontend | Stage 2: Python runtime with all dependencies
 # =============================================================================
 
 # Stage 1: Frontend build
@@ -14,40 +14,83 @@ RUN npm run build
 # Stage 2: Python runtime
 FROM python:3.12-slim AS runtime
 
+# --- System dependencies ---
+# curl: healthcheck + API calls
+# ca-certificates: HTTPS
+# git: skills registry (clawhub)
+# openssh-client: SSH execution skill (run_on_host)
+# jq: JSON processing in shell scripts
+# unzip: AWS CLI installer
+# weasyprint deps: libcairo2, libpango, libgdk-pixbuf (PDF report generation)
+# kubectl: EKS operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    curl \
+    ca-certificates \
+    git \
+    openssh-client \
+    jq \
+    unzip \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    libglib2.0-0 \
+    shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast dependency resolution
-RUN pip install --no-cache-dir uv
+# --- AWS CLI v2 ---
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip && \
+    unzip -qo /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/awscliv2.zip /tmp/aws
 
-# Create non-root user
+# --- kubectl ---
+RUN curl -fsSL "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    -o /usr/local/bin/kubectl && \
+    chmod +x /usr/local/bin/kubectl
+
+# --- uv (Python package manager + uvx for MCP servers) ---
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    mv /root/.local/bin/uvx /usr/local/bin/uvx
+
+# --- Create non-root user ---
 RUN useradd -r -m -s /bin/bash agenticops
 
 WORKDIR /app
 
-# Install Python dependencies (cached layer)
+# --- Install Python dependencies (cached layer) ---
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
-# Hatchling requires frontend dist dir to exist during install
 COPY --from=frontend /build/dist ./src/agenticops/web/frontend/dist
-RUN uv pip install --system ".[im,files,reports]"
+# Install ALL optional deps: im (slack/feishu), files (docx/pdf), reports (weasyprint), cloud (pgvector)
+RUN uv pip install --system ".[im,files,reports,cloud]"
+
+# --- Copy config + skills ---
 COPY config/settings.yaml ./config/settings.yaml
 COPY skills/ ./skills/
 COPY agent-memory/ ./agent-memory/
 
-# Create data + logs directories + empty MCP config (cloud: no stdio MCP)
+# --- Create directories + empty MCP config ---
 RUN mkdir -p /app/data /app/logs /app/config && \
     echo '{"mcpServers": {}}' > /app/config/mcp-servers.json && \
     chown -R agenticops:agenticops /app
 
+# --- Verify all critical tools are installed ---
+RUN aws --version && \
+    kubectl version --client && \
+    uvx --version && \
+    python -c "import boto3, yaml, mcp, strands, sqlalchemy, fastapi, networkx, weasyprint; print('All imports OK')"
+
 USER agenticops
 
-# Environment defaults
+# --- Environment defaults ---
 ENV AIOPS_PROJECT_ROOT=/app \
     AIOPS_DEPLOYMENT_PROFILE=cloud \
     AIOPS_DATABASE_URL=sqlite:////app/data/agenticops.db \
-    AIOPS_API_AUTH_ENABLED=true
+    AIOPS_API_AUTH_ENABLED=true \
+    PATH="/home/agenticops/.local/bin:/usr/local/bin:$PATH"
 
 EXPOSE 8000
 
