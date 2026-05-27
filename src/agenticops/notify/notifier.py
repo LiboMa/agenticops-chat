@@ -343,12 +343,14 @@ class SNSReportNotifier(Notifier):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
+        from agenticops.config import settings as _s
         self.topic_arn: str = config.get("topic_arn", "")
         self.region: str = config.get("region", "us-east-1")
-        self.s3_bucket: str = config.get("s3_bucket", "")
-        self.s3_prefix: str = config.get("s3_prefix", "reports/")
-        self.s3_region: str = config.get("s3_region", self.region)
-        self.url_expiry: int = int(config.get("url_expiry", 604800))  # 7 days
+        # S3: channel-level overrides settings.yaml (unified source)
+        self.s3_bucket: str = config.get("s3_bucket", "") or _s.report_s3_bucket
+        self.s3_prefix: str = config.get("s3_prefix", "") or _s.report_s3_prefix
+        self.s3_region: str = config.get("s3_region", "") or _s.report_s3_region or self.region
+        self.url_expiry: int = int(config.get("url_expiry", 0)) or _s.report_presigned_url_expiry
         self.formats: List[str] = config.get("formats", ["html", "markdown"])
         self.report_types: List[str] = config.get("report_types", [])  # empty = all
         # SES config — when set, HTML reports are sent via SES (rendered in email)
@@ -732,15 +734,16 @@ class SESNotifier(Notifier):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
+        from agenticops.config import settings as _s
         self.sender: str = config.get("sender", config.get("from", ""))
         recipients = config.get("to", [])
         self.recipients: List[str] = recipients if isinstance(recipients, list) else [recipients] if recipients else []
         self.region: str = config.get("region", "us-east-1")
-        # Optional S3 for report pipeline
-        self.s3_bucket: str = config.get("s3_bucket", "")
-        self.s3_prefix: str = config.get("s3_prefix", "reports/")
-        self.s3_region: str = config.get("s3_region", self.region)
-        self.url_expiry: int = int(config.get("url_expiry", 604800))
+        # S3: channel-level overrides settings.yaml (unified source)
+        self.s3_bucket: str = config.get("s3_bucket", "") or _s.report_s3_bucket
+        self.s3_prefix: str = config.get("s3_prefix", "") or _s.report_s3_prefix
+        self.s3_region: str = config.get("s3_region", "") or _s.report_s3_region or self.region
+        self.url_expiry: int = int(config.get("url_expiry", 0)) or _s.report_presigned_url_expiry
         self.formats: List[str] = config.get("formats", ["html", "markdown"])
 
     async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
