@@ -28,16 +28,13 @@ WORKDIR /app
 
 # Install Python dependencies (cached layer)
 COPY pyproject.toml README.md ./
-RUN uv pip install --system ".[im,files,reports]"
-
-# Copy application code
 COPY src/ ./src/
+# Hatchling requires frontend dist dir to exist during install
+COPY --from=frontend /build/dist ./src/agenticops/web/frontend/dist
+RUN uv pip install --system ".[im,files,reports]"
 COPY config/settings.yaml ./config/settings.yaml
 COPY skills/ ./skills/
 COPY agent-memory/ ./agent-memory/
-
-# Copy frontend build from stage 1
-COPY --from=frontend /build/dist ./src/agenticops/web/frontend/dist
 
 # Create data directory + empty MCP config (cloud: no stdio MCP)
 RUN mkdir -p /app/data /app/config && \
