@@ -805,14 +805,15 @@ async def lifespan(app: FastAPI):
     _chat_sessions.start_cleanup()
     _executor_service.start()
 
-    # Start MCP servers
+    # MCP servers: lazy-start on first Agent creation (not here).
+    # Pre-starting causes "session is currently running" conflict with Strands.
     try:
-        from agenticops.mcp_manager import start_mcp_clients
-        mcp_clients = start_mcp_clients()
-        if mcp_clients:
-            logger.info("MCP: %d server(s) started", len(mcp_clients))
+        from agenticops.mcp_manager import get_mcp_clients
+        mcp_count = len(get_mcp_clients())
+        if mcp_count:
+            logger.info("MCP: %d server(s) configured (lazy-start on first chat)", mcp_count)
     except Exception as e:
-        logger.warning("MCP startup failed: %s", e)
+        logger.warning("MCP config load failed: %s", e)
 
     # Start background cron scheduler
     from agenticops.scheduler.scheduler import Scheduler
@@ -1003,14 +1004,14 @@ async def startup():
     _chat_sessions.start_cleanup()
     _executor_service.start()
 
-    # Start MCP servers
+    # MCP servers: lazy-start (same as lifespan path)
     try:
-        from agenticops.mcp_manager import start_mcp_clients
-        mcp_clients = start_mcp_clients()
-        if mcp_clients:
-            logger.info("MCP: %d server(s) started", len(mcp_clients))
+        from agenticops.mcp_manager import get_mcp_clients
+        mcp_count = len(get_mcp_clients())
+        if mcp_count:
+            logger.info("MCP: %d server(s) configured (lazy-start on first chat)", mcp_count)
     except Exception as e:
-        logger.warning("MCP startup failed: %s", e)
+        logger.warning("MCP config load failed: %s", e)
 
     # Start background cron scheduler
     from agenticops.scheduler.scheduler import Scheduler
