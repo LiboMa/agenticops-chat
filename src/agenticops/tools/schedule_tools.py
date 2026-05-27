@@ -48,6 +48,11 @@ def run_task(
     Returns:
         Task creation confirmation with execution ID and status.
     """
+    # Prevent recursive task creation from within scheduled runs
+    from agenticops.services.notification_service import _schedule_running
+    if _schedule_running.get(False):
+        return "Cannot create sub-tasks from within a running schedule. Include all steps in the original prompt instead."
+
     from agenticops.scheduler.scheduler import Schedule, ScheduleExecution, Scheduler
 
     channels = [c.strip() for c in notify_channels.split(",") if c.strip()] if notify_channels else []
@@ -123,6 +128,11 @@ def create_schedule(
     Returns:
         Schedule creation confirmation with ID and next run time.
     """
+    # Prevent recursive schedule creation from within scheduled runs
+    from agenticops.services.notification_service import _schedule_running
+    if _schedule_running.get(False):
+        return "Cannot create schedules from within a running schedule. Use the Chat/CLI directly."
+
     from agenticops.scheduler.scheduler import Schedule, CronParser
 
     # Validate cron expression
