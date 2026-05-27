@@ -1021,80 +1021,83 @@ function ImBotsTab() {
 
   return (
     <>
-      {/* IM Apps */}
+      {/* IM Bots & Channels — unified card */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">IM Bot Apps</h2>
+          <h2 className="text-lg font-semibold text-foreground">IM & Notifications</h2>
           <div className="flex gap-2">
             <button onClick={() => setShowImport(true)} className="px-3 py-1.5 text-sm border border-border text-foreground rounded-lg hover:bg-secondary">
-              Import JSON
+              Import
             </button>
-            <button onClick={() => setShowAppForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
-              Add App
+            <button onClick={() => setShowAppForm(true)} className="px-3 py-1.5 text-sm border border-border text-foreground rounded-lg hover:bg-secondary">
+              + App
+            </button>
+            <button onClick={() => setShowChForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
+              + Channel
             </button>
           </div>
         </CardHeader>
         <CardBody>
-          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load" /> : (
-            <div className="space-y-3">
-              {Object.entries(appsQ.data || {}).map(([platform, apps]) =>
-                Object.entries(apps).map(([name, cfg]) => (
-                  <div key={`${platform}/${name}`} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
-                    <div>
-                      <span className="text-sm font-medium text-foreground">{platform}/{name}</span>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join(", ")}
-                      </p>
+          {/* Bot Apps section */}
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Bot Apps</p>
+            {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load" /> : (
+              <div className="space-y-2">
+                {Object.entries(appsQ.data || {}).map(([platform, apps]) =>
+                  Object.entries(apps).map(([name, cfg]) => (
+                    <div key={`${platform}/${name}`} className="flex items-center justify-between p-2.5 bg-secondary/50 rounded-lg">
+                      <div>
+                        <span className="text-sm font-medium text-foreground">{platform}/{name}</span>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join(", ")}
+                        </p>
+                      </div>
+                      <button onClick={() => deleteApp.mutate({ platform, name })} className="text-xs text-red-600 hover:underline">
+                        Delete
+                      </button>
                     </div>
-                    <button onClick={() => deleteApp.mutate({ platform, name })} className="text-xs text-red-600 hover:underline">
+                  ))
+                )}
+                {!Object.keys(appsQ.data || {}).length && (
+                  <p className="text-sm text-muted-foreground">No bot apps configured.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Divider */}
+          <hr className="border-border my-4" />
+
+          {/* Channels section */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Channels</p>
+            {channelsQ.isLoading ? <Spinner /> : (
+              <div className="space-y-2">
+                {(channelsQ.data || []).map((ch) => (
+                  <div key={ch.name} className="flex items-center justify-between p-2.5 bg-secondary/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div
+                        onClick={() => toggleChannel.mutate({ name: ch.name, enabled: !ch.enabled })}
+                        className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors ${ch.enabled ? "bg-primary-500" : "bg-muted-foreground/30"}`}
+                      >
+                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${ch.enabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-foreground">{ch.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{ch.type} · {ch.role}</span>
+                      </div>
+                    </div>
+                    <button onClick={() => deleteChannel.mutate(ch.name)} className="text-xs text-red-600 hover:underline">
                       Delete
                     </button>
                   </div>
-                ))
-              )}
-              {!Object.keys(appsQ.data || {}).length && (
-                <p className="text-sm text-muted-foreground">No IM apps configured.</p>
-              )}
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* Channels */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">Notification Channels</h2>
-          <button onClick={() => setShowChForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
-            Add Channel
-          </button>
-        </CardHeader>
-        <CardBody>
-          {channelsQ.isLoading ? <Spinner /> : (
-            <div className="space-y-2">
-              {(channelsQ.data || []).map((ch) => (
-                <div key={ch.name} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div
-                      onClick={() => toggleChannel.mutate({ name: ch.name, enabled: !ch.enabled })}
-                      className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors ${ch.enabled ? "bg-primary-500" : "bg-muted-foreground/30"}`}
-                    >
-                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${ch.enabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-                    </div>
-                    <div>
-                      <span className="text-sm font-medium text-foreground">{ch.name}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{ch.type} · {ch.role}</span>
-                    </div>
-                  </div>
-                  <button onClick={() => deleteChannel.mutate(ch.name)} className="text-xs text-red-600 hover:underline">
-                    Delete
-                  </button>
-                </div>
-              ))}
-              {!(channelsQ.data || []).length && (
-                <p className="text-sm text-muted-foreground">No channels configured.</p>
-              )}
-            </div>
-          )}
+                ))}
+                {!(channelsQ.data || []).length && (
+                  <p className="text-sm text-muted-foreground">No channels configured.</p>
+                )}
+              </div>
+            )}
+          </div>
         </CardBody>
       </Card>
 
