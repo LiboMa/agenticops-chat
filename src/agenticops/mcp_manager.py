@@ -152,9 +152,26 @@ def _build_clients() -> List[MCPClient]:
                 # Stdio transport (default)
                 from mcp.client.stdio import stdio_client, StdioServerParameters
 
-                # Build env: merge os.environ + user env + auto-inject AWS_CONFIG_FILE
+                # Build env: start from SAFE base (not full os.environ) to avoid
+                # VIRTUAL_ENV / UV_* vars causing recursive subprocess spawning.
+                # MCP SDK's get_default_environment() only inherits:
+                #   HOME, LOGNAME, PATH, SHELL, TERM, USER (on Unix)
+                from mcp.client.stdio import get_default_environment
                 project_root = str(Path(__file__).parent.parent.parent)
-                server_env = {**os.environ}
+                server_env = get_default_environment()
+
+                # Add AWS credential vars (needed for AWS MCP servers)
+                for key in (
+                    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                    "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE",
+                    "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE",
+                    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+                    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+                    "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+                ):
+                    val = os.environ.get(key)
+                    if val:
+                        server_env[key] = val
 
                 # Auto-inject clean AWS config to avoid ~/.aws/config plugin issues
                 clean_aws_cfg = Path(project_root) / "config" / "aws-mcp.cfg"

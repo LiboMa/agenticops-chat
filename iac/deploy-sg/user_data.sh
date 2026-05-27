@@ -150,7 +150,7 @@ User=agenticops
 Group=agenticops
 WorkingDirectory=$APP_DIR
 EnvironmentFile=/etc/agenticops.env
-ExecStart=$APP_DIR/.venv/bin/uvicorn agenticops.web.app:app --host 0.0.0.0 --port $APP_PORT --workers 2
+ExecStart=$APP_DIR/.venv/bin/uvicorn agenticops.web.app:app --host 0.0.0.0 --port $APP_PORT --workers 4 --timeout-keep-alive 30
 Restart=always
 RestartSec=5
 
