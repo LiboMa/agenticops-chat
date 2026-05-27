@@ -85,8 +85,8 @@ variable "domain_name" {
 }
 
 variable "acm_cert_arn" {
-  type    = string
-  default = ""
+  description = "ACM certificate ARN for HTTPS"
+  type        = string
 }
 
 variable "route53_zone_id" {

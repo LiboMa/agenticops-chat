@@ -1,9 +1,10 @@
 locals {
-  enable_https = var.domain_name != ""
-  create_cert  = local.enable_https && var.acm_cert_arn == ""
-  cert_arn     = local.create_cert ? aws_acm_certificate.this[0].arn : var.acm_cert_arn
+  # Always HTTPS on 443. If no cert provided + domain set, auto-create via Route53.
+  create_cert = var.acm_cert_arn == "" && var.domain_name != "" && var.route53_zone_id != ""
+  cert_arn    = local.create_cert ? aws_acm_certificate_validation.this[0].certificate_arn : var.acm_cert_arn
 }
 
+# --- Security Group ---
 resource "aws_security_group" "alb" {
   name_prefix = "${var.project_name}-alb-"
   vpc_id      = var.vpc_id
@@ -13,16 +14,15 @@ resource "aws_security_group" "alb" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP (redirects to HTTPS)"
   }
 
-  dynamic "ingress" {
-    for_each = local.enable_https ? [1] : []
-    content {
-      from_port   = 443
-      to_port     = 443
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS"
   }
 
   egress {
@@ -36,6 +36,7 @@ resource "aws_security_group" "alb" {
   lifecycle { create_before_destroy = true }
 }
 
+# --- ALB ---
 resource "aws_lb" "this" {
   name               = "${var.project_name}-alb"
   internal           = var.internal
@@ -63,34 +64,24 @@ resource "aws_lb_target_group" "this" {
   tags = var.tags
 }
 
+# --- HTTP Listener: always redirect to 443 ---
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type = local.enable_https ? "redirect" : "forward"
-
-    dynamic "redirect" {
-      for_each = local.enable_https ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
-    }
-
-    dynamic "forward" {
-      for_each = local.enable_https ? [] : [1]
-      content {
-        target_group { arn = aws_lb_target_group.this.arn }
-      }
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
   }
 }
 
+# --- HTTPS Listener: always on 443 ---
 resource "aws_lb_listener" "https" {
-  count             = local.enable_https ? 1 : 0
   load_balancer_arn = aws_lb.this.arn
   port              = 443
   protocol          = "HTTPS"
@@ -103,6 +94,7 @@ resource "aws_lb_listener" "https" {
   }
 }
 
+# --- ACM Certificate (auto-create when domain + zone provided, no cert ARN) ---
 resource "aws_acm_certificate" "this" {
   count             = local.create_cert ? 1 : 0
   domain_name       = var.domain_name

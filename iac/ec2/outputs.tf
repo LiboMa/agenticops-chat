@@ -7,7 +7,7 @@ output "public_ip" {
 }
 
 output "app_url" {
-  value = var.domain_name != "" ? "https://${var.domain_name}" : "http://${module.alb.alb_dns}"
+  value = var.domain_name != "" ? "https://${var.domain_name}" : "https://${module.alb.alb_dns}"
 }
 
 output "ssh_command" {
@@ -15,5 +15,9 @@ output "ssh_command" {
 }
 
 output "health_check" {
-  value = var.domain_name != "" ? "curl https://${var.domain_name}/api/health" : "curl http://${module.alb.alb_dns}/api/health"
+  value = var.domain_name != "" ? "curl -k https://${var.domain_name}/api/health" : "curl -k https://${module.alb.alb_dns}/api/health"
+}
+
+output "alb_internal" {
+  value = var.alb_internal ? "internal (VPC only)" : "internet-facing (public)"
 }

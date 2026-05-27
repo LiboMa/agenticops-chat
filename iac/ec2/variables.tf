@@ -85,20 +85,22 @@ variable "db_backend" {
   default     = "sqlite"
 }
 
-# --- DNS/SSL ---
+# --- DNS/SSL (HTTPS always on 443) ---
 variable "domain_name" {
-  type    = string
-  default = ""
+  description = "Custom domain. Set with route53_zone_id for auto-cert."
+  type        = string
+  default     = ""
 }
 
 variable "acm_cert_arn" {
-  type    = string
-  default = ""
+  description = "ACM certificate ARN for HTTPS. Required unless domain+zone provided for auto-cert."
+  type        = string
 }
 
 variable "route53_zone_id" {
-  type    = string
-  default = ""
+  description = "Route53 zone ID for DNS record + auto-cert validation"
+  type        = string
+  default     = ""
 }
 
 variable "alb_internal" {

@@ -11,15 +11,14 @@ variable "subnet_ids" {
 }
 
 variable "domain_name" {
-  description = "Domain name. Empty = HTTP only."
+  description = "Custom domain name (used for auto-cert creation with Route53)"
   type        = string
   default     = ""
 }
 
 variable "acm_cert_arn" {
-  description = "ACM certificate ARN. Empty + domain set = auto-create."
+  description = "ACM certificate ARN for HTTPS. If empty + domain + zone set, auto-creates cert."
   type        = string
-  default     = ""
 }
 
 variable "route53_zone_id" {
