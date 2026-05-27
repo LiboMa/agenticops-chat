@@ -35,9 +35,10 @@ iac/
 .terraform
 *.tfstate*
 
-# Docs (not needed in container)
+# Docs (not needed in container, but README.md required by pyproject.toml)
 docs/
 RAW-*.md
+!README.md
 
 # Claude
 .claude/

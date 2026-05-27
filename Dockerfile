@@ -27,7 +27,7 @@ RUN useradd -r -m -s /bin/bash agenticops
 WORKDIR /app
 
 # Install Python dependencies (cached layer)
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 RUN uv pip install --system ".[im,files,reports]"
 
 # Copy application code
