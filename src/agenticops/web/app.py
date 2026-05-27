@@ -1466,10 +1466,18 @@ async def api_delete_mcp_server(name: str):
 
 @app.post("/api/settings/mcp-servers/reload")
 async def api_reload_mcp_servers():
-    """Reload MCP clients from config (stop + start)."""
+    """Hot-reload MCP clients: validate → stop → rebuild (lazy-start on next chat)."""
     from agenticops.mcp_manager import reload_mcp_clients
-    clients = reload_mcp_clients()
-    return {"reloaded": len(clients)}
+    validation = reload_mcp_clients()
+    ok_count = sum(1 for r in validation if r["status"] == "ok")
+    return {"reloaded": ok_count, "validation": validation}
+
+
+@app.post("/api/settings/mcp-servers/validate")
+async def api_validate_mcp_servers():
+    """Validate MCP server configs without reloading."""
+    from agenticops.mcp_manager import validate_mcp_config
+    return {"validation": validate_mcp_config()}
 
 
 @app.get("/api/settings/issue-exclude-patterns")

@@ -210,19 +210,36 @@ def get_mcp_clients() -> List[MCPClient]:
     return _mcp_clients
 
 
-def start_mcp_clients() -> List[MCPClient]:
-    """Start all configured MCP clients. Call before creating agents."""
-    clients = get_mcp_clients()
-    started = 0
-    for client in clients:
-        try:
-            client.start()
-            started += 1
-        except Exception as e:
-            logger.error("Failed to start MCP client: %s", e)
-    if started:
-        logger.info("Started %d/%d MCP clients", started, len(clients))
-    return clients
+def validate_mcp_config() -> List[dict]:
+    """Validate MCP server configs without starting them.
+
+    Returns list of {name, status, error} for each server.
+    """
+    import shutil
+
+    results = []
+    servers = list_mcp_servers()
+    for name, cfg in servers.items():
+        if not isinstance(cfg, dict):
+            results.append({"name": name, "status": "invalid", "error": "Not a dict"})
+            continue
+        if cfg.get("disabled", False):
+            results.append({"name": name, "status": "disabled", "error": None})
+            continue
+
+        # Check command exists
+        if "url" not in cfg:
+            cmd = cfg.get("command", "")
+            if not cmd:
+                results.append({"name": name, "status": "error", "error": "No command or url"})
+                continue
+            if not shutil.which(cmd):
+                results.append({"name": name, "status": "error", "error": f"Command '{cmd}' not found in PATH"})
+                continue
+
+        results.append({"name": name, "status": "ok", "error": None})
+
+    return results
 
 
 def stop_mcp_clients():
@@ -235,7 +252,24 @@ def stop_mcp_clients():
     _mcp_clients.clear()
 
 
-def reload_mcp_clients() -> List[MCPClient]:
-    """Stop existing clients, rebuild from config, and start."""
+def reload_mcp_clients() -> List[dict]:
+    """Hot-reload: validate config, stop old clients, rebuild (lazy-start).
+
+    Returns validation results. New clients will be started by Strands Agent
+    on next chat session (lazy-start pattern).
+    """
+    # 1. Validate before tearing down
+    validation = validate_mcp_config()
+    errors = [r for r in validation if r["status"] == "error"]
+    if errors:
+        logger.warning("MCP reload: %d server(s) have config errors", len(errors))
+        # Still proceed — skip broken ones
+
+    # 2. Stop existing clients
     stop_mcp_clients()
-    return start_mcp_clients()
+
+    # 3. Rebuild from config (lazy — no start())
+    _mcp_clients.extend(_build_clients())
+    logger.info("MCP reload: %d client(s) rebuilt (lazy-start on next use)", len(_mcp_clients))
+
+    return validation
