@@ -1,5 +1,5 @@
 locals {
-  password = var.password != "" ? var.password : random_password.this[0].result
+  password = var.enabled ? (var.password != "" ? var.password : random_password.this[0].result) : ""
 }
 
 resource "random_password" "this" {

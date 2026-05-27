@@ -42,8 +42,9 @@ variable "ssh_public_key_path" {
 }
 
 variable "ssh_enabled" {
-  type    = bool
-  default = true
+  description = "Enable SSH access (requires ssh_public_key_path to exist)"
+  type        = bool
+  default     = false
 }
 
 variable "ssh_allowed_cidrs" {
