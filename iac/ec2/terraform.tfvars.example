@@ -1,0 +1,23 @@
+# === Required ===
+region         = "ap-southeast-1"
+admin_password = "CHANGE_ME"
+
+# === Optional (uncomment to customize) ===
+# project_name       = "agenticops"
+# image_tag          = "latest"
+# instance_type      = "c5.xlarge"
+# bedrock_region     = "us-east-1"
+# bedrock_model      = "global.anthropic.claude-sonnet-4-6"
+
+# === Bring Your Own (uncomment if using existing infra) ===
+# vpc_id             = "vpc-0abc123def456"
+# public_subnet_ids  = ["subnet-aaa", "subnet-bbb"]
+# private_subnet_ids = ["subnet-ccc", "subnet-ddd"]
+
+# === Domain + SSL (uncomment for HTTPS) ===
+# domain_name     = "ops.example.com"
+# acm_cert_arn    = "arn:aws:acm:ap-southeast-1:123456789:certificate/xxx"
+# route53_zone_id = "Z1234567890ABC"
+
+# === Database (default: sqlite) ===
+# db_backend = "rds"

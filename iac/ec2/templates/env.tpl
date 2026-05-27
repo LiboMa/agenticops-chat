@@ -1,0 +1,11 @@
+AIOPS_DEPLOYMENT_PROFILE=cloud
+AIOPS_BEDROCK_REGION=${bedrock_region}
+AIOPS_BEDROCK_MODEL_ID=${bedrock_model}
+AIOPS_BEDROCK_MODEL_ID_STRONG=${bedrock_model_strong}
+AIOPS_BEDROCK_MODEL_ID_CHEAP=${bedrock_model_cheap}
+AIOPS_DATABASE_URL=${database_url}
+AIOPS_API_AUTH_ENABLED=true
+AIOPS_ADMIN_PASSWORD=${admin_password}
+AIOPS_REPORT_STORAGE=s3
+AIOPS_REPORT_S3_BUCKET=${project_name}-reports-${account_id}
+AIOPS_S3_REGION=${region}

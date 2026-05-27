@@ -10,7 +10,7 @@ __pycache__
 venv
 .env
 
-# Node
+# Node (frontend node_modules rebuilt in container)
 node_modules
 src/agenticops/web/frontend/node_modules
 
@@ -31,7 +31,9 @@ htmlcov
 
 # Infra
 infra/
+iac/
 .terraform
+*.tfstate*
 
 # Docs (not needed in container)
 docs/
@@ -39,3 +41,8 @@ RAW-*.md
 
 # Claude
 .claude/
+.playwright-mcp/
+
+# Misc
+*.png
+*.pptx

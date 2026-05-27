@@ -1,0 +1,16 @@
+# === Required ===
+region         = "ap-southeast-1"
+admin_password = "CHANGE_ME"
+
+# === EKS (use existing cluster — recommended) ===
+eks_cluster_name = "my-existing-cluster"
+namespace        = "agenticops"
+# replicas       = 1
+
+# === Or create new cluster (leave eks_cluster_name empty) ===
+# vpc_id             = "vpc-xxx"
+# private_subnet_ids = ["subnet-aaa", "subnet-bbb"]
+
+# === Domain + SSL (for LoadBalancer service) ===
+# domain_name  = "ops.example.com"
+# acm_cert_arn = "arn:aws:acm:..."

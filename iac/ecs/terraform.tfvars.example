@@ -1,0 +1,18 @@
+# === Required ===
+region         = "ap-southeast-1"
+admin_password = "CHANGE_ME"
+
+# === Optional ===
+# cpu           = 2048    # 2 vCPU
+# memory        = 4096    # 4 GB
+# desired_count = 1
+
+# === Bring Your Own ===
+# vpc_id             = "vpc-xxx"
+# public_subnet_ids  = ["subnet-aaa", "subnet-bbb"]
+# private_subnet_ids = ["subnet-ccc", "subnet-ddd"]
+
+# === Domain + SSL ===
+# domain_name     = "ops.example.com"
+# acm_cert_arn    = "arn:aws:acm:..."
+# route53_zone_id = "Z1234567890ABC"

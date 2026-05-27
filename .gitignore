@@ -66,3 +66,4 @@ RAW-Idea-latest-v3.md
 strategies/*
 .worktrees/
 .hypothesis/
+**/.terraform/
