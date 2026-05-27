@@ -49,7 +49,7 @@ def get_engine():
 @contextmanager
 def get_db_session() -> Generator[Session, None, None]:
     """Context manager for database sessions with automatic commit/rollback."""
-    SessionLocal = sessionmaker(bind=get_engine())
+    SessionLocal = sessionmaker(bind=get_engine(), expire_on_commit=False)
     session = SessionLocal()
     try:
         yield session

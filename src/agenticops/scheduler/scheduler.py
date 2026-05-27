@@ -87,7 +87,9 @@ class CronParser:
         self.hour = self._parse_field(parts[1], 0, 23)
         self.day = self._parse_field(parts[2], 1, 31)
         self.month = self._parse_field(parts[3], 1, 12)
-        self.weekday = self._parse_field(parts[4], 0, 6)
+        # Cron weekday: 0=Sunday..6=Saturday → Python weekday: 0=Monday..6=Sunday
+        cron_weekdays = self._parse_field(parts[4], 0, 6)
+        self.weekday = {(d - 1) % 7 for d in cron_weekdays}
 
     def _parse_field(self, field: str, min_val: int, max_val: int) -> set:
         """Parse a single cron field."""

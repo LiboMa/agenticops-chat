@@ -153,7 +153,7 @@ class ReportGenerator:
 
                 # Add RCA if available
                 rca = next(
-                    (r for r in rca_results if r.anomaly_id == anomaly.id), None
+                    (r for r in rca_results if r.health_issue_id == anomaly.id), None
                 )
                 if rca:
                     lines.extend(
@@ -267,7 +267,7 @@ class ReportGenerator:
                     "",
                     "## Root Cause Analysis",
                     "",
-                    f"**Confidence**: {rca.confidence_score * 100:.0f}%",
+                    f"**Confidence**: {rca.confidence * 100:.0f}%",
                     "",
                     "### Root Cause",
                     "",
@@ -290,15 +290,15 @@ class ReportGenerator:
             for i, rec in enumerate(rca.recommendations, 1):
                 lines.append(f"{i}. {rec}")
 
-            if rca.related_resources:
+            if rca.contributing_factors:
                 lines.extend(
                     [
                         "",
-                        "### Related Resources",
+                        "### Contributing Factors",
                         "",
                     ]
                 )
-                for res in rca.related_resources:
+                for res in rca.contributing_factors:
                     lines.append(f"- {res}")
 
         lines.extend(
