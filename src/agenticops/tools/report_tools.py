@@ -47,20 +47,40 @@ def save_report(
     except json.JSONDecodeError:
         metadata_parsed = {}
 
-    # Write via storage backend (local or S3)
+    # Write via storage backend (local + S3 for presigned URL)
     from agenticops.config import settings
-    from agenticops.storage import get_storage_backend
+    from agenticops.storage.backend import get_storage_backend, S3Backend, LocalBackend
 
     backend = get_storage_backend()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     key = f"{report_type.lower()}/{report_type.lower()}-{timestamp}.md"
+    filename = key.split("/")[-1]
 
     try:
         uri = backend.write(key, content_markdown.encode("utf-8"), "text/markdown")
     except Exception as e:
         return f"Error writing report file: {e}"
 
-    # Save to database
+    # If primary is local, also upload to S3 for presigned URL
+    presigned_url = None
+    s3_uri = None
+    if isinstance(backend, LocalBackend) and settings.report_s3_bucket:
+        try:
+            s3 = S3Backend(
+                bucket=settings.report_s3_bucket,
+                prefix=settings.report_s3_prefix,
+                region=settings.report_s3_region,
+            )
+            s3_uri = s3.write(key, content_markdown.encode("utf-8"), "text/markdown")
+            presigned_url = s3.presigned_url(s3_uri, expiry=settings.report_presigned_url_expiry)
+        except Exception:
+            logger.debug("S3 mirror upload failed", exc_info=True)
+    else:
+        presigned_url = backend.presigned_url(uri, expiry=settings.report_presigned_url_expiry)
+
+    # Save to database (store S3 URI if available, else local)
+    db_file_path = s3_uri if s3_uri and presigned_url else uri
+
     session = get_session()
     try:
         report = Report(
@@ -68,7 +88,7 @@ def save_report(
             title=title[:200],
             summary=summary,
             content_markdown=content_markdown,
-            file_path=uri,
+            file_path=db_file_path,
             report_metadata=metadata_parsed,
         )
         session.add(report)
@@ -81,14 +101,18 @@ def save_report(
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
-        # Generate presigned URL for S3-stored reports
-        download_url = backend.presigned_url(uri, expiry=settings.report_presigned_url_expiry)
-        display_path = download_url or uri
-
-        return (
-            f"Report #{report.id} saved: [{report_type.upper()}] {title}. "
-            f"File: {display_path}"
-        )
+        # Return filename + presigned URL (never local path)
+        if presigned_url:
+            return (
+                f"Report #{report.id} saved: [{report_type.upper()}] {title}\n"
+                f"File: {filename}\n"
+                f"Download: {presigned_url}"
+            )
+        else:
+            return (
+                f"Report #{report.id} saved: [{report_type.upper()}] {title}\n"
+                f"File: {filename}"
+            )
     except Exception as e:
         session.rollback()
         # Clean up file if DB write failed

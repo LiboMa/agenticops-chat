@@ -315,27 +315,42 @@ def share_content(
     presigned_url = None
     notification_body = body
 
-    # Upload to S3 for long content or when forced
+    # Upload to S3 (always attempt for shareable presigned URL)
     if len(body) > 4000 or upload_to_s3:
         try:
-            from agenticops.storage.backend import get_storage_backend
+            from agenticops.storage.backend import get_storage_backend, S3Backend, LocalBackend
+            from agenticops.config import settings
 
             backend = get_storage_backend()
             ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in subject[:50])
             key = f"shared/{ts}_{safe_name}.md"
-            uri = backend.write(key, body.encode("utf-8"), content_type="text/markdown")
-            presigned_url = backend.presigned_url(uri, expiry=expiry_hours * 3600)
 
-            # Build notification body: summary + link
+            # Always write to primary backend (local or S3)
+            uri = backend.write(key, body.encode("utf-8"), content_type="text/markdown")
+
+            # If primary is local, also upload to S3 for presigned URL
+            if isinstance(backend, LocalBackend) and settings.report_s3_bucket:
+                s3 = S3Backend(
+                    bucket=settings.report_s3_bucket,
+                    prefix=settings.report_s3_prefix,
+                    region=settings.report_s3_region,
+                )
+                s3_uri = s3.write(key, body.encode("utf-8"), content_type="text/markdown")
+                presigned_url = s3.presigned_url(s3_uri, expiry=expiry_hours * 3600)
+            else:
+                presigned_url = backend.presigned_url(uri, expiry=expiry_hours * 3600)
+
+            # Build notification body: summary + download link (never local path)
             summary = body[:500].rstrip()
             if len(body) > 500:
                 summary += "..."
             notification_body = summary
+            filename = key.split("/")[-1]
             if presigned_url:
-                notification_body += f"\n\nFull content: {presigned_url}"
+                notification_body += f"\n\nReport: {filename}\nDownload: {presigned_url}"
             else:
-                notification_body += f"\n\n(Content saved to storage: {uri})"
+                notification_body += f"\n\nReport: {filename}"
         except Exception as e:
             logger.warning("S3 upload failed for share_content, sending directly: %s", e)
             notification_body = body[:4000]
