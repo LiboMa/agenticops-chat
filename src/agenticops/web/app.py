@@ -1519,11 +1519,33 @@ async def api_toggle_channel(name: str, body: dict = Body(...)):
 
 @app.post("/api/settings/im/import")
 async def api_import_im_config(body: dict = Body(...)):
-    """Bulk import IM apps and/or channels from pasted JSON.
+    """Bulk import IM apps and/or channels from JSON or YAML string.
 
-    Accepts: {"apps": {"feishu": {"default": {...}}}, "channels": {"name": {"type": "...", ...}}}
+    Accepts either:
+      - Parsed JSON object: {"apps": {...}, "channels": {...}}
+      - Raw string (JSON or YAML): {"raw": "yaml or json text here"}
     """
+    import yaml as _yaml
     from agenticops.notify.im_config import save_app, save_channel
+
+    # If "raw" field present, parse as JSON or YAML text
+    if "raw" in body:
+        raw_text = body["raw"].strip()
+        parsed = None
+        # Try JSON first
+        try:
+            parsed = json.loads(raw_text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Try YAML
+        if parsed is None:
+            try:
+                parsed = _yaml.safe_load(raw_text)
+            except Exception:
+                pass
+        if not isinstance(parsed, dict):
+            raise HTTPException(400, "Could not parse input as JSON or YAML")
+        body = parsed
 
     imported_apps = 0
     imported_channels = 0

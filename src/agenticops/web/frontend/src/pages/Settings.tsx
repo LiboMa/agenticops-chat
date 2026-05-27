@@ -1183,18 +1183,26 @@ function ImBotsTab() {
           <div className="bg-background rounded-xl shadow-lg w-full max-w-lg p-5 border border-border/50">
             <h3 className="text-base font-semibold mb-2">Import IM Configuration</h3>
             <p className="text-xs text-muted-foreground mb-3">
-              Paste JSON to bulk-import apps and channels. Format:
+              Paste <strong>JSON</strong> or <strong>YAML</strong> to bulk-import apps and channels:
             </p>
-            <pre className="text-[10px] text-muted-foreground bg-secondary rounded p-2 mb-3 overflow-x-auto">{`{
-  "apps": {
-    "feishu": { "default": { "app_id": "...", "app_secret": "..." } },
-    "slack": { "default": { "bot_token": "xoxb-...", "app_token": "xapp-..." } }
-  },
-  "channels": {
-    "feishu-ops": { "type": "feishu", "chat_id": "oc_xxx", "enabled": true },
-    "slack-alerts": { "type": "slack", "chat_id": "C0XXX", "enabled": true }
-  }
-}`}</pre>
+            <pre className="text-[10px] text-muted-foreground bg-secondary rounded p-2 mb-3 overflow-x-auto whitespace-pre-wrap">{`# YAML format:
+apps:
+  feishu:
+    default:
+      app_id: cli_xxx
+      app_secret: your_secret
+  slack:
+    default:
+      bot_token: xoxb-...
+      app_token: xapp-...
+channels:
+  feishu-ops:
+    type: feishu
+    chat_id: oc_xxx
+    enabled: true
+  slack-alerts:
+    type: slack
+    chat_id: C0XXX`}</pre>
             <textarea
               rows={8}
               value={importJson}
@@ -1212,11 +1220,10 @@ function ImBotsTab() {
                 disabled={!importJson.trim()}
                 onClick={async () => {
                   try {
-                    const parsed = JSON.parse(importJson);
                     const res = await fetch("/api/settings/im/import", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(parsed),
+                      body: JSON.stringify({ raw: importJson }),
                     });
                     if (!res.ok) throw new Error(await res.text());
                     const data = await res.json();
@@ -1225,7 +1232,7 @@ function ImBotsTab() {
                     appsQ.refetch();
                     channelsQ.refetch();
                   } catch (e: unknown) {
-                    setImportError(e instanceof SyntaxError ? "Invalid JSON format" : String(e));
+                    setImportError(String(e instanceof Error ? e.message : e));
                   }
                 }}
                 className="px-4 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
