@@ -998,6 +998,11 @@ function ImBotsTab() {
   const [chChatId, setChChatId] = useState("");
   const [chEnabled, setChEnabled] = useState(true);
 
+  const [showImport, setShowImport] = useState(false);
+  const [importJson, setImportJson] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importSuccess, setImportSuccess] = useState("");
+
   const handleSaveApp = () => {
     upsertApp.mutate({ platform: appPlatform, name: appName, config: appFields }, {
       onSuccess: () => { setShowAppForm(false); setAppFields({}); },
@@ -1020,9 +1025,14 @@ function ImBotsTab() {
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">IM Bot Apps</h2>
-          <button onClick={() => setShowAppForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
-            Add App
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowImport(true)} className="px-3 py-1.5 text-sm border border-border text-foreground rounded-lg hover:bg-secondary">
+              Import JSON
+            </button>
+            <button onClick={() => setShowAppForm(true)} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500">
+              Add App
+            </button>
+          </div>
         </CardHeader>
         <CardBody>
           {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load" /> : (
@@ -1162,6 +1172,66 @@ function ImBotsTab() {
                   {upsertChannel.isPending ? "Saving..." : "Save"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import JSON Modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-background rounded-xl shadow-lg w-full max-w-lg p-5 border border-border/50">
+            <h3 className="text-base font-semibold mb-2">Import IM Configuration</h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              Paste JSON to bulk-import apps and channels. Format:
+            </p>
+            <pre className="text-[10px] text-muted-foreground bg-secondary rounded p-2 mb-3 overflow-x-auto">{`{
+  "apps": {
+    "feishu": { "default": { "app_id": "...", "app_secret": "..." } },
+    "slack": { "default": { "bot_token": "xoxb-...", "app_token": "xapp-..." } }
+  },
+  "channels": {
+    "feishu-ops": { "type": "feishu", "chat_id": "oc_xxx", "enabled": true },
+    "slack-alerts": { "type": "slack", "chat_id": "C0XXX", "enabled": true }
+  }
+}`}</pre>
+            <textarea
+              rows={8}
+              value={importJson}
+              onChange={(e) => { setImportJson(e.target.value); setImportError(""); setImportSuccess(""); }}
+              placeholder="Paste JSON here..."
+              className={`${inputCls} font-mono text-xs resize-none`}
+            />
+            {importError && <p className="text-xs text-red-600 mt-1">{importError}</p>}
+            {importSuccess && <p className="text-xs text-green-600 mt-1">{importSuccess}</p>}
+            <div className="flex justify-end gap-2 pt-3">
+              <button onClick={() => { setShowImport(false); setImportJson(""); setImportError(""); setImportSuccess(""); }} className="px-3 py-1.5 text-sm text-muted-foreground">
+                Close
+              </button>
+              <button
+                disabled={!importJson.trim()}
+                onClick={async () => {
+                  try {
+                    const parsed = JSON.parse(importJson);
+                    const res = await fetch("/api/settings/im/import", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(parsed),
+                    });
+                    if (!res.ok) throw new Error(await res.text());
+                    const data = await res.json();
+                    setImportSuccess(`Imported ${data.imported_apps} apps, ${data.imported_channels} channels.`);
+                    setImportJson("");
+                    appsQ.refetch();
+                    channelsQ.refetch();
+                  } catch (e: unknown) {
+                    setImportError(e instanceof SyntaxError ? "Invalid JSON format" : String(e));
+                  }
+                }}
+                className="px-4 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500 disabled:opacity-50"
+              >
+                Import
+              </button>
             </div>
           </div>
         </div>

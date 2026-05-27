@@ -1517,6 +1517,39 @@ async def api_toggle_channel(name: str, body: dict = Body(...)):
     return {"name": name, "enabled": enabled}
 
 
+@app.post("/api/settings/im/import")
+async def api_import_im_config(body: dict = Body(...)):
+    """Bulk import IM apps and/or channels from pasted JSON.
+
+    Accepts: {"apps": {"feishu": {"default": {...}}}, "channels": {"name": {"type": "...", ...}}}
+    """
+    from agenticops.notify.im_config import save_app, save_channel
+
+    imported_apps = 0
+    imported_channels = 0
+
+    if "apps" in body:
+        for platform, apps in body["apps"].items():
+            if not isinstance(apps, dict):
+                continue
+            for app_name, cfg in apps.items():
+                if isinstance(cfg, dict):
+                    save_app(platform, app_name, cfg)
+                    imported_apps += 1
+
+    if "channels" in body:
+        for name, cfg in body["channels"].items():
+            if not isinstance(cfg, dict):
+                continue
+            ch_type = cfg.pop("type", "")
+            enabled = cfg.pop("enabled", True)
+            if ch_type:
+                save_channel(name, ch_type, cfg, is_enabled=enabled)
+                imported_channels += 1
+
+    return {"imported_apps": imported_apps, "imported_channels": imported_channels}
+
+
 # ============================================================================
 # MCP Servers
 # ============================================================================
