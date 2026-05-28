@@ -10,10 +10,15 @@ from agenticops.models import Base
 
 @pytest.fixture
 def db_session(tmp_path):
-    """Create a temporary database for testing."""
+    """Create a temporary database for testing with full isolation."""
     import agenticops.models as models_mod
     from agenticops.config import settings
 
+    # Save original state
+    orig_db_url = settings.database_url
+    orig_engine = models_mod._engine
+
+    # Reset singleton engine
     models_mod._engine = None
     db_url = f"sqlite:///{tmp_path}/test.db"
     settings.database_url = db_url
@@ -25,7 +30,10 @@ def db_session(tmp_path):
     session = get_session()
     yield session
     session.close()
+
+    # Restore original state — prevents leak to subsequent tests
     models_mod._engine = None
+    settings.database_url = orig_db_url
 
 
 # ============================================================================
