@@ -22,9 +22,9 @@ terraform apply -target=module.ecr -auto-approve
 
 # 3. Build and push Docker image
 ECR_REPO=$(terraform output -raw ecr_repository_url)
-aws ecr get-login-password --region $(terraform output -raw region 2>/dev/null || echo ap-southeast-1) | \
-  docker login --username AWS --password-stdin $ECR_REPO
-docker build -t agenticops ../../
+REGISTRY=$(echo $ECR_REPO | cut -d'/' -f1)
+aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin $REGISTRY
+docker build -f ../../docker/Dockerfile -t agenticops:latest ../../
 docker tag agenticops:latest $ECR_REPO:latest
 docker push $ECR_REPO:latest
 
@@ -39,12 +39,15 @@ terraform output
 
 ```bash
 ECR_REPO=$(terraform output -raw ecr_repository_url)
-docker build -t agenticops ../../
+REGISTRY=$(echo $ECR_REPO | cut -d'/' -f1)
+aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin $REGISTRY
+docker build -f ../../docker/Dockerfile -t agenticops:latest ../../
 docker tag agenticops:latest $ECR_REPO:latest
 docker push $ECR_REPO:latest
 
 # SSH into EC2 and restart container:
-ssh ubuntu@$(terraform output -raw public_ip) "docker pull $ECR_REPO:latest && docker restart agenticops"
+ssh ubuntu@$(terraform output -raw public_ip) \
+  "docker pull $ECR_REPO:latest && docker restart agenticops"
 ```
 
 ## Destroy
