@@ -815,11 +815,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("MCP config load failed: %s", e)
 
-    # Start background cron scheduler
-    from agenticops.scheduler.scheduler import Scheduler
-    scheduler_instance = Scheduler()
-    scheduler_instance.start()
-    logger.info("Cron scheduler started")
+    # Start background cron scheduler — only in ONE worker to avoid duplicate runs.
+    # uvicorn multiprocessing: first spawned worker gets the lowest PID after master.
+    import os
+    _is_scheduler_worker = os.environ.get("AIOPS_SCHEDULER_WORKER") == "1"
+    if not _is_scheduler_worker:
+        # Auto-elect: only first worker to acquire the file lock runs scheduler
+        import fcntl
+        _lock_path = Path(settings.data_dir) / ".scheduler.lock"
+        _lock_path.parent.mkdir(parents=True, exist_ok=True)
+        _lock_fd = open(_lock_path, "w")
+        try:
+            fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _is_scheduler_worker = True
+        except (IOError, OSError):
+            _lock_fd.close()
+            _lock_fd = None
+
+    scheduler_instance = None
+    if _is_scheduler_worker:
+        from agenticops.scheduler.scheduler import Scheduler
+        scheduler_instance = Scheduler()
+        scheduler_instance.start()
+        logger.info("Cron scheduler started (this worker elected)")
+    else:
+        logger.info("Cron scheduler skipped (another worker owns it)")
 
     # Auto-detect IM WS from channels.yaml (fallback to config override)
     _startup_log = logging.getLogger(__name__)
@@ -882,8 +902,11 @@ async def lifespan(app: FastAPI):
     _chat_sessions.stop_cleanup()
     _executor_service.stop()
 
-    scheduler_instance.stop()
-    logger.info("Cron scheduler stopped")
+    if scheduler_instance:
+        scheduler_instance.stop()
+        logger.info("Cron scheduler stopped")
+    if _lock_fd:
+        _lock_fd.close()
 
     # Stop MCP clients
     try:
