@@ -61,14 +61,11 @@ RUN useradd -r -m -s /bin/bash agenticops
 WORKDIR /app
 
 # --- Install Python dependencies (locked versions from uv export) ---
-COPY requirements.txt ./
-RUN uv pip install --system -r requirements.txt
-
-# --- Install project itself ---
-COPY pyproject.toml README.md ./
+COPY requirements.txt pyproject.toml README.md ./
 COPY src/ ./src/
 COPY --from=frontend /build/dist ./src/agenticops/web/frontend/dist
-RUN uv pip install --system --no-deps ".[im,files,reports,cloud]"
+RUN uv pip install --system -r requirements.txt && \
+    uv pip install --system --no-deps -e ".[im,files,reports,cloud]"
 
 # --- Copy config + skills ---
 COPY config/settings.yaml ./config/settings.yaml
