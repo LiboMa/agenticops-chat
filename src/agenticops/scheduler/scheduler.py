@@ -210,74 +210,81 @@ class Scheduler:
             self._stop_event.wait(60)
 
     def _check_schedules(self):
-        """Check and execute due schedules."""
-        # Use naive UTC — SQLite returns naive datetimes, so comparison
-        # must be naive-to-naive to avoid TypeError.
+        """Check and execute due schedules.
+
+        Uses atomic DB UPDATE as a distributed lock:
+        Only the process that successfully claims a schedule (updates next_run_at)
+        gets to execute it. This prevents duplicate execution in multi-worker or
+        multi-instance deployments.
+        """
+        from sqlalchemy import update
+
+        # Use naive UTC — SQLite returns naive datetimes
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # Phase 1: read all enabled schedules and close the session
-        due: list[dict] = []
-        init_only: list[tuple[int, datetime]] = []
-
+        # Phase 1: Initialize next_run_at for newly created schedules
         with get_db_session() as session:
             schedules = session.query(Schedule).filter_by(is_enabled=True).all()
             for s in schedules:
                 try:
-                    # One-shot tasks: execute immediately if enabled
                     if s.cron_expression == "@once":
-                        if s.next_run_at is None:
-                            due.append({
-                                "id": s.id,
-                                "name": s.name,
-                                "pipeline_name": s.pipeline_name,
-                                "account_name": s.account_name,
-                                "config": dict(s.config) if s.config else {},
-                                "next_run": None,
-                            })
                         continue
+                    if s.next_run_at is None:
+                        cron = CronParser(s.cron_expression)
+                        s.next_run_at = cron.next_run(now)
+                except Exception as e:
+                    logger.error(f"Error parsing schedule '{s.name}': {e}")
 
-                    cron = CronParser(s.cron_expression)
-                    if s.next_run_at and s.next_run_at <= now:
-                        # Snapshot the fields we need — no lazy access later
-                        due.append({
+        # Phase 2: Atomic claim — UPDATE WHERE next_run_at <= now
+        # Only rows that match get claimed; concurrent workers see 0 rows affected.
+        claimed: list[dict] = []
+
+        with get_db_session() as session:
+            candidates = (
+                session.query(Schedule)
+                .filter(Schedule.is_enabled == True, Schedule.next_run_at <= now)  # noqa: E712
+                .all()
+            )
+
+            for s in candidates:
+                try:
+                    if s.cron_expression == "@once":
+                        next_run = None
+                    else:
+                        cron = CronParser(s.cron_expression)
+                        next_run = cron.next_run(now)
+
+                    # Atomic claim: UPDATE only if next_run_at still matches (CAS)
+                    result = session.execute(
+                        update(Schedule)
+                        .where(Schedule.id == s.id)
+                        .where(Schedule.next_run_at == s.next_run_at)  # CAS condition
+                        .values(
+                            last_run_at=now,
+                            next_run_at=next_run,
+                            is_enabled=False if next_run is None else True,
+                        )
+                    )
+
+                    if result.rowcount == 1:
+                        # Successfully claimed — we own this execution
+                        claimed.append({
                             "id": s.id,
                             "name": s.name,
                             "pipeline_name": s.pipeline_name,
                             "account_name": s.account_name,
                             "config": dict(s.config) if s.config else {},
-                            "next_run": cron.next_run(now),
                         })
-                    elif s.next_run_at is None:
-                        init_only.append((s.id, cron.next_run(now)))
+                    # rowcount == 0 means another worker claimed it first
                 except Exception as e:
-                    logger.error(f"Error parsing schedule '{s.name}': {e}")
+                    logger.error(f"Error claiming schedule '{s.name}': {e}")
 
-            # Initialize next_run_at for newly created schedules
-            for sid, next_run in init_only:
-                obj = session.query(Schedule).filter_by(id=sid).first()
-                if obj:
-                    obj.next_run_at = next_run
-
-        # Phase 2: execute due schedules outside any session
-        for info in due:
+        # Phase 3: Execute claimed schedules (outside any DB session)
+        for info in claimed:
             try:
                 self._execute_schedule_by_info(info)
             except Exception as e:
                 logger.error(f"Error executing schedule '{info['name']}': {e}")
-
-            # Phase 3: update last_run_at / next_run_at in a fresh session
-            try:
-                with get_db_session() as session:
-                    obj = session.query(Schedule).filter_by(id=info["id"]).first()
-                    if obj:
-                        obj.last_run_at = now
-                        if info.get("next_run") is None:
-                            # @once task: disable after execution
-                            obj.is_enabled = False
-                        else:
-                            obj.next_run_at = info["next_run"]
-            except Exception as e:
-                logger.error(f"Error updating schedule '{info['name']}': {e}")
 
     def _execute_schedule(self, schedule: Schedule):
         """Execute a scheduled pipeline from an ORM object.
