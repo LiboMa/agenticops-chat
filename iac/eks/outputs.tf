@@ -3,7 +3,7 @@ output "ecr_repository_url" {
 }
 
 output "cluster_name" {
-  value = local.cluster_name
+  value = var.eks_cluster_name
 }
 
 output "namespace" {

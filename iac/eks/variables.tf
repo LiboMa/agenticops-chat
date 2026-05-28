@@ -32,9 +32,8 @@ variable "private_subnet_ids" {
 
 # --- EKS ---
 variable "eks_cluster_name" {
-  description = "Existing EKS cluster name. Empty = create new."
+  description = "Existing EKS cluster name (required)"
   type        = string
-  default     = ""
 }
 
 variable "namespace" {
@@ -93,6 +92,7 @@ variable "domain_name" {
 variable "acm_cert_arn" {
   description = "ACM certificate ARN for HTTPS"
   type        = string
+  default     = ""
 }
 
 variable "route53_zone_id" {

@@ -19,6 +19,7 @@ variable "domain_name" {
 variable "acm_cert_arn" {
   description = "ACM certificate ARN for HTTPS. If empty + domain + zone set, auto-creates cert."
   type        = string
+  default     = ""
 }
 
 variable "route53_zone_id" {

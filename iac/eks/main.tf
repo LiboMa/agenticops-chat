@@ -1,9 +1,7 @@
 locals {
-  tags           = { Project = var.project_name, ManagedBy = "terraform" }
-  cluster_name   = var.eks_cluster_name != "" ? var.eks_cluster_name : "${var.project_name}-cluster"
-  create_cluster = var.eks_cluster_name == ""
-  database_url   = var.db_backend == "rds" ? module.rds.database_url : "sqlite:////app/data/agenticops.db"
-  image_uri      = "${module.ecr.repository_url}:${var.image_tag}"
+  tags         = { Project = var.project_name, ManagedBy = "terraform" }
+  database_url = var.db_backend == "rds" ? module.rds.database_url : "sqlite:////app/data/agenticops.db"
+  image_uri    = "${module.ecr.repository_url}:${var.image_tag}"
 }
 
 data "aws_caller_identity" "current" {}
@@ -90,6 +88,8 @@ resource "kubernetes_deployment" "app" {
       }
 
       spec {
+        node_selector = length(var.node_selector) > 0 ? var.node_selector : null
+
         container {
           name  = var.project_name
           image = local.image_uri
@@ -148,7 +148,7 @@ resource "kubernetes_service" "app" {
   metadata {
     name      = var.project_name
     namespace = kubernetes_namespace.this.metadata[0].name
-    annotations = var.domain_name != "" ? {
+    annotations = var.acm_cert_arn != "" ? {
       "service.beta.kubernetes.io/aws-load-balancer-type"            = "external"
       "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
       "service.beta.kubernetes.io/aws-load-balancer-scheme"          = var.alb_internal ? "internal" : "internet-facing"
@@ -159,10 +159,10 @@ resource "kubernetes_service" "app" {
 
   spec {
     selector = { app = var.project_name }
-    type     = var.domain_name != "" ? "LoadBalancer" : "ClusterIP"
+    type     = var.acm_cert_arn != "" ? "LoadBalancer" : "ClusterIP"
 
     port {
-      port        = var.domain_name != "" ? 443 : 8000
+      port        = var.acm_cert_arn != "" ? 443 : 8000
       target_port = 8000
       protocol    = "TCP"
     }
