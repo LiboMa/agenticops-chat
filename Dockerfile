@@ -55,8 +55,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx
 
-# --- Create non-root user ---
-RUN useradd -r -m -s /bin/bash agenticops
+# --- Create non-root user (UID 1000 to avoid collision with host cwagent=999) ---
+RUN useradd -u 1000 -m -s /bin/bash agenticops
 
 WORKDIR /app
 
