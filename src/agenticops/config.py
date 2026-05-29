@@ -108,6 +108,18 @@ class Settings(BaseSettings):
         default=16384,
         description="Max output tokens for Bedrock model responses",
     )
+    bedrock_profile: str = Field(
+        default="",
+        description="AWS profile name for Bedrock access (Layer 1). Empty = use default credential chain.",
+    )
+    bedrock_access_key_id: str = Field(
+        default="",
+        description="Explicit AWS Access Key for Bedrock (Layer 1). Takes priority over profile/default chain.",
+    )
+    bedrock_secret_access_key: str = Field(
+        default="",
+        description="Explicit AWS Secret Key for Bedrock (Layer 1).",
+    )
     bedrock_window_size: int = Field(
         default=40,
         description="Conversation manager sliding window size for agents",
@@ -671,6 +683,20 @@ def get_agent_model_config(agent_name: str) -> tuple[str, int]:
     if max_tokens <= 0:
         max_tokens = settings.bedrock_max_tokens
     return model_id, max_tokens
+
+
+def get_bedrock_boto_session():
+    """Return a boto3 Session configured for Bedrock API calls.
+
+    Uses SessionFactory which handles:
+    - AIOPS_BEDROCK_ROLE_ARN → cross-account AssumeRole
+    - Default credential chain (env vars, IRSA, Task Role, Instance Profile, local profile)
+
+    This session is ONLY for Bedrock model invocation (Layer 1).
+    Target account scanning uses separate credentials (Layer 2).
+    """
+    from agenticops.credentials.session_factory import get_session_factory
+    return get_session_factory().get_bedrock_session()
 
 
 def get_agent_window_size(agent_name: str) -> int:

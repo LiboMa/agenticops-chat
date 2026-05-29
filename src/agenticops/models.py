@@ -1,5 +1,6 @@
 """SQLAlchemy models for AgenticOps."""
 
+import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -158,6 +159,7 @@ class CloudAccount(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True)
     provider: Mapped[str] = mapped_column(String(20))  # aws | azure | gcp | alicloud
     is_enabled: Mapped[bool] = mapped_column(default=True)
+    credential_source_type: Mapped[str] = mapped_column(String(20), default="environment")  # environment | assume_role | profile | static_keys
     credentials: Mapped[dict] = mapped_column(JSON, default=dict)
     regions: Mapped[list] = mapped_column(JSON, default=list)
     labels: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -1019,6 +1021,39 @@ def init_db(engine=None):
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE schedule_executions ADD COLUMN retry_count INTEGER DEFAULT 0"))
                 conn.commit()
+
+    # Migration: add credential_source_type column to cloud_accounts if missing
+    if insp.has_table("cloud_accounts"):
+        columns = {col["name"] for col in insp.get_columns("cloud_accounts")}
+        if "credential_source_type" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cloud_accounts ADD COLUMN credential_source_type VARCHAR(20) DEFAULT 'environment'"))
+                conn.commit()
+
+    # Migration: backfill credential_source_type from existing credentials content
+    if insp.has_table("cloud_accounts"):
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT id, credentials, credential_source_type FROM cloud_accounts "
+                "WHERE credential_source_type = 'environment' OR credential_source_type IS NULL"
+            )).fetchall()
+            for row in rows:
+                creds = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
+                if not creds:
+                    continue
+                # Infer the correct source type from credential content
+                inferred = "environment"
+                if creds.get("role_arn"):
+                    inferred = "assume_role"
+                elif creds.get("profile_name"):
+                    inferred = "profile"
+                elif creds.get("access_key_id") or creds.get("secret_access_key") or creds.get("_encrypted"):
+                    inferred = "static_keys"
+                if inferred != "environment":
+                    conn.execute(text(
+                        "UPDATE cloud_accounts SET credential_source_type = :stype WHERE id = :id"
+                    ), {"stype": inferred, "id": row[0]})
+            conn.commit()
 
     # Ensure all ORM models are registered in metadata before create_all
     import agenticops.auth.models  # noqa: F401
