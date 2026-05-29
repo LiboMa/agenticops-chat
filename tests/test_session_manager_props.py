@@ -167,3 +167,29 @@ class TestTTLExpirationCleanup:
 
         assert len(mgr._agents) == 0
         assert len(mgr._last_activity) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tool Messages Reconstruction Tests
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_tool_messages_skips_bad_entries_keeps_good():
+    from agenticops.web.session_manager import _rebuild_tool_messages
+
+    tool_calls = [
+        {"name": "scan", "input": {"region": "us-east-1"}, "toolUseId": "t1"},
+        {"input": {"oops": 1}},                      # missing name -> skip
+        {"name": "detect", "input": {"deep": True}},  # valid
+    ]
+    msgs = _rebuild_tool_messages(tool_calls)
+    # 2 valid calls -> 2 toolUse + 2 toolResult = 4 messages
+    assert len(msgs) == 4
+    names = [b["toolUse"]["name"] for m in msgs if m["role"] == "assistant" for b in m["content"]]
+    assert names == ["scan", "detect"]
+
+
+def test_rebuild_tool_messages_empty_input_returns_empty():
+    from agenticops.web.session_manager import _rebuild_tool_messages
+    assert _rebuild_tool_messages([]) == []
+    assert _rebuild_tool_messages("not a list") == []

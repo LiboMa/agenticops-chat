@@ -41,17 +41,17 @@ def _rebuild_tool_messages(tool_calls: list) -> list[dict]:
     if not isinstance(tool_calls, list) or len(tool_calls) == 0:
         return []
 
-    try:
-        messages: list[dict] = []
-        for tc in tool_calls:
+    messages: list[dict] = []
+    for idx, tc in enumerate(tool_calls):
+        try:
             if not isinstance(tc, dict):
-                logger.warning("_rebuild_tool_messages: non-dict entry in tool_calls, falling back")
-                return []
+                logger.warning("_rebuild_tool_messages: skipping non-dict entry at index %d", idx)
+                continue
 
             name = tc.get("name") or tc.get("tool_name")
             if not name:
-                logger.warning("_rebuild_tool_messages: tool call missing name, falling back")
-                return []
+                logger.warning("_rebuild_tool_messages: skipping entry at index %d (missing name)", idx)
+                continue
 
             tool_input = tc.get("input", {})
             if not isinstance(tool_input, dict):
@@ -59,38 +59,25 @@ def _rebuild_tool_messages(tool_calls: list) -> list[dict]:
 
             tool_use_id = tc.get("toolUseId") or tc.get("tool_use_id") or str(uuid.uuid4())
 
-            # Assistant message with toolUse
             messages.append({
                 "role": "assistant",
-                "content": [
-                    {
-                        "toolUse": {
-                            "toolUseId": tool_use_id,
-                            "name": name,
-                            "input": tool_input,
-                        }
-                    }
-                ],
+                "content": [{"toolUse": {"toolUseId": tool_use_id, "name": name, "input": tool_input}}],
             })
-
-            # User message with toolResult
             messages.append({
                 "role": "user",
-                "content": [
-                    {
-                        "toolResult": {
-                            "toolUseId": tool_use_id,
-                            "content": [{"text": "(result from previous session)"}],
-                            "status": "success",
-                        }
+                "content": [{
+                    "toolResult": {
+                        "toolUseId": tool_use_id,
+                        "content": [{"text": "(result from previous session)"}],
+                        "status": "success",
                     }
-                ],
+                }],
             })
+        except Exception:
+            logger.warning("_rebuild_tool_messages: skipping unparseable entry at index %d", idx, exc_info=True)
+            continue
 
-        return messages
-    except Exception:
-        logger.warning("_rebuild_tool_messages: failed to parse tool_calls, falling back", exc_info=True)
-        return []
+    return messages
 
 
 def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
