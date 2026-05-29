@@ -3880,6 +3880,13 @@ def _cli_persist_message(
         )
 
 
+def _persist_slash_interaction(ctx: ChatContext, command: str, result: str) -> None:
+    """Persist a slash command and its textual result to DB (parity with agent turns)."""
+    _cli_persist_message(ctx, "user", command)
+    if result:
+        _cli_persist_message(ctx, "system", result)
+
+
 def _cli_setup_db_session(
     ctx: ChatContext,
     agent,
@@ -4183,6 +4190,7 @@ def chat(
                     user_input = result[len("__agent__:"):]
                 elif result:
                     ctx.add_to_history("system", result)
+                    _persist_slash_interaction(ctx, user_input, result)
                     print_with_truncation(console, result, ctx, header="System")
                     continue
                 else:

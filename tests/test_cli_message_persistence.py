@@ -224,3 +224,31 @@ class TestWebDashboardInterop:
             assert msgs[0].content == "CLI user msg"
             assert msgs[1].role == "assistant"
             assert msgs[1].content == "CLI assistant msg"
+
+
+# ---------------------------------------------------------------------------
+# Slash command persistence tests (F2)
+# ---------------------------------------------------------------------------
+
+class TestSlashCommandPersistence:
+    """Slash commands persist user + system messages to DB (parity with agent turns)."""
+
+    def test_slash_command_result_is_persisted(self, monkeypatch):
+        """A slash command that returns display text persists user + system messages."""
+        from agenticops.cli import main as cli_main
+
+        persisted = []
+        monkeypatch.setattr(
+            cli_main, "_cli_persist_message",
+            lambda ctx, role, content, **kw: persisted.append((role, content)),
+        )
+        # Stub the dispatcher to behave like a normal display-returning slash command
+        monkeypatch.setattr(cli_main, "handle_slash_command", lambda ctx, cmd: "STATUS OUTPUT")
+
+        from agenticops.cli.context import ChatContext
+        ctx = ChatContext()
+        # Exercise the persistence helper the loop should call for slash results:
+        cli_main._persist_slash_interaction(ctx, "/status", "STATUS OUTPUT")
+
+        assert ("user", "/status") in persisted
+        assert ("system", "STATUS OUTPUT") in persisted
