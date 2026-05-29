@@ -83,6 +83,19 @@ variable "db_backend" {
   default = "sqlite"
 }
 
+# --- Security ---
+variable "kms_key_arn" {
+  description = "KMS key ARN for credential encryption at rest. Empty = use local_key backend."
+  type        = string
+  default     = ""
+}
+
+variable "target_role_arns" {
+  description = "Explicit list of target account role ARNs. Empty = allow AgenticOps-* pattern."
+  type        = list(string)
+  default     = []
+}
+
 # --- DNS/SSL ---
 variable "domain_name" {
   type    = string

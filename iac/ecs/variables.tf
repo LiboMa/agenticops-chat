@@ -99,3 +99,16 @@ variable "alb_internal" {
   type    = bool
   default = false
 }
+
+# --- Security ---
+variable "kms_key_arn" {
+  description = "KMS key ARN for credential encryption at rest"
+  type        = string
+  default     = ""
+}
+
+variable "target_role_arns" {
+  description = "Explicit list of target account role ARNs. Empty = allow AgenticOps-* pattern."
+  type        = list(string)
+  default     = []
+}

@@ -21,10 +21,12 @@ module "vpc" {
 }
 
 module "iam" {
-  source       = "../modules/iam"
-  project_name = var.project_name
-  service      = "ec2"
-  tags         = local.tags
+  source           = "../modules/iam"
+  project_name     = var.project_name
+  service          = "ec2"
+  kms_key_arn      = var.kms_key_arn
+  target_role_arns = var.target_role_arns
+  tags             = local.tags
 }
 
 module "rds" {
