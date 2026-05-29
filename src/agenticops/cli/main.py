@@ -3815,14 +3815,11 @@ def _run_headless(query: str, account: Optional[str] = None):
             console.print(response)
 
         # Token summary
-        try:
-            invocation = result.metrics.latest_agent_invocation
-            if invocation:
-                inp = invocation.usage.get("inputTokens", 0)
-                out = invocation.usage.get("outputTokens", 0)
-                console.print(f"\n[dim]Tokens: ↑{inp} ↓{out} Σ{inp + out}[/dim]")
-        except Exception:
-            pass
+        from agenticops.agents.metrics import extract_token_usage
+        _u = extract_token_usage(result)
+        inp, out = _u["input"], _u["output"]
+        if inp or out:
+            console.print(f"\n[dim]Tokens: ↑{inp} ↓{out} Σ{inp + out}[/dim]")
     else:
         # Piped output: plain text, no Rich formatting
         for w in warnings:
@@ -4242,17 +4239,15 @@ def chat(
                 response = str(result)
 
                 # Extract token usage from Strands metrics (main + sub-agents)
-                try:
-                    accumulated = result.metrics.accumulated_usage
-                    if accumulated:
-                        ctx.add_tokens(
-                            input_tokens=accumulated.get("inputTokens", 0),
-                            output_tokens=accumulated.get("outputTokens", 0),
-                            cache_read=accumulated.get("cacheReadInputTokens", 0),
-                            cache_write=accumulated.get("cacheWriteInputTokens", 0),
-                        )
-                except Exception:
-                    pass  # Don't break chat if metrics extraction fails
+                from agenticops.agents.metrics import extract_token_usage
+                _u = extract_token_usage(result)
+                if any(_u.values()):
+                    ctx.add_tokens(
+                        input_tokens=_u["input"],
+                        output_tokens=_u["output"],
+                        cache_read=_u["cache_read"],
+                        cache_write=_u["cache_write"],
+                    )
 
             except Exception as e:
                 console.print(f"[red]Error: {str(e)}[/red]")
@@ -4262,16 +4257,8 @@ def chat(
             ctx.add_to_history("assistant", response)
 
             # Persist assistant response to DB (shared with Web Dashboard)
-            _token_usage_dict = None
-            try:
-                _acc = result.metrics.accumulated_usage
-                if _acc:
-                    _token_usage_dict = {
-                        "input": _acc.get("inputTokens", 0),
-                        "output": _acc.get("outputTokens", 0),
-                    }
-            except Exception:
-                pass
+            _u2 = extract_token_usage(result)
+            _token_usage_dict = {"input": _u2["input"], "output": _u2["output"]} if any(_u2.values()) else None
             _cli_persist_message(ctx, "assistant", response, token_usage=_token_usage_dict)
 
             # Show session token summary in status bar

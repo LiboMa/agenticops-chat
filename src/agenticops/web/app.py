@@ -5588,11 +5588,11 @@ async def api_send_chat_message(session_id: str, request: Request):
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
-                    if hasattr(res, "metrics"):
-                        inv = getattr(res.metrics, "latest_agent_invocation", None)
-                        if inv and hasattr(inv, "usage"):
-                            input_tokens = inv.usage.get("inputTokens", 0)
-                            output_tokens = inv.usage.get("outputTokens", 0)
+                    from agenticops.agents.metrics import extract_token_usage
+                    _u = extract_token_usage(res)
+                    if _u["input"] or _u["output"]:
+                        input_tokens = _u["input"]
+                        output_tokens = _u["output"]
                     # If accumulated text is empty, extract from result
                     if not accumulated and hasattr(res, "__str__"):
                         accumulated = str(res)
