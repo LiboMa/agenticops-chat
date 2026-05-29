@@ -111,7 +111,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
         model_id, max_tokens = get_agent_model_config("reporter")
         cache_kwargs: dict = {}
@@ -119,7 +119,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
         model = BedrockModel(
             model_id=model_id,
-            region_name=settings.bedrock_region,
+            boto_session=get_bedrock_boto_session(),
             max_tokens=max_tokens,
             boto_client_config=BotocoreConfig(read_timeout=300),
             **cache_kwargs,

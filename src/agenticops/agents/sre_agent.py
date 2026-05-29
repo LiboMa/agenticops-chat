@@ -199,7 +199,7 @@ TOOL SELECTION — accuracy first:
 
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("sre")
     cache_kwargs: dict = {}
@@ -207,7 +207,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
     model = BedrockModel(
         model_id=model_id,
-        region_name=settings.bedrock_region,
+        boto_session=get_bedrock_boto_session(),
         max_tokens=max_tokens,
         **cache_kwargs,
     )

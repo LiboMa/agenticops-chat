@@ -58,9 +58,11 @@ class OpsAgent:
     def llm(self) -> ChatBedrock:
         """Get LangChain Bedrock LLM."""
         if self._llm is None:
+            from agenticops.config import get_bedrock_boto_session
             self._llm = ChatBedrock(
                 model_id=settings.bedrock_model_id,
                 region_name=settings.bedrock_region,
+                client=get_bedrock_boto_session().client("bedrock-runtime"),
                 model_kwargs={"max_tokens": 4096},
             )
         return self._llm

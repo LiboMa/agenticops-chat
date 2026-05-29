@@ -544,11 +544,9 @@ RULES:
 def _llm_distill(context: dict) -> Optional[dict]:
     """Call Bedrock LLM to distill context into structured case study fields."""
     try:
-        import boto3
+        from agenticops.config import get_bedrock_boto_session
 
-        client = boto3.client(
-            "bedrock-runtime", region_name=settings.bedrock_region
-        )
+        client = get_bedrock_boto_session().client("bedrock-runtime")
         prompt = DISTILLATION_PROMPT.format(context=json.dumps(context, indent=2, default=str))
 
         body = json.dumps({

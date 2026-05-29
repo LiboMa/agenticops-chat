@@ -210,7 +210,7 @@ def create_main_agent() -> Agent:
         Configured Strands Agent with sub-agents and metadata tools.
     """
     from agenticops.config import get_scan_focus, resolve_scan_services
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("main")
     cache_kwargs: dict = {}
@@ -218,7 +218,7 @@ def create_main_agent() -> Agent:
         cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
     model = BedrockModel(
         model_id=model_id,
-        region_name=settings.bedrock_region,
+        boto_session=get_bedrock_boto_session(),
         max_tokens=max_tokens,
         **cache_kwargs,
     )

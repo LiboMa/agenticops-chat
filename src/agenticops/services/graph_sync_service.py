@@ -74,8 +74,8 @@ def sync_all() -> dict[str, Any]:
 
     # Use STS to get current account
     try:
-        import boto3
-        sts = boto3.client("sts", region_name=settings.bedrock_region)
+        from agenticops.config import get_bedrock_boto_session
+        sts = get_bedrock_boto_session().client("sts")
         account_id = sts.get_caller_identity()["Account"]
     except Exception:
         account_id = ""
