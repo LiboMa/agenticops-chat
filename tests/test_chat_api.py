@@ -189,3 +189,49 @@ class TestListSessionsResponseFields:
         assert pinstar["pinned"] is True
         assert pinstar["starred"] is True
         assert pinstar["archived"] is False
+
+
+# ---------------------------------------------------------------------------
+# Stream failure error metadata
+# ---------------------------------------------------------------------------
+
+def test_stream_failure_marks_assistant_message_with_error(client, monkeypatch):
+    """When stream_async raises mid-stream, the assistant row carries error metadata.
+
+    Validates: F1 — failed stream turns must be marked so UI can distinguish from
+    completed turns, and user message stays for retry.
+    """
+    import agenticops.web.app as webapp
+
+    session_id = "stream-fail-001"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(ChatSession(session_id=session_id, name="Stream Fail",
+                           created_at=now, updated_at=now, last_activity_at=now))
+
+    class _BoomAgent:
+        async def stream_async(self, _content):
+            yield {"data": "partial "}
+            raise RuntimeError("bedrock exploded")
+
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda sid: _BoomAgent())
+
+    try:
+        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi"})
+        assert resp.status_code == 200  # SSE opens fine; error surfaces as an event
+
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            msgs = db.query(ChatMessage).filter(ChatMessage.session_id == row.id).all()
+            roles = [m.role for m in msgs]
+            assert "user" in roles, "user message should be retained for retry"
+            asst = [m for m in msgs if m.role == "assistant"]
+            assert asst, "partial assistant message should be persisted"
+            assert asst[-1].token_usage and "error" in asst[-1].token_usage, \
+                "assistant message should carry error metadata in token_usage JSON"
+    finally:
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row:
+                db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+                db.delete(row)

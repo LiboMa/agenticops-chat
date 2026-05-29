@@ -5658,16 +5658,19 @@ async def api_send_chat_message(session_id: str, request: Request):
             }
         except Exception as e:
             logger.exception("Chat stream error for session %s", session_id)
-            # Persist partial assistant reply so it isn't lost on error/refresh
-            if accumulated:
-                with get_db_session() as db:
-                    db.add(ChatMessage(
-                        session_id=db_session_pk,
-                        role="assistant",
-                        content=accumulated,
-                        tool_calls=tool_calls if tool_calls else None,
-                        token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
-                    ))
+            # Persist partial assistant reply (if any) WITH error metadata so the
+            # UI can distinguish a failed turn from a completed one, and the user
+            # message stays for retry. ChatMessage has no status column, so the
+            # marker rides in the token_usage JSON.
+            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500]}
+            with get_db_session() as db:
+                db.add(ChatMessage(
+                    session_id=db_session_pk,
+                    role="assistant",
+                    content=accumulated or "",
+                    tool_calls=tool_calls if tool_calls else None,
+                    token_usage=err_meta,
+                ))
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
     return EventSourceResponse(_generate())
