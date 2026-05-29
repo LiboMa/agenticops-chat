@@ -80,6 +80,7 @@ class AccountCreate(BaseModel):
     """Schema for creating a cloud account."""
     name: str = Field(..., max_length=100)
     provider: str = Field(..., pattern="^(aws|azure|gcp|alicloud)$")
+    credential_source_type: str = Field(default="environment", pattern="^(environment|assume_role|profile|static_keys)$")
     credentials: dict = Field(default_factory=dict)
     regions: List[str] = Field(default_factory=list)
     labels: dict = Field(default_factory=dict)
@@ -89,13 +90,14 @@ class AccountCreate(BaseModel):
 class AccountUpdate(BaseModel):
     """Schema for updating a cloud account."""
     name: Optional[str] = Field(None, max_length=100)
+    credential_source_type: Optional[str] = Field(None, pattern="^(environment|assume_role|profile|static_keys)$")
     credentials: Optional[dict] = None
     regions: Optional[List[str]] = None
     labels: Optional[dict] = None
     is_enabled: Optional[bool] = None
 
 
-REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key"}
+REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key", "secret_access_key", "access_key_id", "session_token", "_encrypted"}
 
 
 class AccountResponse(BaseModel):
@@ -103,6 +105,7 @@ class AccountResponse(BaseModel):
     id: int
     name: str
     provider: str
+    credential_source_type: str = "environment"
     credentials: dict
     regions: List[str]
     labels: dict
@@ -1710,7 +1713,8 @@ async def api_health():
     # 2. AWS credentials check
     aws_start = time.time()
     try:
-        sts = boto3.client("sts", region_name=settings.bedrock_region)
+        from agenticops.config import get_bedrock_boto_session
+        sts = get_bedrock_boto_session().client("sts")
         identity = sts.get_caller_identity()
         checks["aws"] = HealthCheckResult(
             status="ok",
@@ -1924,8 +1928,13 @@ async def api_get_account(account_id: int):
 
 @app.post("/api/accounts", response_model=AccountResponse, status_code=201)
 async def api_create_account(account: AccountCreate):
-    """Create a new cloud account."""
+    """Create a new cloud account. Credentials are encrypted at rest."""
     from sqlalchemy.exc import IntegrityError
+    from agenticops.credentials.store import get_credential_store
+
+    # Encrypt sensitive credentials before storage
+    store = get_credential_store()
+    encrypted_creds = store.encrypt_credentials(account.credentials)
 
     with get_db_session() as session:
         existing = session.query(CloudAccount).filter(
@@ -1937,8 +1946,9 @@ async def api_create_account(account: AccountCreate):
         db_account = CloudAccount(
             name=account.name,
             provider=account.provider,
+            credential_source_type=account.credential_source_type,
             is_enabled=account.is_enabled,
-            credentials=account.credentials,
+            credentials=encrypted_creds,
             regions=account.regions,
             labels=account.labels,
         )
@@ -1952,8 +1962,10 @@ async def api_create_account(account: AccountCreate):
 
 @app.put("/api/accounts/{account_id}", response_model=AccountResponse)
 async def api_update_account(account_id: int, account: AccountUpdate):
-    """Update an existing cloud account."""
+    """Update an existing cloud account. Credentials re-encrypted on change."""
     from sqlalchemy.exc import IntegrityError
+    from agenticops.credentials.store import get_credential_store
+    from agenticops.credentials.session_factory import get_session_factory
 
     with get_db_session() as session:
         db_account = session.query(CloudAccount).filter_by(id=account_id).first()
@@ -1971,6 +1983,11 @@ async def api_update_account(account_id: int, account: AccountUpdate):
             if conflict:
                 raise HTTPException(status_code=409, detail=f"Account name '{new_name}' already exists")
 
+        # Encrypt credentials if being updated
+        if "credentials" in update_data and update_data["credentials"]:
+            store = get_credential_store()
+            update_data["credentials"] = store.encrypt_credentials(update_data["credentials"])
+
         for key, value in update_data.items():
             setattr(db_account, key, value)
 
@@ -1978,6 +1995,9 @@ async def api_update_account(account_id: int, account: AccountUpdate):
             session.flush()
         except IntegrityError:
             raise HTTPException(status_code=409, detail=f"Account name '{new_name or db_account.name}' already exists")
+
+        # Invalidate session cache
+        get_session_factory().invalidate(db_account.name)
         return AccountResponse.model_validate(db_account)
 
 
@@ -2002,18 +2022,52 @@ async def api_delete_account(account_id: int):
 
 @app.post("/api/accounts/{account_id}/test")
 async def api_test_account_connection(account_id: int):
-    """Test credential chain for an account. Returns success/failure."""
-    from agenticops.providers import get_provider
+    """Test credential chain for an account. Returns success/failure with identity."""
+    from agenticops.credentials.session_factory import get_session_factory
     with get_db_session() as session:
         acct = session.query(CloudAccount).filter_by(id=account_id).first()
         if not acct:
             raise HTTPException(status_code=404, detail="Account not found")
-        try:
-            provider = get_provider(acct)
-            success = provider.resolve_credentials()
-            return {"success": success, "provider": acct.provider, "name": acct.name}
-        except Exception as e:
-            return {"success": False, "provider": acct.provider, "name": acct.name, "error": str(e)}
+        factory = get_session_factory()
+        result = factory.test_connection(acct.name)
+        result["provider"] = acct.provider
+        result["name"] = acct.name
+        return result
+
+
+@app.get("/api/settings/available-profiles")
+async def api_available_profiles():
+    """List AWS profiles available on the server (from ~/.aws/).
+
+    Used by Web UI to show profile options when credential_source_type=profile.
+    Returns empty list if no profiles found (e.g., container without mounted ~/.aws/).
+    """
+    from agenticops.credentials.session_factory import get_session_factory
+    factory = get_session_factory()
+    profiles = factory.list_available_profiles()
+    return {
+        "available": len(profiles) > 0,
+        "profiles": profiles,
+    }
+
+
+@app.get("/api/settings/environment")
+async def api_detect_environment():
+    """Detect the current deployment environment.
+
+    Returns environment type (eks, ecs, ec2, local) and credential store backend.
+    Helps Web UI adapt its account registration form.
+    """
+    from agenticops.credentials.session_factory import get_session_factory
+    from agenticops.credentials.store import get_credential_store
+    factory = get_session_factory()
+    store = get_credential_store()
+    env_type = factory.detect_environment()
+    return {
+        "environment": env_type.value,
+        "credential_backend": store.backend_name,
+        "profiles_available": len(factory.list_available_profiles()) > 0,
+    }
 
 
 # ============================================================================
@@ -5268,9 +5322,9 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
 def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
     """Generate a concise session title using the cheap LLM. Returns None on failure."""
     try:
-        import boto3
+        from agenticops.config import get_bedrock_boto_session
 
-        client = boto3.client("bedrock-runtime", region_name=settings.bedrock_region)
+        client = get_bedrock_boto_session().client("bedrock-runtime")
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 30,

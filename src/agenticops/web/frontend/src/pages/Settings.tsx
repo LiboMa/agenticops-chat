@@ -20,6 +20,8 @@ import {
   useCreateAccount,
   useUpdateAccount,
   useDeleteAccount,
+  useEnvironmentInfo,
+  useTestConnection,
 } from "@/hooks/useAccounts";
 import {
   useMcpServers,
@@ -44,7 +46,7 @@ import {
   useToggleChannel,
 } from "@/hooks/useImApps";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
-import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig } from "@/api/types";
+import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig, CredentialSourceType } from "@/api/types";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
@@ -133,10 +135,9 @@ const PROVIDER_OPTIONS: { value: CloudProvider; label: string }[] = [
 
 const PROVIDER_FIELDS: Record<CloudProvider, { key: string; label: string; type?: string; placeholder: string }[]> = {
   aws: [
-    { key: "role_arn", label: "Role ARN", placeholder: "arn:aws:iam::123456789012:role/AgenticOps" },
-    { key: "external_id", label: "External ID", placeholder: "Optional" },
+    { key: "access_key_id", label: "Access Key ID", placeholder: "AKIA..." },
+    { key: "secret_access_key", label: "Secret Access Key", type: "password", placeholder: "Secret Access Key" },
     { key: "account_id", label: "Account ID", placeholder: "123456789012" },
-    { key: "profile_name", label: "Profile Name", placeholder: "default (from ~/.aws/credentials)" },
   ],
   azure: [
     { key: "subscription_id", label: "Subscription ID", placeholder: "00000000-0000-0000-0000-000000000000" },
@@ -167,6 +168,19 @@ function AccountFormModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [regions, setRegions] = useState(initial?.regions?.join(", ") ?? "");
   const [isEnabled, setIsEnabled] = useState(initial?.is_enabled ?? true);
+  // Infer source type from credentials — only two user-facing options: assume_role | static_keys
+  function inferSourceType(): CredentialSourceType {
+    const dbType = initial?.credential_source_type;
+    const c = initial?.credentials;
+    // If DB already says assume_role or static_keys, trust it
+    if (dbType === "assume_role" || dbType === "static_keys") return dbType;
+    // Infer from credentials content
+    if (c?.role_arn) return "assume_role";
+    if (c?.access_key_id || c?.secret_access_key || c?._encrypted) return "static_keys";
+    // Default to assume_role (the standard enterprise pattern)
+    return "assume_role";
+  }
+  const [sourceType, setSourceType] = useState<CredentialSourceType>(inferSourceType());
   // Seed credential fields from existing account (edit mode)
   const initialCreds: Record<string, string> = {};
   if (initial?.credentials) {
@@ -178,18 +192,32 @@ function AccountFormModal({
       }
     }
   }
-  const hasExplicitCreds = isEdit && Object.keys(initial?.credentials ?? {}).length > 0;
-  const [useEnvDefaults, setUseEnvDefaults] = useState(isEdit ? !hasExplicitCreds : false);
   const [creds, setCreds] = useState<Record<string, string>>(initialCreds);
 
+  const envQ = useEnvironmentInfo();
+
   const fields = PROVIDER_FIELDS[provider];
+
+  // Only two user-facing options:
+  // - assume_role: AK/SK (optional) → AssumeRole (standard enterprise pattern)
+  // - static_keys: Direct AK/SK when AssumeRole is unavailable
+  const SOURCE_TYPE_OPTIONS: { value: CredentialSourceType; label: string; description: string }[] = [
+    { value: "assume_role", label: "Assume Role", description: "Standard — use AK/SK (or platform default) to assume target Role" },
+    { value: "static_keys", label: "Access Keys Only", description: "Direct AK/SK without Role assumption (legacy / multi-cloud)" },
+  ];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const regionList = regions.split(",").map((r) => r.trim()).filter(Boolean);
 
     const credentials: Record<string, unknown> = {};
-    if (!useEnvDefaults) {
+    if (sourceType === "assume_role") {
+      if (creds.role_arn) credentials.role_arn = creds.role_arn;
+      if (creds.external_id) credentials.external_id = creds.external_id;
+      // Optional base AK/SK for cross-partition AssumeRole
+      if (creds.access_key_id) credentials.access_key_id = creds.access_key_id;
+      if (creds.secret_access_key) credentials.secret_access_key = creds.secret_access_key;
+    } else if (sourceType === "static_keys") {
       for (const f of fields) {
         const val = creds[f.key]?.trim();
         if (val) {
@@ -199,9 +227,9 @@ function AccountFormModal({
     }
 
     if (isEdit) {
-      onSave({ name, credentials, regions: regionList, is_enabled: isEnabled } as AccountUpdate);
+      onSave({ name, credential_source_type: sourceType, credentials, regions: regionList, is_enabled: isEnabled } as AccountUpdate);
     } else {
-      onSave({ name, provider, credentials, regions: regionList, is_enabled: isEnabled } as AccountCreate);
+      onSave({ name, provider, credential_source_type: sourceType, credentials, regions: regionList, is_enabled: isEnabled } as AccountCreate);
     }
   }
 
@@ -209,10 +237,17 @@ function AccountFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-background rounded-lg shadow-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-background rounded-lg shadow-lg w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-foreground mb-4">
           {isEdit ? "Edit Account" : "New Account"}
         </h3>
+        {envQ.data && (
+          <div className="mb-3 p-2 rounded-lg bg-secondary text-xs text-muted-foreground flex items-center gap-2">
+            <span>Environment: <strong>{envQ.data.environment}</strong></span>
+            <span>|</span>
+            <span>Encryption: <strong>{envQ.data.credential_backend}</strong></span>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">Provider</label>
@@ -233,13 +268,64 @@ function AccountFormModal({
             <label className="block text-sm font-medium text-foreground mb-1">Regions (comma-separated)</label>
             <input value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="us-east-1, us-west-2" className={inputClass} />
           </div>
-          <div className="flex items-center gap-2">
-            <input id="use-env" type="checkbox" checked={useEnvDefaults} onChange={(e) => setUseEnvDefaults(e.target.checked)} className="rounded border-border" />
-            <label htmlFor="use-env" className="text-sm text-muted-foreground">Use environment / CLI defaults (no explicit credentials)</label>
+
+          {/* Credential Source Type */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">Credential Method</label>
+            <div className="space-y-1">
+              {SOURCE_TYPE_OPTIONS.map((opt) => (
+                <label key={opt.value} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${sourceType === opt.value ? "border-primary-500 bg-primary-50" : "border-border hover:bg-secondary"}`}>
+                  <input
+                    type="radio"
+                    name="sourceType"
+                    value={opt.value}
+                    checked={sourceType === opt.value}
+                    onChange={() => { setSourceType(opt.value); setCreds({}); }}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                    <p className="text-xs text-muted-foreground">{opt.description}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
-          {!useEnvDefaults && (
+
+          {/* Dynamic fields based on source type */}
+          {sourceType === "assume_role" && (
             <div className="space-y-3 border-t border-border pt-3">
-              <p className="text-xs text-muted-foreground">{provider.toUpperCase()} Credentials — leave blank to use env defaults</p>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Role ARN <span className="text-red-500">*</span></label>
+                <input required value={creds.role_arn ?? ""} onChange={(e) => setCreds({ ...creds, role_arn: e.target.value })} placeholder="arn:aws:iam::123456789012:role/AgenticOpsRole" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">External ID (optional)</label>
+                <input value={creds.external_id ?? ""} onChange={(e) => setCreds({ ...creds, external_id: e.target.value })} placeholder="aiops-prod-xxx" className={inputClass} />
+              </div>
+              <div className="pt-2 border-t border-dashed border-border">
+                <p className="text-xs text-muted-foreground mb-2">
+                  Base credentials for AssumeRole (leave empty to use platform default — Task Role / IRSA / Instance Profile):
+                </p>
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Access Key ID (optional)</label>
+                    <input value={creds.access_key_id ?? ""} onChange={(e) => setCreds({ ...creds, access_key_id: e.target.value })} placeholder="Required for cross-partition (e.g. China ↔ Global)" className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Secret Access Key (optional)</label>
+                    <input type="password" value={creds.secret_access_key ?? ""} onChange={(e) => setCreds({ ...creds, secret_access_key: e.target.value })} placeholder="Encrypted at rest" className={inputClass} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sourceType === "static_keys" && (
+            <div className="space-y-3 border-t border-border pt-3">
+              <div className="p-2 rounded-lg bg-yellow-50 border border-yellow-200 text-xs text-yellow-700">
+                Direct access without Role assumption. Credentials encrypted at rest.
+              </div>
               {fields.map((f) => (
                 <div key={f.key}>
                   <label className="block text-sm font-medium text-foreground mb-1">{f.label}</label>
@@ -264,6 +350,7 @@ function AccountFormModal({
               ))}
             </div>
           )}
+
           <div className="flex items-center gap-2">
             <input id="is-enabled-settings" type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-border" />
             <label htmlFor="is-enabled-settings" className="text-sm text-foreground">Enabled</label>
@@ -311,9 +398,20 @@ const SETTINGS_PROVIDER_BADGE: Record<CloudProvider, string> = {
   alicloud: "bg-purple-100 text-purple-700",
 };
 
+const SOURCE_TYPE_BADGE: Record<string, string> = {
+  assume_role: "bg-blue-100 text-blue-700",
+  static_keys: "bg-amber-100 text-amber-700",
+};
+
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  assume_role: "AssumeRole",
+  static_keys: "AK/SK",
+};
+
 const accountColumns: Column<Account>[] = [
   { key: "name", header: "Name", sortable: true, sortValue: (r) => r.name, render: (r) => <span className="font-medium text-foreground">{r.name}</span> },
   { key: "provider", header: "Provider", render: (r) => <Badge className={SETTINGS_PROVIDER_BADGE[r.provider]}>{r.provider.toUpperCase()}</Badge> },
+  { key: "credential_source_type", header: "Auth", render: (r) => <Badge className={SOURCE_TYPE_BADGE[r.credential_source_type] ?? "bg-secondary text-muted-foreground"}>{SOURCE_TYPE_LABEL[r.credential_source_type] ?? r.credential_source_type}</Badge> },
   { key: "regions", header: "Regions", render: (r) => <div className="flex flex-wrap gap-1">{r.regions.map((reg) => <Badge key={reg} className="bg-secondary text-muted-foreground">{reg}</Badge>)}</div> },
   { key: "is_enabled", header: "Status", render: (r) => r.is_enabled ? <Badge className="bg-green-100 text-green-700">Enabled</Badge> : <Badge className="bg-secondary text-muted-foreground">Disabled</Badge> },
   { key: "last_scanned_at", header: "Last Scanned", sortable: true, sortValue: (r) => r.last_scanned_at ?? "", render: (r) => <span className="text-sm text-muted-foreground">{r.last_scanned_at ? formatShortDate(r.last_scanned_at) : "Never"}</span> },
@@ -1263,6 +1361,8 @@ export default function Settings() {
   const createMut = useCreateAccount();
   const updateAcctMut = useUpdateAccount();
   const deleteMut = useDeleteAccount();
+  const testConnMut = useTestConnection();
+  const [testingId, setTestingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
@@ -1486,7 +1586,22 @@ export default function Settings() {
                 key: "actions",
                 header: "",
                 render: (r) => (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTestingId(r.id);
+                        testConnMut.mutate(r.id, {
+                          onSettled: () => setTimeout(() => setTestingId(null), 3000),
+                        });
+                      }}
+                      disabled={testingId === r.id}
+                      className="text-xs text-green-600 hover:underline disabled:opacity-50"
+                    >
+                      {testingId === r.id
+                        ? testConnMut.isPending ? "Testing..." : testConnMut.isSuccess && testConnMut.data?.success ? "OK" : "Failed"
+                        : "Test"}
+                    </button>
                     <button onClick={(e) => { e.stopPropagation(); setEditing(r); setFormOpen(true); }} className="text-xs text-primary-600 hover:underline">Edit</button>
                     <button onClick={(e) => { e.stopPropagation(); setDeleting(r); }} className="text-xs text-red-600 hover:underline">Delete</button>
                   </div>
