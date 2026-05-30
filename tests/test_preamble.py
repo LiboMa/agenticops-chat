@@ -317,3 +317,22 @@ class TestTransientDetection:
     def test_non_transient_returns_false(self):
         from agenticops.agents.preamble import _is_transient_error
         assert _is_transient_error(Exception("ValidationException: bad input")) is False
+
+
+class TestMemoryLoadErrorHandling:
+    """Tests for agent-memory load exception handling in build_system_prompt."""
+
+    def test_missing_file_is_swallowed(self):
+        from agenticops.agents.preamble import build_system_prompt
+        with patch("agenticops.memory.agent_memory.load_agent_memory", side_effect=FileNotFoundError("nope")):
+            out = build_system_prompt("BASE", include_account=False, include_skills=False, agent_name="detect")
+            assert "BASE" in out  # continues without memory
+
+    def test_unexpected_error_is_logged_not_raised(self, caplog):
+        import logging
+        from agenticops.agents.preamble import build_system_prompt
+        with patch("agenticops.memory.agent_memory.load_agent_memory", side_effect=ValueError("corrupt")):
+            with caplog.at_level(logging.ERROR):
+                out = build_system_prompt("BASE", include_account=False, include_skills=False, agent_name="detect")
+            assert "BASE" in out
+            assert any(r.levelno >= logging.ERROR for r in caplog.records)

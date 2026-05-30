@@ -147,16 +147,20 @@ def build_system_prompt(
 
     # Inject agent memory (behavioral constraints learned from feedback)
     if agent_name:
+        _log = logging.getLogger(__name__)
         try:
             from agenticops.memory.agent_memory import load_agent_memory
 
             memory_block = load_agent_memory(agent_name)
             if memory_block:
                 parts.append(memory_block)
+        except (FileNotFoundError, IsADirectoryError):
+            # Expected when an agent has no memory yet — recover quietly.
+            _log.debug("No agent memory file for %s", agent_name)
         except Exception:
-            logging.getLogger(__name__).warning(
-                "Failed to load agent memory for %s", agent_name, exc_info=True
-            )
+            # Unexpected (permission, parse, etc.) — surface at error level but
+            # never block agent construction.
+            _log.error("Failed to load agent memory for %s", agent_name, exc_info=True)
 
     # Always inject output rules
     parts.append(get_output_rules(agent_type))
