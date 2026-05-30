@@ -235,3 +235,40 @@ def test_stream_failure_marks_assistant_message_with_error(client, monkeypatch):
             if row:
                 db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
                 db.delete(row)
+
+
+def test_disconnect_stops_stream(client, monkeypatch):
+    """If the client disconnects, the generator stops consuming events."""
+    import agenticops.web.app as webapp
+    from agenticops.models import ChatMessage, ChatSession, get_db_session
+
+    session_id = "disconnect-001"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(ChatSession(session_id=session_id, name="Disconnect",
+                           created_at=now, updated_at=now, last_activity_at=now))
+
+    consumed = {"n": 0}
+
+    class _SlowAgent:
+        async def stream_async(self, _content):
+            for i in range(100):
+                consumed["n"] += 1
+                yield {"data": f"tok{i} "}
+
+    async def _always_disconnected(self):
+        return True
+
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda sid: _SlowAgent())
+    monkeypatch.setattr("starlette.requests.Request.is_disconnected", _always_disconnected)
+
+    try:
+        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi"})
+        assert resp.status_code == 200
+        assert consumed["n"] < 100  # disconnect honored -> not all 100 consumed
+    finally:
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row:
+                db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+                db.delete(row)

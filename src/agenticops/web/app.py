@@ -5574,6 +5574,9 @@ async def api_send_chat_message(session_id: str, request: Request):
         output_tokens = 0
         try:
             async for event in agent.stream_async(enriched_content):
+                if await request.is_disconnected():
+                    logger.info("Client disconnected; stopping stream for session %s", session_id)
+                    break
                 ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
@@ -5602,15 +5605,19 @@ async def api_send_chat_message(session_id: str, request: Request):
                 t["status"] = "done"
                 yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
 
-            # Persist assistant message
+            # Persist assistant message (re-verify session still exists to avoid
+            # FK violation / orphan if it was deleted mid-stream)
             with get_db_session() as db:
-                db.add(ChatMessage(
-                    session_id=db_session_pk,
-                    role="assistant",
-                    content=accumulated,
-                    tool_calls=tool_calls if tool_calls else None,
-                    token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
-                ))
+                if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
+                    logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
+                else:
+                    db.add(ChatMessage(
+                        session_id=db_session_pk,
+                        role="assistant",
+                        content=accumulated,
+                        tool_calls=tool_calls if tool_calls else None,
+                        token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
+                    ))
 
             # Auto-name session after first exchange
             import re as _re
