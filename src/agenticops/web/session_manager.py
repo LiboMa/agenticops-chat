@@ -146,7 +146,8 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
 
         # Materialise attributes while session is open to avoid DetachedInstanceError
         row_data = [
-            {"role": msg.role, "content": msg.content or "", "tool_calls": msg.tool_calls}
+            {"role": msg.role, "content": msg.content or "", "tool_calls": msg.tool_calls,
+             "token_usage": msg.token_usage}
             for msg in rows
         ] if rows else []
 
@@ -157,8 +158,17 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
     raw_messages: List[dict] = []
     for msg in row_data:
         content = msg["content"]
-        if not content.strip():
+        # Keep empty assistant turns that carry error metadata (failed stream
+        # turns persisted by the chat endpoint); otherwise skip empty content.
+        _has_error_meta = (
+            msg["role"] == "assistant"
+            and isinstance(msg.get("token_usage"), dict)
+            and msg["token_usage"].get("error")
+        )
+        if not content.strip() and not _has_error_meta:
             continue
+        if not content.strip() and _has_error_meta:
+            content = "[previous turn failed]"
 
         # Truncate long messages
         if len(content) > _MAX_MSG_CHARS:
@@ -448,25 +458,31 @@ class ChatSessionManager:
 
     def _remove_stale(self):
         now = datetime.now(timezone.utc)
+        # Capture each stale session's lock BEFORE removing it, so we can hold
+        # it across summary extraction and serialize against get_or_create.
+        stale_locks: dict[str, threading.Lock] = {}
         with self._lock:
             stale = [sid for sid, ts in self._last_activity.items() if now - ts > self._ttl]
             for sid in stale:
                 logger.info("Cleaning up stale agent for session %s", sid)
+                stale_locks[sid] = self._session_locks.get(sid) or threading.Lock()
                 self._agents.pop(sid, None)
                 self._last_activity.pop(sid, None)
                 self._session_locks.pop(sid, None)
 
-        # Trigger summary + memory extraction outside the lock so we don't
-        # block other sessions.  Failures are logged but never propagated.
+        # Hold the per-session lock during extraction so a concurrent
+        # get_or_create for the same session can't race the summary write.
         for sid in stale:
-            try:
-                _trigger_summary_and_memory(sid)
-            except Exception:
-                logger.error(
-                    "Unexpected error during summary/memory extraction for stale session %s",
-                    sid,
-                    exc_info=True,
-                )
+            lock = stale_locks[sid]
+            with lock:
+                try:
+                    _trigger_summary_and_memory(sid)
+                except Exception:
+                    logger.error(
+                        "Unexpected error during summary/memory extraction for stale session %s",
+                        sid,
+                        exc_info=True,
+                    )
 
     def get_or_create(self, session_id: str) -> Agent:
         # Fast path — agent already cached, no slow work

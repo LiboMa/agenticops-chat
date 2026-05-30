@@ -13,12 +13,13 @@ from agenticops.web.session_manager import _load_history_messages, _MAX_MSG_CHAR
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_msg(role: str, content: str, tool_calls=None, minutes_ago: int = 0):
+def _make_msg(role: str, content: str, tool_calls=None, minutes_ago: int = 0, token_usage=None):
     """Create a mock ChatMessage row."""
     m = MagicMock()
     m.role = role
     m.content = content
     m.tool_calls = tool_calls
+    m.token_usage = token_usage
     m.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return m
 
@@ -130,6 +131,22 @@ class TestLoadHistoryMessages:
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
         assert result[1]["content"][0]["text"] == "real reply"
+
+    def test_keeps_failed_turn_with_error_metadata(self):
+        """Empty assistant turn carrying error metadata is preserved (I3)."""
+        msgs = [
+            _make_msg("user", "hi", minutes_ago=2),
+            _make_msg(
+                "assistant",
+                "",
+                minutes_ago=1,
+                token_usage={"input": 0, "output": 0, "error": "boom"},
+            ),
+        ]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 10)
+        # The failed turn must NOT be dropped — an assistant message survives.
+        assert any(m["role"] == "assistant" for m in result)
 
     def test_truncates_long_messages(self):
         """Messages exceeding _MAX_MSG_CHARS are truncated."""

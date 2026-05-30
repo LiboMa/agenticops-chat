@@ -193,3 +193,25 @@ def test_rebuild_tool_messages_empty_input_returns_empty():
     from agenticops.web.session_manager import _rebuild_tool_messages
     assert _rebuild_tool_messages([]) == []
     assert _rebuild_tool_messages("not a list") == []
+
+
+def test_remove_stale_uses_session_lock_for_trigger(monkeypatch):
+    """Stale cleanup must hold a per-session lock while triggering summary."""
+    from agenticops.web.session_manager import ChatSessionManager
+    from datetime import datetime, timezone, timedelta
+    import threading
+
+    mgr = ChatSessionManager()
+    sid = "sess-1"
+    lock = threading.Lock()
+    mgr._session_locks[sid] = lock
+    mgr._last_activity[sid] = datetime.now(timezone.utc) - timedelta(hours=1)
+    mgr._agents[sid] = object()
+
+    held_during_trigger = {}
+    def _fake_trigger(s):
+        held_during_trigger[s] = lock.locked()
+    monkeypatch.setattr("agenticops.web.session_manager._trigger_summary_and_memory", _fake_trigger)
+
+    mgr._remove_stale()
+    assert held_during_trigger.get(sid) is True
