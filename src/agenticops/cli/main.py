@@ -4274,10 +4274,12 @@ def chat(
                 console.print(f"\n[dim]{ref_links}[/dim]")
 
         except KeyboardInterrupt:
-            # Clean up any active spinner from StreamingCallbackHandler
+            # NOTE: agent() runs synchronously, so an in-flight Bedrock call cannot
+            # be hard-cancelled here — we stop the spinner and let the call finish.
+            # True cancellation would require an async stream refactor (out of scope).
             if hasattr(agent, 'callback_handler') and hasattr(agent.callback_handler, 'stop'):
                 agent.callback_handler.stop()
-            console.print("\n[yellow]Press Ctrl+C again to exit, or continue typing.[/yellow]")
+            console.print("\n[yellow]Stopping display. Press Ctrl+C again to exit, or continue typing.[/yellow]")
             try:
                 session.prompt([('class:prompt', '❯ ')], default='')
             except KeyboardInterrupt:
