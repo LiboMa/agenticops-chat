@@ -180,3 +180,12 @@ def test_build_detect_agent_for_account_respects_cache_config(
     model_call_kwargs_disabled = mock_model_cls.call_args[1]
     assert "cache_config" not in model_call_kwargs_disabled
     assert "cache_tools" not in model_call_kwargs_disabled
+
+
+def test_downgrade_note_constant_exists():
+    """The single-agent downgrade marker must exist and be wired."""
+    import sys
+    import agenticops.agents.detect_agent
+    detect_agent_module = sys.modules['agenticops.agents.detect_agent']
+    assert detect_agent_module._DOWNGRADE_NOTE
+    assert "single-agent" in detect_agent_module._DOWNGRADE_NOTE.lower()

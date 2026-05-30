@@ -46,6 +46,8 @@ from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
+_DOWNGRADE_NOTE = "[degraded: account load failed, ran in single-agent mode]"
+
 DETECT_SYSTEM_PROMPT = """You are the Detect Agent for AgenticOps.
 Your job is to check the health of resources in the active account.
 
@@ -269,12 +271,17 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
 
         # Check account count to decide parallel vs single-agent mode.
         # Fallback to single-agent if DB is unavailable.
+        _downgraded = False
         try:
             from agenticops.scanner.engine import _load_accounts
             accounts = _load_accounts()
         except Exception:
-            logger.warning("Failed to load accounts, falling back to single-agent mode")
+            logger.error(
+                "Failed to load accounts — DEGRADING to single-agent health check",
+                exc_info=True,
+            )
             accounts = []
+            _downgraded = True
 
         if len(accounts) > 1:
             # Multiple accounts: use parallel agentic checker
@@ -353,7 +360,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
             with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent="main") as tracker:
                 result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
                 tracker.set_result(result)
-            return str(result)
+            return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)
     except Exception as e:
         logger.exception("Detect agent failed")
         return f"Detect agent error: {e}"
