@@ -104,6 +104,7 @@
 - **现象**: `build_system_prompt()` 每次 agent 实例化重算（含 skills XML 抓取、memory 加载）。
 - **方案**: 谨慎——按 `(base, include_account, include_skills, agent_type, agent_name, detail_level)` 做带失效的缓存；skills/memory 变更需失效。**先测量再决定**：若实测开销 <50ms 则降级为"仅文档说明"，不引入缓存复杂度（符合"不加没用的功能"）。
 - **回归测试**: 若实现缓存——断言相同入参命中、detail_level 变化后失效。
+- **【决定 2026-05-31，Task 17 执行结论】**: 实测 `build_system_prompt` 平均 **6.37 ms**/次（200 次 post-warmup，含 skills XML + memory 加载）。远低于 50ms 阈值。且该函数仅在 agent 实例化（每 session/请求一次）时调用，非热路径。**决定：不实现缓存**——收益微小，而缓存失效逻辑会引入复杂度与潜在 bug。F14 以"仅文档说明 + 实测数据"结案，无代码改动。
 
 ### 3.4 设计意图澄清（不改行为）
 
