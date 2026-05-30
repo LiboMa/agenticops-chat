@@ -207,3 +207,14 @@ def test_batch_mode_context_resets_on_exception(monkeypatch):
         pass
 
     assert states == [True, False]  # entered True, reset False even on error
+
+
+def test_single_agent_tools_include_account_switching():
+    """Single-agent path is multi-account: must expose assume_role + get_active_account."""
+    import inspect
+    import agenticops.agents.detect_agent as da
+    src = inspect.getsource(da)
+    assert "assume_role" in src
+    assert "get_active_account" in src
+    # Intent marker must be present so the divergence isn't "fixed" by accident
+    assert "ACCOUNT-SCOPED BY DESIGN" in src

@@ -283,6 +283,11 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 _downgraded = True
 
             if len(accounts) > 1:
+                # ACCOUNT-SCOPED BY DESIGN: parallel checkers each get a pre-resolved,
+                # account-locked cli_tool and account context in their prompt — they
+                # intentionally do NOT receive assume_role/get_active_account. The
+                # single-agent path below is the multi-account variant. Do not
+                # "align" these tool sets; the divergence is deliberate.
                 # Multiple accounts: use parallel agentic checker
                 import asyncio
                 import concurrent.futures
@@ -327,6 +332,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     callback_handler=None,
                     conversation_manager=get_agent_conversation_manager("detect"),
                     tools=[
+                        # Multi-account variant: these two enable account switching,
+                        # absent from the account-locked parallel path (see above).
                         assume_role,
                         get_active_account,
                         get_managed_resources,
