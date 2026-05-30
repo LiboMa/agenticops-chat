@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,6 +18,16 @@ import boto3
 from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically: temp file in the same dir + os.replace.
+
+    Prevents a crash mid-write from leaving a corrupt/half-written file.
+    """
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def create_draft_skill(
@@ -47,7 +58,7 @@ description: {json.dumps(description)}
 
 {content}
 """
-    (draft_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    _atomic_write_text(draft_dir / "SKILL.md", skill_md)
 
     # Write reference files if provided
     if references:
@@ -90,7 +101,7 @@ description: {json.dumps(description)}
 
 {content}
 """
-    (pub_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    _atomic_write_text(pub_dir / "SKILL.md", skill_md)
 
     if references:
         refs_dir = pub_dir / "references"
@@ -119,7 +130,7 @@ def update_draft_skill(name: str, updated_content: str) -> Path | None:
         logger.warning("Draft skill '%s' not found at %s", name, draft_dir)
         return None
 
-    skill_md.write_text(updated_content, encoding="utf-8")
+    _atomic_write_text(skill_md, updated_content)
     logger.info("Updated draft skill '%s'", name)
     return draft_dir
 

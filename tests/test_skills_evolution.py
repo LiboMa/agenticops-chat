@@ -88,6 +88,29 @@ class TestCreateDraftSkill:
         assert loaded["name"] == "q-skill"
 
 
+class TestAtomicWrite:
+    def test_atomic_write_helper_replaces_in_place(self, tmp_path):
+        from agenticops.skills.evolution import _atomic_write_text
+
+        target = tmp_path / "SKILL.md"
+        _atomic_write_text(target, "hello")
+        assert target.read_text(encoding="utf-8") == "hello"
+        # Overwrite is atomic and leaves no temp residue
+        _atomic_write_text(target, "world")
+        assert target.read_text(encoding="utf-8") == "world"
+        assert list(tmp_path.glob(".*tmp*")) == []
+
+    def test_create_draft_skill_leaves_no_temp_file(self, tmp_path):
+        from unittest.mock import patch
+        from agenticops.skills.evolution import create_draft_skill
+
+        with patch("agenticops.skills.evolution.settings") as ms:
+            ms.skills_draft_dir = tmp_path
+            d = create_draft_skill(name="atomic-skill", description="d", content="body")
+        assert (d / "SKILL.md").read_text(encoding="utf-8").startswith("---")
+        assert list(d.glob(".*tmp*")) == []
+
+
 # ---------------------------------------------------------------------------
 # update_draft_skill
 # ---------------------------------------------------------------------------
