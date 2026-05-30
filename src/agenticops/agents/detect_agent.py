@@ -266,104 +266,100 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
-        from agenticops.services.notification_service import set_batch_mode
-        set_batch_mode(True)
-
-        # Check account count to decide parallel vs single-agent mode.
-        # Fallback to single-agent if DB is unavailable.
-        _downgraded = False
-        try:
-            from agenticops.scanner.engine import _load_accounts
-            accounts = _load_accounts()
-        except Exception:
-            logger.error(
-                "Failed to load accounts — DEGRADING to single-agent health check",
-                exc_info=True,
-            )
-            accounts = []
-            _downgraded = True
-
-        if len(accounts) > 1:
-            # Multiple accounts: use parallel agentic checker
-            import asyncio
-            import concurrent.futures
-            from agenticops.checker import check_accounts_parallel
-
-            acct_ids = [a.id for a in accounts]
-            coro = check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep)
+        from agenticops.services.notification_service import batch_mode
+        with batch_mode():
+            # Check account count to decide parallel vs single-agent mode.
+            # Fallback to single-agent if DB is unavailable.
+            _downgraded = False
             try:
-                asyncio.get_running_loop()
-                # Already inside an async event loop (e.g. scheduler) — run in a thread
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    result = pool.submit(asyncio.run, coro).result()
-            except RuntimeError:
-                # No running loop — safe to use asyncio.run()
-                result = asyncio.run(coro)
+                from agenticops.scanner.engine import _load_accounts
+                accounts = _load_accounts()
+            except Exception:
+                logger.error(
+                    "Failed to load accounts — DEGRADING to single-agent health check",
+                    exc_info=True,
+                )
+                accounts = []
+                _downgraded = True
 
-            lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
-            for a in result.accounts:
-                lines.append(f"  {a.account_name}: {a.issues_created} issues")
-                if a.agent_output:
-                    lines.append(f"    {a.agent_output[:500]}")
-            return "\n".join(lines)
-        else:
-            # Single account: use original single-agent approach
-            cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
+            if len(accounts) > 1:
+                # Multiple accounts: use parallel agentic checker
+                import asyncio
+                import concurrent.futures
+                from agenticops.checker import check_accounts_parallel
 
-            model_id, max_tokens = get_agent_model_config("detect")
-            cache_kwargs: dict = {}
-            if settings.bedrock_cache_enabled:
-                cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-            model = BedrockModel(
-                model_id=model_id,
-                boto_session=get_bedrock_boto_session(),
-                max_tokens=max_tokens,
-                **cache_kwargs,
-            )
+                acct_ids = [a.id for a in accounts]
+                coro = check_accounts_parallel(account_ids=acct_ids, scope=scope, deep=deep)
+                try:
+                    asyncio.get_running_loop()
+                    # Already inside an async event loop (e.g. scheduler) — run in a thread
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        result = pool.submit(asyncio.run, coro).result()
+                except RuntimeError:
+                    # No running loop — safe to use asyncio.run()
+                    result = asyncio.run(coro)
 
-            from agenticops.agents.preamble import build_system_prompt as _bsp
-            agent = Agent(
-                system_prompt=_bsp(DETECT_SYSTEM_PROMPT, include_account=False, agent_name="detect"),
-                model=model,
-                callback_handler=None,
-                conversation_manager=get_agent_conversation_manager("detect"),
-                tools=[
-                    assume_role,
-                    get_active_account,
-                    get_managed_resources,
-                    list_alarms,
-                    get_alarm_history,
-                    get_metrics,
-                    query_logs,
-                    lookup_cloudtrail_events,
-                    create_health_issue,
-                    run_zscore_detection,
-                    run_rule_evaluation,
-                    describe_nat_gateways,
-                    describe_load_balancers,
-                    describe_region_topology,
-                    analyze_vpc_topology,
-                    map_eks_to_vpc_topology,
-                    *cli_tools,
-                    list_provider_alerts,
-                    query_provider_metrics,
-                    # Agent Skills (dynamic tool registration)
-                    activate_skill,
-                    read_skill_reference,
-                    # Agent Memory (cross-agent search)
-                    search_agent_memory,
-                ],
-            )
+                lines = [f"Parallel health check: {result.total_issues} issues in {result.duration_s}s"]
+                for a in result.accounts:
+                    lines.append(f"  {a.account_name}: {a.issues_created} issues")
+                    if a.agent_output:
+                        lines.append(f"    {a.agent_output[:500]}")
+                return "\n".join(lines)
+            else:
+                # Single account: use original single-agent approach
+                cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
 
-            from agenticops.agents.preamble import invoke_with_retry
-            from agenticops.services.agent_log_service import track_agent
-            with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent="main") as tracker:
-                result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
-                tracker.set_result(result)
-            return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)
+                model_id, max_tokens = get_agent_model_config("detect")
+                cache_kwargs: dict = {}
+                if settings.bedrock_cache_enabled:
+                    cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+                model = BedrockModel(
+                    model_id=model_id,
+                    boto_session=get_bedrock_boto_session(),
+                    max_tokens=max_tokens,
+                    **cache_kwargs,
+                )
+
+                from agenticops.agents.preamble import build_system_prompt as _bsp
+                agent = Agent(
+                    system_prompt=_bsp(DETECT_SYSTEM_PROMPT, include_account=False, agent_name="detect"),
+                    model=model,
+                    callback_handler=None,
+                    conversation_manager=get_agent_conversation_manager("detect"),
+                    tools=[
+                        assume_role,
+                        get_active_account,
+                        get_managed_resources,
+                        list_alarms,
+                        get_alarm_history,
+                        get_metrics,
+                        query_logs,
+                        lookup_cloudtrail_events,
+                        create_health_issue,
+                        run_zscore_detection,
+                        run_rule_evaluation,
+                        describe_nat_gateways,
+                        describe_load_balancers,
+                        describe_region_topology,
+                        analyze_vpc_topology,
+                        map_eks_to_vpc_topology,
+                        *cli_tools,
+                        list_provider_alerts,
+                        query_provider_metrics,
+                        # Agent Skills (dynamic tool registration)
+                        activate_skill,
+                        read_skill_reference,
+                        # Agent Memory (cross-agent search)
+                        search_agent_memory,
+                    ],
+                )
+
+                from agenticops.agents.preamble import invoke_with_retry
+                from agenticops.services.agent_log_service import track_agent
+                with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent="main") as tracker:
+                    result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
+                    tracker.set_result(result)
+                return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)
     except Exception as e:
         logger.exception("Detect agent failed")
         return f"Detect agent error: {e}"
-    finally:
-        from agenticops.services.notification_service import set_batch_mode
-        set_batch_mode(False)

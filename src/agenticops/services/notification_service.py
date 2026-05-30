@@ -12,6 +12,7 @@ Gated by settings.notifications_enabled — when disabled, all calls are no-ops.
 import asyncio
 import logging
 import threading
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Optional
 
@@ -35,6 +36,16 @@ def set_schedule_running(value: bool) -> None:
 def set_batch_mode(value: bool) -> None:
     """Suppress per-issue notifications during batch operations (Scan/Detect/RCA/Patrol)."""
     _batch_mode.set(value)
+
+
+@contextmanager
+def batch_mode():
+    """Enter notification batch mode, guaranteeing reset on exit (even on error)."""
+    set_batch_mode(True)
+    try:
+        yield
+    finally:
+        set_batch_mode(False)
 
 logger = logging.getLogger(__name__)
 

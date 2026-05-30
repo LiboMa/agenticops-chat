@@ -192,3 +192,18 @@ def test_downgrade_note_constant_exists():
     detect_agent_module = sys.modules['agenticops.agents.detect_agent']
     assert detect_agent_module._DOWNGRADE_NOTE
     assert "single-agent" in detect_agent_module._DOWNGRADE_NOTE.lower()
+
+
+def test_batch_mode_context_resets_on_exception(monkeypatch):
+    from agenticops.services import notification_service as ns
+
+    states = []
+    monkeypatch.setattr(ns, "set_batch_mode", lambda v: states.append(v))
+
+    try:
+        with ns.batch_mode():
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+
+    assert states == [True, False]  # entered True, reset False even on error

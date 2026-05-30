@@ -192,92 +192,88 @@ def rca_agent(issue_id: int) -> str:
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
-        from agenticops.services.notification_service import set_batch_mode
-        set_batch_mode(True)
+        from agenticops.services.notification_service import batch_mode
+        with batch_mode():
+            # Resolve provider CLI tool from issue's account
+            cli_tool = None
+            try:
+                from agenticops.models import HealthIssue, get_db_session
+                with get_db_session() as db:
+                    issue = db.query(HealthIssue).filter_by(id=issue_id).first()
+                    if issue and issue.account_id:
+                        cli_tool = get_cli_tool_for_issue(issue.account_id)
+            except Exception:
+                pass
 
-        # Resolve provider CLI tool from issue's account
-        cli_tool = None
-        try:
-            from agenticops.models import HealthIssue, get_db_session
-            with get_db_session() as db:
-                issue = db.query(HealthIssue).filter_by(id=issue_id).first()
-                if issue and issue.account_id:
-                    cli_tool = get_cli_tool_for_issue(issue.account_id)
-        except Exception:
-            pass
+            model_id, max_tokens = get_agent_model_config("rca")
+            cache_kwargs: dict = {}
+            if settings.bedrock_cache_enabled:
+                cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+            model = BedrockModel(
+                model_id=model_id,
+                boto_session=get_bedrock_boto_session(),
+                max_tokens=max_tokens,
+                **cache_kwargs,
+            )
 
-        model_id, max_tokens = get_agent_model_config("rca")
-        cache_kwargs: dict = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-        model = BedrockModel(
-            model_id=model_id,
-            boto_session=get_bedrock_boto_session(),
-            max_tokens=max_tokens,
-            **cache_kwargs,
-        )
+            agent = Agent(
+                system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca", agent_name="rca"),
+                model=model,
+                callback_handler=None,
+                conversation_manager=get_agent_conversation_manager("rca"),
+                tools=[
+                    assume_role,
+                    get_active_account,
+                    get_managed_resources,
+                    get_health_issue,
+                    update_health_issue_status,
+                    lookup_cloudtrail_events,
+                    get_metrics,
+                    query_logs,
+                    search_sops,
+                    search_similar_cases,
+                    save_rca_result,
+                    # Network investigation tools
+                    describe_vpcs,
+                    describe_subnets,
+                    describe_security_groups,
+                    describe_route_tables,
+                    describe_nat_gateways,
+                    describe_transit_gateways,
+                    describe_load_balancers,
+                    describe_region_topology,
+                    analyze_vpc_topology,
+                    # EKS networking tools
+                    describe_eks_clusters,
+                    describe_eks_nodegroups,
+                    check_eks_pod_ip_capacity,
+                    map_eks_to_vpc_topology,
+                    # Graph-based analysis tools
+                    query_reachability,
+                    query_impact_radius,
+                    find_network_path,
+                    detect_network_anomalies,
+                    # Cloud CLI (provider-resolved, fallback to AWS read-only)
+                    cli_tool or run_aws_cli_readonly,
+                    # Agent Skills (domain knowledge + host/kubectl execution + dynamic tools)
+                    activate_skill,
+                    read_skill_reference,
+                    run_on_host,
+                    run_kubectl,
+                    # External monitoring providers
+                    query_provider_metrics,
+                    query_provider_logs,
+                    # Agent Memory (cross-agent search)
+                    search_agent_memory,
+                ],
+            )
 
-        agent = Agent(
-            system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca", agent_name="rca"),
-            model=model,
-            callback_handler=None,
-            conversation_manager=get_agent_conversation_manager("rca"),
-            tools=[
-                assume_role,
-                get_active_account,
-                get_managed_resources,
-                get_health_issue,
-                update_health_issue_status,
-                lookup_cloudtrail_events,
-                get_metrics,
-                query_logs,
-                search_sops,
-                search_similar_cases,
-                save_rca_result,
-                # Network investigation tools
-                describe_vpcs,
-                describe_subnets,
-                describe_security_groups,
-                describe_route_tables,
-                describe_nat_gateways,
-                describe_transit_gateways,
-                describe_load_balancers,
-                describe_region_topology,
-                analyze_vpc_topology,
-                # EKS networking tools
-                describe_eks_clusters,
-                describe_eks_nodegroups,
-                check_eks_pod_ip_capacity,
-                map_eks_to_vpc_topology,
-                # Graph-based analysis tools
-                query_reachability,
-                query_impact_radius,
-                find_network_path,
-                detect_network_anomalies,
-                # Cloud CLI (provider-resolved, fallback to AWS read-only)
-                cli_tool or run_aws_cli_readonly,
-                # Agent Skills (domain knowledge + host/kubectl execution + dynamic tools)
-                activate_skill,
-                read_skill_reference,
-                run_on_host,
-                run_kubectl,
-                # External monitoring providers
-                query_provider_metrics,
-                query_provider_logs,
-                # Agent Memory (cross-agent search)
-                search_agent_memory,
-            ],
-        )
-
-        from agenticops.agents.preamble import invoke_with_retry
-        from agenticops.services.agent_log_service import track_agent
-        with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
-            result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
-            tracker.set_result(result)
-        return str(result)
+            from agenticops.agents.preamble import invoke_with_retry
+            from agenticops.services.agent_log_service import track_agent
+            with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
+                result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
+                tracker.set_result(result)
+            return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")
         return f"RCA agent error: {e}"
-    finally:
-        from agenticops.services.notification_service import set_batch_mode
-        set_batch_mode(False)

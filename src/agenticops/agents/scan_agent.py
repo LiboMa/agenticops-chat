@@ -191,15 +191,12 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
 
         from agenticops.agents.preamble import invoke_with_retry
         from agenticops.services.agent_log_service import track_agent
-        from agenticops.services.notification_service import set_batch_mode
+        from agenticops.services.notification_service import batch_mode
         prompt = f"Scan resources. Services: {services}. Regions: {regions}."
-        set_batch_mode(True)
-        try:
+        with batch_mode():
             with track_agent("scan", "scan_resources", f"services={services} regions={regions}", parent_agent="main") as tracker:
                 result = invoke_with_retry(agent, prompt)
                 tracker.set_result(result)
-        finally:
-            set_batch_mode(False)
         return str(result)
     except Exception as e:
         logger.exception("Scan agent failed")
