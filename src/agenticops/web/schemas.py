@@ -708,3 +708,21 @@ class PasswordChangeRequest(BaseModel):
     """Schema for password change."""
     old_password: str
     new_password: str
+
+
+class AuditLogResponse(BaseModel):
+    """Schema for audit log response."""
+    id: int
+    timestamp: datetime
+    user_id: Optional[int]
+    user_email: Optional[str]
+    action: str
+    entity_type: str
+    entity_id: str
+    entity_name: Optional[str]
+    details: dict
+    old_values: Optional[dict]
+    new_values: Optional[dict]
+    ip_address: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
