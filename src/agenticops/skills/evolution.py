@@ -42,7 +42,7 @@ def create_draft_skill(
     # Build SKILL.md with YAML frontmatter
     skill_md = f"""---
 name: {name}
-description: "{description}"
+description: {json.dumps(description)}
 ---
 
 {content}
@@ -85,7 +85,7 @@ def create_published_skill(
 
     skill_md = f"""---
 name: {name}
-description: "{description}"
+description: {json.dumps(description)}
 ---
 
 {content}

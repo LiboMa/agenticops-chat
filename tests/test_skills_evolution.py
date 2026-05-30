@@ -71,6 +71,22 @@ class TestCreateDraftSkill:
             path = create_draft_skill(name="dup", description="v2", content="second")
             assert "second" in (path / "SKILL.md").read_text(encoding="utf-8")
 
+    def test_create_draft_skill_handles_quotes_in_description(self, tmp_path):
+        import yaml
+        from unittest.mock import patch
+        from agenticops.skills.evolution import create_draft_skill
+
+        nasty = 'A "quoted" skill\nwith newline'
+        with patch("agenticops.skills.evolution.settings") as ms:
+            ms.skills_draft_dir = tmp_path
+            d = create_draft_skill(name="q-skill", description=nasty, content="body")
+        text = (d / "SKILL.md").read_text()
+        # Frontmatter must parse and round-trip the description faithfully
+        fm = text.split("---")[1]
+        loaded = yaml.safe_load(fm)
+        assert loaded["description"] == nasty
+        assert loaded["name"] == "q-skill"
+
 
 # ---------------------------------------------------------------------------
 # update_draft_skill
