@@ -1,6 +1,7 @@
 """Web Dashboard - React SPA + API backend."""
 
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Optional, List
 
@@ -638,11 +639,90 @@ class PasswordChangeRequest(BaseModel):
     old_password: str
     new_password: str
 
+# ---------------------------------------------------------------------------
+# Lifespan (replaces deprecated on_event("startup") / on_event("shutdown"))
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup and shutdown logic."""
+    # --- Startup ---
+    _setup_service_logging()
+    init_db()
+    _chat_sessions.start_cleanup()
+    _executor_service.start()
+
+    _startup_log = logging.getLogger(__name__)
+
+    # Start Feishu WebSocket long-connection if enabled
+    if settings.feishu_ws_enabled:
+        try:
+            from agenticops.im.feishu_ws import start_feishu_ws
+            svc = start_feishu_ws()
+            if svc:
+                _startup_log.info(
+                    "Feishu WS: started=%s thread_alive=%s app=%s",
+                    svc._started,
+                    svc._thread.is_alive() if svc._thread else False,
+                    svc._app_name,
+                )
+                print(f"  Feishu WS: started (app={svc._app_name})")
+            else:
+                _startup_log.error("Feishu WS: start_feishu_ws() returned None — check im-apps.yaml")
+                print("  Feishu WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
+            print(f"  Feishu WS: FAILED — {e}")
+    else:
+        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
+
+    # Start Slack Socket Mode if enabled
+    if settings.slack_ws_enabled:
+        try:
+            from agenticops.im.slack_ws import start_slack_ws
+            slack_svc = start_slack_ws()
+            if slack_svc:
+                _startup_log.info(
+                    "Slack WS: started=%s thread_alive=%s app=%s",
+                    slack_svc._started,
+                    slack_svc._thread.is_alive() if slack_svc._thread else False,
+                    slack_svc._app_name,
+                )
+                print(f"  Slack WS: started (app={slack_svc._app_name})")
+            else:
+                _startup_log.warning("Slack WS: start_slack_ws() returned None — check im-apps.yaml")
+                print("  Slack WS: FAILED — check im-apps.yaml credentials")
+        except Exception as e:
+            _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
+            print(f"  Slack WS: FAILED — {e}")
+    else:
+        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
+
+    yield
+
+    # --- Shutdown ---
+    _chat_sessions.stop_cleanup()
+    _executor_service.stop()
+
+    try:
+        from agenticops.im.feishu_ws import stop_feishu_ws
+        stop_feishu_ws()
+    except Exception:
+        pass
+
+    try:
+        from agenticops.im.slack_ws import stop_slack_ws
+        stop_slack_ws()
+    except Exception:
+        pass
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AgenticAIOps Dashboard",
     description="Agent-First Cloud Observability Platform",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Graph API router
@@ -712,80 +792,6 @@ def _setup_service_logging() -> None:
     access_handler.addFilter(_trace_filter)
     logging.getLogger("uvicorn.access").addHandler(access_handler)
 
-
-@app.on_event("startup")
-async def startup():
-    """Initialize on startup."""
-    _setup_service_logging()
-    init_db()
-    _chat_sessions.start_cleanup()
-    _executor_service.start()
-
-    # Start Feishu WebSocket long-connection if enabled
-    _startup_log = logging.getLogger(__name__)
-    if settings.feishu_ws_enabled:
-        try:
-            from agenticops.im.feishu_ws import start_feishu_ws
-            svc = start_feishu_ws()
-            if svc:
-                _startup_log.info(
-                    "Feishu WS: started=%s thread_alive=%s app=%s",
-                    svc._started,
-                    svc._thread.is_alive() if svc._thread else False,
-                    svc._app_name,
-                )
-                print(f"  Feishu WS: started (app={svc._app_name})")
-            else:
-                _startup_log.error("Feishu WS: start_feishu_ws() returned None — check im-apps.yaml")
-                print("  Feishu WS: FAILED — check im-apps.yaml credentials")
-        except Exception as e:
-            _startup_log.error("Feishu WS failed to start: %s", e, exc_info=True)
-            print(f"  Feishu WS: FAILED — {e}")
-    else:
-        _startup_log.info("Feishu WS: disabled (AIOPS_FEISHU_WS_ENABLED=false)")
-
-    # Start Slack Socket Mode if enabled
-    if settings.slack_ws_enabled:
-        try:
-            from agenticops.im.slack_ws import start_slack_ws
-            slack_svc = start_slack_ws()
-            if slack_svc:
-                _startup_log.info(
-                    "Slack WS: started=%s thread_alive=%s app=%s",
-                    slack_svc._started,
-                    slack_svc._thread.is_alive() if slack_svc._thread else False,
-                    slack_svc._app_name,
-                )
-                print(f"  Slack WS: started (app={slack_svc._app_name})")
-            else:
-                _startup_log.warning("Slack WS: start_slack_ws() returned None — check im-apps.yaml")
-                print("  Slack WS: FAILED — check im-apps.yaml credentials")
-        except Exception as e:
-            _startup_log.warning("Slack WS failed to start: %s", e, exc_info=True)
-            print(f"  Slack WS: FAILED — {e}")
-    else:
-        _startup_log.info("Slack WS: disabled (AIOPS_SLACK_WS_ENABLED=false)")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Cleanup on shutdown."""
-    _chat_sessions.stop_cleanup()
-    _executor_service.stop()
-
-    # Stop Feishu WebSocket service
-    try:
-        from agenticops.im.feishu_ws import stop_feishu_ws
-        stop_feishu_ws()
-    except Exception:
-        pass
-
-    # Stop Slack Socket Mode service
-    try:
-        from agenticops.im.slack_ws import stop_slack_ws
-        stop_slack_ws()
-    except Exception:
-        pass
 
 
 # ============================================================================
