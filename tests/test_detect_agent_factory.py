@@ -143,7 +143,10 @@ def test_build_detect_agent_for_account_uses_correct_model_config(
     mock_model_cls.assert_called_once()
     model_call_kwargs = mock_model_cls.call_args[1]
     assert model_call_kwargs["model_id"] == "global.anthropic.claude-sonnet-4-6"
-    assert model_call_kwargs["region_name"] == "us-east-1"
+    # Layer-1 Bedrock creds now flow via an explicit boto_session (two-layer
+    # credential model), NOT region_name — see get_bedrock_boto_session().
+    assert "boto_session" in model_call_kwargs
+    assert "region_name" not in model_call_kwargs
     assert model_call_kwargs["max_tokens"] == 16384
     assert "cache_config" in model_call_kwargs
 
