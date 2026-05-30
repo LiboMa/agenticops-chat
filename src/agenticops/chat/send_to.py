@@ -211,7 +211,11 @@ def _resolve_local_doc(doc_id: int) -> tuple[str, str]:
 
 
 def _resolve_issue(issue_id: int) -> tuple[str, str]:
-    """Resolve a HealthIssue reference."""
+    """Resolve a HealthIssue reference.
+
+    NOTE: base issue fields mirror agenticops.chat.reference_resolver.fetch_issue;
+    this path additionally joins RCAResult, so it keeps a local query.
+    """
     try:
         from agenticops.models import HealthIssue, RCAResult, get_db_session
 

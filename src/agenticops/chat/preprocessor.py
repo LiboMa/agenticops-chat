@@ -30,43 +30,39 @@ FILE_REF_PATTERN = re.compile(r"@((?:/|\.\.?/)[^\s]+)")
 
 def _resolve_issue_ref(issue_id: int) -> str | None:
     """Fetch HealthIssue by ID and return context block."""
-    from agenticops.models import HealthIssue, get_db_session
-
-    with get_db_session() as session:
-        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-        if not issue:
-            return None
-        return (
-            f'<referenced_issue id="{issue.id}">\n'
-            f"Title: {issue.title}\n"
-            f"Severity: {issue.severity}\n"
-            f"Status: {issue.status}\n"
-            f"Resource: {issue.resource_id}\n"
-            f"Source: {issue.source}\n"
-            f"Description: {issue.description}\n"
-            f"Detected at: {issue.detected_at}\n"
-            f"</referenced_issue>"
-        )
+    from agenticops.chat.reference_resolver import fetch_issue
+    d = fetch_issue(issue_id)
+    if not d:
+        return None
+    return (
+        f'<referenced_issue id="{d["id"]}">\n'
+        f"Title: {d['title']}\n"
+        f"Severity: {d['severity']}\n"
+        f"Status: {d['status']}\n"
+        f"Resource: {d['resource_id']}\n"
+        f"Source: {d['source']}\n"
+        f"Description: {d['description']}\n"
+        f"Detected at: {d['detected_at']}\n"
+        f"</referenced_issue>"
+    )
 
 
 def _resolve_resource_ref(resource_id: int) -> str | None:
     """Fetch CloudResource by int PK and return context block."""
-    from agenticops.models import CloudResource, get_db_session
-
-    with get_db_session() as session:
-        resource = session.query(CloudResource).filter_by(id=resource_id).first()
-        if not resource:
-            return None
-        return (
-            f'<referenced_resource id="{resource.id}">\n'
-            f"Resource ID: {resource.resource_id}\n"
-            f"Provider: {resource.provider}\n"
-            f"Type: {resource.resource_type}\n"
-            f"Name: {resource.name or 'unnamed'}\n"
-            f"Region: {resource.region}\n"
-            f"Status: {resource.status}\n"
-            f"</referenced_resource>"
-        )
+    from agenticops.chat.reference_resolver import fetch_resource
+    d = fetch_resource(resource_id)
+    if not d:
+        return None
+    return (
+        f'<referenced_resource id="{d["id"]}">\n'
+        f"Resource ID: {d['resource_id']}\n"
+        f"Provider: {d['provider']}\n"
+        f"Type: {d['resource_type']}\n"
+        f"Name: {d['name'] or 'unnamed'}\n"
+        f"Region: {d['region']}\n"
+        f"Status: {d['status']}\n"
+        f"</referenced_resource>"
+    )
 
 
 def resolve_references(text: str) -> tuple[str, list[str]]:

@@ -254,3 +254,25 @@ class TestPreprocessMessage:
         )
         assert "AAA" in result
         assert "BBB" in result
+
+
+# ── shared reference resolver ───────────────────────────────────
+
+def test_reference_resolver_module_exists_and_resolves(monkeypatch):
+    from agenticops.chat import reference_resolver as rr
+
+    class _Issue:
+        id = 7; title = "Disk full"; severity = "high"; status = "open"
+        resource_id = "i-1"; source = "cw"; description = "boom"; detected_at = "2026-01-01"
+
+    class _Q:
+        def filter_by(self, **kw): return self
+        def first(self): return _Issue()
+    class _DB:
+        def query(self, *a): return _Q()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(rr, "get_db_session", lambda: _DB())
+    out = rr.fetch_issue(7)
+    assert out is not None and out["id"] == 7 and out["title"] == "Disk full"
