@@ -242,3 +242,23 @@ class TestGetOrCreateMemoryInjection:
         assert "at: 2026-03-15 14:30:00" in agent.system_prompt
         assert "source: session sess-def-456" in agent.system_prompt
         assert "at: 2026-03-16 09:00:00" in agent.system_prompt
+
+
+# ---------------------------------------------------------------------------
+# F6/F7: Validation Guards for Memory Context
+# ---------------------------------------------------------------------------
+
+
+def test_non_string_memory_context_is_not_injected(monkeypatch):
+    from agenticops.web import session_manager as sm
+    # _validate_memory_context is the new guard
+    assert sm._validate_memory_context({"unexpected": "dict"}) is None
+    assert sm._validate_memory_context("  ") is None
+    assert sm._validate_memory_context("real context") == "real context"
+
+
+def test_oversized_memory_context_is_truncated():
+    from agenticops.web import session_manager as sm
+    big = "x" * 100_000
+    out = sm._validate_memory_context(big)
+    assert out is not None and len(out) <= sm._MAX_MEMORY_CONTEXT_CHARS

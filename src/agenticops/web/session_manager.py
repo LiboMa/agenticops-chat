@@ -18,6 +18,26 @@ logger = logging.getLogger(__name__)
 # Max characters per message before truncation
 _MAX_MSG_CHARS = 4000
 
+# Max characters of injected cross-session memory context
+_MAX_MEMORY_CONTEXT_CHARS = 8000
+
+
+def _validate_memory_context(ctx) -> str | None:
+    """Return a safe, non-empty, bounded memory-context string, or None.
+
+    Guards against non-string output and runaway length before the value is
+    concatenated into a system prompt.
+    """
+    if not isinstance(ctx, str):
+        return None
+    stripped = ctx.strip()
+    if not stripped:
+        return None
+    if len(stripped) > _MAX_MEMORY_CONTEXT_CHARS:
+        suffix = "\n... (memory context truncated)"
+        return stripped[:(_MAX_MEMORY_CONTEXT_CHARS - len(suffix))] + suffix
+    return stripped
+
 
 def _rebuild_tool_messages(tool_calls: list) -> list[dict]:
     """Rebuild DB tool_calls JSON into Strands SDK toolUse + toolResult message pairs.
@@ -477,17 +497,23 @@ class ChatSessionManager:
             try:
                 from agenticops.web.memory_service import MemoryService
 
-                memory_context = MemoryService().build_memory_context(
+                raw_context = MemoryService().build_memory_context(
                     session_id=session_id, initial_context=""
                 )
+                memory_context = _validate_memory_context(raw_context)
                 if memory_context:
                     agent.system_prompt = agent.system_prompt + "\n\n" + memory_context
                     logger.info(
                         "Injected memory context into system prompt for session %s",
                         session_id,
                     )
+                elif raw_context:
+                    logger.error(
+                        "Rejected malformed memory context (type=%s) for session %s",
+                        type(raw_context).__name__, session_id,
+                    )
             except Exception:
-                logger.warning(
+                logger.error(
                     "Failed to inject memory context for session %s, continuing without memory",
                     session_id,
                     exc_info=True,
