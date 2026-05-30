@@ -176,7 +176,34 @@ def build_system_prompt(
 
 _retry_logger = logging.getLogger(__name__)
 
-_TRANSIENT_MARKERS = ("timed out", "read timeout", "connection reset", "throttling")
+# botocore error codes considered transient (retry-worthy)
+_TRANSIENT_ERROR_CODES = frozenset({
+    "ThrottlingException", "Throttling", "TooManyRequestsException",
+    "ServiceUnavailable", "ServiceUnavailableException",
+    "RequestTimeout", "RequestTimeoutException", "ModelTimeoutException",
+    "InternalServerException", "ModelNotReadyException",
+})
+
+# substring fallback (lowercased) when no structured error code is present
+_TRANSIENT_MARKERS = (
+    "timed out", "timeout", "read timeout", "connection reset",
+    "throttl", "service unavailable", "too many requests",
+    "internal server error", "503", "429",
+)
+
+
+def _is_transient_error(e: Exception) -> bool:
+    """True if the exception looks retry-worthy (structured code first, then substring)."""
+    code = None
+    response = getattr(e, "response", None)
+    if isinstance(response, dict):
+        error_dict = response.get("Error")
+        if isinstance(error_dict, dict):
+            code = error_dict.get("Code")
+    if code and code in _TRANSIENT_ERROR_CODES:
+        return True
+    err_lower = str(e).lower()
+    return any(m in err_lower for m in _TRANSIENT_MARKERS)
 
 
 def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: float = 3.0):
@@ -198,8 +225,9 @@ def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: floa
         try:
             return agent(prompt)
         except Exception as e:
-            err_lower = str(e).lower()
-            is_transient = any(m in err_lower for m in _TRANSIENT_MARKERS)
+            is_transient = _is_transient_error(e)
+            if not is_transient:
+                _retry_logger.debug("Non-transient agent error (no retry): %s", e)
             if attempt < max_retries and is_transient:
                 _retry_logger.warning(
                     "Bedrock transient error (attempt %d/%d), retrying in %.0fs: %s",

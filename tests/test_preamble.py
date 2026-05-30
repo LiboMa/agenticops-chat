@@ -294,3 +294,26 @@ class TestDisplayCostTable:
                 result = usage.format_detailed()
                 assert "Estimated Cost:" in result
                 assert "$" in result
+
+
+# ── Preamble: transient error detection ──────────────────────────────
+
+class TestTransientDetection:
+    """Tests for _is_transient_error in preamble."""
+
+    def test_detects_throttling_exception_code(self):
+        from agenticops.agents.preamble import _is_transient_error
+        from botocore.exceptions import ClientError
+        err = ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow down"}}, "Converse")
+        assert _is_transient_error(err) is True
+
+    def test_detects_widened_substrings(self):
+        from agenticops.agents.preamble import _is_transient_error
+        for msg in ["Read timeout", "Service Unavailable", "request timeout", "throttled"]:
+            assert _is_transient_error(Exception(msg)) is True, msg
+        assert _is_transient_error(Exception("HTTP 503")) is True
+        assert _is_transient_error(Exception("Rate limited: 429")) is True
+
+    def test_non_transient_returns_false(self):
+        from agenticops.agents.preamble import _is_transient_error
+        assert _is_transient_error(Exception("ValidationException: bad input")) is False
