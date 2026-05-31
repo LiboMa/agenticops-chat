@@ -204,21 +204,52 @@ def classify_kubectl_command(cmd: str) -> str:
 
 # ── SKILL.md Body Scanning ───────────────────────────────────────────
 
+# Promotion-gate-only destructive patterns. Broader than the shared runtime
+# SHELL_BLOCKED_PATTERNS (which the spec defers changing) — this layer exists
+# solely to keep a dangerous *published* skill out of the catalog. Runtime
+# execution still re-classifies per command via classify_shell_command, so this
+# is defense-in-depth, not the sole gate.
+_SKILL_DESTRUCTIVE_PATTERNS = [
+    r"\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\$home|\*)",  # rm -rf on /, ~, $HOME, * (any abs/home/glob target)
+    r"\brm\s+-[a-z]*f?r[a-z]*\s+(/|~|\$home|\*)",  # flag-order variant (-fr)
+    r"\bdd\s+.*\bof=/dev/",                          # dd onto a device
+    r">\s*/dev/(sd|nvme|hd|disk)",                  # redirect onto a block device
+    r"\bmkfs\b", r"\bfdisk\b.*-",                    # filesystem/partition ops
+    r"\bchmod\s+-[a-z]*r[a-z]*\s+777\s+/",         # recursive 777 on /
+    r"\bchown\s+-[a-z]*r[a-z]*\s+.*\s+/\s*$",      # recursive chown of /
+    r":\(\)\s*\{\s*:\|:&\s*\}\s*;:",                 # fork bomb
+    r"(curl|wget)\b.*\|\s*(bash|sh)\b",             # pipe-to-shell
+    r"\b(shutdown|reboot|poweroff|halt)\b",
+]
+
 
 def scan_skill_safety(body: str) -> dict:
-    """Scan a SKILL.md body's fenced bash blocks for blocked-tier commands.
+    """Scan a SKILL.md body's fenced command blocks for destructive commands.
 
     Returns {"safe": bool, "findings": [str]}. A skill is unsafe if any command
-    line in a ```bash/```sh/```shell fence classifies as 'blocked'.
+    line classifies as 'blocked' by the shared classifier OR matches a
+    promotion-gate destructive pattern (broader, catches ``rm -rf /etc`` etc.).
+    Scans ```bash/sh/shell``` fences plus untagged ``` fences (commands are
+    often shown without a language tag).
     """
     findings: list[str] = []
-    for m in re.finditer(r"```(?:bash|sh|shell)\n(.*?)```", body, re.DOTALL):
+    # bash/sh/shell-tagged fences AND bare ``` fences (no language tag)
+    for m in re.finditer(r"```(?:bash|sh|shell)?\n(.*?)```", body, re.DOTALL):
         for line in m.group(1).splitlines():
             cmd = line.strip()
             if not cmd or cmd.startswith("#"):
                 continue
             cmd = cmd[1:].strip() if cmd.startswith("$") else cmd
             if not cmd:
+                continue
+            low = cmd.lower()
+            matched = False
+            for pat in _SKILL_DESTRUCTIVE_PATTERNS:
+                if re.search(pat, low):
+                    findings.append(f"destructive command: {cmd[:80]}")
+                    matched = True
+                    break
+            if matched:
                 continue
             try:
                 tier = classify_shell_command(cmd)

@@ -62,6 +62,14 @@ class TestNormalizeSkillFrontmatter:
         assert out["status"] == "stale"
         assert out["skill_version"] == "1.3"
 
+    def test_non_dict_frontmatter_coerced(self):
+        """Malformed (non-mapping) frontmatter must not raise — coerce to defaults."""
+        from agenticops.skills.loader import normalize_skill_frontmatter
+        for bad in ([1, 2, 3], "scalar", 42, None):
+            out = normalize_skill_frontmatter(bad)
+            assert out["created_by"] == "user"   # pinned default
+            assert out["status"] == "active"
+
 
 # ── parse_frontmatter: YAML error ───────────────────────────────────
 

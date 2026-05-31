@@ -115,9 +115,11 @@ def normalize_skill_frontmatter(fm: dict) -> dict:
     """Backfill cycle③ provenance fields (non-destructive copy).
 
     Human-authored skills default created_by='user' (pinned — Curator never
-    auto-archives them). Existing values are preserved.
+    auto-archives them). Existing values are preserved. Non-dict frontmatter
+    (malformed/scalar/list YAML) is coerced to an empty dict so callers always
+    get a well-formed mapping instead of a raw TypeError/ValueError.
     """
-    out = dict(fm)
+    out = dict(fm) if isinstance(fm, dict) else {}
     out.setdefault("created_by", "user")
     out.setdefault("status", "active")
     out.setdefault("skill_version", "1.0")
