@@ -448,6 +448,35 @@ class TestFrontmatterNormalize:
         assert out["status"] == "stale"
 
 
+# ── Reactivate-on-use & restore ─────────────────────────────────────
+
+
+class TestReactivateOnUse:
+    def test_touch_last_used_reactivates_stale(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import (
+            touch_last_used, parse_frontmatter, _agent_dir, _serialize_frontmatter)
+        fm = {"agent": "detect", "type": "feedback", "status": "stale", "confidence": 3,
+              "source": "auto", "created_by": "auto", "created_at": "2026-01-01",
+              "last_confirmed": "2026-01-01", "last_used": "2026-01-01"}
+        fp = _agent_dir("detect") / "s.md"
+        fp.write_text(_serialize_frontmatter(fm, "body"))
+        touch_last_used("detect", "s.md")
+        out, _ = parse_frontmatter(fp.read_text())
+        assert out["status"] == "active"          # reactivated
+        assert out["last_used"] != "2026-01-01"   # touched
+
+    def test_restore_brings_back_archived(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import restore_memory, _agent_dir, _serialize_frontmatter
+        arch = _agent_dir("detect") / ".archive"
+        arch.mkdir()
+        fm = {"agent": "detect", "status": "archived", "confidence": 3, "created_by": "auto",
+              "created_at": "2026-01-01", "last_used": "2026-01-01"}
+        (arch / "a.md").write_text(_serialize_frontmatter(fm, "body"))
+        assert restore_memory("detect", "a.md") is True
+        assert (_agent_dir("detect") / "a.md").exists()
+        assert not (arch / "a.md").exists()
+
+
 # ── Atomic and Provenance ───────────────────────────────────────────
 
 

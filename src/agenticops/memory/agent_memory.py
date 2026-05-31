@@ -170,6 +170,13 @@ def load_agent_memory(agent_name: str, max_entries: int = 10) -> str:
     memories.sort(key=lambda m: m["confidence"], reverse=True)
     memories = memories[:max_entries]
 
+    # Reactivate-on-use: touch the memories we actually inject
+    for m in memories:
+        try:
+            touch_last_used(m["frontmatter"].get("agent", agent_name), m["filename"])
+        except Exception:
+            logger.debug("touch_last_used failed for %s", m.get("filename"), exc_info=True)
+
     # 4. Format
     lines = [MEMORY_MARKER_START]
     for m in memories:
@@ -272,6 +279,35 @@ def archive_memory(agent_name: str, filename: str) -> bool:
     _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
     update_memory_index(agent_name)
     logger.info("Archived agent memory: %s/%s", agent_name, filename)
+    return True
+
+
+def touch_last_used(agent_name: str, filename: str) -> None:
+    """Mark a memory as used today; reactivate it if it was stale (never un-archive here)."""
+    filepath = _agent_dir(agent_name) / filename
+    if not filepath.exists():
+        return
+    fm, body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
+    fm = normalize_frontmatter(fm)
+    fm["last_used"] = str(date.today())
+    if fm.get("status") == "stale":
+        fm["status"] = "active"
+    _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
+
+
+def restore_memory(agent_name: str, filename: str) -> bool:
+    """Restore an archived memory back to active. Returns True if found."""
+    archive_path = _agent_dir(agent_name) / ".archive" / filename
+    if not archive_path.exists():
+        return False
+    fm, body = parse_frontmatter(archive_path.read_text(encoding="utf-8"))
+    fm = normalize_frontmatter(fm)
+    fm["status"] = "active"
+    fm["last_used"] = str(date.today())
+    dest = _agent_dir(agent_name) / filename
+    _atomic_write_text(dest, _serialize_frontmatter(fm, body))
+    archive_path.unlink()
+    update_memory_index(agent_name)
     return True
 
 
