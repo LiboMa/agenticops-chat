@@ -388,6 +388,28 @@ class Settings(BaseSettings):
         "Set AIOPS_FILE_TOOLS_ADMIN_MODE=false to lock down admin paths.",
     )
 
+    # ── Agent Memory (cycle② self-optimizing) ──────────────────────
+    memory_max_active: int = Field(
+        default=15,
+        description="Max active memories per agent before size-cap forces merge (AIOPS_MEMORY_MAX_ACTIVE)",
+    )
+    memory_stale_days: int = Field(
+        default=30,
+        description="Days since last_used before a memory becomes 'stale' (not injected) (AIOPS_MEMORY_STALE_DAYS)",
+    )
+    memory_archive_days: int = Field(
+        default=60,
+        description="Additional days after stale before a memory is archived (AIOPS_MEMORY_ARCHIVE_DAYS)",
+    )
+    memory_autonomous_write: bool = Field(
+        default=True,
+        description="Allow agents to self-create/patch memories via memory_manage (AIOPS_MEMORY_AUTONOMOUS_WRITE)",
+    )
+    memory_curator_enabled: bool = Field(
+        default=True,
+        description="Enable the background Curator lifecycle (stale/archive/reactivate) (AIOPS_MEMORY_CURATOR_ENABLED)",
+    )
+
     # API Authentication
     api_auth_enabled: bool = Field(
         default=False,
