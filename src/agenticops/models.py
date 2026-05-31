@@ -793,6 +793,7 @@ class SessionSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+# DEPRECATED (frozen cycle② 2026-05-31): kept for existing data/endpoints; no new writes.
 class AgentMemoryFact(Base):
     """跨会话结构化事实记忆（key-value 形式）。"""
     __tablename__ = "agent_memory_facts"
@@ -811,6 +812,7 @@ class AgentMemoryFact(Base):
     )
 
 
+# DEPRECATED (frozen cycle② 2026-05-31): kept for existing data/endpoints; no new writes.
 class AgentMemory(Base):
     """跨会话向量化经验记忆。"""
     __tablename__ = "agent_memories"

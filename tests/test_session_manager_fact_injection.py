@@ -1,21 +1,12 @@
-"""Unit tests for memory injection in ChatSessionManager.get_or_create().
+"""Unit tests for cross-session memory helpers in ChatSessionManager.
 
-Validates that cross-session memory (facts + experiences) from
-MemoryService.build_memory_context() is injected into the Agent's system
-prompt during session creation, and that failures are handled gracefully
-without blocking agent creation.
-
-**Validates: Requirements 6.4, 7.3, 7.4**
+Covers the _format_facts_for_prompt helper, the _validate_memory_context
+guard, and (cycle② 2026-05-31) the freeze of the dead DB cross-session
+memory injection in get_or_create.
 """
 
-import threading
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 from agenticops.models import AgentMemoryFact
-from agenticops.web.session_manager import ChatSessionManager, _format_facts_for_prompt
+from agenticops.web.session_manager import _format_facts_for_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -76,177 +67,28 @@ class TestFormatFactsForPrompt:
 
 
 # ---------------------------------------------------------------------------
-# ChatSessionManager.get_or_create — memory injection via build_memory_context
+# cycle② (2026-05-31): DB cross-session memory injection frozen.
+#
+# The former TestGetOrCreateMemoryInjection class exercised
+# MemoryService.build_memory_context being injected into the agent system
+# prompt during get_or_create. That DB path is now removed (dead code: the
+# builder was always called with an empty query). The replacement guard test
+# (test_get_or_create_no_longer_injects_db_memory) asserts the path is gone.
 # ---------------------------------------------------------------------------
-
-
-class TestGetOrCreateMemoryInjection:
-    """Tests for memory injection during agent creation using build_memory_context."""
-
-    def _make_manager(self):
-        """Create a ChatSessionManager without starting cleanup."""
-        mgr = ChatSessionManager.__new__(ChatSessionManager)
-        mgr._agents = {}
-        mgr._last_activity = {}
-        mgr._lock = threading.Lock()
-        mgr._session_locks = {}
-        mgr._ttl = timedelta(minutes=30)
-        mgr._cleanup_thread = None
-        mgr._shutdown = False
-        return mgr
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_memory_context_injected_into_system_prompt(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-
-        mock_build_ctx.return_value = (
-            "[Cross-session memory - Known facts]\n"
-            "- user_preference/preferred_region: us-west-2 (confidence: 0.95)\n\n"
-            "[Cross-session memory - Related experiences]\n"
-            "- [problem] EC2 instance unreachable (source: session abc-123, at: 2026-01-15 10:30:00)"
-        )
-
-        mgr = self._make_manager()
-        agent = mgr.get_or_create("test-session-1")
-
-        # build_memory_context called with session_id and initial_context
-        mock_build_ctx.assert_called_once_with(
-            session_id="test-session-1", initial_context=""
-        )
-        # Memory context appended to system prompt
-        assert "[Cross-session memory - Known facts]" in agent.system_prompt
-        assert "[Cross-session memory - Related experiences]" in agent.system_prompt
-        assert "user_preference/preferred_region: us-west-2" in agent.system_prompt
-        assert "EC2 instance unreachable" in agent.system_prompt
-        # Original prompt is preserved
-        assert agent.system_prompt.startswith("You are AgenticOps.")
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_no_injection_when_empty_context(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-
-        mock_build_ctx.return_value = ""
-
-        mgr = self._make_manager()
-        agent = mgr.get_or_create("test-session-2")
-
-        # System prompt should remain unchanged
-        assert agent.system_prompt == "You are AgenticOps."
-        assert "[Cross-session memory" not in agent.system_prompt
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_agent_created_even_when_memory_service_fails(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-
-        mock_build_ctx.side_effect = RuntimeError("DB connection failed")
-
-        mgr = self._make_manager()
-        agent = mgr.get_or_create("test-session-3")
-
-        # Agent should still be created and cached
-        assert agent is mock_agent
-        assert "test-session-3" in mgr._agents
-        # System prompt unchanged on failure
-        assert agent.system_prompt == "You are AgenticOps."
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_cached_agent_skips_memory_injection(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-        mock_build_ctx.return_value = ""
-
-        mgr = self._make_manager()
-
-        # First call creates the agent
-        mgr.get_or_create("test-session-4")
-        assert mock_create_agent.call_count == 1
-
-        # Second call returns cached agent — no new agent creation
-        mgr.get_or_create("test-session-4")
-        assert mock_create_agent.call_count == 1
-        # build_memory_context should only be called once (during creation)
-        assert mock_build_ctx.call_count == 1
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_facts_only_context_injected(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        """When build_memory_context returns only facts (no experiences), it still injects."""
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-
-        mock_build_ctx.return_value = (
-            "[Cross-session memory - Known facts]\n"
-            "- user_preference/preferred_region: us-west-2 (confidence: 0.95)"
-        )
-
-        mgr = self._make_manager()
-        agent = mgr.get_or_create("test-session-5")
-
-        assert "[Cross-session memory - Known facts]" in agent.system_prompt
-        assert "user_preference/preferred_region: us-west-2" in agent.system_prompt
-
-    @patch("agenticops.web.session_manager._load_history_messages", return_value=[])
-    @patch("agenticops.web.session_manager.create_main_agent")
-    @patch("agenticops.web.memory_service.MemoryService.build_memory_context")
-    def test_experience_context_includes_session_id_and_timestamp(
-        self, mock_build_ctx, mock_create_agent, mock_load_history
-    ):
-        """Validates Requirement 7.4: injected format includes source session_id and created_at."""
-        mock_agent = MagicMock()
-        mock_agent.system_prompt = "You are AgenticOps."
-        mock_agent.messages = []
-        mock_create_agent.return_value = mock_agent
-
-        mock_build_ctx.return_value = (
-            "[Cross-session memory - Related experiences]\n"
-            "- [problem] EC2 unreachable (source: session sess-abc-123, at: 2026-03-15 14:30:00)\n"
-            "- [solution] Restart instance (source: session sess-def-456, at: 2026-03-16 09:00:00)"
-        )
-
-        mgr = self._make_manager()
-        agent = mgr.get_or_create("test-session-6")
-
-        assert "source: session sess-abc-123" in agent.system_prompt
-        assert "at: 2026-03-15 14:30:00" in agent.system_prompt
-        assert "source: session sess-def-456" in agent.system_prompt
-        assert "at: 2026-03-16 09:00:00" in agent.system_prompt
 
 
 # ---------------------------------------------------------------------------
 # F6/F7: Validation Guards for Memory Context
 # ---------------------------------------------------------------------------
+
+
+def test_get_or_create_no_longer_injects_db_memory():
+    """get_or_create must NOT reference build_memory_context (DB path frozen)."""
+    import inspect
+    from agenticops.web.session_manager import ChatSessionManager
+    src = inspect.getsource(ChatSessionManager.get_or_create)
+    assert "build_memory_context" not in src
+    assert "MemoryService" not in src
 
 
 def test_non_string_memory_context_is_not_injected(monkeypatch):

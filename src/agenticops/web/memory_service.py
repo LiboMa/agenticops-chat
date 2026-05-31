@@ -3,6 +3,11 @@
 Uses a lightweight LLM (Haiku) to extract structured facts from conversation
 history and stores them in the agent_memory_facts table with upsert semantics.
 Also manages vectorized experience memories using Titan V2 embeddings.
+
+DEPRECATED (frozen cycle② 2026-05-31): the DB cross-session memory (facts +
+vector experiences) is no longer injected into agents. Kept read-only for
+existing API endpoints; no new extraction is triggered. See
+docs/superpowers/specs/2026-05-31-memory-system-quantum-upgrade-design.md §7.
 """
 
 import json

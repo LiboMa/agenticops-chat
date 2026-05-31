@@ -509,31 +509,11 @@ class ChatSessionManager:
                 agent.messages.extend(history)
                 logger.info("Restored %d messages for session %s", len(history), session_id)
 
-            # Inject cross-session memory (facts + experiences) into system prompt
-            try:
-                from agenticops.web.memory_service import MemoryService
-
-                raw_context = MemoryService().build_memory_context(
-                    session_id=session_id, initial_context=""
-                )
-                memory_context = _validate_memory_context(raw_context)
-                if memory_context:
-                    agent.system_prompt = agent.system_prompt + "\n\n" + memory_context
-                    logger.info(
-                        "Injected memory context into system prompt for session %s",
-                        session_id,
-                    )
-                elif raw_context:
-                    logger.error(
-                        "Rejected malformed memory context (type=%s) for session %s",
-                        type(raw_context).__name__, session_id,
-                    )
-            except Exception:
-                logger.error(
-                    "Failed to inject memory context for session %s, continuing without memory",
-                    session_id,
-                    exc_info=True,
-                )
+            # NOTE (cycle② 2026-05-31): DB cross-session memory injection removed.
+            # It was a dead path (the builder was called with an empty query so the
+            # context was always empty) and is now frozen. Agent behavioral memory
+            # is injected at build time via build_system_prompt (file-based
+            # agent-memory/).
 
             with self._lock:
                 self._agents[session_id] = agent
