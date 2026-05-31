@@ -324,6 +324,25 @@ def touch_last_used(agent_name: str, filename: str) -> None:
     _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
 
 
+def patch_memory(agent_name: str, filename: str, *, append_body: str = "",
+                 new_confidence: int | None = None) -> bool:
+    """Token-cheap incremental update of an existing memory. Returns True if found."""
+    filepath = _agent_dir(agent_name) / filename
+    if not filepath.exists():
+        return False
+    fm, body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
+    fm = normalize_frontmatter(fm)
+    if append_body:
+        body = body + append_body
+    if new_confidence is not None:
+        fm["confidence"] = max(1, min(5, new_confidence))
+    fm["last_confirmed"] = str(date.today())
+    fm["last_used"] = str(date.today())
+    _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
+    update_memory_index(agent_name)
+    return True
+
+
 def restore_memory(agent_name: str, filename: str) -> bool:
     """Restore an archived memory back to active. Returns True if found."""
     archive_path = _agent_dir(agent_name) / ".archive" / filename

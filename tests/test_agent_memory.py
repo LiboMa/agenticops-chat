@@ -521,6 +521,19 @@ class TestSizeCap:
         assert "updated" in fp.read_text()
 
 
+# ── patch_memory ────────────────────────────────────────────────────
+
+
+class TestPatchMemory:
+    def test_patch_appends_and_touches(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, patch_memory, parse_frontmatter, _agent_dir
+        save_memory_file(agent_name="detect", filename="p.md", body="original")
+        ok = patch_memory("detect", "p.md", append_body="\nADDENDUM")
+        assert ok is True
+        fm, body = parse_frontmatter((_agent_dir("detect") / "p.md").read_text())
+        assert "original" in body and "ADDENDUM" in body
+
+
 # ── Merge into umbrella ─────────────────────────────────────────────
 
 
