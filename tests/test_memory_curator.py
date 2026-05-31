@@ -71,3 +71,27 @@ def test_maybe_run_curator_respects_disabled(monkeypatch, tmp_memory_dir):
     monkeypatch.setattr("agenticops.config.settings.memory_curator_enabled", True, raising=False)
     curator.maybe_run_curator()
     assert calls["n"] == 1
+
+
+def test_backfill_adds_missing_fields(tmp_memory_dir):
+    from agenticops.memory.migrate_backfill import backfill_frontmatter
+    from agenticops.memory.agent_memory import parse_frontmatter, _serialize_frontmatter, _agent_dir
+    # legacy file with no last_used / created_by
+    fm = {"agent": "detect", "type": "feedback", "status": "active", "confidence": 4,
+          "source": "user", "created_at": "2026-01-01", "last_confirmed": "2026-02-01"}
+    (_agent_dir("detect") / "legacy.md").write_text(_serialize_frontmatter(fm, "legacy body"))
+    n = backfill_frontmatter()
+    assert n >= 1
+    out, _ = parse_frontmatter((_agent_dir("detect") / "legacy.md").read_text())
+    assert out["last_used"] == "2026-02-01"   # backfilled from last_confirmed
+    assert out["created_by"] == "user"
+
+
+def test_backfill_is_idempotent(tmp_memory_dir):
+    from agenticops.memory.migrate_backfill import backfill_frontmatter
+    from agenticops.memory.agent_memory import save_memory_file
+    save_memory_file(agent_name="detect", filename="already.md", body="b")  # has all fields
+    n1 = backfill_frontmatter()
+    n2 = backfill_frontmatter()
+    # second run changes nothing (already normalized)
+    assert n2 == 0

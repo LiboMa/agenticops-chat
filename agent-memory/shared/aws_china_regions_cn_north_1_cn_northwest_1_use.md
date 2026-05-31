@@ -2,7 +2,9 @@
 agent: shared
 confidence: 5
 created_at: '2026-03-29'
+created_by: user
 last_confirmed: '2026-03-29'
+last_used: '2026-03-29'
 source: chat
 status: active
 type: pattern
