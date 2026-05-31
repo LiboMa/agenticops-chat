@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/pipeline/sop_identifier.py
-# hypothesis_version: 6.151.9
-
-[0.5, 1.0, 10.0, 'content', 'file', 'issue_pattern', 'metadata', 'resource_type', 'score', 'symptom']

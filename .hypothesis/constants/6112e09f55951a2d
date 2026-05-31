@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/pipeline/sop_upgrader.py
-# hypothesis_version: 6.151.9
-
-[4000, '%Y-%m-%d', ', ', '.,;:!?()[]{}"\'', 'LLM call failed: %s', 'Unknown', 'Untitled SOP', '```', 'and', 'anthropic_version', 'application/json', 'bedrock-2023-05-31', 'bedrock-runtime', 'body', 'content', 'for', 'issue_pattern', 'max_tokens', 'medium', 'messages', 'resource_type', 'role', 'root_cause', 'severity', 'text', 'that', 'the', 'this', 'title', 'unknown issue', 'user', 'was', 'with']

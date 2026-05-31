@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/detect/rules.py
-# hypothesis_version: 6.151.9
-
-[0.0, 10.0, 70.0, 80.0, 90.0, 100.0, 10000.0, 1073741824.0, ' bytes', '!=', '%', '<', '<=', '==', '>', '>=', 'CPUUtilization', 'DatabaseConnections', 'Duration', 'Errors', 'FreeStorageSpace', 'Throttles', 'critical', 'ec2_elevated_cpu', 'ec2_high_cpu', 'high', 'lambda_high_duration', 'lambda_high_errors', 'lambda_throttles', 'low', 'medium', 'metric_name', 'ms', 'rds_high_connections', 'rds_high_cpu', 'rds_low_storage', 'sqs_high_queue_depth']

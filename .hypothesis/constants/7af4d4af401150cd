@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/skills/execution.py
-# hypothesis_version: 6.151.9
-
-[4000, '(no output)', '--name', '--region', '-o', 'AWS-RunShellScript', 'Cancelled', 'Command', 'CommandId', 'ConnectTimeout=10', 'Failed', 'KUBECONFIG', 'StandardErrorContent', 'Status', 'Success', 'TimedOut', 'aws', 'blocked', 'commands', 'default', 'eks', 'ssh', 'ssm', 'unknown', 'update-kubeconfig', 'us-east-1', 'write']

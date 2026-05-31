@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/__init__.py
-# hypothesis_version: 6.151.9
-
-['analyze_vpc_topology', 'approve_fix_plan', 'assume_role', 'create_health_issue', 'describe_ec2', 'describe_ecs', 'describe_eks', 'describe_rds', 'describe_subnets', 'describe_vpcs', 'distill_case_study', 'find_network_path', 'get_active_account', 'get_alarm_history', 'get_enabled_accounts', 'get_fix_plan', 'get_health_issue', 'get_metrics', 'list_alarms', 'list_dynamodb', 'list_health_issues', 'list_s3_buckets', 'list_sns', 'list_sqs', 'query_impact_radius', 'query_logs', 'query_reachability', 'read_kb_sops', 'run_aws_cli', 'run_rule_evaluation', 'run_zscore_detection', 'save_fix_plan', 'save_rca_result', 'save_resources', 'search_similar_cases', 'search_sops', 'web_fetch', 'write_kb_case', 'write_kb_sop']

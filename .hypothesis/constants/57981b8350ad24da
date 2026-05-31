@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/storage/backend.py
-# hypothesis_version: 6.151.9
-
-[3600, '/', 'Body', 'Bucket', 'ContentType', 'Key', 'get_object', 'reports/', 's3', 'us-east-1']

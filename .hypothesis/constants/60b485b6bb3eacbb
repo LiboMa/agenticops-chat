@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/kb/case_study.py
-# hypothesis_version: 6.151.9
-
-[0.5, '"', '## ', '## Lessons Learned', '## Prevention', '## Resolution', '## Root Cause', '## Symptoms', '\'"', '*', ',', ', ', '---', ':', '[', ']', 'case_id', 'date', 'efficiency_score', 'embedding_inputs', 'false', 'immediate action', 'lessons learned', 'lessons_learned', 'long-term fix', 'medium', 'meta', 'pending_review', 'prevention', 'region', 'rejected', 'resolution', 'resource_type', 'reuse_count', 'root cause', 'severity', 'status', 'symptoms', 'tags', 'title', 'true', 'verification', 'verified', 'what failed', 'why missed']

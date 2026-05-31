@@ -596,3 +596,18 @@ Report，Researcher可尽可能的自主式和Orcheatracher讨论，看看有哪
 * 未来两件事 好好搞Prompt （Logic)
 
 * 好好丰富Skills (Abilities)
+
+### 2026.5.25 - self-improving skills, tags, schedule jobs/one-time task
+
+* 完成self-skills-creation 的内容，后续同时也可以自动更新skill
+* 增加Agents Memory 机制
+* 增加 Chat 中的 Operation
+* [TODO] - 与Quick Desktop 相连 
+* [TDDO] - 与Devops/Security Agents 相连，如果可以
+
+
+### 2026.5.29 
+我现在要对现在近个分析以及Agentic
+Agents的架构，提示词，WebUI/CLI/Chat功能，做作一个全面的检查，请启动一个新的分支Agenticops-alayws-memrized
+,修复潜在的Bug和提高优化点，之后，我想对所有Agents的记忆功能、永续记忆、增强记忆、自主优化记忆，做一个质的升级和全面的优化，同时在管理以及创建Skills层
+面，要做得更加的灵活和自主，就如Hermes[https://github.com/NousResearch/hermes-agent.git]一样

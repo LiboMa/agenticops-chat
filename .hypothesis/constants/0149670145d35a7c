@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/integrations/alert_processor.py
-# hypothesis_version: 6.151.9
-
-[500, 'aws', 'closed', 'completed', 'created', 'critical', 'deduplicated', 'description', 'detection', 'error', 'fingerprint', 'fix_executed', 'graph_context', 'high', 'im_origin', 'investigating', 'low', 'medium', 'merged_alerts', 'merged_count', 'open', 'processed', 'provider', 'received', 'resolved', 'severity', 'source', 'tags', 'timestamp', 'title', 'unknown', 'webhook_source']

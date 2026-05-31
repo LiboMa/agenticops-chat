@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/graph/types.py
-# hypothesis_version: 6.151.9
-
-['associated', 'attached_to', 'connects_to', 'contains', 'ec2_instance', 'ecs_cluster', 'ecs_service', 'ecs_task', 'eks_cluster', 'eks_node', 'eks_pod', 'eks_service', 'elasticache_cluster', 'endpoint', 'error', 'healthy', 'hosted_in', 'igw', 'lambda_function', 'load_balancer', 'member_of', 'nat', 'peering', 'peers_with', 'rds_instance', 'references', 'route_table', 'routes_to', 'runs_on', 'security_group', 'serves', 'subnet', 'target_group', 'targets', 'tgw', 'tgw_attachment', 'topologyEdge', 'unknown', 'vpc', 'warning', 'x', 'y']

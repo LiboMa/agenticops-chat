@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/skills/__init__.py
-# hypothesis_version: 6.151.9
-
-['activate_skill', 'auto_improve_skill', 'create_draft_skill', 'discover_skills', 'list_draft_skills', 'list_skills', 'promote_skill', 'read_skill_reference', 'reject_draft_skill', 'resolve_skill_tools', 'review_draft_skill', 'run_kubectl', 'run_on_host', 'search_skills', 'update_draft_skill']

@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/services/notification_service.py
-# hypothesis_version: 6.151.9
-
-['#(\\d+)', 'Issue #(\\d+)', '_schedule_running', 'body', 'channels', 'chat_id', 'completed', 'critical', 'event_type', 'execution_result', 'failed', 'fix_approved', 'fix_planned', 'formats', 'high', 'im_origin', 'issue_created', 'low', 'medium', 'notification', 'notification_sent', 'pipeline_summary', 'platform', 'rca_completed', 'report_saved', 'report_types', 'schedule_result', 'sent', 'severity', 'sns-report', 'subject', 'succeeded']

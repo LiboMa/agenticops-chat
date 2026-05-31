@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/graph/api.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.8, 1.0, 200, 404, 500, '%Y-%m-%d %H:%M:%S', ',', '/api/graph', '/diff', '/multi-region', '/region', '/search', '/stats', '/vpc/{vpc_id}', '/vpc/{vpc_id}/path', '/vpc/{vpc_id}/spof', 'Filter by node type', 'Filter by region', 'Graph diff failed', 'Graph search failed', 'Graph stats failed', 'Neighborhood depth', 'Node not found', 'Path finding failed', 'aws', 'cutoff', 'edge_count', 'error', 'graph', 'graph_node_ttl_hours', 'graph_sync_enabled', 'id', 'last_sync', 'limit', 'multi_region', 'node_count', 'nodes_added', 'nodes_removed', 'nodes_updated', 'region', 'scope', 'snapshot_at', 'stale_node_count', 'type_counts', 'us-east-1', 'vpc']

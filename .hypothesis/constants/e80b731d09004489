@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/providers/gcp.py
-# hypothesis_version: 6.151.9
-
-['\n... (truncated)', '$(', '&&', '(no output)', '--format', '--project', ';', '<', '>', '[^a-zA-Z0-9_]', '_', '_credential', '`', 'gcloud ', 'gcp', 'project_id', 'service_account_key', '|']

@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/kb/vector_store.py
-# hypothesis_version: 6.151.9
-
-[1024, '/', 'Body', 'application/json', 'case_id', 'field_name', 'metadata', 'rds', 'records', 'resource_type', 's3', 's3_key', 'sqlite:///', 'symptom', 'us-east-1', 'vectors/']

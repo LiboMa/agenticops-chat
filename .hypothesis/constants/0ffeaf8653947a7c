@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/notification_tools.py
-# hypothesis_version: 6.151.9
-
-[168, 500, 3600, 4000, 8000, '%H%M%S', '%Y%m%d-%H%M%S', '%Y-%m-%d', ',', '-_', '...', '</body>', '_', 'channel', 'channel_type', 'channels', 'channels_failed', 'channels_sent', 'channels_targeted', 'chat_id', 'error', 'failed', 'file', 'format', 'formats', 'formats_generated', 'formats_uploaded', 'html', 'im_aliases', 'is_enabled', 'issue', 'markdown', 'message', 'name', 'pdf', 'platform', 'preferred_format', 'presigned_url', 'replace', 'report', 'report_id', 'report_type', 'results', 'schedule', 'sent', 'ses', 'severity_filter', 'skipped', 'sns-report', 'status', 'success', 'text', 'text/markdown', 'utf-8']

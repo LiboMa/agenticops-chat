@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/chat/file_reader.py
-# hypothesis_version: 6.151.9
-
-[512, 1024, '.bmp', '.cfg', '.conf', '.csv', '.doc', '.docx', '.gif', '.hcl', '.html', '.ini', '.jpeg', '.jpg', '.js', '.json', '.log', '.md', '.pdf', '.png', '.py', '.sh', '.tf', '.toml', '.ts', '.txt', '.webp', '.xls', '.xlsx', '.xml', '.yaml', '.yml', 'csv', 'doc', 'docx', 'gif', 'html', 'jpeg', 'md', 'pdf', 'png', 'replace', 'txt', 'utf-8', 'webp', 'xls', 'xlsx']

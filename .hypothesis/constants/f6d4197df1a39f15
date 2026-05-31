@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/detect/detector.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.02, 0.9, 0.95, 0.99, 1.5, 2.0, 3.0, 100, 'inf', 'open', 'region', 'resource_id', 'resource_type', 'sample_size', 'std_dev', 'threshold_breach', 'value', 'z_score', 'zscore_spike']

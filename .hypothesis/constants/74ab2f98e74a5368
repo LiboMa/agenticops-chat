@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/notify/im_config.py
-# hypothesis_version: 6.151.9
-
-[0.0, 'agent_id', 'alert_senders', 'app_id', 'app_key', 'app_secret', 'app_token', 'bot_token', 'callback_token', 'channels', 'chat', 'chat_id', 'corp_id', 'corp_secret', 'default', 'dingtalk', 'email', 'enabled', 'encoding_aes_key', 'encrypt_key', 'feishu', 'html', 'markdown', 'mentions_only', 'preferred_format', 'respond_to', 'role', 'ses', 'severity_filter', 'signing_secret', 'slack', 'sns', 'sns-report', 'text', 'type', 'verification_token', 'w', 'webhook', 'wecom']

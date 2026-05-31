@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/cli/display.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.05, 1000000, ' │ ', '.', 'Done', 'Generating response', 'Per-Agent Breakdown:', 'References:\n', 'Thinking', '\\bI#(\\d+)\\b', '\\bR#(\\d+)\\b', 'blue', 'cache_read', 'cache_write', 'complete', 'contentBlockStart', 'cyan', 'data', 'done', 'dots', 'dots12', 'dots2', 'dots3', 'duration', 'error', 'event', 'green', 'idle', 'input', 'main', 'name', 'output', 'processing', 'red', 'requests', 'right', 'start', 'state', 'streaming', 'text', 'thinking', 'toolUse', 'tool_call', 'unknown', 'white', 'yellow', '•', '▸', '◐', '⚙', '✓', '✗', '⟳']

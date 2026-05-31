@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/integration_tools.py
-# hypothesis_version: 6.151.9
-
-[4000, 6000, ',', 'active', 'all', 'available_providers', 'count', 'description', 'error', 'external_id', 'fields', 'latest_value', 'level', 'message', 'metric_name', 'name', 'namespace', 'provider', 'resource_hint', 'resource_id', 'severity', 'source', 'status', 'stored', 'tags', 'timestamp', 'timestamps', 'title', 'unit', 'value', 'values']

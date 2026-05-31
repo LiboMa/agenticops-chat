@@ -1,0 +1,56 @@
+frontend:
+  externalService: false
+  service:
+    type: ClusterIP
+
+loadGenerator:
+  create: true
+
+opentelemetryCollector:
+  create: false
+  projectId: "agenticops-lab"
+
+cartservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+productcatalogservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+currencyservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+paymentservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+shippingservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+emailservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+checkoutservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+recommendationservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"
+
+adservice:
+  env:
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://otel-collector-opentelemetry-collector.monitoring:4317"

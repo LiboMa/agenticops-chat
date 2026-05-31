@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/tools/cloudtrail_tools.py
-# hypothesis_version: 6.151.9
-
-[100, 200, 'AttributeKey', 'AttributeValue', 'CloudTrailEvent', 'EventName', 'EventTime', 'Events', 'ResourceName', 'ResourceType', 'Resources', 'Username', 'cloudtrail', 'errorCode', 'errorMessage', 'error_code', 'error_message', 'eventSource', 'event_name', 'event_source', 'event_time', 'name', 'resources', 'sourceIPAddress', 'source_ip', 'type', 'userAgent', 'user_agent', 'username', '{}']

@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/im/slack_ws.py
-# hypothesis_version: 6.151.9
-
-[120, 300, 500, 1024, '\nShutting down...', '/send_to ', '/sendto ', '<@[A-Z0-9]+>\\s*', 'File logging -> %s', '__main__', 'agenticops.im', 'agenticops.notify', 'alert', 'assistant', 'bot', 'bot_id', 'channel', 'chat_id', 'default', 'error', 'event', 'events_api', 'logs', 'mentions_only', 'message', 'messages', 'ok', 'platform', 'slack', 'slack-agent', 'slack-ws', 'slack_ws.log', 'subtype', 'text', 'ts', 'type', 'unknown', 'user', 'user_id', 'username', 'utf-8']

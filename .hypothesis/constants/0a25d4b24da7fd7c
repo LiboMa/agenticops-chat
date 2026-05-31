@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/monitor/cloudwatch.py
-# hypothesis_version: 6.151.9
-
-[0.5, 100, 300, 1000, '/', 'AWS/EC2', 'AWS/Lambda', 'AWS/RDS', 'Average', 'BucketName', 'ClusterName', 'Complete', 'DBInstanceIdentifier', 'Dimensions', 'DynamoDB', 'EC2', 'ECS', 'FunctionName', 'Id', 'InstanceId', 'Lambda', 'Metric', 'MetricDataResults', 'MetricName', 'MetricStat', 'Name', 'Namespace', 'Period', 'QueueName', 'RDS', 'ResourceId', 'ReturnData', 'Running', 'S3', 'SQS', 'Scheduled', 'Stat', 'TableName', 'Timestamps', 'Value', 'Values', 'arn', 'cloudwatch', 'created_at', 'creationTime', 'describe_log_groups', 'field', 'logGroupName', 'logGroupNamePrefix', 'logGroups', 'logs', 'm1', 'metric_name', 'name', 'namespace', 'queryId', 'results', 'retentionInDays', 'retention_days', 'status', 'storedBytes', 'stored_bytes', 'timestamp', 'value']

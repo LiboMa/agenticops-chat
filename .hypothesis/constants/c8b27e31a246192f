@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/pipeline/orchestrator.py
-# hypothesis_version: 6.151.9
-
-[1000, '$', '$detect', '$scan', 'DailyReport', 'FullScan', 'Monitoring', 'Pipeline', 'account', 'analyze', 'analyzed', 'by_resource', 'completed', 'content_length', 'critical', 'critical_anomalies', 'daily_report', 'detect', 'errors', 'failed', 'metrics_collected', 'monitor', 'notifications_sent', 'notify', 'open', 'pending', 'report', 'report_generated', 'report_path', 'running', 'saved', 'scan', 'skipped', 'total_anomalies', 'total_scanned']

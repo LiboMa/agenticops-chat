@@ -1,4 +1,0 @@
-# file: /Users/malibo/MyDev/AgenticOps/src/agenticops/graph/store.py
-# hypothesis_version: 6.151.9
-
-[' AND ', '%Y-%m-%d %H:%M:%S', '1=1', 'account_id', 'created_at', 'cutoff', 'edge_count', 'edge_type', 'edges_synced', 'id', 'ids', 'label', 'limit', 'nid', 'node_count', 'node_type', 'nodes_added', 'nodes_removed', 'nodes_updated', 'now', 'q', 'raw', 'raw_hash', 'raw_json', 'region', 'region = :region', 'region = :scope', 'resource_type', 'scope', 'snapshot_at', 'source_id', 'state', 'status', 'target_id', 'unknown', 'updated_at', 'vpc-', 'vpc_id', 'vpc_id = :scope', 'vpc_id = :vpc_id']
