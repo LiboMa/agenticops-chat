@@ -42,6 +42,27 @@ def _make_skill_dir(base: Path, name: str, fm: str, body: str = "# Body") -> Pat
     return skill_dir
 
 
+# ── normalize_skill_frontmatter ─────────────────────────────────────
+
+
+class TestNormalizeSkillFrontmatter:
+    def test_backfills_missing_provenance(self):
+        from agenticops.skills.loader import normalize_skill_frontmatter
+        fm = {"name": "old-skill", "description": "legacy"}
+        out = normalize_skill_frontmatter(fm)
+        assert out["created_by"] == "user"
+        assert out["status"] == "active"
+        assert out["skill_version"] == "1.0"
+
+    def test_preserves_existing(self):
+        from agenticops.skills.loader import normalize_skill_frontmatter
+        fm = {"name": "s", "created_by": "agent", "status": "stale", "skill_version": "1.3"}
+        out = normalize_skill_frontmatter(fm)
+        assert out["created_by"] == "agent"
+        assert out["status"] == "stale"
+        assert out["skill_version"] == "1.3"
+
+
 # ── parse_frontmatter: YAML error ───────────────────────────────────
 
 

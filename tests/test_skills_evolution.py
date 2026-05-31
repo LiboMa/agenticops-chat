@@ -88,6 +88,31 @@ class TestCreateDraftSkill:
         assert loaded["name"] == "q-skill"
 
 
+class TestSkillProvenance:
+    def test_create_draft_writes_provenance(self, tmp_path):
+        import yaml
+        from unittest.mock import patch
+        from agenticops.skills.evolution import create_draft_skill
+        with patch("agenticops.skills.evolution.settings") as ms:
+            ms.skills_draft_dir = tmp_path
+            d = create_draft_skill(name="x", description="d", content="body", created_by="agent")
+        fm = yaml.safe_load((d / "SKILL.md").read_text().split("---")[1])
+        assert fm["created_by"] == "agent"
+        assert fm["status"] == "active"
+        assert "created_at" in fm
+        assert fm["skill_version"] == "1.0"
+
+    def test_create_draft_defaults_created_by_user(self, tmp_path):
+        import yaml
+        from unittest.mock import patch
+        from agenticops.skills.evolution import create_draft_skill
+        with patch("agenticops.skills.evolution.settings") as ms:
+            ms.skills_draft_dir = tmp_path
+            d = create_draft_skill(name="y", description="d", content="body")
+        fm = yaml.safe_load((d / "SKILL.md").read_text().split("---")[1])
+        assert fm["created_by"] == "user"
+
+
 class TestAtomicWrite:
     def test_atomic_write_helper_replaces_in_place(self, tmp_path):
         from agenticops.skills.evolution import _atomic_write_text

@@ -12,6 +12,7 @@ import importlib
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -79,6 +80,7 @@ class SkillMetadata:
     metadata: dict = field(default_factory=dict)
     tools: list[str] = field(default_factory=list)  # dotted paths to @tool functions
     is_draft: bool = False
+    created_by: str = "user"
 
 
 # ── YAML Frontmatter Parsing ────────────────────────────────────────
@@ -107,6 +109,20 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
 
     body = content[match.end():]
     return fm, body
+
+
+def normalize_skill_frontmatter(fm: dict) -> dict:
+    """Backfill cycle③ provenance fields (non-destructive copy).
+
+    Human-authored skills default created_by='user' (pinned — Curator never
+    auto-archives them). Existing values are preserved.
+    """
+    out = dict(fm)
+    out.setdefault("created_by", "user")
+    out.setdefault("status", "active")
+    out.setdefault("skill_version", "1.0")
+    out.setdefault("created_at", str(date.today()))
+    return out
 
 
 # ── Skill Discovery ─────────────────────────────────────────────────
@@ -146,6 +162,7 @@ def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetada
                     metadata=fm.get("metadata", {}),
                     tools=fm.get("tools", []),
                     is_draft=is_draft,
+                    created_by=fm.get("created_by", "user"),
                 )
             )
         except Exception as e:

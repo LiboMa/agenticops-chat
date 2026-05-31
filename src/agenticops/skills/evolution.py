@@ -35,6 +35,7 @@ def create_draft_skill(
     description: str,
     content: str,
     references: Optional[dict[str, str]] = None,
+    created_by: str = "user",
 ) -> Path:
     """Write a new SKILL.md to the draft directory.
 
@@ -43,6 +44,7 @@ def create_draft_skill(
         description: Short description for YAML frontmatter.
         content: Full SKILL.md body content (after frontmatter).
         references: Optional dict of {filename: content} for references/ files.
+        created_by: Provenance — "user" (human, pinned) or "agent" (auto).
 
     Returns:
         Path to the created draft skill directory.
@@ -51,9 +53,15 @@ def create_draft_skill(
     draft_dir.mkdir(parents=True, exist_ok=True)
 
     # Build SKILL.md with YAML frontmatter
+    import datetime as _dt
+    _today = _dt.date.today().isoformat()
     skill_md = f"""---
 name: {name}
 description: {json.dumps(description)}
+created_by: {created_by}
+created_at: {_today}
+skill_version: "1.0"
+status: active
 ---
 
 {content}
@@ -76,6 +84,7 @@ def create_published_skill(
     description: str,
     content: str,
     references: Optional[dict[str, str]] = None,
+    created_by: str = "user",
 ) -> Path:
     """Write a new SKILL.md directly to the published skills directory.
 
@@ -87,6 +96,7 @@ def create_published_skill(
         description: Short description for YAML frontmatter.
         content: Full SKILL.md body content (after frontmatter).
         references: Optional dict of {filename: content} for references/ files.
+        created_by: Provenance — "user" (human, pinned) or "agent" (auto).
 
     Returns:
         Path to the created skill directory.
@@ -94,9 +104,15 @@ def create_published_skill(
     pub_dir = settings.skills_dir / name
     pub_dir.mkdir(parents=True, exist_ok=True)
 
+    import datetime as _dt
+    _today = _dt.date.today().isoformat()
     skill_md = f"""---
 name: {name}
 description: {json.dumps(description)}
+created_by: {created_by}
+created_at: {_today}
+skill_version: "1.0"
+status: active
 ---
 
 {content}
