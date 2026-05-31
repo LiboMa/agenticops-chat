@@ -215,3 +215,19 @@ def test_remove_stale_uses_session_lock_for_trigger(monkeypatch):
 
     mgr._remove_stale()
     assert held_during_trigger.get(sid) is True
+
+
+def test_trigger_does_not_extract_db_memory(monkeypatch):
+    import agenticops.web.session_manager as sm
+    extracted = {"facts": 0, "exp": 0}
+
+    class _Spy:
+        def extract_facts(self, *a, **k): extracted["facts"] += 1; return []
+        def extract_experiences(self, *a, **k): extracted["exp"] += 1; return []
+
+    monkeypatch.setattr("agenticops.web.memory_service.MemoryService", _Spy)
+    monkeypatch.setattr(sm, "_load_raw_messages", lambda sid: [{"role": "user", "content": "hi"}])
+    # summary generation is allowed to run/fail harmlessly; stub it to avoid network
+    monkeypatch.setattr("agenticops.web.summary_service.SummaryService", lambda: type("S", (), {"generate_summary": lambda self, *a, **k: None})())
+    sm._trigger_summary_and_memory("some-session")
+    assert extracted["facts"] == 0 and extracted["exp"] == 0

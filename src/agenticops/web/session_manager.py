@@ -323,50 +323,24 @@ def _load_raw_messages(session_id: str) -> list[dict]:
 
 
 def _trigger_memory_extraction(session_id: str) -> None:
-    """Trigger memory extraction (facts + experiences) for a session.
+    """DEPRECATED (frozen cycle② 2026-05-31): DB memory extraction is disabled.
 
-    Loads the session's messages from DB and calls MemoryService to extract
-    structured facts and vectorized experiences.  All failures are logged
-    as errors but never propagated — the caller's normal flow is never blocked.
-
-    Args:
-        session_id: The ChatSession.session_id (UUID string).
+    File-based agent memory is the single core now; this no longer extracts
+    facts/experiences into the frozen DB tables. Kept as a no-op in case any
+    caller still references it.
     """
-    messages = _load_raw_messages(session_id)
-    if not messages:
-        logger.info(
-            "No messages to extract memory from for session %s", session_id
-        )
-        return
-
-    from agenticops.web.memory_service import MemoryService
-
-    svc = MemoryService()
-
-    try:
-        svc.extract_facts(session_id, messages)
-        logger.info("Extracted facts for session %s", session_id)
-    except Exception:
-        logger.error(
-            "Failed to extract facts for session %s", session_id, exc_info=True
-        )
-
-    try:
-        svc.extract_experiences(session_id, messages)
-        logger.info("Extracted experiences for session %s", session_id)
-    except Exception:
-        logger.error(
-            "Failed to extract experiences for session %s",
-            session_id,
-            exc_info=True,
-        )
+    return
 
 
 def _trigger_summary_and_memory(session_id: str) -> None:
-    """Trigger summary generation AND memory extraction for a session.
+    """Trigger conversation summary generation for a session.
 
-    Used during TTL cleanup to capture both the conversation summary and
-    cross-session memories before the agent instance is discarded.
+    Used during TTL cleanup to capture the conversation summary before the
+    agent instance is discarded.
+
+    DB memory extraction (facts + experiences) was removed in cycle② 2026-05-31
+    because those tables are frozen — file-based agent memory is the single
+    core now. Only summary generation remains (still used for chat history).
 
     Args:
         session_id: The ChatSession.session_id (UUID string).
@@ -397,29 +371,6 @@ def _trigger_summary_and_memory(session_id: str) -> None:
     except Exception:
         logger.error(
             "Failed to generate summary for session %s",
-            session_id,
-            exc_info=True,
-        )
-
-    # 2. Memory extraction (facts + experiences)
-    from agenticops.web.memory_service import MemoryService
-
-    svc = MemoryService()
-
-    try:
-        svc.extract_facts(session_id, messages)
-        logger.info("Extracted facts for session %s", session_id)
-    except Exception:
-        logger.error(
-            "Failed to extract facts for session %s", session_id, exc_info=True
-        )
-
-    try:
-        svc.extract_experiences(session_id, messages)
-        logger.info("Extracted experiences for session %s", session_id)
-    except Exception:
-        logger.error(
-            "Failed to extract experiences for session %s",
             session_id,
             exc_info=True,
         )
