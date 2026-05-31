@@ -47,7 +47,7 @@ Web Dashboard ──────┘         │
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
 | `chat/` | `preprocessor.py`, `file_reader.py`, `send_to.py`, `channel.py` | Message preprocessing, file upload, I#/R# refs, /send_to, /channel |
 | `graph/` | `engine.py`, `algorithms.py`, `collectors.py`, `types.py`, `api.py`, `tools.py` | Infrastructure graph: SPOF, capacity risk, dependency chain, change sim |
-| `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py` | Skill discovery, security classification, run_on_host, run_kubectl |
+| `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py`, `evolution.py`, `curator.py`, `review.py`, `improvement_store.py` | Skill discovery, security classification, run_on_host/run_kubectl, autonomous create/improve, Curator lifecycle, security-gated promote/rollback, improvement audit |
 | `notify/` | `notifier.py`, `im_config.py` | Multi-channel notifications, YAML channel config |
 | `im/` | `feishu_ws.py` | IM bot (Feishu WebSocket), alert channel routing |
 | `kb/` | `vector_store.py` | Vector storage (SQLite/pgvector/S3) — KB case search only |
@@ -65,9 +65,20 @@ Web Dashboard ──────┘         │
 | `components/` | Chat components, layout (AppShell, Sidebar, Header) |
 | `api/` | `client.ts`, `types.ts` |
 
-### Skills (`skills/`)
+### Skills (`skills/`) — autonomous, self-optimizing (cycle③ 2026-05-31)
 
 14 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
+
+**Hermes-style autonomy** (mirrors the cycle② memory pattern; skills are EXECUTABLE so promotion is security-gated):
+- **3-tier progressive disclosure** (preserved): system-prompt XML (~460 tok total, measured — no per-agent filtering needed) → `activate_skill` (full body) → `read_skill_reference` (deep-dive).
+- **`skill_manage` tool** (`tools.py`, mirrors `memory_manage`): agent self-curation via `add`/`improve`/`merge`/`deprecate`/`restore`/`search`. Agent writes land as **drafts only** (`created_by=agent`), never auto-published. Gated by `skills_autonomous_write`.
+- **Provenance frontmatter**: `created_by` (user=pinned / agent), `created_at`, `last_improved_at`, `improved_from` (genealogy), `skill_version`, `status` (active/stale/deprecated/archived). `normalize_skill_frontmatter` backfills old SKILL.md non-destructively; the 14 human skills are `created_by=user` (pinned). `[AGENT]` tag in `list_skills` XML.
+- **Skills Curator** (`curator.py`, zero LLM): ages UNUSED `created_by=agent` drafts `active→stale(30d)→archived(60d)` by `last_used`; **human skills pinned (never touched)**; **never deletes** (moves to `skills/.archive/`, recoverable via `restore_skill`); **reactivate-on-use** (`touch_skill_used` on `activate_skill`). Runs at main-agent build (gated by `skills_curator_enabled`).
+- **Security-gated promotion** (`review.py` + `security.py`): `promote_skill` scans the draft body (`scan_skill_safety` — flags blocked-tier commands in fenced bash) before publishing; archives the prior published version to `skills/.archive/<name>__<ts>/` (multi-gen, recoverable). `rollback_skill` restores the most recent archived version. Skill names sanitized (`_safe_skill_name`, path-traversal guard).
+- **Improvement audit loop** (`improvement_store.py`): all three improve paths (`improve_skill` tool, `skill_manage improve`, `services/skill_improvement_service`) record to the improvement store for genealogy.
+- **Frozen-snapshot injection**: skills XML loaded once at agent build; writes take effect next session (protects Bedrock prompt-cache, consistent with memory).
+- **Config** (settings.yaml): `skills_autonomous_write`, `skills_curator_enabled`, `skills_draft_stale_days`, `skills_draft_archive_days`, `skills_security_scan_on_promote`.
+- **API**: `POST /api/skills/{name}/rollback`, `POST /api/skills/{name}/restore` (+ existing promote/review/improve).
 
 ### Agent Memory (`memory/`) — self-optimizing, file-based (cycle② 2026-05-31)
 
@@ -117,6 +128,11 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `agent_{name}_max_tokens` | `0` | Per-agent max_tokens override (0 = use bedrock_max_tokens) |
 | `deployment_profile` | `local` | local or cloud |
 | `skills_enabled` | `true` | Agent Skills |
+| `skills_autonomous_write` | `true` | Allow agents to self-create/improve skills via `skill_manage` (drafts only) |
+| `skills_curator_enabled` | `true` | Skills Curator lifecycle (agent drafts stale/archive; human skills pinned) |
+| `skills_draft_stale_days` | `30` | Days an unused agent draft stays before stale |
+| `skills_draft_archive_days` | `60` | Additional days after stale before an agent draft is archived |
+| `skills_security_scan_on_promote` | `true` | Security-scan a skill before draft→published (blocks dangerous run_on_host) |
 | `scan_focus` | `all` | Resource categories filter |
 | `agent_output_detail` | `medium` | concise/medium/detailed |
 
@@ -164,3 +180,4 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 4.写第一行代码前，把模糊指令转化为可量化的标准
 5.不碰与需求无关的代码，每行改动都对应明确的要求. 
 6. Each Time, 请从Plan Mode 开始
+7. each time when after finsh the development phase, auto-update the docs/ workflows, and readme or related documentation, keep it updated.
