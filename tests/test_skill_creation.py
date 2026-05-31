@@ -86,3 +86,46 @@ def test_skills_protocol_mentions_creation():
 
     assert "create_skill" in SKILLS_USAGE_PROTOCOL
     assert "confirm" in SKILLS_USAGE_PROTOCOL.lower()
+
+
+class TestPromoteMultiGen:
+    def _setup(self, tmp_path, monkeypatch):
+        sdir = tmp_path / "skills"; ddir = sdir / "draft"
+        ddir.mkdir(parents=True)
+        monkeypatch.setattr("agenticops.config.settings.skills_dir", sdir, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_draft_dir", ddir, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_security_scan_on_promote", True, raising=False)
+        return sdir, ddir
+
+    def _mkdraft(self, ddir, name, body="# ok\nkubectl get pods"):
+        d = ddir / name; d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\ncreated_by: agent\n---\n\n{body}")
+
+    def test_promote_archives_old_version_multigen(self, tmp_path, monkeypatch):
+        from agenticops.skills.review import promote_skill
+        sdir, ddir = self._setup(tmp_path, monkeypatch)
+        (sdir / "redis").mkdir(parents=True)
+        (sdir / "redis" / "SKILL.md").write_text("---\nname: redis\ndescription: old\ncreated_by: user\n---\nold body")
+        self._mkdraft(ddir, "redis")
+        assert promote_skill("redis") is True
+        archived = list((sdir / ".archive").glob("redis__*"))
+        assert len(archived) == 1
+        assert (archived[0] / "SKILL.md").read_text().find("old body") != -1
+
+    def test_promote_blocked_on_dangerous_skill(self, tmp_path, monkeypatch):
+        from agenticops.skills.review import promote_skill
+        sdir, ddir = self._setup(tmp_path, monkeypatch)
+        self._mkdraft(ddir, "danger", body="# danger\n```bash\nrm -rf /\n```")
+        ok = promote_skill("danger")
+        assert ok is False
+        assert not (sdir / "danger").exists()
+
+    def test_rollback_restores_previous(self, tmp_path, monkeypatch):
+        from agenticops.skills.review import promote_skill, rollback_skill
+        sdir, ddir = self._setup(tmp_path, monkeypatch)
+        (sdir / "r").mkdir(parents=True)
+        (sdir / "r" / "SKILL.md").write_text("---\nname: r\ndescription: v1\ncreated_by: user\n---\nv1 body")
+        self._mkdraft(ddir, "r", body="v2 body kubectl get pods")
+        promote_skill("r")
+        assert rollback_skill("r") is True
+        assert "v1 body" in (sdir / "r" / "SKILL.md").read_text()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from pathlib import Path
 
 from agenticops.config import settings
@@ -75,37 +76,72 @@ def review_draft_skill(name: str) -> dict | None:
 
 
 def promote_skill(name: str) -> bool:
-    """Promote a draft skill to the main skills directory.
+    """Promote a draft skill to published.
 
-    Moves the skill directory from draft/ to skills/. If a published
-    skill with the same name already exists, it is backed up to
-    skills/<name>.bak before replacement.
+    Security-scans the draft first (skills are executable); a blocked-tier
+    command in its body aborts promotion. Any existing published version is
+    archived to skills/.archive/<name>__<timestamp>/ (multi-generation,
+    recoverable via rollback_skill) instead of a single lossy .bak.
 
     Args:
         name: Name of the draft skill to promote.
 
     Returns:
-        True if promoted successfully, False if draft not found.
+        True if promoted, False if draft not found or it failed the security scan.
     """
     draft_dir = settings.skills_draft_dir / name
-    if not (draft_dir / "SKILL.md").is_file():
+    draft_md = draft_dir / "SKILL.md"
+    if not draft_md.is_file():
         logger.warning("Draft skill '%s' not found at %s", name, draft_dir)
         return False
 
+    # Security gate — skills are executable (run_on_host/run_kubectl)
+    if getattr(settings, "skills_security_scan_on_promote", True):
+        from agenticops.skills.security import scan_skill_safety
+        _, body = parse_frontmatter(draft_md.read_text(encoding="utf-8"))
+        scan = scan_skill_safety(body)
+        if not scan["safe"]:
+            logger.warning("Skill '%s' failed security scan, NOT promoted: %s", name, scan["findings"])
+            return False
+
     target_dir = settings.skills_dir / name
 
-    # Backup existing published skill if present
+    # Archive existing published version (multi-generation, recoverable)
     if target_dir.is_dir():
-        backup_dir = settings.skills_dir / f"{name}.bak"
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
+        archive_root = settings.skills_dir / ".archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        backup_dir = archive_root / f"{name}__{ts}"
         target_dir.rename(backup_dir)
-        logger.info("Backed up existing skill '%s' to %s", name, backup_dir)
+        logger.info("Archived previous '%s' to %s", name, backup_dir)
 
-    # Move draft to published
     shutil.move(str(draft_dir), str(target_dir))
     _invalidate_skills_cache()
     logger.info("Promoted draft skill '%s' to %s", name, target_dir)
+    return True
+
+
+def rollback_skill(name: str) -> bool:
+    """Restore the most recent archived version of a published skill.
+
+    Moves the newest skills/.archive/<name>__<timestamp>/ back to published.
+    Any current published version is itself archived first (so rollback is
+    reversible). Returns True if an archived version was found.
+    """
+    archive_root = settings.skills_dir / ".archive"
+    candidates = sorted(archive_root.glob(f"{name}__*")) if archive_root.is_dir() else []
+    # exclude any rolledback-marked dirs from being treated as the source to restore
+    candidates = [c for c in candidates if "__rolledback-" not in c.name]
+    if not candidates:
+        return False
+    latest = candidates[-1]   # timestamp-sorted, newest last
+    target_dir = settings.skills_dir / name
+    if target_dir.is_dir():
+        ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        target_dir.rename(archive_root / f"{name}__rolledback-{ts}")
+    shutil.move(str(latest), str(target_dir))
+    _invalidate_skills_cache()
+    logger.info("Rolled back '%s' from %s", name, latest)
     return True
 
 
