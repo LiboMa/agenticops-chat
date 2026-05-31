@@ -446,3 +446,24 @@ class TestFrontmatterNormalize:
         assert out["last_used"] == "2026-05-01"
         assert out["created_by"] == "agent"
         assert out["status"] == "stale"
+
+
+# ── Atomic and Provenance ───────────────────────────────────────────
+
+
+class TestAtomicAndProvenance:
+    def test_save_stamps_last_used_and_created_by(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, parse_frontmatter
+        fp = save_memory_file(agent_name="detect", filename="x.md", body="b",
+                              created_by="agent", source="agent")
+        fm, _ = parse_frontmatter(fp.read_text())
+        assert fm["created_by"] == "agent"
+        assert "last_used" in fm
+        assert fm["source"] == "agent"
+
+    def test_atomic_write_helper_no_temp_residue(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import _atomic_write_text, _agent_dir
+        target = _agent_dir("detect") / "atomic.md"
+        _atomic_write_text(target, "hello")
+        assert target.read_text() == "hello"
+        assert list(_agent_dir("detect").glob(".*tmp*")) == []

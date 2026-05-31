@@ -16,6 +16,7 @@ Directory layout::
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -85,6 +86,13 @@ def _serialize_frontmatter(fm: dict[str, Any], body: str) -> str:
     """Serialize frontmatter dict + body into a Markdown string."""
     fm_str = yaml.dump(fm, default_flow_style=False, allow_unicode=True).strip()
     return f"---\n{fm_str}\n---\n\n{body}\n"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically: temp file in same dir + os.replace (crash-safe)."""
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 # ── Loading ─────────────────────────────────────────────────────────
@@ -190,6 +198,7 @@ def save_memory_file(
     body: str,
     resource_pattern: str = "",
     related_issue_id: int | None = None,
+    created_by: str = "user",
 ) -> Path:
     """Create or update a memory Markdown file.
 
@@ -230,15 +239,17 @@ def save_memory_file(
         "status": "active",
         "confidence": max(1, min(5, confidence)),
         "source": source,
+        "created_by": created_by,
         "created_at": created_at,
         "last_confirmed": str(date.today()),
+        "last_used": str(date.today()),
     }
     if resource_pattern:
         fm["resource_pattern"] = resource_pattern
     if related_issue_id is not None:
         fm["related_issue_id"] = related_issue_id
 
-    filepath.write_text(_serialize_frontmatter(fm, body), encoding="utf-8")
+    _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
     logger.info("Saved agent memory: %s/%s (confidence=%d)", agent_name, filename, confidence)
 
     # Update index
@@ -258,7 +269,7 @@ def archive_memory(agent_name: str, filename: str) -> bool:
     raw = filepath.read_text(encoding="utf-8")
     fm, body = parse_frontmatter(raw)
     fm["status"] = "archived"
-    filepath.write_text(_serialize_frontmatter(fm, body), encoding="utf-8")
+    _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
     update_memory_index(agent_name)
     logger.info("Archived agent memory: %s/%s", agent_name, filename)
     return True
@@ -292,7 +303,7 @@ def update_memory_index(agent_name: str) -> None:
         )
 
     index_path = directory / "MEMORY.md"
-    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _atomic_write_text(index_path, "\n".join(lines) + "\n")
 
 
 # ── Searching ───────────────────────────────────────────────────────
