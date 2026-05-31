@@ -59,3 +59,15 @@ def test_user_created_memory_not_auto_archived(tmp_memory_dir):
     assert (tmp_memory_dir / "detect" / "pinned.md").exists()
     fm, _ = parse_frontmatter((tmp_memory_dir / "detect" / "pinned.md").read_text())
     assert fm["status"] in ("active", "stale")  # never archived
+
+
+def test_maybe_run_curator_respects_disabled(monkeypatch, tmp_memory_dir):
+    from agenticops.memory import curator
+    calls = {"n": 0}
+    monkeypatch.setattr(curator, "run_curator", lambda **kw: calls.__setitem__("n", calls["n"] + 1))
+    monkeypatch.setattr("agenticops.config.settings.memory_curator_enabled", False, raising=False)
+    curator.maybe_run_curator()
+    assert calls["n"] == 0
+    monkeypatch.setattr("agenticops.config.settings.memory_curator_enabled", True, raising=False)
+    curator.maybe_run_curator()
+    assert calls["n"] == 1

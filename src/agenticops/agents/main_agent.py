@@ -55,7 +55,7 @@ from agenticops.skills.tools import (
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
 from agenticops.tools.notification_tools import share_content
-from agenticops.tools.memory_tools import record_agent_feedback, search_agent_memory
+from agenticops.tools.memory_tools import record_agent_feedback, search_agent_memory, memory_manage
 from agenticops.tools.schedule_tools import (
     run_task, create_schedule, list_schedules, manage_schedule, get_schedule_history
 )
@@ -209,6 +209,13 @@ def create_main_agent() -> Agent:
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
     """
+    # Run memory Curator lifecycle (cheap, file-metadata only; gated by settings)
+    try:
+        from agenticops.memory.curator import maybe_run_curator
+        maybe_run_curator()
+    except Exception:
+        logger.debug("Curator run skipped", exc_info=True)
+
     from agenticops.config import get_scan_focus, resolve_scan_services
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
@@ -285,6 +292,7 @@ If the user explicitly requests a different scope, honor their request over this
             # Agent Memory tools (feedback recording + cross-agent search)
             record_agent_feedback,
             search_agent_memory,
+            memory_manage,
             # Schedule & Task tools (create/manage schedules and one-shot tasks)
             run_task,
             create_schedule,

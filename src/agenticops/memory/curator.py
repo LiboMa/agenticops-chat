@@ -80,3 +80,14 @@ def run_curator(stale_days: int = 30, archive_days: int = 60, today: date | None
 
     logger.info("Curator run: %s", summary)
     return summary
+
+
+def maybe_run_curator() -> dict | None:
+    """Run the Curator if enabled in settings. Cheap, safe to call at agent build."""
+    from agenticops.config import settings
+    if not getattr(settings, "memory_curator_enabled", True):
+        return None
+    return run_curator(
+        stale_days=getattr(settings, "memory_stale_days", 30),
+        archive_days=getattr(settings, "memory_archive_days", 60),
+    )
