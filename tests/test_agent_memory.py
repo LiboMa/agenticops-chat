@@ -496,3 +496,26 @@ class TestAtomicAndProvenance:
         _atomic_write_text(target, "hello")
         assert target.read_text() == "hello"
         assert list(_agent_dir("detect").glob(".*tmp*")) == []
+
+
+# ── Size-cap enforcement ────────────────────────────────────────────
+
+
+class TestSizeCap:
+    def test_save_new_when_full_raises_memory_full(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, MemoryFullError
+        for i in range(3):
+            save_memory_file(agent_name="detect", filename=f"m{i}.md", body=f"b{i}")
+        with pytest.raises(MemoryFullError) as exc:
+            save_memory_file(agent_name="detect", filename="overflow.md", body="x", max_active=3)
+        assert "detect" in str(exc.value)
+        assert exc.value.active_count == 3
+        assert len(exc.value.current) == 3   # list of (filename, summary)
+
+    def test_update_existing_when_full_is_allowed(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file
+        for i in range(3):
+            save_memory_file(agent_name="detect", filename=f"m{i}.md", body=f"b{i}")
+        # Updating an existing file does NOT count as new → allowed even at cap
+        fp = save_memory_file(agent_name="detect", filename="m0.md", body="updated", max_active=3)
+        assert "updated" in fp.read_text()

@@ -41,6 +41,19 @@ MEMORY_MARKER_END = "[End Agent Memory]"
 DEFAULT_CONFIDENCE = 3
 
 
+class MemoryFullError(Exception):
+    """Raised when an agent's active-memory size cap is reached on a NEW write."""
+
+    def __init__(self, agent_name: str, active_count: int, current: list[tuple[str, str]]):
+        self.agent_name = agent_name
+        self.active_count = active_count
+        self.current = current  # list of (filename, first-line summary)
+        super().__init__(
+            f"Memory full for '{agent_name}' ({active_count} active). "
+            f"Merge related entries before adding new ones."
+        )
+
+
 # ── Frontmatter parsing ────────────────────────────────────────────
 
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
@@ -140,6 +153,11 @@ def _load_memories_from_dir(directory: Path) -> list[dict[str, Any]]:
     return memories
 
 
+def count_active(agent_name: str) -> int:
+    """Count active (non-archived, non-stale) memory files for an agent."""
+    return len(_load_memories_from_dir(_agent_dir(agent_name)))
+
+
 def load_agent_memory(agent_name: str, max_entries: int = 10) -> str:
     """Load per-agent + shared memories, return formatted prompt context.
 
@@ -206,6 +224,7 @@ def save_memory_file(
     resource_pattern: str = "",
     related_issue_id: int | None = None,
     created_by: str = "user",
+    max_active: int | None = None,
 ) -> Path:
     """Create or update a memory Markdown file.
 
@@ -229,6 +248,16 @@ def save_memory_file(
         filename = filename + ".md"
 
     filepath = directory / filename
+
+    # Size-cap: only NEW active files are capped (updates to existing are always allowed)
+    if not filepath.exists():
+        cap = max_active if max_active is not None else getattr(settings, "memory_max_active", 15)
+        if count_active(agent_name) >= cap:
+            current = [
+                (m["filename"], (m["body"].split("\n")[0][:80] if m["body"] else ""))
+                for m in _load_memories_from_dir(_agent_dir(agent_name))
+            ]
+            raise MemoryFullError(agent_name, count_active(agent_name), current)
 
     # If file exists, preserve created_at
     created_at = str(date.today())
