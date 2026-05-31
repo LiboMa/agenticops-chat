@@ -417,3 +417,32 @@ class TestMemoryTools:
         result_str = search_agent_memory.__wrapped__(query="nonexistent")
         result = json.loads(result_str)
         assert result["matches"] == []
+
+
+# ── normalize_frontmatter ───────────────────────────────────────────
+
+
+class TestFrontmatterNormalize:
+    def test_normalize_backfills_missing_fields(self):
+        from agenticops.memory.agent_memory import normalize_frontmatter
+        fm = {"agent": "detect", "type": "feedback", "status": "active",
+              "confidence": 4, "created_at": "2026-01-01", "last_confirmed": "2026-02-01"}
+        out = normalize_frontmatter(fm)
+        assert out["last_used"] == "2026-02-01"   # falls back to last_confirmed
+        assert out["created_by"] == "user"
+        assert out["status"] == "active"
+
+    def test_normalize_last_used_falls_back_to_created_at(self):
+        from agenticops.memory.agent_memory import normalize_frontmatter
+        fm = {"agent": "detect", "confidence": 3, "created_at": "2026-01-01"}
+        out = normalize_frontmatter(fm)
+        assert out["last_used"] == "2026-01-01"
+
+    def test_normalize_preserves_existing_new_fields(self):
+        from agenticops.memory.agent_memory import normalize_frontmatter
+        fm = {"agent": "detect", "last_used": "2026-05-01", "created_by": "agent",
+              "status": "stale"}
+        out = normalize_frontmatter(fm)
+        assert out["last_used"] == "2026-05-01"
+        assert out["created_by"] == "agent"
+        assert out["status"] == "stale"

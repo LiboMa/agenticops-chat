@@ -63,6 +63,24 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return fm, match.group(2).strip()
 
 
+def normalize_frontmatter(fm: dict[str, Any]) -> dict[str, Any]:
+    """Backfill cycle② fields on a frontmatter dict (non-destructive copy).
+
+    - last_used: defaults to last_confirmed, then created_at, then today.
+    - created_by: defaults to "user".
+    - status: defaults to "active".
+    Existing values are preserved.
+    """
+    out = dict(fm)
+    out.setdefault("status", "active")
+    out.setdefault("created_by", "user")
+    if "last_used" not in out:
+        out["last_used"] = out.get("last_confirmed") or out.get("created_at") or str(date.today())
+    # Stringify date-likes for stable comparison
+    out["last_used"] = str(out["last_used"])
+    return out
+
+
 def _serialize_frontmatter(fm: dict[str, Any], body: str) -> str:
     """Serialize frontmatter dict + body into a Markdown string."""
     fm_str = yaml.dump(fm, default_flow_style=False, allow_unicode=True).strip()
