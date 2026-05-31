@@ -50,7 +50,8 @@ Web Dashboard ──────┘         │
 | `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py` | Skill discovery, security classification, run_on_host, run_kubectl |
 | `notify/` | `notifier.py`, `im_config.py` | Multi-channel notifications, YAML channel config |
 | `im/` | `feishu_ws.py` | IM bot (Feishu WebSocket), alert channel routing |
-| `kb/` | `vector_store.py` | Vector storage (SQLite/pgvector/S3) |
+| `kb/` | `vector_store.py` | Vector storage (SQLite/pgvector/S3) — KB case search only |
+| `memory/` | `agent_memory.py`, `curator.py`, `migrate_backfill.py` | File-based self-optimizing agent memory (Hermes-style); single core, no DB |
 | `pipeline/` | `rag_pipeline.py`, `orchestrator.py`, `health_patrol.py` | RAG pipeline, patrol orchestrator |
 | `integrations/` | `alert_processor.py`, `parsers.py` | Webhook alert processing, source parsers |
 | `storage/` | `backend.py` | Storage backends (local/S3) for reports + KB |
@@ -67,6 +68,17 @@ Web Dashboard ──────┘         │
 ### Skills (`skills/`)
 
 14 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
+
+### Agent Memory (`memory/`) — self-optimizing, file-based (cycle② 2026-05-31)
+
+File-based markdown memory under `agent-memory/<agent>/*.md` (+ `shared/`) is the **single core** for agent behavioral memory. **Not a DB** (the old `AgentMemory`/`AgentMemoryFact` DB tables + `web/memory_service.py` are frozen/deprecated — they were a dead injection path).
+
+- **Frontmatter**: `agent, type(feedback|pattern|preference|baseline|umbrella), status(active|stale|archived), confidence(1-5), source, created_by(user|agent), created_at, last_confirmed, last_used, absorbed_into/absorbed_from, resource_pattern`.
+- **Hermes-style Curator** (`curator.py`, zero LLM): size-cap (`memory_max_active`, default 15) forces self-merge at write time; background lifecycle `active→stale(30d)→archived(60d)` by `last_used`; **never deletes** (archives to `<agent>/.archive/`, recoverable via `restore_memory`); **reactivate-on-use** (touched on injection). Runs at each main-agent build (gated by `memory_curator_enabled`).
+- **Agent autonomy**: `memory_manage` tool (add/patch/merge/remove/search) lets agents self-curate; agent-written memories tagged `created_by=agent` (provenance, human-auditable). Gated by `memory_autonomous_write`.
+- **Injection**: frozen-snapshot — loaded once at agent build via `build_system_prompt`, top-`memory_max_active` by confidence then recency; writes take effect NEXT session (protects Bedrock prompt-cache).
+- **Config** (settings.yaml): `memory_max_active`, `memory_stale_days`, `memory_archive_days`, `memory_autonomous_write`, `memory_curator_enabled`.
+- **Deferred (YAGNI)**: episodic semantic-recall tier (vectors) — only `kb/vector_store.py` for KB case search today; S3 Vectors is a future cloud-only option, not built.
 
 ### Infrastructure (`infra/`)
 
