@@ -57,11 +57,11 @@ class ChatContext:
         if self.agent is None:
             return False
         from strands.models.bedrock import BedrockModel
-        from agenticops.config import settings
+        from agenticops.config import settings, get_bedrock_boto_session
         model_id = MODEL_ALIASES[alias]
         self.agent.model = BedrockModel(
             model_id=model_id,
-            region_name=settings.bedrock_region,
+            boto_session=get_bedrock_boto_session(),
             max_tokens=settings.bedrock_max_tokens,
         )
         # Also update settings so get_agent_model_config("main") reflects the change

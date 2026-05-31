@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+
+# Node (frontend node_modules rebuilt in container)
+node_modules
+src/agenticops/web/frontend/node_modules
+
+# Data
+data/
+*.db
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Testing
+.hypothesis
+.pytest_cache
+htmlcov
+.coverage
+
+# Infra
+infra/
+iac/
+.terraform
+*.tfstate*
+
+# Docs (not needed in container, but README.md required by pyproject.toml)
+docs/
+RAW-*.md
+!README.md
+
+# Claude
+.claude/
+.playwright-mcp/
+
+# Misc
+*.png
+*.pptx

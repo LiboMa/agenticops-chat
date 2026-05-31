@@ -51,15 +51,26 @@ class AWSProvider(CloudProvider):
     def resolve_credentials(self) -> bool:
         """Resolve AWS credentials through the following chain:
 
-        1. Build base session (profile_name > static keys > default chain)
-        2. If role_arn set, use base session's STS to AssumeRole
-        3. Validate by calling sts:GetCallerIdentity
+        1. Decrypt credentials if encrypted (via CredentialStore)
+        2. Build base session (profile_name > static keys > default chain)
+        3. If role_arn set, use base session's STS to AssumeRole
+        4. Validate by calling sts:GetCallerIdentity
         """
         if boto3 is None:
             logger.error("boto3 is required for AWS provider")
             return False
 
         creds = self.account.credentials or {}
+
+        # Step 0: Decrypt if credentials are encrypted
+        from agenticops.credentials.store import get_credential_store, _ENCRYPTED_KEY
+        if _ENCRYPTED_KEY in creds:
+            try:
+                store = get_credential_store()
+                creds = store.decrypt_credentials(creds)
+            except Exception as e:
+                logger.error("Failed to decrypt credentials for %s: %s", self.account.name, e)
+                return False
 
         # Step 1: Build base session for authentication
         if creds.get("profile_name"):
@@ -75,7 +86,10 @@ class AWSProvider(CloudProvider):
 
         # Step 2: If role_arn set, assume role using base session
         role_arn = creds.get("role_arn")
+        # STS region: prefer from ARN partition, fallback to account's first region
         sts_region = _sts_region_for_arn(role_arn) if role_arn else None
+        if not sts_region and self.account.regions:
+            sts_region = self.account.regions[0]
         sts_kwargs: dict[str, str] = {"region_name": sts_region} if sts_region else {}
 
         if role_arn:

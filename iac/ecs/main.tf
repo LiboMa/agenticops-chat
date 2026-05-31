@@ -22,10 +22,12 @@ module "vpc" {
 }
 
 module "iam" {
-  source       = "../modules/iam"
-  project_name = var.project_name
-  service      = "ecs"
-  tags         = local.tags
+  source           = "../modules/iam"
+  project_name     = var.project_name
+  service          = "ecs"
+  kms_key_arn      = var.kms_key_arn
+  target_role_arns = var.target_role_arns
+  tags             = local.tags
 }
 
 module "rds" {
@@ -108,8 +110,8 @@ resource "aws_ecs_task_definition" "this" {
   task_role_arn            = module.iam.role_arn
 
   container_definitions = jsonencode([{
-    name  = var.project_name
-    image = local.image_uri
+    name         = var.project_name
+    image        = local.image_uri
     portMappings = [{ containerPort = 8000, protocol = "tcp" }]
     environment = [
       { name = "AIOPS_DEPLOYMENT_PROFILE", value = "cloud" },

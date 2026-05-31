@@ -158,7 +158,8 @@ Requirements for the content:
 Return ONLY valid JSON, no markdown fences or extra text."""
 
     try:
-        client = boto3.client("bedrock-runtime", region_name=settings.bedrock_region)
+        from agenticops.config import get_bedrock_boto_session
+        client = get_bedrock_boto_session().client("bedrock-runtime")
         response = client.converse(
             modelId=settings.bedrock_model_id,
             messages=[{"role": "user", "content": [{"text": prompt}]}],
@@ -245,7 +246,8 @@ Return ONLY the improved SKILL.md body content (no frontmatter, no JSON wrapper)
 Include decision trees, diagnostic commands, and remediation steps."""
 
     try:
-        client = boto3.client("bedrock-runtime", region_name=settings.bedrock_region)
+        from agenticops.config import get_bedrock_boto_session
+        client = get_bedrock_boto_session().client("bedrock-runtime")
         response = client.converse(
             modelId=settings.bedrock_model_id,
             messages=[{"role": "user", "content": [{"text": prompt}]}],

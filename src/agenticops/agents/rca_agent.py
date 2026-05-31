@@ -191,7 +191,7 @@ def rca_agent(issue_id: int) -> str:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
         from agenticops.services.notification_service import set_batch_mode
         set_batch_mode(True)
 
@@ -212,7 +212,7 @@ def rca_agent(issue_id: int) -> str:
             cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
         model = BedrockModel(
             model_id=model_id,
-            region_name=settings.bedrock_region,
+            boto_session=get_bedrock_boto_session(),
             max_tokens=max_tokens,
             **cache_kwargs,
         )

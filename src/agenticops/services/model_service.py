@@ -17,9 +17,9 @@ _CACHE_TTL = 86400  # 24 hours
 
 def _fetch_bedrock_models(region: str = "us-east-1") -> list[dict[str, Any]]:
     """Call Bedrock API to list available Anthropic models."""
-    import boto3
+    from agenticops.config import get_bedrock_boto_session
 
-    client = boto3.client("bedrock", region_name=region)
+    client = get_bedrock_boto_session().client("bedrock")
     response = client.list_foundation_models(byProvider="Anthropic")
 
     models = []

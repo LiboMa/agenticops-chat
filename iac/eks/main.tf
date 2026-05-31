@@ -21,6 +21,18 @@ module "vpc" {
   tags               = local.tags
 }
 
+module "iam" {
+  source              = "../modules/iam"
+  project_name        = var.project_name
+  service             = "eks"
+  eks_cluster_name    = var.eks_cluster_name
+  eks_namespace       = var.namespace
+  eks_service_account = var.project_name
+  kms_key_arn         = var.kms_key_arn
+  target_role_arns    = var.target_role_arns
+  tags                = local.tags
+}
+
 module "rds" {
   source       = "../modules/rds"
   enabled      = var.db_backend == "rds"
@@ -34,6 +46,14 @@ module "rds" {
 resource "kubernetes_namespace" "this" {
   metadata {
     name = var.namespace
+  }
+}
+
+# ServiceAccount for Pod Identity
+resource "kubernetes_service_account" "app" {
+  metadata {
+    name      = var.project_name
+    namespace = kubernetes_namespace.this.metadata[0].name
   }
 }
 
@@ -65,6 +85,8 @@ resource "kubernetes_config_map" "app" {
     AIOPS_REPORT_STORAGE          = "s3"
     AIOPS_REPORT_S3_BUCKET        = "${var.project_name}-reports-${data.aws_caller_identity.current.account_id}"
     AIOPS_S3_REGION               = var.region
+    AIOPS_CREDENTIAL_BACKEND      = var.kms_key_arn != "" ? "kms" : "local_key"
+    AIOPS_KMS_KEY_ID              = var.kms_key_arn
   }
 }
 
@@ -88,7 +110,8 @@ resource "kubernetes_deployment" "app" {
       }
 
       spec {
-        node_selector = length(var.node_selector) > 0 ? var.node_selector : null
+        service_account_name = kubernetes_service_account.app.metadata[0].name
+        node_selector        = length(var.node_selector) > 0 ? var.node_selector : null
 
         container {
           name  = var.project_name

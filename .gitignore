@@ -67,3 +67,18 @@ strategies/*
 .worktrees/
 .hypothesis/
 **/.terraform/
+
+# Terraform state (may contain secrets) + plans
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+**/terraform.tfvars
+
+# Playwright MCP dumps + scratch screenshots
+.playwright-mcp/
+*.png
+
+# Test scratch artifacts
+MagicMock/
+auto-demo_settings.json

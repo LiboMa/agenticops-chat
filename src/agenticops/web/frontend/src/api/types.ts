@@ -161,11 +161,13 @@ export interface FixExecution {
 /* ------------------------------------------------------------------ */
 
 export type CloudProvider = "aws" | "azure" | "gcp" | "alicloud";
+export type CredentialSourceType = "environment" | "assume_role" | "profile" | "static_keys";
 
 export interface Account {
   id: number;
   name: string;
   provider: CloudProvider;
+  credential_source_type: CredentialSourceType;
   credentials: Record<string, unknown>;
   regions: string[];
   labels: Record<string, string>;
@@ -177,6 +179,7 @@ export interface Account {
 export interface AccountCreate {
   name: string;
   provider: CloudProvider;
+  credential_source_type: CredentialSourceType;
   credentials: Record<string, unknown>;
   regions: string[];
   labels?: Record<string, string>;
@@ -185,10 +188,31 @@ export interface AccountCreate {
 
 export interface AccountUpdate {
   name?: string;
+  credential_source_type?: CredentialSourceType;
   credentials?: Record<string, unknown>;
   regions?: string[];
   labels?: Record<string, string>;
   is_enabled?: boolean;
+}
+
+export interface AvailableProfiles {
+  available: boolean;
+  profiles: string[];
+}
+
+export interface EnvironmentInfo {
+  environment: string;
+  credential_backend: string;
+  profiles_available: boolean;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  identity?: string | null;
+  account_id?: string | null;
+  error?: string | null;
+  provider: string;
+  name: string;
 }
 
 /* ------------------------------------------------------------------ */

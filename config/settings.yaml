@@ -1,4 +1,5 @@
 bedrock_region: us-east-1
+bedrock_profile: default
 bedrock_max_tokens: 16384
 bedrock_window_size: 40
 model_aliases:
@@ -28,13 +29,13 @@ token_cost_table:
   claude-opus-4-6:
     input: 15.0
     output: 75.0
-    cache_read: 1.50
+    cache_read: 1.5
   claude-sonnet-4-6:
     input: 3.0
     output: 15.0
-    cache_read: 0.30
+    cache_read: 0.3
   claude-haiku-4-5:
-    input: 0.80
+    input: 0.8
     output: 4.0
     cache_read: 0.08
 bedrock_cache_enabled: true
@@ -62,7 +63,20 @@ api_auth_enabled: false
 session_ttl_minutes: 30
 session_history_depth: 20
 default_regions:
-  aws: ["us-east-1", "us-west-2"]
-  azure: ["eastus", "westus2"]
-  gcp: ["us-central1", "us-east1"]
-  alicloud: ["cn-hangzhou", "cn-beijing"]
+  aws:
+  - us-east-1
+  - us-west-2
+  azure:
+  - eastus
+  - westus2
+  gcp:
+  - us-central1
+  - us-east1
+  alicloud:
+  - cn-hangzhou
+  - cn-beijing
+report_s3_bucket: agenticops-reports-533267047935
+report_s3_region: us-east-1
+report_s3_prefix: reports/
+report_presigned_url_expiry: 604800
+report_storage: local

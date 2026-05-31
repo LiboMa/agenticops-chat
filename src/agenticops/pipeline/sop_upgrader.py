@@ -156,11 +156,9 @@ def upgrade_existing_sop(existing_sop_content: str, case_data: dict) -> str:
 def _call_llm(prompt: str) -> str | None:
     """Call Bedrock LLM with the given prompt. Returns text or None."""
     try:
-        import boto3
+        from agenticops.config import get_bedrock_boto_session
 
-        client = boto3.client(
-            "bedrock-runtime", region_name=settings.bedrock_region
-        )
+        client = get_bedrock_boto_session().client("bedrock-runtime")
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 4000,
