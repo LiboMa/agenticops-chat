@@ -152,3 +152,18 @@ def maybe_run_skills_curator() -> dict | None:
         stale_days=getattr(settings, "skills_draft_stale_days", 30),
         archive_days=getattr(settings, "skills_draft_archive_days", 60),
     )
+
+
+def deprecate_agent_skill(name: str) -> bool:
+    """Mark an agent-created skill as deprecated. Refuses on human (pinned) skills."""
+    skill_dir = _find_skill_dir(name)
+    if skill_dir is None:
+        return False
+    fm, body = parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8"))
+    fm = normalize_skill_frontmatter(fm)
+    if fm.get("created_by") != "agent":
+        return False   # pinned human skill — refuse
+    fm["status"] = "deprecated"
+    _write_skill_md(skill_dir, fm, body)
+    _invalidate_skills_cache()
+    return True

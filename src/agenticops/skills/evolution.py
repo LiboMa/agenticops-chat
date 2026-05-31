@@ -36,6 +36,7 @@ def create_draft_skill(
     content: str,
     references: Optional[dict[str, str]] = None,
     created_by: str = "user",
+    extra_frontmatter: dict | None = None,
 ) -> Path:
     """Write a new SKILL.md to the draft directory.
 
@@ -45,6 +46,7 @@ def create_draft_skill(
         content: Full SKILL.md body content (after frontmatter).
         references: Optional dict of {filename: content} for references/ files.
         created_by: Provenance — "user" (human, pinned) or "agent" (auto).
+        extra_frontmatter: Additional frontmatter fields (e.g., improved_from).
 
     Returns:
         Path to the created draft skill directory.
@@ -55,6 +57,9 @@ def create_draft_skill(
     # Build SKILL.md with YAML frontmatter
     import datetime as _dt
     _today = _dt.date.today().isoformat()
+    _extra = ""
+    if extra_frontmatter:
+        _extra = "".join(f"{k}: {json.dumps(v)}\n" for k, v in extra_frontmatter.items())
     skill_md = f"""---
 name: {name}
 description: {json.dumps(description)}
@@ -62,7 +67,7 @@ created_by: {created_by}
 created_at: {_today}
 skill_version: "1.0"
 status: active
----
+{_extra}---
 
 {content}
 """
@@ -127,6 +132,21 @@ status: active
 
     logger.info("Created published skill '%s' at %s", name, pub_dir)
     return pub_dir
+
+
+def merge_skills_into_umbrella(sources: list, into: str, description: str, content: str) -> Path:
+    """Create an umbrella DRAFT skill from sources; records improved_from. Returns draft path.
+
+    Sources are NOT auto-archived — merge just creates the umbrella draft recording
+    its lineage. The agent/curator handles source lifecycle separately.
+    """
+    from agenticops.skills.loader import _invalidate_skills_cache
+    draft = create_draft_skill(
+        name=into, description=description, content=content, created_by="agent",
+        extra_frontmatter={"improved_from": list(sources)},
+    )
+    _invalidate_skills_cache()
+    return draft
 
 
 def update_draft_skill(name: str, updated_content: str) -> Path | None:
@@ -287,6 +307,7 @@ Include decision trees, diagnostic commands, and remediation steps."""
             name=skill_name,
             description=fm.get("description", existing.description),
             content=improved_body,
+            created_by="agent",
         )
 
         return {

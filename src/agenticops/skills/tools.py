@@ -1,6 +1,6 @@
 """Skill tools — progressive disclosure of domain knowledge + dynamic tool loading.
 
-Six @tool functions that agents use to discover, load, and evolve skill content:
+Seven @tool functions that agents use to discover, load, and evolve skill content:
 - list_skills: See what's available
 - activate_skill: Load full SKILL.md decision trees and procedures;
   if the skill declares tools, dynamically register them on the calling agent
@@ -8,10 +8,12 @@ Six @tool functions that agents use to discover, load, and evolve skill content:
 - create_skill: Generate and create a new draft skill from description
 - improve_skill: Self-improve an existing skill based on identified gaps
 - search_skill_registry: Search local and remote skill registries
+- skill_manage: Unified agent tool for autonomous skill management (add/improve/merge/deprecate/restore/search)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -295,3 +297,98 @@ def search_skill_registry(query: str) -> str:
         source = r.get("source", "local")
         lines.append(f"  {r['name']} [{source}] — {r.get('description', '')[:120]}")
     return "\n".join(lines)
+
+
+@tool
+def skill_manage(
+    action: str,
+    description: str = "",
+    name: str = "",
+    sources: list = None,
+    into: str = "",
+    improvement: str = "",
+) -> str:
+    """Autonomously manage Agent Skills (Hermes-style self-optimization).
+
+    Actions:
+      - add: generate a NEW skill from `description` -> saved as DRAFT (never auto-published;
+             promotion requires security scan + human review).
+      - improve: improve an existing skill (`name` + `improvement`) -> DRAFT; recorded for audit.
+      - merge: combine `sources` (skill names) into an umbrella DRAFT `into`.
+      - deprecate: mark an agent-created skill as deprecated (`name`).
+      - restore: restore an archived skill from .archive/ (`name`).
+      - search: search local + registry skills (`description` as query).
+
+    Agent-created skills are tagged created_by=agent (provenance, human-auditable) and
+    land as DRAFTS — they take effect only after promotion (security-scanned). Effective
+    next session (frozen-snapshot).
+
+    Args:
+        action: add | improve | merge | deprecate | restore | search
+        description: skill description (add) / query (search) / umbrella body desc (merge)
+        name: target skill (improve, deprecate, restore)
+        sources: source skill names (merge)
+        into: umbrella name (merge)
+        improvement: what to improve (improve)
+    Returns: JSON status.
+    """
+    from agenticops.config import settings as _s
+    if not getattr(_s, "skills_autonomous_write", True) and action in ("add", "improve", "merge", "deprecate"):
+        return json.dumps({"error": "Autonomous skill writes are disabled (skills_autonomous_write=false)."})
+
+    from agenticops.skills.loader import _invalidate_skills_cache
+
+    if action == "search":
+        from agenticops.skills.registry import search_skills
+        results = search_skills(description)
+        return json.dumps({"results": results[:10], "total": len(results)})
+
+    if action == "add":
+        from agenticops.skills.evolution import generate_skill_from_description, create_draft_skill
+        gen = generate_skill_from_description(description)
+        if "error" in gen:
+            return json.dumps({"error": f"generation failed: {gen['error']}"})
+        d = create_draft_skill(name=gen.get("name", name), description=gen.get("description", description)[:200],
+                               content=gen.get("content", ""), references=gen.get("references"), created_by="agent")
+        _invalidate_skills_cache()
+        return json.dumps({"status": "draft_created", "skill": d.name,
+                           "message": "Draft created (created_by=agent). Promote after review + security scan to activate."})
+
+    if action == "improve":
+        if not name:
+            return json.dumps({"error": "improve requires 'name'"})
+        from agenticops.skills.evolution import auto_improve_skill
+        from agenticops.skills.improvement_store import add_improvement, update_improvement
+        rec = add_improvement(name, improvement or description, source="agent", trigger="agent", status="pending")
+        result = auto_improve_skill(name, improvement or description)
+        if "error" in result:
+            update_improvement(rec["id"], "failed", result)
+            return json.dumps({"error": result["error"]})
+        update_improvement(rec["id"], "completed", result)
+        _invalidate_skills_cache()
+        return json.dumps({"status": "improved_draft", "skill": name,
+                           "draft_path": result.get("draft_path", ""), "record_id": rec["id"]})
+
+    if action == "merge":
+        if not sources or not into:
+            return json.dumps({"error": "merge requires 'sources' (list) and 'into'"})
+        from agenticops.skills.evolution import merge_skills_into_umbrella
+        d = merge_skills_into_umbrella(list(sources), into, description or f"Umbrella of {sources}", description or "")
+        _invalidate_skills_cache()
+        return json.dumps({"status": "merged_draft", "umbrella": d.name, "absorbed": list(sources)})
+
+    if action == "deprecate":
+        if not name:
+            return json.dumps({"error": "deprecate requires 'name'"})
+        from agenticops.skills.curator import deprecate_agent_skill
+        ok = deprecate_agent_skill(name)
+        return json.dumps({"status": "deprecated" if ok else "not_found_or_pinned", "skill": name})
+
+    if action == "restore":
+        if not name:
+            return json.dumps({"error": "restore requires 'name'"})
+        from agenticops.skills.curator import restore_skill
+        ok = restore_skill(name)
+        return json.dumps({"status": "restored" if ok else "not_found", "skill": name})
+
+    return json.dumps({"error": f"Unknown action '{action}'. Use add|improve|merge|deprecate|restore|search."})
