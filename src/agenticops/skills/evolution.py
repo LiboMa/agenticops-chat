@@ -30,6 +30,22 @@ def _atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+import re as _re
+
+def _safe_skill_name(name: str) -> str:
+    """Validate a skill name is a safe single-segment slug (no path traversal).
+
+    Raises ValueError on names that aren't lowercase-hyphenated single segments
+    (rejects '/', '..', absolute paths, etc.). Skills are executable, and skill
+    names can originate from an LLM / autonomous tool, so this is a hard gate.
+    """
+    if not isinstance(name, str) or not _re.match(r"^[a-z0-9][a-z0-9._-]{0,62}$", name):
+        raise ValueError(f"unsafe skill name: {name!r} (expected lowercase single-segment slug)")
+    if name in (".", "..") or "/" in name or "\\" in name:
+        raise ValueError(f"unsafe skill name: {name!r}")
+    return name
+
+
 def create_draft_skill(
     name: str,
     description: str,
@@ -51,6 +67,7 @@ def create_draft_skill(
     Returns:
         Path to the created draft skill directory.
     """
+    name = _safe_skill_name(name)
     draft_dir = settings.skills_draft_dir / name
     draft_dir.mkdir(parents=True, exist_ok=True)
 
@@ -106,6 +123,7 @@ def create_published_skill(
     Returns:
         Path to the created skill directory.
     """
+    name = _safe_skill_name(name)
     pub_dir = settings.skills_dir / name
     pub_dir.mkdir(parents=True, exist_ok=True)
 

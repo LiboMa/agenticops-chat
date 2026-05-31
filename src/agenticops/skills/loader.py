@@ -152,6 +152,10 @@ def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetada
                 logger.warning("Skill '%s' has no description, skipping", name)
                 continue
 
+            # Skip deprecated/archived skills (missing status => kept, treated active)
+            if fm.get("status") in ("deprecated", "archived"):
+                continue
+
             skills.append(
                 SkillMetadata(
                     name=name,

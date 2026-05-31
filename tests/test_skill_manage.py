@@ -62,3 +62,21 @@ def test_skill_manage_deprecate_refuses_human_skill(tmp_skills):
         "---\nname: linux-admin\ndescription: d\ncreated_by: user\nstatus: active\n---\nbody")
     res = json.loads(skill_manage(action="deprecate", name="linux-admin"))
     assert res["status"] == "not_found_or_pinned"
+
+
+def test_skill_manage_add_rejects_unsafe_name(tmp_skills):
+    from agenticops.skills.tools import skill_manage
+    with patch("agenticops.skills.evolution.generate_skill_from_description",
+               return_value={"name": "../../evil", "description": "d", "content": "body"}):
+        res = json.loads(skill_manage(action="add", description="x"))
+    assert "error" in res and "invalid skill name" in res["error"].lower()
+    sdir, ddir = tmp_skills
+    assert not (ddir.parent.parent / "evil").exists()
+
+
+def test_skill_manage_add_handles_none_description(tmp_skills):
+    from agenticops.skills.tools import skill_manage
+    with patch("agenticops.skills.evolution.generate_skill_from_description",
+               return_value={"name": "ok-skill", "description": None, "content": "body"}):
+        res = json.loads(skill_manage(action="add", description="fallback desc"))
+    assert res["status"] == "draft_created"

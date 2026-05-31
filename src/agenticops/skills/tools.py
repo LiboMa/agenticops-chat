@@ -208,7 +208,7 @@ def create_skill(name: str, description: str, publish: bool = False) -> str:
         return f"Failed to generate skill: {result['error']}"
 
     skill_name = result.get("name", name)
-    skill_desc = result.get("description", description)[:200]
+    skill_desc = (result.get("description") or description)[:200]
     skill_content = result.get("content", "")
     skill_refs = result.get("references")
 
@@ -348,8 +348,11 @@ def skill_manage(
         gen = generate_skill_from_description(description)
         if "error" in gen:
             return json.dumps({"error": f"generation failed: {gen['error']}"})
-        d = create_draft_skill(name=gen.get("name", name), description=gen.get("description", description)[:200],
-                               content=gen.get("content", ""), references=gen.get("references"), created_by="agent")
+        try:
+            d = create_draft_skill(name=gen.get("name", name), description=(gen.get("description") or description)[:200],
+                                   content=gen.get("content", ""), references=gen.get("references"), created_by="agent")
+        except ValueError as e:
+            return json.dumps({"error": f"invalid skill name: {e}"})
         _invalidate_skills_cache()
         return json.dumps({"status": "draft_created", "skill": d.name,
                            "message": "Draft created (created_by=agent). Promote after review + security scan to activate."})
@@ -373,7 +376,10 @@ def skill_manage(
         if not sources or not into:
             return json.dumps({"error": "merge requires 'sources' (list) and 'into'"})
         from agenticops.skills.evolution import merge_skills_into_umbrella
-        d = merge_skills_into_umbrella(list(sources), into, description or f"Umbrella of {sources}", description or "")
+        try:
+            d = merge_skills_into_umbrella(list(sources), into, description or f"Umbrella of {sources}", description or "")
+        except ValueError as e:
+            return json.dumps({"error": f"invalid skill name: {e}"})
         _invalidate_skills_cache()
         return json.dumps({"status": "merged_draft", "umbrella": d.name, "absorbed": list(sources)})
 

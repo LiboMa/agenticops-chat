@@ -85,3 +85,19 @@ def test_restore_skill_from_archive(tmp_skills):
     assert restore_skill("gone") is True
     assert (ddir / "gone" / "SKILL.md").exists()
     assert not arch.exists()
+
+
+def test_deprecated_skill_excluded_from_discovery(tmp_path, monkeypatch):
+    sdir = tmp_path / "skills"; ddir = sdir / "draft"
+    (sdir / "live").mkdir(parents=True)
+    (sdir / "live" / "SKILL.md").write_text("---\nname: live\ndescription: d\ncreated_by: user\nstatus: active\n---\nb")
+    (sdir / "dead").mkdir(parents=True)
+    (sdir / "dead" / "SKILL.md").write_text("---\nname: dead\ndescription: d\ncreated_by: agent\nstatus: deprecated\n---\nb")
+    ddir.mkdir(parents=True)
+    monkeypatch.setattr("agenticops.config.settings.skills_dir", sdir, raising=False)
+    monkeypatch.setattr("agenticops.config.settings.skills_draft_dir", ddir, raising=False)
+    from agenticops.skills.loader import discover_skills, _invalidate_skills_cache
+    _invalidate_skills_cache()
+    names = {s.name for s in discover_skills()}
+    assert "live" in names
+    assert "dead" not in names
