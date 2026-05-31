@@ -53,3 +53,35 @@ def test_human_skill_is_pinned(tmp_skills):
     assert (sdir / "linux-admin" / "SKILL.md").exists()
     fm, _ = parse_frontmatter((sdir / "linux-admin" / "SKILL.md").read_text())
     assert fm["status"] == "active"   # pinned: untouched
+
+
+def test_touch_reactivates_stale_agent_draft(tmp_skills):
+    from agenticops.skills.curator import touch_skill_used
+    from agenticops.skills.loader import parse_frontmatter
+    sdir, ddir = tmp_skills
+    _write_skill(ddir, "s", "agent", "2026-01-01", status="stale")
+    touch_skill_used("s")
+    fm, _ = parse_frontmatter((ddir / "s" / "SKILL.md").read_text())
+    assert fm["status"] == "active"
+    assert fm["last_used"] != "2026-01-01"
+
+
+def test_touch_keeps_human_skill_active(tmp_skills):
+    from agenticops.skills.curator import touch_skill_used
+    from agenticops.skills.loader import parse_frontmatter
+    sdir, ddir = tmp_skills
+    _write_skill(sdir, "linux-admin", "user", "2026-01-01")
+    touch_skill_used("linux-admin")
+    fm, _ = parse_frontmatter((sdir / "linux-admin" / "SKILL.md").read_text())
+    assert fm["status"] == "active"
+
+
+def test_restore_skill_from_archive(tmp_skills):
+    from agenticops.skills.curator import restore_skill
+    sdir, ddir = tmp_skills
+    arch = sdir / ".archive" / "gone"
+    arch.mkdir(parents=True)
+    (arch / "SKILL.md").write_text('---\nname: gone\ncreated_by: agent\nstatus: archived\n---\nbody')
+    assert restore_skill("gone") is True
+    assert (ddir / "gone" / "SKILL.md").exists()
+    assert not arch.exists()

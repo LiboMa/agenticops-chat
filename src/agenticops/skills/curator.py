@@ -57,6 +57,51 @@ def _scan_dirs() -> list[Path]:
     return dirs
 
 
+def _find_skill_dir(name: str) -> Path | None:
+    """Locate a skill package dir by name (published first, then draft)."""
+    for base in (settings.skills_dir, settings.skills_draft_dir):
+        d = base / name
+        if (d / "SKILL.md").is_file():
+            return d
+    return None
+
+
+def touch_skill_used(name: str) -> None:
+    """Mark a skill used today; reactivate it if it was a stale agent draft."""
+    skill_dir = _find_skill_dir(name)
+    if skill_dir is None:
+        return
+    try:
+        fm, body = parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8"))
+    except OSError:
+        return
+    fm = normalize_skill_frontmatter(fm)
+    fm["last_used"] = str(date.today())
+    if fm.get("status") == "stale":
+        fm["status"] = "active"
+    _write_skill_md(skill_dir, fm, body)
+
+
+def restore_skill(name: str) -> bool:
+    """Restore an archived skill from skills/.archive/ back to draft. Returns True if found."""
+    archive_dir = settings.skills_dir / ".archive" / name
+    if not (archive_dir / "SKILL.md").is_file():
+        return False
+    fm, body = parse_frontmatter((archive_dir / "SKILL.md").read_text(encoding="utf-8"))
+    fm = normalize_skill_frontmatter(fm)
+    fm["status"] = "active"
+    fm["last_used"] = str(date.today())
+    dest = settings.skills_draft_dir / name
+    dest.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(dest, fm, body)
+    for item in archive_dir.iterdir():
+        if item.name != "SKILL.md":
+            shutil.move(str(item), str(dest / item.name))
+    shutil.rmtree(archive_dir)
+    _invalidate_skills_cache()
+    return True
+
+
 def run_skills_curator(stale_days: int = 30, archive_days: int = 60, today: date | None = None) -> dict:
     """Advance agent-draft lifecycle. Human skills are pinned. Returns summary."""
     today = today or date.today()

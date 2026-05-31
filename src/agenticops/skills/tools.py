@@ -94,6 +94,13 @@ def activate_skill(skill_name: str, agent: Any = None) -> str:
             f"description=\"<what it should cover>\", publish=True)"
         )
 
+    # Reactivate-on-use (Curator): touch last_used; resurrects stale agent drafts
+    try:
+        from agenticops.skills.curator import touch_skill_used
+        touch_skill_used(skill_name)
+    except Exception:
+        logger.debug("touch_skill_used failed for %s", skill_name, exc_info=True)
+
     # List available references
     skills = discover_skills()
     refs_info = ""
