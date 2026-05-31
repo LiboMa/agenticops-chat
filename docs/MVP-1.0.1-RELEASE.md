@@ -116,9 +116,77 @@ This release focuses on **MCP Server integration reliability**, **dynamic model 
 
 ---
 
+---
+
+## Docker + Terraform Deployment (NEW)
+
+### 7. Docker 容器化
+
+**单一 Image，全依赖打包** — 不再需要目标机器安装 Python/Node/uv：
+
+```bash
+# 构建 (从项目根目录)
+docker build -f docker/Dockerfile -t agenticops:latest .
+
+# 运行
+docker run -d -p 8000:8000 -v /data:/app/data \
+  -e AIOPS_ADMIN_PASSWORD=xxx -e AIOPS_BEDROCK_REGION=us-east-1 \
+  agenticops:latest
+```
+
+Image 包含: AWS CLI v2, kubectl, uvx, git, ssh + 全部 Python 库 (boto3, weasyprint, slack_sdk, psycopg2 等)。
+
+### 8. Terraform IaC (EC2/ECS/EKS)
+
+三种独立部署模块，共享 6 个子模块：
+
+| 模块 | 路径 | 说明 |
+|------|------|------|
+| ECR | `iac/modules/ecr/` | 镜像仓库 + lifecycle |
+| VPC | `iac/modules/vpc/` | 创建或使用已有 VPC |
+| ALB | `iac/modules/alb/` | HTTPS 443 + 自动/手动证书 |
+| RDS | `iac/modules/rds/` | PostgreSQL (可选) |
+| IAM | `iac/modules/iam/` | Bedrock/ECR/S3/SES 权限 |
+| DNS | `iac/modules/dns/` | Route53 A record |
+
+**部署**：`terraform init && terraform apply -target=module.ecr && docker push && terraform apply`
+
+### 9. Scheduler 防重复 (CAS)
+
+- **File-lock**: `fcntl.LOCK_EX` 确保 4 workers 只有 1 个运行 scheduler
+- **DB CAS**: `UPDATE ... WHERE next_run_at = X` 原子操作，多实例安全
+- 修复前: 同一 job 被 4 个 worker 并行执行
+- 修复后: 1 elected + 3 skipped，job 只执行一次
+
+---
+
+## Code Statistics
+
+| 模块 | 行数 | 文件数 |
+|------|------|--------|
+| Backend Python (`src/agenticops/`) | ~55,000 | 160 |
+| Frontend TypeScript (`frontend/src/`) | ~16,000 | 104 |
+| Terraform IaC (`iac/`) | ~2,300 | 35 |
+| Docker (`docker/`) | ~180 | 4 |
+| Tests (`tests/`) | ~4,000 | 25 |
+| Skills | 16 packages | — |
+| **Total** | **~77,000+** | **320+** |
+
+---
+
 ## Upgrade Notes
 
-1. Run `aiops service restart` to apply all changes
-2. DB migration auto-runs: adds `schedule_type`, `max_retries`, `retry_count` columns
-3. If using MCP servers: no action needed (lazy-start replaces pre-start)
-4. `notifications_consolidated` now defaults to `true` — set `false` in settings.yaml if you want per-issue notifications during dev
+**From v1.0.0 (systemd source deploy) → v1.0.1 (Docker)**:
+
+1. 备份数据: `cp -r /opt/agenticops/data /backup/`
+2. 构建 Image: `docker build -f docker/Dockerfile -t agenticops:latest .`
+3. 停止 systemd: `systemctl stop agenticops && systemctl disable agenticops`
+4. 启动容器: `docker run -d --name agenticops -p 8000:8000 -v /backup/data:/app/data --env-file .env agenticops:latest`
+5. 验证: `curl http://localhost:8000/api/health`
+
+**Volume 权限**: `chown -R 1000:1000 /data/path` (容器以 UID 1000 运行)
+
+**已有 v1.0.1 systemd 用户**:
+1. `aiops service restart` 应用代码更新
+2. DB migration 自动运行
+3. Scheduler 防重复自动生效（无需配置）

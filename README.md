@@ -76,7 +76,42 @@ open → investigating → acknowledged → root_cause_identified → fix_planne
 
 State machine enforced — invalid transitions return 409.
 
-## Quick Start
+## Deployment (Docker + Terraform)
+
+### Docker (推荐)
+
+```bash
+# 构建
+docker build -f docker/Dockerfile -t agenticops:latest .
+
+# 运行
+docker run -d -p 8000:8000 \
+  -v /data/agenticops:/app/data \
+  -e AIOPS_ADMIN_PASSWORD=MyPassword \
+  -e AIOPS_BEDROCK_REGION=us-east-1 \
+  agenticops:latest
+```
+
+### Terraform (AWS IaC)
+
+| Target | Path | Command |
+|--------|------|---------|
+| EC2 (单实例) | `iac/ec2/` | `terraform apply` |
+| ECS (Fargate) | `iac/ecs/` | `terraform apply` |
+| EKS (已有集群) | `iac/eks/` | `terraform apply` |
+
+```bash
+cd iac/ec2
+cp terraform.tfvars.example terraform.tfvars
+# 编辑: region, admin_password, acm_cert_arn
+terraform init && terraform apply
+```
+
+详见: [`docker/README.md`](docker/README.md) | [`iac/ec2/README.md`](iac/ec2/README.md) | [`docs/WORKFLOW.md`](docs/WORKFLOW.md#deployment)
+
+---
+
+## Quick Start (Local Dev)
 
 ### 1. Install
 

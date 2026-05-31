@@ -995,3 +995,62 @@ Each case is documented in `docs/cases/case-N-*.md` with:
 - Expected alert flow and pipeline flow
 - Expected fix (command, risk level)
 - Actual metrics (detection latency, MTTR, cost)
+
+---
+
+## Deployment
+
+### Docker (推荐)
+
+AgenticOps 以单一 Docker Image 交付，包含全部运行时依赖。
+
+```mermaid
+flowchart LR
+    BUILD["docker build<br/>-f docker/Dockerfile"] --> IMAGE["agenticops:tag"]
+    IMAGE --> ECR["AWS ECR"]
+    ECR --> EC2["EC2<br/>docker run"]
+    ECR --> ECS["ECS Fargate<br/>Task Definition"]
+    ECR --> EKS["EKS<br/>K8s Deployment"]
+```
+
+**Quick Start (本地测试)**:
+```bash
+docker build -f docker/Dockerfile -t agenticops:latest .
+docker run --rm -p 8000:8000 \
+  -e AIOPS_ADMIN_PASSWORD=test123 \
+  -e AIOPS_BEDROCK_REGION=us-east-1 \
+  agenticops:latest
+# → http://localhost:8000
+```
+
+### Terraform IaC
+
+三种部署模式，每种独立一个 Terraform root module：
+
+| 模式 | 路径 | 适用场景 |
+|------|------|----------|
+| **EC2** | `iac/ec2/` | 单实例，最简单，开发/小团队 |
+| **ECS** | `iac/ecs/` | Fargate 无服务器，自动伸缩 |
+| **EKS** | `iac/eks/` | 已有 K8s 集群，大规模 |
+
+**共享模块** (`iac/modules/`): ecr, vpc, alb, rds, iam, dns
+
+**部署流程 (EC2 为例)**:
+```bash
+cd iac/ec2
+cp terraform.tfvars.example terraform.tfvars
+# 编辑: region, admin_password, acm_cert_arn
+
+terraform init
+terraform apply -target=module.ecr -auto-approve   # 1. 创建 ECR
+# docker build + push                              # 2. 推送镜像
+terraform apply -auto-approve                      # 3. 部署全部基础设施
+```
+
+**Bring Your Own**:
+- `vpc_id` — 使用已有 VPC（空=创建新的）
+- `acm_cert_arn` — 使用已有 ACM 证书（空=自动申请）
+- `eks_cluster_name` — 部署到已有 EKS 集群
+- `alb_internal = true` — 仅 VPC 内网访问
+
+详细说明见各模块 README: `iac/ec2/README.md`, `iac/ecs/README.md`, `iac/eks/README.md`
