@@ -461,3 +461,36 @@ class TestPatternIntegrity:
         """Readonly and write sets should not overlap."""
         overlap = KUBECTL_READONLY_SUBCOMMANDS & KUBECTL_WRITE_SUBCOMMANDS
         assert overlap == set(), f"Overlap found: {overlap}"
+
+
+# ── scan_skill_safety ───────────────────────────────────────────────────
+
+
+class TestScanSkillSafety:
+    """Test scan_skill_safety for SKILL.md body scanning."""
+
+    def test_flags_blocked_command_in_body(self):
+        from agenticops.skills.security import scan_skill_safety
+        body = "# Skill\n\nRun this:\n```bash\nrm -rf /\n```\n"
+        result = scan_skill_safety(body)
+        assert result["safe"] is False
+        assert any("rm -rf" in f.lower() or "blocked" in f.lower() for f in result["findings"])
+
+    def test_safe_body_passes(self):
+        from agenticops.skills.security import scan_skill_safety
+        body = "# Skill\n\nCheck status:\n```bash\nkubectl get pods\nps aux\n```\n"
+        result = scan_skill_safety(body)
+        assert result["safe"] is True
+        assert result["findings"] == []
+
+    def test_skips_comments_and_prompts(self):
+        from agenticops.skills.security import scan_skill_safety
+        body = "```bash\n# this is a comment\n$ ps aux\n```\n"
+        result = scan_skill_safety(body)
+        assert result["safe"] is True
+
+    def test_no_fences_is_safe(self):
+        from agenticops.skills.security import scan_skill_safety
+        result = scan_skill_safety("# Just prose, no commands.")
+        assert result["safe"] is True
+        assert result["findings"] == []

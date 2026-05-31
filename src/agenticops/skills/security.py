@@ -200,3 +200,30 @@ def classify_kubectl_command(cmd: str) -> str:
             return "write"
 
     return "unknown"
+
+
+# ── SKILL.md Body Scanning ───────────────────────────────────────────
+
+
+def scan_skill_safety(body: str) -> dict:
+    """Scan a SKILL.md body's fenced bash blocks for blocked-tier commands.
+
+    Returns {"safe": bool, "findings": [str]}. A skill is unsafe if any command
+    line in a ```bash/```sh/```shell fence classifies as 'blocked'.
+    """
+    findings: list[str] = []
+    for m in re.finditer(r"```(?:bash|sh|shell)\n(.*?)```", body, re.DOTALL):
+        for line in m.group(1).splitlines():
+            cmd = line.strip()
+            if not cmd or cmd.startswith("#"):
+                continue
+            cmd = cmd[1:].strip() if cmd.startswith("$") else cmd
+            if not cmd:
+                continue
+            try:
+                tier = classify_shell_command(cmd)
+            except Exception:
+                continue
+            if tier == "blocked":
+                findings.append(f"blocked command: {cmd[:80]}")
+    return {"safe": len(findings) == 0, "findings": findings}
