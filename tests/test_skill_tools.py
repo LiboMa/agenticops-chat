@@ -292,3 +292,45 @@ class TestSearchSkillRegistry:
             assert "2 found" in result
             assert "linux-admin [local]" in result
             assert "k8s-admin [clawhub]" in result
+
+
+# ── improve_skill ────────────────────────────────────────────────────
+
+
+class TestImproveSkill:
+    """Cover improve_skill improvement_store wiring."""
+
+    def test_improve_skill_records_to_store(self, monkeypatch):
+        recorded = {}
+        def _add(skill_name, improvement, **kw):
+            recorded["skill"] = skill_name
+            recorded["status"] = kw.get("status")
+            recorded["source"] = kw.get("source")
+            return {"id": "rec1"}
+        def _upd(rid, status, result=None):
+            recorded["final"] = status
+            recorded["rid"] = rid
+            return {"id": rid}
+        monkeypatch.setattr("agenticops.skills.improvement_store.add_improvement", _add)
+        monkeypatch.setattr("agenticops.skills.improvement_store.update_improvement", _upd)
+        with patch("agenticops.skills.evolution.auto_improve_skill",
+                   return_value={"action": "updated", "skill_name": "redis", "draft_path": "/x"}):
+            from agenticops.skills.tools import improve_skill
+            out = improve_skill("redis", "add cluster failover")
+        assert recorded.get("skill") == "redis"
+        assert recorded.get("final") == "completed"
+        assert recorded.get("rid") == "rec1"
+
+    def test_improve_skill_records_failure(self, monkeypatch):
+        recorded = {}
+        monkeypatch.setattr("agenticops.skills.improvement_store.add_improvement",
+                            lambda skill_name, improvement, **kw: {"id": "rec2"})
+        def _upd(rid, status, result=None):
+            recorded["final"] = status
+        monkeypatch.setattr("agenticops.skills.improvement_store.update_improvement", _upd)
+        with patch("agenticops.skills.evolution.auto_improve_skill",
+                   return_value={"error": "skill not found"}):
+            from agenticops.skills.tools import improve_skill
+            out = improve_skill("ghost", "x")
+        assert "Failed to improve" in out
+        assert recorded.get("final") == "failed"

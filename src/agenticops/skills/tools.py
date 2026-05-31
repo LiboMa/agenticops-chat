@@ -250,6 +250,7 @@ def improve_skill(skill_name: str, improvement: str) -> str:
 
     Creates an improved draft version of the skill. The original published
     skill is preserved until the draft is reviewed and promoted.
+    The improvement is recorded in the improvement store for audit/genealogy.
 
     Args:
         skill_name: Name of the existing skill to improve.
@@ -259,12 +260,16 @@ def improve_skill(skill_name: str, improvement: str) -> str:
         Success message with draft path, or error message.
     """
     from agenticops.skills.evolution import auto_improve_skill
+    from agenticops.skills.improvement_store import add_improvement, update_improvement
     from agenticops.skills.loader import _invalidate_skills_cache
 
+    rec = add_improvement(skill_name, improvement, source="agent", trigger="agent", status="pending")
     result = auto_improve_skill(skill_name, improvement)
     if "error" in result:
+        update_improvement(rec["id"], "failed", result)
         return f"Failed to improve skill: {result['error']}"
 
+    update_improvement(rec["id"], "completed", result)
     _invalidate_skills_cache()
     return (
         f"Improved draft of '{skill_name}' created at {result['draft_path']}.\n"
