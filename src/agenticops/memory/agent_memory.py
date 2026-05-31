@@ -72,7 +72,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     try:
         fm = yaml.safe_load(match.group(1)) or {}
     except yaml.YAMLError:
-        logger.warning("Failed to parse YAML frontmatter")
+        logger.error("Failed to parse YAML frontmatter", exc_info=True)
         return {}, content.strip()
     return fm, match.group(2).strip()
 
@@ -232,6 +232,7 @@ def save_memory_file(
     related_issue_id: int | None = None,
     created_by: str = "user",
     max_active: int | None = None,
+    collision_safe: bool = False,
 ) -> Path:
     """Create or update a memory Markdown file.
 
@@ -255,6 +256,21 @@ def save_memory_file(
         filename = filename + ".md"
 
     filepath = directory / filename
+
+    # Collision-safe: if the slug collides with a DIFFERENT existing body,
+    # write to the next free name_N.md instead of silently overwriting.
+    if collision_safe and filepath.exists():
+        try:
+            _, existing_body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
+        except OSError:
+            existing_body = None
+        if existing_body is not None and existing_body.strip() != body.strip():
+            stem = filepath.stem
+            n = 2
+            while (directory / f"{stem}_{n}.md").exists():
+                n += 1
+            filepath = directory / f"{stem}_{n}.md"
+            filename = filepath.name
 
     # Size-cap: only NEW active files are capped (updates to existing are always allowed)
     if not filepath.exists():

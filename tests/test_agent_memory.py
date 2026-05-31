@@ -600,3 +600,33 @@ class TestConfidenceEvolution:
     def test_adjust_confidence_missing_file_returns_false(self, tmp_memory_dir):
         from agenticops.memory.agent_memory import adjust_confidence
         assert adjust_confidence("detect", "nope.md", delta=-1) is False
+
+
+# ── Collision-safe filenames & parse-error severity (§9) ────────────
+
+
+class TestCollisionAndParse:
+    def test_save_collision_appends_suffix(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, _agent_dir
+        save_memory_file(agent_name="detect", filename="dup.md", body="first", created_by="auto")
+        # second write with same filename but DIFFERENT body + collision_safe → new file
+        save_memory_file(agent_name="detect", filename="dup.md", body="second different",
+                         created_by="auto", collision_safe=True)
+        files = sorted(p.name for p in _agent_dir("detect").glob("dup*.md"))
+        assert len(files) == 2  # dup.md + dup_2.md
+
+    def test_save_collision_same_body_no_duplicate(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, _agent_dir
+        save_memory_file(agent_name="detect", filename="same.md", body="identical", created_by="auto")
+        # same body + collision_safe → updates in place, no new file
+        save_memory_file(agent_name="detect", filename="same.md", body="identical",
+                         created_by="auto", collision_safe=True)
+        files = sorted(p.name for p in _agent_dir("detect").glob("same*.md"))
+        assert files == ["same.md"]
+
+    def test_parse_error_logged_at_error(self, tmp_memory_dir, caplog):
+        import logging
+        from agenticops.memory.agent_memory import parse_frontmatter
+        with caplog.at_level(logging.ERROR):
+            parse_frontmatter("---\n: : bad:\n---\nbody")
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
