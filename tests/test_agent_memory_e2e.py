@@ -361,10 +361,12 @@ class TestPromptInjectionE2E:
         assert updated.count(MEMORY_MARKER_END) == 1
 
     def test_max_entries_respects_cap(self, tmp_memory_dir):
+        # max_active=25 lets all 20 writes through (we're testing the LOAD-side
+        # injection cap here, not the cycle② write-side size-cap which defaults to 15).
         for i in range(20):
             save_memory_file(
                 agent_name="detect", filename=f"mem_{i:02d}.md",
-                body=f"Memory number {i}", confidence=3,
+                body=f"Memory number {i}", confidence=3, max_active=25,
             )
         prompt = load_agent_memory("detect", max_entries=5)
         assert prompt.count("(confidence:") == 5

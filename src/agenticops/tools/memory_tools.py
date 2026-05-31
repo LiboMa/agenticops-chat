@@ -74,16 +74,27 @@ def record_agent_feedback(
     filename = _slugify(description[:50]) + ".md"
     issue_id = related_issue_id if related_issue_id > 0 else None
 
-    filepath = save_memory_file(
-        agent_name=agent_name,
-        filename=filename,
-        memory_type=memory_type,
-        confidence=confidence,
-        source="chat",
-        body=description,
-        resource_pattern=resource_pattern,
-        related_issue_id=issue_id,
-    )
+    try:
+        filepath = save_memory_file(
+            agent_name=agent_name,
+            filename=filename,
+            memory_type=memory_type,
+            confidence=confidence,
+            source="chat",
+            body=description,
+            resource_pattern=resource_pattern,
+            related_issue_id=issue_id,
+        )
+    except MemoryFullError as e:
+        # Consistent with memory_manage: return actionable merge guidance, not a traceback
+        return json.dumps({
+            "status": "memory_full",
+            "agent": agent_name,
+            "active_count": e.active_count,
+            "current": e.current,
+            "message": f"Memory full for {agent_name}. Use memory_manage(action='merge') "
+                       f"to consolidate related entries, then record again.",
+        })
 
     result = {
         "status": "saved",
