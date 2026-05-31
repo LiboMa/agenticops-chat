@@ -23,7 +23,7 @@ Web Dashboard ──────┘         │
                               ├──► CloudWatch, CloudTrail, EKS, VPC, ELB, ...
                               ├──► SQLite / PostgreSQL metadata DB
                               ├──► Graph Engine (NetworkX) — SPOF, capacity, dependency, change sim
-                              └──► Agent Skills (SKILL.md packages) — 14 domain skills
+                              └──► Agent Skills (SKILL.md packages) — 15 domain skills
 ```
 
 - **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
@@ -47,7 +47,7 @@ Web Dashboard ──────┘         │
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
 | `chat/` | `preprocessor.py`, `file_reader.py`, `send_to.py`, `channel.py` | Message preprocessing, file upload, I#/R# refs, /send_to, /channel |
 | `graph/` | `engine.py`, `algorithms.py`, `collectors.py`, `types.py`, `api.py`, `tools.py` | Infrastructure graph: SPOF, capacity risk, dependency chain, change sim |
-| `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py`, `evolution.py`, `curator.py`, `review.py`, `improvement_store.py` | Skill discovery, security classification, run_on_host/run_kubectl, autonomous create/improve, Curator lifecycle, security-gated promote/rollback, improvement audit |
+| `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py`, `evolution.py`, `curator.py`, `review.py`, `improvement_store.py` | Skill discovery (XML-escaped, YAML colon-fallback, kebab-case name validation, 200-char index), security classification, run_on_host/run_kubectl, autonomous create/improve, Curator lifecycle, security-gated promote/rollback, improvement audit |
 | `notify/` | `notifier.py`, `im_config.py` | Multi-channel notifications, YAML channel config |
 | `im/` | `feishu_ws.py` | IM bot (Feishu WebSocket), alert channel routing |
 | `kb/` | `vector_store.py` | Vector storage (SQLite/pgvector/S3) — KB case search only |
@@ -67,12 +67,12 @@ Web Dashboard ──────┘         │
 
 ### Skills (`skills/`) — autonomous, self-optimizing (cycle③ 2026-05-31)
 
-14 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
+15 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis, security-engineer. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
 
 **Hermes-style autonomy** (mirrors the cycle② memory pattern; skills are EXECUTABLE so promotion is security-gated):
 - **3-tier progressive disclosure** (preserved): system-prompt XML (~460 tok total, measured — no per-agent filtering needed) → `activate_skill` (full body) → `read_skill_reference` (deep-dive).
 - **`skill_manage` tool** (`tools.py`, mirrors `memory_manage`): agent self-curation via `add`/`improve`/`merge`/`deprecate`/`restore`/`search`. Agent writes land as **drafts only** (`created_by=agent`), never auto-published. Gated by `skills_autonomous_write`.
-- **Provenance frontmatter**: `created_by` (user=pinned / agent), `created_at`, `last_improved_at`, `improved_from` (genealogy), `skill_version`, `status` (active/stale/deprecated/archived). `normalize_skill_frontmatter` backfills old SKILL.md non-destructively; the 14 human skills are `created_by=user` (pinned). `[AGENT]` tag in `list_skills` XML.
+- **Provenance frontmatter**: `created_by` (user=pinned / agent), `created_at`, `last_improved_at`, `improved_from` (genealogy), `skill_version`, `status` (active/stale/deprecated/archived). `normalize_skill_frontmatter` backfills old SKILL.md non-destructively; the 15 human skills are `created_by=user` (pinned). `[AGENT]` tag in `list_skills` XML.
 - **Skills Curator** (`curator.py`, zero LLM): ages UNUSED `created_by=agent` drafts `active→stale(30d)→archived(60d)` by `last_used`; **human skills pinned (never touched)**; **never deletes** (moves to `skills/.archive/`, recoverable via `restore_skill`); **reactivate-on-use** (`touch_skill_used` on `activate_skill`). Runs at main-agent build (gated by `skills_curator_enabled`).
 - **Security-gated promotion** (`review.py` + `security.py`): `promote_skill` scans the draft body (`scan_skill_safety` — flags blocked-tier commands in fenced bash) before publishing; archives the prior published version to `skills/.archive/<name>__<ts>/` (multi-gen, recoverable). `rollback_skill` restores the most recent archived version. Skill names sanitized (`_safe_skill_name`, path-traversal guard).
 - **Improvement audit loop** (`improvement_store.py`): all three improve paths (`improve_skill` tool, `skill_manage improve`, `services/skill_improvement_service`) record to the improvement store for genealogy.

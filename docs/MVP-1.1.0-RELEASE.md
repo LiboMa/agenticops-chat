@@ -69,6 +69,11 @@ agent-memory/
 | **改进审计闭环** | 所有 improve 路径接线 `improvement_store`（genealogy） |
 | **Frozen-snapshot 注入** | Skills XML 构建时加载一次，~460 tokens |
 | **路径遍历防护** | `_safe_skill_name` 校验，拒绝 `../../etc` 等恶意 name |
+| **XML 注入防护 (P0.5)** | `build_available_skills_xml` 使用 `xml.sax.saxutils.escape` 转义 `<>&"` |
+| **YAML 容错解析 (P0.5)** | colon-fallback — `description: Use when: foo` 不再静默丢失 |
+| **严格 name 格式校验 (P0.5)** | kebab-case + 1-64 字符 + 必须等于父目录名（agentskills.io 规范） |
+| **资源自动枚举 (P0.5)** | `activate_skill` 返回 scripts/references/assets 文件列表（上限 20） |
+| **索引召回率提升 (P0.5)** | XML 描述截断从 80 → 200 字符，去掉首句切分 |
 
 ### 3.2 安全分级 (Defense-in-Depth)
 
@@ -195,10 +200,11 @@ skills_security_scan_on_promote: true  # 发布前安全扫描
 
 - [x] Cycle ② Memory: 47 tests passed
 - [x] Cycle ③ Skills: 371 tests passed (2.07s)
+- [x] P0.5 loader hardening: 36 tests passed (1.36s), 16 新增
 - [x] All agents import clean
 - [x] CLI `aiops --help` works
 - [x] Web app compiles + starts
-- [x] 14 human skills still discovered (pinned)
+- [x] 15 human skills discovered (pinned) — all pass kebab-case name validation
 - [x] Prompt-cache discipline: frozen-snapshot, no mid-session mutation
 - [x] Security: path-traversal guard, promote scan, non-dict tolerance
 

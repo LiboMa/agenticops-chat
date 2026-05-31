@@ -56,7 +56,7 @@ graph TB
 
     subgraph "Knowledge & Skills"
         KB["Knowledge Base<br/>SOPs + Past Cases"]
-        SKILLS["Agent Skills (14)<br/>Domain expertise packages"]
+        SKILLS["Agent Skills (15)<br/>Domain expertise packages"]
         RAG["RAG Pipeline<br/>Vector search + reranking"]
     end
 
@@ -312,12 +312,12 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph "Progressive Disclosure"
-        PROMPT["System Prompt<br/>~100 tokens/skill<br/>(always loaded)"]
+        PROMPT["System Prompt<br/>~200 chars/skill index<br/>(always loaded, XML-escaped)"]
         ACTIVATE["activate_skill<br/>~3-5K tokens<br/>(on demand)"]
         REF["read_skill_reference<br/>~2-8K tokens<br/>(deep dive)"]
     end
 
-    subgraph "14 Domain Skills"
+    subgraph "15 Domain Skills"
         S1["linux-admin"]
         S2["network-engineer"]
         S3["kubernetes-admin"]
