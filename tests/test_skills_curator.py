@@ -101,3 +101,22 @@ def test_deprecated_skill_excluded_from_discovery(tmp_path, monkeypatch):
     names = {s.name for s in discover_skills()}
     assert "live" in names
     assert "dead" not in names
+
+
+def test_maybe_run_skills_curator_respects_disabled(monkeypatch, tmp_skills):
+    from agenticops.skills import curator
+    calls = {"n": 0}
+    monkeypatch.setattr(curator, "run_skills_curator", lambda **kw: calls.__setitem__("n", calls["n"] + 1))
+    monkeypatch.setattr("agenticops.config.settings.skills_curator_enabled", False, raising=False)
+    assert curator.maybe_run_skills_curator() is None
+    assert calls["n"] == 0
+    monkeypatch.setattr("agenticops.config.settings.skills_curator_enabled", True, raising=False)
+    curator.maybe_run_skills_curator()
+    assert calls["n"] == 1
+
+
+def test_skill_manage_registered_on_main_agent():
+    import inspect
+    import agenticops.agents.main_agent as ma
+    src = inspect.getsource(ma)
+    assert "skill_manage" in src

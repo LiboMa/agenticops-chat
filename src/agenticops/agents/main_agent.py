@@ -50,7 +50,7 @@ from agenticops.graph.tools import (
 )
 from agenticops.skills.tools import (
     activate_skill, read_skill_reference, list_skills,
-    create_skill, improve_skill, search_skill_registry,
+    create_skill, improve_skill, search_skill_registry, skill_manage,
 )
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.integration_tools import list_monitoring_providers
@@ -216,6 +216,13 @@ def create_main_agent() -> Agent:
     except Exception:
         logger.debug("Curator run skipped", exc_info=True)
 
+    # Run skills Curator lifecycle (agent drafts only; human skills pinned; gated by settings)
+    try:
+        from agenticops.skills.curator import maybe_run_skills_curator
+        maybe_run_skills_curator()
+    except Exception:
+        logger.debug("Skills Curator run skipped", exc_info=True)
+
     from agenticops.config import get_scan_focus, resolve_scan_services
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
@@ -285,6 +292,7 @@ If the user explicitly requests a different scope, honor their request over this
             create_skill,
             improve_skill,
             search_skill_registry,
+            skill_manage,
             # Monitoring integrations
             list_monitoring_providers,
             # Notification tools (direct, no skill activation needed)
