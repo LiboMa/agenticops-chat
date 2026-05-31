@@ -1,10 +1,18 @@
 ---
 name: linux-admin
-description: "Linux system administration troubleshooting — covers process management, disk I/O analysis, memory troubleshooting, network diagnostics, SSH operations, log analysis, and performance tuning. Includes decision trees for CPU high, memory pressure, disk issues, network problems, SSH connectivity, and service failures."
+description: Linux system administration troubleshooting — covers process management,
+  disk I/O analysis, memory troubleshooting, network diagnostics, SSH operations,
+  log analysis, and performance tuning. Includes decision trees for CPU high, memory
+  pressure, disk issues, network problems, SSH connectivity, and service failures.
 metadata:
   author: agenticops
-  version: "1.1"
+  version: '1.1'
   domain: infrastructure
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-05-31'
+last_used: '2026-05-31'
 ---
 
 # Linux Admin Skill
@@ -344,3 +352,10 @@ System unresponsive but SSH works:
 | `scp` | File copy over SSH | `-r` (recursive), `-l` (bandwidth limit), `-o ProxyJump=` |
 | `rsync` | Incremental sync | `-avz -e ssh` (archive+compress), `--bwlimit` |
 | `sshd` | Server management | `-t` (test config), `-T` (effective config) |
+
+
+
+
+
+
+
