@@ -4988,6 +4988,18 @@ async def api_delete_agent_memory(agent: str, filename: str):
         raise HTTPException(status_code=404, detail="Memory file not found")
 
 
+@app.post("/api/agent-memory/{agent}/{filename}/restore")
+async def api_restore_agent_memory(agent: str, filename: str):
+    """Restore an archived agent memory back to active."""
+    from agenticops.memory.agent_memory import AGENT_NAMES, restore_memory
+
+    if agent not in AGENT_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid agent: {agent}")
+    if not restore_memory(agent, filename):
+        raise HTTPException(status_code=404, detail="Archived memory not found")
+    return {"status": "restored", "agent": agent, "filename": filename}
+
+
 # ============================================================================
 # Run Server Function
 # ============================================================================

@@ -244,3 +244,20 @@ class TestGetMemoryExperiences:
         if len(data) >= 2:
             dates = [e["created_at"] for e in data]
             assert dates == sorted(dates, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Agent Memory (file-based) — list with created_by
+# ---------------------------------------------------------------------------
+
+
+def test_list_memories_includes_created_by(tmp_path):
+    from unittest.mock import patch
+    mem_dir = tmp_path / "agent-memory"
+    (mem_dir / "detect").mkdir(parents=True)
+    with patch("agenticops.memory.agent_memory.AGENT_MEMORY_DIR", mem_dir):
+        from agenticops.memory.agent_memory import save_memory_file, list_memories
+        save_memory_file(agent_name="detect", filename="x.md", body="b", created_by="agent")
+        rows = list_memories(agent_name="detect", status_filter="active")
+        assert rows and rows[0]["created_by"] == "agent"
+        assert "last_used" in rows[0]

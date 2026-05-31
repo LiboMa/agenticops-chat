@@ -605,6 +605,8 @@ def list_memories(
                 "status": file_status,
                 "confidence": fm.get("confidence", DEFAULT_CONFIDENCE),
                 "source": fm.get("source", ""),
+                "created_by": fm.get("created_by", "user"),
+                "last_used": str(fm.get("last_used", "")),
                 "resource_pattern": fm.get("resource_pattern", ""),
                 "related_issue_id": fm.get("related_issue_id"),
                 "summary": summary,
