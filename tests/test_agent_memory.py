@@ -519,3 +519,30 @@ class TestSizeCap:
         # Updating an existing file does NOT count as new → allowed even at cap
         fp = save_memory_file(agent_name="detect", filename="m0.md", body="updated", max_active=3)
         assert "updated" in fp.read_text()
+
+
+# ── Merge into umbrella ─────────────────────────────────────────────
+
+
+class TestMergeMemories:
+    def test_merge_creates_umbrella_archives_sources(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import (
+            save_memory_file, merge_memories, parse_frontmatter, _agent_dir)
+        save_memory_file(agent_name="detect", filename="cpu1.md", body="CPU spike A")
+        save_memory_file(agent_name="detect", filename="cpu2.md", body="CPU spike B")
+        path = merge_memories(
+            agent_name="detect",
+            sources=["cpu1.md", "cpu2.md"],
+            into="cpu_baseline.md",
+            body="CPU on t3.* 50-85% <10min normal; >90% >10min alerts.",
+            created_by="agent",
+        )
+        um_fm, _ = parse_frontmatter(path.read_text())
+        assert um_fm["type"] == "umbrella"
+        assert um_fm["status"] == "active"
+        assert set(um_fm["absorbed_from"]) == {"cpu1.md", "cpu2.md"}
+        for src in ("cpu1.md", "cpu2.md"):
+            assert not (_agent_dir("detect") / src).exists()
+            arch_fm, _ = parse_frontmatter((_agent_dir("detect") / ".archive" / src).read_text())
+            assert arch_fm["status"] == "archived"
+            assert arch_fm["absorbed_into"] == "cpu_baseline.md"

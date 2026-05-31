@@ -340,6 +340,61 @@ def restore_memory(agent_name: str, filename: str) -> bool:
     return True
 
 
+def merge_memories(
+    agent_name: str,
+    sources: list[str],
+    into: str,
+    body: str,
+    *,
+    confidence: int = DEFAULT_CONFIDENCE,
+    created_by: str = "agent",
+) -> Path:
+    """Merge narrow memories into one umbrella; archive the sources (absorbed_into).
+
+    Bypasses the size cap (it net-reduces active count). The umbrella records
+    absorbed_from; each source is moved to .archive/ with absorbed_into=<umbrella>.
+    """
+    directory = _agent_dir(agent_name)
+    directory.mkdir(parents=True, exist_ok=True)
+    if not into.endswith(".md"):
+        into = into + ".md"
+
+    # Write the umbrella directly (NOT via size-capped save_memory_file)
+    umbrella_fm: dict[str, Any] = {
+        "agent": agent_name,
+        "type": "umbrella",
+        "status": "active",
+        "confidence": max(1, min(5, confidence)),
+        "source": created_by,
+        "created_by": created_by,
+        "created_at": str(date.today()),
+        "last_confirmed": str(date.today()),
+        "last_used": str(date.today()),
+        "absorbed_from": [s if s.endswith(".md") else s + ".md" for s in sources],
+    }
+    umbrella_path = directory / into
+    _atomic_write_text(umbrella_path, _serialize_frontmatter(umbrella_fm, body))
+
+    # Archive each source with absorbed_into pointer
+    archive_dir = directory / ".archive"
+    archive_dir.mkdir(exist_ok=True)
+    for src in sources:
+        src_name = src if src.endswith(".md") else src + ".md"
+        src_path = directory / src_name
+        if not src_path.exists():
+            continue
+        fm, body_src = parse_frontmatter(src_path.read_text(encoding="utf-8"))
+        fm = normalize_frontmatter(fm)
+        fm["status"] = "archived"
+        fm["absorbed_into"] = into
+        _atomic_write_text(archive_dir / src_name, _serialize_frontmatter(fm, body_src))
+        src_path.unlink()
+
+    update_memory_index(agent_name)
+    logger.info("Merged %s -> %s for %s", sources, into, agent_name)
+    return umbrella_path
+
+
 def update_memory_index(agent_name: str) -> None:
     """Rebuild the MEMORY.md index for an agent from active memory files."""
     directory = _agent_dir(agent_name)
