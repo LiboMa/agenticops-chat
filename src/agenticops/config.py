@@ -382,6 +382,26 @@ class Settings(BaseSettings):
         default=True,
         description="Notify when skill improvement drafts are created (AIOPS_SKILLS_IMPROVEMENT_NOTIFY)",
     )
+    skills_autonomous_write: bool = Field(
+        default=True,
+        description="Allow agents to self-create/improve skills via skill_manage (drafts only) (AIOPS_SKILLS_AUTONOMOUS_WRITE)",
+    )
+    skills_curator_enabled: bool = Field(
+        default=True,
+        description="Enable the skills Curator lifecycle (agent drafts stale/archive; human skills pinned) (AIOPS_SKILLS_CURATOR_ENABLED)",
+    )
+    skills_draft_stale_days: int = Field(
+        default=30,
+        description="Days an unused agent draft stays before becoming stale (AIOPS_SKILLS_DRAFT_STALE_DAYS)",
+    )
+    skills_draft_archive_days: int = Field(
+        default=60,
+        description="Additional days after stale before an agent draft is archived (AIOPS_SKILLS_DRAFT_ARCHIVE_DAYS)",
+    )
+    skills_security_scan_on_promote: bool = Field(
+        default=True,
+        description="Security-scan a skill before promoting draft->published (blocks dangerous run_on_host) (AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE)",
+    )
     file_tools_admin_mode: bool = Field(
         default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "

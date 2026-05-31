@@ -85,3 +85,8 @@ memory_stale_days: 30
 memory_archive_days: 60
 memory_autonomous_write: true
 memory_curator_enabled: true
+skills_autonomous_write: true
+skills_curator_enabled: true
+skills_draft_stale_days: 30
+skills_draft_archive_days: 60
+skills_security_scan_on_promote: true
