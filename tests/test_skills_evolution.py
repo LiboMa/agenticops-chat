@@ -171,8 +171,8 @@ def _make_bedrock_response(text: str) -> dict:
 
 
 class TestGenerateSkillFromDescription:
-    @patch("agenticops.skills.evolution.boto3")
-    def test_success(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_success(self, mock_session):
         payload = {
             "name": "redis-admin",
             "description": "Redis troubleshooting skill",
@@ -181,61 +181,61 @@ class TestGenerateSkillFromDescription:
         }
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response(json.dumps(payload))
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("a skill for Redis admin")
         assert result["name"] == "redis-admin"
         assert result["references"] == {"tips.md": "some tips"}
 
-    @patch("agenticops.skills.evolution.boto3")
-    def test_strips_markdown_fences(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_strips_markdown_fences(self, mock_session):
         payload = {"name": "k8s", "description": "K8s skill", "content": "body"}
         fenced = f"```json\n{json.dumps(payload)}\n```"
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response(fenced)
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("kubernetes skill")
         assert result["name"] == "k8s"
         assert result.get("references") == {}
 
-    @patch("agenticops.skills.evolution.boto3")
-    def test_missing_required_key(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_missing_required_key(self, mock_session):
         payload = {"name": "bad", "content": "no description key"}
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response(json.dumps(payload))
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("bad skill")
         assert "error" in result
         assert "missing required key" in result["error"]
 
-    @patch("agenticops.skills.evolution.boto3")
-    def test_invalid_json(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_invalid_json(self, mock_session):
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response("not json at all")
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("broken")
         assert "error" in result
         assert "Invalid JSON" in result["error"]
 
-    @patch("agenticops.skills.evolution.boto3")
-    def test_boto3_exception(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_bedrock_exception(self, mock_session):
         client = MagicMock()
         client.converse.side_effect = RuntimeError("connection timeout")
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("fail")
         assert "error" in result
         assert "connection timeout" in result["error"]
 
-    @patch("agenticops.skills.evolution.boto3")
-    def test_defaults_references_to_empty(self, mock_boto3):
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_defaults_references_to_empty(self, mock_session):
         payload = {"name": "minimal", "description": "Minimal", "content": "body"}
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response(json.dumps(payload))
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         result = generate_skill_from_description("minimal skill")
         assert result["references"] == {}
@@ -255,9 +255,9 @@ class TestAutoImproveSkill:
         skill = SimpleNamespace(name=name, path=skill_dir, description="Original")
         return skill
 
-    @patch("agenticops.skills.evolution.boto3")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.skills.evolution.settings")
-    def test_success(self, mock_settings, mock_boto3, tmp_path):
+    def test_success(self, mock_settings, mock_session, tmp_path):
         draft_dir = tmp_path / "drafts"
         mock_settings.skills_draft_dir = draft_dir
         mock_settings.bedrock_region = "us-east-1"
@@ -267,7 +267,7 @@ class TestAutoImproveSkill:
 
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response("## Improved body\nNew content")
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         with patch(
             "agenticops.skills.loader.discover_skills", return_value=[skill]
@@ -293,9 +293,9 @@ class TestAutoImproveSkill:
         assert "error" in result
         assert "not found" in result["error"]
 
-    @patch("agenticops.skills.evolution.boto3")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.skills.evolution.settings")
-    def test_llm_error(self, mock_settings, mock_boto3, tmp_path):
+    def test_llm_error(self, mock_settings, mock_session, tmp_path):
         mock_settings.bedrock_region = "us-east-1"
         mock_settings.bedrock_model_id = "test-model"
 
@@ -303,7 +303,7 @@ class TestAutoImproveSkill:
 
         client = MagicMock()
         client.converse.side_effect = RuntimeError("LLM down")
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         with patch(
             "agenticops.skills.loader.discover_skills", return_value=[skill]
@@ -316,9 +316,9 @@ class TestAutoImproveSkill:
         assert "error" in result
         assert "LLM down" in result["error"]
 
-    @patch("agenticops.skills.evolution.boto3")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.skills.evolution.settings")
-    def test_with_agent_context(self, mock_settings, mock_boto3, tmp_path):
+    def test_with_agent_context(self, mock_settings, mock_session, tmp_path):
         draft_dir = tmp_path / "drafts"
         mock_settings.skills_draft_dir = draft_dir
         mock_settings.bedrock_region = "us-east-1"
@@ -328,7 +328,7 @@ class TestAutoImproveSkill:
 
         client = MagicMock()
         client.converse.return_value = _make_bedrock_response("improved")
-        mock_boto3.client.return_value = client
+        mock_session.return_value.client.return_value = client
 
         with patch(
             "agenticops.skills.loader.discover_skills", return_value=[skill]
@@ -345,3 +345,47 @@ class TestAutoImproveSkill:
         call_args = client.converse.call_args
         prompt_text = call_args[1]["messages"][0]["content"][0]["text"]
         assert "Redis was OOMing" in prompt_text
+
+
+# ---------------------------------------------------------------------------
+# generate validation (cycle③ hardening)
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateValidation:
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_rejects_non_string_name(self, mock_session):
+        payload = {"name": 123, "description": "d", "content": "body"}
+        client = MagicMock()
+        client.converse.return_value = _make_bedrock_response(json.dumps(payload))
+        mock_session.return_value.client.return_value = client
+        result = generate_skill_from_description("x")
+        assert "error" in result
+
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_rejects_bad_name_format(self, mock_session):
+        payload = {"name": "Bad Name!", "description": "d", "content": "body"}
+        client = MagicMock()
+        client.converse.return_value = _make_bedrock_response(json.dumps(payload))
+        mock_session.return_value.client.return_value = client
+        result = generate_skill_from_description("x")
+        assert "error" in result and "invalid skill name" in result["error"]
+
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_rejects_empty_content(self, mock_session):
+        payload = {"name": "ok-name", "description": "d", "content": ""}
+        client = MagicMock()
+        client.converse.return_value = _make_bedrock_response(json.dumps(payload))
+        mock_session.return_value.client.return_value = client
+        result = generate_skill_from_description("x")
+        assert "error" in result
+
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_accepts_valid_payload(self, mock_session):
+        payload = {"name": "redis-admin", "description": "Redis ops", "content": "## body\nsteps"}
+        client = MagicMock()
+        client.converse.return_value = _make_bedrock_response(json.dumps(payload))
+        mock_session.return_value.client.return_value = client
+        result = generate_skill_from_description("x")
+        assert "error" not in result
+        assert result["name"] == "redis-admin"

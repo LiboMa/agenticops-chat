@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -246,6 +247,17 @@ Return ONLY valid JSON, no markdown fences or extra text."""
         for key in ("name", "description", "content"):
             if key not in result:
                 return {"error": f"LLM response missing required key: {key}"}
+
+        # Type + content validation (cycle③ hardening)
+        name_val = result.get("name")
+        if not isinstance(name_val, str) or not re.match(r"^[a-z0-9][a-z0-9-]{1,60}$", name_val or ""):
+            return {"error": f"invalid skill name: {name_val!r} (expected lowercase-hyphenated)"}
+        if not isinstance(result.get("description"), str) or not result["description"].strip():
+            return {"error": "invalid or empty description"}
+        if not isinstance(result.get("content"), str) or not result["content"].strip():
+            return {"error": "invalid or empty content"}
+        if len(result["content"]) > 50000:
+            return {"error": f"content too large ({len(result['content'])} chars, max 50000)"}
 
         result.setdefault("references", {})
         return result
