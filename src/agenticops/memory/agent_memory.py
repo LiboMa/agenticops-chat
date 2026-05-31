@@ -343,6 +343,20 @@ def patch_memory(agent_name: str, filename: str, *, append_body: str = "",
     return True
 
 
+def adjust_confidence(agent_name: str, filename: str, delta: int) -> bool:
+    """Nudge a memory's confidence by delta (clamped 1-5). Returns True if found."""
+    filepath = _agent_dir(agent_name) / filename
+    if not filepath.exists():
+        return False
+    fm, body = parse_frontmatter(filepath.read_text(encoding="utf-8"))
+    fm = normalize_frontmatter(fm)
+    cur = int(fm.get("confidence", DEFAULT_CONFIDENCE))
+    fm["confidence"] = max(1, min(5, cur + delta))
+    fm["last_confirmed"] = str(date.today())
+    _atomic_write_text(filepath, _serialize_frontmatter(fm, body))
+    return True
+
+
 def restore_memory(agent_name: str, filename: str) -> bool:
     """Restore an archived memory back to active. Returns True if found."""
     archive_path = _agent_dir(agent_name) / ".archive" / filename

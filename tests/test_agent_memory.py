@@ -559,3 +559,29 @@ class TestMergeMemories:
             arch_fm, _ = parse_frontmatter((_agent_dir("detect") / ".archive" / src).read_text())
             assert arch_fm["status"] == "archived"
             assert arch_fm["absorbed_into"] == "cpu_baseline.md"
+
+
+# ── Confidence Evolution ────────────────────────────────────────────
+
+
+class TestConfidenceEvolution:
+    def test_adjust_confidence_clamps(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, adjust_confidence, parse_frontmatter, _agent_dir
+        save_memory_file(agent_name="detect", filename="c.md", body="b", confidence=3)
+        adjust_confidence("detect", "c.md", delta=-1)
+        fm, _ = parse_frontmatter((_agent_dir("detect") / "c.md").read_text())
+        assert fm["confidence"] == 2
+        adjust_confidence("detect", "c.md", delta=-5)  # clamp at 1
+        fm, _ = parse_frontmatter((_agent_dir("detect") / "c.md").read_text())
+        assert fm["confidence"] == 1
+
+    def test_adjust_confidence_clamps_high(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import save_memory_file, adjust_confidence, parse_frontmatter, _agent_dir
+        save_memory_file(agent_name="detect", filename="h.md", body="b", confidence=4)
+        adjust_confidence("detect", "h.md", delta=+10)  # clamp at 5
+        fm, _ = parse_frontmatter((_agent_dir("detect") / "h.md").read_text())
+        assert fm["confidence"] == 5
+
+    def test_adjust_confidence_missing_file_returns_false(self, tmp_memory_dir):
+        from agenticops.memory.agent_memory import adjust_confidence
+        assert adjust_confidence("detect", "nope.md", delta=-1) is False
