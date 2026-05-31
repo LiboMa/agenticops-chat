@@ -598,3 +598,36 @@ class TestGenerateSkillAPI:
             )
         assert resp.status_code == 500
         assert "LLM failed" in resp.json()["detail"]
+
+
+# ── Rollback + Restore endpoints (cycle③ P5) ─────────────────────────
+
+
+class TestRollbackRestoreEndpoints:
+    def test_endpoints_registered(self):
+        from agenticops.web.app import app
+        paths = {r.path for r in app.routes if hasattr(r, "path")}
+        assert "/api/skills/{name}/rollback" in paths
+        assert "/api/skills/{name}/restore" in paths
+
+    def test_rollback_success(self, client):
+        with patch("agenticops.skills.review.rollback_skill", return_value=True):
+            resp = client.post("/api/skills/redis/rollback")
+        assert resp.status_code == 200
+        assert resp.json() == {"rolled_back": True, "name": "redis"}
+
+    def test_rollback_404_when_no_archive(self, client):
+        with patch("agenticops.skills.review.rollback_skill", return_value=False):
+            resp = client.post("/api/skills/ghost/rollback")
+        assert resp.status_code == 404
+
+    def test_restore_success(self, client):
+        with patch("agenticops.skills.curator.restore_skill", return_value=True):
+            resp = client.post("/api/skills/old-skill/restore")
+        assert resp.status_code == 200
+        assert resp.json() == {"restored": True, "name": "old-skill"}
+
+    def test_restore_404_when_missing(self, client):
+        with patch("agenticops.skills.curator.restore_skill", return_value=False):
+            resp = client.post("/api/skills/nope/restore")
+        assert resp.status_code == 404

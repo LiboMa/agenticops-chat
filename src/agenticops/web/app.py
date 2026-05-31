@@ -3604,6 +3604,24 @@ async def api_improve_skill(name: str, body: dict = Body(...), background_tasks:
     return result
 
 
+@app.post("/api/skills/{name}/rollback")
+async def api_rollback_skill(name: str):
+    """Roll back a published skill to its most recent archived version (multi-gen backup)."""
+    from agenticops.skills.review import rollback_skill
+    if not rollback_skill(name):
+        raise HTTPException(status_code=404, detail=f"No archived version to roll back for '{name}'")
+    return {"rolled_back": True, "name": name}
+
+
+@app.post("/api/skills/{name}/restore")
+async def api_restore_skill(name: str):
+    """Restore a curator-archived skill from skills/.archive/ back to draft."""
+    from agenticops.skills.curator import restore_skill
+    if not restore_skill(name):
+        raise HTTPException(status_code=404, detail=f"Archived skill '{name}' not found")
+    return {"restored": True, "name": name}
+
+
 # ============================================================================
 # Notification API Endpoints
 # ============================================================================
