@@ -21,6 +21,7 @@ from strands import tool
 
 from agenticops.skills.loader import (
     discover_skills,
+    list_skill_resources,
     load_skill_body,
     load_skill_reference as _load_ref,
     resolve_skill_tools,
@@ -103,19 +104,13 @@ def activate_skill(skill_name: str, agent: Any = None) -> str:
     except Exception:
         logger.debug("touch_skill_used failed for %s", skill_name, exc_info=True)
 
-    # List available references
-    skills = discover_skills()
+    # List available resources (scripts/, references/, assets/)
     refs_info = ""
-    for s in skills:
-        if s.name == skill_name:
-            refs_dir = s.path / "references"
-            if refs_dir.is_dir():
-                ref_files = sorted(refs_dir.glob("*.md"))
-                if ref_files:
-                    refs_info = "\n\nAvailable references (use read_skill_reference to load):\n"
-                    for rf in ref_files:
-                        refs_info += f"  - references/{rf.name}\n"
-            break
+    resources = list_skill_resources(skill_name)
+    if resources:
+        refs_info = "\n\nAvailable resources (use read_skill_reference to load):\n"
+        for rel in resources:
+            refs_info += f"  - {rel}\n"
 
     # Dynamic tool registration — if the skill declares tools AND we have an agent
     tools_info = ""

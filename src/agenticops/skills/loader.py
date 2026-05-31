@@ -15,12 +15,20 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
+from xml.sax.saxutils import escape as _xml_escape
 
 import yaml
 
 from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ── P0.5 constants (agentskills.io spec alignment) ─────────────────────
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+_MAX_SKILL_NAME_LEN = 64
+_RESOURCE_DIRS = ("scripts", "references", "assets")
+_MAX_RESOURCE_FILES = 20
+_MAX_DESC_XML = 200
 
 # ── Module-level mtime cache ────────────────────────────────────────
 
@@ -88,23 +96,40 @@ class SkillMetadata:
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
+def _fix_yaml_colons(yaml_str: str) -> str:
+    """Quote unquoted values containing colons (mirrors Strands AgentSkills fallback)."""
+    fixed_lines: list[str] = []
+    for line in yaml_str.splitlines():
+        m = re.match(r"^(\s*\w[\w-]*):\s+(.+)$", line)
+        if m:
+            key, value = m.group(1), m.group(2)
+            if ":" in value and not (value.startswith('"') or value.startswith("'")):
+                escaped = value.replace('"', '\\"')
+                line = f'{key}: "{escaped}"'
+        fixed_lines.append(line)
+    return "\n".join(fixed_lines)
+
+
 def parse_frontmatter(content: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from SKILL.md content.
 
-    Args:
-        content: Raw SKILL.md file content.
-
-    Returns:
-        Tuple of (frontmatter dict, body text after frontmatter).
+    Falls back to colon-quoting repair if the initial yaml.safe_load fails.
     """
     match = _FRONTMATTER_RE.match(content)
     if not match:
         return {}, content
 
+    raw = match.group(1)
     try:
-        fm = yaml.safe_load(match.group(1)) or {}
+        fm = yaml.safe_load(raw) or {}
     except yaml.YAMLError as e:
-        logger.warning("Failed to parse YAML frontmatter: %s", e)
+        logger.warning("YAML parse failed (%s); retrying with colon-quoting fallback", e)
+        try:
+            fm = yaml.safe_load(_fix_yaml_colons(raw)) or {}
+        except yaml.YAMLError:
+            return {}, content
+
+    if not isinstance(fm, dict):
         return {}, content
 
     body = content[match.end():]
@@ -130,6 +155,26 @@ def normalize_skill_frontmatter(fm: dict) -> dict:
 # ── Skill Discovery ─────────────────────────────────────────────────
 
 
+def _validate_skill_name(name: str, skill_dir: Path) -> bool:
+    """Validate skill name (lenient — logs WARNING and returns False, never raises)."""
+    if not name:
+        logger.warning("Skill at %s has empty name — skipping", skill_dir)
+        return False
+    if len(name) > _MAX_SKILL_NAME_LEN:
+        logger.warning("Skill name '%s' exceeds %d chars — skipping", name, _MAX_SKILL_NAME_LEN)
+        return False
+    if not _SKILL_NAME_RE.match(name):
+        logger.warning("Skill name '%s' is not valid kebab-case — skipping (dir=%s)", name, skill_dir.name)
+        return False
+    if "--" in name:
+        logger.warning("Skill name '%s' contains consecutive hyphens — skipping", name)
+        return False
+    if skill_dir.name != name:
+        logger.warning("Skill name '%s' does not match directory '%s' — skipping", name, skill_dir.name)
+        return False
+    return True
+
+
 def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetadata]:
     """Scan a single directory for valid skill packages."""
     skills: list[SkillMetadata] = []
@@ -152,6 +197,9 @@ def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetada
             description = fm.get("description", "")
             if not description:
                 logger.warning("Skill '%s' has no description, skipping", name)
+                continue
+
+            if not _validate_skill_name(name, skill_dir):
                 continue
 
             # Skip deprecated/archived skills (missing status => kept, treated active)
@@ -238,28 +286,20 @@ def discover_skills(skills_dir: Path | None = None) -> list[SkillMetadata]:
 def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
     """Generate <available_skills> XML block for agent system prompts.
 
-    Descriptions are truncated to the first sentence (max 80 chars) to
-    reduce prompt token usage. Full descriptions are available via
-    activate_skill().
-
-    Args:
-        skills: List of discovered skill metadata.
-
-    Returns:
-        XML string listing all available skills.
+    Descriptions are truncated to ``_MAX_DESC_XML`` chars (200) and
+    XML-escaped to prevent special characters from breaking the prompt.
     """
     if not skills:
         return ""
 
     lines = ["<available_skills>"]
     for s in skills:
-        # Truncate to first sentence, max 80 chars
-        short_desc = s.description.split(".")[0][:80]
-        # Provenance/state tags (compose): [DRAFT] for unpromoted, [AGENT] for self-created
+        short_desc = _xml_escape(s.description[:_MAX_DESC_XML])
+        safe_name = _xml_escape(s.name, {'"': "&quot;"})
         tag = "[DRAFT] " if s.is_draft else ""
         if getattr(s, "created_by", "user") == "agent":
             tag += "[AGENT] "
-        lines.append(f'  <skill name="{s.name}">{tag}{short_desc}</skill>')
+        lines.append(f'  <skill name="{safe_name}">{tag}{short_desc}</skill>')
     lines.append("</available_skills>")
     return "\n".join(lines)
 
@@ -328,6 +368,29 @@ def load_skill_reference(skill_name: str, ref_path: str) -> str | None:
     if not target.is_file():
         return None
     return target.read_text(encoding="utf-8")
+
+
+# ── Resource Listing ────────────────────────────────────────────────
+
+
+def list_skill_resources(skill_name: str) -> list[str]:
+    """List relative paths under scripts/, references/, assets/ for a skill."""
+    s = _get_skill_by_name(skill_name)
+    if s is None:
+        return []
+    files: list[str] = []
+    for dir_name in _RESOURCE_DIRS:
+        resource_dir = s.path / dir_name
+        if not resource_dir.is_dir():
+            continue
+        for fp in sorted(resource_dir.rglob("*")):
+            if not fp.is_file():
+                continue
+            files.append(fp.relative_to(s.path).as_posix())
+            if len(files) >= _MAX_RESOURCE_FILES:
+                files.append(f"... (truncated at {_MAX_RESOURCE_FILES} files)")
+                return files
+    return files
 
 
 # ── Dynamic Tool Resolution ──────────────────────────────────────────

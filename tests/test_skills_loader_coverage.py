@@ -13,9 +13,11 @@ from agenticops.skills.loader import (
     _get_max_mtime,
     _invalidate_skills_cache,
     _scan_directory,
+    _validate_skill_name,
     build_available_skills_xml,
     discover_skills,
     get_available_skills_xml,
+    list_skill_resources,
     load_skill_body,
     load_skill_reference,
     parse_frontmatter,
@@ -270,3 +272,136 @@ class TestAgentTagInXml:
                           is_draft=True, created_by="agent")
         xml = build_available_skills_xml([s])
         assert "[DRAFT]" in xml and "[AGENT]" in xml
+
+
+# ── P0.5 — Strands AgentSkills 借鉴 tests ─────────────────────────────
+
+
+class TestXmlEscape:
+    """A1: XML escape in build_available_skills_xml."""
+
+    def test_description_with_special_chars_escaped(self, tmp_path):
+        skill = SkillMetadata(name="alpha", description="Use when foo & bar <baz>", path=tmp_path / "alpha")
+        xml = build_available_skills_xml([skill])
+        assert "&amp;" in xml
+        assert "&lt;baz&gt;" in xml
+        assert "<baz>" not in xml
+
+    def test_safe_description_unchanged(self, tmp_path):
+        skill = SkillMetadata(name="plain", description="plain description", path=tmp_path / "plain")
+        xml = build_available_skills_xml([skill])
+        assert "plain description" in xml
+
+
+class TestYamlColonFallback:
+    """A2: parse_frontmatter recovers from values containing colons."""
+
+    def test_value_with_colon_recovers(self):
+        content = "---\nname: pdf-skill\ndescription: Use when: the user asks about PDFs\n---\nBody"
+        fm, body = parse_frontmatter(content)
+        assert fm.get("name") == "pdf-skill"
+        assert "Use when" in fm.get("description", "")
+        assert body.strip() == "Body"
+
+    def test_truly_broken_yaml_still_returns_empty(self):
+        content = "---\n: :\n  bad: [unclosed\n---\nBody"
+        fm, body = parse_frontmatter(content)
+        assert fm == {}
+
+
+class TestNameValidation:
+    """A3: _validate_skill_name enforces kebab-case + dir match."""
+
+    def test_valid_name(self, tmp_path):
+        d = tmp_path / "redis-admin"
+        d.mkdir()
+        assert _validate_skill_name("redis-admin", d) is True
+
+    def test_uppercase_rejected(self, tmp_path):
+        d = tmp_path / "BadName"
+        d.mkdir()
+        assert _validate_skill_name("BadName", d) is False
+
+    def test_dir_mismatch_rejected(self, tmp_path):
+        d = tmp_path / "aaa"
+        d.mkdir()
+        assert _validate_skill_name("bbb", d) is False
+
+    def test_too_long_rejected(self, tmp_path):
+        long = "a" * 65
+        d = tmp_path / long
+        d.mkdir()
+        assert _validate_skill_name(long, d) is False
+
+    def test_consecutive_hyphens_rejected(self, tmp_path):
+        d = tmp_path / "a--b"
+        d.mkdir()
+        assert _validate_skill_name("a--b", d) is False
+
+    def test_scan_skips_invalid_name(self, tmp_path):
+        skill_dir = tmp_path / "right"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: wrong\ndescription: x\n---\nBody")
+        skills = _scan_directory(tmp_path)
+        assert skills == []
+
+
+class TestListSkillResources:
+    """B1: list_skill_resources enumerates scripts/references/assets."""
+
+    def test_lists_references_and_scripts(self, tmp_path):
+        _make_skill_dir(tmp_path, "ops", "name: ops\ndescription: ops skill")
+        (tmp_path / "ops" / "references").mkdir()
+        (tmp_path / "ops" / "references" / "api.md").write_text("# API")
+        (tmp_path / "ops" / "scripts").mkdir()
+        (tmp_path / "ops" / "scripts" / "run.sh").write_text("#!/bin/sh")
+
+        with patch("agenticops.skills.loader.settings") as mock_settings:
+            mock_settings.skills_enabled = True
+            mock_settings.skills_dir = tmp_path
+            mock_settings.skills_draft_dir = tmp_path / "draft"
+            resources = list_skill_resources("ops")
+            assert "references/api.md" in resources
+            assert "scripts/run.sh" in resources
+
+    def test_unknown_skill_returns_empty(self, tmp_path):
+        with patch("agenticops.skills.loader.settings") as mock_settings:
+            mock_settings.skills_enabled = True
+            mock_settings.skills_dir = tmp_path
+            mock_settings.skills_draft_dir = tmp_path / "draft"
+            assert list_skill_resources("ghost") == []
+
+    def test_truncates_at_cap(self, tmp_path):
+        _make_skill_dir(tmp_path, "many", "name: many\ndescription: many refs")
+        refs = tmp_path / "many" / "references"
+        refs.mkdir()
+        for i in range(25):
+            (refs / f"r{i:02d}.md").write_text("x")
+
+        with patch("agenticops.skills.loader.settings") as mock_settings:
+            mock_settings.skills_enabled = True
+            mock_settings.skills_dir = tmp_path
+            mock_settings.skills_draft_dir = tmp_path / "draft"
+            resources = list_skill_resources("many")
+            assert len(resources) == 21
+            assert resources[-1].startswith("... (truncated")
+
+
+class TestDescriptionWidening:
+    """B2: XML cap raised from 80 → 200 chars; first-sentence split removed."""
+
+    def test_long_description_not_cut_at_80(self, tmp_path):
+        skill = SkillMetadata(name="long", description="X" * 150 + " end.", path=tmp_path / "long")
+        xml = build_available_skills_xml([skill])
+        assert "X" * 150 in xml
+
+    def test_truncated_at_200(self, tmp_path):
+        skill = SkillMetadata(name="huge", description="Y" * 300, path=tmp_path / "huge")
+        xml = build_available_skills_xml([skill])
+        assert "Y" * 200 in xml
+        assert "Y" * 201 not in xml
+
+    def test_period_no_longer_truncates(self, tmp_path):
+        skill = SkillMetadata(name="multi", description="First. Second.", path=tmp_path / "multi")
+        xml = build_available_skills_xml([skill])
+        assert "Second" in xml
