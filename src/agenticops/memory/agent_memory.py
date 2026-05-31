@@ -158,20 +158,24 @@ def count_active(agent_name: str) -> int:
     return len(_load_memories_from_dir(_agent_dir(agent_name)))
 
 
-def load_agent_memory(agent_name: str, max_entries: int = 10) -> str:
+def load_agent_memory(agent_name: str, max_entries: int | None = None) -> str:
     """Load per-agent + shared memories, return formatted prompt context.
 
-    Memories are sorted by confidence (high first) and capped at
-    *max_entries*.
+    Memories are sorted by confidence (high first), then last_used
+    (most recent first), and capped at *max_entries*.
 
     Args:
         agent_name: One of AGENT_NAMES (e.g. "detect").
-        max_entries: Max number of memory entries to inject.
+        max_entries: Max number of memory entries to inject. Defaults to
+            ``settings.memory_max_active`` when not provided.
 
     Returns:
         Formatted string ready for system prompt injection, or empty
         string if no active memories.
     """
+    if max_entries is None:
+        max_entries = getattr(settings, "memory_max_active", 15)
+
     memories: list[dict[str, Any]] = []
 
     # 1. Agent's own memories
@@ -184,8 +188,11 @@ def load_agent_memory(agent_name: str, max_entries: int = 10) -> str:
     if not memories:
         return ""
 
-    # 3. Sort by confidence descending, cap
-    memories.sort(key=lambda m: m["confidence"], reverse=True)
+    # 3. Sort by confidence descending, then last_used descending, cap
+    memories.sort(
+        key=lambda m: (m["confidence"], str(normalize_frontmatter(m["frontmatter"]).get("last_used", ""))),
+        reverse=True,
+    )
     memories = memories[:max_entries]
 
     # Reactivate-on-use: touch the memories we actually inject

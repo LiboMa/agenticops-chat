@@ -220,6 +220,21 @@ class TestLoadAgentMemory:
         assert MEMORY_MARKER_END in result
 
 
+class TestLoadOrderingAndCap:
+    def test_load_uses_settings_cap(self, tmp_memory_dir, monkeypatch):
+        from agenticops.memory.agent_memory import save_memory_file, load_agent_memory
+        # Save 5 entries first (pass max_active so the lowered load-cap below
+        # does not block the save-side size-cap).
+        for i in range(5):
+            save_memory_file(agent_name="rca", filename=f"m{i}.md", body=f"body{i}",
+                             confidence=(i % 5) + 1, max_active=10)
+        # Now lower the settings cap that load_agent_memory should honor.
+        monkeypatch.setattr("agenticops.config.settings.memory_max_active", 2, raising=False)
+        out = load_agent_memory("rca")  # no explicit max_entries -> settings cap=2
+        # Only 2 entries injected (count the per-entry confidence markers)
+        assert out.count("(confidence:") == 2
+
+
 # ── search_memories ─────────────────────────────────────────────────
 
 
