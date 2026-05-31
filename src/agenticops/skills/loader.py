@@ -253,7 +253,10 @@ def build_available_skills_xml(skills: list[SkillMetadata]) -> str:
     for s in skills:
         # Truncate to first sentence, max 80 chars
         short_desc = s.description.split(".")[0][:80]
+        # Provenance/state tags (compose): [DRAFT] for unpromoted, [AGENT] for self-created
         tag = "[DRAFT] " if s.is_draft else ""
+        if getattr(s, "created_by", "user") == "agent":
+            tag += "[AGENT] "
         lines.append(f'  <skill name="{s.name}">{tag}{short_desc}</skill>')
     lines.append("</available_skills>")
     return "\n".join(lines)

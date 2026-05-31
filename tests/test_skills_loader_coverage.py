@@ -237,3 +237,28 @@ class TestGetAvailableSkillsXmlCache:
             # Second call should use XML cache
             second = get_available_skills_xml()
             assert first == second
+
+
+# ── [AGENT] provenance tag in XML (cycle③ P4) ────────────────────────
+
+
+class TestAgentTagInXml:
+    def test_agent_created_skill_tagged(self):
+        human = SkillMetadata(name="human-skill", description="h", path=Path("/tmp/human-skill"),
+                              created_by="user")
+        agent = SkillMetadata(name="agent-skill", description="a", path=Path("/tmp/agent-skill"),
+                             created_by="agent")
+        xml = build_available_skills_xml([human, agent])
+        assert "[AGENT]" in xml
+        # the tag attaches to the agent-created skill line, not the human one
+        for line in xml.splitlines():
+            if 'name="human-skill"' in line:
+                assert "[AGENT]" not in line
+            if 'name="agent-skill"' in line:
+                assert "[AGENT]" in line
+
+    def test_draft_and_agent_tags_compose(self):
+        s = SkillMetadata(name="ag-draft", description="d", path=Path("/tmp/ag-draft"),
+                          is_draft=True, created_by="agent")
+        xml = build_available_skills_xml([s])
+        assert "[DRAFT]" in xml and "[AGENT]" in xml
