@@ -890,6 +890,17 @@ def init_db(engine=None):
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN archived BOOLEAN DEFAULT 0"))
                 conn.commit()
 
+    # Migration: composite index on chat_messages for cursor pagination.
+    # chat_messages had NO indexes; this makes (session_id, id) range scans
+    # for the paginated /messages endpoint efficient. Idempotent.
+    if insp.has_table("chat_messages"):
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chat_message_session_id "
+                "ON chat_messages(session_id, id)"
+            ))
+            conn.commit()
+
     # Migration: add fingerprint dedup columns to health_issues if missing
     if insp.has_table("health_issues"):
         columns = {col["name"] for col in insp.get_columns("health_issues")}
