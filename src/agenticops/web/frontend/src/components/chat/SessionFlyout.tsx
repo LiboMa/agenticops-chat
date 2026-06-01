@@ -9,6 +9,7 @@ import {
 import { useLocale } from "@/i18n/LocaleContext";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { sortSessions, filterArchived } from "@/lib/sortSessions";
+import { useActiveStreamingSessions } from "@/hooks/useSessionStream";
 
 interface Props {
   open: boolean;
@@ -85,6 +86,8 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
     const q = search.toLowerCase();
     return sorted.filter((s) => s.name.toLowerCase().includes(q));
   }, [sessions, search, showArchived]);
+
+  const activeStreaming = useActiveStreamingSessions();
 
   const handleNew = async () => {
     const s = await createMut.mutateAsync(undefined);
@@ -225,7 +228,13 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                       {s.name}
                     </p>
                   )}
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                    {activeStreaming.includes(s.session_id) && (
+                      <span
+                        title="Streaming…"
+                        className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse"
+                      />
+                    )}
                     {relativeTime(s.last_activity_at)}
                   </p>
 
