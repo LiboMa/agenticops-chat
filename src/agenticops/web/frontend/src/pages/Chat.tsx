@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
-import { useChat } from "@/hooks/useChat";
+import { useSessionStream } from "@/hooks/useSessionStream";
+import { useChatMessages } from "@/hooks/useChatMessages";
 import { useLazySessionCreate } from "@/hooks/useLazySessionCreate";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { SessionFlyout } from "@/components/chat/SessionFlyout";
@@ -84,9 +85,10 @@ export default function Chat() {
     }
   }, [urlSessionId]);
 
-  const { data: detail } = useChatSession(selectedId);
+  useChatSession(selectedId); // metadata only — primes session existence/validation
+  const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, sendMessage, cancel } =
-    useChat(selectedId);
+    useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
   const currentSession = sessions?.find((s) => s.session_id === selectedId);
 
@@ -269,11 +271,14 @@ export default function Chat() {
 
             {/* Messages */}
             <MessageList
-              messages={detail?.messages ?? []}
+              messages={messages}
               streamingContent={streamingContent}
               streamingToolCalls={toolCalls}
               streamingTokenMetrics={tokenMetrics}
               streaming={streaming}
+              hasOlder={hasOlder}
+              isFetchingOlder={isFetchingOlder}
+              onLoadOlder={fetchOlder}
             />
 
             {/* Error banner */}
