@@ -3847,27 +3847,57 @@ async def api_list_chat_sessions(
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
 async def api_get_chat_session(session_id: str):
+    """Session metadata only. History is fetched via the paginated
+    /sessions/{id}/messages endpoint. `messages` is always [] (deprecated)."""
     with get_db_session() as db:
         row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
         if not row:
             raise HTTPException(404, "Session not found")
-        msgs = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == row.id)
-            .order_by(ChatMessage.created_at.asc())
-            .all()
-        )
+        cnt = db.query(func.count(ChatMessage.id)).filter(
+            ChatMessage.session_id == row.id
+        ).scalar()
         return ChatSessionDetail(
             id=row.id, session_id=row.session_id, name=row.name,
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at,
-            message_count=len(msgs),
+            message_count=cnt,
             pinned=row.pinned, starred=row.starred, archived=row.archived,
+            messages=[],
+        )
+
+
+@app.get("/api/chat/sessions/{session_id}/messages", response_model=ChatMessagesPage)
+async def api_get_chat_messages(
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    before: Optional[int] = Query(default=None, description="Return messages with id < before (older page)"),
+):
+    """Cursor-paginated chat history, newest-first window returned in
+    chronological (oldest→newest) order. Cursor = ChatMessage.id."""
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+
+        q = db.query(ChatMessage).filter(ChatMessage.session_id == row.id)
+        if before is not None:
+            q = q.filter(ChatMessage.id < before)
+        # Fetch newest `limit + 1` (descending) to detect has_more, then reverse.
+        rows_desc = q.order_by(ChatMessage.id.desc()).limit(limit + 1).all()
+
+        has_more = len(rows_desc) > limit
+        page = rows_desc[:limit]                 # newest `limit` (still descending)
+        page_chrono = list(reversed(page))       # oldest→newest for the client
+        next_cursor = page_chrono[0].id if (page_chrono and has_more) else None
+
+        return ChatMessagesPage(
             messages=[ChatMessageResponse(
                 id=m.id, role=m.role, content=m.content,
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
-                created_at=m.created_at,
-            ) for m in msgs],
+                attachments=m.attachments, created_at=m.created_at,
+            ) for m in page_chrono],
+            has_more=has_more,
+            next_cursor=next_cursor,
         )
 
 
