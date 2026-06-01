@@ -35,6 +35,7 @@ def client(tmp_path):
          patch("agenticops.web.app._executor_service"), \
          patch("agenticops.scheduler.scheduler.Scheduler.start"), \
          patch("agenticops.scheduler.scheduler.Scheduler.stop"), \
+         patch("agenticops.notify.im_config.load_channels", return_value=[]), \
          patch("agenticops.web.app.settings") as mock_settings:
         mock_settings.feishu_ws_enabled = False
         mock_settings.slack_ws_enabled = False
