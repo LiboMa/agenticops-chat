@@ -579,7 +579,14 @@ export interface ChatMessage {
 }
 
 export interface ChatSessionDetail extends ChatSession {
+  /** @deprecated History now comes from GET /sessions/{id}/messages. Always []. */
+  messages?: ChatMessage[];
+}
+
+export interface ChatMessagesPage {
   messages: ChatMessage[];
+  has_more: boolean;
+  next_cursor: number | null;
 }
 
 /* ------------------------------------------------------------------ */
