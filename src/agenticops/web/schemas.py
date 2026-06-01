@@ -607,7 +607,20 @@ class ChatSessionResponse(BaseModel):
 
 
 class ChatSessionDetail(ChatSessionResponse):
+    # DEPRECATED: history now comes from GET /sessions/{id}/messages (paginated).
+    # Kept for type stability; the detail endpoint always returns [].
     messages: List[ChatMessageResponse] = []
+
+
+class ChatMessagesPage(BaseModel):
+    """One page of chat messages, ordered oldest→newest (chronological).
+
+    Cursor is ChatMessage.id (monotonic). `next_cursor` is the id to pass as
+    `before` to fetch the immediately-older page; null when no older page exists.
+    """
+    messages: List[ChatMessageResponse] = []
+    has_more: bool = False
+    next_cursor: Optional[int] = None
 
 
 class MemoryFactResponse(BaseModel):
