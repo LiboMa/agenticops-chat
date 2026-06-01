@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useRef, useMemo, useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolCallChip } from "./ToolCallChip";
@@ -49,19 +49,46 @@ export function MessageList({
     getItemKey: (i) => messages[i].id,
   });
 
-  // Auto-scroll to bottom on new messages / streaming tokens (sticky-bottom).
-  useEffect(() => {
-    const el = parentRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages.length, streamingContent, streaming]);
+  // Scroll bookkeeping refs.
+  const stickToBottomRef = useRef(true);            // auto-scroll only when the user is at the bottom
+  const distanceFromBottomRef = useRef(0);          // captured on scroll, used to anchor on prepend
+  const prevFirstIdRef = useRef<number | undefined>(undefined);
+  const prevLenRef = useRef(0);
 
-  // Reverse-infinite-scroll: when scrolled near the top, load the older page.
+  // Track scroll position: whether the user is pinned to the bottom, and the
+  // distance-from-bottom used to anchor the view when older pages prepend.
   const onScroll = () => {
     const el = parentRef.current;
-    if (!el || !hasOlder || isFetchingOlder) return;
-    if (el.scrollTop < 120) onLoadOlder?.();
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 80;
+    distanceFromBottomRef.current = distanceFromBottom;
+    if (hasOlder && !isFetchingOlder && el.scrollTop < 120) onLoadOlder?.();
   };
+
+  // Scroll management runs before paint (useLayoutEffect) to avoid flicker.
+  //  - prepend (older page loaded at top → first id changed AND length grew):
+  //    keep the same distance from the bottom so the viewport stays on the same
+  //    content despite rows added above (no yank-to-bottom, no visible jump).
+  //  - append / streaming (content added at the bottom): stick to bottom only
+  //    if the user was already there.
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const firstId = messages[0]?.id;
+    const prepended =
+      prevFirstIdRef.current !== undefined &&
+      firstId !== prevFirstIdRef.current &&
+      messages.length > prevLenRef.current;
+
+    if (prepended) {
+      el.scrollTop = el.scrollHeight - el.clientHeight - distanceFromBottomRef.current;
+    } else if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    prevFirstIdRef.current = firstId;
+    prevLenRef.current = messages.length;
+  }, [messages, streamingContent, streaming]);
 
   const streamingHtml = useMemo(
     () => (streamingContent ? renderMarkdown(streamingContent) : ""),
