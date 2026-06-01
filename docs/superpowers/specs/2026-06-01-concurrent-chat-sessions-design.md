@@ -72,7 +72,7 @@ with cursor pagination + virtualization so opening a session paints instantly.
 | **Stream store** | `lib/chatStream.ts` *(new)* | Framework-agnostic singleton. `Map<sessionId, StreamState>`, owns the `AbortController`s and the SSE parse loop (lifted verbatim from `useChat`). API: `send(sessionId, content, file?, detailLevel?)`, `cancel(sessionId)`, `getSnapshot(sessionId)`, `subscribe(sessionId, cb)`, `subscribeActive(cb)`, `activeSessions()`. Token emit **throttled ~60 ms** (coalesce tokens; fixes O(n²) re-parse). Calls injected callbacks on `done`/`session_renamed` to update the TanStack cache. No new dep — designed for React 18 `useSyncExternalStore`. |
 | **Stream hook** | `hooks/useSessionStream.ts` *(new; replaces `useChat`)* | `useSyncExternalStore` adapter reading one session's slice. Returns `{ streaming, content, toolCalls, tokenMetrics, error, send, cancel }`. Same surface as today's `useChat` so `Chat.tsx`/`ChatInput` wiring barely changes. |
 | **Paginated messages** | `hooks/useChatMessages.ts` *(new)* | `useInfiniteQuery` (TanStack already installed). Loads the newest page on mount; `fetchOlder()` triggered on scroll-up. Flattens pages oldest→newest. Optimistic append on stream `done` so the completed assistant message appears without a refetch flicker. |
-| **Virtualized list** | `components/chat/MessageList.tsx` *(rewrite)* | `@tanstack/react-virtual` (the one new dep). Dynamic row measurement, reverse-infinite-scroll at the top (load older), sticky-to-bottom while streaming, renders the streaming bubble from the store slice. |
+| **Virtualized list** | `components/chat/MessageList.tsx` *(rewrite)* | `@tanstack/react-virtual` (the one new dep). Dynamic row measurement, reverse-infinite-scroll at the top (load older), sticky-to-bottom while streaming, renders the streaming bubble from the store slice. **Markdown memo**: module-level `Map<msgId, html>` so immutable messages parse once and survive virtual remounts (see Caching). |
 
 `Chat.tsx` changes: drop local stream state; read the per-session slice via
 `useSessionStream(selectedId)`; input disabled **only when that session streams** (not
@@ -105,6 +105,25 @@ navigate(/app/chat/newId)`. Deletes the dead `pendingMessage` machinery in
 3. **DB index** on `chat_messages (session_id, id)` to make the `before`-cursor range scan
    efficient. Added non-destructively in the `init_db` migration block (`models.py`),
    consistent with existing migration style. Idempotent (`CREATE INDEX IF NOT EXISTS`).
+   **Today `chat_messages` has zero indexes** (verified on the live DB — not even on the
+   `session_id` FK), so every history query is currently a full-table scan filtered in
+   memory. This index is the single highest-leverage backend change; with it a 50-row page
+   read is sub-millisecond on the current DB.
+
+### Persistence (where session data lives)
+
+- **Live DB:** `data/agenticops.db` — SQLite (~13 MB), configured via `.env`
+  `AIOPS_DATABASE_URL=sqlite:///data/agenticops.db` (matches the `config.py:82` default
+  `sqlite:///{PROJECT_ROOT}/data/agenticops.db`). Gitignored. Postgres is supported via the
+  same `database_url` but not in use.
+- **Tables:** `chat_sessions` (one row per conversation), `chat_messages` (every message:
+  role, content, `tool_calls`/`token_usage`/`attachments` JSON, `created_at`),
+  `session_summaries` (rolling summaries on TTL/archive). `models.py:751-793`.
+- **Runtime (not persistence):** `ChatSessionManager._agents` holds one transient Strands
+  `Agent` per `session_id`, `agent.messages` rebuilt from the DB on first access and
+  TTL-evicted. The store refactor does not touch this layer.
+- *(Stale leftover: `src/agenticops/data/agenticops.db`, 148 KB from Feb — pre-dates the
+  project-root `data/` move; not the live DB.)*
 
 ### Data flow — concurrent streams
 
@@ -141,6 +160,34 @@ no cross-talk between concurrent streams.
 - **Streaming CPU**: ~60 ms token coalescing removes the per-token full-markdown re-parse.
 - **Refetch churn**: replace the 5 s full-history refetch with optimistic cache append on
   `done`; pages are otherwise static once loaded.
+
+### Caching (decided)
+
+Three layers, no new backend cache or infra dependency.
+
+1. **TanStack Query client page cache** *(this design's primary cache).* `useInfiniteQuery`
+   holds loaded message pages for the session's lifetime → scroll-up never re-fetches a
+   page; re-opening a visited session is instant. **Optimistic append on stream `done`
+   replaces the 5 s full-history refetch** (`useChatSession.ts:10`) entirely.
+
+2. **Bedrock prompt cache — already on (`bedrock_cache_enabled: true`), preserved.** The
+   design does **not** touch `session_manager` or `agent.messages`, so prefix-cache
+   behavior is unchanged. Concurrency is prompt-cache-safe: different sessions = different
+   `Agent` instances = independent prefixes (no collision); same-session concurrent turns
+   are blocked by Strands' `_invocation_lock` (can't bust each other's prefix).
+
+3. **Rendered-markdown memo (new, ~10 lines).** Persisted messages are immutable, so cache
+   `renderMarkdown(content)` in a module-level `Map<msgId, html>` — parse once, reuse on
+   every virtual remount. Without it, virtualization would re-parse full markdown each time
+   a row scrolls back into view (`MessageList.tsx:91` currently parses inline per render).
+   Folded into the `MessageList` rewrite.
+
+**Explicitly out of scope (YAGNI / 经济):** server-side response cache (Redis or in-proc
+LRU for pages) and HTTP `ETag`/`Cache-Control` on `/messages`. The DB is single-user and
+tiny; with the new `(session_id, id)` index a page read is sub-ms, so the slow-open
+bottleneck is fully addressed by pagination + index + TanStack without added invalidation
+complexity. `ETag` would only help across hard reloads / new tabs, which the chosen
+"don't survive reload" tradeoff does not prioritize.
 
 ## Testing
 
