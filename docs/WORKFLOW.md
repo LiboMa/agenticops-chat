@@ -498,6 +498,36 @@ flowchart LR
 
 ---
 
+## Concurrent Chat Sessions & Fast Session Open
+
+The Web chat supports **multiple simultaneously-streaming conversations** in one browser tab and opens any session **instantly**, regardless of history size.
+
+```mermaid
+flowchart LR
+    subgraph STORE["chatStream store (module-level, keyed by session_id)"]
+        A["session A<br/>●streaming"]
+        B["session B<br/>●streaming"]
+    end
+
+    UI["Chat page<br/>(useSyncExternalStore)"] -->|"select / navigate"| STORE
+    STORE -->|"SSE loop owned here<br/>(survives navigation)"| BE["POST /sessions/{id}/messages<br/>EventSourceResponse"]
+
+    HIST["useChatMessages<br/>(useInfiniteQuery)"] -->|"GET /sessions/{id}/messages<br/>?limit=50&before=cursor"| BE2["cursor-paginated<br/>newest page + next_cursor"]
+    HIST --> VIRT["Virtualized MessageList<br/>(@tanstack/react-virtual)"]
+```
+
+**Concurrency.** The SSE read-loop lives in a module-level `chatStream` store keyed by `session_id`, not inside the React page. Navigating between sessions does **not** stop generation — multiple sessions stream at once, and a live ● dot in the session list marks each one that is actively streaming. The input is disabled per-session (only the conversation that is streaming), never globally. Backend `contextvars` (`detail_level`, `scan_focus`, `trace_id`) isolate concurrent streams to different sessions; same-session concurrent turns are still rejected by the Strands agent lock (one turn per conversation, by design).
+
+**Fast open.** History is **cursor-paginated**: `GET /api/chat/sessions/{id}/messages?limit=50&before=<msg_id>` returns the newest page plus a `next_cursor` (the `before` id for the next-older page). `GET /api/chat/sessions/{id}` is **metadata-only** (no longer ships the full history). The message list is **virtualized** (`@tanstack/react-virtual`) so only visible rows are in the DOM; scrolling to the top loads the older page, with scroll-anchoring so the viewport doesn't jump.
+
+**Caching.** Three layers, no server-side cache: the **TanStack Query** page cache (loaded pages stay warm; an optimistic append on stream completion replaces the old 5 s full-history refetch), the **Bedrock prompt cache** (unchanged — different sessions use independent prefixes), and an **immutable-message markdown memo** (`Map<msgId, html>`) so virtualized rows re-mount without re-parsing markdown.
+
+**Persistence.** Sessions and messages live in SQLite (`data/agenticops.db`): `chat_sessions`, `chat_messages` (indexed on `(session_id, id)` for cursor scans), `session_summaries`.
+
+**Reload caveat.** An in-flight stream is **not** resumed after a hard page reload (by design); the backend persists the partial reply, so it appears in the loaded history.
+
+---
+
 ## Quick Tutorials
 
 ### Tutorial 1: First Scan — Discover Your AWS Resources
