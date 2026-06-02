@@ -1,172 +1,141 @@
 # AgenticOps
 
-Agent-First Cloud Operations Platform — multi-agent AI operations with interactive CLI, React dashboard, IM integration, and autonomous remediation.
+**Agent-first cloud operations platform.** A team of specialized AI agents scans your AWS infrastructure, detects issues, finds root causes, plans fixes, and — for low-risk problems — remediates them autonomously. They also **learn**: every operation refines a self-optimizing memory and skill library.
 
-> **Version**: 1.0.1 | **Release Notes**: [docs/MVP-1.0.1-RELEASE.md](docs/MVP-1.0.1-RELEASE.md) | [v1.0.0](docs/MVP-1.0.0-RELEASE.md)
+> **Version**: 1.1.1 · **Latest release**: [Concurrent chat sessions + fast open](docs/MVP-1.1.1-RELEASE.md) · **Full history** below.
 
-## Overview
+Three ways in — all driving the same agents:
 
-AgenticOps (`aiops`) uses 7 specialized AI agents (built on [Strands Agents SDK](https://github.com/strands-agents/strands-agents) + AWS Bedrock Claude 4.5/4.6) to scan, monitor, detect, analyze, and remediate issues across AWS infrastructure — fully automated, from alert to resolution.
+```
+   CLI  (aiops chat)  ┐
+   Web Dashboard      ├──►  Main Agent (router)  ──►  6 specialist agents  ──►  AWS
+   IM Bots            ┘
+   (Feishu/Slack/…)
+```
 
-**Three access points**: CLI (`aiops chat`), React Web Dashboard, IM Bots (Feishu/Slack/DingTalk/WeCom)
+---
 
-## Key Capabilities
+## Design Principles
+
+The whole system follows a few deliberate rules — they explain most of the design decisions below:
+
+1. **Agents as tools.** The Main agent is a *pure router*; each specialist (Scan, Detect, RCA, SRE, Executor, Reporter) is exposed as a callable tool. No specialist talks to another directly.
+2. **Read/plan/execute are separated.** SRE *plans* fixes but never touches infrastructure; only the Executor acts, and only after an approval gate. Risk-tiered: L0/L1 auto-approve, L2/L3 require a human.
+3. **Tiered models for cost.** Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing and high-throughput work (Main, Scan, Detect, Reporter), Haiku available as the economy tier. Per-agent overridable.
+4. **Agents learn, safely.** Memory and skills self-optimize within hard safety boundaries — agent writes land as drafts; promotion is security-gated; human-authored knowledge is pinned and never auto-touched.
+5. **One source of truth for config.** `config/settings.yaml` defines everything; env vars override it. Code never hardcodes values.
+6. **Simple by default.** SQLite + file-based memory locally; Postgres + S3 only when you opt into the cloud profile. No dependency added without a present-day need.
+
+---
+
+## What It Does
 
 | Capability | Description |
 |------------|-------------|
-| **Scan** | 20+ AWS service types: EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS, SNS, VPCs, subnets, SGs, route tables, NAT/TGW, Load Balancers |
+| **Scan** | 20+ AWS service types (EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS/SNS, VPC/subnets/SGs, NAT/TGW, Load Balancers) |
 | **Monitor & Detect** | CloudWatch alarms/metrics, Z-score anomaly detection, Prometheus/CloudWatch/Datadog webhook intake |
-| **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, network topology, Knowledge Base search |
-| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — fully autonomous for low-risk fixes |
-| **Agent Skills** | 15 domain skills with self-improvement: auto-creation from resolved cases, LLM-driven refinement, draft/promote workflow |
-| **Agent Metrics** | Per-agent and per-model token consumption tracking, call logs, trace timeline |
-| **Network Topology** | VPC graph engine with SPOF detection, capacity risk, dependency chain, change simulation |
-| **Knowledge Base** | Hybrid vector (Titan V2) + keyword search; auto-distills resolved cases into reusable SOPs |
-| **Report** | Daily/weekly/incident/inventory reports with multi-channel distribution |
-| **Scheduled Pipelines** | Cron-based task scheduling: FullScan, Monitoring, DailyReport, HealthPatrol, AgentChain (prompt-driven) |
-| **Notify** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook — YAML-configured |
-| **IM Bots** | Feishu/Slack WebSocket bots with alert channel routing (agent-verified, not regex) |
-| **MCP Servers** | Claude Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload, graceful degradation |
-| **Dynamic Models** | Bedrock API auto-discovery of available Claude models (cached), per-agent assignment, CLI/Web switching |
+| **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, infrastructure graph, and Knowledge Base search |
+| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — autonomous for low-risk fixes |
+| **Self-Optimizing Memory** | File-based agent memory that learns from each operation; agent self-curation, never-delete archival, prompt-cache-safe injection |
+| **Autonomous Skills** | 15 domain skills the agents can create, improve, and merge — published only through a security-gated, human-auditable workflow |
+| **Concurrent Chat** | Multiple conversations stream at once; sessions open instantly via cursor-paginated, virtualized history |
+| **Knowledge Base** | Hybrid vector + keyword search; distills resolved cases into reusable SOPs |
+| **Reports & Schedules** | Daily/weekly/incident/inventory reports; cron pipelines (FullScan, Monitoring, HealthPatrol, …) |
+| **Notify & IM Bots** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook; agent-verified alert routing |
+| **MCP Servers** | Claude-Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload |
+| **Graph Engine** | NetworkX infrastructure graph: SPOF detection, capacity risk, dependency chains, change simulation (agent tools) |
 
-## Multi-Agent Architecture
+---
+
+## Architecture
 
 ```
 CLI (aiops chat)  ──┐
-                    ├──► Main Agent (orchestrator) ──► Sub-Agents
-Web Dashboard ──────┤         │
-  (React + SSE)     │         ├──► Scan Agent ──► AWS service APIs
-IM Bots ────────────┘         ├──► Detect Agent ──► CloudWatch, Prometheus
-  (Feishu/Slack)              ├──► RCA Agent ──► CloudTrail, KB, Skills
-                              ├──► SRE Agent ──► Fix plan generation (READ-ONLY)
-                              ├──► Executor Agent ──► AWS CLI, SSM/SSH, kubectl
-                              └──► Reporter Agent ──► Reports, KB distillation
+                    ├──► Main Agent (router) ──► Scan Agent    ──► AWS service APIs
+Web Dashboard ──────┤        │                  Detect Agent  ──► CloudWatch, Prometheus
+  (React + SSE)     │        │                  RCA Agent     ──► CloudTrail, KB, Skills, Graph
+IM Bots ────────────┘        │                  SRE Agent     ──► Fix-plan generation (READ-ONLY)
+                             │                  Executor Agent──► AWS CLI, SSM/SSH, kubectl
+                             │                  Reporter Agent──► Reports, KB distillation
+                             │
+                             ├──► Agent Memory  (agent-memory/*.md — self-optimizing)
+                             ├──► Agent Skills  (skills/*/SKILL.md — autonomous, security-gated)
+                             ├──► SQLite / PostgreSQL  (metadata)
+                             └──► MCP Servers  (optional external tools)
 ```
 
-| Agent | Model Tier | Role |
-|-------|------------|------|
-| **Main** | Opus 4.6 | Pure router — dispatches to specialists |
-| **RCA** | Opus 4.6 | Root cause analysis with Skills + KB |
-| **SRE** | Opus 4.6 | Fix plan generation (never executes) |
-| **Executor** | Sonnet 4.6 | Multi-backend execution (AWS/SSM/kubectl) |
+### The 7 Agents
+
+| Agent | Model (default) | Role |
+|-------|-----------------|------|
+| **Main** | Sonnet 4.6 | Pure router — dispatches to specialists |
+| **RCA** | Opus 4.6 | Root cause analysis (Skills + KB + Graph) |
+| **SRE** | Opus 4.6 | Fix-plan generation — **never executes** |
+| **Executor** | Opus 4.6 | Multi-backend execution (AWS / SSM / kubectl) |
 | **Scan** | Sonnet 4.6 | Resource discovery |
 | **Detect** | Sonnet 4.6 | Health monitoring + anomaly detection |
-| **Reporter** | Haiku 4.5 | Report generation (cost-optimized) |
+| **Reporter** | Sonnet 4.6 | Report generation |
 
-Per-agent model overrides via `config/settings.yaml` or `AIOPS_AGENT_{NAME}_MODEL_ID` env vars.
-Available models fetched dynamically from Bedrock (`/api/models`). Switch via CLI `/model` or Web Settings.
+Defaults from `config/settings.yaml` — Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet elsewhere.
+
+Models are fetched dynamically from Bedrock; override per agent in `config/settings.yaml` or via `AIOPS_AGENT_{NAME}_MODEL_ID`. Switch at runtime with CLI `/model` or Web Settings.
 
 ### Auto-Fix Pipeline
 
 ```
-Alert ──► HealthIssue ──► RCA Agent ──► SRE Agent ──► Auto-Approve (L0/L1) ──► Executor ──► Resolve
-                                                       ↓ L2/L3: Human Approval
+Alert ─► HealthIssue ─► RCA ─► SRE ─► Auto-Approve (L0/L1) ─► Executor ─► Resolve
+                                       └► L2/L3: Human Approval
 ```
 
-**Three independent gates**: `auto_fix_enabled` (master), `executor_auto_approve_l0_l1`, `executor_enabled`
+- **Three independent gates**: `auto_fix_enabled` (master) · `executor_auto_approve_l0_l1` · `executor_enabled`
+- **One issue → one active fix plan**: draft = update-in-place, locked = reject, terminal = allow new
+- **9-state HealthIssue lifecycle**, enforced by a state machine (invalid transitions → 409):
+  `open → investigating → acknowledged → root_cause_identified → fix_planned → fix_approved → fix_executing → fix_executed → resolved`
 
-**FixPlan dedup**: One issue → one active plan. Draft=update-in-place, Locked=reject, Terminal=allow new.
+### Dual Alert Intake
 
-### HealthIssue Lifecycle
+| Pipeline | Flow | LLM Cost |
+|----------|------|----------|
+| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA pipeline | None |
+| **IM Agent** | IM message → Main Agent (verification) → `create_health_issue` → same pipeline | Yes |
 
-```
-open → investigating → acknowledged → root_cause_identified → fix_planned
-  → fix_approved → fix_executing → fix_executed → resolved
-```
+A SHA-256 fingerprint dedups issues across both pipelines.
 
-State machine enforced — invalid transitions return 409.
+### Self-Learning Layer
 
-## Deployment (Docker + Terraform)
+Agents improve over time, within strict safety boundaries:
 
-### Docker (推荐)
+- **Memory** (`agent-memory/<agent>/*.md`) — Hermes-style self-optimizing markdown memory. Agents `add/merge/search` via a `memory_manage` tool; a zero-LLM Curator ages unused memories (`active→stale→archived`) and **never deletes** (recoverable). Human-written memories outrank agent-written ones. Injected once at build time (prompt-cache-safe).
+- **Skills** (`skills/<name>/SKILL.md`) — agents can `add/improve/merge` skills via `skill_manage`, but writes land as **drafts only**. `promote_skill` scans the skill body for dangerous shell commands before publishing; human-authored skills are **pinned** and never auto-modified. All changes are versioned and recoverable.
 
-```bash
-# 构建
-docker build -f docker/Dockerfile -t agenticops:latest .
-
-# 运行
-docker run -d -p 8000:8000 \
-  -v /data/agenticops:/app/data \
-  -e AIOPS_ADMIN_PASSWORD=MyPassword \
-  -e AIOPS_BEDROCK_REGION=us-east-1 \
-  agenticops:latest
-```
-
-### Terraform (AWS IaC)
-
-| Target | Path | Command |
-|--------|------|---------|
-| EC2 (单实例) | `iac/ec2/` | `terraform apply` |
-| ECS (Fargate) | `iac/ecs/` | `terraform apply` |
-| EKS (已有集群) | `iac/eks/` | `terraform apply` |
-
-```bash
-cd iac/ec2
-cp terraform.tfvars.example terraform.tfvars
-# 编辑: region, admin_password, acm_cert_arn
-terraform init && terraform apply
-```
-
-详见: [`docker/README.md`](docker/README.md) | [`iac/ec2/README.md`](iac/ec2/README.md) | [`docs/WORKFLOW.md`](docs/WORKFLOW.md#deployment)
+See [`docs/MVP-1.1.0-RELEASE.md`](docs/MVP-1.1.0-RELEASE.md) for the full memory + skills design.
 
 ---
 
-## Quick Start (Local Dev)
-
-### 1. Install
+## Quick Start
 
 ```bash
-pip install -e .
-# Optional cloud backends:
-pip install -e ".[cloud]"    # pgvector + psycopg2
+# 1. Install
+pip install -e .                 # add ".[cloud]" for pgvector + Postgres
+
+# 2. Initialize (pick one)
+aiops init                       # interactive wizard
+aiops init --yes                 # non-interactive local defaults
+aiops init --config setup.json   # zero-prompt from JSON (template: config/setup.json.example)
+aiops quickstart --yes           # one-click: init + start + optional scan
+
+# 3. Start
+aiops web                        # dashboard at http://localhost:8000
+#   or: aiops service start      # background daemon
+
+# 4. Chat
+aiops chat                       # interactive REPL (30+ slash commands)
+aiops chat "check health of prod"            # headless
+aiops chat "analyze this log @/tmp/error.log"  # with file
+aiops chat "deep dive on I#42 and check R#17"  # with issue/resource refs
 ```
 
-### 2. Initialize (3 options)
-
-```bash
-# Interactive guided setup
-aiops init
-
-# Non-interactive local setup
-aiops init --yes
-
-# Zero-prompt from JSON config
-aiops init --config setup.json
-
-# One-click: init + start + optional scan
-aiops quickstart --yes
-```
-
-### 3. Start Services
-
-```bash
-# Service mode (background daemon)
-aiops service start
-
-# Or direct web dashboard
-aiops web
-# Dashboard at http://localhost:8000
-```
-
-### 4. Interactive Chat
-
-```bash
-# Interactive REPL with 30+ slash commands
-aiops chat
-
-# Headless mode
-aiops chat "check health of prod"
-aiops chat -q "scan us-east-1" -d concise
-echo "list issues" | aiops chat
-
-# With file attachment
-aiops chat "analyze this log @/tmp/error.log"
-
-# With issue/resource references
-aiops chat "deep dive on I#42 and check R#17"
-```
-
-### 5. Basic Operations
+Common operations:
 
 ```bash
 aiops run scan --services EC2,Lambda,RDS,S3
@@ -176,313 +145,145 @@ aiops run analyze 1
 aiops run report --type daily
 ```
 
-## CLI Reference
+---
 
-### Core Commands
+## Interfaces
+
+### CLI
 
 | Command | Description |
 |---------|-------------|
-| `aiops init [--config FILE]` | Initialize — guided wizard or JSON config |
-| `aiops quickstart [--yes]` | One-click: init + start + optional scan |
-| `aiops chat [QUERY] [-d LEVEL] [-f FOCUS]` | Interactive/headless AI chat |
-| `aiops service start\|stop\|status\|restart\|logs` | Background service management |
+| `aiops init / quickstart` | Initialize / one-click bring-up |
+| `aiops chat [QUERY] [-d LEVEL] [-f FOCUS]` | Interactive or headless AI chat |
+| `aiops service start\|stop\|status\|logs` | Background service management |
 | `aiops web [--host H] [--port P]` | Launch web dashboard |
-| `aiops issues [--severity S] [--status S]` | List health issues |
-| `aiops issue <id>` | Show issue detail |
-| `aiops arch [-o FORMAT]` | System architecture (tree/markdown/json) |
-| `aiops export <entity> [-o FORMAT]` | Export data |
-| `aiops version` | Show version |
+| `aiops issues` / `aiops issue <id>` | List / show health issues |
+| `aiops get\|describe\|create\|update\|delete <entity>` | CRUD over accounts, resources, schedules, channels |
+| `aiops run scan\|detect\|analyze\|report\|schedule\|notify` | Run a pipeline step |
 
-### CRUD Commands
+In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, and more — type `/help`.
 
-```bash
-aiops get accounts|resources|issues|reports|schedules|channels
-aiops describe account|resource|issue|report <id>
-aiops create account|schedule|channel <name> [options]
-aiops update account|issue|schedule <id> [options]
-aiops delete account|schedule <id>
-aiops run scan|detect|analyze|report|schedule|notify [options]
-```
+### Web Dashboard
 
-### Chat Slash Commands (30+)
+React 18 + TypeScript + Tailwind + TanStack Query, served by FastAPI at `http://localhost:8000`. 13 pages (+ Login): Dashboard, Chat, Issues & Plans, Issue Detail, Resource Detail, Schedules, Schedule Detail, Reports, Report Detail, Agent Metrics, Skills, Skill Detail, Settings.
 
-```
-/help                    Show all commands
-/scan                    Scan resources
-/detect                  Run detection
-/analyze <id>            Run RCA
-/fix <id>                Generate fix plan
-/approve <id>            Approve fix plan
-/execute <id>            Execute approved plan
-/focus <categories>      Set scan focus (computing,networking,databases,...)
-/detail concise|medium|detailed  Output detail level
-/model opus|sonnet|haiku Runtime model switch
-/skill list|activate     Agent Skills management
-/workflow full-scan|daily|incident  Multi-step workflows
-/channel list|show|test|set  Notification channel management
-/send_to <target> <content>  Send to IM/notification channel
-/tokens                  Token usage stats
-/export                  Export data
-```
+The **Chat** page streams multiple concurrent sessions (background streaming, instant open) — see [v1.1.1 notes](docs/MVP-1.1.1-RELEASE.md).
 
-## Web Dashboard
+### API
 
-React SPA with 13 pages, served by FastAPI at `http://localhost:8000`.
+80+ REST endpoints; full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills`, `/api/graph`, `/api/settings`, `/api/auth`.
 
-**Tech stack**: React 18, TypeScript, Tailwind CSS, TanStack Query, Vite
-
-| Page | Description |
-|------|-------------|
-| **Dashboard** | Overview stats, critical issues, recent activity |
-| **Chat** | SSE streaming chat with file upload, session management |
-| **Issues & Plans** | Health issues + fix plans in unified view with severity/status filtering |
-| **Issue Detail** | Issue detail + pipeline timeline + RCA + action bar |
-| **Resources** | AWS resource inventory with type/region filtering |
-| **Resource Detail** | Resource metadata, tags, related issues |
-| **Schedules** | CRUD + execution history + "Run Now" + cron builder |
-| **Schedule Detail** | Execution logs, pipeline config |
-| **Reports** | Report browser by type (daily/incident/inventory) |
-| **Agent Metrics** | Per-agent & per-model token consumption, call logs, trace timeline |
-| **Skills** | Skill catalog with domain filtering, draft/published status |
-| **Skill Detail** | Markdown viewer, inline editor, LLM improve, review diff, promote |
-| **Settings** | Runtime config, MCP servers, model presets, notification channels |
-
-## API Reference
-
-80+ REST API endpoints served by FastAPI. Full OpenAPI docs at `http://localhost:8000/docs`.
-
-| Category | Base Path | Count |
-|----------|-----------|-------|
-| Health Issues | `/api/health-issues` | 8 |
-| Fix Plans | `/api/fix-plans` | 6 |
-| Chat (SSE) | `/api/chat/sessions` | 5 |
-| Resources | `/api/resources` | 5 |
-| Schedules | `/api/schedules` | 7 |
-| Notifications | `/api/notifications` | 7 |
-| Agent Logs/Metrics | `/api/agent-logs` | 3 |
-| Skills | `/api/skills` | 7 |
-| Graph/Topology | `/api/graph` | 12 |
-| Accounts | `/api/accounts` | 5 |
-| Auth | `/api/auth` | 3 |
-| Audit | `/api/audit` | 3 |
-| Settings/MCP | `/api/settings` | 8 |
-| Stats/Health | `/api/stats`, `/api/health` | 3 |
-| IM/Webhooks | `/api/im`, `/api/webhooks` | 8+ |
-
-## Agent Skills
-
-15 domain skills loaded on demand (~636 tokens in system prompt, ~3-5K per activation):
-
-| Skill | Domain |
-|-------|--------|
-| `linux-admin` | Process, disk, memory, network diagnostics |
-| `network-engineer` | CCIE-level routing, firewall, TCP, VPN, MTU |
-| `kubernetes-admin` | Pods, nodes, CNI, CoreDNS, PVC, HPA |
-| `database-admin` | RDS, DynamoDB, ElastiCache, slow queries |
-| `elasticsearch` | Cluster health, DSL, JVM, ILM, snapshots |
-| `monitoring` | CloudWatch, Prometheus, SLI/SLO |
-| `log-analysis` | CloudWatch Insights, pod/system logs |
-| `aws-compute` | EC2, ECS, EKS, Lambda troubleshooting |
-| `aws-storage` | S3, EBS, EFS, FSx troubleshooting |
-| `local-os-operator` | Local file read/search/tail (dynamic tools) |
-| `web-research` | Public URL fetch, SSL checks, service status pages |
-| `distributed-tracing` | X-Ray, OpenTelemetry, trace correlation |
-| `document-analysis` | PDF/doc parsing, report generation |
-| `notification-operator` | Multi-channel notification routing and delivery |
-| `security-engineer` | IAM, SecurityHub, GuardDuty, compliance checks |
-
-**Self-improving skills**: Skills auto-create from resolved cases and improve via LLM refinement. Draft → Review (diff) → Promote workflow in the web UI.
-
-Add new skills with zero code changes — see `skills/ADDING_SKILLS.md`.
-
-## Graph Engine
-
-NetworkX-based infrastructure graph with SRE analysis algorithms:
-
-| Algorithm | Purpose |
-|-----------|---------|
-| `dependency_chain_analysis` | Reverse BFS — all upstream dependents of a fault node |
-| `detect_spof` | Articulation points + bridges |
-| `capacity_risk_analysis` | Subnet IP exhaustion + EKS pod limits |
-| `simulate_change` | Before/after reachability diff |
-
-12 compute node types (EC2, RDS, Lambda, EKS, ECS, ElastiCache, etc.) with SG-inferred connectivity edges.
-
-## Dual Alert Intake
-
-| Pipeline | Flow | LLM Cost |
-|----------|------|----------|
-| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA pipeline | None |
-| **IM Agent** | IM message → Main Agent (5-step verification) → `create_health_issue` → same pipeline | Yes |
-
-HealthIssue fingerprint (SHA-256) prevents duplicates across both pipelines.
+---
 
 ## Configuration
 
-Primary config: `config/settings.yaml` (YAML, single source of truth).
-
-**Priority**: env vars (`AIOPS_*`) > `.env` file > `settings.yaml` > Python Field defaults.
+`config/settings.yaml` is the single source of truth. **Priority**: `AIOPS_*` env vars > `.env` > `settings.yaml` > defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-opus-4-6-v1` | Default model (Opus 4.6) |
-| `AIOPS_BEDROCK_MODEL_ID_CHEAP` | `...claude-haiku-4-5-20251001-v1:0` | Economy model (Haiku 4.5) |
-| `AIOPS_BEDROCK_REGION` | `us-east-1` | AWS Bedrock region |
-| `AIOPS_DATABASE_URL` | `sqlite:///...agenticops.db` | Database URL |
+| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-opus-4-6-v1` | Default (reasoning) model |
+| `AIOPS_BEDROCK_REGION` | `us-east-1` | Bedrock region |
+| `AIOPS_DATABASE_URL` | `sqlite:///…/data/agenticops.db` | Database URL |
 | `AIOPS_AUTO_FIX_ENABLED` | `true` | Auto-fix pipeline master switch |
-| `AIOPS_AUTO_RCA_ENABLED` | `true` | Auto-trigger RCA on new issues |
 | `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | `true` | Auto-approve low-risk plans |
-| `AIOPS_EXECUTOR_ENABLED` | `true` | Enable fix execution |
-| `AIOPS_NOTIFICATIONS_ENABLED` | `true` | Auto-notifications |
-| `AIOPS_SKILLS_ENABLED` | `true` | Agent Skills integration |
-| `AIOPS_SCAN_FOCUS` | `all` | Resource categories filter |
-| `AIOPS_AGENT_OUTPUT_DETAIL` | `medium` | Output detail level |
-| `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` or `cloud` |
-| `AIOPS_BEDROCK_CACHE_ENABLED` | `true` | Prompt caching on all agents |
-| `AIOPS_MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | MCP servers config path |
+| `AIOPS_MEMORY_AUTONOMOUS_WRITE` | `true` | Allow agents to self-write memory (drafts) |
+| `AIOPS_SKILLS_AUTONOMOUS_WRITE` | `true` | Allow agents to self-create skills (drafts) |
+| `AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE` | `true` | Security-scan skills before publishing |
+| `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` (SQLite/files) or `cloud` (Postgres/S3) |
 
-## Validated: 10/10 Cases Passed
+---
 
-Closed-loop validation on EKS Lab (2026-03-06):
+## Deployment
+
+| Target | Path | Command |
+|--------|------|---------|
+| **Docker** | `docker/` | `docker build -f docker/Dockerfile -t agenticops . && docker run -p 8000:8000 …` |
+| **EC2** | `iac/ec2/` | `terraform apply` |
+| **ECS (Fargate)** | `iac/ecs/` | `terraform apply` |
+| **EKS** | `iac/eks/` | `terraform apply` |
+| **One-click (Singapore)** | `iac/deploy-sg/` | `./deploy.sh apply` — CloudFront → ALB → EC2 in ap-southeast-1 |
+
+```bash
+docker run -d -p 8000:8000 \
+  -v /data/agenticops:/app/data \
+  -e AIOPS_ADMIN_PASSWORD=MyPassword \
+  -e AIOPS_BEDROCK_REGION=us-east-1 \
+  agenticops:latest
+```
+
+**Auth** (default-on for cloud profiles): login via `POST /api/auth/login` (`admin` / `aiops2026`, change with `AIOPS_ADMIN_PASSWORD`); 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+
+Details: [`docker/README.md`](docker/README.md) · [`iac/ec2/README.md`](iac/ec2/README.md) · [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
+
+---
+
+## Validation
+
+Closed-loop validation on an EKS lab (10 fault scenarios — OOM, bad image, network policy, disk pressure, pod pending, unhealthy targets, CoreDNS down, PVC pending, HPA maxed, service deleted):
 
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Auto-fix rate | >=7/10 | **10/10** |
-| Detection time | <=3 min | **~2 min** |
-| MTTR | <=10 min | **~6.3 min** |
-| Cost/cycle | <=$3 | **~$2-3** |
+| Auto-fix rate | ≥ 7/10 | **10/10** |
+| Detection time | ≤ 3 min | **~2 min** |
+| MTTR | ≤ 10 min | **~6.3 min** |
+| Cost / cycle | ≤ $3 | **~$2–3** |
 
-Cases: OOM Kill, Bad Image, Network Policy, DiskPressure, Pod Pending, Unhealthy Targets, CoreDNS Down, PVC Pending, HPA Maxed, Service Deleted.
+---
 
 ## Project Structure
 
 ```
 src/agenticops/
-├── agents/          # 7 Strands agents (main, scan, detect, rca, sre, executor, reporter)
-├── tools/           # Agent tools (metadata, AWS CLI, web, notification, cloudwatch)
-├── services/        # Pipeline services (auto-fix, RCA, notifications, events, resolution)
-├── graph/           # Infrastructure graph engine + SRE algorithms
-├── skills/          # Skill loader, security, execution, improvement store
-├── kb/              # Knowledge Base (vector store: SQLite/pgvector/S3)
-├── cli/             # CLI entry + chat + init wizard + display
-├── web/             # FastAPI backend + React SPA frontend
-├── chat/            # Message preprocessing, file reader, /send_to, /channel
-├── notify/          # Multi-channel notifications (YAML config)
-├── im/              # IM bots (Feishu/Slack WebSocket)
-├── integrations/    # Alert processor, source parsers
-├── pipeline/        # Pipeline orchestrator, health patrol, presets
-├── storage/         # Storage backends (local/S3)
-├── scanner/         # Resource scanning engine
-├── scan/            # AWS service scanner + region discovery
-├── scheduler/       # Cron-based task scheduling
-├── monitor/         # CloudWatch metrics collector
-├── auth/            # Authentication (JWT + API keys)
-├── audit/           # Audit trail service
-├── models.py        # SQLAlchemy ORM models
-└── config.py        # Pydantic settings (AIOPS_ env prefix)
+├── agents/       # 7 Strands agents (main, scan, detect, rca, sre, executor, reporter)
+├── tools/        # Agent tools (metadata, AWS CLI, web, notification, cloudwatch)
+├── services/     # Pipeline services (auto-fix, RCA, notifications, events, resolution)
+├── memory/       # Self-optimizing file-based agent memory + Curator
+├── skills/       # Skill loader, security, execution, Curator, promote/rollback
+├── graph/        # Infrastructure graph engine + SRE algorithms
+├── kb/           # Knowledge Base (vector store: SQLite/pgvector/S3)
+├── cli/          # CLI entry + chat + init wizard
+├── web/          # FastAPI backend + React SPA (frontend/)
+├── chat/         # Message preprocessing, file reader, /send_to, /channel
+├── notify/  im/  # Multi-channel notifications + IM bots (Feishu/Slack)
+├── integrations/ # Alert processor, source parsers
+├── pipeline/ scheduler/ monitor/ scanner/ scan/   # Pipelines, cron, metrics, scanning
+├── auth/ audit/  # JWT/API-key auth, audit trail
+├── models.py     # SQLAlchemy ORM models
+└── config.py     # Pydantic settings (AIOPS_ env prefix)
 
-skills/              # 15 domain skill packages (SKILL.md + references/)
-config/              # settings.yaml, channels.yaml, im-apps.yaml, mcp-servers.json
-iac/
-└── deploy-sg/       # Terraform: CloudFront → ALB → EC2 (Singapore)
-infra/
-├── cloud-deploy/    # CloudFormation template + deploy script
-└── eks-lab-tf/      # EKS lab Terraform (10 scenario validation)
-Dockerfile           # Container image for ECS/EKS deployment
-docs/                # WORKFLOW.md, MVP release notes, cases, use-cases
+agent-memory/     # Per-agent + shared markdown memory (self-optimizing)
+skills/           # 15 domain skill packages (+ draft/ staging) — SKILL.md + references/
+config/           # settings.yaml, channels.yaml, im-apps.yaml, mcp-servers.json
+iac/              # Terraform: ec2/, ecs/, eks/, deploy-sg/, modules/
+docs/             # WORKFLOW.md, MVP release notes, design docs, use-cases
 ```
 
-## AWS Deployment (Singapore)
+---
 
-One-click Terraform deployment: CloudFront → ALB → EC2 (t3.medium) in ap-southeast-1.
+## Release History
 
-### Architecture
+Most recent first. Each links to detailed notes.
 
-```
-Internet (HTTPS) → CloudFront → ALB (SG: CF prefix-list only) → EC2 (private subnet, port 8000)
-                                                                   ↓
-                                                              EBS gp3 (SQLite)
-                                                                   ↓
-                                                          Bedrock API (us-east-1)
-```
+| Version | Date | Highlights |
+|---------|------|-----------|
+| **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions (background streaming, multi-open) + fast session open (cursor pagination + virtualization) |
+| **[1.1.0](docs/MVP-1.1.0-RELEASE.md)** | 2026-05-31 | Autonomous **agent memory** (self-optimizing, Hermes-style) + autonomous **skills** (agent-created, security-gated promotion) |
+| **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | Loader/UX hardening; skill index recall improvements |
+| **[1.0.0](docs/MVP-1.0.0-RELEASE.md)** | 2026-03-10 | First MVP — 7-agent architecture, auto-fix pipeline, web dashboard, 10/10 validation |
 
-### Deploy
+User-facing workflow guide with Mermaid diagrams: [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
-```bash
-cd iac/deploy-sg
-
-# Review plan
-./deploy.sh plan
-
-# Deploy (one-click)
-./deploy.sh apply
-
-# Destroy
-./deploy.sh destroy
-```
-
-**Prerequisites**: AWS CLI configured, Terraform >= 1.5, `ap-southeast-1` access.
-
-**Default login**: `admin` / `aiops2026` (changeable via `AIOPS_ADMIN_PASSWORD`)
-
-### Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `region` | `ap-southeast-1` | AWS region |
-| `instance_type` | `t3.medium` | EC2 instance type |
-| `vpc_id` | `""` (new VPC) | Use existing VPC (optional) |
-| `admin_password` | `aiops2026` | Admin user password |
-| `bedrock_region` | `us-east-1` | Bedrock API region |
-
-## Docker
-
-```bash
-# Build (for future ECS/EKS)
-docker build -t agenticops .
-
-# Run
-docker run -p 8000:8000 \
-  -e AIOPS_BEDROCK_REGION=us-east-1 \
-  -e AIOPS_API_AUTH_ENABLED=true \
-  -e AWS_ACCESS_KEY_ID=... \
-  -e AWS_SECRET_ACCESS_KEY=... \
-  agenticops
-```
-
-## Authentication
-
-When `AIOPS_API_AUTH_ENABLED=true` (default for cloud deployments):
-
-- **Login**: `POST /api/auth/login` with `{"email": "admin", "password": "aiops2026"}`
-- **Session token**: Returned in login response, valid for 24 hours
-- **API keys**: `POST /api/users/me/api-keys` for long-lived access
-- **Protected routes**: All `/api/*` except `/api/health` and `/api/auth/login`
-- **Frontend**: Login page at `/app/login`, auto-redirect on 401
-
-Default admin user is auto-seeded on first startup when no users exist.
+---
 
 ## Development
 
 ```bash
-# Install
 pip install -e ".[dev]"
 
-# Run tests
-pytest tests/ -v
-
-# Syntax check
-python3 -m py_compile src/agenticops/web/app.py
-
-# Frontend type check + build
-cd src/agenticops/web/frontend
-npx tsc --noEmit && npm run build
-
-# Run API server (dev)
-uvicorn agenticops.web.app:app --reload --port 8000
-
-# Run chat
-aiops chat
+pytest tests/ -v                              # tests
+python3 -m py_compile src/agenticops/web/app.py   # backend syntax check
+cd src/agenticops/web/frontend && npx tsc --noEmit && npm run build   # frontend
+uvicorn agenticops.web.app:app --reload --port 8000   # dev API server
 ```
 
 ## License
