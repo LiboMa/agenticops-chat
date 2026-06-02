@@ -1,10 +1,18 @@
 ---
 name: aws-compute
-description: "AWS compute troubleshooting — covers EC2 (launch failures, instance status checks, EBS issues, networking), ECS (task placement, service events, container health), EKS (node scaling, cluster issues), and Lambda (cold starts, timeouts, concurrency, memory tuning). Includes decision trees for common failure modes."
+description: AWS compute troubleshooting — covers EC2 (launch failures, instance status
+  checks, EBS issues, networking), ECS (task placement, service events, container
+  health), EKS (node scaling, cluster issues), and Lambda (cold starts, timeouts,
+  concurrency, memory tuning). Includes decision trees for common failure modes.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: compute
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-06-01'
+last_used: '2026-06-01'
 ---
 
 # AWS Compute Skill
@@ -174,3 +182,4 @@ metadata:
 - Resource quotas and limit ranges per namespace
 - Horizontal Pod Autoscaler (HPA) + Cluster Autoscaler = full auto-scaling
 - IRSA (IAM Roles for Service Accounts) for least-privilege pod permissions
+

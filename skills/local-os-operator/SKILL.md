@@ -1,17 +1,26 @@
 ---
 name: local-os-operator
-description: "Local filesystem operations — read configs, tail logs, search files, list directories, inspect file metadata, and write files. Provides secure access to local operational artifacts (Terraform, CloudFormation, Kubernetes manifests, systemd units, nginx configs, application properties, log files). Includes security blocklists for sensitive files."
+description: Local filesystem operations — read configs, tail logs, search files,
+  list directories, inspect file metadata, and write files. Provides secure access
+  to local operational artifacts (Terraform, CloudFormation, Kubernetes manifests,
+  systemd units, nginx configs, application properties, log files). Includes security
+  blocklists for sensitive files.
 metadata:
   author: agenticops
-  version: "1.1"
+  version: '1.1'
   domain: infrastructure
 tools:
-  - agenticops.tools.file_tools.read_local_file
-  - agenticops.tools.file_tools.tail_local_file
-  - agenticops.tools.file_tools.search_local_file
-  - agenticops.tools.file_tools.list_local_directory
-  - agenticops.tools.file_tools.file_stat
-  - agenticops.tools.file_tools.write_local_file
+- agenticops.tools.file_tools.read_local_file
+- agenticops.tools.file_tools.tail_local_file
+- agenticops.tools.file_tools.search_local_file
+- agenticops.tools.file_tools.list_local_directory
+- agenticops.tools.file_tools.file_stat
+- agenticops.tools.file_tools.write_local_file
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-05-31'
+last_used: '2026-06-02'
 ---
 
 # Local OS Operator Skill
@@ -175,3 +184,5 @@ Need file info (not content)
 | `search_local_file` | `search_local_file(path="/var/log/app.log", pattern="ERROR")` | Matching lines with line numbers |
 | `list_local_directory` | `list_local_directory(path="/etc/nginx", pattern="*.conf", recursive=True)` | Files with sizes |
 | `file_stat` | `file_stat(path="/etc/nginx/nginx.conf")` | Size, mtime, perms, owner |
+
+

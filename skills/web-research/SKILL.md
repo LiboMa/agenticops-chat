@@ -1,12 +1,20 @@
 ---
 name: web-research
-description: "Fetch open web data — cloud status pages, documentation, API endpoints, changelogs, and CVE databases. Provides web_fetch tool for HTTP GET with security controls (private IP blocking, size limits, timeout). Use for checking service status pages, reading upstream documentation, or fetching public API data during investigation."
+description: Fetch open web data — cloud status pages, documentation, API endpoints,
+  changelogs, and CVE databases. Provides web_fetch tool for HTTP GET with security
+  controls (private IP blocking, size limits, timeout). Use for checking service status
+  pages, reading upstream documentation, or fetching public API data during investigation.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: operations
 tools:
-  - agenticops.tools.web_tools.web_fetch
+- agenticops.tools.web_tools.web_fetch
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-06-01'
+last_used: '2026-06-01'
 ---
 
 # Web Research Skill
@@ -91,3 +99,5 @@ Multiple resources showing same symptoms
 - **Redirects**: Returns target URL — call again to follow
 - **Errors**: Descriptive message with status code
 - **All output**: Truncated to 4000 characters
+
+
