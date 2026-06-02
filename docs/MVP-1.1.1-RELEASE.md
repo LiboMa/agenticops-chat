@@ -112,7 +112,37 @@ v1.1.1（新）:
 
 ---
 
-## 七、已知限制 & 后续计划
+## 七、Skills & Memory 运行态更新
+
+v1.1.1 随发布快照同步了自主**记忆**与**技能**系统在运行中产生的状态更新 —— 这些不是新功能（核心能力见 [v1.1.0](MVP-1.1.0-RELEASE.md)），而是 cycle②/cycle③ 自治机制**实际跑起来**后的产物，一并纳入本次发布分支。
+
+### 7.1 Agent Memory（运行态）
+
+| 项 | 说明 |
+|----|------|
+| **`last_used` 时间戳推进** | 9 个 `agent-memory/*.md` 被 Curator 在注入时 touch，`last_used` 推进到 `2026-06-02` —— Reactivate-on-use 机制的可见证据 |
+| **内容不变** | 仅时间戳变化，记忆正文/confidence/provenance 未改 |
+| **效果** | 这些记忆因近期被使用而保持 `active`，不会被 Curator 误判为 stale 归档 |
+
+### 7.2 Agent Skills（运行态 / frontmatter 规范化）
+
+`normalize_skill_frontmatter` 对 3 个技能做了**非破坏性 provenance 回填**（技能正文未改）：
+
+| Skill | 变更 |
+|-------|------|
+| `aws-compute` | 回填 `created_by=user` / `status=active` / `skill_version` / `created_at`；YAML 引号与缩进规范化 |
+| `local-os-operator` | 同上 + tools 列表缩进规范化 |
+| `web-research` | 同上 |
+
+- **`created_by=user`** → 这 3 个为人工编写技能，被 Curator **永久 pinned**，绝不自动 stale/归档
+- **向后兼容**：旧 SKILL.md 缺失的 provenance 字段被补齐，符合 cycle③ 规范；无字段语义丢失
+- **未触及**：其余 12 个技能、技能正文、references/ 均未改动
+
+> 这部分体现了"Agents 在安全边界内自主学习"原则的**日常运转**：记忆随使用自我保活、技能元数据自我规范化，全程无人工介入、无破坏性写入。
+
+---
+
+## 八、已知限制 & 后续计划
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -124,7 +154,7 @@ v1.1.1（新）:
 
 ---
 
-## 八、升级指南
+## 九、升级指南
 
 ```bash
 git pull
@@ -136,7 +166,7 @@ cd src/agenticops/web/frontend && npm install   # 拉取 @tanstack/react-virtual
 
 ---
 
-## 九、验证清单
+## 十、验证清单
 
 - [x] 后端分页：7 tests passed（默认页/before 游标/末页/空会话/404/limit 上限/metadata-only）
 - [x] 后端 chat 套件：28/28 相关测试通过，零回归
