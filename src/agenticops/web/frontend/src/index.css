@@ -159,3 +159,16 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-table th { @apply text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b; }
 .report-content .md-table td { @apply px-4 py-2 border-b; }
 .report-content .md-table tr:last-child td { @apply border-b-0; }
+
+/* Chat: inline code/command chip (blue-tinted, theme-aware) */
+.report-content code {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  font-size: 0.85em;
+}
+.report-content pre code {
+  background: transparent;
+  padding: 0;
+}

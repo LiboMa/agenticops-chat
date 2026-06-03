@@ -230,7 +230,7 @@ export default function Chat() {
         ) : (
           <>
             {/* Session toolbar */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card/50">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/60">
               {/* Flyout toggle */}
               <button
                 onClick={() => setFlyoutOpen((prev) => !prev)}
@@ -248,14 +248,14 @@ export default function Chat() {
               </button>
 
               {/* Session name */}
-              <h3 className="text-sm font-medium text-foreground truncate flex-1">
+              <h3 className="text-sm font-medium text-foreground truncate flex-1 text-center">
                 {currentSession?.name ?? "Chat"}
               </h3>
 
               {/* Save as Report button */}
               <button
                 onClick={() => setShowSaveReport(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground bg-secondary hover:bg-muted border border-border rounded-md transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60 rounded-lg transition-colors"
               >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
