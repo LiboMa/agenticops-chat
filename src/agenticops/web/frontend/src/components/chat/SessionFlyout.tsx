@@ -222,7 +222,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                         )}
 
                         {/* Hover action menu */}
-                        <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
+                        <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
                           <button
                             onClick={(e) => handleTogglePin(s.session_id, s.pinned, e)}
                             className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
