@@ -37,3 +37,33 @@ class TestMessagingSchema:
         ses = next(c for c in body["channel_types"] if c["type"] == "ses")
         keys = {f["key"] for f in ses["fields"]}
         assert "sender" in keys and "recipients" in keys
+
+
+class TestMessagingApps:
+    def test_list_apps_masks_secrets(self, client, monkeypatch):
+        import agenticops.web.app as webapp
+        fake = {"feishu": {"default": {"app_id": "cli_123456", "app_secret": "supersecretvalue"}}}
+        monkeypatch.setattr(webapp, "_messaging_get_apps_detail", lambda: fake, raising=False)
+        # Patch the underlying im_config function the endpoint calls:
+        import agenticops.notify.im_config as imc
+        monkeypatch.setattr(imc, "get_apps_detail", lambda: fake)
+        resp = client.get("/api/messaging/apps")
+        assert resp.status_code == 200
+        body = resp.json()
+        secret = body["feishu"]["default"]["app_secret"]
+        assert secret.startswith("****") and "supersecret" not in secret
+        assert body["feishu"]["default"]["app_id"] == "cli_123456"  # non-secret unmasked
+
+    def test_upsert_app_invalid_platform_400(self, client):
+        resp = client.put("/api/messaging/apps/badplatform/default", json={"app_id": "x"})
+        assert resp.status_code == 400
+
+    def test_upsert_and_delete_app(self, client, monkeypatch):
+        import agenticops.notify.im_config as imc
+        saved = {}
+        monkeypatch.setattr(imc, "save_app", lambda p, n, c: saved.update({(p, n): c}))
+        monkeypatch.setattr(imc, "delete_app", lambda p, n: saved.pop((p, n), None) is not None)
+        r1 = client.put("/api/messaging/apps/feishu/default", json={"app_id": "cli_x", "app_secret": "s"})
+        assert r1.status_code == 200 and ("feishu", "default") in saved
+        r2 = client.delete("/api/messaging/apps/feishu/default")
+        assert r2.status_code == 200

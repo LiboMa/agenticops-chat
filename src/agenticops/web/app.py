@@ -866,6 +866,44 @@ async def api_messaging_schema():
     return MESSAGING_SCHEMA
 
 
+@app.get("/api/messaging/apps")
+async def api_messaging_list_apps():
+    """List IM bot apps (credentials) with secrets masked."""
+    from agenticops.notify.im_config import get_apps_detail
+    apps = get_apps_detail()
+    return {
+        platform: {name: _mask_im_secrets(cfg) for name, cfg in platform_apps.items()}
+        for platform, platform_apps in apps.items()
+    }
+
+
+@app.put("/api/messaging/apps/{platform}/{name}")
+async def api_messaging_upsert_app(platform: str, name: str, body: dict = Body(...)):
+    """Create/update a bot app credential. Empty secret fields keep the existing value."""
+    from agenticops.notify.im_config import save_app, get_apps_detail
+    valid = {"feishu", "dingtalk", "wecom", "slack"}
+    if platform not in valid:
+        raise HTTPException(400, f"Invalid platform. Valid: {', '.join(sorted(valid))}")
+    # Merge: a blank secret field means "keep existing" (the GET masked it).
+    existing = get_apps_detail().get(platform, {}).get(name, {})
+    merged = dict(existing)
+    for k, v in body.items():
+        if k.lower() in _SENSITIVE_IM_KEYS and (v == "" or v is None):
+            continue  # keep existing secret
+        merged[k] = v
+    save_app(platform, name, merged)
+    return {"platform": platform, "name": name, "status": "saved", "restart_hint": True}
+
+
+@app.delete("/api/messaging/apps/{platform}/{name}")
+async def api_messaging_delete_app(platform: str, name: str):
+    """Delete a bot app credential."""
+    from agenticops.notify.im_config import delete_app
+    if not delete_app(platform, name):
+        raise HTTPException(404, f"App '{platform}/{name}' not found")
+    return {"status": "deleted"}
+
+
 @app.get("/api/settings/im-apps")
 async def api_list_im_apps():
     """List all IM bot apps with masked secrets."""
