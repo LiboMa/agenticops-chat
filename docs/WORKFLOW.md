@@ -502,6 +502,15 @@ only; per-type size caps mirror `file_reader.py`: 512 KB text / 5 MB image / 5 M
 All attachments post as one multipart request (`file` repeated); the backend reads
 `form.getlist("file")` and builds Strands ContentBlocks per file (server caps at 5).
 
+**Chat UI (v1.1.x):** open-webui-style blue/white minimal look — sessions grouped by time
+(Pinned / Starred / Today / Yesterday / Previous 7 days / Previous 30 days / Older) via a
+pure `groupSessions` render helper, neutral gray active row with a blue streaming dot,
+hover-revealed (and focus-reachable) pin/star/archive/delete, flat assistant messages
+(no bubble) with soft-blue user bubbles, a centered session toolbar, and a floating pill
+composer (auto-grow textarea, round send/stop). Purely presentational — no change to
+streaming, pagination, attachments, or session logic. Light mode is blue/white; dark mode
+reuses the existing `.dark` theme tokens (green accent).
+
 ---
 
 ## Concurrent Chat Sessions & Fast Session Open
