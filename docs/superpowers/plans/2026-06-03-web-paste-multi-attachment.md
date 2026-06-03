@@ -4,11 +4,44 @@
 
 **Goal:** Let the web chat composer accept pasted images (`Cmd+V`), drag-dropped files, and multiple attachments per message (max 5, existing accepted types only), end-to-end to the agent.
 
-**Architecture:** A pure, unit-testable `lib/attachments.ts` (extraction + per-type validation) drives `ChatInput.tsx` (paste/drop UI + multi-badge). The send chain (`chatStream.ts` → `useSessionStream.ts` → `useLazySessionCreate.ts`) changes `file?: File` → `files?: File[]` and appends all files to one `FormData`. The backend `app.py` multipart branch reads `form.getlist("file")` and loops the **already-list-based** classification (`file_images`/`file_documents`/`file_contents`). Preprocessor, `file_reader.py`, and the `ChatMessage` model are untouched.
+**Architecture:** A pure, unit-testable `lib/attachments.ts` (extraction + per-type validation + dedup) drives `ChatInput.tsx` (paste/drop UI + multi-badge). The send chain (`chatStream.ts` → `useSessionStream.ts` → `useLazySessionCreate.ts`) changes `file?: File` → `files?: File[]` and appends all files to one `FormData`. The backend `app.py` multipart branch reads `form.getlist("file")` and loops the **already-list-based** classification (`file_images`/`file_documents`/`file_contents`). Preprocessor, `file_reader.py`, and the `ChatMessage` model are untouched.
 
 **Tech Stack:** React 18 + TypeScript + Vite/Vitest (frontend, node test env — no DOM rendering); FastAPI + Starlette `UploadFile` (backend); pytest + TestClient.
 
 **Spec:** `docs/superpowers/specs/2026-06-03-web-paste-multi-attachment-design.md`
+
+### Implementation patterns borrowed from open-webui (code-verified, to avoid known bugs)
+
+This plan adopts open-webui's battle-tested upload UX patterns (their `MessageInput.svelte` /
+`Chat.svelte` / `FilesOverlay.svelte`), mapped to React. These prevent real bugs they shipped
+fixes for. **No feature scope is added — only the implementation is made robust.**
+
+1. **`dragover`-driven highlight, not dragenter-counter.** `onDragOver` sets `dragging=true`
+   every frame (continuous while hovering) → naturally flicker-immune. Gate on
+   `e.dataTransfer.types.includes("Files")` so text-selection drags don't trigger it.
+2. **`dragleave` contains-guard:** `if (e.currentTarget.contains(e.relatedTarget as Node)) return;`
+   — moving the cursor onto a child element does NOT clear the highlight. (This is their fix
+   for the Firefox "overlay stuck / flicker" bug #21664.)
+3. **Escape + drop always reset** `dragging=false` (no stuck overlay).
+4. **Capture-phase listeners + airtight cleanup.** Drag listeners attach to the composer
+   container in a `useEffect` with `{ capture: true }`, and the cleanup removes them with the
+   **same `{ capture: true }`** options. (Their memory-leak bug #21968 was un-removed
+   listeners → page crash on extended use.)
+5. **Paste: selective `preventDefault`.** Loop `e.clipboardData.items`, `getAsFile()` for
+   `image/*`; `preventDefault()` **only when a file is actually consumed** so normal text
+   paste still works.
+6. **Single ingress handler.** Drop, paste, and the `<input>` onChange all funnel into one
+   `addFiles(File[])` → one place for validation + dedup.
+7. **Validate limits BEFORE building FormData** (count + per-type size) — done in
+   `validateFiles`.
+8. **dataURL previews, never `URL.createObjectURL`.** We don't render image thumbnails this
+   phase (filename badges only), so there is nothing to leak — but if a preview is ever added,
+   use a FileReader dataURL, not an object URL (avoids revoke bookkeeping / leaks).
+9. **Dedup incoming files by `name+size`** before adding to state (their duplicate-upload
+   bug #10f06a64). React keys/removal use a stable per-attachment id, **never the array index**
+   (their concurrent-removal race, fixed via UUID `tempItemId`).
+10. **Allow send with files but empty text** (their dropped-file-context bug #21477) — already
+    handled by our fallback-text logic.
 
 ---
 
@@ -144,20 +177,33 @@ export function filesFromDrop(dt: DataTransferLike): File[] {
   return out;
 }
 
+/** Stable identity for dedup + React keys (open-webui dedups by name; we add size). */
+export function fileKey(f: File): string {
+  return `${f.name}:${f.size}`;
+}
+
 export interface ValidationResult {
   accepted: File[];
   errors: string[];
 }
 
 /**
- * Validate incoming files against existing selection. Rejects unsupported
- * extension, oversize (per-type), and over-count (MAX_ATTACHMENTS total).
+ * Validate incoming files against the existing selection. In order:
+ *   - dedup against existing AND within the incoming batch (by name+size)
+ *   - reject unsupported extension
+ *   - reject oversize (per-type cap)
+ *   - reject over-count (MAX_ATTACHMENTS total)
+ * Duplicates are silently skipped (no error noise — re-pasting the same screenshot
+ * is a common, benign action).
  */
 export function validateFiles(existing: File[], incoming: File[]): ValidationResult {
   const accepted: File[] = [];
   const errors: string[] = [];
+  const seen = new Set(existing.map(fileKey)); // dedup vs current selection + within batch
   let count = existing.length;
   for (const f of incoming) {
+    const key = fileKey(f);
+    if (seen.has(key)) continue; // duplicate — skip silently
     if (!isAccepted(f.name)) {
       errors.push(`${f.name}: type not supported`);
       continue;
@@ -171,6 +217,7 @@ export function validateFiles(existing: File[], incoming: File[]): ValidationRes
       errors.push(`too many files (max ${MAX_ATTACHMENTS})`);
       break;
     }
+    seen.add(key);
     accepted.push(f);
     count++;
   }
@@ -190,6 +237,7 @@ import {
   validateFiles,
   maxSizeForFile,
   acceptAttr,
+  fileKey,
   MAX_ATTACHMENTS,
 } from "@/lib/attachments";
 
@@ -267,13 +315,34 @@ describe("attachments", () => {
     expect(acceptAttr).toContain(".log");
     expect(acceptAttr.startsWith(".")).toBe(true);
   });
+
+  it("validateFiles dedups against existing selection (name+size), silently", () => {
+    const existing = [file("shot.png", 100)];
+    const r = validateFiles(existing, [file("shot.png", 100), file("other.png", 100)]);
+    expect(r.accepted.map((f) => f.name)).toEqual(["other.png"]); // dup skipped
+    expect(r.errors).toEqual([]); // no error noise for dedup
+  });
+
+  it("validateFiles dedups within the incoming batch", () => {
+    const r = validateFiles([], [file("a.png", 100), file("a.png", 100)]);
+    expect(r.accepted).toHaveLength(1);
+  });
+
+  it("same name but different size is NOT a duplicate", () => {
+    const r = validateFiles([file("a.log", 100)], [file("a.log", 200)]);
+    expect(r.accepted).toHaveLength(1);
+  });
+
+  it("fileKey combines name and size", () => {
+    expect(fileKey(file("x.png", 42))).toBe("x.png:42");
+  });
 });
 ```
 
 - [ ] **Step 3: Run tests**
 
 Run: `cd /Users/malibo/MyDev/AgenticOps/src/agenticops/web/frontend && npx vitest --run src/__tests__/attachments.test.ts`
-Expected: PASS (9 tests).
+Expected: PASS (13 tests).
 
 NOTE on the `file()` helper: `new File([new Uint8Array(size)], name)` produces a File whose
 `.size === size`. If for any reason `.size` reads 0 in this node version, fall back to
@@ -677,8 +746,13 @@ way, commit only once tsc passes (end of Task 5).
 
 Replace the ENTIRE contents of `src/agenticops/web/frontend/src/components/chat/ChatInput.tsx` with:
 
+Patterns from open-webui (see header): `dragover`-driven highlight, `dragleave`
+contains-guard, Escape/drop reset, **capture-phase** drag listeners with **matching cleanup**,
+selective `preventDefault` on paste, single `addFiles` ingress, UUID-keyed attachment state
+(removal by id, never index).
+
 ```typescript
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   acceptAttr,
   filesFromPaste,
@@ -695,73 +769,128 @@ interface Props {
   onDetailLevelChange?: (level: string) => void;
 }
 
+// Attachment carries a stable id so removal + React keys never use the array index
+// (open-webui bug G: index-based removal races with concurrent adds).
+interface Attachment {
+  id: string;
+  file: File;
+}
+
+let _attachSeq = 0;
+function nextAttachId(): string {
+  // No Math.random/Date.now needed — a module counter is stable + unique per session.
+  _attachSeq += 1;
+  return `att-${_attachSeq}`;
+}
+
 export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, onDetailLevelChange }: Props) {
   const [input, setInput] = useState("");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const addFiles = (incoming: File[]) => {
+  const addFiles = useCallback((incoming: File[]) => {
     if (incoming.length === 0) return;
-    const { accepted, errors } = validateFiles(selectedFiles, incoming);
-    if (accepted.length > 0) setSelectedFiles((prev) => [...prev, ...accepted]);
-    setAttachError(errors.length > 0 ? errors.join("; ") : null);
-  };
+    setAttachments((prev) => {
+      const existing = prev.map((a) => a.file);
+      const { accepted, errors } = validateFiles(existing, incoming);
+      setAttachError(errors.length > 0 ? errors.join("; ") : null);
+      if (accepted.length === 0) return prev;
+      return [...prev, ...accepted.map((f) => ({ id: nextAttachId(), file: f }))];
+    });
+  }, []);
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if ((!trimmed && selectedFiles.length === 0) || disabled) return;
-    const fallback = selectedFiles.length > 0 ? "Please analyze the attached file(s)" : "";
-    onSend(trimmed || fallback, selectedFiles);
+    if ((!trimmed && attachments.length === 0) || disabled) return;
+    const fallback = attachments.length > 0 ? "Please analyze the attached file(s)" : "";
+    onSend(trimmed || fallback, attachments.map((a) => a.file));
     setInput("");
-    setSelectedFiles([]);
+    setAttachments([]);
     setAttachError(null);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) addFiles(Array.from(e.target.files));
-    e.target.value = "";
+    e.target.value = ""; // allow re-selecting the same file
   };
 
+  // Paste: pull image/* items as files; only preventDefault when we actually
+  // consume a file, so normal text paste still works (open-webui pattern #5/#6).
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const imgs = filesFromPaste(e.clipboardData);
     if (imgs.length > 0) {
       e.preventDefault();
       addFiles(imgs);
     }
-    // plain text falls through to default textarea behavior
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    addFiles(filesFromDrop(e.dataTransfer));
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
 
-  const removeFile = (idx: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
+  // Drag-drop wired imperatively on the container in CAPTURE phase, with airtight
+  // cleanup (open-webui memory-leak bug #21968). dragover re-asserts true every
+  // frame (flicker-immune); dragleave uses the contains-guard (Firefox bug #21664);
+  // Escape + drop always reset.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onDragOver = (e: DragEvent) => {
+      if (disabled) return;
+      // Only react to file drags, not text-selection drags.
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault();
+        setIsDragging(true);
+      }
+    };
+    const onDragLeave = (e: DragEvent) => {
+      // Moving onto a child element keeps relatedTarget inside the container → ignore.
+      if (el.contains(e.relatedTarget as Node)) return;
+      setIsDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      if (e.dataTransfer) addFiles(filesFromDrop(e.dataTransfer));
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsDragging(false);
+    };
+
+    const opts = { capture: true } as const;
+    el.addEventListener("dragover", onDragOver, opts);
+    el.addEventListener("dragleave", onDragLeave, opts);
+    el.addEventListener("drop", onDrop, opts);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      el.removeEventListener("dragover", onDragOver, opts);
+      el.removeEventListener("dragleave", onDragLeave, opts);
+      el.removeEventListener("drop", onDrop, opts);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [disabled, addFiles]);
 
   return (
     <div
+      ref={containerRef}
       className={`border-t border-border p-4 bg-secondary ${isDragging ? "ring-2 ring-primary-500 ring-inset" : ""}`}
-      onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragging(true); }}
-      onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
-      onDrop={handleDrop}
     >
-      {/* Attachment badges */}
-      {selectedFiles.length > 0 && (
+      {/* Attachment badges (keyed by stable id, removable by id) */}
+      {attachments.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-2 max-w-4xl mx-auto">
-          {selectedFiles.map((f, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg border border-primary-200">
+          {attachments.map((a) => (
+            <span key={a.id} className="inline-flex items-center gap-1.5 text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg border border-primary-200">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
-              {f.name}
-              <span className="text-primary-400">({(f.size / 1024).toFixed(1)} KB)</span>
+              {a.file.name}
+              <span className="text-primary-400">({(a.file.size / 1024).toFixed(1)} KB)</span>
               <button
-                onClick={() => removeFile(i)}
+                onClick={() => removeAttachment(a.id)}
                 className="ml-0.5 text-muted-foreground hover:text-red-500 transition-colors"
                 title="Remove"
               >
@@ -840,7 +969,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
         ) : (
           <button
             onClick={handleSend}
-            disabled={(!input.trim() && selectedFiles.length === 0) || disabled}
+            disabled={(!input.trim() && attachments.length === 0) || disabled}
             className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-secondary disabled:text-muted-foreground disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors self-end"
           >
             Send
@@ -969,16 +1098,24 @@ Expected: backend green, tsc clean, build OK, vitest green.
 `uvicorn agenticops.web.app:app --reload --port 8000` + `npm run dev`. Verify:
 - `Cmd+Shift+4` screenshot → `Cmd+V` in composer → image badge → send → agent sees it.
 - Drag 2 files → 2 badges → send → both in the message.
+- **Drag a file IN then back OUT** (cursor leaves the window) → highlight clears, NOT stuck
+  (open-webui Firefox bug #21664). Test in **Firefox/Safari** specifically.
+- **Drag over child elements** (textarea, buttons, badges) → highlight does NOT flicker
+  (contains-guard).
 - Drop 6 files → 5 accepted + "too many files (max 5)" message.
 - Drop a `.exe` → "type not supported", not sent.
+- **Paste the same screenshot twice** → only one badge (dedup by name+size, no error).
+- Remove the middle of 3 attachments → correct one removed (id-keyed, not index).
 - Paste plain text → goes into the textarea (not an attachment).
+- Press **Escape** mid-drag → highlight clears.
 
 ---
 
 ## Self-Review Notes (author)
 
-- **Spec coverage:** paste (T5 handlePaste), drag-drop (T5 handleDrop + isDragging), multi-attachment array (T1 state→T5 UI→T3 send chain→T2 backend), max 5 (T1 validateFiles), ACCEPTED_TYPES only + client reject (T1 validateFiles + acceptAttr), per-type size caps mirroring file_reader (T1 maxSizeForFile: 512KB/5MB/5MB), backend form.getlist loop (T2), preprocessor/file_reader/model untouched (T2 note), MessageList multi-badge (T6), docs (T6). All spec sections map to a task.
-- **Type consistency:** `onSend(message, files: File[])` (ChatInput) ↔ `sendMessage`/`handleWelcomeSend(content, files)` (Chat.tsx) ↔ `useSessionStream.send(content, files?, detailLevel?)` ↔ `chatStream.send(sessionId, content, files?, detailLevel?)` ↔ `sendFirstMessage(content, files?, detailLevel?)`. All `File[]`. `attachments` optimistic shape `{filename,size}` matches `types.ts:577` and backend dict keys (`filename`,`size`,`type` — frontend reads only filename/size). `validateFiles(existing, incoming)`, `filesFromPaste(ClipboardLike)`, `filesFromDrop(DataTransferLike)`, `maxSizeForFile(name)`, `acceptAttr` — names consistent T1↔T5.
-- **node-env test safety:** pure fns take structural `ClipboardLike`/`DataTransferLike` (not DOM `DataTransfer`, which is undefined in node) — tests use plain object fixtures + `File` global.
+- **Spec coverage:** paste (T5 handlePaste), drag-drop (T5 capture-phase useEffect + isDragging), multi-attachment array (T1 state→T5 UI→T3 send chain→T2 backend), max 5 (T1 validateFiles), ACCEPTED_TYPES only + client reject (T1 validateFiles + acceptAttr), per-type size caps mirroring file_reader (T1 maxSizeForFile: 512KB/5MB/5MB by true backend routing), backend form.getlist loop (T2), preprocessor/file_reader/model untouched (T2 note), MessageList multi-badge (T6), docs (T6). All spec sections map to a task.
+- **open-webui patterns adopted (header list 1-10):** dragover-state (T5 onDragOver), contains-guard dragleave (T5 onDragLeave), Escape+drop reset (T5), capture-phase + matching cleanup (T5 useEffect opts), selective preventDefault paste (T5 handlePaste), single addFiles ingress (T5), validate-before-FormData (T1/T5), dataURL-not-objectURL (N/A — filename badges only this phase, noted), dedup by name+size (T1 validateFiles + tests), id-keyed removal not index (T5 Attachment.id/nextAttachId), allow files+empty-text (T5 fallback). Each guards a real open-webui bug (#21968 leak, #21664 Firefox stuck, #10f06a64 dup, #21477 dropped-file, bug G index-race).
+- **Type consistency:** `onSend(message, files: File[])` (ChatInput) ↔ `sendMessage`/`handleWelcomeSend(content, files)` (Chat.tsx) ↔ `useSessionStream.send(content, files?, detailLevel?)` ↔ `chatStream.send(sessionId, content, files?, detailLevel?)` ↔ `sendFirstMessage(content, files?, detailLevel?)`. All `File[]`. `attachments` optimistic shape `{filename,size}` matches `types.ts:577` and backend dict keys (`filename`,`size`,`type` — frontend reads only filename/size). `validateFiles(existing, incoming)`, `filesFromPaste(ClipboardLike)`, `filesFromDrop(DataTransferLike)`, `maxSizeForFile(name)`, `acceptAttr`, `fileKey(f)` — names consistent T1↔T5. ChatInput uses internal `Attachment{id,file}` state (id from module counter `nextAttachId`); `onSend` still receives a plain `File[]` (`attachments.map(a => a.file)`), so the send-chain contract is unchanged.
+- **node-env test safety:** pure fns take structural `ClipboardLike`/`DataTransferLike` (not DOM `DataTransfer`, which is undefined in node) — tests use plain object fixtures + `File` global. The drag listeners (which need real DOM events) live in `ChatInput` (not unit-tested — verified via manual smoke), keeping the testable logic pure.
 - **Task 4 intentionally void** (numbering kept stable; attachments.ts consumed in T5).
 - **Commit grouping:** T3 leaves tree non-compiling by design; T5 commits T3+T5 frontend together after tsc passes (noted in T3 Step 4).
