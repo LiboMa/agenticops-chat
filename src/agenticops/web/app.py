@@ -3996,7 +3996,7 @@ async def api_send_chat_message(session_id: str, request: Request):
 
     Accepts:
     - application/json: {"content": "message text"}
-    - multipart/form-data: content (text field) + file (optional)
+    - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
     """
     from agenticops.chat.preprocessor import preprocess_message
 

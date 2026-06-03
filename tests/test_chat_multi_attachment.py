@@ -15,9 +15,10 @@ def client():
 
 
 def test_multipart_two_files_both_attached(client, monkeypatch):
-    """POST with 1 png (image branch) + 1 .txt (document branch) → both recorded as
-    attachments. (.txt routes through is_document_file server-side, not the text else-branch;
-    the assertions hold regardless of branch — the point is BOTH files are captured.)"""
+    """POST with 1 png (image branch) + 1 .txt (document branch) + 1 .log (text else-branch)
+    → all three recorded as attachments. (.txt routes through is_document_file server-side;
+    .log falls through to read_upload_bytes, exercising the text else-branch; .png is the
+    image branch — the point is every branch is covered and ALL files are captured.)"""
     import agenticops.web.app as webapp
 
     session_id = "multi-attach-001"
@@ -43,6 +44,7 @@ def test_multipart_two_files_both_attached(client, monkeypatch):
     files = [
         ("file", ("shot.png", png_bytes, "image/png")),
         ("file", ("notes.txt", b"hello log line", "text/plain")),
+        ("file", ("app.log", b"ERROR something failed", "text/plain")),
     ]
     try:
         resp = client.post(
@@ -60,7 +62,7 @@ def test_multipart_two_files_both_attached(client, monkeypatch):
             assert msgs, "user message persisted"
             atts = msgs[-1].attachments or []
             names = sorted(a["filename"] for a in atts)
-            assert names == ["notes.txt", "shot.png"], f"both attachments recorded, got {names}"
+            assert names == ["app.log", "notes.txt", "shot.png"], f"all three attachments recorded, got {names}"
     finally:
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()

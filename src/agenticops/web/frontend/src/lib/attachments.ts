@@ -16,7 +16,7 @@ const MAX_TEXT_SIZE = 512 * KB;
 const MAX_IMAGE_SIZE = 5 * MB;
 const MAX_DOCUMENT_SIZE = 5 * MB;
 
-const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp"];
 // Document branch server-side (is_document_file): 5 MB cap.
 const DOCUMENT_EXTS = ["pdf", "docx", "txt", "md", "csv"];
 // Else/text branch server-side (read_upload_bytes): 512 KB cap.
