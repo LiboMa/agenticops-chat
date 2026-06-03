@@ -785,6 +785,87 @@ def _mask_im_secrets(config: dict) -> dict:
     }
 
 
+# ============================================================================
+# Messaging — unified facade over channels.yaml + im-apps.yaml + NotificationLog
+# (replaces the separate Notifications + IM Bots settings tabs)
+# ============================================================================
+
+# Schema descriptor: drives the frontend's dynamic Configure form.
+# field: {key, label, type: text|password|number|list|select, required, secret}
+MESSAGING_SCHEMA: dict = {
+    "app_platforms": [
+        {"platform": "feishu", "label": "Feishu (飞书)", "fields": [
+            {"key": "app_id", "label": "App ID", "type": "text", "required": True, "secret": False},
+            {"key": "app_secret", "label": "App Secret", "type": "password", "required": True, "secret": True},
+        ]},
+        {"platform": "slack", "label": "Slack", "fields": [
+            {"key": "bot_token", "label": "Bot Token (xoxb-)", "type": "password", "required": True, "secret": True},
+            {"key": "app_token", "label": "App Token (xapp-)", "type": "password", "required": True, "secret": True},
+        ]},
+        {"platform": "dingtalk", "label": "DingTalk (钉钉)", "fields": [
+            {"key": "app_key", "label": "App Key", "type": "text", "required": True, "secret": False},
+            {"key": "app_secret", "label": "App Secret", "type": "password", "required": True, "secret": True},
+        ]},
+        {"platform": "wecom", "label": "WeCom (企业微信)", "fields": [
+            {"key": "corp_id", "label": "Corp ID", "type": "text", "required": True, "secret": False},
+            {"key": "corp_secret", "label": "Corp Secret", "type": "password", "required": True, "secret": True},
+            {"key": "agent_id", "label": "Agent ID", "type": "number", "required": False, "secret": False},
+        ]},
+    ],
+    "channel_types": [
+        {"type": "slack", "label": "Slack", "fields": [
+            {"key": "webhook_url", "label": "Webhook URL", "type": "text", "required": False, "secret": False},
+            {"key": "app_name", "label": "Bot App name (for bot mode)", "type": "text", "required": False, "secret": False},
+            {"key": "chat_id", "label": "Channel ID (bot mode)", "type": "text", "required": False, "secret": False},
+        ]},
+        {"type": "feishu", "label": "Feishu (飞书)", "fields": [
+            {"key": "app_name", "label": "Bot App name", "type": "text", "required": True, "secret": False},
+            {"key": "chat_id", "label": "Chat ID (oc_...)", "type": "text", "required": True, "secret": False},
+        ]},
+        {"type": "dingtalk", "label": "DingTalk (钉钉)", "fields": [
+            {"key": "app_name", "label": "Bot App name", "type": "text", "required": True, "secret": False},
+            {"key": "chat_id", "label": "Conversation ID (cid...)", "type": "text", "required": True, "secret": False},
+        ]},
+        {"type": "wecom", "label": "WeCom (企业微信)", "fields": [
+            {"key": "app_name", "label": "Bot App name", "type": "text", "required": True, "secret": False},
+            {"key": "touser", "label": "To user(s)", "type": "text", "required": False, "secret": False},
+        ]},
+        {"type": "email", "label": "Email (SMTP)", "fields": [
+            {"key": "smtp_host", "label": "SMTP Host", "type": "text", "required": True, "secret": False},
+            {"key": "smtp_port", "label": "SMTP Port", "type": "number", "required": True, "secret": False},
+            {"key": "username", "label": "Username", "type": "text", "required": False, "secret": False},
+            {"key": "password", "label": "Password", "type": "password", "required": False, "secret": True},
+            {"key": "from_addr", "label": "From", "type": "text", "required": True, "secret": False},
+            {"key": "to_addrs", "label": "To (comma-separated)", "type": "list", "required": True, "secret": False},
+        ]},
+        {"type": "ses", "label": "Email (AWS SES)", "fields": [
+            {"key": "sender", "label": "Sender", "type": "text", "required": True, "secret": False},
+            {"key": "recipients", "label": "Recipients (comma-separated)", "type": "list", "required": True, "secret": False},
+            {"key": "region", "label": "AWS Region", "type": "text", "required": True, "secret": False},
+        ]},
+        {"type": "sns", "label": "AWS SNS", "fields": [
+            {"key": "topic_arn", "label": "Topic ARN", "type": "text", "required": True, "secret": False},
+            {"key": "region", "label": "AWS Region", "type": "text", "required": True, "secret": False},
+        ]},
+        {"type": "sns-report", "label": "SNS Report (SNS + S3)", "fields": [
+            {"key": "topic_arn", "label": "Topic ARN", "type": "text", "required": True, "secret": False},
+            {"key": "region", "label": "AWS Region", "type": "text", "required": True, "secret": False},
+            {"key": "s3_bucket", "label": "S3 Bucket", "type": "text", "required": False, "secret": False},
+            {"key": "s3_prefix", "label": "S3 Prefix", "type": "text", "required": False, "secret": False},
+        ]},
+        {"type": "webhook", "label": "Webhook", "fields": [
+            {"key": "url", "label": "URL", "type": "text", "required": True, "secret": False},
+        ]},
+    ],
+}
+
+
+@app.get("/api/messaging/schema")
+async def api_messaging_schema():
+    """Field descriptor for the dynamic Configure form (channel types + app platforms)."""
+    return MESSAGING_SCHEMA
+
+
 @app.get("/api/settings/im-apps")
 async def api_list_im_apps():
     """List all IM bot apps with masked secrets."""
