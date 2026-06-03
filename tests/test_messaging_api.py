@@ -116,3 +116,40 @@ class TestMessagingChannels:
         resp = client.get("/api/messaging/logs?limit=5")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+
+class TestMessagingSecretAndToggle:
+    def test_masked_secret_not_persisted_on_app_upsert(self, client, monkeypatch):
+        """Re-PUT with a masked secret (****xxxx) must KEEP the existing real secret."""
+        import agenticops.notify.im_config as imc
+        existing = {"feishu": {"default": {"app_id": "cli_x", "app_secret": "REALSECRET"}}}
+        saved = {}
+        monkeypatch.setattr(imc, "get_apps_detail", lambda: existing)
+        monkeypatch.setattr(imc, "save_app", lambda p, n, c: saved.update(c))
+        # client sends the masked value back (as a naive edit-form would)
+        client.put("/api/messaging/apps/feishu/default", json={"app_id": "cli_x", "app_secret": "****CRET"})
+        assert saved["app_secret"] == "REALSECRET", f"masked secret was persisted: {saved.get('app_secret')}"
+
+    def test_blank_secret_keeps_existing_on_app_upsert(self, client, monkeypatch):
+        import agenticops.notify.im_config as imc
+        existing = {"feishu": {"default": {"app_id": "cli_x", "app_secret": "REALSECRET"}}}
+        saved = {}
+        monkeypatch.setattr(imc, "get_apps_detail", lambda: existing)
+        monkeypatch.setattr(imc, "save_app", lambda p, n, c: saved.update(c))
+        client.put("/api/messaging/apps/feishu/default", json={"app_id": "cli_x", "app_secret": ""})
+        assert saved["app_secret"] == "REALSECRET"
+
+    def test_toggle_preserves_role(self, client, monkeypatch):
+        """Toggling enable must NOT drop role (alert -> chat regression)."""
+        import agenticops.notify.im_config as imc
+        from agenticops.notify.im_config import ChannelConfig
+        ch = ChannelConfig(name="feishu-alert", channel_type="feishu",
+                           config={"chat_id": "oc_x"}, is_enabled=True,
+                           severity_filter=[], role="alert")
+        monkeypatch.setattr(imc, "load_channels", lambda: [ch])
+        saved = {}
+        monkeypatch.setattr(imc, "save_channel",
+                            lambda name, ct, cfg, is_enabled=True, severity_filter=None: saved.update({"cfg": cfg, "en": is_enabled}))
+        client.patch("/api/messaging/channels/feishu-alert/toggle", json={"enabled": False})
+        assert saved["cfg"].get("role") == "alert", f"role lost on toggle: {saved['cfg']}"
+        assert saved["en"] is False

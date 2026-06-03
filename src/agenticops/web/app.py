@@ -888,8 +888,8 @@ async def api_messaging_upsert_app(platform: str, name: str, body: dict = Body(.
     existing = get_apps_detail().get(platform, {}).get(name, {})
     merged = dict(existing)
     for k, v in body.items():
-        if k.lower() in _SENSITIVE_IM_KEYS and (v == "" or v is None):
-            continue  # keep existing secret
+        if k.lower() in _SENSITIVE_IM_KEYS and (v == "" or v is None or (isinstance(v, str) and v.startswith("****"))):
+            continue  # keep existing secret (blank or masked-from-GET)
         merged[k] = v
     save_app(platform, name, merged)
     return {"platform": platform, "name": name, "status": "saved", "restart_hint": True}
@@ -971,13 +971,20 @@ async def api_messaging_toggle_channel(name: str, body: dict = Body(...)):
     ch = next((c for c in load_channels() if c.name == name), None)
     if not ch:
         raise HTTPException(404, f"Channel '{name}' not found")
-    save_channel(name, ch.channel_type, ch.config, is_enabled=enabled, severity_filter=ch.severity_filter or None)
+    cfg = dict(ch.config)
+    if ch.role:
+        cfg["role"] = ch.role
+    if ch.preferred_format:
+        cfg["preferred_format"] = ch.preferred_format
+    if ch.alert_senders:
+        cfg["alert_senders"] = ch.alert_senders
+    save_channel(name, ch.channel_type, cfg, is_enabled=enabled, severity_filter=ch.severity_filter or None)
     return {"name": name, "enabled": enabled}
 
 
 @app.post("/api/messaging/channels/{name}/test")
 async def api_messaging_test_channel(name: str, data: NotificationSendRequest):
-    """Send a test message through a channel (reuses the notifier path; writes a NotificationLog)."""
+    """Send a test message through a channel (reuses the notifier send path)."""
     from agenticops.notify.im_config import get_channel
     from agenticops.notify.notifier import NotificationManager
     channel = get_channel(name)
