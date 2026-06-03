@@ -496,6 +496,12 @@ flowchart LR
     BLOCKS --> AGENT
 ```
 
+**Web composer input (v1.1.x):** the chat composer accepts pasted images (`Cmd+V`),
+drag-dropped files, and the file picker — up to 5 attachments per message (accepted types
+only; per-type size caps mirror `file_reader.py`: 512 KB text / 5 MB image / 5 MB document).
+All attachments post as one multipart request (`file` repeated); the backend reads
+`form.getlist("file")` and builds Strands ContentBlocks per file (server caps at 5).
+
 ---
 
 ## Concurrent Chat Sessions & Fast Session Open
