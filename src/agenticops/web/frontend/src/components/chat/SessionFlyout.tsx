@@ -9,6 +9,7 @@ import {
 import { useLocale } from "@/i18n/LocaleContext";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { sortSessions, filterArchived } from "@/lib/sortSessions";
+import { groupSessions } from "@/lib/groupSessions";
 import { useActiveStreamingSessions } from "@/hooks/useSessionStream";
 
 interface Props {
@@ -16,24 +17,6 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onClose: () => void;
-}
-
-/** Tiny relative-time formatter (e.g. "3m ago", "2h ago", "Jan 5"). */
-function relativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffSec = Math.round((now - then) / 1000);
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
@@ -88,6 +71,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
   }, [sessions, search, showArchived]);
 
   const activeStreaming = useActiveStreamingSessions();
+  const groups = useMemo(() => groupSessions(filtered), [filtered]);
 
   const handleNew = async () => {
     const s = await createMut.mutateAsync(undefined);
@@ -128,23 +112,24 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <h3 className="text-sm font-semibold text-foreground">
           {t("chat.sessions")}
         </h3>
         <div className="flex items-center gap-1">
           <button
             onClick={handleNew}
             disabled={createMut.isPending}
-            className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
             title={t("chat.newChat")}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
+            {t("chat.newChat")}
           </button>
           <button
             onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             title={t("chat.close")}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -161,7 +146,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("chat.search")}
-          className="w-full px-2 py-1 text-xs bg-secondary border border-border rounded-md text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full px-3 py-1.5 text-xs bg-muted border border-transparent rounded-lg text-foreground placeholder-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:bg-background focus:border-border transition-colors"
         />
       </div>
 
@@ -183,103 +168,104 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
             </p>
           </div>
         ) : (
-          <div className="space-y-0.5">
-            {filtered.map((s) => {
-              const isActive = selectedId === s.session_id;
-              return (
-                <div
-                  key={s.session_id}
-                  onClick={() => onSelect(s.session_id)}
-                  className={`
-                    group relative rounded-md cursor-pointer transition-all
-                    ${
-                      isActive
-                        ? "bg-primary/10 border-l-2 border-primary pl-2 pr-1.5 py-2"
-                        : "border-l-2 border-transparent pl-2 pr-1.5 py-2 hover:bg-accent"
-                    }
-                  `}
-                >
-                  {renamingId === s.session_id ? (
-                    <input
-                      ref={renameRef}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onBlur={handleRenameSubmit}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); handleRenameSubmit(); }
-                        if (e.key === "Escape") setRenamingId(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs font-medium bg-background border border-border rounded px-1 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  ) : (
-                    <p
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        setRenamingId(s.session_id);
-                        setRenameValue(s.name);
-                      }}
-                      className={`text-xs font-medium truncate pr-4 ${
-                        isActive ? "text-primary" : "text-foreground"
-                      }`}
-                    >
-                      {s.pinned && <span title={t("chat.pinned")}>📌 </span>}
-                      {s.starred && <span title={t("chat.starred")}>⭐ </span>}
-                      {s.name}
-                    </p>
-                  )}
-                  <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
-                    {activeStreaming.includes(s.session_id) && (
-                      <span
-                        title="Streaming…"
-                        className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse"
-                      />
-                    )}
-                    {relativeTime(s.last_activity_at)}
-                  </p>
-
-                  {/* Hover action menu */}
-                  <div className="absolute top-1.5 right-1 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all">
-                    <button
-                      onClick={(e) => handleTogglePin(s.session_id, s.pinned, e)}
-                      className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                      title={s.pinned ? t("chat.unpin") : t("chat.pin")}
-                    >
-                      <span className="text-[10px]">{s.pinned ? "📌" : "📍"}</span>
-                    </button>
-                    <button
-                      onClick={(e) => handleToggleStar(s.session_id, s.starred, e)}
-                      className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                      title={s.starred ? t("chat.unstar") : t("chat.star")}
-                    >
-                      <span className="text-[10px]">{s.starred ? "⭐" : "☆"}</span>
-                    </button>
-                    <button
-                      onClick={(e) => handleToggleArchive(s.session_id, s.archived, e)}
-                      className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                      title={s.archived ? t("chat.unarchive") : t("chat.archive")}
-                    >
-                      <span className="text-[10px]">{s.archived ? "📂" : "📁"}</span>
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(s.session_id, e)}
-                      className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      title={t("common.delete")}
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
+          <div className="space-y-2 pb-2">
+            {groups.map((group) => (
+              <div key={group.label}>
+                <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {group.label}
                 </div>
-              );
-            })}
+                <div className="space-y-0.5">
+                  {group.sessions.map((s) => {
+                    const isActive = selectedId === s.session_id;
+                    return (
+                      <div
+                        key={s.session_id}
+                        onClick={() => onSelect(s.session_id)}
+                        className={`group relative rounded-lg cursor-pointer px-2.5 py-2 transition-colors ${
+                          isActive ? "bg-muted" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        {renamingId === s.session_id ? (
+                          <input
+                            ref={renameRef}
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onBlur={handleRenameSubmit}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); handleRenameSubmit(); }
+                              if (e.key === "Escape") setRenamingId(null);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs font-medium bg-background border border-border rounded px-1 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-1.5 pr-4">
+                            {activeStreaming.includes(s.session_id) && (
+                              <span
+                                title="Streaming…"
+                                className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse flex-shrink-0"
+                              />
+                            )}
+                            {s.pinned && <span className="text-[10px] flex-shrink-0" title={t("chat.pinned")}>📌</span>}
+                            {s.starred && <span className="text-[10px] flex-shrink-0" title={t("chat.starred")}>⭐</span>}
+                            <p
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setRenamingId(s.session_id);
+                                setRenameValue(s.name);
+                              }}
+                              className={`text-[13px] truncate ${isActive ? "font-semibold text-foreground" : "text-foreground/90"}`}
+                            >
+                              {s.name}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Hover action menu */}
+                        <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
+                          <button
+                            onClick={(e) => handleTogglePin(s.session_id, s.pinned, e)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                            title={s.pinned ? t("chat.unpin") : t("chat.pin")}
+                          >
+                            <span className="text-[10px]">{s.pinned ? "📌" : "📍"}</span>
+                          </button>
+                          <button
+                            onClick={(e) => handleToggleStar(s.session_id, s.starred, e)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                            title={s.starred ? t("chat.unstar") : t("chat.star")}
+                          >
+                            <span className="text-[10px]">{s.starred ? "⭐" : "☆"}</span>
+                          </button>
+                          <button
+                            onClick={(e) => handleToggleArchive(s.session_id, s.archived, e)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                            title={s.archived ? t("chat.unarchive") : t("chat.archive")}
+                          >
+                            <span className="text-[10px]">{s.archived ? "📂" : "📁"}</span>
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(s.session_id, e)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title={t("common.delete")}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
       {/* Footer with archive toggle */}
-      <div className="border-t border-border px-2 py-1.5 space-y-1">
+      <div className="border-t border-border px-3 py-2 flex items-center justify-between">
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -289,9 +275,9 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
           />
           <span className="text-[10px] text-muted-foreground">{t("chat.showArchived")}</span>
         </label>
-        <p className="text-[10px] text-muted-foreground/50 text-center">
+        <span className="text-[10px] text-muted-foreground/50">
           {sessions?.length ?? 0} session{(sessions?.length ?? 0) !== 1 ? "s" : ""}
-        </p>
+        </span>
       </div>
       {dialog}
     </div>
