@@ -82,3 +82,4 @@ tfplan
 # Test scratch artifacts
 MagicMock/
 auto-demo_settings.json
+.superpowers/
