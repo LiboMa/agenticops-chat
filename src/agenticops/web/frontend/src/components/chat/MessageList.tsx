@@ -131,7 +131,7 @@ export function MessageList({
               data-index={vi.index}
               ref={virtualizer.measureElement}
               style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
-              className="pb-5"
+              className="pb-7"
             >
               <MessageRow msg={msg} />
             </div>
@@ -187,7 +187,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
         <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">AI</div>
       )}
       <div className={msg.role === "user"
-        ? "bg-primary-50 border border-primary-100 rounded-xl px-4 py-2.5 max-w-2xl"
+        ? "bg-primary-50 border border-primary-100 rounded-2xl rounded-br-md px-4 py-2.5 max-w-2xl text-primary-900"
         : "flex-1 max-w-3xl space-y-2"}>
         {msg.role === "user" && msg.attachments && msg.attachments.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-1">
