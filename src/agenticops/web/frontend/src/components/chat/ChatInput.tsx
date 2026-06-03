@@ -36,6 +36,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const addFiles = useCallback((incoming: File[]) => {
     if (incoming.length === 0) return;
@@ -47,6 +48,14 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
       return [...prev, ...accepted.map((f) => ({ id: nextAttachId(), file: f }))];
     });
   }, []);
+
+  // Auto-grow the textarea up to its max height (open-webui-style), then scroll.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   const handleSend = () => {
     const trimmed = input.trim();
@@ -153,7 +162,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
       )}
 
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-end gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
+        <div className="flex items-center gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
           {/* Hidden file input (multiple) */}
           <input
             ref={fileInputRef}
@@ -192,6 +201,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
           </button>
 
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onPaste={handlePaste}
@@ -204,7 +214,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
             placeholder="Ask about AWS resources… (paste/drag files, Cmd+Enter to send)"
             disabled={disabled}
             rows={1}
-            className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40"
+            className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40 overflow-y-auto"
           />
           {streaming ? (
             <button
