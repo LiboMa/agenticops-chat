@@ -511,6 +511,17 @@ composer (auto-grow textarea, round send/stop). Purely presentational — no cha
 streaming, pagination, attachments, or session logic. Light mode is blue/white; dark mode
 reuses the existing `.dark` theme tokens (green accent).
 
+**Messaging settings (v1.1.x):** the Settings → **Messaging** tab unifies the former
+Notifications + IM Bots tabs into one page (Bot Apps / Channels / Delivery Logs), backed by
+`/api/messaging/*` — a facade over `config/channels.yaml` + `config/im-apps.yaml` + the
+`NotificationLog` table (no YAML/DB schema change). **Bot App** = inbound bot credentials
+(Feishu/Slack/DingTalk/WeCom); **Channel** = outbound routing (`role: alert|chat`); email/SES
+are channel types. Configure uses a schema-driven form (`/api/messaging/schema`) with
+segmented type tiles → dynamic fields and masked secrets (a blank secret on save keeps the
+existing value; a `****`-masked value is never persisted). The old `/api/notifications/*` +
+`/api/settings/{channels,im-apps}` endpoints remain but are **deprecated**. (Note:
+`hooks/useNotifications.ts` is retained — it still powers Report publishing + Share dialog.)
+
 ---
 
 ## Concurrent Chat Sessions & Fast Session Open

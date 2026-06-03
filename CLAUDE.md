@@ -39,7 +39,7 @@ Web Dashboard ──────┘         │
 | Module | Key Files | Purpose |
 |--------|-----------|---------|
 | `cli/` | `main.py`, `context.py`, `display.py`, `formatters.py`, `init_helpers.py` | CLI entry, chat loop, slash commands, init wizard |
-| `web/` | `app.py`, `session_manager.py` | FastAPI (~70 endpoints), per-session agents, SSE streaming; concurrent chat sessions via frontend `chatStream` store; cursor-paginated + virtualized history |
+| `web/` | `app.py`, `session_manager.py` | FastAPI (~70 endpoints), per-session agents, SSE streaming; concurrent chat sessions via frontend `chatStream` store; cursor-paginated + virtualized history; unified Settings **Messaging** tab via `/api/messaging/*` (facade over channels.yaml + im-apps.yaml + NotificationLog; old `/api/notifications/*` + `/api/settings/{channels,im-apps}` deprecated) |
 | `agents/` | `main_agent.py`, `scan_agent.py`, `detect_agent.py`, `rca_agent.py`, `sre_agent.py`, `executor_agent.py`, `reporter_agent.py` | 7 agents (1 router + 6 specialists) |
 | `tools/` | `metadata_tools.py`, `aws_cli_tool.py` | Agent tools: DB CRUD, AWS CLI wrapper |
 | `services/` | `pipeline_service.py`, `rca_service.py`, `notification_service.py`, `pipeline_events.py`, `resolution_service.py`, `executor_service.py` | Auto-fix pipeline, auto-RCA, notifications, event timeline |
