@@ -152,75 +152,81 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
         <div className="max-w-4xl mx-auto mb-2 text-xs text-red-500">{attachError}</div>
       )}
 
-      <div className="flex gap-3 max-w-4xl mx-auto">
-        {/* Hidden file input (multiple) */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          accept={acceptAttr}
-          onChange={handleFileSelect}
-        />
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-end gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
+          {/* Hidden file input (multiple) */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept={acceptAttr}
+            onChange={handleFileSelect}
+          />
 
-        {/* Detail level selector */}
-        {onDetailLevelChange && (
-          <select
-            value={detailLevel ?? "medium"}
-            onChange={(e) => onDetailLevelChange(e.target.value)}
+          {/* Detail level selector */}
+          {onDetailLevelChange && (
+            <select
+              value={detailLevel ?? "medium"}
+              onChange={(e) => onDetailLevelChange(e.target.value)}
+              disabled={disabled}
+              className="self-center text-[11px] border-none rounded-lg px-1.5 py-1 text-muted-foreground bg-transparent hover:bg-muted focus:outline-none disabled:opacity-50 cursor-pointer"
+              title="Response detail level"
+            >
+              <option value="concise">Concise</option>
+              <option value="medium">Medium</option>
+              <option value="detailed">Detailed</option>
+            </select>
+          )}
+
+          {/* Attach button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
-            className="self-end text-xs border border-border rounded-lg px-2 py-2.5 text-muted-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
-            title="Response detail level"
+            className="self-center w-8 h-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-primary-600 hover:bg-muted disabled:opacity-50 transition-colors"
+            title="Attach file"
           >
-            <option value="concise">Concise</option>
-            <option value="medium">Medium</option>
-            <option value="detailed">Detailed</option>
-          </select>
-        )}
-
-        {/* Attach button */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
-          className="self-end px-2.5 py-2.5 text-muted-foreground hover:text-primary-600 disabled:opacity-50 transition-colors rounded-lg hover:bg-secondary"
-          title="Attach file"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-          </svg>
-        </button>
-
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onPaste={handlePaste}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder="Ask about AWS resources… (paste/drag files, Cmd+Enter to send)"
-          disabled={disabled}
-          rows={2}
-          className="flex-1 bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none disabled:opacity-50 transition-shadow"
-        />
-        {streaming ? (
-          <button
-            onClick={onCancel}
-            className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors self-end"
-          >
-            Stop
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+            </svg>
           </button>
-        ) : (
-          <button
-            onClick={handleSend}
-            disabled={(!input.trim() && attachments.length === 0) || disabled}
-            className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-secondary disabled:text-muted-foreground disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors self-end"
-          >
-            Send
-          </button>
-        )}
+
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Ask about AWS resources… (paste/drag files, Cmd+Enter to send)"
+            disabled={disabled}
+            rows={1}
+            className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40"
+          />
+          {streaming ? (
+            <button
+              onClick={onCancel}
+              className="self-center w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors flex-shrink-0"
+              title="Stop"
+            >
+              <span className="w-3 h-3 bg-white rounded-sm" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={(!input.trim() && attachments.length === 0) || disabled}
+              className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
+              title="Send"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
