@@ -745,12 +745,14 @@ def get_agent_window_size(agent_name: str) -> int:
     """Return the window size for a given agent.
 
     Priority:
-    1. Explicit override (agent_X_window_size > 0) -> use it
+    1. Explicit override (agent_X_window_size != 0) -> use it
+       - Positive: custom sliding window size
+       - FULL_CONTEXT (-1): NullConversationManager (no trimming)
     2. Auto (agent_X_window_size == 0) -> look up MODEL_WINDOW_DEFAULTS by model family
     3. Fallback -> bedrock_window_size
     """
     override = getattr(settings, f"agent_{agent_name}_window_size", 0)
-    if override > 0:
+    if override != 0:
         return override
 
     # Auto mode: resolve from model family defaults

@@ -476,3 +476,10 @@ class ChatSessionManager:
             self._agents.pop(session_id, None)
             self._last_activity.pop(session_id, None)
             self._session_locks.pop(session_id, None)
+
+    def clear(self):
+        """Drop all cached agent instances so they rebuild with fresh config."""
+        with self._lock:
+            self._agents.clear()
+            self._last_activity.clear()
+            self._session_locks.clear()

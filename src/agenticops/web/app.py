@@ -3,7 +3,7 @@
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, List
+from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
@@ -667,7 +667,8 @@ async def api_get_settings():
 
 @app.patch("/api/settings")
 async def api_update_settings(body: dict = Body(...)):
-    """Update runtime settings (session-level, resets on restart)."""
+    """Update runtime settings. Agent models + report config persist to settings.yaml;
+    boolean toggles and scan_focus are session-level (reset on restart)."""
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
     BOOL_KEYS = {
@@ -705,17 +706,27 @@ async def api_update_settings(body: dict = Body(...)):
         am = body["agent_models"]
         if not isinstance(am, dict):
             raise HTTPException(400, "agent_models must be a dict")
+        yaml_agent_updates: dict[str, Any] = {}
         for name, cfg in am.items():
             if name not in AGENT_NAMES:
                 raise HTTPException(400, f"Unknown agent: {name}")
             if not isinstance(cfg, dict):
                 raise HTTPException(400, f"agent_models.{name} must be a dict")
             if "model_id" in cfg:
-                setattr(settings, f"agent_{name}_model_id", str(cfg["model_id"]))
+                val = str(cfg["model_id"])
+                setattr(settings, f"agent_{name}_model_id", val)
+                yaml_agent_updates[f"agent_{name}_model_id"] = val
             if "max_tokens" in cfg:
-                setattr(settings, f"agent_{name}_max_tokens", int(cfg["max_tokens"]))
+                val = int(cfg["max_tokens"])
+                setattr(settings, f"agent_{name}_max_tokens", val)
+                yaml_agent_updates[f"agent_{name}_max_tokens"] = val
             if "window_size" in cfg:
-                setattr(settings, f"agent_{name}_window_size", int(cfg["window_size"]))
+                val = int(cfg["window_size"])
+                setattr(settings, f"agent_{name}_window_size", val)
+                yaml_agent_updates[f"agent_{name}_window_size"] = val
+        if yaml_agent_updates:
+            save_to_yaml(yaml_agent_updates)
+            _chat_sessions.clear()
 
     # Report S3 config — update in-memory + persist to settings.yaml
     report_changed = False
