@@ -4017,6 +4017,13 @@ async def api_send_chat_message(session_id: str, request: Request):
         uploads = form.getlist("file")
         valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
 
+        # Server-side cap (defense-in-depth): client enforces 5, but client
+        # validation is bypassable (curl/Postman). Each file is read fully into
+        # memory below, so bound the batch independent of the client.
+        MAX_UPLOAD_FILES = 5
+        if len(valid_uploads) > MAX_UPLOAD_FILES:
+            raise HTTPException(400, f"Too many files ({len(valid_uploads)}); max {MAX_UPLOAD_FILES}")
+
         if valid_uploads:
             from agenticops.chat.file_reader import (
                 is_image_file, is_document_file,

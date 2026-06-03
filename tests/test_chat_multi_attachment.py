@@ -67,3 +67,27 @@ def test_multipart_two_files_both_attached(client, monkeypatch):
             if row:
                 db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
                 db.delete(row)
+
+
+def test_too_many_files_rejected(client):
+    """Server rejects > 5 files even if the client would have blocked it (defense-in-depth)."""
+    session_id = "multi-attach-cap-002"
+    now = datetime.now(timezone.utc)
+    with get_db_session() as db:
+        db.add(ChatSession(session_id=session_id, name="Cap",
+                           created_at=now, updated_at=now, last_activity_at=now))
+    files = [("file", (f"f{i}.txt", b"hi", "text/plain")) for i in range(6)]
+    try:
+        resp = client.post(
+            f"/api/chat/sessions/{session_id}/messages",
+            data={"content": "x"},
+            files=files,
+        )
+        assert resp.status_code == 400
+        assert "max" in resp.json().get("detail", "").lower()
+    finally:
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if row:
+                db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+                db.delete(row)
