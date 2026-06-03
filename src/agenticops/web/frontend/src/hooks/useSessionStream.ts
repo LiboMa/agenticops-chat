@@ -47,18 +47,20 @@ export function useSessionStream(sessionId: string | null) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const send = useCallback(
-    (content: string, file?: File, detailLevel?: string) => {
+    (content: string, files?: File[], detailLevel?: string) => {
       if (!sessionId) return;
       // Optimistically append the user's message so it shows immediately.
       const userMsg: ChatMessage = {
         id: nextTempId(),
         role: "user",
         content,
-        attachments: file ? [{ filename: file.name, size: file.size }] : undefined,
+        attachments: files && files.length > 0
+          ? files.map((f) => ({ filename: f.name, size: f.size }))
+          : undefined,
         created_at: new Date().toISOString(),
       };
       appendMessageToCache(qc, sessionId, userMsg);
-      void chatStream.send(sessionId, content, file, detailLevel);
+      void chatStream.send(sessionId, content, files, detailLevel);
     },
     [sessionId, qc],
   );

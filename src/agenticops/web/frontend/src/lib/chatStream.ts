@@ -89,7 +89,7 @@ class ChatStreamStore {
     this.controllers.get(sessionId)?.abort();
   }
 
-  async send(sessionId: string, content: string, file?: File, detailLevel?: string) {
+  async send(sessionId: string, content: string, files?: File[], detailLevel?: string) {
     if (this.isStreaming(sessionId)) return;
 
     this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null });
@@ -120,10 +120,10 @@ class ChatStreamStore {
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
       let res: Response;
-      if (file) {
+      if (files && files.length > 0) {
         const formData = new FormData();
         formData.append("content", content);
-        formData.append("file", file);
+        files.forEach((f) => formData.append("file", f));
         if (detailLevel && detailLevel !== "medium") formData.append("detail_level", detailLevel);
         res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: "POST", headers: authHeaders, body: formData, signal: controller.signal,

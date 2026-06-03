@@ -20,7 +20,7 @@ export function useLazySessionCreate() {
   const creatingRef = useRef(false);
 
   const sendFirstMessage = useCallback(
-    async (content: string, file?: File, detailLevel?: string) => {
+    async (content: string, files?: File[], detailLevel?: string) => {
       if (creatingRef.current) return;
       creatingRef.current = true;
       setCreating(true);
@@ -37,13 +37,15 @@ export function useLazySessionCreate() {
           id: nextTempId(),
           role: "user",
           content,
-          attachments: file ? [{ filename: file.name, size: file.size }] : undefined,
+          attachments: files && files.length > 0
+            ? files.map((f) => ({ filename: f.name, size: f.size }))
+            : undefined,
           created_at: new Date().toISOString(),
         };
         appendMessageToCache(qc, session.session_id, userMsg);
         // Kick off the stream in the store, then navigate. The Chat page binds
         // to the in-flight stream for this session id on mount.
-        void chatStream.send(session.session_id, content, file, detailLevel);
+        void chatStream.send(session.session_id, content, files, detailLevel);
         navigate(`/app/chat/${session.session_id}`, { replace: true });
       } finally {
         creatingRef.current = false;

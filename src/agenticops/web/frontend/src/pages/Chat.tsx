@@ -140,8 +140,8 @@ export default function Chat() {
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
-  const handleWelcomeSend = (content: string, file?: File) => {
-    sendFirstMessage(content, file, detailLevel);
+  const handleWelcomeSend = (content: string, files: File[]) => {
+    sendFirstMessage(content, files, detailLevel);
   };
 
   return (
@@ -290,7 +290,7 @@ export default function Chat() {
 
             {/* Chat input */}
             <ChatInput
-              onSend={(msg, file) => sendMessage(msg, file, detailLevel)}
+              onSend={(msg, files) => sendMessage(msg, files, detailLevel)}
               onCancel={cancel}
               disabled={streaming}
               streaming={streaming}
