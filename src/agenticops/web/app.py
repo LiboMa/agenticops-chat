@@ -4014,43 +4014,46 @@ async def api_send_chat_message(session_id: str, request: Request):
         text_content = str(form.get("content", "")).strip()
         detail_level_req = str(form.get("detail_level", "")).strip() or None
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
-        upload = form.get("file")
+        uploads = form.getlist("file")
+        valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
 
-        if upload and hasattr(upload, "filename") and upload.filename:
+        if valid_uploads:
             from agenticops.chat.file_reader import (
                 is_image_file, is_document_file,
                 read_upload_image_bytes, read_upload_document_bytes,
                 read_upload_bytes,
             )
-            raw = await upload.read()
-
-            if is_image_file(upload.filename):
-                img_bytes, fmt, error = read_upload_image_bytes(upload.filename, raw)
-                if error:
-                    raise HTTPException(400, error)
-                if img_bytes and fmt:
-                    file_images.append((upload.filename, img_bytes, fmt))
-                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "image"}]
-            elif is_document_file(upload.filename):
-                doc_bytes, fmt, name, error = read_upload_document_bytes(upload.filename, raw)
-                if error:
-                    raise HTTPException(400, error)
-                if doc_bytes and fmt and name:
-                    file_documents.append((upload.filename, doc_bytes, fmt, name))
-                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "document"}]
-            else:
-                file_text, error = read_upload_bytes(upload.filename, raw)
-                if error:
-                    raise HTTPException(400, error)
-                if file_text:
-                    file_contents.append((upload.filename, file_text))
-                    attachments = [{"filename": upload.filename, "size": len(raw), "type": "text"}]
+            attachments = []
+            for upload in valid_uploads:
+                raw = await upload.read()
+                if is_image_file(upload.filename):
+                    img_bytes, fmt, error = read_upload_image_bytes(upload.filename, raw)
+                    if error:
+                        raise HTTPException(400, error)
+                    if img_bytes and fmt:
+                        file_images.append((upload.filename, img_bytes, fmt))
+                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "image"})
+                elif is_document_file(upload.filename):
+                    doc_bytes, fmt, name, error = read_upload_document_bytes(upload.filename, raw)
+                    if error:
+                        raise HTTPException(400, error)
+                    if doc_bytes and fmt and name:
+                        file_documents.append((upload.filename, doc_bytes, fmt, name))
+                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "document"})
+                else:
+                    file_text, error = read_upload_bytes(upload.filename, raw)
+                    if error:
+                        raise HTTPException(400, error)
+                    if file_text:
+                        file_contents.append((upload.filename, file_text))
+                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "text"})
 
         has_file = file_contents or file_images or file_documents
         if not text_content and not has_file:
             raise HTTPException(400, "Message content or file required")
         if not text_content:
-            text_content = f"Please analyze the attached file: {upload.filename}"
+            _names = ", ".join(a["filename"] for a in (attachments or []))
+            text_content = f"Please analyze the attached file(s): {_names}"
         user_content = text_content
     else:
         payload = ChatMessageCreate(**(await request.json()))
