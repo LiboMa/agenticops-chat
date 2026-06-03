@@ -904,9 +904,117 @@ async def api_messaging_delete_app(platform: str, name: str):
     return {"status": "deleted"}
 
 
+def _mask_channel_config(config: dict) -> dict:
+    """Drop secret-ish keys from a channel config for safe display."""
+    return {k: v for k, v in config.items()
+            if "token" not in k.lower() and "secret" not in k.lower() and "password" not in k.lower()}
+
+
+@app.get("/api/messaging/channels")
+async def api_messaging_list_channels():
+    """List all channels (routing) with full shape + secrets masked."""
+    from agenticops.notify.im_config import load_channels
+    return [
+        {
+            "name": c.name,
+            "type": c.channel_type,
+            "enabled": c.is_enabled,
+            "role": c.role,
+            "severity_filter": c.severity_filter,
+            "preferred_format": c.preferred_format,
+            "config": _mask_channel_config(c.config),
+        }
+        for c in load_channels()
+    ]
+
+
+@app.put("/api/messaging/channels/{name}")
+async def api_messaging_upsert_channel(name: str, body: dict = Body(...)):
+    """Create/update a channel. Body: {type, enabled, role, severity_filter, config}.
+    Blank secret config values keep the existing stored value."""
+    from agenticops.notify.im_config import save_channel, get_channel
+    channel_type = body.get("type", "")
+    if not channel_type:
+        raise HTTPException(400, "Field 'type' is required")
+    enabled = body.get("enabled", True)
+    role = body.get("role", "chat")
+    severity_filter = body.get("severity_filter") or None
+    config = dict(body.get("config", {}))
+    config["role"] = role  # role is stored inside the channel entry (reserved key handled by save_channel)
+    # secret-keep merge: blank secret value → keep existing
+    existing = get_channel(name)
+    if existing:
+        for k, v in list(config.items()):
+            if ("token" in k.lower() or "secret" in k.lower() or "password" in k.lower()) and (v == "" or v is None):
+                if k in existing.config:
+                    config[k] = existing.config[k]
+                else:
+                    config.pop(k, None)
+    save_channel(name, channel_type, config, is_enabled=enabled, severity_filter=severity_filter)
+    return {"name": name, "type": channel_type, "status": "saved"}
+
+
+@app.delete("/api/messaging/channels/{name}")
+async def api_messaging_delete_channel(name: str):
+    """Delete a channel."""
+    from agenticops.notify.im_config import delete_channel
+    if not delete_channel(name):
+        raise HTTPException(404, f"Channel '{name}' not found")
+    return {"status": "deleted"}
+
+
+@app.patch("/api/messaging/channels/{name}/toggle")
+async def api_messaging_toggle_channel(name: str, body: dict = Body(...)):
+    """Enable/disable a channel."""
+    from agenticops.notify.im_config import load_channels, save_channel
+    enabled = body.get("enabled", True)
+    ch = next((c for c in load_channels() if c.name == name), None)
+    if not ch:
+        raise HTTPException(404, f"Channel '{name}' not found")
+    save_channel(name, ch.channel_type, ch.config, is_enabled=enabled, severity_filter=ch.severity_filter or None)
+    return {"name": name, "enabled": enabled}
+
+
+@app.post("/api/messaging/channels/{name}/test")
+async def api_messaging_test_channel(name: str, data: NotificationSendRequest):
+    """Send a test message through a channel (reuses the notifier path; writes a NotificationLog)."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import NotificationManager
+    channel = get_channel(name)
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    notifier_class = NotificationManager.NOTIFIER_CLASSES.get(channel.channel_type)
+    if not notifier_class:
+        raise HTTPException(400, f"Unknown channel type: {channel.channel_type}")
+    try:
+        notifier = notifier_class(channel.config)
+        success = await notifier.send(subject=data.subject, body=data.body, severity=data.severity)
+        return {"status": "sent" if success else "failed", "channel": channel.name}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "failed", "channel": channel.name, "error": str(e)})
+
+
+@app.get("/api/messaging/logs", response_model=List[NotificationLogResponse])
+async def api_messaging_logs(
+    channel_name: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
+):
+    """Delivery logs (reuses NotificationLog)."""
+    from agenticops.notify.notifier import NotificationLog
+    with get_db_session() as session:
+        q = session.query(NotificationLog).order_by(NotificationLog.sent_at.desc())
+        if channel_name:
+            q = q.filter_by(channel_name=channel_name)
+        if status:
+            q = q.filter_by(status=status)
+        return [NotificationLogResponse.model_validate(log) for log in q.offset(offset).limit(limit).all()]
+
+
 @app.get("/api/settings/im-apps")
 async def api_list_im_apps():
-    """List all IM bot apps with masked secrets."""
+    """List all IM bot apps with masked secrets. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import get_apps_detail
     apps = get_apps_detail()
     # Mask secrets in response
@@ -920,7 +1028,7 @@ async def api_list_im_apps():
 
 @app.put("/api/settings/im-apps/{platform}/{name}")
 async def api_upsert_im_app(platform: str, name: str, body: dict = Body(...)):
-    """Create or update an IM bot app credential."""
+    """Create or update an IM bot app credential. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import save_app
     valid = {"feishu", "dingtalk", "wecom", "slack"}
     if platform not in valid:
@@ -931,7 +1039,7 @@ async def api_upsert_im_app(platform: str, name: str, body: dict = Body(...)):
 
 @app.delete("/api/settings/im-apps/{platform}/{name}")
 async def api_delete_im_app(platform: str, name: str):
-    """Delete an IM bot app."""
+    """Delete an IM bot app. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import delete_app
     if not delete_app(platform, name):
         raise HTTPException(404, f"App '{platform}/{name}' not found")
@@ -940,7 +1048,7 @@ async def api_delete_im_app(platform: str, name: str):
 
 @app.get("/api/settings/channels")
 async def api_list_channels():
-    """List all notification channels."""
+    """List all notification channels. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import load_channels
     channels = load_channels()
     return [
@@ -959,7 +1067,7 @@ async def api_list_channels():
 
 @app.put("/api/settings/channels/{name}")
 async def api_upsert_channel(name: str, body: dict = Body(...)):
-    """Create or update a notification channel."""
+    """Create or update a notification channel. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import save_channel
     channel_type = body.pop("type", "")
     if not channel_type:
@@ -972,7 +1080,7 @@ async def api_upsert_channel(name: str, body: dict = Body(...)):
 
 @app.delete("/api/settings/channels/{name}")
 async def api_delete_channel(name: str):
-    """Delete a notification channel."""
+    """Delete a notification channel. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import delete_channel
     if not delete_channel(name):
         raise HTTPException(404, f"Channel '{name}' not found")
@@ -981,7 +1089,7 @@ async def api_delete_channel(name: str):
 
 @app.patch("/api/settings/channels/{name}/toggle")
 async def api_toggle_channel(name: str, body: dict = Body(...)):
-    """Enable or disable a channel."""
+    """Enable or disable a channel. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import load_channels, save_channel
     enabled = body.get("enabled", True)
     channels = load_channels()
@@ -3759,7 +3867,7 @@ async def api_restore_skill(name: str):
 
 @app.get("/api/notifications/channels", response_model=List[NotificationChannelResponse])
 async def api_list_notification_channels():
-    """List notification channels from channels.yaml."""
+    """List notification channels from channels.yaml. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import load_channels
 
     channels = load_channels()
@@ -3859,7 +3967,7 @@ async def api_delete_notification_channel(channel_name: str):
 
 @app.post("/api/notifications/channels/{channel_name}/test")
 async def api_test_notification_channel(channel_name: str, data: NotificationSendRequest):
-    """Send a test notification through a channel (from channels.yaml)."""
+    """Send a test notification through a channel (from channels.yaml). [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import get_channel
     from agenticops.notify.notifier import NotificationManager
 
@@ -3897,7 +4005,7 @@ async def api_list_notification_logs(
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
-    """List notification logs."""
+    """List notification logs. [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.notifier import NotificationLog
 
     with get_db_session() as session:
@@ -3914,7 +4022,7 @@ async def api_list_notification_logs(
 
 @app.get("/api/notifications/im-apps")
 async def api_list_im_apps():
-    """Diagnostic endpoint — list configured IM app names (no secrets)."""
+    """Diagnostic endpoint — list configured IM app names (no secrets). [DEPRECATED: use /api/messaging/*]"""
     from agenticops.notify.im_config import list_apps
     return list_apps()
 
