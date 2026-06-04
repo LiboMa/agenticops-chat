@@ -60,8 +60,8 @@ Web Dashboard ──────┘         │
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | 15 pages: Dashboard, Chat, Resources, Anomalies, AnomalyDetail, FixPlans, FixPlanDetail, Reports, ReportDetail, Schedules, ScheduleDetail, Notifications, NotificationLogs, Accounts, AuditLog |
-| `hooks/` | 23 TanStack Query hooks |
+| `pages/` | 14 pages: Dashboard, Chat, IssuesAndPlans, IssueDetail, Resources(detail), ReportDetail, Reports, ScheduleDetail, Schedules, AgentMetrics, Skills, SkillDetail, Settings, Login |
+| `hooks/` | 25+ TanStack Query hooks (incl. chatStream-backed useSessionStream/useChatMessages, useMessaging) |
 | `components/` | Chat components, layout (AppShell, Sidebar, Header) |
 | `api/` | `client.ts`, `types.ts` |
 
@@ -102,7 +102,7 @@ File-based markdown memory under `agent-memory/<agent>/*.md` (+ `shared/`) is th
 
 | File | Purpose |
 |------|---------|
-| `config/channels.yaml` | Notification channels (sole source of truth, gitignored) |
+| `config/channels.yaml` | Messaging channels — alert/chat routing (sole source of truth, gitignored; managed via Settings → Messaging) |
 | `config/im-apps.yaml` | IM app credentials (gitignored) |
 | `config/setup.json.example` | JSON config template for `aiops init --config` |
 

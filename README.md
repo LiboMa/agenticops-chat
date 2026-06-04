@@ -39,9 +39,10 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Self-Optimizing Memory** | File-based agent memory that learns from each operation; agent self-curation, never-delete archival, prompt-cache-safe injection |
 | **Autonomous Skills** | 15 domain skills the agents can create, improve, and merge — published only through a security-gated, human-auditable workflow |
 | **Concurrent Chat** | Multiple conversations stream at once; sessions open instantly via cursor-paginated, virtualized history |
+| **Chat Attachments** | Paste images (Cmd+V), drag-drop, and multi-file upload (up to 5) in the web composer; per-type size validation |
 | **Knowledge Base** | Hybrid vector + keyword search; distills resolved cases into reusable SOPs |
 | **Reports & Schedules** | Daily/weekly/incident/inventory reports; cron pipelines (FullScan, Monitoring, HealthPatrol, …) |
-| **Notify & IM Bots** | Slack, Email/SES, SNS, Feishu, DingTalk, WeCom, Webhook; agent-verified alert routing |
+| **Messaging** | Unified Settings → Messaging tab: bot apps (Feishu/Slack/DingTalk/WeCom credentials), channels (Slack/Email/SES/SNS/Feishu/DingTalk/WeCom/Webhook), and delivery logs — schema-driven config with masked secrets, via `/api/messaging/*` |
 | **MCP Servers** | Claude-Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload |
 | **Graph Engine** | NetworkX infrastructure graph: SPOF detection, capacity risk, dependency chains, change simulation (agent tools) |
 
@@ -266,7 +267,7 @@ Most recent first. Each links to detailed notes.
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions (background streaming, multi-open) + fast session open (cursor pagination + virtualization) |
+| **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions + fast open; paste/drag-drop multi-attachment; open-webui-style chat UI refresh; agent window-config fix (Full Context + Web→YAML persist); unified **Messaging** settings (merged Notifications + IM Bots) |
 | **[1.1.0](docs/MVP-1.1.0-RELEASE.md)** | 2026-05-31 | Autonomous **agent memory** (self-optimizing, Hermes-style) + autonomous **skills** (agent-created, security-gated promotion) |
 | **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | Loader/UX hardening; skill index recall improvements |
 | **[1.0.0](docs/MVP-1.0.0-RELEASE.md)** | 2026-03-10 | First MVP — 7-agent architecture, auto-fix pipeline, web dashboard, 10/10 validation |
