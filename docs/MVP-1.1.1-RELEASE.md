@@ -1,4 +1,4 @@
-# AgenticOps v1.1.1 Release — 并发会话 + 秒开会话
+# AgenticOps v1.1.1 Release — Web 聊天体验 + 统一 Messaging
 
 > **版本**: 1.1.1 | **日期**: 2026-06-02 | **分支**: `cycle3-skills-autonomy`
 
@@ -14,6 +14,14 @@ v1.1.1 是聚焦 **Web 聊天体验** 的优化版本，解决两个长期痛点
 核心思路：把 SSE 流式读取循环 **移出 React 组件树**，放进一个按 `session_id` 索引的模块级 store —— 流不再随组件卸载而中断，多会话可同时流式输出；配合游标分页 + 列表虚拟化，会话打开瞬间渲染。
 
 > **设计理念**: 借鉴 Gemini/ChatGPT 的"多会话单应用 + 后台流式"交互模式，唯一指标 —— 多开 + 秒开。
+
+v1.1.1 实际落地的完整范围（本次合并）：
+
+1. **并发会话 + 秒开**（本文 §二/§三）—— 后台流式多开 + 游标分页虚拟化
+2. **粘贴 / 拖拽多附件**（§七）—— Cmd+V 截图、拖拽、一条消息最多 5 个附件
+3. **Chat UI 重构**（§八）—— open-webui 风格蓝/白、时间分组侧栏、扁平 AI 消息、悬浮胶囊输入框
+4. **Agent 窗口配置修复**（§九）—— Full Context 对所有 agent 生效 + Web 配置持久化到 YAML
+5. **统一 Messaging 设置**（§十）—— 合并 Notifications + IM Bots 两个 tab，新 `/api/messaging/*`
 
 ---
 
@@ -112,7 +120,57 @@ v1.1.1（新）:
 
 ---
 
-## 七、Skills & Memory 运行态更新
+## 七、粘贴 / 拖拽多附件 (Chat Attachments)
+
+Web 聊天输入框支持 **粘贴图片(Cmd+V)、拖拽文件、一条消息多附件**(最多 5 个,沿用现有 ACCEPTED_TYPES)。
+
+| 能力 | 说明 |
+|------|------|
+| **粘贴图片** | `Cmd+V` 截图直接进附件(借鉴 open-webui:仅在真取到 image 时 preventDefault,纯文本粘贴不拦截) |
+| **拖拽上传** | 拖文件进输入框;dragover 持续高亮 + dragleave contains 守卫(防 Firefox 闪烁)+ capture 阶段监听严格 cleanup(防内存泄漏) |
+| **多附件** | 一条消息最多 5 个;按 name+size 去重;按稳定 id 移除(非数组下标,防并发删错) |
+| **分类型大小校验** | 客户端校验对齐后端 file_reader:文本 512KB / 图片 5MB / 文档 5MB |
+| **后端** | `form.getlist("file")` 循环 + 服务端 max-5 防护(防 curl 绕过);preprocessor/file_reader/ChatMessage 模型零改 |
+
+> **设计理念**:对照 open-webui 真实实现(MessageInput/Chat/FilesOverlay)借鉴 8 个经过实战验证的模式,避开它们修过的 bug(Firefox 拖拽卡住 #21664、内存泄漏 #21968、重复上传 #10f06a64)。
+
+## 八、Chat UI 重构 (open-webui 风格)
+
+聊天界面重构为 **open-webui 风格、蓝/白主色、极简**。
+
+| 区域 | 改动 |
+|------|------|
+| **会话侧栏** | 按时间分组(Pinned/Starred/Today/Yesterday/Previous 7/30 days/Older,纯函数 `groupSessions`)· 中性灰底活动态 + 蓝色流式点 · hover(且键盘可达)显示 pin/star/archive/delete · 去常驻 emoji 噪声 |
+| **消息区** | 用户=淡蓝气泡 · AI=无气泡扁平文本(读长答案/日志最清爽)· 更大行距 · 行内代码中性 chip |
+| **输入框** | 悬浮胶囊(圆角+轻阴影)· textarea 自动增高 · 圆形蓝色发送/红色停止 |
+| **顶栏** | 标题居中 · 安静的 Save-as-Report 按钮 |
+
+> 纯视觉重构:不碰任何 hook/后端/状态/SSE/分页/附件逻辑。light=蓝/白;dark 复用现有 `.dark` 主题(绿色强调)。
+
+## 九、Agent 窗口配置修复 (2 bugs)
+
+| Bug | 根因 | 修复 |
+|-----|------|------|
+| **Window 配置不持久** | `PATCH /api/settings` 只把 Report 配置写盘,agent_models(model/window/max_tokens)仅内存 | agent_models 改动也 `save_to_yaml()` + 清 session agent 缓存,当场生效 |
+| **非 RCA/SRE 设不了 Full Context** | `get_agent_window_size` 的 override 判断是 `> 0`,吞掉了 `-1`(Full Context sentinel) | 改成 `!= 0`,让 `-1` 作为有效 override 通过;任意 agent 可设 Full Context |
+
+> 之前 RCA/SRE 的 Full Context 是靠 `MODEL_WINDOW_DEFAULTS` 硬编码默认值(auto 路径),不是 override 路径——所以其他 agent 永远设不上。两个 bug 互相独立,均已修复 + 回归测试。
+
+## 十、统一 Messaging 设置 (合并 Notifications + IM Bots)
+
+把原来重复的 **Notifications + IM Bots 两个 Settings tab 合并为一个 Messaging tab**(三段:Bot Apps / Channels / Delivery Logs)。
+
+| 项 | 说明 |
+|----|------|
+| **统一后端** | 新建 `/api/messaging/{schema,apps,channels,logs}` facade,封装现有 `channels.yaml` + `im-apps.yaml` + `NotificationLog`(零 YAML/DB schema 改动);老 `/api/notifications/*` + `/api/settings/{channels,im-apps}` 标 deprecated |
+| **Bot App vs Channel** | App=inbound bot 凭据(Feishu/Slack/DingTalk/WeCom);Channel=outbound 路由(role: alert/chat);email/ses 作为 channel 类型 |
+| **Schema 驱动表单** | `/api/messaging/schema` 描述每个类型的字段;Configure 弹窗用分段磁贴选类型 → 动态字段,告别手写 config JSON;密钥遮罩 + 眼睛揭示 |
+| **2 个数据完整性 bug 修复** | ① 遮罩密钥回写守卫(防 `****xxxx` 覆盖真实 app_secret)② toggle 保留 role/preferred_format/alert_senders(防开关频道丢 role) |
+| **借鉴** | 卡片式连接管理 + 状态徽章 + Test/Configure + restart 提示借鉴 Hermes Agents dashboard,渲染为我们的蓝/白 |
+
+> **设计理念**:让用户更直接、简便地配置 IM bot / email / 双向 channel —— 一处管凭据 + 渠道 + 日志,动态表单替代 raw JSON。
+
+## 十一、Skills & Memory 运行态更新
 
 v1.1.1 随发布快照同步了自主**记忆**与**技能**系统在运行中产生的状态更新 —— 这些不是新功能（核心能力见 [v1.1.0](MVP-1.1.0-RELEASE.md)），而是 cycle②/cycle③ 自治机制**实际跑起来**后的产物，一并纳入本次发布分支。
 
@@ -142,7 +200,7 @@ v1.1.1 随发布快照同步了自主**记忆**与**技能**系统在运行中�
 
 ---
 
-## 八、已知限制 & 后续计划
+## 十二、已知限制 & 后续计划
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
@@ -154,7 +212,7 @@ v1.1.1 随发布快照同步了自主**记忆**与**技能**系统在运行中�
 
 ---
 
-## 九、升级指南
+## 十三、升级指南
 
 ```bash
 git pull
@@ -162,11 +220,13 @@ cd src/agenticops/web/frontend && npm install   # 拉取 @tanstack/react-virtual
 # DB 索引在 init_db() 自动幂等创建，无需手动迁移
 ```
 
+统一 Messaging 设置无需迁移:沿用现有 config/channels.yaml + config/im-apps.yaml,老 API 仍可用(deprecated)。
+
 无新配置项。Postgres 同样兼容（同一 `database_url`）。
 
 ---
 
-## 十、验证清单
+## 十四、验证清单
 
 - [x] 后端分页：7 tests passed（默认页/before 游标/末页/空会话/404/limit 上限/metadata-only）
 - [x] 后端 chat 套件：28/28 相关测试通过，零回归
