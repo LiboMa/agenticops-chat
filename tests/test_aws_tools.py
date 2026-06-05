@@ -43,64 +43,109 @@ def _inject_session(region="us-east-1", account_id="111111111111"):
 # ── assume_role ───────────────────────────────────────────────────────
 
 class TestAssumeRole:
+    """Tests for assume_role using the provider abstraction layer.
+
+    The function now resolves credentials via:
+      get_db_session() → find matching CloudAccount → get_provider(account) →
+      provider.resolve_credentials() → provider.sdk_session() → cache
+    """
+
     @pytest.fixture(autouse=True)
     def _import(self):
         from agenticops.tools.aws_tools import assume_role
         self.fn = assume_role
 
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_success(self, mock_boto3):
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
+    @patch("agenticops.models.get_db_session")
+    @patch("agenticops.providers.get_provider")
+    def test_assume_role_success(self, mock_get_provider, mock_get_db_session):
+        """Successful assume_role resolves credentials and caches session."""
+        # Set up DB to return a matching CloudAccount
+        mock_account = MagicMock()
+        mock_account.id = 1
+        mock_account.name = "prod-account"
+        mock_account.provider = "aws"
+        mock_account.credentials = {"role_arn": "arn:aws:iam::111111111111:role/Test", "account_id": "111111111111"}
+        mock_account.regions = ["us-east-1"]
+        mock_account.labels = {}
+        mock_account.is_enabled = True
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_account]
+        mock_get_db_session.return_value.__enter__ = MagicMock(return_value=mock_db)
+        mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Set up provider to succeed
+        mock_provider = MagicMock()
+        mock_provider.resolve_credentials.return_value = True
+        mock_provider.sdk_session.return_value = MagicMock()
+        mock_get_provider.return_value = mock_provider
 
         result = self.fn(
             account_id="111111111111",
             role_arn="arn:aws:iam::111111111111:role/Test",
             region="us-east-1",
         )
-        assert "Assumed role" in result
-        assert "111111111111" in result
+        assert "Credentials resolved" in result or "cached" in result
+        mock_provider.resolve_credentials.assert_called_once()
+        mock_provider.sdk_session.assert_called_once()
 
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_with_external_id(self, mock_boto3):
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
+    @patch("agenticops.models.get_db_session")
+    @patch("agenticops.providers.get_provider")
+    def test_assume_role_no_matching_account(self, mock_get_provider, mock_get_db_session):
+        """Returns error message when no matching account found in DB."""
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.all.return_value = []
+        mock_get_db_session.return_value.__enter__ = MagicMock(return_value=mock_db)
+        mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
 
-        self.fn(
-            account_id="222222222222",
-            role_arn="arn:aws:iam::222222222222:role/Test",
-            region="us-west-2",
-            external_id="ext-123",
+        result = self.fn(
+            account_id="999999999999",
+            role_arn="arn:aws:iam::999999999999:role/NonExistent",
+            region="us-east-1",
         )
-        call_kwargs = mock_sts.assume_role.call_args[1]
-        assert call_kwargs["ExternalId"] == "ext-123"
+        assert "No enabled account found" in result
+        mock_get_provider.assert_not_called()
 
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_cached(self, mock_boto3):
-        """Second call should return cached message without calling STS."""
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
+    def test_assume_role_cached(self):
+        """Second call with same account+region returns cached message without re-resolving."""
+        # Pre-inject a session into cache
+        _inject_session(region="us-east-1", account_id="111111111111")
 
-        self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
-        result = self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
+        result = self.fn(
+            account_id="111111111111",
+            role_arn="arn:aws:iam::111111111111:role/Test",
+            region="us-east-1",
+        )
         assert "already cached" in result
 
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_client_error(self, mock_boto3):
-        from botocore.exceptions import ClientError
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "denied"}}, "AssumeRole"
+    @patch("agenticops.models.get_db_session")
+    @patch("agenticops.providers.get_provider")
+    def test_assume_role_resolve_fails(self, mock_get_provider, mock_get_db_session):
+        """Returns failure message when provider.resolve_credentials() returns False."""
+        mock_account = MagicMock()
+        mock_account.id = 2
+        mock_account.name = "broken-account"
+        mock_account.provider = "aws"
+        mock_account.credentials = {"role_arn": "arn:aws:iam::333333333333:role/Broken"}
+        mock_account.regions = ["us-west-2"]
+        mock_account.labels = {}
+        mock_account.is_enabled = True
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_account]
+        mock_get_db_session.return_value.__enter__ = MagicMock(return_value=mock_db)
+        mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_provider = MagicMock()
+        mock_provider.resolve_credentials.return_value = False
+        mock_get_provider.return_value = mock_provider
+
+        result = self.fn(
+            account_id="333333333333",
+            role_arn="arn:aws:iam::333333333333:role/Broken",
+            region="us-west-2",
         )
-        result = self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
-        assert "Error" in result
+        assert "Failed to resolve credentials" in result
 
 
 # ── Internal helpers ──────────────────────────────────────────────────

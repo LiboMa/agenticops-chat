@@ -137,7 +137,7 @@ class AuthService:
         with get_db_session() as session:
             user = session.query(User).filter_by(email=email, is_active=True).first()
             if user and verify_password(password, user.password_hash):
-                user.last_login_at = datetime.utcnow()
+                user.last_login_at = datetime.now(timezone.utc)
                 # Eagerly load attributes before session closes
                 session.flush()
                 session.expunge(user)
