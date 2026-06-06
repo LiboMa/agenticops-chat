@@ -55,6 +55,7 @@ Web Dashboard ──────┘         │
 | `pipeline/` | `rag_pipeline.py`, `orchestrator.py`, `health_patrol.py` | RAG pipeline, patrol orchestrator |
 | `integrations/` | `alert_processor.py`, `parsers.py` | Webhook alert processing, source parsers |
 | `storage/` | `backend.py` | Storage backends (local/S3) for reports + KB |
+| `acp/` | `types.py`, `registry.py`, `jsonrpc.py`, `mapping.py`, `client.py`, `backends/claude_code.py` | Optional ACP enhanced backend (MVP-1.3.0) — protocol-agnostic `EnhancedBackend` abstraction + registry; self-implemented JSON-RPC/stdio `AcpClient`; `ClaudeCodeBackend` (Bedrock). `enhanced_task` tool (`agents/enhanced.py`), conditionally into main/sre. Default off (`acp_enhanced_enabled`) |
 
 ### Frontend (`src/agenticops/web/frontend/src/`)
 
@@ -133,6 +134,11 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `skills_draft_stale_days` | `30` | Days an unused agent draft stays before stale |
 | `skills_draft_archive_days` | `60` | Additional days after stale before an agent draft is archived |
 | `skills_security_scan_on_promote` | `true` | Security-scan a skill before draft→published (blocks dangerous run_on_host) |
+| `acp_enhanced_enabled` | `false` | Enable the optional ACP enhanced-task backend (delegate complex tasks to Claude Code/Kiro) |
+| `acp_enhanced_backend` | `claude-code` | Default enhanced backend provider |
+| `acp_use_bedrock` | `true` | Run the enhanced backend on Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) |
+| `acp_timeout_seconds` | `300` | Per-turn timeout for an enhanced-backend subprocess |
+| `acp_auto_approve_permissions` | `true` | Auto-approve the backend's permission requests (allow_once) |
 | `scan_focus` | `all` | Resource categories filter |
 | `agent_output_detail` | `medium` | concise/medium/detailed |
 

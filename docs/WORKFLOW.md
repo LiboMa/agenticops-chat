@@ -554,6 +554,31 @@ flowchart LR
 
 ---
 
+## Enhanced Backend (ACP) — optional task delegation
+
+Selected agents (**main** and **sre**) can delegate a hard task — create-skill, deep research, brainstorming, complex multi-step operations — to an external coding agent for a higher-quality result. This is an **optional enhancement / escalation path**, not a replacement: the Strands 7-agent orchestration is unchanged, and the feature is **off by default**.
+
+```
+main / sre agent
+   │ LLM decides a task is complex → calls a @tool (like a sub-agent)
+   ▼
+@tool enhanced_task(task, context, backend?)        ← registered only when acp_enhanced_enabled=true
+   ▼
+EnhancedBackend abstraction + registry  (protocol-agnostic core)
+   ▼ provider translates its own protocol → unified EnhancedEvent stream
+ClaudeCodeBackend  →  AcpClient (self-implemented JSON-RPC 2.0 over stdio)
+   ▼ stdio subprocess
+claude-agent-acp  (Claude Code, running on Bedrock: CLAUDE_CODE_USE_BEDROCK=1)
+   ▲ EnhancedEvent → existing SSE (text / tool_start / tool_end / done) → chat UI + "✦ Enhanced" chip
+```
+
+- **Self-implemented protocol** (`src/agenticops/acp/`): newline-delimited JSON-RPC 2.0 over stdio — no third-party ACP dependency. The Phase-0 spike (`scripts/acp_spike.py`) pinned the live behavior of `claude-agent-acp` v0.42.0: launch with `npx -y`, `protocolVersion: 1`, nested `session/update` payloads, terminal `usage` tokens, Bedrock pass-through working.
+- **Pluggable, extensible**: adding **Kiro-cli** or **Codex** later = one provider class + `register_backend()`; the protocol-agnostic core (`EnhancedBackend` / `EnhancedEvent`) does not change. Claude/Kiro share the same `AcpClient`.
+- **Graceful**: if the backend is unavailable (no `npx`, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes.
+- **Enable**: set `acp_enhanced_enabled: true` in `config/settings.yaml` (see config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`).
+
+---
+
 ## Quick Tutorials
 
 ### Tutorial 1: First Scan — Discover Your AWS Resources
