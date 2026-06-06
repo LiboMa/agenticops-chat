@@ -40,3 +40,30 @@ def test_enhanced_backend_is_protocol():
 
     b: EnhancedBackend = Dummy()   # structural check
     assert b.name == "dummy"
+
+
+class TestRegistry:
+    def setup_method(self):
+        from agenticops.acp import registry
+        registry._BACKENDS.clear()
+
+    def test_register_and_get(self):
+        from agenticops.acp import registry
+        from agenticops.acp.types import BackendCapabilities, EnhancedEvent
+
+        class Dummy:
+            name = "dummy"
+            def capabilities(self): return BackendCapabilities(True, False, False, False)
+            async def run(self, task, context):
+                yield EnhancedEvent(kind="text", text="x")
+            async def cancel(self): ...
+
+        registry.register_backend("dummy", Dummy)
+        assert "dummy" in registry.available_backends()
+        be = registry.get_backend("dummy")
+        assert be.name == "dummy"
+
+    def test_get_unknown_raises(self):
+        from agenticops.acp import registry
+        with pytest.raises(KeyError):
+            registry.get_backend("nope")
