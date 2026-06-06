@@ -90,3 +90,10 @@ skills_curator_enabled: true
 skills_draft_stale_days: 30
 skills_draft_archive_days: 60
 skills_security_scan_on_promote: true
+
+# ── ACP Enhanced Backend (MVP-1.3.0) — optional, default off ──
+acp_enhanced_enabled: false
+acp_enhanced_backend: claude-code
+acp_use_bedrock: true
+acp_timeout_seconds: 300
+acp_auto_approve_permissions: true

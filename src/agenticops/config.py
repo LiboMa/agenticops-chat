@@ -402,6 +402,37 @@ class Settings(BaseSettings):
         default=True,
         description="Security-scan a skill before promoting draft->published (blocks dangerous run_on_host) (AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE)",
     )
+
+    # ── ACP Enhanced Backend (MVP-1.3.0, optional) ─────────────────
+    acp_enhanced_enabled: bool = Field(
+        default=False,
+        description="Enable the optional ACP enhanced-task backend (delegates complex tasks to Claude Code/Kiro) (AIOPS_ACP_ENHANCED_ENABLED)",
+    )
+    acp_enhanced_backend: str = Field(
+        default="claude-code",
+        description="Default enhanced backend provider name (AIOPS_ACP_ENHANCED_BACKEND)",
+    )
+    acp_claude_command: str = Field(
+        default="npx",
+        description="Launch command for the Claude Code ACP agent (AIOPS_ACP_CLAUDE_COMMAND)",
+    )
+    acp_claude_args: list[str] = Field(
+        default_factory=lambda: ["@agentclientprotocol/claude-agent-acp"],
+        description="Args for the Claude Code ACP agent launch (AIOPS_ACP_CLAUDE_ARGS)",
+    )
+    acp_use_bedrock: bool = Field(
+        default=True,
+        description="Run the enhanced backend on Bedrock (CLAUDE_CODE_USE_BEDROCK=1) (AIOPS_ACP_USE_BEDROCK)",
+    )
+    acp_timeout_seconds: int = Field(
+        default=300,
+        description="Per-turn timeout for an enhanced-backend subprocess (AIOPS_ACP_TIMEOUT_SECONDS)",
+    )
+    acp_auto_approve_permissions: bool = Field(
+        default=True,
+        description="Auto-approve the backend's permission requests (allow_once) this round (AIOPS_ACP_AUTO_APPROVE_PERMISSIONS)",
+    )
+
     file_tools_admin_mode: bool = Field(
         default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "
