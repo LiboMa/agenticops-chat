@@ -67,6 +67,16 @@ class AcpClient:
                 self._proc.terminate()
             except ProcessLookupError:
                 pass
+            # Reap the child within the loop's lifetime — otherwise the subprocess
+            # transport's delayed __del__ fires after asyncio.run() closes the loop
+            # ("RuntimeError: Event loop is closed"). Force-kill if it lingers.
+            try:
+                await asyncio.wait_for(self._proc.wait(), timeout=5)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    self._proc.kill()
+                except ProcessLookupError:
+                    pass
 
     async def run(self, prompt_text: str, cwd: Optional[str] = None) -> AsyncIterator[EnhancedEvent]:
         """Launch, handshake, prompt, and yield EnhancedEvents until done/error."""
