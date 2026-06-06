@@ -417,8 +417,8 @@ class Settings(BaseSettings):
         description="Launch command for the Claude Code ACP agent (AIOPS_ACP_CLAUDE_COMMAND)",
     )
     acp_claude_args: list[str] = Field(
-        default_factory=lambda: ["@agentclientprotocol/claude-agent-acp"],
-        description="Args for the Claude Code ACP agent launch (AIOPS_ACP_CLAUDE_ARGS)",
+        default_factory=lambda: ["-y", "@agentclientprotocol/claude-agent-acp"],
+        description="Args for the Claude Code ACP agent launch; -y auto-confirms npx install (AIOPS_ACP_CLAUDE_ARGS)",
     )
     acp_use_bedrock: bool = Field(
         default=True,

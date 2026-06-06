@@ -780,8 +780,8 @@ class AcpClient:
             return
 
         try:
-            # initialize
-            init_id = await self._send("initialize", {"protocolVersion": 2, "capabilities": {},
+            # initialize  (spike: claude-agent-acp 0.42.0 negotiates protocolVersion 1)
+            init_id = await self._send("initialize", {"protocolVersion": 1, "capabilities": {},
                                                       "clientInfo": {"name": "agenticops", "version": "1.3.0"}})
             if not await self._await_result(init_id):
                 yield EnhancedEvent(kind="error", error="ACP initialize failed"); return
@@ -841,8 +841,11 @@ class AcpClient:
                 if "error" in obj:
                     yield EnhancedEvent(kind="error", error=str(obj["error"]))
                 else:
-                    stop = obj["result"].get("stopReason")
-                    yield EnhancedEvent(kind="done", tokens=None)
+                    # spike: terminal result carries usage {inputTokens, outputTokens, ...}
+                    usage = (obj["result"] or {}).get("usage") or {}
+                    tokens = {"input": usage.get("inputTokens", 0),
+                              "output": usage.get("outputTokens", 0)} if usage else None
+                    yield EnhancedEvent(kind="done", tokens=tokens)
                 return
 ```
 
