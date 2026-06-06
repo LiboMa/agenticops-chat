@@ -59,6 +59,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.agents.enhanced import enhanced_task
 
 logger = logging.getLogger(__name__)
 
@@ -211,59 +212,63 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         max_tokens=max_tokens,
         **cache_kwargs,
     )
+    _tools = [
+        assume_role,
+        get_active_account,
+        get_managed_resources,
+        get_health_issue,
+        get_rca_result,
+        search_sops,
+        search_similar_cases,
+        save_fix_plan,
+        # AWS describe tools (read-only)
+        describe_ec2,
+        describe_rds,
+        list_lambda_functions,
+        # Network tools (read-only)
+        describe_vpcs,
+        describe_subnets,
+        describe_security_groups,
+        describe_route_tables,
+        describe_nat_gateways,
+        describe_transit_gateways,
+        describe_load_balancers,
+        describe_region_topology,
+        analyze_vpc_topology,
+        # EKS networking tools
+        describe_eks_clusters,
+        describe_eks_nodegroups,
+        check_eks_pod_ip_capacity,
+        map_eks_to_vpc_topology,
+        # Graph-based analysis tools
+        query_reachability,
+        query_impact_radius,
+        find_network_path,
+        detect_network_anomalies,
+        # SRE analysis tools
+        analyze_dependency_chain,
+        detect_single_points_of_failure,
+        analyze_capacity_risk,
+        simulate_edge_removal,
+        # Cloud CLI (provider-resolved, fallback to AWS read-only)
+        *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
+        # Agent Skills (domain knowledge + host/kubectl execution)
+        activate_skill,
+        read_skill_reference,
+        run_on_host,
+        run_kubectl,
+        # Agent Memory (cross-agent search)
+        search_agent_memory,
+    ]
+    # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off)
+    if settings.acp_enhanced_enabled:
+        _tools.append(enhanced_task)
     return Agent(
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre", agent_name="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("sre"),
-        tools=[
-            assume_role,
-            get_active_account,
-            get_managed_resources,
-            get_health_issue,
-            get_rca_result,
-            search_sops,
-            search_similar_cases,
-            save_fix_plan,
-            # AWS describe tools (read-only)
-            describe_ec2,
-            describe_rds,
-            list_lambda_functions,
-            # Network tools (read-only)
-            describe_vpcs,
-            describe_subnets,
-            describe_security_groups,
-            describe_route_tables,
-            describe_nat_gateways,
-            describe_transit_gateways,
-            describe_load_balancers,
-            describe_region_topology,
-            analyze_vpc_topology,
-            # EKS networking tools
-            describe_eks_clusters,
-            describe_eks_nodegroups,
-            check_eks_pod_ip_capacity,
-            map_eks_to_vpc_topology,
-            # Graph-based analysis tools
-            query_reachability,
-            query_impact_radius,
-            find_network_path,
-            detect_network_anomalies,
-            # SRE analysis tools
-            analyze_dependency_chain,
-            detect_single_points_of_failure,
-            analyze_capacity_risk,
-            simulate_edge_removal,
-            # Cloud CLI (provider-resolved, fallback to AWS read-only)
-            *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
-            # Agent Skills (domain knowledge + host/kubectl execution)
-            activate_skill,
-            read_skill_reference,
-            run_on_host,
-            run_kubectl,
-            # Agent Memory (cross-agent search)
-            search_agent_memory,
-        ],
+        tools=_tools,
     )
 
 

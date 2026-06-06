@@ -29,6 +29,7 @@ from agenticops.agents.rca_agent import rca_agent
 from agenticops.agents.reporter_agent import reporter_agent
 from agenticops.agents.sre_agent import sre_agent, sre_query
 from agenticops.agents.executor_agent import executor_agent
+from agenticops.agents.enhanced import enhanced_task
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_managed_resources,
@@ -327,6 +328,8 @@ If the user explicitly requests a different scope, honor their request over this
             add_cloud_account,
             update_cloud_account,
             remove_cloud_account,
+            # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off)
+            *([enhanced_task] if settings.acp_enhanced_enabled else []),
             # MCP tool providers (external servers)
             *tools_extra,
         ],
