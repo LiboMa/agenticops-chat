@@ -4399,6 +4399,27 @@ async def api_send_chat_message(session_id: str, request: Request):
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
                     break
                 ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
+                # Enhanced backend (enhanced_task async-gen) sub-events streamed
+                # live via Strands ToolStreamEvent -> existing SSE event types.
+                if ev.get("type") == "tool_stream":
+                    from agenticops.acp.mapping import tool_stream_to_sse
+                    _sse = tool_stream_to_sse(ev)
+                    if _sse:
+                        if _sse["event"] == "text":
+                            accumulated += _sse["data"]["token"]
+                        elif _sse["event"] == "tool_start":
+                            _n = _sse["data"]["name"]
+                            if _n not in [t["name"] for t in tool_calls]:
+                                tool_calls.append({"name": _n, "status": "running"})
+                        elif _sse["event"] == "tool_end":
+                            # already streamed live — mark done so the post-loop
+                            # sweep doesn't emit a duplicate tool_end
+                            _n = _sse["data"]["name"]
+                            for t in tool_calls:
+                                if t["name"] == _n:
+                                    t["status"] = "done"
+                        yield {"event": _sse["event"], "data": json.dumps(_sse["data"])}
+                    continue
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
                     accumulated += ev["data"]
@@ -4421,8 +4442,11 @@ async def api_send_chat_message(session_id: str, request: Request):
                     if not accumulated and hasattr(res, "__str__"):
                         accumulated = str(res)
 
-            # Mark tools done
+            # Mark tools done (skip any already finished live, e.g. enhanced
+            # sub-tools that streamed their own tool_end)
             for t in tool_calls:
+                if t["status"] == "done":
+                    continue
                 t["status"] = "done"
                 yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
 
