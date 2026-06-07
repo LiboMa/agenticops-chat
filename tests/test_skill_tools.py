@@ -93,9 +93,10 @@ class TestActivateSkill:
         assert "not found" in result
         assert "linux-admin" in result
 
+    @patch("agenticops.skills.tools.list_skill_resources")
     @patch("agenticops.skills.tools.discover_skills")
     @patch("agenticops.skills.tools.load_skill_body", return_value="# Decision Tree\n- Check CPU")
-    def test_activate_success_no_agent(self, mock_load, mock_discover):
+    def test_activate_success_no_agent(self, mock_load, mock_discover, mock_resources):
         from agenticops.skills.tools import activate_skill
         import tempfile
 
@@ -108,6 +109,7 @@ class TestActivateSkill:
             mock_discover.return_value = [
                 _FakeSkill(name="linux-admin", description="LA", path=skill_dir)
             ]
+            mock_resources.return_value = ["references/net.md"]
             result = activate_skill(skill_name="linux-admin")
             assert "Decision Tree" in result
             assert "references/net.md" in result
