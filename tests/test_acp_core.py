@@ -4,11 +4,13 @@ import pytest
 
 
 def test_config_fields_present():
+    # Assert the fields exist with the right types — NOT specific values, which
+    # are user-configurable at runtime (settings.yaml / env / Web Settings).
     from agenticops.config import settings
-    assert settings.acp_enhanced_enabled is False          # default off
-    assert settings.acp_enhanced_backend == "claude-code"
-    assert settings.acp_use_bedrock is True
-    assert settings.acp_timeout_seconds == 300
+    assert isinstance(settings.acp_enhanced_enabled, bool)
+    assert isinstance(settings.acp_enhanced_backend, str) and settings.acp_enhanced_backend
+    assert isinstance(settings.acp_use_bedrock, bool)
+    assert isinstance(settings.acp_timeout_seconds, int)
 
 
 def test_enhanced_event_kinds():
@@ -44,8 +46,19 @@ def test_enhanced_backend_is_protocol():
 
 class TestRegistry:
     def setup_method(self):
+        # Snapshot the real registry, then start clean. teardown restores it so
+        # these tests don't wipe the import-time registrations other test files
+        # (e.g. test_acp_providers) rely on. Import the package first so the
+        # snapshot captures the real backends even if this runs before them.
+        import agenticops.acp  # noqa: F401 — triggers register_backend at import
+        from agenticops.acp import registry
+        self._saved = dict(registry._BACKENDS)
+        registry._BACKENDS.clear()
+
+    def teardown_method(self):
         from agenticops.acp import registry
         registry._BACKENDS.clear()
+        registry._BACKENDS.update(self._saved)
 
     def test_register_and_get(self):
         from agenticops.acp import registry
