@@ -209,6 +209,7 @@ class SessionFactory:
         elif settings.bedrock_profile:
             # Named profile for Bedrock — bypass AWS_CONFIG_FILE/AWS_SHARED_CREDENTIALS_FILE
             # overrides that may block profile resolution
+            import botocore.exceptions
             import botocore.session
             bc_session = botocore.session.Session()
             # Force real config paths if env vars point to /dev/null
@@ -219,10 +220,21 @@ class SessionFactory:
             if os.environ.get("AWS_CONFIG_FILE") in ("/dev/null", ""):
                 bc_session.set_config_variable("config_file", real_config)
             bc_session.set_config_variable("profile", settings.bedrock_profile)
-            session = boto3.Session(
-                botocore_session=bc_session,
-                region_name=settings.bedrock_region,
-            )
+            try:
+                session = boto3.Session(
+                    botocore_session=bc_session,
+                    region_name=settings.bedrock_region,
+                )
+                # Force profile resolution now so we can fall back if it's missing
+                # (e.g. on EC2 where the instance role should be used instead).
+                session.get_credentials()
+            except botocore.exceptions.ProfileNotFound:
+                logger.warning(
+                    "Bedrock profile %r not found; falling back to default "
+                    "credential chain (env/IRSA/ECS/EC2 instance role).",
+                    settings.bedrock_profile,
+                )
+                session = boto3.Session(region_name=settings.bedrock_region)
         else:
             # Default credential chain
             session = boto3.Session(region_name=settings.bedrock_region)
