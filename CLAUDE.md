@@ -55,7 +55,7 @@ Web Dashboard ──────┘         │
 | `pipeline/` | `rag_pipeline.py`, `orchestrator.py`, `health_patrol.py` | RAG pipeline, patrol orchestrator |
 | `integrations/` | `alert_processor.py`, `parsers.py` | Webhook alert processing, source parsers |
 | `storage/` | `backend.py` | Storage backends (local/S3) for reports + KB |
-| `acp/` | `types.py`, `registry.py`, `jsonrpc.py`, `mapping.py`, `client.py`, `backends/claude_code.py` | Optional ACP enhanced backend (MVP-1.3.0) — protocol-agnostic `EnhancedBackend` abstraction + registry; self-implemented JSON-RPC/stdio `AcpClient`; `ClaudeCodeBackend` (Bedrock). `enhanced_task` tool (`agents/enhanced.py`), conditionally into main/sre. Default off (`acp_enhanced_enabled`) |
+| `acp/` | `types.py`, `registry.py`, `jsonrpc.py`, `mapping.py`, `client.py`, `backends/{claude_code,kiro_cli,codex}.py` | Optional ACP enhanced backend (MVP-1.3.0) — protocol-agnostic `EnhancedBackend` abstraction + registry; self-implemented JSON-RPC/stdio `AcpClient` (per-provider `protocol_version`); 3 providers: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`), `codex` (`codex-acp`, needs `OPENAI_API_KEY`). `enhanced_task` async-gen tool (`agents/enhanced.py`) streams live via `ToolStreamEvent`→SSE, conditionally into main/sre. Provider chosen in Settings→Enhanced Backend. Default off (`acp_enhanced_enabled`) |
 
 ### Frontend (`src/agenticops/web/frontend/src/`)
 
@@ -139,6 +139,8 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `acp_use_bedrock` | `true` | Run the enhanced backend on Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) |
 | `acp_timeout_seconds` | `300` | Per-turn timeout for an enhanced-backend subprocess |
 | `acp_auto_approve_permissions` | `true` | Auto-approve the backend's permission requests (allow_once) |
+| `acp_kiro_command` / `acp_kiro_args` | `kiro-cli` / `["acp","--trust-all-tools"]` | Kiro CLI ACP launch (uses kiro's own login) |
+| `acp_codex_command` / `acp_codex_args` | `npx` / `["-y","@zed-industries/codex-acp"]` | Codex ACP launch (needs `OPENAI_API_KEY`) |
 | `scan_focus` | `all` | Resource categories filter |
 | `agent_output_detail` | `medium` | concise/medium/detailed |
 

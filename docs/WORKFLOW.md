@@ -565,18 +565,20 @@ main / sre agent
 @tool enhanced_task(task, context, backend?)        ← registered only when acp_enhanced_enabled=true
    ▼
 EnhancedBackend abstraction + registry  (protocol-agnostic core)
-   ▼ provider translates its own protocol → unified EnhancedEvent stream
-ClaudeCodeBackend  →  AcpClient (self-implemented JSON-RPC 2.0 over stdio)
-   ▼ stdio subprocess
-claude-agent-acp  (Claude Code, running on Bedrock: CLAUDE_CODE_USE_BEDROCK=1)
+   ▼ get_backend(acp_enhanced_backend) — provider chosen in Settings → Enhanced Backend
+   ├─ ClaudeCodeBackend → AcpClient → npx claude-agent-acp   (Bedrock)
+   ├─ KiroCliBackend    → AcpClient → kiro-cli acp           (IAM Identity Center login)
+   └─ CodexBackend      → AcpClient → npx codex-acp          (needs OPENAI_API_KEY)
+   ▼ stdio subprocess (self-implemented JSON-RPC 2.0)
    ▲ EnhancedEvent → existing SSE (text / tool_start / tool_end / done) → chat UI + "✦ Enhanced" chip
 ```
 
 - **Self-implemented protocol** (`src/agenticops/acp/`): newline-delimited JSON-RPC 2.0 over stdio — no third-party ACP dependency. The Phase-0 spike (`scripts/acp_spike.py`) pinned the live behavior of `claude-agent-acp` v0.42.0: launch with `npx -y`, `protocolVersion: 1`, nested `session/update` payloads, terminal `usage` tokens, Bedrock pass-through working.
 - **End-to-end streaming, no buffering.** Every hop is a streaming primitive: Claude Code pushes `session/update` notifications → `AcpClient` reads them as an async generator (`async for read_message(...)`) → `backend.run()` yields `AsyncIterator[EnhancedEvent]` → `enhanced_task` is an **async-generator `@tool`** (Strands detects `isasyncgenfunction` and wraps each yield as a `ToolStreamEvent`) → the web stream loop maps those to existing SSE events (`tool_stream_to_sse`) → the browser reads them via `fetch` + `ReadableStream`. Claude Code's intermediate tool calls (Read/Bash/WebSearch) surface as live `tool_start`/`tool_end` chips, so a long task (deep research, create-skill) shows real-time progress. Granularity follows Bedrock's chunking — short answers arrive in one or two chunks; we never hold a chunk back.
-- **Pluggable, extensible**: adding **Kiro-cli** or **Codex** later = one provider class + `register_backend()`; the protocol-agnostic core (`EnhancedBackend` / `EnhancedEvent`) does not change. Claude/Kiro share the same `AcpClient`.
-- **Graceful**: if the backend is unavailable (no `npx`, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes.
-- **Enable**: set `acp_enhanced_enabled: true` in `config/settings.yaml` (see config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`).
+- **Three providers, pluggable**: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`, uses kiro's own login), and `codex` (`@zed-industries/codex-acp`, needs `OPENAI_API_KEY`). Claude/Kiro/Codex all share the same self-implemented `AcpClient` (it speaks ACP/JSON-RPC; `protocol_version` is per-provider, default 1). Adding another = one provider class + `register_backend()`; the protocol-agnostic core (`EnhancedBackend` / `EnhancedEvent`) does not change.
+- **Choose in the UI**: **Settings → General → Enhanced Backend** has a toggle (`acp_enhanced_enabled`) + a provider dropdown (populated from the registry). Both persist to `settings.yaml` and clear the session cache so agents rebuild with the new provider on the next message.
+- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes.
+- **Enable**: toggle it in Settings, or set `acp_enhanced_enabled: true` in `config/settings.yaml` (config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`, `acp_kiro_command`/`acp_kiro_args`, `acp_codex_command`/`acp_codex_args`).
 
 ---
 
