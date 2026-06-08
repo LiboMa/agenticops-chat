@@ -1244,6 +1244,42 @@ export default function Settings() {
         </CardBody>
       </Card>
 
+      {/* ── Enhanced Backend (ACP) ───────────────────────────── */}
+      {s && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-foreground">Enhanced Backend (ACP)</h2>
+            <span className="text-xs text-muted-foreground">Optional: delegate complex tasks to an external coding agent</span>
+          </CardHeader>
+          <CardBody>
+            <SettingToggle
+              label="Enhanced Backend"
+              description="Let the main & SRE agents delegate hard tasks (create-skill, deep research, brainstorming) to an external coding agent"
+              enabled={s.acp_enhanced_enabled}
+              onChange={(v) => updateMut.mutate({ acp_enhanced_enabled: v })}
+              saving={updateMut.isPending}
+            />
+            <div className="pt-4">
+              <label className="block text-sm font-medium text-foreground mb-1">Backend Provider</label>
+              <select
+                value={s.acp_enhanced_backend}
+                disabled={!s.acp_enhanced_enabled || updateMut.isPending}
+                onChange={(e) => updateMut.mutate({ acp_enhanced_backend: e.target.value })}
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+              >
+                {s.acp_available_backends.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground mt-2">
+                <strong>claude-code</strong> &amp; <strong>kiro-cli</strong> use their own login (Bedrock / IAM Identity Center);
+                <strong> codex</strong> requires <code>OPENAI_API_KEY</code> in the server environment.
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       {/* ── Exclude Patterns ─────────────────────────────────── */}
       <ExcludePatternsCard />
 
