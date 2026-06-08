@@ -38,12 +38,13 @@ def _safe_env(extra: Optional[dict] = None) -> dict:
 
 class AcpClient:
     def __init__(self, command: str, args: list[str], env_extra: Optional[dict] = None,
-                 auto_approve: bool = True, timeout: int = 300):
+                 auto_approve: bool = True, timeout: int = 300, protocol_version: int = 1):
         self._command = command
         self._args = args
         self._env = _safe_env(env_extra)
         self._auto_approve = auto_approve
         self._timeout = timeout
+        self._protocol_version = protocol_version
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._next_id = 0
 
@@ -91,8 +92,9 @@ class AcpClient:
             return
 
         try:
-            # initialize  (spike: claude-agent-acp 0.42.0 negotiates protocolVersion 1)
-            init_id = await self._send("initialize", {"protocolVersion": 1, "capabilities": {},
+            # initialize  (spike: claude-agent-acp 0.42.0 negotiates protocolVersion 1;
+            # per-provider override via protocol_version ctor arg)
+            init_id = await self._send("initialize", {"protocolVersion": self._protocol_version, "capabilities": {},
                                                       "clientInfo": {"name": "agenticops", "version": "1.3.0"}})
             if not await self._await_result(init_id):
                 yield EnhancedEvent(kind="error", error="ACP initialize failed")

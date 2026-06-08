@@ -432,6 +432,22 @@ class Settings(BaseSettings):
         default=True,
         description="Auto-approve the backend's permission requests (allow_once) this round (AIOPS_ACP_AUTO_APPROVE_PERMISSIONS)",
     )
+    acp_kiro_command: str = Field(
+        default="kiro-cli",
+        description="Launch command for the Kiro CLI ACP agent (AIOPS_ACP_KIRO_COMMAND)",
+    )
+    acp_kiro_args: list[str] = Field(
+        default_factory=lambda: ["acp", "--trust-all-tools"],
+        description="Args for the Kiro CLI ACP agent launch; --trust-all-tools auto-approves (AIOPS_ACP_KIRO_ARGS)",
+    )
+    acp_codex_command: str = Field(
+        default="npx",
+        description="Launch command for the Codex ACP agent (AIOPS_ACP_CODEX_COMMAND)",
+    )
+    acp_codex_args: list[str] = Field(
+        default_factory=lambda: ["-y", "@zed-industries/codex-acp"],
+        description="Args for the Codex ACP agent launch; needs OPENAI_API_KEY (AIOPS_ACP_CODEX_ARGS)",
+    )
 
     file_tools_admin_mode: bool = Field(
         default=True,
