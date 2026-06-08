@@ -602,6 +602,16 @@ def _model_version_label(model_id: str) -> str:
     return m.group(1).replace("-", ".") if m else ""
 
 
+def _acp_available_backends() -> list[str]:
+    """Registered enhanced-backend provider names (empty if acp module unavailable)."""
+    try:
+        import agenticops.acp  # noqa: F401 — triggers register_backend at import
+        from agenticops.acp.registry import available_backends
+        return available_backends()
+    except Exception:
+        return []
+
+
 @app.get("/api/settings")
 async def api_get_settings():
     """Return all toggleable runtime settings."""
@@ -662,6 +672,10 @@ async def api_get_settings():
         "report_s3_prefix": settings.report_s3_prefix,
         "report_s3_region": settings.report_s3_region,
         "report_presigned_url_expiry": settings.report_presigned_url_expiry,
+        # ACP enhanced backend (optional task delegation)
+        "acp_enhanced_enabled": settings.acp_enhanced_enabled,
+        "acp_enhanced_backend": settings.acp_enhanced_backend,
+        "acp_available_backends": _acp_available_backends(),
     }
 
 
@@ -682,7 +696,10 @@ async def api_update_settings(body: dict = Body(...)):
     REPORT_STR_KEYS = {"report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region"}
     REPORT_INT_KEYS = {"report_presigned_url_expiry"}
 
-    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | {"scan_focus", "agent_models"}
+    # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
+    ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
+
+    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models"}
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -746,6 +763,24 @@ async def api_update_settings(body: dict = Body(...)):
             if key in body:
                 yaml_updates[key] = getattr(settings, key)
         save_to_yaml(yaml_updates)
+
+    # ACP enhanced backend — persist to YAML + clear session cache so agents
+    # rebuild with the new tool registration / provider on the next message.
+    acp_yaml: dict[str, Any] = {}
+    if "acp_enhanced_enabled" in body:
+        if not isinstance(body["acp_enhanced_enabled"], bool):
+            raise HTTPException(400, "acp_enhanced_enabled must be a boolean")
+        settings.acp_enhanced_enabled = body["acp_enhanced_enabled"]
+        acp_yaml["acp_enhanced_enabled"] = settings.acp_enhanced_enabled
+    if "acp_enhanced_backend" in body:
+        val = str(body["acp_enhanced_backend"])
+        if val not in _acp_available_backends():
+            raise HTTPException(400, f"Unknown enhanced backend: {val}")
+        settings.acp_enhanced_backend = val
+        acp_yaml["acp_enhanced_backend"] = val
+    if acp_yaml:
+        save_to_yaml(acp_yaml)
+        _chat_sessions.clear()
 
     return await api_get_settings()
 
