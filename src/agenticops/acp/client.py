@@ -63,21 +63,45 @@ class AcpClient:
         await self._proc.stdin.drain()
 
     async def cancel(self) -> None:
-        if self._proc and self._proc.returncode is None:
-            try:
-                self._proc.terminate()
-            except ProcessLookupError:
-                pass
-            # Reap the child within the loop's lifetime — otherwise the subprocess
-            # transport's delayed __del__ fires after asyncio.run() closes the loop
-            # ("RuntimeError: Event loop is closed"). Force-kill if it lingers.
-            try:
-                await asyncio.wait_for(self._proc.wait(), timeout=5)
-            except (asyncio.TimeoutError, ProcessLookupError):
+        if not self._proc:
+            return
+        # Reap the child + close the stdin pipe within the loop's lifetime.
+        # Otherwise the transport's delayed __del__ fires after the loop closes
+        # (enhanced_task uses asyncio.run(), a short-lived loop) and raises
+        # "RuntimeError: Event loop is closed". The leak is the STDIN pipe
+        # transport, not just the process — so we must close stdin explicitly
+        # and yield a tick for the transport to tear down.
+        if self._proc.returncode is None:
+            for sig in ("terminate", "kill"):
                 try:
-                    self._proc.kill()
+                    getattr(self._proc, sig)()
                 except ProcessLookupError:
-                    pass
+                    break
+                try:
+                    await asyncio.wait_for(self._proc.wait(), timeout=5)
+                    break  # reaped cleanly
+                except asyncio.TimeoutError:
+                    continue  # escalate terminate -> kill
+                except Exception:
+                    break
+        # Close ALL pipe transports (stdin writer + stdout/stderr reader
+        # transports), not just stdin — each leaked transport raises on __del__.
+        try:
+            if self._proc.stdin:
+                self._proc.stdin.close()
+        except Exception:
+            pass
+        for stream in (self._proc.stdout, self._proc.stderr):
+            tr = getattr(stream, "_transport", None) if stream else None
+            try:
+                if tr:
+                    tr.close()
+            except Exception:
+                pass
+        try:
+            await asyncio.sleep(0)  # let the pipe transports finish closing
+        except Exception:
+            pass
 
     async def run(self, prompt_text: str, cwd: Optional[str] = None) -> AsyncIterator[EnhancedEvent]:
         """Launch, handshake, prompt, and yield EnhancedEvents until done/error."""
