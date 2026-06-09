@@ -28,9 +28,16 @@ KUBECTL_TIMEOUT = 30
 
 
 def _get_ssm_client(region: str = "us-east-1"):
-    """Get an SSM client using the same pattern as aws_tools."""
+    """Get an SSM client.
+
+    NOTE (Phase-2 TODO): this uses the DEFAULT credential chain, NOT the agent's
+    currently-assumed account. Cross-account SSM (run_on_host) is unsafe until
+    account-aware credential injection lands (see Phase 2 in the credential plan
+    + "凭证安全铁律" in CLAUDE.md). Single-account / ambient setups are unaffected.
+    """
     import boto3
 
+    logger.debug("run_on_host(ssm) uses default credentials, not account-scoped (Phase-2 gap)")
     return boto3.client("ssm", region_name=region)
 
 
@@ -227,6 +234,11 @@ def _execute_kubectl(cluster_name: str, command: str, region: str, namespace: st
             # No pre-configured kubeconfig — update via aws eks
             if not cluster_name:
                 return "Error: No cluster_name provided and no KUBECONFIG set. Set AIOPS_EKS_CLUSTER_NAME or pass cluster_name."
+            # NOTE (Phase-2 TODO): this `aws eks update-kubeconfig` runs with the
+            # DEFAULT credential chain (no env injected). In multi-account setups
+            # it may target the WRONG account's EKS. The pre-set KUBECONFIG branch
+            # above (EKS-lab / bastion) is unaffected. Account-aware kubeconfig is
+            # Phase 2 (see "凭证安全铁律" in CLAUDE.md).
             update_result = subprocess.run(
                 ["aws", "eks", "update-kubeconfig", "--name", cluster_name, "--region", region],
                 capture_output=True,
