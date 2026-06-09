@@ -145,6 +145,9 @@ class AWSProvider(CloudProvider):
         """
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
+        # Default region to re-inject after stripping ambient AWS_* (so commands
+        # without an explicit --region still resolve, as they did before).
+        default_region = (self.account.regions or [None])[0]
 
         # Capture session credentials if available
         session = self._session if hasattr(self, "_session") else None
@@ -176,17 +179,28 @@ class AWSProvider(CloudProvider):
             except ValueError as e:
                 return f"Error: Invalid command syntax: {e}"
 
-            # Build env with credentials
-            env = os.environ.copy()
-            if session:
-                try:
-                    frozen = session.get_credentials().get_frozen_credentials()
-                    env["AWS_ACCESS_KEY_ID"] = frozen.access_key
-                    env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
-                    if frozen.token:
-                        env["AWS_SESSION_TOKEN"] = frozen.token
-                except Exception:
-                    pass  # Fall back to ambient credentials
+            # Build a CLEAN env: strip all ambient AWS_* so a host profile/token
+            # can never leak into this account's command, then inject ONLY this
+            # account's resolved credentials. Extraction failure = hard error
+            # (NEVER fall back to ambient — that runs on the WRONG account).
+            env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+            if not session:
+                return (
+                    f"Error: no resolved session for account '{account_name}'; "
+                    "cannot run AWS CLI safely (refusing to use ambient credentials)."
+                )
+            try:
+                frozen = session.get_credentials().get_frozen_credentials()
+            except Exception as e:
+                return f"Error: failed to resolve credentials for account '{account_name}': {e}"
+            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+            if frozen.token:
+                env["AWS_SESSION_TOKEN"] = frozen.token
+            # Re-inject a default region for commands that omit --region (we just
+            # stripped any ambient AWS_DEFAULT_REGION/AWS_REGION).
+            if default_region and "--region" not in command:
+                env["AWS_DEFAULT_REGION"] = default_region
 
             try:
                 result = subprocess.run(

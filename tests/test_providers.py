@@ -333,6 +333,12 @@ class TestAWSProvider:
         """Verify --output json is appended."""
         account = make_account("aws")
         provider = get_provider(account)
+        # cli_tool now fails closed without a resolved session; give it one so we
+        # reach the subprocess call this test is actually asserting on.
+        frozen = MagicMock(access_key="k", secret_key="s", token="t")
+        sess = MagicMock()
+        sess.get_credentials.return_value.get_frozen_credentials.return_value = frozen
+        provider._session = sess
         tool = provider.cli_tool()
 
         with patch("agenticops.providers.aws.subprocess.run") as mock_run:
