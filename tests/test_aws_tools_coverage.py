@@ -9,6 +9,7 @@ from agenticops.tools.aws_tools import (
     _session_cache,
     _get_session,
     _get_client,
+    _set_active_account,
     _extract_items,
     _format_ec2_instance,
     _scan_service_generic,
@@ -35,10 +36,12 @@ from agenticops.scan.services import AWSServiceDef
 
 @pytest.fixture(autouse=True)
 def clear_session_cache():
-    """Clear the module-level session cache between tests."""
+    """Clear the module-level session cache + account context between tests."""
     _session_cache.clear()
+    _set_active_account(None)
     yield
     _session_cache.clear()
+    _set_active_account(None)
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +116,19 @@ class TestGetSession:
     def test_session_found(self):
         mock_session = MagicMock()
         _session_cache["123:us-east-1"] = mock_session
+        _set_active_account("123")  # bind current-turn account context
         assert _get_session("us-east-1") is mock_session
 
     def test_session_not_found(self):
+        _set_active_account("123")
         with pytest.raises(RuntimeError, match="No assumed session"):
             _get_session("ap-southeast-1")
+
+    def test_session_no_account_context_fail_closed(self):
+        # session cached for another account, but no active context → must raise
+        _session_cache["123:us-east-1"] = MagicMock()
+        with pytest.raises(RuntimeError, match="No active account context"):
+            _get_session("us-east-1")
 
 
 @pytest.mark.skip(reason="Needs DB schema adaptation for main branch credential_source_type column")

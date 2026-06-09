@@ -3,6 +3,7 @@
 Wraps existing core logic from scan/scanner.py and scan/services.py.
 """
 
+import contextvars
 import json
 import logging
 from typing import Any
@@ -18,6 +19,22 @@ logger = logging.getLogger(__name__)
 # Populated by assume_role via provider layer. Kept for backward compat with
 # graph/api.py and integrations/cloudwatch_provider.py until they migrate.
 _session_cache: dict[str, Any] = {}
+
+# The account id the current agent turn is operating on (set by assume_role).
+# Used so _get_session takes the session by account+region exactly — never
+# region-only, which could silently return ANOTHER account's session.
+_active_account_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "active_account_id", default=None
+)
+
+
+def _set_active_account(account_id: str | None) -> None:
+    """Bind the account the current turn operates on (called by assume_role)."""
+    _active_account_var.set(account_id)
+
+
+def _get_active_account() -> str | None:
+    return _active_account_var.get()
 
 
 @tool
@@ -72,6 +89,7 @@ def assume_role(
         if provider.resolve_credentials():
             session = provider.sdk_session()
             _session_cache[cache_key] = session
+            _set_active_account(account_id)  # bind current-turn account context
             return f"Credentials resolved for {matched.name} ({matched.provider}) in {region}. Session cached."
         return f"Failed to resolve credentials for {matched.name}."
     except Exception as e:
@@ -79,13 +97,25 @@ def assume_role(
 
 
 def _get_session(region: str) -> Any:
-    """Get a cached session for the given region (any account)."""
-    for key, session in _session_cache.items():
-        if key.endswith(f":{region}"):
-            return session
-    raise RuntimeError(
-        f"No assumed session for region {region}. Call assume_role first."
-    )
+    """Get the cached session for the CURRENT account + region.
+
+    Fail-closed: if no account context is set, or no session is cached for that
+    exact account+region, raise — NEVER fall back to another account's session
+    (region-only lookup is unsafe across accounts).
+    """
+    account_id = _get_active_account()
+    if not account_id:
+        raise RuntimeError(
+            "No active account context. Call assume_role first so the session "
+            "is bound to a specific account (region-only lookup is unsafe across accounts)."
+        )
+    key = f"{account_id}:{region}"
+    session = _session_cache.get(key)
+    if session is None:
+        raise RuntimeError(
+            f"No assumed session for account {account_id} in {region}. Call assume_role first."
+        )
+    return session
 
 
 def _get_client(service_name: str, region: str):
