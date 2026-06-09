@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-04-29'
 created_by: user
 last_confirmed: '2026-04-29'
-last_used: '2026-05-31'
+last_used: '2026-06-09'
 related_issue_id: 122
 resource_pattern: sa-malibo/*
 source: auto

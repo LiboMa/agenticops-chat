@@ -7,7 +7,7 @@ existing schedules via natural language in Chat.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from strands import tool
@@ -66,7 +66,7 @@ def run_task(
     }
 
     # Create @once schedule record
-    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     schedule_name = f"task-{ts}"
 
     with get_db_session() as session:
@@ -138,7 +138,7 @@ def create_schedule(
     # Validate cron expression
     try:
         parser = CronParser(cron)
-        next_run = parser.next_run(datetime.utcnow())
+        next_run = parser.next_run(datetime.now(timezone.utc))
     except (ValueError, Exception) as e:
         return f"Invalid cron expression '{cron}': {e}"
 

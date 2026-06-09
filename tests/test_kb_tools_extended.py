@@ -138,7 +138,8 @@ class TestLLMDistill:
         }).encode()
         mock_client.invoke_model.return_value = {"body": mock_body}
 
-        with patch("boto3.client", return_value=mock_client):
+        with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
+            mock_get_session.return_value.client.return_value = mock_client
             from agenticops.tools.kb_tools import _llm_distill
             result = _llm_distill({"issue_id": 1, "title": "test"})
             assert result is not None
@@ -152,13 +153,14 @@ class TestLLMDistill:
         }).encode()
         mock_client.invoke_model.return_value = {"body": mock_body}
 
-        with patch("boto3.client", return_value=mock_client):
+        with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
+            mock_get_session.return_value.client.return_value = mock_client
             from agenticops.tools.kb_tools import _llm_distill
             result = _llm_distill({"issue_id": 1})
             assert result["title"] == "Fenced"
 
     def test_failure(self):
-        with patch("boto3.client", side_effect=Exception("no access")):
+        with patch("agenticops.config.get_bedrock_boto_session", side_effect=Exception("no access")):
             from agenticops.tools.kb_tools import _llm_distill
             result = _llm_distill({"issue_id": 1})
             assert result is None
@@ -171,7 +173,8 @@ class TestLLMDistill:
         }).encode()
         mock_client.invoke_model.return_value = {"body": mock_body}
 
-        with patch("boto3.client", return_value=mock_client):
+        with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
+            mock_get_session.return_value.client.return_value = mock_client
             from agenticops.tools.kb_tools import _llm_distill
             result = _llm_distill({"issue_id": 1})
             assert result is None

@@ -139,10 +139,9 @@ class TestUpgradeExistingSop:
 # ---------------------------------------------------------------------------
 
 class TestCallLlm:
-    @patch("boto3.client")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_successful_call(self, mock_settings, mock_boto3_client):
-        mock_settings.bedrock_region = "us-east-1"
+    def test_successful_call(self, mock_settings, mock_get_session):
         mock_settings.bedrock_model_id = "anthropic.claude-v2"
 
         body_payload = json.dumps({
@@ -153,17 +152,16 @@ class TestCallLlm:
 
         mock_client = MagicMock()
         mock_client.invoke_model.return_value = {"body": mock_resp_body}
-        mock_boto3_client.return_value = mock_client
+        mock_get_session.return_value.client.return_value = mock_client
 
         from agenticops.pipeline.sop_upgrader import _call_llm
         result = _call_llm("test prompt")
         assert "resource_type: EC2" in result
         mock_client.invoke_model.assert_called_once()
 
-    @patch("boto3.client")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_strips_code_fences(self, mock_settings, mock_boto3_client):
-        mock_settings.bedrock_region = "us-east-1"
+    def test_strips_code_fences(self, mock_settings, mock_get_session):
         mock_settings.bedrock_model_id = "anthropic.claude-v2"
 
         body_payload = json.dumps({
@@ -173,7 +171,7 @@ class TestCallLlm:
         mock_resp_body.read.return_value = body_payload
         mock_client = MagicMock()
         mock_client.invoke_model.return_value = {"body": mock_resp_body}
-        mock_boto3_client.return_value = mock_client
+        mock_get_session.return_value.client.return_value = mock_client
 
         from agenticops.pipeline.sop_upgrader import _call_llm
         result = _call_llm("test prompt")
@@ -181,12 +179,11 @@ class TestCallLlm:
         assert not result.endswith("```")
         assert "# My SOP" in result
 
-    @patch("boto3.client")
+    @patch("agenticops.config.get_bedrock_boto_session")
     @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_returns_none_on_exception(self, mock_settings, mock_boto3_client):
-        mock_settings.bedrock_region = "us-east-1"
+    def test_returns_none_on_exception(self, mock_settings, mock_get_session):
         mock_settings.bedrock_model_id = "anthropic.claude-v2"
-        mock_boto3_client.side_effect = Exception("connection error")
+        mock_get_session.side_effect = Exception("connection error")
 
         from agenticops.pipeline.sop_upgrader import _call_llm
         result = _call_llm("test prompt")

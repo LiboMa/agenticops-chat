@@ -571,7 +571,7 @@ class AgentLog(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     parent_agent: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     model_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================================

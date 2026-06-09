@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-06-01'
-last_used: '2026-06-01'
+last_used: '2026-06-08'
 ---
 
 # AWS Compute Skill
@@ -182,4 +182,6 @@ last_used: '2026-06-01'
 - Resource quotas and limit ranges per namespace
 - Horizontal Pod Autoscaler (HPA) + Cluster Autoscaler = full auto-scaling
 - IRSA (IAM Roles for Service Accounts) for least-privilege pod permissions
+
+
 
