@@ -32,6 +32,20 @@ Web Dashboard ──────┘         │
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)
 
+## 凭证安全铁律 (multi-account credential safety)
+
+平台是多 AWS 账户。任何"业务/扫描/执行"路径必须遵守:
+1. **不得裸用 `boto3.Session()` / `boto3.client()` 跑跨账户调用** —— 必须经 provider 层
+   (`get_provider(account).resolve_credentials()` → `cli_tool()/sdk_session()`)取**目标账户**凭证。
+   (例外:Bedrock 控制面 `get_bedrock_session()`、账户 test-connection、`list_available_profiles` 可读 `~/.aws`。)
+2. **凭证解析失败 = 显式报错,禁止静默回退到 ambient(进程默认)凭证** —— 多账户下 ambient 只对应某一个账户,
+   降级 = 在错误账户上执行。`environment` 源类型是唯一合法的"用本地默认链"声明(属解析成功)。
+3. **子进程注入凭证前先 strip 所有 `AWS_*`**,再只注入本账户已解析凭证(防宿主残留串号);需要默认 region 时显式回注。
+4. **缓存 key 必须含 account**(`{account}:{region}`),禁止 region-only 取 session;`aws_tools._get_session` 用
+   `_active_account_var` ContextVar(由 `assume_role` 设置)按 account+region 精确取,无上下文时 fail-closed。
+5. **已知 Phase-2 缺口(勿当已修)**:`skills/execution.py` 的 `run_kubectl`/`run_on_host(ssm)` 目前用默认凭证、
+   非账户作用域;`tools/aws_cli_tool.py` 的 `run_aws_cli/_readonly` 不注入任何凭证(纯 ambient)。改造见 Phase 2。
+
 ## Key Modules
 
 ### Backend (`src/agenticops/`)
