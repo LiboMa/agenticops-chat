@@ -197,6 +197,15 @@ def _execute_aws_cli(command: str) -> str:
     except ValueError as e:
         return f"Error: Invalid command syntax: {e}"
 
+    # Scope credentials to the active account (set by assume_role). Falls back to
+    # ambient env when no account context is set; fails closed if an account is
+    # active but has no cached session (never runs on the wrong account).
+    from agenticops.tools.aws_tools import get_account_subprocess_env
+    try:
+        env = get_account_subprocess_env()
+    except RuntimeError as e:
+        return f"Error: {e}"
+
     try:
         result = subprocess.run(
             args,
@@ -204,6 +213,7 @@ def _execute_aws_cli(command: str) -> str:
             text=True,
             timeout=TIMEOUT_SECONDS,
             shell=False,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return f"Error: Command timed out after {TIMEOUT_SECONDS} seconds."

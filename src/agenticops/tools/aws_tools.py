@@ -126,6 +126,54 @@ def _get_client(service_name: str, region: str):
     return session.client(service_name, region_name=region)
 
 
+def get_account_subprocess_env(region: str | None = None) -> dict[str, str]:
+    """Build a subprocess env scoped to the CURRENT account (set by assume_role).
+
+    - No active account context → return ambient env unchanged (single-account /
+      local dev; behavior preserved).
+    - Active account WITH a cached session → strip all ambient AWS_* and inject
+      only that account's frozen credentials (+ optional default region).
+    - Active account WITHOUT a cached session → fail closed (RuntimeError),
+      NEVER fall back to ambient (that would run on the wrong account).
+
+    Mirrors providers/aws.cli_tool's strip+inject+fail-closed contract so the CLI
+    and host-exec paths are account-safe in multi-account setups.
+    """
+    import os
+
+    account_id = _get_active_account()
+    if not account_id:
+        return dict(os.environ)  # no account scoping requested → ambient
+
+    # Find a cached session for this account (exact region if given, else any region
+    # for this account — the credentials are account-scoped, not region-scoped).
+    session = None
+    if region is not None:
+        session = _session_cache.get(f"{account_id}:{region}")
+    if session is None:
+        prefix = f"{account_id}:"
+        for key, sess in _session_cache.items():
+            if key.startswith(prefix):
+                session = sess
+                break
+    if session is None:
+        raise RuntimeError(
+            f"No assumed session for account {account_id}"
+            + (f" in {region}" if region else "")
+            + ". Call assume_role first."
+        )
+
+    frozen = session.get_credentials().get_frozen_credentials()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+    env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+    if frozen.token:
+        env["AWS_SESSION_TOKEN"] = frozen.token
+    if region:
+        env["AWS_DEFAULT_REGION"] = region
+    return env
+
+
 def _extract_items(response: dict, list_key: str) -> list:
     """Extract items from response using dot-notation key."""
     data = response

@@ -28,16 +28,31 @@ KUBECTL_TIMEOUT = 30
 
 
 def _get_ssm_client(region: str = "us-east-1"):
-    """Get an SSM client.
+    """Get an SSM client scoped to the active account (set by assume_role).
 
-    NOTE (Phase-2 TODO): this uses the DEFAULT credential chain, NOT the agent's
-    currently-assumed account. Cross-account SSM (run_on_host) is unsafe until
-    account-aware credential injection lands (see Phase 2 in the credential plan
-    + "凭证安全铁律" in CLAUDE.md). Single-account / ambient setups are unaffected.
+    Uses the cached account session when an account context is active, so
+    run_on_host(ssm) targets the correct account in multi-account setups. Falls
+    back to the default credential chain when no account context is set
+    (single-account / local dev — unchanged behavior).
     """
     import boto3
+    from agenticops.tools.aws_tools import _get_active_account, _session_cache
 
-    logger.debug("run_on_host(ssm) uses default credentials, not account-scoped (Phase-2 gap)")
+    account_id = _get_active_account()
+    if account_id:
+        session = _session_cache.get(f"{account_id}:{region}")
+        if session is None:  # active account but no session for this region → any region
+            for key, sess in _session_cache.items():
+                if key.startswith(f"{account_id}:"):
+                    session = sess
+                    break
+        if session is None:
+            raise RuntimeError(
+                f"No assumed session for account {account_id}; call assume_role before run_on_host."
+            )
+        return session.client("ssm", region_name=region)
+
+    logger.debug("run_on_host(ssm) uses default credentials (no active account context)")
     return boto3.client("ssm", region_name=region)
 
 
@@ -234,17 +249,23 @@ def _execute_kubectl(cluster_name: str, command: str, region: str, namespace: st
             # No pre-configured kubeconfig — update via aws eks
             if not cluster_name:
                 return "Error: No cluster_name provided and no KUBECONFIG set. Set AIOPS_EKS_CLUSTER_NAME or pass cluster_name."
-            # NOTE (Phase-2 TODO): this `aws eks update-kubeconfig` runs with the
-            # DEFAULT credential chain (no env injected). In multi-account setups
-            # it may target the WRONG account's EKS. The pre-set KUBECONFIG branch
-            # above (EKS-lab / bastion) is unaffected. Account-aware kubeconfig is
-            # Phase 2 (see "凭证安全铁律" in CLAUDE.md).
+            # Scope `aws eks update-kubeconfig` to the active account (set by
+            # assume_role) so multi-account EKS targets the right account. Falls
+            # back to ambient when no account context; fails closed if an account
+            # is active but has no cached session. The pre-set KUBECONFIG branch
+            # above (EKS-lab / bastion) bypasses this entirely.
+            from agenticops.tools.aws_tools import get_account_subprocess_env
+            try:
+                eks_env = get_account_subprocess_env(region)
+            except RuntimeError as e:
+                return f"Error: {e}"
             update_result = subprocess.run(
                 ["aws", "eks", "update-kubeconfig", "--name", cluster_name, "--region", region],
                 capture_output=True,
                 text=True,
                 timeout=15,
                 shell=False,
+                env=eks_env,
             )
             if update_result.returncode != 0:
                 return f"Failed to update kubeconfig: {update_result.stderr.strip()}"
