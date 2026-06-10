@@ -120,6 +120,90 @@ graph TB
 
 ---
 
+## Credential Safety: Authentication & Authorization
+
+AgenticOps operates across **multiple AWS accounts**. There is no global "current account" — every operation must explicitly resolve the **target account's** credentials. The two concerns are separate:
+
+- **Authentication (AuthN)** — *which account am I, and are these credentials valid?* Resolved through the **provider layer** (`get_provider → resolve_credentials`), never by bare `boto3`.
+- **Authorization (AuthZ)** — *is this command allowed to run?* A 3-tier classifier (read-only / write / blocked) gates every AWS CLI + host command before execution.
+
+The iron rules live in `CLAUDE.md` → **凭证安全铁律**. The flows below are the enforced implementation.
+
+### Authentication Flow (multi-account, fail-closed)
+
+```mermaid
+flowchart TD
+    START["Agent needs to operate on account N<br/>(scan / detect / rca / sre / executor)"] --> ASSUME["assume_role(account_id, role_arn, region)<br/><i>tools/aws_tools.py</i>"]
+
+    ASSUME --> PROV["Provider layer<br/>get_provider(account).resolve_credentials()<br/><i>providers/aws.py</i>"]
+
+    PROV --> SRC{"Credential source?"}
+    SRC -->|"profile_name"| BASE["boto3.Session(profile)"]
+    SRC -->|"static keys"| BASE2["boto3.Session(ak/sk) — decrypt first"]
+    SRC -->|"environment"| BASE3["default chain<br/>(env / IRSA / ECS / EC2 role)"]
+    SRC -->|"role_arn"| REFRESH["AssumeRole via botocore native<br/>AssumeRoleCredentialFetcher +<br/>DeferredRefreshableCredentials<br/><b>auto-refresh, no 1h expiry</b>"]
+
+    BASE --> VALID
+    BASE2 --> VALID
+    BASE3 --> VALID
+    REFRESH --> VALID["Validate: sts:GetCallerIdentity<br/>(partition-aware: aws / aws-cn / aws-us-gov)"]
+
+    VALID -->|"call fails"| FAILV["✗ return False<br/>(no session cached)"]
+    VALID -->|"ok"| IDCHECK{"credentials.account_id set?"}
+
+    IDCHECK -->|"yes & MISMATCH"| FAILID["✗ FAIL-CLOSED<br/>resolved Account ≠ expected<br/>refuse credentials"]
+    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>key = {account}:{region}"]
+
+    CACHE --> CTX["_set_active_account(account_id)<br/>ContextVar — binds current turn"]
+    CTX --> READY["✓ Ready: subsequent describe/cli/exec<br/>resolve by account+region exactly"]
+
+    style FAILV fill:#f66
+    style FAILID fill:#f66
+    style READY fill:#6f6
+    style REFRESH fill:#9cf
+```
+
+**Why fail-closed matters:** with no global current account, any silent fallback to *ambient* (process-default) credentials = executing on the **wrong account**. So `_get_session` requires an active-account ContextVar and an exact `{account}:{region}` cache hit — no context or no match → `RuntimeError`, never another account's session.
+
+### Authorization Flow (3-tier command gate + scoped exec)
+
+Every AWS CLI / host command passes a classifier **before** it runs, then executes in an env scoped to the active account:
+
+```mermaid
+flowchart TD
+    CMD["Command from agent<br/>(run_aws_cli / run_aws_cli_readonly / run_on_host / kubectl)"] --> SHELL{"Shell-injection check<br/>pipe / semicolon / and-and /<br/>subshell / redirect / backtick"}
+    SHELL -->|"contains operator"| REJ1["✗ Reject"]
+    SHELL -->|"clean"| TIER{"_classify_command()"}
+
+    TIER -->|"BLOCKED<br/>iam create-user, terminate-instances,<br/>--force, organizations delete-, ..."| REJ2["✗ Blocked outright"]
+    TIER -->|"WRITE / UNKNOWN"| CONF{"require_confirmation?"}
+    TIER -->|"READ-ONLY<br/>describe / list / get"| ENV
+
+    CONF -->|"false"| PAUSE["⏸ Ask user to confirm<br/>(present command + impact)"]
+    CONF -->|"true"| ENV
+
+    ENV["get_account_subprocess_env([region])<br/><i>tools/aws_tools.py</i>"] --> ACTX{"Active account context?"}
+    ACTX -->|"no"| AMBIENT["Ambient env<br/>(single-account / local dev — unchanged)"]
+    ACTX -->|"yes, session cached"| INJECT["Strip ALL ambient AWS_*<br/>+ inject this account's frozen creds<br/>+ default region"]
+    ACTX -->|"yes, NO session"| REJ3["✗ FAIL-CLOSED RuntimeError"]
+
+    AMBIENT --> RUN["subprocess.run(args, env=...)"]
+    INJECT --> RUN
+    RUN --> OUT["Output (truncated to cli_max_output_chars)"]
+
+    style REJ1 fill:#f66
+    style REJ2 fill:#f66
+    style REJ3 fill:#f66
+    style PAUSE fill:#f96
+    style OUT fill:#6f6
+```
+
+**Unified exec entry:** `run_aws_cli` / `run_aws_cli_readonly` (CLI), `run_on_host(ssm)`, and `aws eks update-kubeconfig` (kubectl) all resolve their subprocess env through `get_account_subprocess_env()`, so account scoping is consistent: inject when an account is active, fall back to ambient only when none is (local dev), fail closed when an account is active but uncached. The provider's own `cli_tool()` applies the same strip + inject + fail-closed contract for per-account CLI tools.
+
+> **AuthN vs AuthZ separation:** AuthN decides *whose* credentials (provider layer, fail-closed); AuthZ decides *what's permitted* (3-tier classifier + L0–L4 approval gate in the fix pipeline). A read-only command on the right account still runs; a write command on the right account still needs confirmation / approval.
+
+---
+
 ## Core Workflow: Issue Lifecycle
 
 ```mermaid
@@ -691,18 +775,16 @@ Open `http://localhost:8000/app/dashboard` and explore:
 | Page | What You Can Do |
 |------|----------------|
 | **Dashboard** | Overview stats, recent issues |
-| **Chat** | Same as CLI but with SSE streaming, file upload button, session history |
-| **Resources** | Browse all scanned AWS resources with filters |
-| **Anomalies** | View health issues, click through to RCA and fix plans |
-| **Fix Plans** | Review plans, approve, trigger execution |
-| **Network** | Interactive topology graph with SRE analysis (SPOF detection, capacity risk) |
-| **Reports** | Generate and view daily/incident/inventory reports |
-| **Schedules** | Set up cron-based automated scans/detections |
-| **Notifications** | Configure channels (Feishu, Slack, Email, DingTalk, WeCom, Webhook), view logs |
-| **Accounts** | Manage AWS accounts (activate, deactivate) |
-| **Audit Log** | View all system audit events |
+| **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history |
+| **Resources** / **Resource Detail** | Browse all scanned AWS resources with filters; drill into one resource |
+| **Issues & Plans** / **Issue Detail** | View health issues + fix plans, click through to RCA, approve, trigger execution |
+| **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports |
+| **Schedules** / **Schedule Detail** | Set up cron-based automated scans/detections |
+| **Skills** / **Skill Detail** | Browse the 15 domain skills, view/promote/rollback drafts |
+| **Agent Metrics** | Per-agent token/latency/usage metrics |
+| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend |
 
-> **See also**: [Web Service Workflow](web_service_workflow.md) — process model, SSE vs WebSocket, Feishu Bot, startup lifecycle.
+> **Note:** Settings consolidates account management, messaging channels, MCP servers, and the optional Enhanced Backend selector. The standalone Network topology page was removed (the graph engine remains as agent tools — see Tutorial 7).
 
 **Web chat supports file uploads** — click the paperclip icon to attach screenshots (PNG/JPEG) for visual analysis or PDFs/docs for document analysis.
 
@@ -759,7 +841,7 @@ what happens if I remove the connection between subnet-aaa and nat-gw-bbb?
 what depends on i-0abc123def?
 ```
 
-**Web alternative:** Go to the **Network** page, select a VPC, toggle "Enriched" to see compute resources, and use the SRE Analysis panel for SPOF/capacity/dependency analysis.
+**Note:** Topology is exposed through the agent (SRE/RCA call the graph engine tools) and chat, not a dedicated web page — the standalone Network page was removed. Ask in chat (CLI or Web) as shown above; the graph engine (NetworkX: SPOF, capacity risk, dependency chain, change simulation) runs server-side as agent tools.
 
 ---
 
@@ -969,11 +1051,11 @@ curl "$BASE/graph/vpc/{vpc_id}/enriched?region=us-east-1"
 # Detect single points of failure
 curl "$BASE/graph/vpc/{vpc_id}/spof?region=us-east-1"
 
-# List notification channels
-curl $BASE/notifications/channels
+# List messaging channels (alert/chat routing)
+curl $BASE/messaging/channels
 
-# Test a notification channel
-curl -X POST $BASE/notifications/channels/feishu-ops/test
+# Test a messaging channel
+curl -X POST $BASE/messaging/channels/feishu-ops/test
 
 # List IM aliases
 curl $BASE/im-aliases
