@@ -15,10 +15,12 @@ from agenticops.scan.services import AWS_SERVICES, AWSServiceDef
 
 logger = logging.getLogger(__name__)
 
-# Session cache: keyed by "account_id:region"
-# Populated by assume_role via provider layer. Kept for backward compat with
-# graph/api.py and integrations/cloudwatch_provider.py until they migrate.
-_session_cache: dict[str, Any] = {}
+# Session cache: keyed by "account_id:region" (also "web:region" from the
+# dashboard paths). This is the SAME dict object as providers/base._session_cache
+# — the provider layer is the single home for session caching (Phase-2 Item4),
+# with one thread-safe lock and one clear_session_cache() authority. We alias it
+# here so existing readers (assume_role/_get_session/web/graph) keep working.
+from agenticops.providers.base import _session_cache  # noqa: E402  (shared cache)
 
 # The account id the current agent turn is operating on (set by assume_role).
 # Used so _get_session takes the session by account+region exactly — never
