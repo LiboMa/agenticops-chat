@@ -113,10 +113,24 @@ class AWSProvider(CloudProvider):
 
         # Validate by calling STS (use partition-aware endpoint)
         try:
-            session.client("sts", **sts_kwargs).get_caller_identity()
+            identity = session.client("sts", **sts_kwargs).get_caller_identity()
         except Exception as e:
             logger.error("AWS credential validation failed for %s: %s", self.account.name, e)
             return False
+
+        # Defense-in-depth: if the account declares an expected account_id, the
+        # resolved identity MUST match it — else we'd silently operate on the
+        # wrong account. No account_id configured → skip (unchanged behavior).
+        expected = str(creds.get("account_id") or "").strip()
+        if expected:
+            resolved = str(identity.get("Account") or "")
+            if resolved and resolved != expected:
+                logger.error(
+                    "AWS identity mismatch for %s: resolved account %s != expected %s; "
+                    "refusing to use these credentials.",
+                    self.account.name, resolved, expected,
+                )
+                return False
 
         # Cache the session
         regions = self.account.regions or ["us-east-1"]
