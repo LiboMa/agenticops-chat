@@ -41,10 +41,16 @@ Web Dashboard ──────┘         │
 2. **凭证解析失败 = 显式报错,禁止静默回退到 ambient(进程默认)凭证** —— 多账户下 ambient 只对应某一个账户,
    降级 = 在错误账户上执行。`environment` 源类型是唯一合法的"用本地默认链"声明(属解析成功)。
 3. **子进程注入凭证前先 strip 所有 `AWS_*`**,再只注入本账户已解析凭证(防宿主残留串号);需要默认 region 时显式回注。
+   统一入口:`aws_tools.get_account_subprocess_env([region])` —— `run_aws_cli/_readonly`、`run_on_host(ssm)`、
+   `aws eks update-kubeconfig` 都经它取活动账户 env(无账户上下文回退 ambient;账户活动但无 session 则 fail-closed)。
 4. **缓存 key 必须含 account**(`{account}:{region}`),禁止 region-only 取 session;`aws_tools._get_session` 用
    `_active_account_var` ContextVar(由 `assume_role` 设置)按 account+region 精确取,无上下文时 fail-closed。
-5. **已知 Phase-2 缺口(勿当已修)**:`skills/execution.py` 的 `run_kubectl`/`run_on_host(ssm)` 目前用默认凭证、
-   非账户作用域;`tools/aws_cli_tool.py` 的 `run_aws_cli/_readonly` 不注入任何凭证(纯 ambient)。改造见 Phase 2。
+   会话缓存单一归属:`aws_tools._session_cache` 即 `providers/base._session_cache`(同一 dict);`SessionFactory._cache`
+   仅服务 Bedrock 控制面 + test-connection,另属一类。
+5. **AssumeRole 会话自动刷新**:`providers/aws._build_assume_role_session` 用 botocore 原生
+   `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`,长任务自动续期,勿退回手搓静态 Session+TTL。
+6. **纵深校验**:`resolve_credentials` 在 `credentials.account_id` 存在时校验 `GetCallerIdentity().Account` 必须匹配,
+   否则 fail-closed(防错号执行);未配置 `account_id` 则不校验(行为不变)。
 
 ## Key Modules
 
