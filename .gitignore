@@ -60,3 +60,4 @@ htmlcov/
 node_modules/
 docs/use-cases/test.html
 .hypothesis/
+MagicMock/
