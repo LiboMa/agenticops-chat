@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 72" fill="none">
+  <defs>
+    <linearGradient id="wisp1" x1="0%" y1="0%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.2"/>
+      <stop offset="50%" stop-color="#3B82F6" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0.3"/>
+    </linearGradient>
+    <linearGradient id="wisp2" x1="0%" y1="50%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.4"/>
+      <stop offset="40%" stop-color="#60A5FA" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="wisp3" x1="20%" y1="100%" x2="80%" y2="0%">
+      <stop offset="0%" stop-color="#93C5FD" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#3B82F6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#DBEAFE" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="wisp4" x1="0%" y1="30%" x2="100%" y2="70%">
+      <stop offset="0%" stop-color="#60A5FA" stop-opacity="0.1"/>
+      <stop offset="50%" stop-color="#3B82F6" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#93C5FD" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Cloud wisp layer 1 — top flowing arc -->
+  <path d="M 8 28 C 20 18, 38 14, 52 20 C 66 26, 58 36, 72 32 C 86 28, 94 18, 110 22"
+        stroke="url(#wisp1)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+
+  <!-- Cloud wisp layer 2 — main central flow -->
+  <path d="M 4 38 C 18 32, 32 28, 48 34 C 64 40, 72 44, 88 38 C 104 32, 112 28, 128 34"
+        stroke="url(#wisp2)" stroke-width="3" stroke-linecap="round" fill="none"/>
+
+  <!-- Cloud wisp layer 3 — lower undulating curve -->
+  <path d="M 12 50 C 28 46, 42 52, 58 48 C 74 44, 82 50, 98 46 C 114 42, 122 48, 134 44"
+        stroke="url(#wisp3)" stroke-width="2" stroke-linecap="round" fill="none"/>
+
+  <!-- Cloud wisp layer 4 — subtle background whisper -->
+  <path d="M 20 60 C 36 56, 50 62, 66 58 C 82 54, 96 58, 112 54"
+        stroke="url(#wisp4)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+
+  <!-- Neural connection nodes at wisp intersections -->
+  <circle cx="52" cy="20" r="2.5" fill="#3B82F6" opacity="0.8"/>
+  <circle cx="72" cy="32" r="2" fill="#60A5FA" opacity="0.7"/>
+  <circle cx="48" cy="34" r="2.5" fill="#3B82F6" opacity="0.9"/>
+  <circle cx="88" cy="38" r="2" fill="#3B82F6" opacity="0.75"/>
+  <circle cx="58" cy="48" r="2" fill="#60A5FA" opacity="0.6"/>
+  <circle cx="98" cy="46" r="1.8" fill="#3B82F6" opacity="0.7"/>
+  <circle cx="66" cy="58" r="1.5" fill="#93C5FD" opacity="0.5"/>
+
+  <!-- Subtle neural connections between nodes -->
+  <line x1="52" y1="20" x2="48" y2="34" stroke="#3B82F6" stroke-width="0.5" opacity="0.3"/>
+  <line x1="72" y1="32" x2="88" y2="38" stroke="#3B82F6" stroke-width="0.5" opacity="0.25"/>
+  <line x1="48" y1="34" x2="58" y2="48" stroke="#60A5FA" stroke-width="0.5" opacity="0.2"/>
+  <line x1="88" y1="38" x2="98" y2="46" stroke="#3B82F6" stroke-width="0.5" opacity="0.25"/>
+  <line x1="58" y1="48" x2="66" y2="58" stroke="#93C5FD" stroke-width="0.4" opacity="0.2"/>
+  <line x1="72" y1="32" x2="48" y2="34" stroke="#3B82F6" stroke-width="0.4" opacity="0.2"/>
+
+  <!-- Text: AgenticOps -->
+  <text x="142" y="44" font-family="'Outfit', 'Inter', sans-serif" font-size="22" font-weight="500" fill="#3B82F6" letter-spacing="-0.5">
+    Agentic<tspan font-weight="300" fill="#60A5FA">Ops</tspan>
+  </text>
+</svg>
