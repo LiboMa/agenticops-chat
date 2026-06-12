@@ -4596,7 +4596,11 @@ if (FRONTEND_DIR / "assets").exists():
 
 @app.get("/app/{full_path:path}")
 async def serve_spa(full_path: str):
-    """SPA fallback — serve index.html for all /app/* routes."""
+    """Serve dist root files (logo, favicons) or fall back to index.html (SPA routes)."""
+    if full_path and "/" not in full_path and ".." not in full_path:
+        candidate = (FRONTEND_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.parent == FRONTEND_DIR.resolve():
+            return FileResponse(str(candidate))
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
         return FileResponse(str(index_file))
