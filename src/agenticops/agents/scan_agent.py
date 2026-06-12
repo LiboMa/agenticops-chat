@@ -147,14 +147,19 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
 
 @tool
 def scan_agent(services: str = "all", regions: str = "all") -> str:
-    """Scan cloud resources across all enabled accounts and update inventory.
+    """Discover and inventory cloud resources across all enabled accounts.
+
+    USE FOR: "scan", "discover", "inventory", "refresh my resources",
+    "what do I have deployed". Security-only scan: services='security'.
+    NOT FOR: health/status checks (detect_agent) or one-off AWS queries (sre_query).
 
     Args:
-        services: Comma-separated resource categories (compute,database,storage,container,network,serverless) or 'all'.
-        regions: Comma-separated regions or 'all' (uses each account's configured regions)
+        services: Comma-separated categories (compute,database,storage,container,
+            network,serverless,security) or 'all'.
+        regions: Comma-separated regions or 'all' (each account's configured regions).
 
     Returns:
-        Summary of discovered resources with counts per account, region, and type.
+        Discovered resource counts per account, region, and type.
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session

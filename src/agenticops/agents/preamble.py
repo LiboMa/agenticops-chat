@@ -38,6 +38,45 @@ AGENT SKILLS PROTOCOL:
   Never create a skill without user confirmation.
 """
 
+# ── Shared Investigation Prompt Fragments (RCA + SRE) ───────────────
+
+_SKILL_ROUTES_COMMON = """\
+     - EC2/host issues → activate_skill("linux-admin") + activate_skill("aws-compute")
+     - Network/connectivity → activate_skill("network-engineer")
+     - Kubernetes/EKS/pods → activate_skill("kubernetes-admin")
+     - RDS/DynamoDB/Redis → activate_skill("database-admin")
+     - CloudWatch/metrics → activate_skill("monitoring")
+     - Log analysis → activate_skill("log-analysis")
+     - S3/EBS/EFS → activate_skill("aws-storage")"""
+
+
+def skills_activation_block(extra_routes: list[str], outro: str) -> str:
+    """Build the shared ACTIVATE DOMAIN SKILLS routing table (RCA + SRE).
+
+    Args:
+        extra_routes: Agent-specific route lines appended after the common set
+            (e.g. RCA adds distributed-tracing, SRE adds security-engineer).
+        outro: Agent-specific closing sentence.
+    """
+    routes = _SKILL_ROUTES_COMMON
+    for r in extra_routes:
+        routes += f"\n     - {r}"
+    return (
+        "ACTIVATE DOMAIN SKILLS: Based on the issue type, call activate_skill to load\n"
+        "     domain-specific troubleshooting knowledge BEFORE investigating:\n"
+        f"{routes}\n"
+        f"     {outro}"
+    )
+
+
+LOCAL_FILE_INSPECTION_BLOCK = """\
+LOCAL FILE INSPECTION (when you need to read configs, logs, or templates):
+     a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
+     b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
+        — these tools are dynamically registered when you activate the skill.
+     c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked."""
+
+
 # ── Output Format Rule Templates ────────────────────────────────────
 
 OUTPUT_RULES: dict[str, str] = {
@@ -138,6 +177,12 @@ def build_system_prompt(
     Returns:
         Assembled system prompt string.
     """
+    # Stability-ordered assembly (Bedrock prompt-cache friendly): the prefix
+    # is ordered by change frequency — base prompt (static) → skills XML
+    # (changes on SKILL.md edits) → output rules (changes on detail-level
+    # switch) → memory LAST (changes on every build via touch_last_used).
+    # A memory change then invalidates only the prompt tail, not the whole
+    # cached prefix. Do not "tidy" this order.
     parts: list[str] = []
 
     if include_account:
@@ -145,7 +190,19 @@ def build_system_prompt(
 
     parts.append(base)
 
-    # Inject agent memory (behavioral constraints learned from feedback)
+    if include_skills and settings.skills_enabled:
+        from agenticops.skills.loader import get_available_skills_xml
+
+        xml = get_available_skills_xml()
+        if xml:
+            parts.append(xml)
+            parts.append(SKILLS_USAGE_PROTOCOL)
+
+    # Always inject output rules
+    parts.append(get_output_rules(agent_type))
+
+    # Inject agent memory (behavioral constraints learned from feedback) —
+    # kept last: most volatile block (see stability note above).
     if agent_name:
         _log = logging.getLogger(__name__)
         try:
@@ -161,17 +218,6 @@ def build_system_prompt(
             # Unexpected (permission, parse, etc.) — surface at error level but
             # never block agent construction.
             _log.error("Failed to load agent memory for %s", agent_name, exc_info=True)
-
-    # Always inject output rules
-    parts.append(get_output_rules(agent_type))
-
-    if include_skills and settings.skills_enabled:
-        from agenticops.skills.loader import get_available_skills_xml
-
-        xml = get_available_skills_xml()
-        if xml:
-            parts.append(xml)
-            parts.append(SKILLS_USAGE_PROTOCOL)
 
     return "\n\n".join(parts)
 

@@ -475,6 +475,35 @@ class GraphStore:
             ).fetchall()
         return [r[0] for r in rows]
 
+    def get_recent_snapshots(self, limit: int = 5) -> list[dict]:
+        """Return the most recent graph sync snapshots (topology change history).
+
+        Each entry: {id, scope, snapshot_at, node_count, edge_count,
+        nodes_added, nodes_updated, nodes_removed}.
+        """
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, scope, snapshot_at, node_count, edge_count, "
+                    "nodes_added, nodes_updated, nodes_removed "
+                    "FROM graph_snapshots ORDER BY id DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "scope": r[1],
+                "snapshot_at": r[2],
+                "node_count": r[3],
+                "edge_count": r[4],
+                "nodes_added": r[5],
+                "nodes_updated": r[6],
+                "nodes_removed": r[7],
+            }
+            for r in rows
+        ]
+
     def remove_stale_nodes(self, ttl_hours: int = 24) -> int:
         """Delete nodes (and their edges) not updated within ttl_hours."""
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=ttl_hours)).strftime("%Y-%m-%d %H:%M:%S")

@@ -423,33 +423,9 @@ async def get_graph_diff(
 ) -> list[dict]:
     """Compare recent graph snapshots to show sync history."""
     try:
-        from sqlalchemy import text
-        from agenticops.models import get_engine
+        from agenticops.graph.store import GraphStore
 
-        engine = get_engine()
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT id, scope, snapshot_at, node_count, edge_count, "
-                    "nodes_added, nodes_updated, nodes_removed "
-                    "FROM graph_snapshots ORDER BY id DESC LIMIT :limit"
-                ),
-                {"limit": limit},
-            ).fetchall()
-
-        return [
-            {
-                "id": r[0],
-                "scope": r[1],
-                "snapshot_at": r[2],
-                "node_count": r[3],
-                "edge_count": r[4],
-                "nodes_added": r[5],
-                "nodes_updated": r[6],
-                "nodes_removed": r[7],
-            }
-            for r in rows
-        ]
+        return GraphStore().get_recent_snapshots(limit=limit)
     except Exception as e:
         logger.exception("Graph diff failed")
         return JSONResponse({"error": str(e)}, status_code=500)

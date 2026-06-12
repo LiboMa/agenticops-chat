@@ -543,6 +543,38 @@ class PipelineEvent(Base):
 
 
 # ============================================================================
+# ITSM Links (MVP-2.0.0)
+# ============================================================================
+
+
+class ITSMLink(Base):
+    """Mapping of an internal entity to its external ITSM record (idempotency key).
+
+    entity_type: health_issue | fix_plan
+    record_type: incident | change
+    """
+
+    __tablename__ = "itsm_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "system", "record_type",
+            name="uq_itsm_link_entity_system",
+        ),
+        Index("idx_itsm_link_entity", "entity_type", "entity_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(30))
+    entity_id: Mapped[int] = mapped_column()
+    system: Mapped[str] = mapped_column(String(30))  # servicenow | jira
+    record_type: Mapped[str] = mapped_column(String(30))
+    external_id: Mapped[str] = mapped_column(String(200))   # sys_id / issue key
+    external_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # INC0010002 / OPS-42
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ============================================================================
 # Agent Audit Log
 # ============================================================================
 

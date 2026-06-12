@@ -6,7 +6,7 @@ model_aliases:
   opus: global.anthropic.claude-opus-4-6-v1
   sonnet: global.anthropic.claude-sonnet-4-6
   haiku: global.anthropic.claude-haiku-4-5-20251001-v1:0
-agent_main_model_id: global.anthropic.claude-sonnet-4-6
+agent_main_model_id: global.anthropic.claude-opus-4-6-v1
 agent_scan_model_id: global.anthropic.claude-sonnet-4-6
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_model_id: global.anthropic.claude-opus-4-6-v1
@@ -44,8 +44,23 @@ embedding_dimension: 1024
 embedding_enabled: true
 auto_rca_enabled: true
 auto_fix_enabled: true
+
+# ── Prevention (graph-based proactive checks) ──
+patrol_graph_checks_enabled: true   # SPOF + capacity-risk analysis in health patrol
+rca_topology_context_enabled: true  # inject topology context into RCA invocations
 executor_enabled: true
 executor_auto_approve_l0_l1: true
+
+# ── Governed Autonomy + ITSM (MVP-2.0.0) ──
+policy_engine_enabled: true
+policy_file: config/policies.yaml
+itsm_enabled: false        # true + a backend URL = mirror lifecycle into ITSM
+itsm_dry_run: true         # log intended API calls instead of sending
+itsm_servicenow_url: ""
+itsm_servicenow_user: ""
+itsm_jira_url: ""
+itsm_jira_email: ""
+itsm_jira_project_key: OPS
 notifications_enabled: true
 notifications_consolidated: false
 agent_output_detail: medium
@@ -90,10 +105,9 @@ skills_curator_enabled: true
 skills_draft_stale_days: 30
 skills_draft_archive_days: 60
 skills_security_scan_on_promote: true
-
-# ── ACP Enhanced Backend (MVP-1.3.0) — optional, default off ──
-acp_enhanced_enabled: false
-acp_enhanced_backend: claude-code
+acp_enhanced_enabled: true
+acp_enhanced_backend: kiro-cli
 acp_use_bedrock: true
 acp_timeout_seconds: 300
 acp_auto_approve_permissions: true
+agent_main_window_size: -1

@@ -83,7 +83,8 @@ SHELL_WRITE_COMMANDS = {
 SHELL_BLOCKED_PATTERNS = [
     r"rm\s+-rf\s+/\s*$",
     r"rm\s+-rf\s+/\*",
-    r"rm\s+-rf\s+--no-preserve-root",
+    r"rm\s+.*--no-preserve-root",
+    r"rm\s+(-\S+\s+)*-\S*(rf|fr)\S*\s+/\s*(\s|$)",
     "mkfs",
     r"dd\s+if=",
     "shutdown", "reboot", "poweroff", "halt", "init 0", "init 6",

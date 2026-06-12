@@ -94,6 +94,14 @@ async def lifespan(app: FastAPI):
     _setup_service_logging()
     init_db()
 
+    # Surface model-ID config drift early (unmatched IDs lose window tuning
+    # and may be rejected by Bedrock at invocation time)
+    try:
+        from agenticops.config import validate_agent_model_ids
+        validate_agent_model_ids()
+    except Exception:
+        pass
+
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
         try:
@@ -114,6 +122,14 @@ async def lifespan(app: FastAPI):
 
     _chat_sessions.start_cleanup()
     _executor_service.start()
+
+    # ITSM bridge (MVP-2.0.0): mirror issue/fix lifecycle into ServiceNow/Jira
+    try:
+        from agenticops.itsm import start_itsm_bridge
+        if start_itsm_bridge():
+            logger.info("ITSM bridge started (dry_run=%s)", settings.itsm_dry_run)
+    except Exception as e:
+        logger.warning("ITSM bridge failed to start: %s", e)
 
     # MCP servers: lazy-start on first Agent creation (not here).
     # Pre-starting causes "session is currently running" conflict with Strands.
@@ -5364,6 +5380,19 @@ async def api_restore_agent_memory(agent: str, filename: str):
 
 # ============================================================================
 # Run Server Function
+# ============================================================================
+# Self-Improvement Metrics (MVP-2.0.0)
+# ============================================================================
+
+
+@app.get("/api/metrics/improvement")
+async def api_improvement_metrics(days: int = 90, fingerprint: Optional[str] = None):
+    """Self-improvement metrics: MTTR by pattern, first-time-fix rate, automation rate."""
+    from agenticops.services.metrics_service import get_improvement_metrics
+
+    return get_improvement_metrics(days=days, fingerprint=fingerprint)
+
+
 # ============================================================================
 
 

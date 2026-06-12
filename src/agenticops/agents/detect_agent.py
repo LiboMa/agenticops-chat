@@ -166,7 +166,6 @@ TOOL SELECTION — accuracy first:
 - Choose whichever tool produces the most accurate result for the task at hand.
 - When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
-- 对于已有的issue，是否真正可以做到重复问题，自动归集，不再重新进去RCA的Pipeline流程。
 8.5. WEB RESEARCH: When investigating potential service-wide issues, call
      activate_skill("web-research") to load web_fetch, then check cloud provider
      status pages (e.g., AWS Health Dashboard) to confirm whether symptoms are
@@ -255,14 +254,20 @@ def _build_detect_agent_for_account(
 
 @tool
 def detect_agent(scope: str = "all", deep: bool = False) -> str:
-    """Check health of resources via CloudWatch Alarms, metrics, and security posture.
+    """Check resource health via CloudWatch alarms, metrics, and security posture.
+
+    USE FOR: "health", "detect", "issues", "problems", "check", "status", and
+    security checks — "security audit", "security posture", "vulnerability",
+    "compliance", "GuardDuty", "SecurityHub", "Inspector", "IAM audit"
+    (use scope='security' for security-only). Creates HealthIssues for findings.
+    NOT FOR: resource inventory (scan_agent) or root-cause analysis (rca_agent).
 
     Args:
-        scope: Resource type filter (e.g., 'EC2', 'RDS', 'security') or 'all' for all resources including security. Use 'security' for security-only checks (GuardDuty, SecurityHub, Inspector, IAM, SG audit, CloudTrail, encryption).
-        deep: If True, pull detailed metrics/logs even for OK resources
+        scope: Resource type filter (e.g., 'EC2', 'RDS', 'security') or 'all'.
+        deep: If True, pull detailed metrics/logs even for OK resources.
 
     Returns:
-        Health check summary with issues found, severity breakdown, monitoring gaps, and security findings.
+        Health summary: issues found, severity breakdown, security findings.
     """
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session

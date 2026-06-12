@@ -50,7 +50,13 @@ from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
-EXECUTOR_SYSTEM_PROMPT = f"""You are the Executor Agent for AgenticOps (L4 Auto Operation).
+def _build_executor_prompt() -> str:
+    """Build the executor system prompt at agent-construction time.
+
+    A function (not a module-level f-string) so runtime settings changes
+    (executor_enabled, timeouts) are reflected without a process restart.
+    """
+    return f"""You are the Executor Agent for AgenticOps (L4 Auto Operation).
 Your job is to execute APPROVED fix plans — and ONLY approved plans.
 
 EXECUTION PROTOCOL (7 steps — follow in exact order):
@@ -146,13 +152,20 @@ When the step has no explicit type, infer from the command:
 """
 
 
+# Module-level constant kept for tests/tooling that measure the prompt;
+# agent construction calls _build_executor_prompt() for fresh settings.
+EXECUTOR_SYSTEM_PROMPT = _build_executor_prompt()
+
+
 @tool
 def executor_agent(fix_plan_id: int) -> str:
-    """Execute an approved FixPlan following the L4 execution protocol.
+    """Execute an APPROVED FixPlan following the 7-step execution protocol.
 
-    Retrieves the approved plan, runs pre-checks, executes each step,
-    verifies with post-checks, and records the full execution trail.
-    Only approved plans are executed; unapproved plans are rejected.
+    USE FOR: "execute", "run fix", "apply fix" + a plan ID. SAFETY: only
+    approved plans run — verify with get_approved_fix_plan and confirm with
+    the user BEFORE dispatching. Runs pre-checks, executes steps exactly as
+    written, post-checks, rolls back on failure, records the audit trail.
+    NOT FOR: creating plans (sre_agent) or approving them (approve_fix_plan).
 
     Args:
         fix_plan_id: The FixPlan ID to execute (must be in 'approved' status).
@@ -209,7 +222,7 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         agent = Agent(
-            system_prompt=build_system_prompt(EXECUTOR_SYSTEM_PROMPT, include_account=False, agent_type="executor", agent_name="executor"),
+            system_prompt=build_system_prompt(_build_executor_prompt(), include_account=False, agent_type="executor", agent_name="executor"),
             model=model,
             callback_handler=None,
             conversation_manager=get_agent_conversation_manager("executor"),

@@ -1,0 +1,71 @@
+# AgenticOps Governed-Autonomy Policy (MVP-2.0.0)
+#
+# Declarative approval rules for fix plans. Evaluated top-down; first match
+# wins. This file IS the autonomy contract: every automated approval traces
+# back to a named rule here (logged on the issue's pipeline-event timeline),
+# which is the audit evidence story for SOC 2 CC8.1 / ITIL change enablement.
+#
+# Actions:
+#   auto_approve        — approve without a human (audited)
+#   require_human       — wait for in-app / IM human approval
+#   require_itsm_change — gate on an external ITSM change request (ServiceNow/Jira)
+#   block               — never execute
+#   escalate            — re-evaluate at one risk tier higher
+#
+# Match fields (all optional; omitted = match anything):
+#   risk_level: [L0, L1, L2, L3, L4]
+#   severity: [critical, high, medium, low]
+#   provider: [aws, azure, gcp, alicloud, kubernetes, ssh, prometheus]
+#   resource_pattern: <regex matched against the issue's resource_id>
+#   blast_radius_gte: <int — downstream nodes affected per the infra graph>
+#   in_change_freeze: true — matches inside any freeze_windows entry below
+
+version: 1
+
+defaults:
+  action: require_human   # anything unmatched falls back to a human gate
+
+freeze_windows: []
+  # - name: cny-freeze-2027
+  #   start: 2027-02-10T00:00:00+08:00
+  #   end:   2027-02-20T23:59:59+08:00
+
+rules:
+  # Hard stop during declared change freezes, regardless of risk.
+  - name: freeze-window-block
+    match: { in_change_freeze: true }
+    action: block
+
+  # Wide-impact fixes get bumped a tier even when nominally low-risk
+  # (graph-engine blast radius: number of downstream-affected nodes).
+  - name: blast-radius-escalation
+    match: { blast_radius_gte: 3 }
+    action: escalate
+
+  # Pre-execution simulation gate: if the graph engine predicts the fix's
+  # target going down would isolate subnets or break critical paths
+  # (impact_analysis severity), escalate one tier before approving.
+  # Fail-soft: no graph data → impact_severity is None → rule doesn't match.
+  - name: impact-severity-escalation
+    match: { impact_severity: [critical, high] }
+    action: escalate
+
+  # The historical default: L0/L1 auto-approve. As an ITIL *standard change*
+  # this rule is the one-time human pre-authorization of the pattern.
+  - name: auto-approve-low-risk
+    match: { risk_level: [L0, L1] }
+    action: auto_approve
+    itsm_change_type: standard
+
+  # Medium/high risk: human approval (in-app/IM today; flip action to
+  # require_itsm_change to gate on a ServiceNow normal change instead).
+  - name: medium-high-risk-human
+    match: { risk_level: [L2, L3] }
+    action: require_human
+    itsm_change_type: normal
+
+  # L4 (architecture-level) is never auto-executed.
+  - name: l4-never-auto
+    match: { risk_level: [L4] }
+    action: require_human
+    itsm_change_type: emergency

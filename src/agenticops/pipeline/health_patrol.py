@@ -82,6 +82,86 @@ class RunDetectStep(PipelineStep):
         return {"detect_result": str(result)[:2000]}
 
 
+class AnalyzeGraphRisksStep(PipelineStep):
+    """Preventive structural risk analysis from the persisted infra graph.
+
+    Runs SPOF detection and capacity-risk analysis as pure code (zero LLM,
+    zero AWS calls — reads the GraphStore populated by graph sync). Findings
+    become HealthIssues with auto_rca=False: structural risks need design
+    review, not CloudTrail forensics. Fingerprint dedup in the issue layer
+    collapses repeat patrol findings into one open issue.
+    """
+
+    def __init__(self):
+        super().__init__("analyze_graph_risks", depends_on=["run_detect"])
+
+    async def execute(self, context: Dict[str, Any]) -> Any:
+        config = context.get("config", {})
+        from agenticops.config import settings
+
+        enabled = config.get("graph_checks", settings.patrol_graph_checks_enabled)
+        if not enabled:
+            return {"skipped": True, "note": "graph checks disabled"}
+
+        try:
+            from agenticops.graph.store import GraphStore
+            from agenticops.graph.algorithms import detect_spof, capacity_risk_analysis
+        except ImportError:
+            return {"skipped": True, "note": "graph module not available"}
+
+        try:
+            store = GraphStore()
+            graph = store.load_graph(scope=config.get("graph_scope", ""))
+        except Exception as e:
+            logger.warning("Graph load failed in patrol: %s", e)
+            return {"skipped": True, "note": f"graph load failed: {e}"}
+
+        if graph.graph.number_of_nodes() == 0:
+            return {"skipped": True, "note": "graph empty — run graph sync first"}
+
+        from agenticops.tools.metadata_tools import _create_health_issue_impl
+
+        issues_created: list[str] = []
+
+        spof_report = detect_spof(graph)
+        for item in spof_report.articulation_points:
+            result = _create_health_issue_impl(
+                resource_id=item.node_id,
+                severity="medium",
+                source="graph_patrol",
+                title=f"SPOF: {item.label or item.node_id}",
+                description=(
+                    f"{item.impact_description} "
+                    f"(affected components: {item.affected_components})"
+                ),
+                auto_rca=False,
+            )
+            issues_created.append(result)
+
+        capacity_report = capacity_risk_analysis(
+            graph, threshold=float(config.get("capacity_threshold", 0.8))
+        )
+        for risk in capacity_report.items:
+            result = _create_health_issue_impl(
+                resource_id=risk.node_id,
+                severity="high" if risk.risk_level == "critical" else "medium",
+                source="graph_patrol",
+                title=f"Capacity risk: {risk.label or risk.node_id} {risk.metric}",
+                description=(
+                    f"{risk.metric} at {risk.utilization_pct:.0f}% "
+                    f"({risk.current:.0f}/{risk.maximum:.0f})"
+                ),
+                auto_rca=False,
+            )
+            issues_created.append(result)
+
+        return {
+            "spofs": spof_report.total_spofs,
+            "capacity_risks": capacity_report.total_risks,
+            "issues": issues_created,
+        }
+
+
 class HealthPatrolPipeline(Pipeline):
     """Proactive health patrol — runs detect_agent on a schedule.
 
@@ -89,12 +169,16 @@ class HealthPatrolPipeline(Pipeline):
         scope: Resource type filter (default "all")
         deep: Run deep investigation (default False)
         providers: Comma-separated provider names or "all" (default "all")
+        graph_checks: Run SPOF/capacity graph analysis (default from settings)
+        graph_scope: Region or vpc-id filter for the graph load (default all)
+        capacity_threshold: Utilization threshold 0-1 (default 0.8)
     """
 
     def __init__(self, account: Optional[CloudAccount] = None, config: Optional[dict] = None):
         super().__init__("HealthPatrol", account)
         self.add_step(FetchExternalAlertsStep())
         self.add_step(RunDetectStep())
+        self.add_step(AnalyzeGraphRisksStep())
         self.patrol_config = config or {}
 
     async def execute(self) -> PipelineResult:

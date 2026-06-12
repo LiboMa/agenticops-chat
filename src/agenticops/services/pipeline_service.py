@@ -93,11 +93,14 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
 
 
 def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
-    """Auto-approve L0/L1 fix plans. Synchronous — no agent needed.
+    """Policy-gated auto-approval for fix plans. Synchronous — no agent needed.
 
     Called from save_fix_plan() when a new plan is persisted.
-    L2/L3 plans are skipped (require human approval).
-    On success, chains to trigger_auto_execute().
+    With policy_engine_enabled, config/policies.yaml decides (auto_approve /
+    require_human / require_itsm_change / block / escalate); the decision and
+    its matching rule are logged to the pipeline-event timeline as the audit
+    record. Legacy behavior (hardcoded L0/L1) is preserved when disabled.
+    On auto-approval, chains to trigger_auto_execute().
     """
     if not settings.auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping approve for plan #%d", fix_plan_id)
@@ -110,6 +113,7 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     try:
         from agenticops.models import FixPlan, HealthIssue, get_db_session
 
+        decision = None
         with get_db_session() as session:
             plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
             if not plan:
@@ -123,14 +127,23 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
-            if plan.risk_level not in ("L0", "L1"):
+            if settings.policy_engine_enabled:
+                decision = _evaluate_policy_for_plan(session, plan)
+                if decision.action != "auto_approve":
+                    _log_policy_decision(plan, decision, trace_id)
+                    logger.info(
+                        "Policy '%s' → %s for FixPlan #%d (%s) — not auto-approving",
+                        decision.rule_name, decision.action, fix_plan_id, plan.risk_level,
+                    )
+                    return
+            elif plan.risk_level not in ("L0", "L1"):
                 logger.info(
                     "Auto-approve: FixPlan #%d is %s — L2/L3 require human approval",
                     fix_plan_id, plan.risk_level,
                 )
                 return
 
-            # Approve L0/L1 plan
+            # Approve plan (policy auto_approve, or legacy L0/L1)
             plan.status = "approved"
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
@@ -160,8 +173,11 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
 
         try:
             from agenticops.services.pipeline_events import log_event
+            detail = {"plan_id": fix_plan_id, "approved_by": "agent:auto-pipeline", "risk_level": risk_level}
+            if decision is not None:
+                detail["policy_decision"] = decision.to_dict()
             log_event(health_issue_id, "fix_approved", "approval",
-                      detail={"plan_id": fix_plan_id, "approved_by": "agent:auto-pipeline", "risk_level": risk_level},
+                      detail=detail,
                       actor="agent:auto-pipeline", trace_id=resolved_tid)
         except Exception:
             pass
@@ -171,6 +187,68 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
 
     except Exception:
         logger.exception("Auto-approve failed for FixPlan #%d", fix_plan_id)
+
+
+def _evaluate_policy_for_plan(session, plan):
+    """Build policy-engine inputs from the plan's issue context and evaluate.
+
+    Runs an account-scoped blast-radius estimate AND a pre-execution impact
+    simulation (graph engine, zero AWS calls) so policies can gate on what
+    the fix would break, not just how risky the change class is. Both are
+    fail-soft: no graph data → None → simulation rules simply don't match.
+    """
+    from agenticops.models import CloudAccount, HealthIssue
+    from agenticops.services.policy_engine import (
+        estimate_blast_radius,
+        get_policy_engine,
+        simulate_fix_impact,
+    )
+
+    severity = provider = resource_id = native_account_id = None
+    issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+    if issue:
+        severity = issue.severity
+        provider = issue.provider
+        resource_id = issue.resource_id
+        # Graph nodes are keyed by the cloud-native account number, not our FK
+        if issue.account_id:
+            account = session.query(CloudAccount).filter_by(id=issue.account_id).first()
+            if account:
+                native_account_id = (account.credentials or {}).get("account_id") or None
+
+    impact = simulate_fix_impact(resource_id, native_account_id)
+    decision = get_policy_engine().evaluate(
+        risk_level=plan.risk_level,
+        severity=severity,
+        provider=provider,
+        resource_id=resource_id,
+        blast_radius=estimate_blast_radius(resource_id, native_account_id),
+        impact_severity=impact["severity"] if impact else None,
+    )
+    if impact:
+        decision.reasons.append(
+            f"pre-execution simulation: {impact['affected_nodes']} nodes affected, "
+            f"{impact['isolated_subnets']} subnets isolated, severity={impact['severity']}"
+        )
+    return decision
+
+
+def _log_policy_decision(plan, decision, trace_id: Optional[str]) -> None:
+    """Record a non-approving policy decision on the issue timeline (audit trail)."""
+    try:
+        from agenticops.services.pipeline_events import log_event
+        log_event(
+            plan.health_issue_id,
+            "policy_decision",
+            "approval",
+            status=decision.action,
+            detail={"plan_id": plan.id, "risk_level": plan.risk_level,
+                    "policy_decision": decision.to_dict()},
+            actor="policy-engine",
+            trace_id=trace_id,
+        )
+    except Exception:
+        pass
 
 
 # ── Stage 3: Auto-Execute (after plan approved) ──────────────────────

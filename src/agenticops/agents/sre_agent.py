@@ -57,11 +57,23 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
 from agenticops.providers.base import get_cli_tool_for_issue, get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.agents.preamble import build_system_prompt
+from agenticops.agents.preamble import (
+    LOCAL_FILE_INSPECTION_BLOCK,
+    build_system_prompt,
+    skills_activation_block,
+)
 from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.agents.enhanced import enhanced_task
 
 logger = logging.getLogger(__name__)
+
+_SRE_SKILLS_BLOCK = skills_activation_block(
+    extra_routes=['Security → activate_skill("security-engineer")'],
+    outro=(
+        "The skill provides decision trees, command references, and fix patterns — use them to\n"
+        "     inform your risk assessment and fix plan steps."
+    ),
+)
 
 SRE_SYSTEM_PROMPT = """You are the SRE Agent for AgenticOps.
 You have TWO modes of operation:
@@ -72,18 +84,7 @@ You are READ-ONLY — you NEVER execute fixes or modify AWS resources.
 
 MODE A — FIX PLAN PROTOCOL:
 1. SETUP: Call get_active_account and assume_role to get AWS credentials.
-1.5. ACTIVATE DOMAIN SKILLS: Based on the issue type, call activate_skill to load
-     domain-specific troubleshooting knowledge BEFORE investigating:
-     - EC2/host issues → activate_skill("linux-admin") + activate_skill("aws-compute")
-     - Network/connectivity → activate_skill("network-engineer")
-     - Kubernetes/EKS/pods → activate_skill("kubernetes-admin")
-     - RDS/DynamoDB/Redis → activate_skill("database-admin")
-     - CloudWatch/metrics → activate_skill("monitoring")
-     - Log analysis → activate_skill("log-analysis")
-     - S3/EBS/EFS → activate_skill("aws-storage")
-     - Security → activate_skill("security-engineer")
-     The skill provides decision trees, command references, and fix patterns — use them to
-     inform your risk assessment and fix plan steps.
+1.5. __SKILLS_BLOCK__
 2. READ: Call get_health_issue and get_rca_result for the given issue.
 3. SEARCH KB: Call search_sops for relevant procedures.
    Call search_similar_cases with a detailed description for past resolutions.
@@ -128,11 +129,7 @@ MODE A — FIX PLAN PROTOCOL:
      c. Follow the decision trees from the activated skill for systematic diagnosis.
      d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
         should be included in the fix plan, NOT executed directly.
-5.6. LOCAL FILE INSPECTION (when you need to read configs, logs, templates, or scripts):
-     a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
-     b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
-        — these tools are dynamically registered when you activate the skill.
-     c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
+5.6. __LOCAL_FILE_BLOCK__
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
    - Pre-checks (what to verify before starting)
@@ -196,6 +193,11 @@ TOOL SELECTION — accuracy first:
   Example: `aws ce get-cost-and-usage --time-period Start=2026-02-01,End=2026-02-28 --granularity MONTHLY --metrics BlendedCost --query 'ResultsByTime[].Total'`
 
 """
+
+# Shared fragments live in preamble.py (single-source for RCA + SRE);
+# placeholder substitution avoids f-string brace escaping in the long prompt.
+SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _SRE_SKILLS_BLOCK)
+SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
 
 
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
@@ -276,8 +278,10 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
 def sre_agent(issue_id: int) -> str:
     """Generate a Fix Plan for a HealthIssue based on RCA results.
 
-    READ-ONLY: does not execute any fixes, only produces a plan with
-    risk classification, ordered steps, rollback plan, and pre/post checks.
+    USE FOR: "fix", "plan fix", "remediate", "how do I resolve" + an issue ID
+    (I#N). READ-ONLY: never executes — produces a plan with risk level (L0-L3),
+    ordered steps, rollback plan, and pre/post checks for the approval gate.
+    NOT FOR: executing plans (executor_agent) or general queries (sre_query).
 
     Args:
         issue_id: The HealthIssue ID to create a fix plan for.
@@ -314,16 +318,19 @@ def sre_agent(issue_id: int) -> str:
 
 @tool
 def sre_query(query: str, region: str = "us-east-1") -> str:
-    """Query AWS infrastructure information using the SRE agent.
+    """CATCH-ALL for any AWS question that doesn't fit another agent.
 
-    Use this for general AWS questions that don't map to scan, detect, RCA, or
-    report workflows. The SRE agent has access to specialized tools AND the full
-    read-only AWS CLI, so it can answer questions about ANY AWS service.
+    USE FOR: ad-hoc queries on ANY AWS service via read-only CLI (60+ services
+    — ElastiCache, CloudFront, Route53, Step Functions, API Gateway, cost
+    breakdowns, GuardDuty findings...), any CLI command request, kubectl /
+    run_on_host operations, deep dependency-chain or change-simulation asks.
+    When unsure which agent fits an AWS question, choose this one.
+    NOT FOR: full inventory (scan_agent), health sweeps (detect_agent),
+    issue analysis (rca_agent), or fix plans (sre_agent).
 
     Args:
-        query: The question or investigation request (e.g., 'list all ElastiCache
-               clusters in us-east-1', 'show CloudFront distributions',
-               'what are my Route53 hosted zones', 'get cost breakdown for last month').
+        query: The question or investigation request (e.g., 'list ElastiCache
+               clusters', 'show CloudFront distributions', 'cost breakdown').
         region: AWS region to investigate (default: us-east-1).
 
     Returns:
