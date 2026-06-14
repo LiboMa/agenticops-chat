@@ -38,6 +38,11 @@ def test_db(tmp_path):
     orig_sops_dir = settings.sops_dir
     orig_cases_dir = settings.cases_dir
     orig_kb_dir = settings.knowledge_base_dir
+    orig_engine = models_mod._engine
+
+    # Dispose any lingering engine to avoid StaticPool cross-contamination
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
 
     # Reset singleton engine
     models_mod._engine = None
@@ -57,7 +62,11 @@ def test_db(tmp_path):
     yield session, tmp_path
 
     session.close()
-    models_mod._engine = None
+
+    # Dispose test engine before restoring
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
+    models_mod._engine = orig_engine
 
     # Restore original settings
     settings.database_url = orig_db_url

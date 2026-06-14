@@ -35,19 +35,58 @@ class TestEvidenceItem:
 
     def test_create_evidence_item(self):
         """Basic construction with all fields."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.evidence import EvidenceItem
+
+        item = EvidenceItem(
+            source="cloudtrail",
+            content="IAM role modified at 03:14 UTC",
+            confidence_delta=0.3,
+            raw_data={"event_id": "abc123"},
+        )
+        assert item.source == "cloudtrail"
+        assert item.content == "IAM role modified at 03:14 UTC"
+        assert item.confidence_delta == 0.3
+        assert item.raw_data == {"event_id": "abc123"}
+        assert item.timestamp is not None
 
     def test_evidence_item_defaults(self):
         """raw_data defaults to empty dict."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.evidence import EvidenceItem
+
+        item = EvidenceItem(
+            source="cloudwatch",
+            content="CPU spike",
+            confidence_delta=0.1,
+        )
+        assert item.raw_data == {}
 
     def test_evidence_item_confidence_delta_range(self):
         """confidence_delta should be -1.0 to 1.0."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.evidence import EvidenceItem
+
+        # Positive delta
+        pos = EvidenceItem(source="kb", content="match", confidence_delta=1.0)
+        assert -1.0 <= pos.confidence_delta <= 1.0
+
+        # Negative delta (contradicting evidence)
+        neg = EvidenceItem(source="trace", content="no match", confidence_delta=-0.5)
+        assert -1.0 <= neg.confidence_delta <= 1.0
 
     def test_evidence_item_serialization(self):
         """Should serialize to JSON (for prompt building)."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.evidence import EvidenceItem
+        import dataclasses
+
+        item = EvidenceItem(
+            source="memory",
+            content="Similar OOM seen last week",
+            confidence_delta=0.4,
+            raw_data={"memory_id": 42},
+        )
+        d = dataclasses.asdict(item)
+        serialized = json.dumps(d, default=str)
+        assert "memory" in serialized
+        assert "Similar OOM" in serialized
 
 
 class TestDeepRCAResult:
@@ -55,15 +94,49 @@ class TestDeepRCAResult:
 
     def test_create_result(self):
         """Full construction with all fields."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.deep_rca import DeepRCAResult
+        from agenticops.analyze.rca import RCAAnalysis
+
+        analysis = RCAAnalysis(root_cause="OOM kill", confidence_score=0.85)
+        result = DeepRCAResult(
+            analysis=analysis,
+            memory_hits=[{"content": "past oom", "confidence": 0.9}],
+            kb_matches=[{"title": "OOM case"}],
+            iterations=2,
+            verified=True,
+        )
+        assert result.analysis.root_cause == "OOM kill"
+        assert result.iterations == 2
+        assert result.verified is True
+        assert len(result.memory_hits) == 1
 
     def test_result_iteration_history(self):
         """iteration_history tracks per-loop state."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.deep_rca import DeepRCAResult
+        from agenticops.analyze.rca import RCAAnalysis
+
+        result = DeepRCAResult(
+            analysis=RCAAnalysis(root_cause="", confidence_score=0.0)
+        )
+        result.iteration_history.append({"iteration": 1, "confidence": 0.4})
+        result.iteration_history.append({"iteration": 2, "confidence": 0.75})
+        assert len(result.iteration_history) == 2
+        assert result.iteration_history[-1]["confidence"] == 0.75
 
     def test_result_memory_matches_present(self):
         """memory_matches populated from pre-investigation."""
-        pytest.skip("Awaiting Developer implementation")
+        from agenticops.analyze.deep_rca import DeepRCAResult
+        from agenticops.analyze.rca import RCAAnalysis
+
+        result = DeepRCAResult(
+            analysis=RCAAnalysis(root_cause="disk full", confidence_score=0.9),
+            memory_hits=[
+                {"content": "disk full on prod-db", "confidence": 0.92, "type": "episodic"},
+            ],
+            is_known_pattern=True,
+        )
+        assert result.is_known_pattern is True
+        assert result.memory_hits[0]["confidence"] == 0.92
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -18,6 +18,10 @@ def db_session(tmp_path):
     orig_db_url = settings.database_url
     orig_engine = models_mod._engine
 
+    # Dispose any lingering engine to avoid StaticPool cross-contamination
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
+
     # Reset singleton engine
     models_mod._engine = None
     db_url = f"sqlite:///{tmp_path}/test.db"
@@ -31,8 +35,12 @@ def db_session(tmp_path):
     yield session
     session.close()
 
+    # Dispose test engine before restoring
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
+
     # Restore original state — prevents leak to subsequent tests
-    models_mod._engine = None
+    models_mod._engine = orig_engine
     settings.database_url = orig_db_url
 
 
