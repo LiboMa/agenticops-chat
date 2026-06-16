@@ -64,11 +64,11 @@ class TestPatchRename:
 
 class TestGenerateSessionTitle:
 
-    @patch("boto3.client")
-    def test_returns_title(self, mock_boto_client):
-        mock_bedrock = MagicMock()
-        mock_boto_client.return_value = mock_bedrock
-        mock_bedrock.invoke_model.return_value = {
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_returns_title(self, mock_get_session):
+        mock_client = MagicMock()
+        mock_get_session.return_value.client.return_value = mock_client
+        mock_client.invoke_model.return_value = {
             "body": MagicMock(
                 read=MagicMock(return_value=json.dumps({
                     "content": [{"text": "AWS Health Check Setup"}]
@@ -78,16 +78,16 @@ class TestGenerateSessionTitle:
         title = _generate_session_title("check my aws health", "I found 3 issues in us-east-1")
         assert title == "AWS Health Check Setup"
 
-    @patch("boto3.client", side_effect=Exception("No credentials"))
-    def test_returns_none_on_failure(self, mock_boto_client):
+    @patch("agenticops.config.get_bedrock_boto_session", side_effect=Exception("No credentials"))
+    def test_returns_none_on_failure(self, mock_get_session):
         result = _generate_session_title("hello", "hi")
         assert result is None
 
-    @patch("boto3.client")
-    def test_returns_none_on_empty_response(self, mock_boto_client):
-        mock_bedrock = MagicMock()
-        mock_boto_client.return_value = mock_bedrock
-        mock_bedrock.invoke_model.return_value = {
+    @patch("agenticops.config.get_bedrock_boto_session")
+    def test_returns_none_on_empty_response(self, mock_get_session):
+        mock_client = MagicMock()
+        mock_get_session.return_value.client.return_value = mock_client
+        mock_client.invoke_model.return_value = {
             "body": MagicMock(
                 read=MagicMock(return_value=json.dumps({"content": [{"text": ""}]}).encode())
             )

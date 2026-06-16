@@ -73,8 +73,11 @@ def test_list_accounts_filter_by_provider(client):
     client.post("/api/accounts", json={"name": "a2", "provider": "azure", "credentials": {}, "regions": []})
     resp = client.get("/api/accounts?provider=aws")
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
-    assert resp.json()[0]["provider"] == "aws"
+    accounts = resp.json()
+    assert len(accounts) >= 1
+    assert all(a["provider"] == "aws" for a in accounts)
+    # Ensure our azure account is NOT in the filtered list
+    assert not any(a["name"] == "a2" for a in accounts)
 
 
 def test_create_account_duplicate_name(client):

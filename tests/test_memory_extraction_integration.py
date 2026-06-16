@@ -87,57 +87,17 @@ class TestLoadRawMessages:
 # ---------------------------------------------------------------------------
 
 class TestTriggerMemoryExtraction:
-    @patch("agenticops.web.memory_service.MemoryService")
-    def test_calls_extract_facts_and_experiences(self, MockMemSvc, session_with_messages):
-        from agenticops.web.session_manager import _trigger_memory_extraction
-        mock_instance = MockMemSvc.return_value
+    """Tests for _trigger_memory_extraction (deprecated no-op since cycle② 2026-05-31)."""
 
+    def test_is_noop(self, session_with_messages):
+        """Function is now a no-op; should return immediately without error."""
+        from agenticops.web.session_manager import _trigger_memory_extraction
+        # Should not raise
         _trigger_memory_extraction(session_with_messages)
 
-        mock_instance.extract_facts.assert_called_once()
-        args = mock_instance.extract_facts.call_args
-        assert args[0][0] == session_with_messages
-        assert len(args[0][1]) == 2  # 2 messages
-
-        mock_instance.extract_experiences.assert_called_once()
-        args = mock_instance.extract_experiences.call_args
-        assert args[0][0] == session_with_messages
-
-    @patch("agenticops.web.memory_service.MemoryService")
-    def test_skips_extraction_for_empty_session(self, MockMemSvc, empty_session):
+    def test_noop_for_empty_session(self, empty_session):
         from agenticops.web.session_manager import _trigger_memory_extraction
         _trigger_memory_extraction(empty_session)
-        MockMemSvc.return_value.extract_facts.assert_not_called()
-        MockMemSvc.return_value.extract_experiences.assert_not_called()
-
-    @patch("agenticops.web.memory_service.MemoryService")
-    def test_fact_extraction_failure_does_not_block_experience_extraction(
-        self, MockMemSvc, session_with_messages, caplog
-    ):
-        from agenticops.web.session_manager import _trigger_memory_extraction
-        mock_instance = MockMemSvc.return_value
-        mock_instance.extract_facts.side_effect = RuntimeError("LLM timeout")
-
-        with caplog.at_level(logging.ERROR):
-            _trigger_memory_extraction(session_with_messages)
-
-        # Facts failed but experiences should still be called
-        mock_instance.extract_experiences.assert_called_once()
-        assert "Failed to extract facts" in caplog.text
-
-    @patch("agenticops.web.memory_service.MemoryService")
-    def test_experience_extraction_failure_logged(
-        self, MockMemSvc, session_with_messages, caplog
-    ):
-        from agenticops.web.session_manager import _trigger_memory_extraction
-        mock_instance = MockMemSvc.return_value
-        mock_instance.extract_experiences.side_effect = RuntimeError("Embedding error")
-
-        with caplog.at_level(logging.ERROR):
-            _trigger_memory_extraction(session_with_messages)
-
-        mock_instance.extract_facts.assert_called_once()
-        assert "Failed to extract experiences" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -145,44 +105,66 @@ class TestTriggerMemoryExtraction:
 # ---------------------------------------------------------------------------
 
 class TestTriggerSummaryAndMemory:
-    @patch("agenticops.web.memory_service.MemoryService")
+    """Tests for _trigger_summary_and_memory (only summary; memory extraction removed cycle②)."""
+
+    @patch("agenticops.web.session_manager._load_raw_messages")
+    @patch("agenticops.models.get_db_session")
     @patch("agenticops.web.summary_service.SummaryService")
-    def test_calls_summary_and_memory_services(
-        self, MockSumSvc, MockMemSvc, session_with_messages
+    def test_calls_summary_service(
+        self, MockSumSvc, mock_db, mock_load, session_with_messages
     ):
         from agenticops.web.session_manager import _trigger_summary_and_memory
+
+        # Provide messages so the function doesn't early-return
+        mock_load.return_value = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+
+        # Mock DB lookup to return a row with id
+        mock_row = MagicMock()
+        mock_row.id = 42
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session.query.return_value.filter.return_value.first.return_value = mock_row
+        mock_db.return_value = mock_session
 
         _trigger_summary_and_memory(session_with_messages)
 
         MockSumSvc.return_value.generate_summary.assert_called_once()
-        MockMemSvc.return_value.extract_facts.assert_called_once()
-        MockMemSvc.return_value.extract_experiences.assert_called_once()
 
-    @patch("agenticops.web.memory_service.MemoryService")
+    @patch("agenticops.web.session_manager._load_raw_messages")
+    @patch("agenticops.models.get_db_session")
     @patch("agenticops.web.summary_service.SummaryService")
-    def test_summary_failure_does_not_block_memory(
-        self, MockSumSvc, MockMemSvc, session_with_messages, caplog
+    def test_summary_failure_logged(
+        self, MockSumSvc, mock_db, mock_load, session_with_messages, caplog
     ):
         from agenticops.web.session_manager import _trigger_summary_and_memory
+
+        mock_load.return_value = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+
+        mock_row = MagicMock()
+        mock_row.id = 42
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session.query.return_value.filter.return_value.first.return_value = mock_row
+        mock_db.return_value = mock_session
         MockSumSvc.return_value.generate_summary.side_effect = RuntimeError("LLM down")
 
         with caplog.at_level(logging.ERROR):
             _trigger_summary_and_memory(session_with_messages)
 
-        # Memory extraction should still proceed
-        MockMemSvc.return_value.extract_facts.assert_called_once()
-        MockMemSvc.return_value.extract_experiences.assert_called_once()
         assert "Failed to generate summary" in caplog.text
 
-    @patch("agenticops.web.memory_service.MemoryService")
-    @patch("agenticops.web.summary_service.SummaryService")
-    def test_skips_all_for_empty_session(
-        self, MockSumSvc, MockMemSvc, empty_session
-    ):
+    def test_skips_all_for_empty_session(self, empty_session):
         from agenticops.web.session_manager import _trigger_summary_and_memory
+        # Should not raise
         _trigger_summary_and_memory(empty_session)
-        MockSumSvc.return_value.generate_summary.assert_not_called()
-        MockMemSvc.return_value.extract_facts.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

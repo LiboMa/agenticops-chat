@@ -22,6 +22,15 @@ def db_session(tmp_path):
     settings.reports_dir = tmp_path / "reports"
     settings.reports_dir.mkdir(parents=True, exist_ok=True)
 
+    # Disable S3 mirror so tests use local storage only
+    orig_s3_bucket = settings.report_s3_bucket
+    settings.report_s3_bucket = ""
+
+    # Reset storage backend singleton to pick up new reports_dir
+    import agenticops.storage.backend as _storage_mod
+    orig_backend = _storage_mod._backend
+    _storage_mod._backend = None
+
     engine = models_mod.get_engine()
     Base.metadata.create_all(engine)
 
@@ -29,6 +38,8 @@ def db_session(tmp_path):
     yield session
     session.close()
     models_mod._engine = None
+    settings.report_s3_bucket = orig_s3_bucket
+    _storage_mod._backend = orig_backend
 
 
 class TestSaveReport:
@@ -303,7 +314,7 @@ class TestSaveReportErrors:
                 raise OSError("Disk full")
 
         monkeypatch.setattr(
-            "agenticops.storage.get_storage_backend",
+            "agenticops.storage.backend.get_storage_backend",
             lambda: _FailBackend(),
         )
 

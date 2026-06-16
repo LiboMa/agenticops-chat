@@ -72,19 +72,19 @@ class TestBufferOrSend:
 
     @patch("agenticops.services.notification_service.settings")
     @patch("agenticops.services.notification_service.notify_event")
-    def test_send_immediately_when_issue_id_none(self, mock_notify, mock_settings):
+    def test_suppressed_when_consolidated_issue_id_none(self, mock_notify, mock_settings):
+        """When consolidated=True, ALL notifications are suppressed (even issue_id=None)."""
         mock_settings.notifications_consolidated = True
         _buffer_or_send(None, "report_saved", "subj", "body", None)
-        mock_notify.assert_called_once()
+        mock_notify.assert_not_called()
 
     @patch("agenticops.services.notification_service.settings")
     @patch("agenticops.services.notification_service.notify_event")
-    def test_buffers_when_consolidated_and_issue_id(self, mock_notify, mock_settings):
+    def test_suppressed_when_consolidated_and_issue_id(self, mock_notify, mock_settings):
+        """When consolidated=True, per-issue notifications are suppressed (final report only)."""
         mock_settings.notifications_consolidated = True
         _buffer_or_send(42, "issue_created", "subj", "body", "medium")
         mock_notify.assert_not_called()
-        assert 42 in _consolidated_buffer
-        assert len(_consolidated_buffer[42]) == 1
 
     def teardown_method(self):
         with _buffer_lock:

@@ -153,9 +153,8 @@ class TestSkillXMLTruncation:
             path=Path("/tmp/fake"),
         )
         xml = build_available_skills_xml([skill])
-        assert "Short description" in xml
-        # Should NOT include "Extra." since we take first sentence
-        assert "Extra." not in xml
+        # Short descriptions (under _MAX_DESC_XML) are preserved in full
+        assert "Short description. Extra." in xml
 
     def test_draft_skill_tagged(self):
         from agenticops.skills.loader import build_available_skills_xml, SkillMetadata

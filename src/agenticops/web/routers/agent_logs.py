@@ -1,6 +1,6 @@
 """Agent log / token-tracking API endpoints — extracted from app.py (no logic change)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -112,7 +112,7 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
     """Per-agent token consumption aggregation over a time window."""
     from agenticops.models import AgentLog
 
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     with get_db_session() as db:
         rows = (
