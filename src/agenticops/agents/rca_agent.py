@@ -50,7 +50,11 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
 from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.agents.preamble import build_system_prompt
+from agenticops.agents.preamble import (
+    LOCAL_FILE_INSPECTION_BLOCK,
+    build_system_prompt,
+    skills_activation_block,
+)
 from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.tools.integration_tools import (
     query_provider_metrics,
@@ -59,23 +63,22 @@ from agenticops.tools.integration_tools import (
 
 logger = logging.getLogger(__name__)
 
+_RCA_SKILLS_BLOCK = skills_activation_block(
+    extra_routes=[
+        'Service degradation/latency/5xx/cascading failures → activate_skill("distributed-tracing")',
+    ],
+    outro="The skill provides decision trees and command references — use them to guide your investigation.",
+)
+
 RCA_SYSTEM_PROMPT = """You are the RCA Agent for AgenticOps.
 Your job is to perform Root Cause Analysis on a specific HealthIssue.
 
 INVESTIGATION PROTOCOL — follow this order strictly:
 
-1. SETUP: Call get_active_account and assume_role to get AWS credentials.
-1.5. ACTIVATE DOMAIN SKILLS: Based on the issue type, call activate_skill to load
-     domain-specific troubleshooting knowledge BEFORE investigating:
-     - EC2/host issues → activate_skill("linux-admin") + activate_skill("aws-compute")
-     - Network/connectivity → activate_skill("network-engineer")
-     - Kubernetes/EKS/pods → activate_skill("kubernetes-admin")
-     - RDS/DynamoDB/Redis → activate_skill("database-admin")
-     - CloudWatch/metrics → activate_skill("monitoring")
-     - Log analysis → activate_skill("log-analysis")
-     - S3/EBS/EFS → activate_skill("aws-storage")
-     - Service degradation/latency/5xx/cascading failures → activate_skill("distributed-tracing")
-     The skill provides decision trees and command references — use them to guide your investigation.
+1. SETUP: Call get_active_account to see enabled accounts. Tools are account-addressed —
+   pass account='<name>' when known, or omit it (single-account / inventory-matched
+   hosts resolve automatically). Credentials come ONLY from registered accounts.
+1.5. __SKILLS_BLOCK__
 2. READ ISSUE: Call get_health_issue with the given issue_id to understand the problem.
 3. SET STATUS: Call update_health_issue_status to set status to 'investigating'.
 4. SEARCH KNOWLEDGE BASE:
@@ -131,14 +134,11 @@ INVESTIGATION PROTOCOL — follow this order strictly:
 8. SAVE: Call save_rca_result with all findings.
 8.5. EXTENDED INVESTIGATION: Use the provided cloud CLI tool for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
-8.6. LOCAL FILE INSPECTION (when you need to check configs, logs, or templates):
-     a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
-     b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
-        — these tools are dynamically registered when you activate the skill.
-     c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
+8.6. __LOCAL_FILE_BLOCK__
 8.7. HOST-LEVEL INVESTIGATION (when you need OS-level data from an EC2 instance):
-     a. Use run_on_host(host_id=INSTANCE_ID, command="...", method="ssm") to execute
-        diagnostic commands on the host (ps, top, df, free, journalctl, ss, etc.).
+     a. Use run_on_host(host_id=INSTANCE_ID, command="...") to execute diagnostic
+        commands (ps, top, df, free, journalctl, ss, etc.). method="auto" (default)
+        tries SSM then falls back to SSH automatically if SSM is unavailable.
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.
@@ -175,14 +175,71 @@ TOOL SELECTION — accuracy first:
 
 """
 
+# Shared fragments live in preamble.py (single-source for RCA + SRE);
+# placeholder substitution avoids f-string brace escaping in the long prompt.
+RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _RCA_SKILLS_BLOCK)
+RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
+
+
+def _build_topology_context(resource_id: str, max_chars: int = 2000) -> str:
+    """Build a TOPOLOGY CONTEXT block from the persisted graph (zero AWS, zero LLM).
+
+    Combines the resource's graph neighborhood (get_alert_context) with recent
+    topology-change snapshots so the RCA agent sees "what changed" without
+    extra tool calls. Fail-soft: any error returns "" and never blocks RCA.
+    """
+    if not settings.rca_topology_context_enabled or not resource_id or resource_id == "unknown":
+        return ""
+    try:
+        lines: list[str] = []
+
+        from agenticops.graph.context import get_alert_context
+        ctx = get_alert_context(resource_id)
+        if ctx:
+            lines.append(f"Resource position: {ctx['topology_summary']}")
+            deps = ctx.get("dependencies", {})
+            downstream = deps.get("downstream", [])[:5]
+            if downstream:
+                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in downstream]
+                lines.append(f"Downstream dependents: {', '.join(dep_strs)}")
+            upstream = deps.get("upstream", [])[:5]
+            if upstream:
+                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in upstream]
+                lines.append(f"Upstream dependencies: {', '.join(dep_strs)}")
+
+        from agenticops.graph.store import GraphStore
+        snapshots = GraphStore().get_recent_snapshots(limit=5)
+        changed = [
+            s for s in snapshots
+            if (s.get("nodes_added") or 0) + (s.get("nodes_removed") or 0) + (s.get("nodes_updated") or 0) > 0
+        ]
+        if changed:
+            lines.append("Recent topology changes (graph sync history):")
+            for s in changed:
+                lines.append(
+                    f"  {s['snapshot_at']}: +{s['nodes_added']} added, "
+                    f"~{s['nodes_updated']} updated, -{s['nodes_removed']} removed"
+                    f" (scope={s['scope'] or 'all'})"
+                )
+
+        if not lines:
+            return ""
+        block = "TOPOLOGY CONTEXT (from infrastructure graph — pre-fetched, no tool call needed):\n" + "\n".join(lines)
+        return block[:max_chars]
+    except Exception:
+        logger.debug("Topology context unavailable for %s", resource_id, exc_info=True)
+        return ""
+
 
 @tool
 def rca_agent(issue_id: int) -> str:
     """Perform Root Cause Analysis on a HealthIssue.
 
-    Investigates the issue using CloudTrail, CloudWatch metrics/logs,
-    and the Knowledge Base (SOPs + similar cases). Saves structured
-    RCA results to metadata.
+    USE FOR: "analyze", "investigate", "RCA", "root cause", "why did this
+    happen" + an issue ID (I#N). Also host-level troubleshooting during an
+    investigation (has run_on_host + run_kubectl). Investigates via CloudTrail,
+    metrics/logs, topology, and the KB; saves a structured RCAResult.
+    NOT FOR: generating fix plans (sre_agent) or general AWS queries (sre_query).
 
     Args:
         issue_id: The HealthIssue ID to analyze.
@@ -196,12 +253,15 @@ def rca_agent(issue_id: int) -> str:
         with batch_mode():
             # Resolve provider CLI tool from issue's account
             cli_tool = None
+            issue_resource_id = ""
             try:
                 from agenticops.models import HealthIssue, get_db_session
                 with get_db_session() as db:
                     issue = db.query(HealthIssue).filter_by(id=issue_id).first()
-                    if issue and issue.account_id:
-                        cli_tool = get_cli_tool_for_issue(issue.account_id)
+                    if issue:
+                        issue_resource_id = issue.resource_id or ""
+                        if issue.account_id:
+                            cli_tool = get_cli_tool_for_issue(issue.account_id)
             except Exception:
                 pass
 
@@ -268,10 +328,15 @@ def rca_agent(issue_id: int) -> str:
                 ],
             )
 
+            prompt = f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol."
+            topology_block = _build_topology_context(issue_resource_id)
+            if topology_block:
+                prompt = f"{prompt}\n\n{topology_block}"
+
             from agenticops.agents.preamble import invoke_with_retry
             from agenticops.services.agent_log_service import track_agent
             with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
-                result = invoke_with_retry(agent, f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol.")
+                result = invoke_with_retry(agent, prompt)
                 tracker.set_result(result)
             return str(result)
     except Exception as e:

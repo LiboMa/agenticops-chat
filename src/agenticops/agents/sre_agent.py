@@ -57,10 +57,23 @@ from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
 from agenticops.providers.base import get_cli_tool_for_issue, get_all_cli_tools
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
-from agenticops.agents.preamble import build_system_prompt
+from agenticops.agents.preamble import (
+    LOCAL_FILE_INSPECTION_BLOCK,
+    build_system_prompt,
+    skills_activation_block,
+)
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.agents.enhanced import enhanced_task
 
 logger = logging.getLogger(__name__)
+
+_SRE_SKILLS_BLOCK = skills_activation_block(
+    extra_routes=['Security → activate_skill("security-engineer")'],
+    outro=(
+        "The skill provides decision trees, command references, and fix patterns — use them to\n"
+        "     inform your risk assessment and fix plan steps."
+    ),
+)
 
 SRE_SYSTEM_PROMPT = """You are the SRE Agent for AgenticOps.
 You have TWO modes of operation:
@@ -70,19 +83,10 @@ You have TWO modes of operation:
 You are READ-ONLY — you NEVER execute fixes or modify AWS resources.
 
 MODE A — FIX PLAN PROTOCOL:
-1. SETUP: Call get_active_account and assume_role to get AWS credentials.
-1.5. ACTIVATE DOMAIN SKILLS: Based on the issue type, call activate_skill to load
-     domain-specific troubleshooting knowledge BEFORE investigating:
-     - EC2/host issues → activate_skill("linux-admin") + activate_skill("aws-compute")
-     - Network/connectivity → activate_skill("network-engineer")
-     - Kubernetes/EKS/pods → activate_skill("kubernetes-admin")
-     - RDS/DynamoDB/Redis → activate_skill("database-admin")
-     - CloudWatch/metrics → activate_skill("monitoring")
-     - Log analysis → activate_skill("log-analysis")
-     - S3/EBS/EFS → activate_skill("aws-storage")
-     - Security → activate_skill("security-engineer")
-     The skill provides decision trees, command references, and fix patterns — use them to
-     inform your risk assessment and fix plan steps.
+1. SETUP: Call get_active_account to see enabled accounts. Tools are account-addressed —
+   pass account='<name>' when known, or omit it (single-account / inventory-matched
+   hosts resolve automatically). Credentials come ONLY from registered accounts.
+1.5. __SKILLS_BLOCK__
 2. READ: Call get_health_issue and get_rca_result for the given issue.
 3. SEARCH KB: Call search_sops for relevant procedures.
    Call search_similar_cases with a detailed description for past resolutions.
@@ -120,18 +124,15 @@ MODE A — FIX PLAN PROTOCOL:
    - Call simulate_edge_removal to preview the impact of removing a network link or rule.
    - Check if the issue has already self-resolved
 5.5. HOST-LEVEL INVESTIGATION (when you need OS-level data for fix planning):
-     a. Use run_on_host(host_id=INSTANCE_ID, command="...", method="ssm") to check
-        current host state (disk space, memory, running processes, service status, etc.).
+     a. Use run_on_host(host_id=INSTANCE_ID, command="...") to check current host
+        state (disk, memory, processes, service status). method="auto" (default)
+        tries SSM then falls back to SSH automatically if SSM is unavailable.
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.
      d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
         should be included in the fix plan, NOT executed directly.
-5.6. LOCAL FILE INSPECTION (when you need to read configs, logs, templates, or scripts):
-     a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
-     b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
-        — these tools are dynamically registered when you activate the skill.
-     c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
+5.6. __LOCAL_FILE_BLOCK__
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
    - Pre-checks (what to verify before starting)
@@ -147,7 +148,8 @@ MODE A — FIX PLAN PROTOCOL:
 MODE B — GENERAL AWS INVESTIGATION:
 When you receive a general query (not tied to a specific HealthIssue), act as an
 AWS infrastructure investigator:
-1. SETUP: Call get_active_account and assume_role to get AWS credentials.
+1. SETUP: Call get_active_account to see enabled accounts. Pass account='<name>' to
+   tools when known; otherwise single-account / inventory match resolves automatically.
 1.5. ACTIVATE SKILLS: If the query involves a specific domain, call activate_skill to
      load relevant troubleshooting knowledge (e.g., activate_skill("network-engineer")
      for network questions, activate_skill("kubernetes-admin") for EKS questions).
@@ -158,8 +160,9 @@ AWS infrastructure investigator:
      this covers 60+ services (ElastiCache, Redshift, Step Functions, CloudFront,
      WAF, Route53, DynamoDB, SQS, SNS, Glue, Athena, EMR, CodePipeline,
      GuardDuty, Security Hub, Cost Explorer, Organizations, etc.)
-3. HOST-LEVEL DATA: When investigating host or pod issues, use run_on_host (SSM)
-   or run_kubectl to gather OS-level or Kubernetes diagnostics directly.
+3. HOST-LEVEL DATA: When investigating host or pod issues, use run_on_host
+   (method="auto" climbs the SSM→SSH ladder) or run_kubectl to gather OS-level
+   or Kubernetes diagnostics directly.
 3.5. LOCAL FILE DATA: When you need to read local configs, logs, Terraform, CloudFormation
    templates, Kubernetes manifests, scripts, or other operational artifacts:
    a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
@@ -196,6 +199,11 @@ TOOL SELECTION — accuracy first:
 
 """
 
+# Shared fragments live in preamble.py (single-source for RCA + SRE);
+# placeholder substitution avoids f-string brace escaping in the long prompt.
+SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _SRE_SKILLS_BLOCK)
+SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
+
 
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
@@ -211,59 +219,63 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         max_tokens=max_tokens,
         **cache_kwargs,
     )
+    _tools = [
+        assume_role,
+        get_active_account,
+        get_managed_resources,
+        get_health_issue,
+        get_rca_result,
+        search_sops,
+        search_similar_cases,
+        save_fix_plan,
+        # AWS describe tools (read-only)
+        describe_ec2,
+        describe_rds,
+        list_lambda_functions,
+        # Network tools (read-only)
+        describe_vpcs,
+        describe_subnets,
+        describe_security_groups,
+        describe_route_tables,
+        describe_nat_gateways,
+        describe_transit_gateways,
+        describe_load_balancers,
+        describe_region_topology,
+        analyze_vpc_topology,
+        # EKS networking tools
+        describe_eks_clusters,
+        describe_eks_nodegroups,
+        check_eks_pod_ip_capacity,
+        map_eks_to_vpc_topology,
+        # Graph-based analysis tools
+        query_reachability,
+        query_impact_radius,
+        find_network_path,
+        detect_network_anomalies,
+        # SRE analysis tools
+        analyze_dependency_chain,
+        detect_single_points_of_failure,
+        analyze_capacity_risk,
+        simulate_edge_removal,
+        # Cloud CLI (provider-resolved, fallback to AWS read-only)
+        *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
+        # Agent Skills (domain knowledge + host/kubectl execution)
+        activate_skill,
+        read_skill_reference,
+        run_on_host,
+        run_kubectl,
+        # Agent Memory (cross-agent search)
+        search_agent_memory,
+    ]
+    # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off)
+    if settings.acp_enhanced_enabled:
+        _tools.append(enhanced_task)
     return Agent(
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre", agent_name="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("sre"),
-        tools=[
-            assume_role,
-            get_active_account,
-            get_managed_resources,
-            get_health_issue,
-            get_rca_result,
-            search_sops,
-            search_similar_cases,
-            save_fix_plan,
-            # AWS describe tools (read-only)
-            describe_ec2,
-            describe_rds,
-            list_lambda_functions,
-            # Network tools (read-only)
-            describe_vpcs,
-            describe_subnets,
-            describe_security_groups,
-            describe_route_tables,
-            describe_nat_gateways,
-            describe_transit_gateways,
-            describe_load_balancers,
-            describe_region_topology,
-            analyze_vpc_topology,
-            # EKS networking tools
-            describe_eks_clusters,
-            describe_eks_nodegroups,
-            check_eks_pod_ip_capacity,
-            map_eks_to_vpc_topology,
-            # Graph-based analysis tools
-            query_reachability,
-            query_impact_radius,
-            find_network_path,
-            detect_network_anomalies,
-            # SRE analysis tools
-            analyze_dependency_chain,
-            detect_single_points_of_failure,
-            analyze_capacity_risk,
-            simulate_edge_removal,
-            # Cloud CLI (provider-resolved, fallback to AWS read-only)
-            *(cli_tools if cli_tools else [cli_tool or run_aws_cli_readonly]),
-            # Agent Skills (domain knowledge + host/kubectl execution)
-            activate_skill,
-            read_skill_reference,
-            run_on_host,
-            run_kubectl,
-            # Agent Memory (cross-agent search)
-            search_agent_memory,
-        ],
+        tools=_tools,
     )
 
 
@@ -271,8 +283,10 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
 def sre_agent(issue_id: int) -> str:
     """Generate a Fix Plan for a HealthIssue based on RCA results.
 
-    READ-ONLY: does not execute any fixes, only produces a plan with
-    risk classification, ordered steps, rollback plan, and pre/post checks.
+    USE FOR: "fix", "plan fix", "remediate", "how do I resolve" + an issue ID
+    (I#N). READ-ONLY: never executes — produces a plan with risk level (L0-L3),
+    ordered steps, rollback plan, and pre/post checks for the approval gate.
+    NOT FOR: executing plans (executor_agent) or general queries (sre_query).
 
     Args:
         issue_id: The HealthIssue ID to create a fix plan for.
@@ -309,16 +323,19 @@ def sre_agent(issue_id: int) -> str:
 
 @tool
 def sre_query(query: str, region: str = "us-east-1") -> str:
-    """Query AWS infrastructure information using the SRE agent.
+    """CATCH-ALL for any AWS question that doesn't fit another agent.
 
-    Use this for general AWS questions that don't map to scan, detect, RCA, or
-    report workflows. The SRE agent has access to specialized tools AND the full
-    read-only AWS CLI, so it can answer questions about ANY AWS service.
+    USE FOR: ad-hoc queries on ANY AWS service via read-only CLI (60+ services
+    — ElastiCache, CloudFront, Route53, Step Functions, API Gateway, cost
+    breakdowns, GuardDuty findings...), any CLI command request, kubectl /
+    run_on_host operations, deep dependency-chain or change-simulation asks.
+    When unsure which agent fits an AWS question, choose this one.
+    NOT FOR: full inventory (scan_agent), health sweeps (detect_agent),
+    issue analysis (rca_agent), or fix plans (sre_agent).
 
     Args:
-        query: The question or investigation request (e.g., 'list all ElastiCache
-               clusters in us-east-1', 'show CloudFront distributions',
-               'what are my Route53 hosted zones', 'get cost breakdown for last month').
+        query: The question or investigation request (e.g., 'list ElastiCache
+               clusters', 'show CloudFront distributions', 'cost breakdown').
         region: AWS region to investigate (default: us-east-1).
 
     Returns:
@@ -333,7 +350,8 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
             result = invoke_with_retry(agent,
                 f"General AWS investigation (Mode B). Region: {region}\n"
                 f"Query: {query}\n"
-                f"Use get_active_account + assume_role first, then use the best tool for this query. "
+                f"Pass account='<name>' to tools when the target account is known; otherwise "
+                f"tools auto-resolve (single-account / inventory match). "
                 f"If no specialized tool covers the service, use run_aws_cli_readonly with --query filters."
             )
             tracker.set_result(result)

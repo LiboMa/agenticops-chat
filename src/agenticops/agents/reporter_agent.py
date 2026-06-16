@@ -100,8 +100,10 @@ RULES:
 def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
     """Generate an operations report from health issues, RCA results, and inventory.
 
-    Gathers data from metadata, formats a structured markdown report,
-    and saves it to the database and reports directory.
+    USE FOR: "report", "summary", "daily report", "incident report",
+    "inventory report". Gathers metadata, formats structured markdown,
+    saves to DB + reports directory.
+    NOT FOR: live health checks (detect_agent) or ad-hoc queries (sre_query).
 
     Args:
         report_type: Type of report: daily, incident, or inventory

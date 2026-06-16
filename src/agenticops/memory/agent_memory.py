@@ -202,13 +202,15 @@ def load_agent_memory(agent_name: str, max_entries: int | None = None) -> str:
         except Exception:
             logger.debug("touch_last_used failed for %s", m.get("filename"), exc_info=True)
 
-    # 4. Format
+    # 4. Format — include the filename so agents can cite/patch a specific
+    # memory via memory_manage(action="patch"/"remove", filename=...)
     lines = [MEMORY_MARKER_START]
     for m in memories:
         fm = m["frontmatter"]
         entry = (
             f"[{fm.get('type', 'unknown')}] "
             f"(confidence: {m['confidence']}/5) "
+            f"[file: {m['filename']}] "
             f"{m['body']}"
         )
         lines.append(entry)

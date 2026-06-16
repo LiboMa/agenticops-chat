@@ -14,6 +14,28 @@ from agenticops.tools.aws_cli_tool import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_account_resolution(monkeypatch):
+    """Drive credential resolution to a single mock account (no DB / no ambient).
+
+    The CLI tools resolve a registered account's subprocess env before running;
+    stub it so execution-path tests can focus on command behavior.
+    """
+    from types import SimpleNamespace
+    from agenticops.credentials import resolver
+
+    snap = SimpleNamespace(
+        id=1, name="acct", provider="aws",
+        credentials={"account_id": "111111111111"}, regions=["us-east-1"], labels={},
+        credential_source_type="assume_role",
+    )
+    monkeypatch.setattr(resolver, "resolve_default_account", lambda provider="aws": snap)
+    monkeypatch.setattr(
+        resolver, "get_subprocess_env_for_account",
+        lambda target, region=None: {"AWS_ACCESS_KEY_ID": "K", "AWS_SECRET_ACCESS_KEY": "S"},
+    )
+
+
 # ── _classify_command tests ──────────────────────────────────────────
 
 

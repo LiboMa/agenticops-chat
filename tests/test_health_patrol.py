@@ -146,11 +146,12 @@ class TestHealthPatrolPipeline:
 
         with patch.dict("sys.modules", {"agenticops.integrations": mock_mod}):
             from agenticops.pipeline.health_patrol import HealthPatrolPipeline
-            pipe = HealthPatrolPipeline(config={"scope": "all"})
+            # graph_checks off: keep this test hermetic (no GraphStore/DB)
+            pipe = HealthPatrolPipeline(config={"scope": "all", "graph_checks": False})
             result = asyncio.run(pipe.execute())
 
         assert result.status == StepStatus.COMPLETED
-        assert len(result.step_results) == 2
+        assert len(result.step_results) == 3
         assert result.duration_ms is not None
 
     @patch("agenticops.agents.detect_agent.detect_agent", side_effect=RuntimeError("boom"))
@@ -184,9 +185,10 @@ class TestHealthPatrolPipeline:
 
         assert result.status == StepStatus.COMPLETED
 
-    def test_pipeline_has_two_steps(self):
+    def test_pipeline_has_three_steps(self):
         from agenticops.pipeline.health_patrol import HealthPatrolPipeline
         pipe = HealthPatrolPipeline()
-        assert len(pipe.steps) == 2
+        assert len(pipe.steps) == 3
         assert pipe.steps[0].name == "fetch_external_alerts"
         assert pipe.steps[1].name == "run_detect"
+        assert pipe.steps[2].name == "analyze_graph_risks"

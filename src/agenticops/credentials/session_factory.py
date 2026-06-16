@@ -3,7 +3,6 @@
 Provides a single entry point for all cloud API calls:
 - get_session(account_name) → authenticated boto3.Session
 - get_bedrock_session() → Session for Bedrock model invocation
-- get_env_for_subprocess(account_name) → env dict for AWS CLI subprocess
 - detect_environment() → what kind of runtime we're in
 """
 
@@ -209,6 +208,7 @@ class SessionFactory:
         elif settings.bedrock_profile:
             # Named profile for Bedrock — bypass AWS_CONFIG_FILE/AWS_SHARED_CREDENTIALS_FILE
             # overrides that may block profile resolution
+            import botocore.exceptions
             import botocore.session
             bc_session = botocore.session.Session()
             # Force real config paths if env vars point to /dev/null
@@ -219,44 +219,27 @@ class SessionFactory:
             if os.environ.get("AWS_CONFIG_FILE") in ("/dev/null", ""):
                 bc_session.set_config_variable("config_file", real_config)
             bc_session.set_config_variable("profile", settings.bedrock_profile)
-            session = boto3.Session(
-                botocore_session=bc_session,
-                region_name=settings.bedrock_region,
-            )
+            try:
+                session = boto3.Session(
+                    botocore_session=bc_session,
+                    region_name=settings.bedrock_region,
+                )
+                # Force profile resolution now so we can fall back if it's missing
+                # (e.g. on EC2 where the instance role should be used instead).
+                session.get_credentials()
+            except botocore.exceptions.ProfileNotFound:
+                logger.warning(
+                    "Bedrock profile %r not found; falling back to default "
+                    "credential chain (env/IRSA/ECS/EC2 instance role).",
+                    settings.bedrock_profile,
+                )
+                session = boto3.Session(region_name=settings.bedrock_region)
         else:
             # Default credential chain
             session = boto3.Session(region_name=settings.bedrock_region)
 
         self._cache_session(cache_key, session)
         return session
-
-    def get_env_for_subprocess(self, account_name: str, region: str | None = None) -> dict[str, str]:
-        """Get environment variables for AWS CLI subprocess calls.
-
-        Args:
-            account_name: Account to get credentials for.
-            region: Optional region override.
-
-        Returns:
-            Dict of env vars including AWS_ACCESS_KEY_ID, etc.
-        """
-        session = self.get_session(account_name, region)
-        env = os.environ.copy()
-
-        try:
-            frozen = session.get_credentials().get_frozen_credentials()
-            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
-            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
-            if frozen.token:
-                env["AWS_SESSION_TOKEN"] = frozen.token
-            if region:
-                env["AWS_DEFAULT_REGION"] = region
-        except Exception as e:
-            logger.warning("Failed to extract credentials for subprocess: %s", e)
-
-        # Remove profile to avoid conflicts
-        env.pop("AWS_PROFILE", None)
-        return env
 
     def invalidate(self, account_name: str | None = None) -> None:
         """Invalidate cached sessions.

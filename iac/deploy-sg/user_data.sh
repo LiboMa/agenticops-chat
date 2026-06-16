@@ -128,6 +128,9 @@ echo '{"mcpServers": {}}' > "$APP_DIR/config/mcp-servers.json"
 cat > /etc/agenticops.env <<ENVEOF
 AIOPS_BEDROCK_REGION=$BEDROCK_REGION
 AIOPS_BEDROCK_MODEL_ID=$BEDROCK_MODEL
+# Empty profile => boto3 default credential chain => EC2 instance role.
+# Overrides settings.yaml's "bedrock_profile: default" (which has no ~/.aws/config on this host).
+AIOPS_BEDROCK_PROFILE=
 AIOPS_DATABASE_URL=sqlite:///$APP_DIR/data/agenticops.db
 AIOPS_API_AUTH_ENABLED=true
 AIOPS_ADMIN_PASSWORD=$ADMIN_PASSWORD

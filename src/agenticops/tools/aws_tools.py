@@ -11,24 +11,30 @@ from botocore.exceptions import ClientError, BotoCoreError
 from strands import tool
 
 from agenticops.scan.services import AWS_SERVICES, AWSServiceDef
+from agenticops.credentials.resolver import (
+    AccountResolutionError,
+    resolve_account_session,
+    resolve_default_account,
+)
 
 logger = logging.getLogger(__name__)
 
-# Session cache: keyed by "account_id:region"
-# Populated by assume_role via provider layer. Kept for backward compat with
-# graph/api.py and integrations/cloudwatch_provider.py until they migrate.
-_session_cache: dict[str, Any] = {}
+# Session cache is owned by providers/base (single thread-safe home). We alias
+# it here so existing readers (web/graph) that imported it keep working.
+from agenticops.providers.base import _session_cache  # noqa: E402  (shared cache)
 
 
 @tool
 def assume_role(
     account_id: str, role_arn: str, region: str, external_id: str = ""
 ) -> str:
-    """Assume an IAM role in a target AWS account and cache the session.
+    """Pre-warm and cache credentials for a registered AWS account.
 
-    Resolves credentials through the provider abstraction layer, which supports
-    cross-partition roles (aws, aws-cn, aws-us-gov), named profiles, static
-    keys, and the default credential chain.
+    Resolves credentials through the provider abstraction layer (cross-partition
+    roles, named profiles, static keys, or the environment chain). Tools are
+    account-addressed — you do NOT need to call this before every operation:
+    pass account='<name>' to a tool, or omit it for single-account deployments.
+    Use this only to validate/pre-warm an account's credentials.
 
     Args:
         account_id: AWS account ID
@@ -37,13 +43,8 @@ def assume_role(
         external_id: Optional external ID for the trust policy
 
     Returns:
-        Confirmation message with assumed role details.
+        Confirmation message with the resolved account identity.
     """
-    cache_key = f"{account_id}:{region}"
-
-    if cache_key in _session_cache:
-        return f"Session already cached for account {account_id} in {region}."
-
     from agenticops.providers import get_provider
     from agenticops.models import CloudAccount, get_db_session
     from types import SimpleNamespace
@@ -68,29 +69,35 @@ def assume_role(
         return f"No enabled account found matching role_arn={role_arn} or account_id={account_id}."
 
     try:
-        provider = get_provider(matched)
-        if provider.resolve_credentials():
-            session = provider.sdk_session()
-            _session_cache[cache_key] = session
-            return f"Credentials resolved for {matched.name} ({matched.provider}) in {region}. Session cached."
-        return f"Failed to resolve credentials for {matched.name}."
+        resolve_account_session(matched, region)
+    except AccountResolutionError as e:
+        return f"Failed to resolve credentials for {matched.name}: {e}"
     except Exception as e:
         return f"Error resolving credentials: {e}"
 
-
-def _get_session(region: str) -> Any:
-    """Get a cached session for the given region (any account)."""
-    for key, session in _session_cache.items():
-        if key.endswith(f":{region}"):
-            return session
-    raise RuntimeError(
-        f"No assumed session for region {region}. Call assume_role first."
+    return (
+        f"Credentials resolved for {matched.name} (account {account_id}, "
+        f"{matched.provider}) in {region}. Tools are account-addressed: pass "
+        f"account='{matched.name}' to target it, or omit account — single-account "
+        f"deployments and inventory-matched hosts/clusters resolve automatically."
     )
 
 
-def _get_client(service_name: str, region: str):
-    """Get boto3 client from cached session."""
-    session = _get_session(region)
+def _get_session(region: str, account: str = "") -> Any:
+    """Resolve a boto3 session for an explicit account, or the default account.
+
+    Fail-closed: with an explicit account that can't resolve, or zero/ambiguous
+    enabled accounts when none is given, raises AccountResolutionError — NEVER
+    falls back to ambient credentials.
+    """
+    if account:
+        return resolve_account_session(account, region)
+    return resolve_account_session(resolve_default_account(), region)
+
+
+def _get_client(service_name: str, region: str, account: str = ""):
+    """Get a boto3 client from the resolved account session."""
+    session = _get_session(region, account)
     return session.client(service_name, region_name=region)
 
 
@@ -132,10 +139,10 @@ def _format_ec2_instance(instance: dict, region: str) -> dict:
 
 
 def _scan_service_generic(
-    service_name: str, region: str, service_def: AWSServiceDef
+    service_name: str, region: str, service_def: AWSServiceDef, account: str = ""
 ) -> list[dict]:
     """Generic scan for any service using its definition."""
-    client = _get_client(service_def.boto3_service, region)
+    client = _get_client(service_def.boto3_service, region, account)
     resources = []
 
     try:
@@ -222,18 +229,19 @@ def _format_simple_resource(item: Any, service_def: AWSServiceDef, region: str) 
 
 
 @tool
-def describe_ec2(region: str) -> str:
+def describe_ec2(region: str, account: str = "") -> str:
     """Describe all EC2 instances in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of EC2 instances with id, name, type, status, IPs.
     """
     service_def = AWS_SERVICES["EC2"]
     try:
-        raw_items = _scan_service_generic("EC2", region, service_def)
+        raw_items = _scan_service_generic("EC2", region, service_def, account)
         resources = []
         for reservation in raw_items:
             for instance in reservation.get("Instances", []):
@@ -244,18 +252,19 @@ def describe_ec2(region: str) -> str:
 
 
 @tool
-def list_lambda_functions(region: str) -> str:
+def list_lambda_functions(region: str, account: str = "") -> str:
     """List all Lambda functions in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of Lambda functions with name, runtime, memory, timeout.
     """
     service_def = AWS_SERVICES["Lambda"]
     try:
-        raw_items = _scan_service_generic("Lambda", region, service_def)
+        raw_items = _scan_service_generic("Lambda", region, service_def, account)
         resources = [_format_resource(item, service_def, region) for item in raw_items]
         return json.dumps(resources, default=str)
     except Exception as e:
@@ -263,18 +272,19 @@ def list_lambda_functions(region: str) -> str:
 
 
 @tool
-def describe_rds(region: str) -> str:
+def describe_rds(region: str, account: str = "") -> str:
     """Describe all RDS instances in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of RDS instances with identifier, engine, status, size.
     """
     service_def = AWS_SERVICES["RDS"]
     try:
-        raw_items = _scan_service_generic("RDS", region, service_def)
+        raw_items = _scan_service_generic("RDS", region, service_def, account)
         resources = [_format_resource(item, service_def, region) for item in raw_items]
         return json.dumps(resources, default=str)
     except Exception as e:
@@ -282,18 +292,19 @@ def describe_rds(region: str) -> str:
 
 
 @tool
-def list_s3_buckets(region: str) -> str:
+def list_s3_buckets(region: str, account: str = "") -> str:
     """List all S3 buckets (S3 is global, region used for API endpoint).
 
     Args:
         region: AWS region for API endpoint
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of S3 buckets with name and creation date.
     """
     service_def = AWS_SERVICES["S3"]
     try:
-        raw_items = _scan_service_generic("S3", region, service_def)
+        raw_items = _scan_service_generic("S3", region, service_def, account)
         resources = [_format_resource(item, service_def, region) for item in raw_items]
         return json.dumps(resources, default=str)
     except Exception as e:
@@ -301,18 +312,19 @@ def list_s3_buckets(region: str) -> str:
 
 
 @tool
-def describe_ecs(region: str) -> str:
+def describe_ecs(region: str, account: str = "") -> str:
     """Describe ECS clusters in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of ECS cluster ARNs.
     """
     service_def = AWS_SERVICES["ECS"]
     try:
-        raw_items = _scan_service_generic("ECS", region, service_def)
+        raw_items = _scan_service_generic("ECS", region, service_def, account)
         resources = [
             _format_simple_resource(item, service_def, region) for item in raw_items
         ]
@@ -322,18 +334,19 @@ def describe_ecs(region: str) -> str:
 
 
 @tool
-def describe_eks(region: str) -> str:
+def describe_eks(region: str, account: str = "") -> str:
     """Describe EKS clusters in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of EKS cluster names.
     """
     service_def = AWS_SERVICES["EKS"]
     try:
-        raw_items = _scan_service_generic("EKS", region, service_def)
+        raw_items = _scan_service_generic("EKS", region, service_def, account)
         resources = [
             _format_simple_resource(item, service_def, region) for item in raw_items
         ]
@@ -343,18 +356,19 @@ def describe_eks(region: str) -> str:
 
 
 @tool
-def list_dynamodb(region: str) -> str:
+def list_dynamodb(region: str, account: str = "") -> str:
     """List DynamoDB tables in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of DynamoDB table names.
     """
     service_def = AWS_SERVICES["DynamoDB"]
     try:
-        raw_items = _scan_service_generic("DynamoDB", region, service_def)
+        raw_items = _scan_service_generic("DynamoDB", region, service_def, account)
         resources = [
             _format_simple_resource(item, service_def, region) for item in raw_items
         ]
@@ -364,18 +378,19 @@ def list_dynamodb(region: str) -> str:
 
 
 @tool
-def list_sqs(region: str) -> str:
+def list_sqs(region: str, account: str = "") -> str:
     """List SQS queues in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of SQS queue URLs and names.
     """
     service_def = AWS_SERVICES["SQS"]
     try:
-        raw_items = _scan_service_generic("SQS", region, service_def)
+        raw_items = _scan_service_generic("SQS", region, service_def, account)
         resources = []
         for queue_url in raw_items:
             queue_name = queue_url.split("/")[-1] if isinstance(queue_url, str) else str(queue_url)
@@ -394,18 +409,19 @@ def list_sqs(region: str) -> str:
 
 
 @tool
-def list_sns(region: str) -> str:
+def list_sns(region: str, account: str = "") -> str:
     """List SNS topics in a region.
 
     Args:
         region: AWS region
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON list of SNS topic ARNs.
     """
     service_def = AWS_SERVICES["SNS"]
     try:
-        raw_items = _scan_service_generic("SNS", region, service_def)
+        raw_items = _scan_service_generic("SNS", region, service_def, account)
         resources = [_format_resource(item, service_def, region) for item in raw_items]
         return json.dumps(resources, default=str)
     except Exception as e:

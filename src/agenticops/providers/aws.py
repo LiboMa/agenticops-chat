@@ -94,16 +94,8 @@ class AWSProvider(CloudProvider):
 
         if role_arn:
             try:
-                sts = base_session.client("sts", **sts_kwargs)
-                resp = sts.assume_role(
-                    RoleArn=role_arn,
-                    RoleSessionName=f"agenticops-{self.account.name}",
-                )
-                assumed = resp["Credentials"]
-                session = boto3.Session(
-                    aws_access_key_id=assumed["AccessKeyId"],
-                    aws_secret_access_key=assumed["SecretAccessKey"],
-                    aws_session_token=assumed["SessionToken"],
+                session = self._build_assume_role_session(
+                    base_session, role_arn, sts_region, creds
                 )
             except Exception as e:
                 logger.error("STS AssumeRole failed for %s: %s", self.account.name, e)
@@ -113,10 +105,24 @@ class AWSProvider(CloudProvider):
 
         # Validate by calling STS (use partition-aware endpoint)
         try:
-            session.client("sts", **sts_kwargs).get_caller_identity()
+            identity = session.client("sts", **sts_kwargs).get_caller_identity()
         except Exception as e:
             logger.error("AWS credential validation failed for %s: %s", self.account.name, e)
             return False
+
+        # Defense-in-depth: if the account declares an expected account_id, the
+        # resolved identity MUST match it — else we'd silently operate on the
+        # wrong account. No account_id configured → skip (unchanged behavior).
+        expected = str(creds.get("account_id") or "").strip()
+        if expected:
+            resolved = str(identity.get("Account") or "")
+            if resolved and resolved != expected:
+                logger.error(
+                    "AWS identity mismatch for %s: resolved account %s != expected %s; "
+                    "refusing to use these credentials.",
+                    self.account.name, resolved, expected,
+                )
+                return False
 
         # Cache the session
         regions = self.account.regions or ["us-east-1"]
@@ -126,6 +132,57 @@ class AWSProvider(CloudProvider):
 
         self._session = session
         return True
+
+    @staticmethod
+    def _sts_client_creator(base_botocore_session: Any, sts_region: str | None) -> Callable:
+        """Return a client_creator that builds STS clients pinned to sts_region.
+
+        AssumeRoleCredentialFetcher calls this each time it (re)assumes the role,
+        so the region must be baked in (partition-aware for China/GovCloud).
+        """
+        def _create(service_name: str, **kwargs: Any) -> Any:
+            if sts_region:
+                kwargs.setdefault("region_name", sts_region)
+            return base_botocore_session.create_client(service_name, **kwargs)
+        return _create
+
+    def _build_assume_role_session(
+        self, base_session: Any, role_arn: str, sts_region: str | None, creds: dict
+    ) -> Any:
+        """Build a boto3 Session whose credentials AUTO-REFRESH via AssumeRole.
+
+        Uses botocore's AssumeRoleCredentialFetcher + DeferredRefreshableCredentials
+        so long-running SDK sessions transparently re-assume the role before the
+        ~1h temporary credentials expire (no hand-rolled TTL / silent ExpiredToken).
+        """
+        import botocore.session
+        from botocore.credentials import (
+            AssumeRoleCredentialFetcher,
+            DeferredRefreshableCredentials,
+        )
+
+        base_botocore = base_session._session  # underlying botocore session
+        extra_args: dict[str, Any] = {}
+        if creds.get("external_id"):
+            extra_args["ExternalId"] = creds["external_id"]
+
+        fetcher = AssumeRoleCredentialFetcher(
+            client_creator=self._sts_client_creator(base_botocore, sts_region),
+            source_credentials=base_botocore.get_credentials(),
+            role_arn=role_arn,
+            extra_args={
+                "RoleSessionName": f"agenticops-{self.account.name}",
+                **extra_args,
+            },
+        )
+        refreshable = DeferredRefreshableCredentials(
+            method="assume-role",
+            refresh_using=fetcher.fetch_credentials,
+        )
+
+        botocore_session = botocore.session.Session()
+        botocore_session._credentials = refreshable
+        return boto3.Session(botocore_session=botocore_session)
 
     def sdk_session(self) -> Any:
         """Return the boto3 Session (call resolve_credentials first)."""
@@ -145,6 +202,9 @@ class AWSProvider(CloudProvider):
         """
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
+        # Default region to re-inject after stripping ambient AWS_* (so commands
+        # without an explicit --region still resolve, as they did before).
+        default_region = (self.account.regions or [None])[0]
 
         # Capture session credentials if available
         session = self._session if hasattr(self, "_session") else None
@@ -176,17 +236,28 @@ class AWSProvider(CloudProvider):
             except ValueError as e:
                 return f"Error: Invalid command syntax: {e}"
 
-            # Build env with credentials
-            env = os.environ.copy()
-            if session:
-                try:
-                    frozen = session.get_credentials().get_frozen_credentials()
-                    env["AWS_ACCESS_KEY_ID"] = frozen.access_key
-                    env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
-                    if frozen.token:
-                        env["AWS_SESSION_TOKEN"] = frozen.token
-                except Exception:
-                    pass  # Fall back to ambient credentials
+            # Build a CLEAN env: strip all ambient AWS_* so a host profile/token
+            # can never leak into this account's command, then inject ONLY this
+            # account's resolved credentials. Extraction failure = hard error
+            # (NEVER fall back to ambient — that runs on the WRONG account).
+            env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+            if not session:
+                return (
+                    f"Error: no resolved session for account '{account_name}'; "
+                    "cannot run AWS CLI safely (refusing to use ambient credentials)."
+                )
+            try:
+                frozen = session.get_credentials().get_frozen_credentials()
+            except Exception as e:
+                return f"Error: failed to resolve credentials for account '{account_name}': {e}"
+            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+            if frozen.token:
+                env["AWS_SESSION_TOKEN"] = frozen.token
+            # Re-inject a default region for commands that omit --region (we just
+            # stripped any ambient AWS_DEFAULT_REGION/AWS_REGION).
+            if default_region and "--region" not in command:
+                env["AWS_DEFAULT_REGION"] = default_region
 
             try:
                 result = subprocess.run(

@@ -342,8 +342,7 @@ def _compute_fingerprint(source: str, resource_id: str, title: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-@tool
-def create_health_issue(
+def _create_health_issue_impl(
     resource_id: str,
     severity: str,
     source: str,
@@ -352,26 +351,13 @@ def create_health_issue(
     alarm_name: str = "",
     metric_data: str = "{}",
     related_changes: str = "[]",
+    auto_rca: bool = True,
 ) -> str:
-    """Create a new health issue record in the metadata database.
+    """Create a health issue with fingerprint dedup. Plain function (no @tool).
 
-    Uses fingerprint-based deduplication: if an open/investigating issue with the
-    same fingerprint (source + resource_id + normalised title) exists and was last
-    seen within 5 minutes, the existing issue is updated instead of creating a
-    duplicate.
-
-    Args:
-        resource_id: AWS resource ID (e.g., i-1234567890abcdef0)
-        severity: Issue severity: critical, high, medium, or low
-        source: Detection source: cloudwatch_alarm, metric_anomaly, log_pattern, or manual
-        title: Brief issue title
-        description: Detailed description of the issue
-        alarm_name: CloudWatch alarm name if source is cloudwatch_alarm
-        metric_data: JSON object with relevant metric data
-        related_changes: JSON array of related CloudTrail events
-
-    Returns:
-        Confirmation with the new HealthIssue ID.
+    auto_rca=False skips the auto-RCA trigger — used by structural risk sources
+    (e.g. graph patrol SPOF/capacity findings) where a CloudTrail-style forensic
+    RCA is not meaningful.
     """
     session = get_session()
     try:
@@ -529,8 +515,9 @@ def create_health_issue(
             pass
 
         # Auto-trigger RCA for newly created issues
-        from agenticops.services.rca_service import trigger_auto_rca
-        trigger_auto_rca(issue.id, trace_id=trace_id)
+        if auto_rca:
+            from agenticops.services.rca_service import trigger_auto_rca
+            trigger_auto_rca(issue.id, trace_id=trace_id)
 
         # Auto-notify
         try:
@@ -545,6 +532,50 @@ def create_health_issue(
         return f"Error creating health issue: {e}"
     finally:
         session.close()
+
+
+@tool
+def create_health_issue(
+    resource_id: str,
+    severity: str,
+    source: str,
+    title: str,
+    description: str,
+    alarm_name: str = "",
+    metric_data: str = "{}",
+    related_changes: str = "[]",
+) -> str:
+    """Create a new health issue record in the metadata database.
+
+    Uses fingerprint-based deduplication: if an open/investigating issue with the
+    same fingerprint (source + resource_id + normalised title) exists and was last
+    seen within 5 minutes, the existing issue is updated instead of creating a
+    duplicate.
+
+    Args:
+        resource_id: AWS resource ID (e.g., i-1234567890abcdef0)
+        severity: Issue severity: critical, high, medium, or low
+        source: Detection source: cloudwatch_alarm, metric_anomaly, log_pattern, or manual
+        title: Brief issue title
+        description: Detailed description of the issue
+        alarm_name: CloudWatch alarm name if source is cloudwatch_alarm
+        metric_data: JSON object with relevant metric data
+        related_changes: JSON array of related CloudTrail events
+
+    Returns:
+        Confirmation with the new HealthIssue ID.
+    """
+    return _create_health_issue_impl(
+        resource_id=resource_id,
+        severity=severity,
+        source=source,
+        title=title,
+        description=description,
+        alarm_name=alarm_name,
+        metric_data=metric_data,
+        related_changes=related_changes,
+        auto_rca=True,
+    )
 
 
 @tool

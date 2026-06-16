@@ -120,6 +120,87 @@ graph TB
 
 ---
 
+## Credential Safety: Authentication & Authorization
+
+AgenticOps operates across **multiple AWS accounts**. There is no global "current account" — every operation must explicitly resolve the **target account's** credentials. The two concerns are separate:
+
+- **Authentication (AuthN)** — *which account am I, and are these credentials valid?* Resolved through the **provider layer** (`get_provider → resolve_credentials`), never by bare `boto3`.
+- **Authorization (AuthZ)** — *is this command allowed to run?* A 3-tier classifier (read-only / write / blocked) gates every AWS CLI + host command before execution.
+
+The iron rules live in `CLAUDE.md` → **凭证安全铁律**. The flows below are the enforced implementation.
+
+### Authentication Flow (multi-account, fail-closed)
+
+```mermaid
+flowchart TD
+    START["Agent needs to operate on account N<br/>(scan / detect / rca / sre / executor)"] --> ASSUME["assume_role(account_id, role_arn, region)<br/><i>tools/aws_tools.py</i>"]
+
+    ASSUME --> PROV["Provider layer<br/>get_provider(account).resolve_credentials()<br/><i>providers/aws.py</i>"]
+
+    PROV --> SRC{"Credential source?"}
+    SRC -->|"profile_name"| BASE["boto3.Session(profile)"]
+    SRC -->|"static keys"| BASE2["boto3.Session(ak/sk) — decrypt first"]
+    SRC -->|"environment"| BASE3["default chain<br/>(env / IRSA / ECS / EC2 role)"]
+    SRC -->|"role_arn"| REFRESH["AssumeRole via botocore native<br/>AssumeRoleCredentialFetcher +<br/>DeferredRefreshableCredentials<br/><b>auto-refresh, no 1h expiry</b>"]
+
+    BASE --> VALID
+    BASE2 --> VALID
+    BASE3 --> VALID
+    REFRESH --> VALID["Validate: sts:GetCallerIdentity<br/>(partition-aware: aws / aws-cn / aws-us-gov)"]
+
+    VALID -->|"call fails"| FAILV["✗ return False<br/>(no session cached)"]
+    VALID -->|"ok"| IDCHECK{"credentials.account_id set?"}
+
+    IDCHECK -->|"yes & MISMATCH"| FAILID["✗ FAIL-CLOSED<br/>resolved Account ≠ expected<br/>refuse credentials"]
+    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>keys = {provider}:{name}:{region}<br/>AND {account_id}:{region}"]
+
+    CACHE --> READY["✓ Ready: describe/cli/exec resolve the<br/>account explicitly (param → inventory →<br/>single-account default), fail-closed"]
+
+    style FAILV fill:#f66
+    style FAILID fill:#f66
+    style READY fill:#6f6
+    style REFRESH fill:#9cf
+```
+
+**Why account-addressed, not a ContextVar:** Strands runs sync tools under `asyncio.to_thread` + `contextvars.copy_context()`, so a ContextVar written inside a tool (the old `_set_active_account`) is discarded at the tool boundary — every later tool saw `None` and silently fell back to ambient (the TRC-bc600aa9 wrong-account incident). The account is now an explicit, data-driven property of the *target*: `credentials/resolver` resolves it from the tool's `account` param → inventory lookup by host/cluster id → the single enabled account. No registered account → fail-closed (never ambient).
+
+### Authorization Flow (3-tier command gate + scoped exec)
+
+Every AWS CLI / host command passes a classifier **before** it runs, then executes in an env scoped to the active account:
+
+```mermaid
+flowchart TD
+    CMD["Command from agent<br/>(run_aws_cli / run_aws_cli_readonly / run_on_host / kubectl)"] --> SHELL{"Shell-injection check<br/>pipe / semicolon / and-and /<br/>subshell / redirect / backtick"}
+    SHELL -->|"contains operator"| REJ1["✗ Reject"]
+    SHELL -->|"clean"| TIER{"_classify_command()"}
+
+    TIER -->|"BLOCKED<br/>iam create-user, terminate-instances,<br/>--force, organizations delete-, ..."| REJ2["✗ Blocked outright"]
+    TIER -->|"WRITE / UNKNOWN"| CONF{"require_confirmation?"}
+    TIER -->|"READ-ONLY<br/>describe / list / get"| ENV
+
+    CONF -->|"false"| PAUSE["⏸ Ask user to confirm<br/>(present command + impact)"]
+    CONF -->|"true"| ENV
+
+    ENV["get_subprocess_env_for_account(account[, region])<br/><i>credentials/resolver.py</i>"] --> RESOLVE{"Resolve account<br/>param → inventory → default"}
+    RESOLVE -->|"resolved + session"| INJECT["Strip ALL ambient AWS_*<br/>+ inject this account's frozen creds<br/>+ default region"]
+    RESOLVE -->|"0 / ambiguous / resolve fails"| REJ3["✗ FAIL-CLOSED<br/>AccountResolutionError<br/>(lists enabled accounts)"]
+
+    INJECT --> RUN["subprocess.run(args, env=...)"]
+    RUN --> OUT["Output (truncated to cli_max_output_chars)"]
+
+    style REJ1 fill:#f66
+    style REJ2 fill:#f66
+    style REJ3 fill:#f66
+    style PAUSE fill:#f96
+    style OUT fill:#6f6
+```
+
+**Unified exec entry:** `run_aws_cli` / `run_aws_cli_readonly` (CLI), `run_on_host(ssm)`, and `aws eks update-kubeconfig` (kubectl) all resolve their subprocess env through `credentials/resolver.get_subprocess_env_for_account()`. There is NO ambient branch: the account is resolved (explicit param → inventory by host/cluster id → single enabled account), creds are stripped + injected from that registered account's session, and a missing/ambiguous/failed account is fail-closed with an actionable error. The provider's own `cli_tool()` applies the same strip + inject + fail-closed contract for per-account CLI tools. `run_on_host(method="auto")` additionally climbs the SSM → SSH access ladder on transport failure.
+
+> **AuthN vs AuthZ separation:** AuthN decides *whose* credentials (provider layer, fail-closed); AuthZ decides *what's permitted* (3-tier classifier + L0–L4 approval gate in the fix pipeline). A read-only command on the right account still runs; a write command on the right account still needs confirmation / approval.
+
+---
+
 ## Core Workflow: Issue Lifecycle
 
 ```mermaid
@@ -293,6 +374,12 @@ flowchart TD
 
 **Code path**: `app.py:_process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → resolved.
 
+**Prevention hooks (graph engine, zero LLM)**:
+
+- **Patrol graph risks** — the scheduled HealthPatrol runs an `AnalyzeGraphRisksStep` after detect: SPOF detection (articulation points/bridges) + capacity-risk analysis (subnet IP exhaustion, EKS pod limits) on the persisted infra graph. Findings become HealthIssues (`source=graph_patrol`) **without** auto-RCA — structural risks need design review, not CloudTrail forensics. Gate: `patrol_graph_checks_enabled`.
+- **RCA topology context** — every `rca_agent()` invocation gets a pre-fetched TOPOLOGY CONTEXT block (resource neighbors, up/downstream dependencies, recent graph-sync changes) so "what changed before this alert" is answered without extra tool calls. Gate: `rca_topology_context_enabled`.
+- **Pre-execution simulation gate** — `trigger_auto_approve()` runs `simulate_fix_impact()` (graph `impact_analysis`, account-scoped) before policy evaluation; the `impact-severity-escalation` rule in `policies.yaml` escalates plans whose target outage would isolate subnets or break critical paths. Fail-soft: no graph data → rule doesn't match → behavior unchanged.
+
 **Key settings**:
 
 | Setting | Default | What it controls |
@@ -302,6 +389,8 @@ flowchart TD
 | `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | `true` | Auto-approve low-risk plans |
 | `AIOPS_EXECUTOR_ENABLED` | `true` | Enable fix execution |
 | `AIOPS_NOTIFICATIONS_ENABLED` | `true` | Auto-notify on pipeline events |
+| `AIOPS_PATROL_GRAPH_CHECKS_ENABLED` | `true` | SPOF/capacity prevention step in patrol |
+| `AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED` | `true` | Topology context injection into RCA |
 
 > **See also**: [EKS Lab Auto-Fix Pipeline (Use Case 6)](use-cases/use-case-6-eks-lab-auto-fix-pipeline.md) for validated end-to-end test results.
 
@@ -554,6 +643,34 @@ flowchart LR
 
 ---
 
+## Enhanced Backend (ACP) — optional task delegation
+
+Selected agents (**main** and **sre**) can delegate a hard task — create-skill, deep research, brainstorming, complex multi-step operations — to an external coding agent for a higher-quality result. This is an **optional enhancement / escalation path**, not a replacement: the Strands 7-agent orchestration is unchanged, and the feature is **off by default**.
+
+```
+main / sre agent
+   │ LLM decides a task is complex → calls a @tool (like a sub-agent)
+   ▼
+@tool enhanced_task(task, context, backend?)        ← registered only when acp_enhanced_enabled=true
+   ▼
+EnhancedBackend abstraction + registry  (protocol-agnostic core)
+   ▼ get_backend(acp_enhanced_backend) — provider chosen in Settings → Enhanced Backend
+   ├─ ClaudeCodeBackend → AcpClient → npx claude-agent-acp   (Bedrock)
+   ├─ KiroCliBackend    → AcpClient → kiro-cli acp           (IAM Identity Center login)
+   └─ CodexBackend      → AcpClient → npx codex-acp          (needs OPENAI_API_KEY)
+   ▼ stdio subprocess (self-implemented JSON-RPC 2.0)
+   ▲ EnhancedEvent → existing SSE (text / tool_start / tool_end / done) → chat UI + "✦ Enhanced" chip
+```
+
+- **Self-implemented protocol** (`src/agenticops/acp/`): newline-delimited JSON-RPC 2.0 over stdio — no third-party ACP dependency. The Phase-0 spike (`scripts/acp_spike.py`) pinned the live behavior of `claude-agent-acp` v0.42.0: launch with `npx -y`, `protocolVersion: 1`, nested `session/update` payloads, terminal `usage` tokens, Bedrock pass-through working.
+- **End-to-end streaming, no buffering.** Every hop is a streaming primitive: Claude Code pushes `session/update` notifications → `AcpClient` reads them as an async generator (`async for read_message(...)`) → `backend.run()` yields `AsyncIterator[EnhancedEvent]` → `enhanced_task` is an **async-generator `@tool`** (Strands detects `isasyncgenfunction` and wraps each yield as a `ToolStreamEvent`) → the web stream loop maps those to existing SSE events (`tool_stream_to_sse`) → the browser reads them via `fetch` + `ReadableStream`. Claude Code's intermediate tool calls (Read/Bash/WebSearch) surface as live `tool_start`/`tool_end` chips, so a long task (deep research, create-skill) shows real-time progress. Granularity follows Bedrock's chunking — short answers arrive in one or two chunks; we never hold a chunk back.
+- **Three providers, pluggable**: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`, uses kiro's own login), and `codex` (`@zed-industries/codex-acp`, needs `OPENAI_API_KEY`). Claude/Kiro/Codex all share the same self-implemented `AcpClient` (it speaks ACP/JSON-RPC; `protocol_version` is per-provider, default 1). Adding another = one provider class + `register_backend()`; the protocol-agnostic core (`EnhancedBackend` / `EnhancedEvent`) does not change.
+- **Choose in the UI**: **Settings → General → Enhanced Backend** has a toggle (`acp_enhanced_enabled`) + a provider dropdown (populated from the registry). Both persist to `settings.yaml` and clear the session cache so agents rebuild with the new provider on the next message.
+- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes.
+- **Enable**: toggle it in Settings, or set `acp_enhanced_enabled: true` in `config/settings.yaml` (config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`, `acp_kiro_command`/`acp_kiro_args`, `acp_codex_command`/`acp_codex_args`).
+
+---
+
 ## Quick Tutorials
 
 ### Tutorial 1: First Scan — Discover Your AWS Resources
@@ -663,18 +780,16 @@ Open `http://localhost:8000/app/dashboard` and explore:
 | Page | What You Can Do |
 |------|----------------|
 | **Dashboard** | Overview stats, recent issues |
-| **Chat** | Same as CLI but with SSE streaming, file upload button, session history |
-| **Resources** | Browse all scanned AWS resources with filters |
-| **Anomalies** | View health issues, click through to RCA and fix plans |
-| **Fix Plans** | Review plans, approve, trigger execution |
-| **Network** | Interactive topology graph with SRE analysis (SPOF detection, capacity risk) |
-| **Reports** | Generate and view daily/incident/inventory reports |
-| **Schedules** | Set up cron-based automated scans/detections |
-| **Notifications** | Configure channels (Feishu, Slack, Email, DingTalk, WeCom, Webhook), view logs |
-| **Accounts** | Manage AWS accounts (activate, deactivate) |
-| **Audit Log** | View all system audit events |
+| **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history |
+| **Resources** / **Resource Detail** | Browse all scanned AWS resources with filters; drill into one resource |
+| **Issues & Plans** / **Issue Detail** | View health issues + fix plans, click through to RCA, approve, trigger execution |
+| **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports |
+| **Schedules** / **Schedule Detail** | Set up cron-based automated scans/detections |
+| **Skills** / **Skill Detail** | Browse the 15 domain skills, view/promote/rollback drafts |
+| **Agent Metrics** | Per-agent token/latency/usage metrics |
+| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend |
 
-> **See also**: [Web Service Workflow](web_service_workflow.md) — process model, SSE vs WebSocket, Feishu Bot, startup lifecycle.
+> **Note:** Settings consolidates account management, messaging channels, MCP servers, and the optional Enhanced Backend selector. The standalone Network topology page was removed (the graph engine remains as agent tools — see Tutorial 7).
 
 **Web chat supports file uploads** — click the paperclip icon to attach screenshots (PNG/JPEG) for visual analysis or PDFs/docs for document analysis.
 
@@ -731,7 +846,7 @@ what happens if I remove the connection between subnet-aaa and nat-gw-bbb?
 what depends on i-0abc123def?
 ```
 
-**Web alternative:** Go to the **Network** page, select a VPC, toggle "Enriched" to see compute resources, and use the SRE Analysis panel for SPOF/capacity/dependency analysis.
+**Note:** Topology is exposed through the agent (SRE/RCA call the graph engine tools) and chat, not a dedicated web page — the standalone Network page was removed. Ask in chat (CLI or Web) as shown above; the graph engine (NetworkX: SPOF, capacity risk, dependency chain, change simulation) runs server-side as agent tools.
 
 ---
 
@@ -941,11 +1056,11 @@ curl "$BASE/graph/vpc/{vpc_id}/enriched?region=us-east-1"
 # Detect single points of failure
 curl "$BASE/graph/vpc/{vpc_id}/spof?region=us-east-1"
 
-# List notification channels
-curl $BASE/notifications/channels
+# List messaging channels (alert/chat routing)
+curl $BASE/messaging/channels
 
-# Test a notification channel
-curl -X POST $BASE/notifications/channels/feishu-ops/test
+# Test a messaging channel
+curl -X POST $BASE/messaging/channels/feishu-ops/test
 
 # List IM aliases
 curl $BASE/im-aliases

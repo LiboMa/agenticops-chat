@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-06-01'
-last_used: '2026-06-08'
+last_used: '2026-06-16'
 ---
 
 # AWS Compute Skill
@@ -46,7 +46,10 @@ last_used: '2026-06-08'
    - Key pair matches, permissions on .pem file (`chmod 400 key.pem`)
    - Route table: subnet has route to IGW (public subnet) or NAT (private subnet)
    - OS firewall: iptables/firewalld/ufw may be blocking
-   - SSM Session Manager: alternative when SSH is not feasible
+   - Access ladder (human-SRE order): SSM Session Manager is the PRIMARY path;
+     SSH is the fallback when SSM is unavailable. `run_on_host(method="auto")`
+     tries SSM first, classifies the failure (InvalidInstanceId / TargetNotConnected /
+     AccessDenied), then falls back to SSH using the instance's inventory IP.
 6. **Instance stuck in stopping/shutting-down**:
    - Force stop: `aws ec2 stop-instances --instance-ids ID --force`
    - If stuck for >20 min, file AWS Support case

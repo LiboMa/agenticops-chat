@@ -135,7 +135,7 @@ def _calc_max_pods(max_enis: int, ipv4_per_eni: int) -> int:
 
 
 @tool
-def describe_eks_clusters(region: str) -> str:
+def describe_eks_clusters(region: str, account: str = "") -> str:
     """Describe all EKS clusters in a region with full configuration details.
 
     Enhanced replacement for the basic describe_eks tool. Returns VPC config,
@@ -149,7 +149,7 @@ def describe_eks_clusters(region: str) -> str:
         network config, logging, and tags.
     """
     try:
-        eks = _get_client("eks", region)
+        eks = _get_client("eks", region, account)
         cluster_names = []
         paginator = eks.get_paginator("list_clusters")
         for page in paginator.paginate():
@@ -203,7 +203,7 @@ def describe_eks_clusters(region: str) -> str:
 
 
 @tool
-def describe_eks_nodegroups(region: str, cluster_name: str) -> str:
+def describe_eks_nodegroups(region: str, cluster_name: str, account: str = "") -> str:
     """Describe all managed node groups for an EKS cluster.
 
     Returns instance types, capacity type (ON_DEMAND/SPOT), scaling config,
@@ -217,7 +217,7 @@ def describe_eks_nodegroups(region: str, cluster_name: str) -> str:
         JSON list of node groups with configuration and health details.
     """
     try:
-        eks = _get_client("eks", region)
+        eks = _get_client("eks", region, account)
         ng_names = []
         paginator = eks.get_paginator("list_nodegroups")
         for page in paginator.paginate(clusterName=cluster_name):
@@ -273,7 +273,7 @@ def describe_eks_nodegroups(region: str, cluster_name: str) -> str:
 
 
 @tool
-def check_eks_pod_ip_capacity(region: str, cluster_name: str) -> str:
+def check_eks_pod_ip_capacity(region: str, cluster_name: str, account: str = "") -> str:
     """Check pod IP capacity for an EKS cluster's node groups.
 
     Calculates max pods per node using the AWS VPC CNI formula:
@@ -291,8 +291,8 @@ def check_eks_pod_ip_capacity(region: str, cluster_name: str) -> str:
         total cluster capacity, and warnings.
     """
     try:
-        eks = _get_client("eks", region)
-        ec2 = _get_client("ec2", region)
+        eks = _get_client("eks", region, account)
+        ec2 = _get_client("ec2", region, account)
 
         # Get cluster subnets
         cluster_resp = eks.describe_cluster(name=cluster_name)
@@ -387,7 +387,7 @@ def check_eks_pod_ip_capacity(region: str, cluster_name: str) -> str:
 
 
 @tool
-def map_eks_to_vpc_topology(region: str, cluster_name: str) -> str:
+def map_eks_to_vpc_topology(region: str, cluster_name: str, account: str = "") -> str:
     """Map an EKS cluster's networking to its underlying VPC topology.
 
     Bridges EKS to VPC: cluster → VPC → node subnets → route tables → NAT/IGW.
@@ -403,8 +403,8 @@ def map_eks_to_vpc_topology(region: str, cluster_name: str) -> str:
         load balancers in VPC, and detected topology issues.
     """
     try:
-        eks = _get_client("eks", region)
-        ec2 = _get_client("ec2", region)
+        eks = _get_client("eks", region, account)
+        ec2 = _get_client("ec2", region, account)
 
         # Get cluster details
         cluster_resp = eks.describe_cluster(name=cluster_name)
@@ -518,7 +518,7 @@ def map_eks_to_vpc_topology(region: str, cluster_name: str) -> str:
 
         # Find LBs in the same VPC
         try:
-            elbv2 = _get_client("elbv2", region)
+            elbv2 = _get_client("elbv2", region, account)
             lb_paginator = elbv2.get_paginator("describe_load_balancers")
             vpc_lbs = []
             for page in lb_paginator.paginate():

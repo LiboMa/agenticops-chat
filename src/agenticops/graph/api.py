@@ -36,33 +36,25 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
 def _ensure_aws_session(region: str) -> None:
-    """Ensure AWS session exists for the given region via provider layer."""
-    import agenticops.tools.aws_tools as aws_tools_module
+    """Pre-warm a registered-account session for the region (default account).
 
-    for key in aws_tools_module._session_cache:
-        if key.endswith(f":{region}"):
-            return
-
-    # Resolve credentials for the first enabled AWS account
-    from agenticops.models import CloudAccount, get_db_session
-    from agenticops.providers import get_provider
-    from types import SimpleNamespace
+    Graph collectors resolve credentials through the same provider layer
+    (account-addressed, fail-closed). This only pre-warms the cache for the
+    single enabled AWS account; if more than one is enabled it logs and lets
+    the per-call resolution surface the ambiguity. Multi-account graph sync is
+    a follow-up.
+    """
+    from agenticops.credentials.resolver import (
+        resolve_default_account,
+        resolve_account_session,
+        AccountResolutionError,
+    )
 
     try:
-        with get_db_session() as db:
-            acct = db.query(CloudAccount).filter(
-                CloudAccount.is_enabled == True, CloudAccount.provider == "aws"  # noqa: E712
-            ).first()
-            if not acct:
-                return
-            snap = SimpleNamespace(
-                id=acct.id, name=acct.name, provider=acct.provider,
-                credentials=dict(acct.credentials or {}),
-                regions=list(acct.regions or []), labels=dict(acct.labels or {}),
-            )
-        provider = get_provider(snap)
-        if provider.resolve_credentials():
-            aws_tools_module._session_cache[f"web:{region}"] = provider.sdk_session()
+        snap = resolve_default_account("aws")
+        resolve_account_session(snap, region)
+    except AccountResolutionError as e:
+        logger.debug("graph API: %s", e)
     except Exception:
         logger.debug("Failed to resolve AWS session for graph API", exc_info=True)
 
@@ -423,33 +415,9 @@ async def get_graph_diff(
 ) -> list[dict]:
     """Compare recent graph snapshots to show sync history."""
     try:
-        from sqlalchemy import text
-        from agenticops.models import get_engine
+        from agenticops.graph.store import GraphStore
 
-        engine = get_engine()
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT id, scope, snapshot_at, node_count, edge_count, "
-                    "nodes_added, nodes_updated, nodes_removed "
-                    "FROM graph_snapshots ORDER BY id DESC LIMIT :limit"
-                ),
-                {"limit": limit},
-            ).fetchall()
-
-        return [
-            {
-                "id": r[0],
-                "scope": r[1],
-                "snapshot_at": r[2],
-                "node_count": r[3],
-                "edge_count": r[4],
-                "nodes_added": r[5],
-                "nodes_updated": r[6],
-                "nodes_removed": r[7],
-            }
-            for r in rows
-        ]
+        return GraphStore().get_recent_snapshots(limit=limit)
     except Exception as e:
         logger.exception("Graph diff failed")
         return JSONResponse({"error": str(e)}, status_code=500)

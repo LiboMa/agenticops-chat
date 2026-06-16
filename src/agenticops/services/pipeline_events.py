@@ -9,9 +9,46 @@ blocked by event logging failure.
 
 import json
 import logging
-from typing import Optional
+import threading
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# ── In-process subscribers (MVP-2.0.0) ──────────────────────────────
+#
+# Integrations (ITSM bridge, webhooks) subscribe here to react to pipeline
+# lifecycle events. Handlers run on a daemon thread and are best-effort:
+# a failing subscriber never blocks or breaks the pipeline.
+
+_subscribers: list[Callable[[int, str, str, str, Optional[dict]], None]] = []
+_subscribers_lock = threading.Lock()
+
+
+def subscribe(handler: Callable[[int, str, str, str, Optional[dict]], None]) -> None:
+    """Register handler(health_issue_id, event_type, stage, status, detail)."""
+    with _subscribers_lock:
+        if handler not in _subscribers:
+            _subscribers.append(handler)
+
+
+def unsubscribe(handler: Callable) -> None:
+    with _subscribers_lock:
+        if handler in _subscribers:
+            _subscribers.remove(handler)
+
+
+def _notify_subscribers(
+    health_issue_id: int, event_type: str, stage: str, status: str, detail: Optional[dict]
+) -> None:
+    with _subscribers_lock:
+        handlers = list(_subscribers)
+    for handler in handlers:
+        def _run(h=handler):
+            try:
+                h(health_issue_id, event_type, stage, status, detail)
+            except Exception:
+                logger.debug("pipeline event subscriber failed", exc_info=True)
+        threading.Thread(target=_run, daemon=True, name="pipeline-event-sub").start()
 
 
 def _resolve_trace_id(
@@ -73,6 +110,11 @@ def log_event(
             session.add(event)
     except Exception:
         logger.debug("Failed to log pipeline event %s for issue #%d", event_type, health_issue_id, exc_info=True)
+
+    try:
+        _notify_subscribers(health_issue_id, event_type, stage, status, detail)
+    except Exception:
+        logger.debug("Subscriber notification failed for %s", event_type, exc_info=True)
 
 
 def get_timeline(health_issue_id: int) -> list[dict]:

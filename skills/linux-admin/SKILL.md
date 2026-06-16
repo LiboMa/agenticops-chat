@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-05-31'
-last_used: '2026-06-09'
+last_used: '2026-06-16'
 ---
 
 # Linux Admin Skill
@@ -162,6 +162,11 @@ Network unreachable OR high latency/packet loss
 ```
 
 ### SSH Connectivity
+
+> Host access tool: `run_on_host(host_id, command, method="auto")` performs the
+> SSM→SSH ladder automatically — it tries SSM first, and on failure falls back to
+> SSH using the instance's inventory IP. Force a transport with `method="ssm"` or
+> `method="ssh"` when needed.
 
 1. `ssh -v user@host` — verbose connection debugging (shows auth methods, key exchange)
 2. Check sshd running: `systemctl status sshd`

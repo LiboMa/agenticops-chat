@@ -117,82 +117,69 @@ class TestSessionCache:
 
 class TestAWSProvider:
     def test_resolve_credentials_role_arn(self):
-        """Test STS AssumeRole path: base session → base_session.client('sts').assume_role()."""
+        """AssumeRole path: builds a refreshable session, then validates via STS."""
         account = make_account("aws", credentials={"role_arn": "arn:aws:iam::123:role/test"})
         provider = get_provider(account)
 
-        mock_sts = MagicMock()
-        mock_sts.assume_role.return_value = {
-            "Credentials": {
-                "AccessKeyId": "AKIA...",
-                "SecretAccessKey": "secret",
-                "SessionToken": "token",
-            }
-        }
-
-        # base_session (default chain, no profile) — used for STS AssumeRole
-        mock_base_session = MagicMock()
-        mock_base_session.client.return_value = mock_sts
-
-        # assumed_session — created from assumed credentials
+        # assumed (refreshable) session — validation calls get_caller_identity
         mock_assumed_session = MagicMock()
         mock_assumed_session.client.return_value.get_caller_identity.return_value = {}
 
+        mock_base_session = MagicMock()
         mock_boto3 = MagicMock()
-        mock_boto3.Session.side_effect = [mock_base_session, mock_assumed_session]
+        mock_boto3.Session.return_value = mock_base_session
 
         import agenticops.providers.aws as aws_mod
         original = aws_mod.boto3
         try:
             aws_mod.boto3 = mock_boto3
-            result = provider.resolve_credentials()
+            # Spy the refreshable-session builder (its botocore internals are
+            # covered by test_aws_provider_refreshable_creds.py).
+            with patch.object(provider, "_build_assume_role_session",
+                              return_value=mock_assumed_session) as spy:
+                result = provider.resolve_credentials()
         finally:
             aws_mod.boto3 = original
 
         assert result is True
-        mock_base_session.client.assert_called_with("sts")
-        mock_sts.assume_role.assert_called_once()
+        spy.assert_called_once()
+        # default-partition ARN + no regions → sts_region falls back to None
+        _base, role_arn, sts_region, _creds = spy.call_args[0]
+        assert role_arn == "arn:aws:iam::123:role/test"
+        # validation happened on the assumed session
+        mock_assumed_session.client.return_value.get_caller_identity.assert_called_once()
 
     def test_resolve_credentials_profile_plus_role_arn(self):
-        """Test profile_name + role_arn: base session uses profile, then assumes role."""
+        """profile_name + role_arn: base session uses profile, STS region = aws-cn partition."""
         account = make_account("aws", credentials={
             "profile_name": "china-profile",
             "role_arn": "arn:aws-cn:iam::113:role/OpsRole",
         })
         provider = get_provider(account)
 
-        mock_sts = MagicMock()
-        mock_sts.assume_role.return_value = {
-            "Credentials": {
-                "AccessKeyId": "AKIA...",
-                "SecretAccessKey": "secret",
-                "SessionToken": "token",
-            }
-        }
-
-        mock_base_session = MagicMock()
-        mock_base_session.client.return_value = mock_sts
-
         mock_assumed_session = MagicMock()
         mock_assumed_session.client.return_value.get_caller_identity.return_value = {}
 
+        mock_base_session = MagicMock()
         mock_boto3 = MagicMock()
-        mock_boto3.Session.side_effect = [mock_base_session, mock_assumed_session]
+        mock_boto3.Session.return_value = mock_base_session
 
         import agenticops.providers.aws as aws_mod
         original = aws_mod.boto3
         try:
             aws_mod.boto3 = mock_boto3
-            result = provider.resolve_credentials()
+            with patch.object(provider, "_build_assume_role_session",
+                              return_value=mock_assumed_session) as spy:
+                result = provider.resolve_credentials()
         finally:
             aws_mod.boto3 = original
 
         assert result is True
-        # Base session uses profile
+        # Base session uses the configured profile
         mock_boto3.Session.assert_any_call(profile_name="china-profile")
-        # AssumeRole called via base session's STS client (cn-north-1 for aws-cn partition)
-        mock_base_session.client.assert_called_with("sts", region_name="cn-north-1")
-        mock_sts.assume_role.assert_called_once()
+        # AssumeRole STS region pinned to cn-north-1 for the aws-cn partition
+        _base, role_arn, sts_region, _creds = spy.call_args[0]
+        assert sts_region == "cn-north-1"
 
     def test_resolve_credentials_profile(self):
         """Test profile_name path."""
@@ -333,6 +320,12 @@ class TestAWSProvider:
         """Verify --output json is appended."""
         account = make_account("aws")
         provider = get_provider(account)
+        # cli_tool now fails closed without a resolved session; give it one so we
+        # reach the subprocess call this test is actually asserting on.
+        frozen = MagicMock(access_key="k", secret_key="s", token="t")
+        sess = MagicMock()
+        sess.get_credentials.return_value.get_frozen_credentials.return_value = frozen
+        provider._session = sess
         tool = provider.cli_tool()
 
         with patch("agenticops.providers.aws.subprocess.run") as mock_run:

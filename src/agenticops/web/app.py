@@ -53,24 +53,6 @@ from agenticops.web.session_manager import ChatSessionManager
 logger = logging.getLogger(__name__)
 
 
-def _ensure_aws_session(region: str):
-    """Ensure an AWS session exists for the given region.
-
-    If no assumed-role session exists, inject a default boto3 session
-    from environment credentials (suitable for local/internal dashboard).
-    """
-    import boto3
-    import agenticops.tools.aws_tools as aws_tools_module
-
-    for key in aws_tools_module._session_cache:
-        if key.endswith(f":{region}"):
-            return  # Already have a session for this region
-    # Inject default credentials session
-    session = boto3.Session(region_name=region)
-    aws_tools_module._session_cache[f"web:{region}"] = session
-    logger.info("Injected default AWS session for region %s", region)
-
-
 # ============================================================================
 # Pydantic Models for API — extracted to schemas.py (imported below)
 # ============================================================================
@@ -94,6 +76,14 @@ async def lifespan(app: FastAPI):
     _setup_service_logging()
     init_db()
 
+    # Surface model-ID config drift early (unmatched IDs lose window tuning
+    # and may be rejected by Bedrock at invocation time)
+    try:
+        from agenticops.config import validate_agent_model_ids
+        validate_agent_model_ids()
+    except Exception:
+        pass
+
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
         try:
@@ -114,6 +104,14 @@ async def lifespan(app: FastAPI):
 
     _chat_sessions.start_cleanup()
     _executor_service.start()
+
+    # ITSM bridge (MVP-2.0.0): mirror issue/fix lifecycle into ServiceNow/Jira
+    try:
+        from agenticops.itsm import start_itsm_bridge
+        if start_itsm_bridge():
+            logger.info("ITSM bridge started (dry_run=%s)", settings.itsm_dry_run)
+    except Exception as e:
+        logger.warning("ITSM bridge failed to start: %s", e)
 
     # MCP servers: lazy-start on first Agent creation (not here).
     # Pre-starting causes "session is currently running" conflict with Strands.
@@ -602,6 +600,16 @@ def _model_version_label(model_id: str) -> str:
     return m.group(1).replace("-", ".") if m else ""
 
 
+def _acp_available_backends() -> list[str]:
+    """Registered enhanced-backend provider names (empty if acp module unavailable)."""
+    try:
+        import agenticops.acp  # noqa: F401 — triggers register_backend at import
+        from agenticops.acp.registry import available_backends
+        return available_backends()
+    except Exception:
+        return []
+
+
 @app.get("/api/settings")
 async def api_get_settings():
     """Return all toggleable runtime settings."""
@@ -662,6 +670,10 @@ async def api_get_settings():
         "report_s3_prefix": settings.report_s3_prefix,
         "report_s3_region": settings.report_s3_region,
         "report_presigned_url_expiry": settings.report_presigned_url_expiry,
+        # ACP enhanced backend (optional task delegation)
+        "acp_enhanced_enabled": settings.acp_enhanced_enabled,
+        "acp_enhanced_backend": settings.acp_enhanced_backend,
+        "acp_available_backends": _acp_available_backends(),
     }
 
 
@@ -682,7 +694,10 @@ async def api_update_settings(body: dict = Body(...)):
     REPORT_STR_KEYS = {"report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region"}
     REPORT_INT_KEYS = {"report_presigned_url_expiry"}
 
-    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | {"scan_focus", "agent_models"}
+    # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
+    ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
+
+    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models"}
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -746,6 +761,24 @@ async def api_update_settings(body: dict = Body(...)):
             if key in body:
                 yaml_updates[key] = getattr(settings, key)
         save_to_yaml(yaml_updates)
+
+    # ACP enhanced backend — persist to YAML + clear session cache so agents
+    # rebuild with the new tool registration / provider on the next message.
+    acp_yaml: dict[str, Any] = {}
+    if "acp_enhanced_enabled" in body:
+        if not isinstance(body["acp_enhanced_enabled"], bool):
+            raise HTTPException(400, "acp_enhanced_enabled must be a boolean")
+        settings.acp_enhanced_enabled = body["acp_enhanced_enabled"]
+        acp_yaml["acp_enhanced_enabled"] = settings.acp_enhanced_enabled
+    if "acp_enhanced_backend" in body:
+        val = str(body["acp_enhanced_backend"])
+        if val not in _acp_available_backends():
+            raise HTTPException(400, f"Unknown enhanced backend: {val}")
+        settings.acp_enhanced_backend = val
+        acp_yaml["acp_enhanced_backend"] = val
+    if acp_yaml:
+        save_to_yaml(acp_yaml)
+        _chat_sessions.clear()
 
     return await api_get_settings()
 
@@ -4399,6 +4432,27 @@ async def api_send_chat_message(session_id: str, request: Request):
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
                     break
                 ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
+                # Enhanced backend (enhanced_task async-gen) sub-events streamed
+                # live via Strands ToolStreamEvent -> existing SSE event types.
+                if ev.get("type") == "tool_stream":
+                    from agenticops.acp.mapping import tool_stream_to_sse
+                    _sse = tool_stream_to_sse(ev)
+                    if _sse:
+                        if _sse["event"] == "text":
+                            accumulated += _sse["data"]["token"]
+                        elif _sse["event"] == "tool_start":
+                            _n = _sse["data"]["name"]
+                            if _n not in [t["name"] for t in tool_calls]:
+                                tool_calls.append({"name": _n, "status": "running"})
+                        elif _sse["event"] == "tool_end":
+                            # already streamed live — mark done so the post-loop
+                            # sweep doesn't emit a duplicate tool_end
+                            _n = _sse["data"]["name"]
+                            for t in tool_calls:
+                                if t["name"] == _n:
+                                    t["status"] = "done"
+                        yield {"event": _sse["event"], "data": json.dumps(_sse["data"])}
+                    continue
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
                     accumulated += ev["data"]
@@ -4421,8 +4475,11 @@ async def api_send_chat_message(session_id: str, request: Request):
                     if not accumulated and hasattr(res, "__str__"):
                         accumulated = str(res)
 
-            # Mark tools done
+            # Mark tools done (skip any already finished live, e.g. enhanced
+            # sub-tools that streamed their own tool_end)
             for t in tool_calls:
+                if t["status"] == "done":
+                    continue
                 t["status"] = "done"
                 yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
 
@@ -4521,7 +4578,11 @@ if (FRONTEND_DIR / "assets").exists():
 
 @app.get("/app/{full_path:path}")
 async def serve_spa(full_path: str):
-    """SPA fallback — serve index.html for all /app/* routes."""
+    """Serve dist root files (logo, favicons) or fall back to index.html (SPA routes)."""
+    if full_path and "/" not in full_path and ".." not in full_path:
+        candidate = (FRONTEND_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.parent == FRONTEND_DIR.resolve():
+            return FileResponse(str(candidate))
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
         return FileResponse(str(index_file))
@@ -5305,6 +5366,19 @@ async def api_restore_agent_memory(agent: str, filename: str):
 
 # ============================================================================
 # Run Server Function
+# ============================================================================
+# Self-Improvement Metrics (MVP-2.0.0)
+# ============================================================================
+
+
+@app.get("/api/metrics/improvement")
+async def api_improvement_metrics(days: int = 90, fingerprint: Optional[str] = None):
+    """Self-improvement metrics: MTTR by pattern, first-time-fix rate, automation rate."""
+    from agenticops.services.metrics_service import get_improvement_metrics
+
+    return get_improvement_metrics(days=days, fingerprint=fingerprint)
+
+
 # ============================================================================
 
 

@@ -12,31 +12,44 @@ import pytest
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+# Holds the snapshot the patched resolver returns as the single enabled account.
+_DEFAULT_ACCOUNT = {"snap": None}
+
+
 @pytest.fixture(autouse=True)
-def _clear_session_cache():
-    """Clear the module-level session cache before each test."""
+def _resolver_env(monkeypatch):
+    """Clear the shared session cache and drive resolution to one mock account."""
+    from types import SimpleNamespace
     import agenticops.tools.aws_tools as mod
+    from agenticops.credentials import resolver
+
     mod._session_cache.clear()
+    _DEFAULT_ACCOUNT["snap"] = None
+
+    def _list_enabled(provider=""):
+        snap = _DEFAULT_ACCOUNT["snap"]
+        return [snap] if snap else []
+
+    # Drive both resolution entry points off the single registered account.
+    monkeypatch.setattr(resolver, "list_enabled_accounts", _list_enabled)
     yield
     mod._session_cache.clear()
-
-
-def _make_sts_response():
-    return {
-        "Credentials": {
-            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
-            "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "SessionToken": "FwoGZXIvYXdzE...",
-            "Expiration": datetime(2026, 12, 31, tzinfo=timezone.utc),
-        }
-    }
+    _DEFAULT_ACCOUNT["snap"] = None
 
 
 def _inject_session(region="us-east-1", account_id="111111111111"):
-    """Inject a mock session into the cache."""
+    """Register a single enabled account and seed its cached session."""
+    from types import SimpleNamespace
     import agenticops.tools.aws_tools as mod
+
     session = MagicMock()
+    # resolve_account_session looks up {account_id}:{region} as a fallback key.
     mod._session_cache[f"{account_id}:{region}"] = session
+    _DEFAULT_ACCOUNT["snap"] = SimpleNamespace(
+        id=1, name="acct", provider="aws",
+        credentials={"account_id": account_id}, regions=[region], labels={},
+        credential_source_type="assume_role",
+    )
     return session
 
 
@@ -46,8 +59,8 @@ class TestAssumeRole:
     """Tests for assume_role using the provider abstraction layer.
 
     The function now resolves credentials via:
-      get_db_session() → find matching CloudAccount → get_provider(account) →
-      provider.resolve_credentials() → provider.sdk_session() → cache
+      get_db_session() → find matching CloudAccount → resolve_account_session()
+      (get_provider → resolve_credentials → sdk_session → cache).
     """
 
     @pytest.fixture(autouse=True)
@@ -106,17 +119,34 @@ class TestAssumeRole:
         assert "No enabled account found" in result
         mock_get_provider.assert_not_called()
 
-    def test_assume_role_cached(self):
-        """Second call with same account+region returns cached message without re-resolving."""
-        # Pre-inject a session into cache
+    @patch("agenticops.models.get_db_session")
+    def test_assume_role_cached(self, mock_get_db_session):
+        """With a session already cached, assume_role resolves it (cache hit) and confirms
+        without calling the provider again."""
+        mock_account = MagicMock()
+        mock_account.id = 1
+        mock_account.name = "acct"
+        mock_account.provider = "aws"
+        mock_account.credentials = {"role_arn": "arn:aws:iam::111111111111:role/Test", "account_id": "111111111111"}
+        mock_account.regions = ["us-east-1"]
+        mock_account.labels = {}
+        mock_account.is_enabled = True
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_account]
+        mock_get_db_session.return_value.__enter__ = MagicMock(return_value=mock_db)
+        mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Pre-inject a session into cache; resolver finds it without re-resolving.
         _inject_session(region="us-east-1", account_id="111111111111")
 
-        result = self.fn(
-            account_id="111111111111",
-            role_arn="arn:aws:iam::111111111111:role/Test",
-            region="us-east-1",
-        )
-        assert "already cached" in result
+        with patch("agenticops.providers.get_provider") as mock_get_provider:
+            result = self.fn(
+                account_id="111111111111",
+                role_arn="arn:aws:iam::111111111111:role/Test",
+                region="us-east-1",
+            )
+            assert "Credentials resolved" in result
+            mock_get_provider.assert_not_called()  # cache hit → no re-resolution
 
     @patch("agenticops.models.get_db_session")
     @patch("agenticops.providers.get_provider")

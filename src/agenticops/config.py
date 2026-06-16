@@ -402,6 +402,53 @@ class Settings(BaseSettings):
         default=True,
         description="Security-scan a skill before promoting draft->published (blocks dangerous run_on_host) (AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE)",
     )
+
+    # ── ACP Enhanced Backend (MVP-1.3.0, optional) ─────────────────
+    acp_enhanced_enabled: bool = Field(
+        default=False,
+        description="Enable the optional ACP enhanced-task backend (delegates complex tasks to Claude Code/Kiro) (AIOPS_ACP_ENHANCED_ENABLED)",
+    )
+    acp_enhanced_backend: str = Field(
+        default="claude-code",
+        description="Default enhanced backend provider name (AIOPS_ACP_ENHANCED_BACKEND)",
+    )
+    acp_claude_command: str = Field(
+        default="npx",
+        description="Launch command for the Claude Code ACP agent (AIOPS_ACP_CLAUDE_COMMAND)",
+    )
+    acp_claude_args: list[str] = Field(
+        default_factory=lambda: ["-y", "@agentclientprotocol/claude-agent-acp"],
+        description="Args for the Claude Code ACP agent launch; -y auto-confirms npx install (AIOPS_ACP_CLAUDE_ARGS)",
+    )
+    acp_use_bedrock: bool = Field(
+        default=True,
+        description="Run the enhanced backend on Bedrock (CLAUDE_CODE_USE_BEDROCK=1) (AIOPS_ACP_USE_BEDROCK)",
+    )
+    acp_timeout_seconds: int = Field(
+        default=300,
+        description="Per-turn timeout for an enhanced-backend subprocess (AIOPS_ACP_TIMEOUT_SECONDS)",
+    )
+    acp_auto_approve_permissions: bool = Field(
+        default=True,
+        description="Auto-approve the backend's permission requests (allow_once) this round (AIOPS_ACP_AUTO_APPROVE_PERMISSIONS)",
+    )
+    acp_kiro_command: str = Field(
+        default="kiro-cli",
+        description="Launch command for the Kiro CLI ACP agent (AIOPS_ACP_KIRO_COMMAND)",
+    )
+    acp_kiro_args: list[str] = Field(
+        default_factory=lambda: ["acp", "--trust-all-tools"],
+        description="Args for the Kiro CLI ACP agent launch; --trust-all-tools auto-approves (AIOPS_ACP_KIRO_ARGS)",
+    )
+    acp_codex_command: str = Field(
+        default="npx",
+        description="Launch command for the Codex ACP agent (AIOPS_ACP_CODEX_COMMAND)",
+    )
+    acp_codex_args: list[str] = Field(
+        default_factory=lambda: ["-y", "@zed-industries/codex-acp"],
+        description="Args for the Codex ACP agent launch; needs OPENAI_API_KEY (AIOPS_ACP_CODEX_ARGS)",
+    )
+
     file_tools_admin_mode: bool = Field(
         default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "
@@ -481,16 +528,91 @@ class Settings(BaseSettings):
         description="Total execution timeout in seconds (default 30 min)",
     )
 
+    # Host access ladder (SSM → SSH fallback for run_on_host method="auto")
+    ssh_default_user: str = Field(
+        default="",
+        description="Default SSH username for run_on_host SSH fallback (AIOPS_SSH_DEFAULT_USER)",
+    )
+    ssh_default_key_path: str = Field(
+        default="",
+        description="Default SSH private key path for run_on_host SSH fallback (AIOPS_SSH_DEFAULT_KEY_PATH)",
+    )
+    ssh_bastion_host: str = Field(
+        default="",
+        description="Optional ProxyJump bastion (e.g. user@bastion) for SSH fallback (AIOPS_SSH_BASTION_HOST)",
+    )
+
     # Auto-RCA
     auto_rca_enabled: bool = Field(
         default=True,
         description="Automatically trigger RCA when a new HealthIssue is created",
     )
 
+    # ── Prevention (graph-based proactive checks) ────────────────────
+    patrol_graph_checks_enabled: bool = Field(
+        default=True,
+        description="Run SPOF + capacity-risk graph analysis during health patrol "
+        "(AIOPS_PATROL_GRAPH_CHECKS_ENABLED)",
+    )
+    rca_topology_context_enabled: bool = Field(
+        default=True,
+        description="Inject topology context (neighbors, blast radius, recent graph "
+        "changes) into RCA invocations (AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED)",
+    )
+
     # Auto-Fix Pipeline (RCA → SRE → Approve → Execute)
     auto_fix_enabled: bool = Field(
         default=True,
         description="Enable auto-fix pipeline: RCA → SRE → Approve(L0/L1) → Execute",
+    )
+
+    # ── Governed Autonomy (MVP-2.0.0) ───────────────────────────────
+    policy_engine_enabled: bool = Field(
+        default=True,
+        description="Use the declarative policy engine for fix-plan approval decisions; "
+        "false = legacy hardcoded L0/L1 auto-approve (AIOPS_POLICY_ENGINE_ENABLED)",
+    )
+    policy_file: str = Field(
+        default="config/policies.yaml",
+        description="Path to the governed-autonomy policy file (AIOPS_POLICY_FILE)",
+    )
+
+    # ── ITSM Bridge (MVP-2.0.0) ─────────────────────────────────────
+    itsm_enabled: bool = Field(
+        default=False,
+        description="Mirror issue/fix lifecycle into ITSM (ServiceNow/Jira) (AIOPS_ITSM_ENABLED)",
+    )
+    itsm_dry_run: bool = Field(
+        default=True,
+        description="Log intended ITSM API calls instead of sending them (AIOPS_ITSM_DRY_RUN)",
+    )
+    itsm_servicenow_url: str = Field(
+        default="",
+        description="ServiceNow instance URL, e.g. https://acme.service-now.com (AIOPS_ITSM_SERVICENOW_URL)",
+    )
+    itsm_servicenow_user: str = Field(
+        default="",
+        description="ServiceNow integration user (AIOPS_ITSM_SERVICENOW_USER)",
+    )
+    itsm_servicenow_password: str = Field(
+        default="",
+        description="ServiceNow integration password — prefer env var (AIOPS_ITSM_SERVICENOW_PASSWORD)",
+    )
+    itsm_jira_url: str = Field(
+        default="",
+        description="Jira site URL, e.g. https://acme.atlassian.net (AIOPS_ITSM_JIRA_URL)",
+    )
+    itsm_jira_email: str = Field(
+        default="",
+        description="Jira account email for Basic auth (AIOPS_ITSM_JIRA_EMAIL)",
+    )
+    itsm_jira_api_token: str = Field(
+        default="",
+        description="Jira API token — prefer env var (AIOPS_ITSM_JIRA_API_TOKEN)",
+    )
+    itsm_jira_project_key: str = Field(
+        default="OPS",
+        description="Jira project key for incidents/changes (AIOPS_ITSM_JIRA_PROJECT_KEY)",
     )
 
     # Resource-Based Dedup
@@ -725,6 +847,31 @@ def get_agent_model_config(agent_name: str) -> tuple[str, int]:
     if max_tokens <= 0:
         max_tokens = settings.bedrock_max_tokens
     return model_id, max_tokens
+
+
+def validate_agent_model_ids() -> list[str]:
+    """Warn about agent model IDs that don't match any known model family.
+
+    An unmatched ID silently falls back to bedrock_window_size in
+    get_agent_window_size (losing the per-agent window tuning) and may be
+    rejected by Bedrock at invocation time. Returns the list of warning
+    strings (also logged) so callers/tests can assert on drift.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    warnings: list[str] = []
+    for agent_name in AGENT_NAMES:
+        model_id, _ = get_agent_model_config(agent_name)
+        if not any(family in model_id for family in MODEL_WINDOW_DEFAULTS):
+            msg = (
+                f"agent_{agent_name}_model_id={model_id!r} matches no known model "
+                f"family {list(MODEL_WINDOW_DEFAULTS)} — window falls back to "
+                f"bedrock_window_size={settings.bedrock_window_size}; check settings.yaml"
+            )
+            warnings.append(msg)
+            _log.warning(msg)
+    return warnings
 
 
 def get_bedrock_boto_session():

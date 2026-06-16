@@ -29,6 +29,7 @@ from agenticops.agents.rca_agent import rca_agent
 from agenticops.agents.reporter_agent import reporter_agent
 from agenticops.agents.sre_agent import sre_agent, sre_query
 from agenticops.agents.executor_agent import executor_agent
+from agenticops.agents.enhanced import enhanced_task
 from agenticops.tools.metadata_tools import (
     get_active_account,
     get_managed_resources,
@@ -181,7 +182,7 @@ ROUTING RULES:
 
 ADDITIONAL TASKS by USER REQUEST:
 1.If YOUR ASK for run specifc CLI commands, use the sre_query agent which has read-only AWS CLI access to 60+ services. For health issue investigation, use detect_agent and rca_agent. For inventory and resource questions, use scan_agent. For fix plan generation, use sre_agent. For any question that doesn't fit those categories, default to sre_query.
-2.任何命令行的操作，都丢给SRE来执行
+2.Any CLI command request → dispatch to sre_query (never run host/CLI commands yourself).
 
 CONTEXT BLOCKS: Messages may contain <attached_file>, <referenced_issue>, and <referenced_resource>
 context blocks with pre-fetched data. Use this context directly to answer the user's question.
@@ -327,6 +328,8 @@ If the user explicitly requests a different scope, honor their request over this
             add_cloud_account,
             update_cloud_account,
             remove_cloud_account,
+            # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off)
+            *([enhanced_task] if settings.acp_enhanced_enabled else []),
             # MCP tool providers (external servers)
             *tools_extra,
         ],

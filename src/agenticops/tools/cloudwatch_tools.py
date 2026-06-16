@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @tool
-def list_alarms(region: str, resource_type: str = "", state: str = "") -> str:
+def list_alarms(region: str, resource_type: str = "", state: str = "", account: str = "") -> str:
     """List CloudWatch Alarms, optionally filtered by resource type or state.
 
     Args:
@@ -31,7 +31,7 @@ def list_alarms(region: str, resource_type: str = "", state: str = "") -> str:
         JSON list of alarms with name, state, metric, namespace, and dimensions.
     """
     try:
-        client = _get_client("cloudwatch", region)
+        client = _get_client("cloudwatch", region, account)
     except RuntimeError as e:
         return str(e)
 
@@ -72,7 +72,7 @@ def list_alarms(region: str, resource_type: str = "", state: str = "") -> str:
 
 
 @tool
-def get_alarm_history(alarm_name: str, region: str, hours: int = 24) -> str:
+def get_alarm_history(alarm_name: str, region: str, hours: int = 24, account: str = "") -> str:
     """Get state change history for a specific CloudWatch alarm.
 
     Args:
@@ -84,7 +84,7 @@ def get_alarm_history(alarm_name: str, region: str, hours: int = 24) -> str:
         JSON list of alarm state transitions with timestamps and reasons.
     """
     try:
-        client = _get_client("cloudwatch", region)
+        client = _get_client("cloudwatch", region, account)
     except RuntimeError as e:
         return str(e)
 
@@ -120,6 +120,7 @@ def get_metrics(
     region: str,
     metric_names: str = "",
     hours: int = 1,
+    account: str = "",
 ) -> str:
     """Get CloudWatch metrics for a specific resource.
 
@@ -134,7 +135,7 @@ def get_metrics(
         JSON object mapping metric names to data points (timestamp, value).
     """
     try:
-        client = _get_client("cloudwatch", region)
+        client = _get_client("cloudwatch", region, account)
     except RuntimeError as e:
         return str(e)
 
@@ -212,7 +213,7 @@ def get_metrics(
 
 @tool
 def query_logs(
-    log_group: str, region: str, query: str = "", hours: int = 1
+    log_group: str, region: str, query: str = "", hours: int = 1, account: str = ""
 ) -> str:
     """Run a CloudWatch Logs Insights query.
 
@@ -226,7 +227,7 @@ def query_logs(
         JSON list of matching log entries.
     """
     try:
-        client = _get_client("logs", region)
+        client = _get_client("logs", region, account)
     except RuntimeError as e:
         return str(e)
 

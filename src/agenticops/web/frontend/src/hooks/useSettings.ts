@@ -25,6 +25,10 @@ export interface AppSettings {
   report_s3_prefix: string;
   report_s3_region: string;
   report_presigned_url_expiry: number;
+  // ACP enhanced backend (optional task delegation)
+  acp_enhanced_enabled: boolean;
+  acp_enhanced_backend: string;
+  acp_available_backends: string[];
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };

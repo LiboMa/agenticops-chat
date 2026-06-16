@@ -42,10 +42,7 @@ export function IconSidebar() {
       <aside className="fixed inset-y-0 left-0 w-[52px] bg-card border-r border-border flex flex-col z-30">
         {/* Logo */}
         <div className="h-[52px] flex items-center justify-center border-b border-border">
-          <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 shadow-md shadow-primary-500/25">
-            <span className="text-white text-sm font-bold">A</span>
-            <div className="absolute inset-0 rounded-lg bg-white/10 animate-pulse" style={{ animationDuration: "3s" }} />
-          </div>
+          <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="AgenticOps" className="w-8 h-8 drop-shadow-md" />
         </div>
 
         {/* Nav icons */}
