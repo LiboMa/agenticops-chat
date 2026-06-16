@@ -257,6 +257,50 @@ class TestEmailNotifier:
 
 
 # ---------------------------------------------------------------------------
+# Config-key mapping regression: UI/YAML keys must populate recipients.
+# Bug: SESNotifier read "to" but the UI/YAML key is "recipients" → recipients
+# silently emptied → send() returned False without ever calling SES. Same shape
+# in EmailNotifier (username/password/from_addr/to_addrs vs legacy keys).
+# ---------------------------------------------------------------------------
+
+class TestConfigKeyMapping:
+    def test_ses_reads_recipients_key(self):
+        from agenticops.notify.notifier import SESNotifier
+        n = SESNotifier({"sender": "s@x.com", "recipients": ["r@x.com"], "region": "us-east-1"})
+        assert n.recipients == ["r@x.com"]  # not dropped to []
+
+    def test_ses_legacy_to_key_still_works(self):
+        from agenticops.notify.notifier import SESNotifier
+        n = SESNotifier({"sender": "s@x.com", "to": ["legacy@x.com"]})
+        assert n.recipients == ["legacy@x.com"]
+
+    def test_ses_send_false_without_recipients(self):
+        from agenticops.notify.notifier import SESNotifier
+        n = SESNotifier({"sender": "s@x.com", "region": "us-east-1"})
+        assert n.recipients == []
+        assert run_async(n.send("subj", "body")) is False
+
+    def test_email_reads_ui_keys(self):
+        n = EmailNotifier({
+            "smtp_host": "h", "username": "u", "password": "p",
+            "from_addr": "f@x.com", "to_addrs": ["r@x.com"],
+        })
+        assert n.smtp_user == "u"
+        assert n.smtp_password == "p"
+        assert n.from_email == "f@x.com"
+        assert n.to_emails == ["r@x.com"]
+
+    def test_email_legacy_keys_still_work(self):
+        n = EmailNotifier({
+            "smtp_user": "u2", "smtp_password": "p2",
+            "from_email": "f2@x.com", "to_emails": ["r2@x.com"],
+        })
+        assert n.smtp_user == "u2"
+        assert n.from_email == "f2@x.com"
+        assert n.to_emails == ["r2@x.com"]
+
+
+# ---------------------------------------------------------------------------
 # SNSNotifier
 # ---------------------------------------------------------------------------
 

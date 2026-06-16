@@ -165,13 +165,16 @@ class EmailNotifier(Notifier):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
+        # Accept both the UI/YAML keys (username/password/from_addr/to_addrs)
+        # and the legacy keys (smtp_user/smtp_password/from_email/to_emails).
         self.smtp_host = config.get("smtp_host", "localhost")
         self.smtp_port = config.get("smtp_port", 587)
-        self.smtp_user = config.get("smtp_user")
-        self.smtp_password = config.get("smtp_password")
+        self.smtp_user = config.get("username", config.get("smtp_user"))
+        self.smtp_password = config.get("password", config.get("smtp_password"))
         self.use_tls = config.get("use_tls", True)
-        self.from_email = config.get("from_email", "aiops@localhost")
-        self.to_emails = config.get("to_emails", [])
+        self.from_email = config.get("from_addr", config.get("from_email", "aiops@localhost"))
+        to_addrs = config.get("to_addrs", config.get("to_emails", []))
+        self.to_emails = to_addrs if isinstance(to_addrs, list) else [to_addrs] if to_addrs else []
 
     async def send(self, subject: str, body: str, severity: Optional[str] = None) -> bool:
         """Send an email notification."""
@@ -736,7 +739,8 @@ class SESNotifier(Notifier):
         super().__init__(config)
         from agenticops.config import settings as _s
         self.sender: str = config.get("sender", config.get("from", ""))
-        recipients = config.get("to", [])
+        # Config/UI key is "recipients"; accept "to" as a back-compat alias.
+        recipients = config.get("recipients", config.get("to", []))
         self.recipients: List[str] = recipients if isinstance(recipients, list) else [recipients] if recipients else []
         self.region: str = config.get("region", "us-east-1")
         # S3: channel-level overrides settings.yaml (unified source)
