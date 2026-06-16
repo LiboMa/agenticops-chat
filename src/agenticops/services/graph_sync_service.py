@@ -72,14 +72,14 @@ def sync_all() -> dict[str, Any]:
 
     stats: dict[str, Any] = {"regions": {}}
 
-    # Use STS to get current account
+    # Attribute graph nodes to the registered default account (no ambient STS).
     try:
-        from agenticops.config import get_bedrock_boto_session
-        sts = get_bedrock_boto_session().client("sts")
-        account_id = sts.get_caller_identity()["Account"]
-    except Exception:
+        from agenticops.credentials.resolver import resolve_default_account
+        snap = resolve_default_account("aws")
+        account_id = str(snap.credentials.get("account_id") or snap.name)
+    except Exception as e:
         account_id = ""
-        logger.warning("Could not determine AWS account ID")
+        logger.warning("Could not determine registered AWS account for graph sync: %s", e)
 
     # Discover regions with VPCs — start with bedrock_region
     regions = [settings.bedrock_region]

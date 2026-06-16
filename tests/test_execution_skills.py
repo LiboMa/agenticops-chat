@@ -10,6 +10,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from types import SimpleNamespace
+
 from agenticops.skills.execution import (
     run_on_host,
     run_kubectl,
@@ -20,6 +22,12 @@ from agenticops.skills.execution import (
     SSM_TIMEOUT,
     SSH_TIMEOUT,
     KUBECTL_TIMEOUT,
+)
+
+_SNAP = SimpleNamespace(
+    id=1, name="acct", provider="aws",
+    credentials={"account_id": "111111111111"}, regions=["us-east-1"], labels={},
+    credential_source_type="assume_role",
 )
 
 
@@ -53,15 +61,15 @@ class TestRunOnHost:
         result = self._call(host_id="i-123", command="some-custom-tool")
         assert "requires confirmation" in result
 
-    @patch("agenticops.skills.execution._execute_ssm")
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "total 4\ndrwxr-xr-x 2 root root", ""))
     @patch("agenticops.skills.execution.classify_shell_command")
-    def test_readonly_command_ssm(self, mock_classify, mock_ssm):
+    def test_readonly_command_ssm(self, mock_classify, mock_ssm, mock_resolve):
         mock_classify.return_value = "read"
-        mock_ssm.return_value = "total 4\ndrwxr-xr-x 2 root root"
-        result = self._call(host_id="i-123", command="ls -la", method="ssm")
+        result = self._call(host_id="i-0123456789abcdef0", command="ls -la", method="ssm")
         assert "drwxr" in result
 
-    @patch("agenticops.skills.execution._execute_ssh")
+    @patch("agenticops.skills.execution._run_ssh_for_host")
     @patch("agenticops.skills.execution.classify_shell_command")
     def test_readonly_command_ssh(self, mock_classify, mock_ssh):
         mock_classify.return_value = "read"
@@ -69,21 +77,21 @@ class TestRunOnHost:
         result = self._call(host_id="10.0.1.5", command="uptime", method="ssh")
         assert "5 days" in result
 
-    @patch("agenticops.skills.execution._execute_ssm")
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "nginx restarted", ""))
     @patch("agenticops.skills.execution.classify_shell_command")
-    def test_write_with_confirmation(self, mock_classify, mock_ssm):
+    def test_write_with_confirmation(self, mock_classify, mock_ssm, mock_resolve):
         mock_classify.return_value = "write"
-        mock_ssm.return_value = "nginx restarted"
         result = self._call(
-            host_id="i-123", command="systemctl restart nginx",
-            require_confirmation=True
+            host_id="i-0123456789abcdef0", command="systemctl restart nginx",
+            method="ssm", require_confirmation=True
         )
         assert "restarted" in result
 
     @patch("agenticops.skills.execution.classify_shell_command")
     def test_invalid_method(self, mock_classify):
         mock_classify.return_value = "read"
-        result = self._call(host_id="i-123", command="ls", method="telnet")
+        result = self._call(host_id="i-123", command="ls", method="kerberos")
         assert "Unknown method" in result
 
 
@@ -102,7 +110,7 @@ class TestExecuteSSM:
             "StandardOutputContent": "Hello from host\n",
         }
 
-        result = _execute_ssm("i-123", "echo hello", "us-east-1")
+        result = _execute_ssm("i-123", "echo hello", "us-east-1", _SNAP)[1]
         assert "Hello from host" in result
 
     @patch("agenticops.skills.execution.time.sleep")
@@ -116,7 +124,7 @@ class TestExecuteSSM:
             "StandardErrorContent": "command not found\n",
         }
 
-        result = _execute_ssm("i-123", "badcmd", "us-east-1")
+        result = _execute_ssm("i-123", "badcmd", "us-east-1", _SNAP)[1]
         assert "Failed" in result
         assert "command not found" in result
 
@@ -131,7 +139,7 @@ class TestExecuteSSM:
             "StandardOutputContent": "",
         }
 
-        result = _execute_ssm("i-123", "true", "us-east-1")
+        result = _execute_ssm("i-123", "true", "us-east-1", _SNAP)[1]
         assert "(no output)" in result
 
     @patch("agenticops.skills.execution._get_ssm_client")
@@ -140,7 +148,7 @@ class TestExecuteSSM:
         mock_get_ssm.return_value = mock_ssm
         mock_ssm.send_command.side_effect = Exception("Throttled")
 
-        result = _execute_ssm("i-123", "ls", "us-east-1")
+        result = _execute_ssm("i-123", "ls", "us-east-1", _SNAP)[1]
         assert "SSM error" in result
 
     @patch("agenticops.skills.execution.time.sleep")
@@ -154,7 +162,7 @@ class TestExecuteSSM:
             "StandardOutputContent": "x" * (MAX_OUTPUT_CHARS + 500),
         }
 
-        result = _execute_ssm("i-123", "cat bigfile", "us-east-1")
+        result = _execute_ssm("i-123", "cat bigfile", "us-east-1", _SNAP)[1]
         assert "truncated" in result
 
 
@@ -266,8 +274,10 @@ class TestExecuteKubectl:
         assert "No cluster_name" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
+    @patch("agenticops.credentials.resolver.get_subprocess_env_for_account", return_value={})
+    @patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1"))
     @patch.dict("os.environ", {}, clear=True)
-    def test_update_kubeconfig_fails(self, mock_run):
+    def test_update_kubeconfig_fails(self, mock_find, mock_env, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="aws error", stdout="")
         result = _execute_kubectl("bad-cluster", "get pods", "us-east-1", "default")
         assert "Failed to update kubeconfig" in result

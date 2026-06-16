@@ -16,10 +16,12 @@ from agenticops.config import get_detail_level, settings
 # ── Account Preamble ─────────────────────────────────────────────────
 
 ACCOUNT_PREAMBLE = (
-    "Call get_active_account to get all enabled cloud accounts. "
-    "Operate on ALL enabled accounts unless the user specifies a particular one. "
-    "Call assume_role for each account before its cloud operations. "
-    "If no account is configured, inform the user."
+    "Call get_active_account to see all enabled cloud accounts. Tools are "
+    "account-addressed: pass account='<name>' when the target account is known; "
+    "run_on_host/run_kubectl auto-resolve the account from inventory by host/cluster "
+    "id; single-account deployments resolve automatically. On ambiguity a tool "
+    "returns the enabled account list — pick one and retry. Host access ladder: "
+    "SSM → SSH → actionable report. If no account is configured, inform the user."
 )
 
 # ── Skills Usage Protocol ────────────────────────────────────────────

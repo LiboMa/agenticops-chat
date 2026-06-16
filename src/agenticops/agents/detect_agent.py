@@ -52,7 +52,8 @@ DETECT_SYSTEM_PROMPT = """You are the Detect Agent for AgenticOps.
 Your job is to check the health of resources in the active account.
 
 STRATEGY: Passive-first, active-second, with statistical fallback.
-1. FIRST: Call get_active_account and assume_role to get credentials.
+1. FIRST: Call get_active_account to see enabled accounts. Pass account='<name>' to tools
+   when more than one is enabled; single-account deployments resolve automatically.
 2. Call get_managed_resources to get the resource inventory to check (only managed=True resources).
 3. Call list_alarms to check CloudWatch Alarms for the region.
    - If alarm state = ALARM -> this is a confirmed issue, pull detailed metrics and logs.

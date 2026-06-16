@@ -528,6 +528,20 @@ class Settings(BaseSettings):
         description="Total execution timeout in seconds (default 30 min)",
     )
 
+    # Host access ladder (SSM → SSH fallback for run_on_host method="auto")
+    ssh_default_user: str = Field(
+        default="",
+        description="Default SSH username for run_on_host SSH fallback (AIOPS_SSH_DEFAULT_USER)",
+    )
+    ssh_default_key_path: str = Field(
+        default="",
+        description="Default SSH private key path for run_on_host SSH fallback (AIOPS_SSH_DEFAULT_KEY_PATH)",
+    )
+    ssh_bastion_host: str = Field(
+        default="",
+        description="Optional ProxyJump bastion (e.g. user@bastion) for SSH fallback (AIOPS_SSH_BASTION_HOST)",
+    )
+
     # Auto-RCA
     auto_rca_enabled: bool = Field(
         default=True,

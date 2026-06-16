@@ -49,7 +49,7 @@ def mock_clients():
     ec2_client = MagicMock()
     elbv2_client = MagicMock()
 
-    def get_client(service, region):
+    def get_client(service, region, account=""):
         if service == "eks":
             return eks_client
         elif service == "ec2":

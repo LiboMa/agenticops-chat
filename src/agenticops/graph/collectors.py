@@ -12,10 +12,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _get_client(service_name: str, region: str):
-    """Get a boto3 client via the shared session cache."""
+def _get_client(service_name: str, region: str, account: str = ""):
+    """Get a boto3 client for a registered account (default account if omitted)."""
     from agenticops.tools.aws_tools import _get_client as _aws_get_client
-    return _aws_get_client(service_name, region)
+    return _aws_get_client(service_name, region, account)
 
 
 def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:

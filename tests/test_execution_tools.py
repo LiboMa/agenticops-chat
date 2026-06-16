@@ -1,6 +1,7 @@
 """Tests for agenticops.skills.execution — targeting uncovered lines."""
 
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
@@ -8,8 +9,15 @@ import pytest
 
 # ── run_on_host ──────────────────────────────────────────────────────
 
+_SNAP = SimpleNamespace(
+    id=1, name="acct", provider="aws",
+    credentials={"account_id": "111111111111"}, regions=["us-east-1"], labels={},
+    credential_source_type="assume_role",
+)
+
+
 class TestRunOnHost:
-    """Cover run_on_host lines 65-91, 96-134, 139-165."""
+    """run_on_host gating + method routing (auto / ssm / ssh)."""
 
     def test_empty_command(self):
         from agenticops.skills.execution import run_on_host
@@ -32,12 +40,14 @@ class TestRunOnHost:
         assert "requires confirmation" in result
 
     @patch("agenticops.skills.execution.classify_shell_command", return_value="write")
-    @patch("agenticops.skills.execution._execute_ssm", return_value="restarted")
-    def test_write_with_confirmation(self, mock_exec, mock_cls):
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "restarted", ""))
+    def test_write_with_confirmation_ssm(self, mock_exec, mock_resolve, mock_cls):
         from agenticops.skills.execution import run_on_host
 
         result = run_on_host(
-            host_id="i-1", command="systemctl restart nginx", require_confirmation=True
+            host_id="i-0123456789abcdef0", command="systemctl restart nginx",
+            method="ssm", require_confirmation=True,
         )
         assert result == "restarted"
 
@@ -49,16 +59,17 @@ class TestRunOnHost:
         assert "requires confirmation" in result
 
     @patch("agenticops.skills.execution.classify_shell_command", return_value="readonly")
-    @patch("agenticops.skills.execution._execute_ssm", return_value="output")
-    def test_readonly_ssm(self, mock_exec, mock_cls):
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "output", ""))
+    def test_explicit_ssm(self, mock_exec, mock_resolve, mock_cls):
         from agenticops.skills.execution import run_on_host
 
-        result = run_on_host(host_id="i-1", command="ps aux")
+        result = run_on_host(host_id="i-0123456789abcdef0", command="ps aux", method="ssm")
         assert result == "output"
 
     @patch("agenticops.skills.execution.classify_shell_command", return_value="readonly")
-    @patch("agenticops.skills.execution._execute_ssh", return_value="ssh output")
-    def test_readonly_ssh(self, mock_exec, mock_cls):
+    @patch("agenticops.skills.execution._run_ssh_for_host", return_value="ssh output")
+    def test_explicit_ssh(self, mock_ssh, mock_cls):
         from agenticops.skills.execution import run_on_host
 
         result = run_on_host(host_id="10.0.1.1", command="uptime", method="ssh")
@@ -68,14 +79,48 @@ class TestRunOnHost:
     def test_unknown_method(self, mock_cls):
         from agenticops.skills.execution import run_on_host
 
-        result = run_on_host(host_id="i-1", command="ps", method="ftp")
+        result = run_on_host(host_id="i-1", command="ps", method="kerberos")
         assert "Unknown method" in result
+
+    @patch("agenticops.skills.execution.classify_shell_command", return_value="readonly")
+    @patch("agenticops.skills.execution._run_ssh_for_host", return_value="ssh-only output")
+    def test_auto_non_instance_goes_ssh(self, mock_ssh, mock_cls):
+        from agenticops.skills.execution import run_on_host
+
+        # A hostname (not an i-... id) → auto ladder uses SSH directly.
+        result = run_on_host(host_id="db.internal", command="uptime", method="auto")
+        assert result == "ssh-only output"
+
+    @patch("agenticops.skills.execution.classify_shell_command", return_value="readonly")
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "inventory match"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(False, "SSM TargetNotConnected: ...", "TargetNotConnected"))
+    @patch("agenticops.credentials.resolver.get_instance_ips", return_value={"private_ip": "10.0.1.5", "public_ip": None})
+    @patch("agenticops.skills.execution._run_ssh_for_host", return_value="uptime: 5 days")
+    def test_auto_ssm_fails_falls_back_to_ssh(self, mock_ssh, mock_ips, mock_exec, mock_resolve, mock_cls):
+        from agenticops.skills.execution import run_on_host
+
+        result = run_on_host(host_id="i-0123456789abcdef0", command="uptime", method="auto")
+        assert "SSM failed" in result
+        assert "10.0.1.5" in result
+        assert "uptime: 5 days" in result
+        mock_ssh.assert_called_once_with("10.0.1.5", "uptime")
+
+    @patch("agenticops.skills.execution.classify_shell_command", return_value="readonly")
+    @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "inventory match"))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(False, "SSM TargetNotConnected: ...", "TargetNotConnected"))
+    @patch("agenticops.credentials.resolver.get_instance_ips", return_value=None)
+    def test_auto_ssm_fails_no_ip_for_ssh(self, mock_ips, mock_exec, mock_resolve, mock_cls):
+        from agenticops.skills.execution import run_on_host
+
+        result = run_on_host(host_id="i-0123456789abcdef0", command="uptime", method="auto")
+        assert "SSM failed" in result
+        assert "SSH fallback unavailable" in result
 
 
 # ── _execute_ssm ─────────────────────────────────────────────────────
 
 class TestExecuteSSM:
-    """Cover _execute_ssm lines 96-134."""
+    """_execute_ssm returns (ok, text, failure_class) with error classification."""
 
     @patch("agenticops.skills.execution._get_ssm_client")
     def test_ssm_success(self, mock_get_client):
@@ -89,8 +134,9 @@ class TestExecuteSSM:
         }
         mock_get_client.return_value = client
 
-        result = _execute_ssm("i-123", "echo hello", "us-east-1")
-        assert result == "hello world"
+        ok, text, cls = _execute_ssm("i-123", "echo hello", "us-east-1", _SNAP)
+        assert ok is True
+        assert text == "hello world"
 
     @patch("agenticops.skills.execution._get_ssm_client")
     def test_ssm_success_no_output(self, mock_get_client):
@@ -104,8 +150,8 @@ class TestExecuteSSM:
         }
         mock_get_client.return_value = client
 
-        result = _execute_ssm("i-123", "true", "us-east-1")
-        assert result == "(no output)"
+        ok, text, cls = _execute_ssm("i-123", "true", "us-east-1", _SNAP)
+        assert text == "(no output)"
 
     @patch("agenticops.skills.execution._get_ssm_client")
     def test_ssm_failed_with_stderr(self, mock_get_client):
@@ -119,9 +165,41 @@ class TestExecuteSSM:
         }
         mock_get_client.return_value = client
 
-        result = _execute_ssm("i-123", "badcmd", "us-east-1")
-        assert "Failed" in result
-        assert "command not found" in result
+        ok, text, cls = _execute_ssm("i-123", "badcmd", "us-east-1", _SNAP)
+        assert ok is False
+        assert "Failed" in text
+        assert "command not found" in text
+
+    @patch("agenticops.skills.execution._get_ssm_client")
+    def test_ssm_invalid_instance_id_classified(self, mock_get_client):
+        from agenticops.skills.execution import _execute_ssm
+        from botocore.exceptions import ClientError
+
+        client = MagicMock()
+        client.send_command.side_effect = ClientError(
+            {"Error": {"Code": "InvalidInstanceId", "Message": "bad"}}, "SendCommand"
+        )
+        mock_get_client.return_value = client
+
+        ok, text, cls = _execute_ssm("i-123", "ls", "us-east-1", _SNAP)
+        assert ok is False
+        assert cls == "InvalidInstanceId"
+        assert "InvalidInstanceId" in text
+
+    @patch("agenticops.skills.execution._get_ssm_client")
+    def test_ssm_access_denied_classified(self, mock_get_client):
+        from agenticops.skills.execution import _execute_ssm
+        from botocore.exceptions import ClientError
+
+        client = MagicMock()
+        client.send_command.side_effect = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "SendCommand"
+        )
+        mock_get_client.return_value = client
+
+        ok, text, cls = _execute_ssm("i-123", "ls", "us-east-1", _SNAP)
+        assert cls == "AccessDenied"
+        assert "ssm:SendCommand" in text
 
     @patch("agenticops.skills.execution._get_ssm_client")
     def test_ssm_truncates_long_output(self, mock_get_client):
@@ -135,9 +213,9 @@ class TestExecuteSSM:
         }
         mock_get_client.return_value = client
 
-        result = _execute_ssm("i-123", "big", "us-east-1")
-        assert "truncated" in result
-        assert len(result) < 5000 + 50
+        ok, text, cls = _execute_ssm("i-123", "big", "us-east-1", _SNAP)
+        assert "truncated" in text
+        assert len(text) < 5000 + 50
 
     @patch("agenticops.skills.execution._get_ssm_client")
     def test_ssm_exception(self, mock_get_client):
@@ -147,8 +225,9 @@ class TestExecuteSSM:
         client.send_command.side_effect = Exception("SSM unavailable")
         mock_get_client.return_value = client
 
-        result = _execute_ssm("i-123", "ls", "us-east-1")
-        assert "SSM error" in result
+        ok, text, cls = _execute_ssm("i-123", "ls", "us-east-1", _SNAP)
+        assert ok is False
+        assert "SSM error" in text
 
 
 # ── _execute_ssh ─────────────────────────────────────────────────────
@@ -276,8 +355,10 @@ class TestExecuteKubectl:
         assert "No cluster_name" in result or "Error" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
+    @patch("agenticops.credentials.resolver.get_subprocess_env_for_account", return_value={})
+    @patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1"))
     @patch.dict("os.environ", {}, clear=False)
-    def test_kubectl_update_kubeconfig_failure(self, mock_run):
+    def test_kubectl_update_kubeconfig_failure(self, mock_find, mock_env, mock_run):
         from agenticops.skills.execution import _execute_kubectl
 
         import os

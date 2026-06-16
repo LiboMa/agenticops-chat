@@ -53,24 +53,6 @@ from agenticops.web.session_manager import ChatSessionManager
 logger = logging.getLogger(__name__)
 
 
-def _ensure_aws_session(region: str):
-    """Ensure an AWS session exists for the given region.
-
-    If no assumed-role session exists, inject a default boto3 session
-    from environment credentials (suitable for local/internal dashboard).
-    """
-    import boto3
-    import agenticops.tools.aws_tools as aws_tools_module
-
-    for key in aws_tools_module._session_cache:
-        if key.endswith(f":{region}"):
-            return  # Already have a session for this region
-    # Inject default credentials session
-    session = boto3.Session(region_name=region)
-    aws_tools_module._session_cache[f"web:{region}"] = session
-    logger.info("Injected default AWS session for region %s", region)
-
-
 # ============================================================================
 # Pydantic Models for API — extracted to schemas.py (imported below)
 # ============================================================================

@@ -54,6 +54,19 @@ def db_session():
 
 
 @pytest.fixture
+def one_aws_account(db_session):
+    """Create a single enabled AWS account (default-account resolution succeeds)."""
+    a = CloudAccount(
+        name="aws-prod", provider="aws", is_enabled=True,
+        credentials={"role_arn": "arn:aws:iam::111:role/Ops", "account_id": "111"},
+        regions=["us-east-1"],
+    )
+    db_session.add(a)
+    db_session.commit()
+    return a
+
+
+@pytest.fixture
 def two_aws_accounts(db_session):
     """Create two enabled AWS accounts."""
     a1 = CloudAccount(
@@ -416,7 +429,7 @@ class TestMetadataToolsNoLegacy:
 
 
 class TestGraphApiUsesProvider:
-    def test_ensure_aws_session_uses_provider(self, db_session, two_aws_accounts):
+    def test_ensure_aws_session_uses_provider(self, db_session, one_aws_account):
         mock_provider = MagicMock()
         mock_provider.resolve_credentials.return_value = True
         mock_session = MagicMock()
@@ -436,7 +449,25 @@ class TestGraphApiUsesProvider:
             _ensure_aws_session("us-east-1")
 
         mock_provider.resolve_credentials.assert_called_once()
-        assert "web:us-east-1" in tools_mod._session_cache
+        # Resolver caches under the account-addressed keys, NOT a "web:" key.
+        assert not any(k.startswith("web:") for k in tools_mod._session_cache)
+        assert any(k.endswith(":us-east-1") for k in tools_mod._session_cache)
+
+    def test_ensure_aws_session_ambiguous_degrades(self, db_session, two_aws_accounts):
+        # Two enabled accounts → default resolution is ambiguous; the pre-warm
+        # logs-and-degrades (no raise, no cache write) rather than guessing.
+        @contextmanager
+        def fake_db():
+            yield db_session
+
+        import agenticops.tools.aws_tools as tools_mod
+        tools_mod._session_cache.clear()
+
+        with patch(_MODELS_DB_SESSION, fake_db):
+            from agenticops.graph.api import _ensure_aws_session
+            _ensure_aws_session("us-east-1")  # must not raise
+
+        assert tools_mod._session_cache == {}
 
     def test_no_direct_boto3_in_ensure_session(self):
         import agenticops.graph.api as mod

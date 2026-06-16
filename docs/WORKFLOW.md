@@ -152,10 +152,9 @@ flowchart TD
     VALID -->|"ok"| IDCHECK{"credentials.account_id set?"}
 
     IDCHECK -->|"yes & MISMATCH"| FAILID["✗ FAIL-CLOSED<br/>resolved Account ≠ expected<br/>refuse credentials"]
-    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>key = {account}:{region}"]
+    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>keys = {provider}:{name}:{region}<br/>AND {account_id}:{region}"]
 
-    CACHE --> CTX["_set_active_account(account_id)<br/>ContextVar — binds current turn"]
-    CTX --> READY["✓ Ready: subsequent describe/cli/exec<br/>resolve by account+region exactly"]
+    CACHE --> READY["✓ Ready: describe/cli/exec resolve the<br/>account explicitly (param → inventory →<br/>single-account default), fail-closed"]
 
     style FAILV fill:#f66
     style FAILID fill:#f66
@@ -163,7 +162,7 @@ flowchart TD
     style REFRESH fill:#9cf
 ```
 
-**Why fail-closed matters:** with no global current account, any silent fallback to *ambient* (process-default) credentials = executing on the **wrong account**. So `_get_session` requires an active-account ContextVar and an exact `{account}:{region}` cache hit — no context or no match → `RuntimeError`, never another account's session.
+**Why account-addressed, not a ContextVar:** Strands runs sync tools under `asyncio.to_thread` + `contextvars.copy_context()`, so a ContextVar written inside a tool (the old `_set_active_account`) is discarded at the tool boundary — every later tool saw `None` and silently fell back to ambient (the TRC-bc600aa9 wrong-account incident). The account is now an explicit, data-driven property of the *target*: `credentials/resolver` resolves it from the tool's `account` param → inventory lookup by host/cluster id → the single enabled account. No registered account → fail-closed (never ambient).
 
 ### Authorization Flow (3-tier command gate + scoped exec)
 
@@ -182,13 +181,11 @@ flowchart TD
     CONF -->|"false"| PAUSE["⏸ Ask user to confirm<br/>(present command + impact)"]
     CONF -->|"true"| ENV
 
-    ENV["get_account_subprocess_env([region])<br/><i>tools/aws_tools.py</i>"] --> ACTX{"Active account context?"}
-    ACTX -->|"no"| AMBIENT["Ambient env<br/>(single-account / local dev — unchanged)"]
-    ACTX -->|"yes, session cached"| INJECT["Strip ALL ambient AWS_*<br/>+ inject this account's frozen creds<br/>+ default region"]
-    ACTX -->|"yes, NO session"| REJ3["✗ FAIL-CLOSED RuntimeError"]
+    ENV["get_subprocess_env_for_account(account[, region])<br/><i>credentials/resolver.py</i>"] --> RESOLVE{"Resolve account<br/>param → inventory → default"}
+    RESOLVE -->|"resolved + session"| INJECT["Strip ALL ambient AWS_*<br/>+ inject this account's frozen creds<br/>+ default region"]
+    RESOLVE -->|"0 / ambiguous / resolve fails"| REJ3["✗ FAIL-CLOSED<br/>AccountResolutionError<br/>(lists enabled accounts)"]
 
-    AMBIENT --> RUN["subprocess.run(args, env=...)"]
-    INJECT --> RUN
+    INJECT --> RUN["subprocess.run(args, env=...)"]
     RUN --> OUT["Output (truncated to cli_max_output_chars)"]
 
     style REJ1 fill:#f66
@@ -198,7 +195,7 @@ flowchart TD
     style OUT fill:#6f6
 ```
 
-**Unified exec entry:** `run_aws_cli` / `run_aws_cli_readonly` (CLI), `run_on_host(ssm)`, and `aws eks update-kubeconfig` (kubectl) all resolve their subprocess env through `get_account_subprocess_env()`, so account scoping is consistent: inject when an account is active, fall back to ambient only when none is (local dev), fail closed when an account is active but uncached. The provider's own `cli_tool()` applies the same strip + inject + fail-closed contract for per-account CLI tools.
+**Unified exec entry:** `run_aws_cli` / `run_aws_cli_readonly` (CLI), `run_on_host(ssm)`, and `aws eks update-kubeconfig` (kubectl) all resolve their subprocess env through `credentials/resolver.get_subprocess_env_for_account()`. There is NO ambient branch: the account is resolved (explicit param → inventory by host/cluster id → single enabled account), creds are stripped + injected from that registered account's session, and a missing/ambiguous/failed account is fail-closed with an actionable error. The provider's own `cli_tool()` applies the same strip + inject + fail-closed contract for per-account CLI tools. `run_on_host(method="auto")` additionally climbs the SSM → SSH access ladder on transport failure.
 
 > **AuthN vs AuthZ separation:** AuthN decides *whose* credentials (provider layer, fail-closed); AuthZ decides *what's permitted* (3-tier classifier + L0–L4 approval gate in the fix pipeline). A read-only command on the right account still runs; a write command on the right account still needs confirmation / approval.
 

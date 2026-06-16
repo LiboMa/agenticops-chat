@@ -1,67 +1,72 @@
-"""Phase-2 Item1: subprocess exec paths inject the ACTIVE account's credentials.
+"""Subprocess exec paths inject a REGISTERED account's credentials — never ambient.
 
-run_aws_cli / run_aws_cli_readonly / kubectl / ssm previously ran with pure
-ambient credentials (wrong account in a multi-account setup). They now build a
-clean env from the active account's cached session (strip ambient AWS_* + inject
-frozen creds), falling back to ambient ONLY when no account context is set
-(single-account / local dev — unchanged behavior).
+run_aws_cli / run_aws_cli_readonly / kubectl / ssm build a clean env from a
+registered account's session (strip ambient AWS_* + inject frozen creds). There
+is NO ambient fallback: a missing/ambiguous/unresolvable account is fail-closed.
+Account is resolved explicitly (param → inventory → single-account default), not
+via an implicit ContextVar (which never survived a Strands tool boundary).
 """
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
-from agenticops.tools import aws_tools
+from agenticops.credentials import resolver
 
 
-def setup_function():
-    aws_tools._session_cache.clear()
-    aws_tools._set_active_account(None)
-
-
-def teardown_function():
-    aws_tools._session_cache.clear()
-    aws_tools._set_active_account(None)
-
-
-def _cache_session(account_id, region="us-east-1", key="K", secret="S", token="T"):
+def _fake_session(key="K", secret="S", token="T"):
     frozen = mock.Mock(access_key=key, secret_key=secret, token=token)
     sess = mock.Mock()
     sess.get_credentials.return_value.get_frozen_credentials.return_value = frozen
-    aws_tools._session_cache[f"{account_id}:{region}"] = sess
     return sess
 
 
-def test_env_injects_active_account_and_strips_ambient(monkeypatch):
+def _snap(name="prod", account_id="111111111111", regions=("us-east-1",)):
+    return SimpleNamespace(
+        id=1, name=name, provider="aws",
+        credentials={"account_id": account_id}, regions=list(regions), labels={},
+        credential_source_type="assume_role",
+    )
+
+
+# ── get_subprocess_env_for_account: strip ambient + inject registered creds ──
+
+
+def test_env_injects_account_and_strips_ambient(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AMBIENT")
     monkeypatch.setenv("AWS_PROFILE", "ambient-profile")
-    _cache_session("111111111111", key="ACCT_KEY", secret="ACCT_SECRET", token="ACCT_TOKEN")
-    aws_tools._set_active_account("111111111111")
+    sess = _fake_session(key="ACCT_KEY", secret="ACCT_SECRET", token="ACCT_TOKEN")
+    monkeypatch.setattr(resolver, "resolve_account_session", lambda ref, region=None: sess)
 
-    env = aws_tools.get_account_subprocess_env()
+    env = resolver.get_subprocess_env_for_account(_snap(), "us-east-1")
     assert env["AWS_ACCESS_KEY_ID"] == "ACCT_KEY"
     assert env["AWS_SECRET_ACCESS_KEY"] == "ACCT_SECRET"
     assert env["AWS_SESSION_TOKEN"] == "ACCT_TOKEN"
+    assert env["AWS_DEFAULT_REGION"] == "us-east-1"
     assert "AWS_PROFILE" not in env  # ambient profile stripped
 
 
-def test_env_falls_back_to_ambient_without_account_context(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AMBIENT")
-    # no active account → unchanged ambient env (single-account/local dev)
-    env = aws_tools.get_account_subprocess_env()
-    assert env["AWS_ACCESS_KEY_ID"] == "AMBIENT"
+def test_env_fail_closed_when_account_unresolvable(monkeypatch):
+    def boom(ref, region=None):
+        raise resolver.AccountResolutionError("nope")
+    monkeypatch.setattr(resolver, "resolve_account_session", boom)
+    with pytest.raises(resolver.AccountResolutionError):
+        resolver.get_subprocess_env_for_account("missing", "us-east-1")
 
 
-def test_env_fail_closed_when_active_account_has_no_session():
-    # active account set but nothing cached for it → fail closed, never ambient
-    aws_tools._set_active_account("222222222222")
-    with pytest.raises(RuntimeError):
-        aws_tools.get_account_subprocess_env()
+# ── run_aws_cli: account-addressed, no ambient ──────────────────────────────
 
 
 def test_run_aws_cli_passes_injected_env(monkeypatch):
     from agenticops.tools import aws_cli_tool
-    _cache_session("111111111111", key="ACCT_KEY")
-    aws_tools._set_active_account("111111111111")
+
+    monkeypatch.setattr(
+        "agenticops.credentials.resolver.resolve_default_account", lambda provider="aws": _snap()
+    )
+    monkeypatch.setattr(
+        "agenticops.credentials.resolver.get_subprocess_env_for_account",
+        lambda target, region=None: {"AWS_ACCESS_KEY_ID": "ACCT_KEY"},
+    )
 
     captured = {}
     def fake_run(args, **kw):
@@ -70,35 +75,40 @@ def test_run_aws_cli_passes_injected_env(monkeypatch):
     monkeypatch.setattr("agenticops.tools.aws_cli_tool.subprocess.run", fake_run)
 
     aws_cli_tool.run_aws_cli("aws ec2 describe-instances --region us-east-1")
-    assert captured["env"] is not None
     assert captured["env"]["AWS_ACCESS_KEY_ID"] == "ACCT_KEY"
 
 
-def test_ssm_client_uses_active_account_session():
-    from agenticops.skills import execution
-    sess = _cache_session("111111111111")
-    aws_tools._set_active_account("111111111111")
+def test_run_aws_cli_fail_closed_on_ambiguous_accounts(monkeypatch):
+    from agenticops.tools import aws_cli_tool
 
-    client = execution._get_ssm_client("us-east-1")
+    def ambiguous(provider="aws"):
+        raise resolver.AccountResolutionError("Multiple enabled aws accounts: a, b")
+    monkeypatch.setattr("agenticops.credentials.resolver.resolve_default_account", ambiguous)
+
+    out = aws_cli_tool.run_aws_cli("aws ec2 describe-instances --region us-east-1")
+    assert "Multiple enabled aws accounts" in out
+
+
+# ── SSM client: registered account, fail-closed (no ambient) ────────────────
+
+
+def test_ssm_client_uses_account_session(monkeypatch):
+    from agenticops.skills import execution
+    sess = _fake_session()
+    monkeypatch.setattr(
+        "agenticops.credentials.resolver.resolve_account_session",
+        lambda ref, region=None: sess,
+    )
+    client = execution._get_ssm_client("us-east-1", _snap())
     sess.client.assert_called_once_with("ssm", region_name="us-east-1")
     assert client is sess.client.return_value
 
 
-def test_ssm_client_fail_closed_when_account_has_no_session():
+def test_ssm_client_fail_closed_when_unresolvable(monkeypatch):
     from agenticops.skills import execution
-    aws_tools._set_active_account("222222222222")  # nothing cached
-    with pytest.raises(RuntimeError):
-        execution._get_ssm_client("us-east-1")
 
-
-def test_ssm_client_ambient_fallback_without_account(monkeypatch):
-    from agenticops.skills import execution
-    made = {}
-    def fake_client(name, **kw):
-        made["name"] = name
-        made["kw"] = kw
-        return object()
-    monkeypatch.setattr("boto3.client", fake_client)
-    execution._get_ssm_client("eu-west-1")  # no active account → ambient boto3.client
-    assert made["name"] == "ssm"
-    assert made["kw"]["region_name"] == "eu-west-1"
+    def boom(ref, region=None):
+        raise resolver.AccountResolutionError("no session")
+    monkeypatch.setattr("agenticops.credentials.resolver.resolve_account_session", boom)
+    with pytest.raises(resolver.AccountResolutionError):
+        execution._get_ssm_client("eu-west-1", "missing")

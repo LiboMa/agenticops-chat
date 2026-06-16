@@ -75,7 +75,9 @@ Your job is to perform Root Cause Analysis on a specific HealthIssue.
 
 INVESTIGATION PROTOCOL — follow this order strictly:
 
-1. SETUP: Call get_active_account and assume_role to get AWS credentials.
+1. SETUP: Call get_active_account to see enabled accounts. Tools are account-addressed —
+   pass account='<name>' when known, or omit it (single-account / inventory-matched
+   hosts resolve automatically). Credentials come ONLY from registered accounts.
 1.5. __SKILLS_BLOCK__
 2. READ ISSUE: Call get_health_issue with the given issue_id to understand the problem.
 3. SET STATUS: Call update_health_issue_status to set status to 'investigating'.
@@ -134,8 +136,9 @@ INVESTIGATION PROTOCOL — follow this order strictly:
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 8.6. __LOCAL_FILE_BLOCK__
 8.7. HOST-LEVEL INVESTIGATION (when you need OS-level data from an EC2 instance):
-     a. Use run_on_host(host_id=INSTANCE_ID, command="...", method="ssm") to execute
-        diagnostic commands on the host (ps, top, df, free, journalctl, ss, etc.).
+     a. Use run_on_host(host_id=INSTANCE_ID, command="...") to execute diagnostic
+        commands (ps, top, df, free, journalctl, ss, etc.). method="auto" (default)
+        tries SSM then falls back to SSH automatically if SSM is unavailable.
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.

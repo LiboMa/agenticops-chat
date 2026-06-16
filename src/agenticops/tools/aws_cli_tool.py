@@ -181,7 +181,7 @@ def _classify_command(command: str) -> str:
     return "unknown"
 
 
-def _execute_aws_cli(command: str) -> str:
+def _execute_aws_cli(command: str, account: str = "") -> str:
     """Shared execution logic for both AWS CLI tools.
 
     Assumes command has already been validated (starts with 'aws', no shell injection).
@@ -197,13 +197,17 @@ def _execute_aws_cli(command: str) -> str:
     except ValueError as e:
         return f"Error: Invalid command syntax: {e}"
 
-    # Scope credentials to the active account (set by assume_role). Falls back to
-    # ambient env when no account context is set; fails closed if an account is
-    # active but has no cached session (never runs on the wrong account).
-    from agenticops.tools.aws_tools import get_account_subprocess_env
+    # Account-addressed credentials: explicit account, else the single enabled
+    # account (default). Fail-closed with an actionable message — NEVER ambient.
+    from agenticops.credentials.resolver import (
+        AccountResolutionError,
+        get_subprocess_env_for_account,
+        resolve_default_account,
+    )
     try:
-        env = get_account_subprocess_env()
-    except RuntimeError as e:
+        target = account or resolve_default_account()
+        env = get_subprocess_env_for_account(target)
+    except AccountResolutionError as e:
         return f"Error: {e}"
 
     try:
@@ -237,7 +241,7 @@ def _execute_aws_cli(command: str) -> str:
 
 
 @tool
-def run_aws_cli(command: str, require_confirmation: bool = False) -> str:
+def run_aws_cli(command: str, require_confirmation: bool = False, account: str = "") -> str:
     """Execute an AWS CLI command and return the output.
 
     Use this tool to run any AWS CLI command for querying or managing AWS resources.
@@ -247,9 +251,15 @@ def run_aws_cli(command: str, require_confirmation: bool = False) -> str:
     Write commands (create, modify, delete, update) require explicit confirmation.
     Destructive commands (terminate, delete IAM) are blocked for safety.
 
+    Credentials come ONLY from a registered account (never local profiles): pass
+    account='<name>' to target one, or omit it for single-account deployments. If
+    more than one account is enabled and none is given, the tool returns the list
+    of enabled accounts so you can retry with the right one.
+
     Args:
         command: The full AWS CLI command (e.g., 'aws ec2 describe-instances --region us-east-1')
         require_confirmation: Set to true to acknowledge a write operation
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON output from the AWS CLI command, or error message.
@@ -289,11 +299,11 @@ def run_aws_cli(command: str, require_confirmation: bool = False) -> str:
         )
 
     # 4. Execute
-    return _execute_aws_cli(command)
+    return _execute_aws_cli(command, account)
 
 
 @tool
-def run_aws_cli_readonly(command: str) -> str:
+def run_aws_cli_readonly(command: str, account: str = "") -> str:
     """Execute a read-only AWS CLI command. Write and destructive operations are blocked.
 
     Use this ONLY as a fallback for querying AWS services not covered by specialized tools.
@@ -302,8 +312,12 @@ def run_aws_cli_readonly(command: str) -> str:
     IMPORTANT: Always use --query to filter output and reduce data volume.
     Never request full API responses — only request the fields you need.
 
+    Credentials come ONLY from a registered account (never local profiles): pass
+    account='<name>' to target one, or omit it for single-account deployments.
+
     Args:
         command: The full AWS CLI command with --query filter (e.g., 'aws elasticache describe-cache-clusters --query "CacheClusters[].{Id:CacheClusterId,Status:CacheClusterStatus}" --region us-east-1')
+        account: Registered account name. Omit for single-account deployments.
 
     Returns:
         JSON output from the AWS CLI command, or error message.
@@ -335,4 +349,4 @@ def run_aws_cli_readonly(command: str) -> str:
         )
 
     # 4. Execute
-    return _execute_aws_cli(command)
+    return _execute_aws_cli(command, account)

@@ -79,7 +79,10 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
      Report which pre-check failed and why.
 
 4. EXECUTE
-   Call assume_role first to get credentials for the target account.
+   Steps run against the plan's target account: pass account='<name>' to
+   run_on_host/run_kubectl/CLI tools when the plan specifies one; otherwise
+   single-account / inventory auto-resolution applies. Credentials come ONLY
+   from registered accounts (never a local profile).
    For each step in the plan's steps list (in order):
    - Determine the correct execution tool based on the step type (see TOOL SELECTION).
    - Execute the command and record: step_index, command, status (succeeded/failed), output, duration.
@@ -118,8 +121,8 @@ TOOL SELECTION (route each step to the correct backend):
 - AWS/Cloud API operations (e.g., modify-instance-attribute, update-function-code, modify-db-instance):
   Use the provided cloud CLI tool (supports both read and write operations with security filtering).
 - Host-level commands (e.g., systemctl restart, kill, disk cleanup, log inspection):
-  Use run_on_host with method="ssm" (or "ssh"). Set require_confirmation=True for write commands —
-  the plan approval serves as the confirmation.
+  Use run_on_host (method="auto" climbs the SSM→SSH ladder; or force method="ssm"/"ssh").
+  Set require_confirmation=True for write commands — the plan approval serves as the confirmation.
 - Kubernetes operations (e.g., rollout restart, scale deployment, apply manifest):
   Use run_kubectl with the cluster_name and namespace. Set require_confirmation=True for write commands.
 - Resource verification: Use describe tools (describe_ec2, describe_rds, etc.) for targeted checks.

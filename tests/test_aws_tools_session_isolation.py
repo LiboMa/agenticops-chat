@@ -1,43 +1,64 @@
-"""Bug#1 regression: _get_session must not return another account's session by region."""
+"""Regression: _get_session resolves the EXACT registered account, never crosses accounts."""
+from types import SimpleNamespace
+
 import pytest
+
 from agenticops.tools import aws_tools
+from agenticops.credentials import resolver
+from agenticops.providers.base import _session_cache
 
 
 def setup_function():
-    aws_tools._session_cache.clear()
-    aws_tools._set_active_account(None)
+    _session_cache.clear()
 
 
-def test_get_session_does_not_cross_account_by_region():
-    # 两个账户,同一 region,各自的 session 对象
+def teardown_function():
+    _session_cache.clear()
+
+
+def _snap(name, account_id, regions=("us-east-1",)):
+    return SimpleNamespace(
+        id=1, name=name, provider="aws",
+        credentials={"account_id": account_id}, regions=list(regions), labels={},
+        credential_source_type="assume_role",
+    )
+
+
+def test_get_session_resolves_explicit_account(monkeypatch):
     sess_a = object()
     sess_b = object()
-    aws_tools._session_cache["111111111111:us-east-1"] = sess_a
-    aws_tools._session_cache["222222222222:us-east-1"] = sess_b
+    # Seed cache the way resolve_account_session writes it (account_id:region).
+    _session_cache["111111111111:us-east-1"] = sess_a
+    _session_cache["222222222222:us-east-1"] = sess_b
+    monkeypatch.setattr(
+        resolver, "get_account_snapshot",
+        lambda ref, provider="": _snap("acct-b", "222222222222"),
+    )
 
-    # 当前账户上下文 = B,必须拿到 B,绝不能拿到 A
-    aws_tools._set_active_account("222222222222")
-    assert aws_tools._get_session("us-east-1") is sess_b
+    # cache lookup uses provider:name:region then account_id:region
+    assert aws_tools._get_session("us-east-1", account="acct-b") is sess_b
 
 
-def test_get_session_fail_closed_without_account_context():
-    # 缓存里有别的账户的 session,但没有当前账户上下文 → 必须报错,不能返回任意 session
-    aws_tools._session_cache["111111111111:us-east-1"] = object()
-    aws_tools._set_active_account(None)
-    with pytest.raises(RuntimeError):
+def test_get_session_fail_closed_without_account(monkeypatch):
+    # No explicit account and zero enabled accounts → fail-closed (no ambient).
+    monkeypatch.setattr(
+        resolver, "list_enabled_accounts", lambda provider="": []
+    )
+    with pytest.raises(resolver.AccountResolutionError):
         aws_tools._get_session("us-east-1")
 
 
-def test_get_session_account_not_in_cache_raises():
-    aws_tools._session_cache["111111111111:us-east-1"] = object()
-    aws_tools._set_active_account("222222222222")  # B 没 assume 过
-    with pytest.raises(RuntimeError):
-        aws_tools._get_session("us-east-1")
+def test_get_session_unknown_account_raises(monkeypatch):
+    monkeypatch.setattr(resolver, "get_account_snapshot", lambda ref, provider="": None)
+    monkeypatch.setattr(resolver, "list_enabled_accounts", lambda provider="": [])
+    with pytest.raises(resolver.AccountResolutionError):
+        aws_tools._get_session("us-east-1", account="ghost")
 
 
-def test_web_key_not_returned_to_agent_path():
-    # web:region 的 session 绝不能被 agent 的账户上下文命中
-    aws_tools._session_cache["web:us-east-1"] = object()
-    aws_tools._set_active_account("222222222222")
-    with pytest.raises(RuntimeError):
-        aws_tools._get_session("us-east-1")
+def test_get_session_single_account_default(monkeypatch):
+    sess = object()
+    _session_cache["111111111111:us-east-1"] = sess
+    snap = _snap("only", "111111111111")
+    monkeypatch.setattr(resolver, "list_enabled_accounts", lambda provider="aws": [snap])
+    # default account resolves to the single enabled account; cache hit returns it
+    assert aws_tools._get_session("us-east-1") is sess

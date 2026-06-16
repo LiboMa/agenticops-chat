@@ -12,7 +12,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 from strands import tool
 
-from agenticops.tools.aws_tools import _get_session, _get_client
+from agenticops.tools.aws_tools import _get_client
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ def _detect_blackhole_routes(
 # ---------------------------------------------------------------------------
 
 @tool
-def describe_vpcs(region: str) -> str:
+def describe_vpcs(region: str, account: str = "") -> str:
     """Describe all VPCs in a region.
 
     Args:
@@ -248,7 +248,7 @@ def describe_vpcs(region: str) -> str:
         JSON list of VPCs with VpcId, CIDR, state, is_default, DHCP options, Name tag.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
         paginator = client.get_paginator("describe_vpcs")
         vpcs = []
         for page in paginator.paginate():
@@ -275,7 +275,7 @@ def describe_vpcs(region: str) -> str:
 
 
 @tool
-def describe_subnets(region: str, vpc_id: str = "") -> str:
+def describe_subnets(region: str, vpc_id: str = "", account: str = "") -> str:
     """Describe subnets in a region, optionally filtered by VPC.
 
     Args:
@@ -286,7 +286,7 @@ def describe_subnets(region: str, vpc_id: str = "") -> str:
         JSON list of subnets with SubnetId, VpcId, AZ, CIDR, available IPs, state.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
         kwargs: dict[str, Any] = {}
         if vpc_id:
             kwargs["Filters"] = [{"Name": "vpc-id", "Values": [vpc_id]}]
@@ -312,7 +312,7 @@ def describe_subnets(region: str, vpc_id: str = "") -> str:
 
 
 @tool
-def describe_security_groups(region: str, vpc_id: str = "", group_ids: str = "") -> str:
+def describe_security_groups(region: str, vpc_id: str = "", group_ids: str = "", account: str = "") -> str:
     """Describe security groups with full rule breakdown.
 
     Args:
@@ -324,7 +324,7 @@ def describe_security_groups(region: str, vpc_id: str = "", group_ids: str = "")
         JSON list of security groups with GroupId, GroupName, VpcId, inbound/outbound rules.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
         kwargs: dict[str, Any] = {}
         filters = []
         if vpc_id:
@@ -354,7 +354,7 @@ def describe_security_groups(region: str, vpc_id: str = "", group_ids: str = "")
 
 
 @tool
-def describe_route_tables(region: str, vpc_id: str = "") -> str:
+def describe_route_tables(region: str, vpc_id: str = "", account: str = "") -> str:
     """Describe route tables with full route and association details.
 
     Args:
@@ -366,7 +366,7 @@ def describe_route_tables(region: str, vpc_id: str = "") -> str:
         subnet associations. Route state (active/blackhole) is key for network troubleshooting.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
         kwargs: dict[str, Any] = {}
         if vpc_id:
             kwargs["Filters"] = [{"Name": "vpc-id", "Values": [vpc_id]}]
@@ -396,7 +396,7 @@ def describe_route_tables(region: str, vpc_id: str = "") -> str:
 
 
 @tool
-def describe_nat_gateways(region: str, vpc_id: str = "") -> str:
+def describe_nat_gateways(region: str, vpc_id: str = "", account: str = "") -> str:
     """Describe NAT Gateways with connectivity and elastic IP details.
 
     Args:
@@ -408,7 +408,7 @@ def describe_nat_gateways(region: str, vpc_id: str = "") -> str:
         connectivity type (public/private), elastic IP addresses.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
         kwargs: dict[str, Any] = {}
         if vpc_id:
             kwargs["Filter"] = [{"Name": "vpc-id", "Values": [vpc_id]}]
@@ -443,7 +443,7 @@ def describe_nat_gateways(region: str, vpc_id: str = "") -> str:
 
 
 @tool
-def describe_transit_gateways(region: str) -> str:
+def describe_transit_gateways(region: str, account: str = "") -> str:
     """Describe Transit Gateways with attachment details.
 
     Args:
@@ -454,7 +454,7 @@ def describe_transit_gateways(region: str) -> str:
         (VPC/VPN/peering with their states). Shows full connectivity picture.
     """
     try:
-        client = _get_client("ec2", region)
+        client = _get_client("ec2", region, account)
 
         # Get Transit Gateways
         tgw_response = client.describe_transit_gateways()
@@ -500,7 +500,7 @@ def describe_transit_gateways(region: str) -> str:
 
 
 @tool
-def describe_load_balancers(region: str) -> str:
+def describe_load_balancers(region: str, account: str = "") -> str:
     """Describe Application/Network Load Balancers with target health.
 
     Args:
@@ -512,7 +512,7 @@ def describe_load_balancers(region: str) -> str:
         counts per target group). Unhealthy targets are a top-3 root cause category.
     """
     try:
-        client = _get_client("elbv2", region)
+        client = _get_client("elbv2", region, account)
 
         # Get load balancers
         lb_paginator = client.get_paginator("describe_load_balancers")
@@ -601,7 +601,7 @@ def describe_load_balancers(region: str) -> str:
 
 
 @tool
-def describe_region_topology(region: str) -> str:
+def describe_region_topology(region: str, account: str = "") -> str:
     """Describe region-level network topology: all VPCs, Transit Gateways, and VPC Peering connections.
 
     Provides a high-level view of how VPCs are interconnected via TGWs and peering.
@@ -613,7 +613,7 @@ def describe_region_topology(region: str) -> str:
         JSON object with vpcs, transit_gateways (with attachments), and peering_connections.
     """
     try:
-        ec2 = _get_client("ec2", region)
+        ec2 = _get_client("ec2", region, account)
 
         # 1. All VPCs
         vpcs = []
@@ -690,7 +690,7 @@ def describe_region_topology(region: str) -> str:
 
 
 @tool
-def describe_tgw_peering_attachments(region: str) -> str:
+def describe_tgw_peering_attachments(region: str, account: str = "") -> str:
     """Describe Transit Gateway peering attachments in a region.
 
     Returns TGW-to-TGW peering attachments that connect Transit Gateways
@@ -705,7 +705,7 @@ def describe_tgw_peering_attachments(region: str) -> str:
         state, and requester/accepter info.
     """
     try:
-        ec2 = _get_client("ec2", region)
+        ec2 = _get_client("ec2", region, account)
         resp = ec2.describe_transit_gateway_peering_attachments()
         attachments = []
         for att in resp.get("TransitGatewayPeeringAttachments", []):
@@ -730,7 +730,7 @@ def describe_tgw_peering_attachments(region: str) -> str:
 
 
 @tool
-def describe_cross_region_topology(regions: str = "") -> str:
+def describe_cross_region_topology(regions: str = "", account: str = "") -> str:
     """Describe network topology across multiple AWS regions.
 
     Aggregates per-region topology data, cross-region VPC peering connections,
@@ -749,7 +749,7 @@ def describe_cross_region_topology(regions: str = "") -> str:
         if regions and regions.strip():
             region_list = [r.strip() for r in regions.split(",") if r.strip()]
         else:
-            ec2 = _get_client("ec2", "us-east-1")
+            ec2 = _get_client("ec2", "us-east-1", account)
             resp = ec2.describe_regions(
                 Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
             )
@@ -764,12 +764,12 @@ def describe_cross_region_topology(regions: str = "") -> str:
         for reg in region_list:
             try:
                 # Per-region topology
-                raw = describe_region_topology(region=reg)
+                raw = describe_region_topology(region=reg, account=account)
                 topo = json.loads(raw)
                 region_topologies.append(topo)
 
                 # Cross-region VPC peerings
-                ec2 = _get_client("ec2", reg)
+                ec2 = _get_client("ec2", reg, account)
                 peer_resp = ec2.describe_vpc_peering_connections()
                 for pcx in peer_resp.get("VpcPeeringConnections", []):
                     pcx_id = pcx.get("VpcPeeringConnectionId", "")
@@ -830,7 +830,7 @@ def describe_cross_region_topology(regions: str = "") -> str:
 
 
 @tool
-def analyze_vpc_topology(region: str, vpc_id: str) -> str:
+def analyze_vpc_topology(region: str, vpc_id: str, account: str = "") -> str:
     """Analyze complete VPC topology: subnets, routing, gateways, peering, endpoints, and SG dependencies.
 
     Provides a holistic view of VPC connectivity including subnet classification
@@ -847,7 +847,7 @@ def analyze_vpc_topology(region: str, vpc_id: str) -> str:
         SG dependency map, blackhole routes, and reachability summary.
     """
     try:
-        ec2 = _get_client("ec2", region)
+        ec2 = _get_client("ec2", region, account)
 
         # 1. VPC details
         vpc_resp = ec2.describe_vpcs(VpcIds=[vpc_id])

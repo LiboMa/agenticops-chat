@@ -12,99 +12,45 @@ import pytest
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+# Holds the snapshot the patched resolver returns as the single enabled account.
+_DEFAULT_ACCOUNT = {"snap": None}
+
+
 @pytest.fixture(autouse=True)
-def _clear_session_cache():
-    """Clear the module-level session cache + account context before each test."""
+def _resolver_env(monkeypatch):
+    """Clear the shared session cache and drive resolution to one mock account."""
+    from types import SimpleNamespace
     import agenticops.tools.aws_tools as mod
+    from agenticops.credentials import resolver
+
     mod._session_cache.clear()
-    mod._set_active_account(None)
+    _DEFAULT_ACCOUNT["snap"] = None
+
+    def _list_enabled(provider=""):
+        snap = _DEFAULT_ACCOUNT["snap"]
+        return [snap] if snap else []
+
+    # Drive both resolution entry points off the single registered account.
+    monkeypatch.setattr(resolver, "list_enabled_accounts", _list_enabled)
     yield
     mod._session_cache.clear()
-    mod._set_active_account(None)
-
-
-def _make_sts_response():
-    return {
-        "Credentials": {
-            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
-            "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "SessionToken": "FwoGZXIvYXdzE...",
-            "Expiration": datetime(2026, 12, 31, tzinfo=timezone.utc),
-        }
-    }
+    _DEFAULT_ACCOUNT["snap"] = None
 
 
 def _inject_session(region="us-east-1", account_id="111111111111"):
-    """Inject a mock session into the cache and bind it as the active account."""
+    """Register a single enabled account and seed its cached session."""
+    from types import SimpleNamespace
     import agenticops.tools.aws_tools as mod
+
     session = MagicMock()
+    # resolve_account_session looks up {account_id}:{region} as a fallback key.
     mod._session_cache[f"{account_id}:{region}"] = session
-    mod._set_active_account(account_id)
+    _DEFAULT_ACCOUNT["snap"] = SimpleNamespace(
+        id=1, name="acct", provider="aws",
+        credentials={"account_id": account_id}, regions=[region], labels={},
+        credential_source_type="assume_role",
+    )
     return session
-
-
-# ── assume_role ───────────────────────────────────────────────────────
-
-@pytest.mark.skip(reason="Stale: assume_role now resolves via provider layer, not aws_tools.boto3 directly (pre-existing failure, see test_aws_tools_coverage.TestAssumeRole)")
-class TestAssumeRole:
-    @pytest.fixture(autouse=True)
-    def _import(self):
-        from agenticops.tools.aws_tools import assume_role
-        self.fn = assume_role
-
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_success(self, mock_boto3):
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
-
-        result = self.fn(
-            account_id="111111111111",
-            role_arn="arn:aws:iam::111111111111:role/Test",
-            region="us-east-1",
-        )
-        assert "Assumed role" in result
-        assert "111111111111" in result
-
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_with_external_id(self, mock_boto3):
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
-
-        self.fn(
-            account_id="222222222222",
-            role_arn="arn:aws:iam::222222222222:role/Test",
-            region="us-west-2",
-            external_id="ext-123",
-        )
-        call_kwargs = mock_sts.assume_role.call_args[1]
-        assert call_kwargs["ExternalId"] == "ext-123"
-
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_cached(self, mock_boto3):
-        """Second call should return cached message without calling STS."""
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.return_value = _make_sts_response()
-        mock_boto3.Session.return_value = MagicMock()
-
-        self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
-        result = self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
-        assert "already cached" in result
-
-    @patch("agenticops.tools.aws_tools.boto3")
-    def test_assume_role_client_error(self, mock_boto3):
-        from botocore.exceptions import ClientError
-        mock_sts = MagicMock()
-        mock_boto3.client.return_value = mock_sts
-        mock_sts.assume_role.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "denied"}}, "AssumeRole"
-        )
-        result = self.fn(account_id="111111111111", role_arn="arn:aws:iam::111111111111:role/Test", region="us-east-1")
-        assert "Error" in result
 
 
 # ── Internal helpers ──────────────────────────────────────────────────

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @tool
 def lookup_cloudtrail_events(
-    resource_id: str, region: str, hours: int = 2
+    resource_id: str, region: str, hours: int = 2, account: str = ""
 ) -> str:
     """Look up recent CloudTrail events for a resource.
 
@@ -33,7 +33,7 @@ def lookup_cloudtrail_events(
         JSON list of recent change events with: event_name, time, user, source_ip, resources.
     """
     try:
-        client = _get_client("cloudtrail", region)
+        client = _get_client("cloudtrail", region, account)
     except RuntimeError as e:
         return str(e)
 
