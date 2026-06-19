@@ -92,19 +92,26 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 
 ## 八、凭证安全硬化（多账户串号防护）
 
-6 条铁律全部落地（详见 CLAUDE.md「凭证安全铁律」）：
+> **2.0.0 补丁（账户寻址重构，2026-06-15）**：早期实现用一个隐式的 `_active_account_var` ContextVar 记录"当前账户"，但 Strands SDK 用 `asyncio.to_thread` + `contextvars.copy_context()` 执行每个同步 `@tool`，工具内对 ContextVar 的写入一返回就被丢弃 —— 导致 `run_on_host(ssm)` 静默回退到本地默认凭证链（事故 TRC-bc600aa9：CloudTrail 把 SendCommand 记到本地 IAM 用户而非 AssumeRole 会话），同时 `_get_session` 系消费方在真实会话里 100% fail-closed 报错。**已用「账户寻址执行」彻底重写**，根因消除。
 
-- 业务路径禁止裸用 boto3，必须经 provider 层取目标账户凭证；解析失败显式报错，**禁止静默回退 ambient**
-- 子进程注入前 strip 全部 `AWS_*`（清单扩展到 `ARM_* / GOOGLE_* / ALIBABA_CLOUD_*`）；统一入口 `get_account_subprocess_env()`，覆盖 run_aws_cli / kubectl / ssm
-- 会话缓存 key 含 account（`{account}:{region}`）；`_active_account_var` ContextVar 精确绑定，无上下文 fail-closed
-- AssumeRole 自动续期：botocore 原生 `DeferredRefreshableCredentials`，长任务不再 1 小时过期
-- 纵深校验：`GetCallerIdentity().Account` 必须匹配配置的 account_id，否则 fail-closed
+**核心契约：账户是目标的属性，不是隐式全局状态。** 新模块 `credentials/resolver.py` 统一解析：
+
+- **显式 account 参数 → 库存反查（按 instance-id / cluster-name）→ 单账户默认 → fail-closed 列出账户名**。所有业务工具（`run_on_host` / `run_kubectl` / `run_aws_cli` / `describe_*` / network / eks / cloudwatch / cloudtrail）都带 `account` 参数。
+- **唯一合法的"本地链"路径** = 注册的 `environment`-源账户（经 provider 层解析 + `GetCallerIdentity` 校验），**没有任何隐式 ambient 回退分支**。
+- 子进程注入前 strip 全部 `AWS_*`（清单扩展到 `ARM_* / GOOGLE_* / ALIBABA_CLOUD_*`）；统一入口 `get_subprocess_env_for_account(account[, region])`，覆盖 run_aws_cli / kubectl / ssm。
+- 会话缓存双键 `{provider}:{name}:{region}` 与 `{account_id}:{region}`（线程安全，单一归属）。
+- AssumeRole 自动续期：botocore 原生 `DeferredRefreshableCredentials`，长任务不再 1 小时过期。
+- 纵深校验：`GetCallerIdentity().Account` 必须匹配配置的 account_id，否则 fail-closed。
+- **主机访问降级阶梯（像人类 SRE）**：`run_on_host(method="auto")` 先走 SSM，失败时按 botocore 错误码分类（InvalidInstanceId / TargetNotConnected / AccessDenied / Timeout），用库存 IP 自动降级 SSH（支持注册 ssh 账户 + `ssh_default_user`/`ssh_default_key_path`/`ssh_bastion_host` ProxyJump），返回完整尝试轨迹。
+- 删除：`_active_account_var` / `_set_active_account` / `_get_active_account` / `get_account_subprocess_env` 及所有 ambient 回退分支；日志签名 `uses default credentials (no active account context)` 已从代码库消失。
+
+**通知渠道键名修复（2026-06-18）**：`SESNotifier` 读 `config["to"]` 但 UI/`channels.yaml` 用的键是 `recipients` → `recipients=[]` → `send()` 静默 `return False` 从不调 SES（`ops-ses-email` 渠道完全不发邮件）；`EmailNotifier`(SMTP) 同类错配（`smtp_user`/`from_email`/`to_emails` vs UI 的 `username`/`from_addr`/`to_addrs`）。两者改为优先读 UI/YAML 键、旧键作向后兼容别名，已在远程实例实发验证（`send()=True`）。
 
 ## 九、其他交付
 
 - **ACP Enhanced Backend**：新增 Kiro CLI + Codex 两个 provider（共享自实现 JSON-RPC/stdio AcpClient）；`enhanced_task` 流式输出桥接到 chat SSE；Settings → Enhanced Backend 选择器。默认关闭。
 - **品牌 Logo**：全新 SVG logo + icon（`frontend/public/`：logo.svg / logo-icon.svg / favicon-16/32 / logo-192/512），侧栏品牌位从渐变字母 "A" 占位升级为正式 logo，favicon 全套接入 index.html。
-- **文档**：`docs/MVP-2.0.0-ARCHITECTURE.md`（架构决策 + 调研依据 + YAGNI 清单）、`docs/WORKFLOW.md` 新增 Prevention hooks 节 + 凭证 AuthN/AuthZ 流程图。
+- **文档**：`docs/MVP-2.0.0-ARCHITECTURE.md`（架构决策 + 调研依据 + YAGNI 清单）、`docs/WORKFLOW.md` 新增 Prevention hooks 节 + 凭证 AuthN/AuthZ 流程图（已随账户寻址重构更新：移除 ContextVar 节点与 ambient 分支，AuthZ 入口改为 `get_subprocess_env_for_account`）。
 
 ## 十、新增配置（settings.yaml）
 
@@ -119,12 +126,17 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 ## 十一、测试与验证
 
 - **62 个新测试**：prompt 预算金样 + 卫生回归（27）、策略模拟门（11）、巡检图步骤（6+12 更新）、RCA 拓扑块（7）—— 全绿
-- 全量套件 2,600+ 通过；已在干净树上验证剩余失败均为 pre-existing（test_chat_session_rename 等 ~23 个，与本版改动无关）
+- **账户寻址重构（补丁）**：新增 `tests/test_account_resolver.py`（18）+ 重写凭证/执行套件（subprocess 注入、会话隔离、execution 阶梯、SSM 错误分类、run_kubectl/run_aws_cli 账户解析）；改动区 419 测试全绿
+- **通知键名修复（补丁）**：`tests/test_notifier.py` 新增 `TestConfigKeyMapping`（5）—— SES/SMTP 的 recipients 键映射回归；152 notifier 测试全绿
+- 全量套件 3,100+ 通过；已在干净树上验证剩余失败均为 pre-existing（test_chat_session_rename / 过期 Bedrock 模型 / SES-SNS 凭证等，与本版改动无关）
 - 前端 `npx tsc --noEmit` 通过；dist 已重建（logo + favicon 入包）
+- **远程部署验证**：`iac/deploy-sg`（ap-southeast-1，`i-0935450a95f321942`）已部署 main 最新；运行环境核验旧符号不可导入、`run_on_host` 默认 `method=auto`、日志无事故签名；`ops-ses-email` 实发 `send()=True`
 
 ## 十二、升级说明
 
 1. 零破坏性：所有新行为受配置门控且默认值复刻旧行为（policy 默认规则 = legacy L0/L1；模拟门 fail-soft）
 2. `config/policies.yaml` 首次纳入版本管理 —— 这是自治契约文件，修改需评审
 3. scan/detect 模型已切换 Sonnet 4.6（成本下降，窗口修复）；如需 Opus 在 settings.yaml 显式覆盖
-4. 下一版（roadmap）：执行后验证回路（VerifyGate）、Reconciler 对账循环、回放评测 CI 门 —— 详见架构文档第 3 节
+4. **凭证调用方式变更**：业务工具改为账户寻址 —— 多账户部署需对 `run_on_host` / `run_kubectl` / `run_aws_cli` / `describe_*` 传 `account='<name>'`（单账户部署自动解析，无需改动）。旧的 `assume_role` 工具保留但仅用于预热/校验，不再是必需的前置步骤。新增 SSH 降级配置 `ssh_default_user` / `ssh_default_key_path` / `ssh_bastion_host`（默认空）。
+5. **访问地址**：自定义域名 `agenticops.tinyboat.blog` 依赖外部域名续费；在恢复前临时使用 CloudFront 默认域名 `https://d1o50vxhknqf6d.cloudfront.net`（即开即用，与自定义域名无关）。SES 仍在 sandbox —— 发给非验证收件人需在 SES 控制台申请生产权限。
+6. 下一版（roadmap）：执行后验证回路（VerifyGate）、Reconciler 对账循环、回放评测 CI 门 —— 详见架构文档第 3 节
