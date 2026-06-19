@@ -49,11 +49,14 @@ terraform init
 
 | Method | Command |
 |--------|---------|
-| Web | https://agenticops.tinyboat.blog |
-| SSH | `ssh ubuntu@<public_ip>` |
-| SSM | `aws ssm start-session --target <instance_id> --region ap-southeast-1` |
+| Web (CloudFront, always reachable) | `terraform output -raw cloudfront_url` (e.g. `https://d1o50vxhknqf6d.cloudfront.net`) |
+| Web (custom domain, optional) | https://agenticops.tinyboat.blog — requires a **live** domain + DNS pointing at CloudFront |
+| SSH | `ssh ubuntu@$(terraform output -raw ec2_public_ip)` |
+| SSM | `aws ssm start-session --target $(terraform output -raw ec2_instance_id) --region ap-southeast-1` |
 | Logs | `journalctl -u agenticops -f` |
 | Login | admin / aiops2026 |
+
+> The EC2 public IP is **auto-assigned and changes on stop/start** — always derive it from `terraform output` (run `terraform apply -refresh-only -auto-approve` first if the instance was restarted), never hard-code it. Drive redeploys via `./deploy.sh redeploy` (SSM + instance ID), which doesn't depend on the IP. The custom domain currently depends on an external domain registration being live; until then use the CloudFront URL.
 
 ## Infrastructure Components
 

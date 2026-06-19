@@ -214,6 +214,8 @@ docker run -d -p 8000:8000 \
 
 **Auth** (default-on for cloud profiles): login via `POST /api/auth/login` (`admin` / `aiops2026`, change with `AIOPS_ADMIN_PASSWORD`); 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
 
+**Singapore deployment access**: the one-click `deploy-sg` stack fronts the app with CloudFront. Use the CloudFront default domain (`./deploy.sh` prints `cloudfront_url`, e.g. `https://d1o50vxhknqf6d.cloudfront.net`) which is always reachable; a custom domain via Route53 + ACM is optional and requires a live domain. `deploy.sh redeploy [branch]` pulls + rebuilds + restarts on the instance via SSM. Note: the instance uses an auto-assigned public IP that changes on stop/start — drive ops via the instance ID / SSM, not a hard-coded IP.
+
 Details: [`docker/README.md`](docker/README.md) · [`iac/ec2/README.md`](iac/ec2/README.md) · [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 
 ---
@@ -267,6 +269,7 @@ Most recent first. Each links to detailed notes.
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **[2.0.0 "Methos"](docs/MVP-2.0.0-RELEASE.md)** | 2026-06-19 | Governed Autonomy (policy engine) · ITSM bridge · Multi-cloud capability layer (SSH/Prometheus/Kubernetes providers) · self-improvement metrics · prevention triad (SPOF patrol + RCA topology + simulation gate) · **account-addressed credentials** (kills the ContextVar wrong-account defect; explicit account resolution, fail-closed, SSM→SSH access ladder) · SES/SMTP notifier key-mapping fix |
 | **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions + fast open; paste/drag-drop multi-attachment; open-webui-style chat UI refresh; agent window-config fix (Full Context + Web→YAML persist); unified **Messaging** settings (merged Notifications + IM Bots) |
 | **[1.1.0](docs/MVP-1.1.0-RELEASE.md)** | 2026-05-31 | Autonomous **agent memory** (self-optimizing, Hermes-style) + autonomous **skills** (agent-created, security-gated promotion) |
 | **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | Loader/UX hardening; skill index recall improvements |
