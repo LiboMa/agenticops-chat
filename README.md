@@ -67,12 +67,14 @@ IM Bots ────────────┘        │                  SRE 
 
 ### The 7 Agents
 
-| Agent | Model (default) | Role |
-|-------|-----------------|------|
-| **Main** | Sonnet 4.6 | Pure router — dispatches to specialists |
+Models are per-agent overrides in `config/settings.yaml` (`agent_*_model_id`), winning over the tier defaults in `config.py`. Committed defaults:
+
+| Agent | Model (settings.yaml) | Role |
+|-------|-----------------------|------|
+| **Main** | Opus 4.8 | Pure router — dispatches to specialists |
 | **RCA** | Opus 4.6 | Root cause analysis (Skills + KB + Graph) |
-| **SRE** | Opus 4.6 | Fix-plan generation — **never executes** |
-| **Executor** | Opus 4.6 | Multi-backend execution (AWS / SSM / kubectl) |
+| **SRE** | Opus 4.8 | Fix-plan generation — **never executes** |
+| **Executor** | Opus 4.8 | Multi-backend execution (AWS / SSM / kubectl) |
 | **Scan** | Sonnet 4.6 | Resource discovery |
 | **Detect** | Sonnet 4.6 | Health monitoring + anomaly detection |
 | **Reporter** | Sonnet 4.6 | Report generation |
@@ -182,7 +184,7 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-opus-4-6-v1` | Default (reasoning) model |
+| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | Default (mid) tier; per-agent overrides in `settings.yaml` |
 | `AIOPS_BEDROCK_REGION` | `us-east-1` | Bedrock region |
 | `AIOPS_DATABASE_URL` | `sqlite:///…/data/agenticops.db` | Database URL |
 | `AIOPS_AUTO_FIX_ENABLED` | `true` | Auto-fix pipeline master switch |
@@ -275,7 +277,7 @@ Most recent first. Each links to detailed notes.
 | **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | Loader/UX hardening; skill index recall improvements |
 | **[1.0.0](docs/MVP-1.0.0-RELEASE.md)** | 2026-03-10 | First MVP — 7-agent architecture, auto-fix pipeline, web dashboard, 10/10 validation |
 
-User-facing workflow guide with Mermaid diagrams: [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
+User-facing workflow guide with Mermaid diagrams: [`docs/WORKFLOW.md`](docs/WORKFLOW.md). Codebase health audit + loop-engineering roadmap: [`docs/AUDIT-2026-06.md`](docs/AUDIT-2026-06.md).
 
 ---
 

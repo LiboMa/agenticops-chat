@@ -27,7 +27,7 @@ Web Dashboard ──────┘         │
 ```
 
 - **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
-- **Tiered models**: `bedrock_model_id` (Sonnet 4.6 or Opus 4.6), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Sonnet 4.6 (`global.anthropic.claude-sonnet-4-6`) available as mid-tier option for router/executor.
+- **Tiered models**: `bedrock_model_id` (default Sonnet 4.6 — mid tier for router/executor), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Per-agent overrides live in `config/settings.yaml` (`agent_*_model_id`) and win over tier defaults — the committed defaults run main/sre/executor on Opus 4.8, scan/detect/reporter on Sonnet 4.6, rca on Opus 4.6.
 - **Auto-fix pipeline**: HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)
@@ -138,9 +138,9 @@ All settings use `AIOPS_` env prefix. Key ones:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `bedrock_model_id` | `global.anthropic.claude-opus-4-6-v1` | Default model (Opus 4.6). Can set to `global.anthropic.claude-sonnet-4-6` for cost savings on router/executor |
-| `bedrock_model_id_cheap` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Economy model (Haiku 4.5) |
-| `bedrock_model_id_strong` | `global.anthropic.claude-opus-4-6-v1` | Strong model (Opus 4.6) for RCA/SRE |
+| `bedrock_model_id` | `global.anthropic.claude-sonnet-4-6` | Default (mid) tier — main router + executor. `config/settings.yaml` overrides per-agent (e.g. main/sre/executor → Opus 4.8) |
+| `bedrock_model_id_cheap` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Economy tier (Haiku 4.5) — tier default for scan/detect/reporter (settings.yaml may raise to Sonnet) |
+| `bedrock_model_id_strong` | `global.anthropic.claude-opus-4-6-v1` | Strong tier (Opus 4.6) — tier default for RCA/SRE |
 | `bedrock_max_tokens` | `16384` | Max output tokens |
 | `bedrock_region` | `us-east-1` | AWS Bedrock region |
 | `database_url` | `sqlite:///...agenticops.db` | Database URL |
