@@ -267,7 +267,7 @@ class TestL4Lifecycle:
         plan.approved_by = "test"
         plan.approved_at = utc_now()
         issue.status = "fix_approved"
-        session.flush()
+        session.commit()
 
         # Simulate successful execution via metadata tool
         from agenticops.tools.metadata_tools import save_execution_result
