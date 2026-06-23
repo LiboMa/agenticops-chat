@@ -10,7 +10,7 @@ Does NOT require AWS credentials — tests the orchestration layer only.
 import json
 import time
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from agenticops.models import (
@@ -24,6 +24,7 @@ from agenticops.models import (
     get_session,
     init_db,
 )
+from agenticops.utils.timeutils import utc_now
 
 
 @pytest.fixture
@@ -37,6 +38,11 @@ def test_db(tmp_path):
     orig_sops_dir = settings.sops_dir
     orig_cases_dir = settings.cases_dir
     orig_kb_dir = settings.knowledge_base_dir
+    orig_engine = models_mod._engine
+
+    # Dispose any lingering engine to avoid StaticPool cross-contamination
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
 
     # Reset singleton engine
     models_mod._engine = None
@@ -50,17 +56,17 @@ def test_db(tmp_path):
     settings.ensure_dirs()
 
     engine = models_mod.get_engine()
-    # Enable WAL mode to allow concurrent reads/writes in tests
-    with engine.connect() as conn:
-        conn.execute(models_mod.text("PRAGMA journal_mode=WAL"))
-        conn.commit()
     Base.metadata.create_all(engine)
 
     session = get_session()
     yield session, tmp_path
 
     session.close()
-    models_mod._engine = None
+
+    # Dispose test engine before restoring
+    if models_mod._engine is not None:
+        models_mod._engine.dispose()
+    models_mod._engine = orig_engine
 
     # Restore original settings
     settings.database_url = orig_db_url
@@ -214,7 +220,7 @@ class TestL4Lifecycle:
         # Approve the plan (L1 = auto-approvable)
         plan.status = "approved"
         plan.approved_by = "agent:main_agent"
-        plan.approved_at = datetime.now(timezone.utc)
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.commit()
 
@@ -230,7 +236,7 @@ class TestL4Lifecycle:
         # Approve first
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.now(timezone.utc)
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 
@@ -259,9 +265,9 @@ class TestL4Lifecycle:
         # Approve
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.now(timezone.utc)
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
-        session.commit()  # commit to release SQLite write lock before save_execution_result
+        session.flush()
 
         # Simulate successful execution via metadata tool
         from agenticops.tools.metadata_tools import save_execution_result
@@ -308,9 +314,9 @@ class TestL4Lifecycle:
 
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.now(timezone.utc)
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
-        session.commit()  # commit to release SQLite write lock before save_execution_result
+        session.flush()
 
         from agenticops.tools.metadata_tools import save_execution_result
 
@@ -361,7 +367,7 @@ class TestRAGPipeline:
 
         # Mark as resolved (needed for extract)
         issue.status = "resolved"
-        issue.resolved_at = datetime.now(timezone.utc)
+        issue.resolved_at = utc_now()
         session.commit()
 
         from agenticops.pipeline.rag_pipeline import _extract_case_data
@@ -374,10 +380,13 @@ class TestRAGPipeline:
         assert case_data["severity"] == "high"
         assert "memory leak" in case_data["root_cause"].lower()
 
-    def test_rag_pipeline_generates_sop(self, seed_data):
+    def test_rag_pipeline_generates_sop(self, seed_data, monkeypatch):
         """Test SOP generation from case data (uses fallback, no LLM)."""
-        from unittest.mock import patch
+        from agenticops.pipeline import sop_upgrader
         from agenticops.pipeline.sop_upgrader import generate_new_sop
+
+        # Force fallback path — don't call real LLM in unit tests
+        monkeypatch.setattr(sop_upgrader, "_call_llm", lambda prompt: None)
 
         case_data = {
             "resource_type": "EC2",
@@ -396,9 +405,8 @@ class TestRAGPipeline:
             "recommendations": "Add memory monitoring",
         }
 
-        # Mock _call_llm to avoid hanging on boto3 calls in test env
-        with patch("agenticops.pipeline.sop_upgrader._call_llm", return_value=None):
-            sop = generate_new_sop(case_data)
+        # This will use fallback (no Bedrock available in test)
+        sop = generate_new_sop(case_data)
 
         assert sop is not None
         assert len(sop) > 100
@@ -487,7 +495,7 @@ class TestExecutorService:
         # Approve plan
         plan.status = "approved"
         plan.approved_by = "test"
-        plan.approved_at = datetime.now(timezone.utc)
+        plan.approved_at = utc_now()
         issue.status = "fix_approved"
         session.flush()
 
