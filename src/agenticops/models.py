@@ -586,6 +586,7 @@ class AgentLog(Base):
     __table_args__ = (
         Index("idx_agent_log_trace", "trace_id"),
         Index("idx_agent_log_agent_time", "agent_name", "created_at"),
+        Index("idx_agent_log_actor_time", "actor_type", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -597,6 +598,10 @@ class AgentLog(Base):
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
     cache_read_tokens: Mapped[int] = mapped_column(default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
+    actor_type: Mapped[str] = mapped_column(String(20), default="system")
+    actor_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     duration_ms: Mapped[int] = mapped_column(default=0)
     status: Mapped[str] = mapped_column(String(20), default="success")
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -809,6 +814,7 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     attachments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -1019,6 +1025,33 @@ def init_db(engine=None):
                     conn.execute(text(stmt))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_log_trace ON agent_logs(trace_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_log_agent_time ON agent_logs(agent_name, created_at)"))
+                conn.commit()
+
+    # Migration: add cost/actor columns to agent_logs
+    if insp.has_table("agent_logs"):
+        cols = {c["name"] for c in insp.get_columns("agent_logs")}
+        more = []
+        if "cache_write_tokens" not in cols:
+            more.append("ALTER TABLE agent_logs ADD COLUMN cache_write_tokens INTEGER DEFAULT 0")
+        if "cost_usd" not in cols:
+            more.append("ALTER TABLE agent_logs ADD COLUMN cost_usd FLOAT DEFAULT 0")
+        if "actor_type" not in cols:
+            more.append("ALTER TABLE agent_logs ADD COLUMN actor_type VARCHAR(20) DEFAULT 'system'")
+        if "actor_id" not in cols:
+            more.append("ALTER TABLE agent_logs ADD COLUMN actor_id VARCHAR(100)")
+        if more:
+            with engine.connect() as conn:
+                for stmt in more:
+                    conn.execute(text(stmt))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_log_actor_time ON agent_logs(actor_type, created_at)"))
+                conn.commit()
+
+    # Migration: add trace_id to chat_messages
+    if insp.has_table("chat_messages"):
+        cols = {c["name"] for c in insp.get_columns("chat_messages")}
+        if "trace_id" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN trace_id VARCHAR(36)"))
                 conn.commit()
 
     # Migration: add provider column to health_issues if missing, backfill 'aws'
