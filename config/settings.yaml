@@ -26,18 +26,26 @@ agent_rca_window_size: 0
 agent_sre_window_size: -1
 agent_executor_window_size: 100
 token_cost_table:
+  claude-opus-4-8:
+    input: 15.0
+    output: 75.0
+    cache_read: 1.5
+    cache_write: 18.75
   claude-opus-4-6:
     input: 15.0
     output: 75.0
     cache_read: 1.5
+    cache_write: 18.75
   claude-sonnet-4-6:
     input: 3.0
     output: 15.0
     cache_read: 0.3
+    cache_write: 3.75
   claude-haiku-4-5:
     input: 0.8
     output: 4.0
     cache_read: 0.08
+    cache_write: 1.0
 bedrock_cache_enabled: true
 embedding_model_id: amazon.titan-embed-text-v2:0
 embedding_dimension: 1024
