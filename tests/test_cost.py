@@ -19,7 +19,12 @@ def test_compute_cost_missing_keys_default_zero():
 
 
 def test_unknown_model_returns_zero(caplog):
-    assert compute_cost("some.unknown.model", {"input": 1_000_000}) == 0.0
+    import logging
+    with caplog.at_level(logging.WARNING, logger="agenticops.cost"):
+        assert compute_cost("some.unknown.model", {"input": 1_000_000}) == 0.0
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "some.unknown.model" in caplog.text
 
 
 def test_breakdown_sums_to_total():
