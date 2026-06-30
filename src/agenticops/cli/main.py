@@ -3799,7 +3799,8 @@ def _run_headless(query: str, account: Optional[str] = None):
         with display.live_display():
             display.start("Thinking...")
             try:
-                with track_agent("main", "chat_headless", query[:200]) as tracker:
+                with track_agent("main", "chat_headless", query[:200],
+                                actor_type="cli", actor_id=__import__("getpass").getuser()) as tracker:
                     result = agent(enriched)
                     tracker.set_result(result)
                 display.complete("Done")
@@ -3825,7 +3826,8 @@ def _run_headless(query: str, account: Optional[str] = None):
         for w in warnings:
             print(f"Warning: {w}", file=sys.stderr)
         try:
-            with track_agent("main", "chat_headless", query[:200]) as tracker:
+            with track_agent("main", "chat_headless", query[:200],
+                            actor_type="cli", actor_id=__import__("getpass").getuser()) as tracker:
                 result = agent(enriched)
                 tracker.set_result(result)
         except Exception as e:
@@ -4227,7 +4229,8 @@ def chat(
                 handler.start()
                 try:
                     from agenticops.services.agent_log_service import track_agent as _track
-                    with _track("main", "chat", user_input[:200]) as _trk:
+                    with _track("main", "chat", user_input[:200],
+                                actor_type="cli", actor_id=__import__("getpass").getuser()) as _trk:
                         result = agent(enriched_input)
                         _trk.set_result(result)
                 except Exception as e:

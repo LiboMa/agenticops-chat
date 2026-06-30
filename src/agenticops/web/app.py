@@ -4532,6 +4532,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     duration_ms=int((time.monotonic() - _chat_start_time) * 1000),
                     trace_id=_chat_trace_id,
                     model_id=_main_model_id,
+                    actor_type="user",
+                    actor_id=getattr(getattr(request, "state", None), "user", None),
                 )
             except Exception:
                 logger.debug("Failed to log main agent call", exc_info=True)
