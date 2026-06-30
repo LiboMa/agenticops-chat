@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, literal
 
 _GROUP_COL = {"agent": "agent_name", "actor": "actor_type", "model": "model_id"}
 _BUCKET_FMT = {"hour": "%Y-%m-%d %H:00", "day": "%Y-%m-%d", "month": "%Y-%m", "year": "%Y"}
@@ -31,10 +31,13 @@ def cost_summary(
     from agenticops.models import AgentLog, get_db_session
 
     filters = filters or {}
-    gcol_name = _GROUP_COL.get(group_by, "agent_name")
 
     with get_db_session() as db:
-        gcol = getattr(AgentLog, gcol_name)
+        if group_by == "none":
+            # No dimension split: a single aggregate bucket keyed "all".
+            gcol = literal("all")
+        else:
+            gcol = getattr(AgentLog, _GROUP_COL.get(group_by, "agent_name"))
         bexpr = _bucket_expr(AgentLog.created_at, bucket)
 
         def base_query():

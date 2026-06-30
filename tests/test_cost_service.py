@@ -61,3 +61,16 @@ def test_cost_summary_actor_filter(monkeypatch):
     )
     assert round(out["totals"]["cost_usd"], 2) == 2.0
     assert out["breakdown"][0]["key"] == "user"
+
+
+def test_cost_summary_group_by_none(monkeypatch):
+    _seed(monkeypatch)
+    out = cost_service.cost_summary(
+        start=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 22, tzinfo=timezone.utc),
+        bucket="day", group_by="none",
+    )
+    assert round(out["totals"]["cost_usd"], 2) == 5.0          # totals unchanged
+    assert len(out["breakdown"]) == 1
+    assert out["breakdown"][0]["key"] == "all"
+    assert round(out["breakdown"][0]["cost_usd"], 2) == 5.0
