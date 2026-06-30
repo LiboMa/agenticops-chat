@@ -21,7 +21,7 @@ The whole system follows a few deliberate rules — they explain most of the des
 
 1. **Agents as tools.** The Main agent is a *pure router*; each specialist (Scan, Detect, RCA, SRE, Executor, Reporter) is exposed as a callable tool. No specialist talks to another directly.
 2. **Read/plan/execute are separated.** SRE *plans* fixes but never touches infrastructure; only the Executor acts, and only after an approval gate. Risk-tiered: L0/L1 auto-approve, L2/L3 require a human.
-3. **Tiered models for cost.** Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing and high-throughput work (Main, Scan, Detect, Reporter), Haiku available as the economy tier. Per-agent overridable.
+3. **Tiered models for cost.** Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing and high-throughput work (Main, Scan, Detect, Reporter), Haiku available as the economy tier. Per-agent overridable. Token & cost is tracked per-call with real-time dashboards (Web + `aiops cost` CLI).
 4. **Agents learn, safely.** Memory and skills self-optimize within hard safety boundaries — agent writes land as drafts; promotion is security-gated; human-authored knowledge is pinned and never auto-touched.
 5. **One source of truth for config.** `config/settings.yaml` defines everything; env vars override it. Code never hardcodes values.
 6. **Simple by default.** SQLite + file-based memory locally; Postgres + S3 only when you opt into the cloud profile. No dependency added without a present-day need.
