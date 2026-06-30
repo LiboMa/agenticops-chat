@@ -260,6 +260,8 @@ from agenticops.web.routers import memory as _memory_router
 app.include_router(_memory_router.router)
 from agenticops.web.routers import accounts as _accounts_router
 app.include_router(_accounts_router.router)
+from agenticops.web.routers import cost as _cost_router
+app.include_router(_cost_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
