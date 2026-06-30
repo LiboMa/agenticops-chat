@@ -5,7 +5,12 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAgentLogs, useAgentTimeline, useAgentLogSummary } from "@/hooks/useAgentLogs";
+import { useCostSummary } from "@/hooks/useCostSummary";
 import type { AgentLogEntry } from "@/api/types";
+import {
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis,
+  Tooltip, Legend, PieChart, Pie, Cell,
+} from "recharts";
 
 /* ── Time range options ─────────────────────────────────────────── */
 
@@ -380,6 +385,153 @@ function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => 
   );
 }
 
+/* ── Cost Dashboard ────────────────────────────────────────────── */
+
+const COST_PERIODS = [
+  { label: "7d", value: "7d" },
+  { label: "30d", value: "30d" },
+  { label: "Month", value: "month" },
+  { label: "Year", value: "year" },
+];
+
+const GROUP_BY_OPTIONS = [
+  { label: "Agent", value: "agent" },
+  { label: "Actor", value: "actor" },
+  { label: "Model", value: "model" },
+];
+
+const COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#6366f1", "#ec4899"];
+
+function CostDashboard() {
+  const [period, setPeriod] = useState("30d");
+  const [groupBy, setGroupBy] = useState("agent");
+  const costQ = useCostSummary({ period, groupBy });
+
+  if (costQ.isLoading) return <Card><CardBody><Spinner /></CardBody></Card>;
+  if (costQ.error) return <ErrorBanner message={(costQ.error as Error).message} onRetry={() => costQ.refetch()} />;
+  if (!costQ.data) return null;
+
+  const { totals, series, breakdown } = costQ.data;
+
+  const chartData = series.map((s) => {
+    const entry: Record<string, string | number> = { bucket: s.bucket, tokens: s.total_tokens };
+    for (const [k, v] of Object.entries(s.by)) {
+      entry[k] = v.cost_usd;
+    }
+    return entry;
+  });
+
+  const dimensionKeys = [...new Set(breakdown.map((b) => b.key))];
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">Cost & Tokens</h2>
+        <div className="flex gap-2">
+          <div className="flex gap-1 bg-secondary rounded-lg p-1">
+            {COST_PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={`px-2 py-1 text-xs rounded ${period === p.value ? "bg-background shadow text-foreground" : "text-muted-foreground"}`}
+              >{p.label}</button>
+            ))}
+          </div>
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value)}
+            className="text-xs border rounded px-2 py-1 bg-background"
+          >
+            {GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      </CardHeader>
+      <CardBody>
+        {/* KPI scorecards */}
+        <div className="grid grid-cols-4 gap-3 mb-4">
+          <div className="p-3 rounded-lg bg-green-50 dark:bg-green-950">
+            <div className="text-xs text-muted-foreground">Total Cost</div>
+            <div className="text-xl font-bold text-green-700 dark:text-green-300">${totals.cost_usd.toFixed(4)}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950">
+            <div className="text-xs text-muted-foreground">Total Tokens</div>
+            <div className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatTokens(totals.total_tokens)}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-950">
+            <div className="text-xs text-muted-foreground">Cache Hit %</div>
+            <div className="text-xl font-bold text-purple-700 dark:text-purple-300">{totals.cache_hit_pct.toFixed(0)}%</div>
+          </div>
+          <div className="p-3 rounded-lg bg-secondary">
+            <div className="text-xs text-muted-foreground">Calls</div>
+            <div className="text-xl font-bold text-foreground">{totals.call_count}</div>
+          </div>
+        </div>
+
+        {/* Stacked bar (cost) + line (tokens) chart */}
+        {chartData.length > 0 && (
+          <div className="h-64 mb-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData}>
+                <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="cost" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${v.toFixed(2)}`} />
+                <YAxis yAxisId="tokens" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatTokens(v)} />
+                <Tooltip />
+                <Legend />
+                {dimensionKeys.map((k, i) => (
+                  <Bar key={k} dataKey={k} stackId="cost" yAxisId="cost" fill={COLORS[i % COLORS.length]} />
+                ))}
+                <Line type="monotone" dataKey="tokens" yAxisId="tokens" stroke="#6b7280" dot={false} strokeDasharray="4 2" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Breakdown + donut */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Breakdown table */}
+          <div>
+            <h3 className="text-sm font-medium mb-2">Breakdown by {groupBy}</h3>
+            <div className="space-y-1">
+              {breakdown.slice(0, 8).map((b, i) => (
+                <div key={b.key} className="flex items-center gap-2 text-xs">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                  <span className="flex-1 truncate">{b.key}</span>
+                  <span className="tabular-nums text-muted-foreground">{b.calls} calls</span>
+                  <span className="tabular-nums text-muted-foreground">{formatTokens(b.tokens)}</span>
+                  <span className="tabular-nums font-medium text-green-600 dark:text-green-400">${b.cost_usd.toFixed(4)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Donut chart */}
+          {breakdown.length > 0 && (
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={breakdown.slice(0, 7)}
+                    dataKey="cost_usd"
+                    nameKey="key"
+                    innerRadius="50%"
+                    outerRadius="80%"
+                    paddingAngle={2}
+                  >
+                    {breakdown.slice(0, 7).map((_, i) => (
+                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => `$${Number(v).toFixed(4)}`} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── Main Page ──────────────────────────────────────────────────── */
 
 export default function AgentMetrics() {
@@ -392,6 +544,7 @@ export default function AgentMetrics() {
       <h1 className="text-2xl font-semibold text-foreground mb-4">{t("nav.agentMetrics")}</h1>
 
       <div className="space-y-6">
+        <CostDashboard />
         <TokenSummary hours={hours} onHoursChange={setHours} />
         <ModelSummary hours={hours} />
         <AgentCallLog onSelectTrace={setSelectedTrace} />
