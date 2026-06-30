@@ -305,19 +305,24 @@ function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => 
           <>
             <div className="flex gap-3 mb-4 text-xs">
               <div className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
-                Input: <strong>{formatTokens(timelineQ.data.total_input_tokens)}</strong>
+                Input: <strong>{formatTokens(timelineQ.data.totals.input_tokens)}</strong>
               </div>
               <div className="px-2 py-1 rounded bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
-                Output: <strong>{formatTokens(timelineQ.data.total_output_tokens)}</strong>
+                Output: <strong>{formatTokens(timelineQ.data.totals.output_tokens)}</strong>
               </div>
               <div className="px-2 py-1 rounded bg-secondary text-muted-foreground">
-                Duration: <strong>{formatDuration(timelineQ.data.total_duration_ms)}</strong>
+                Duration: <strong>{formatDuration(timelineQ.data.totals.duration_ms)}</strong>
               </div>
+              {timelineQ.data.totals.cost_usd > 0 && (
+                <div className="px-2 py-1 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">
+                  Cost: <strong>${timelineQ.data.totals.cost_usd.toFixed(4)}</strong>
+                </div>
+              )}
             </div>
             <div className="space-y-0">
-              {timelineQ.data.entries.map((entry, i) => {
+              {timelineQ.data.calls.map((entry, i) => {
                 const isChild = !!entry.parent_agent;
-                const maxDur = Math.max(...timelineQ.data!.entries.map((e) => e.duration_ms), 1);
+                const maxDur = Math.max(...timelineQ.data!.calls.map((e) => e.duration_ms), 1);
                 const barPct = Math.max((entry.duration_ms / maxDur) * 100, 4);
                 return (
                   <div
@@ -331,7 +336,7 @@ function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => 
                           ? "border-green-500 bg-green-100"
                           : "border-red-500 bg-red-100"
                       }`} />
-                      {i < timelineQ.data!.entries.length - 1 && (
+                      {i < timelineQ.data!.calls.length - 1 && (
                         <div className="w-px flex-1 bg-border" />
                       )}
                     </div>

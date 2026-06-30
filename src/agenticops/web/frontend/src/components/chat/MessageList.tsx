@@ -171,7 +171,9 @@ export function MessageList({
               </div>
             )}
             {streamingTokenMetrics && (
-              <TokenMetrics input={streamingTokenMetrics.input} output={streamingTokenMetrics.output} />
+              <span className="text-xs text-muted-foreground tabular-nums">
+                ↑{streamingTokenMetrics.input.toLocaleString()} ↓{streamingTokenMetrics.output.toLocaleString()} Σ{(streamingTokenMetrics.input + streamingTokenMetrics.output).toLocaleString()}
+              </span>
             )}
           </div>
         </div>
@@ -211,7 +213,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           dangerouslySetInnerHTML={{ __html: renderMessageMarkdown(msg.id, msg.content) }}
         />
         {msg.role === "assistant" && msg.token_usage && (
-          <TokenMetrics input={msg.token_usage.input} output={msg.token_usage.output} />
+          <TokenMetrics msg={msg} />
         )}
       </div>
     </div>
