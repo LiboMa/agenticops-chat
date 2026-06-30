@@ -1,5 +1,10 @@
-"""AGENT Module - LLM Agent for orchestration."""
+"""AGENT Module - REMOVED.
 
-from agenticops.agent.ops_agent import OpsAgent
+The legacy OpsAgent (LangChain-based) has been removed.
+Use agenticops.agents.create_main_agent() (Strands SDK) instead.
+"""
 
-__all__ = ["OpsAgent"]
+raise ImportError(
+    "agenticops.agent has been removed. "
+    "Use agenticops.agents.create_main_agent() instead."
+)
