@@ -1,6 +1,6 @@
 # Token & Cost Observability — Design Spec
 
-> Status: approved design (brainstorm complete) · Date: 2026-06-27 · Branch: `MVP-2.0.0.methos-release`
+> Status: approved design (brainstorm complete) · Date: 2026-06-27 · Branch: `MVP-2.0.0-release`
 
 ## 1. Context
 

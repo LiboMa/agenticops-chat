@@ -1,6 +1,6 @@
-# AgenticOps v2.0.0 "Methos" Release — 治理型自治 + 企业流程 + 预防性运维
+# AgenticOps v2.0.0 Release — 治理型自治 + 企业流程 + 预防性运维
 
-> **版本**: 2.0.0 (Methos) | **日期**: 2026-06-12 (updated 2026-07-01) | **分支**: `MVP-2.0.0.methos-release`
+> **版本**: 2.0.0 | **日期**: 2026-06-12 (updated 2026-07-01) | **分支**: `MVP-2.0.0-release`
 
 ---
 

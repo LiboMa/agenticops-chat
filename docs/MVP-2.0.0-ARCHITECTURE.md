@@ -1,7 +1,7 @@
-# MVP-2.0.0 "Methos" — 架构升级决策文档
+# MVP-2.0.0 — 架构升级决策文档
 
 > 2026-06-11 · 基于 5 路深度调研（业界竞品 / ITSM 流程 / Self-improving SOTA / 多云-IDC 抽象 / 代码全量审计）的综合产出
-> 分支：`MVP-2.0.0.methos-release`
+> 分支：`MVP-2.0.0-release`
 
 ---
 
@@ -200,7 +200,7 @@ class SupportsExecute(Protocol):   def execute(...) -> dict
 | 3 | Capability/ResourceRef/Protocols + SSH/Prometheus/K8s providers | providers/* | ✅ Done |
 | 4 | Metrics Service + /api/metrics/improvement | services/metrics_service.py | ✅ Done |
 | 5 | 全量测试通过 + 文档更新 | tests/* docs/* | ✅ 526/527 pass |
-| 6 | 客户级 PPT + Demo 脚本 | docs/AgenticOps-2.0-Methos.pptx | ✅ Done |
+| 6 | 客户级 PPT + Demo 脚本 | docs/AgenticOps-2.0.pptx | ✅ Done |
 | 7 | Azure ARG / GCP CAI 读路径实装、蒸馏验证门、eval Ring1 | — | 2.1 |
 
 ---
