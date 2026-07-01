@@ -4,19 +4,26 @@ vi.mock("@/lib/renderMarkdown", () => ({
   renderMarkdown: vi.fn((md: string) => `<p>${md}</p>`),
 }));
 
-import { renderMessageMarkdown } from "@/lib/markdownCache";
-import { renderMarkdown } from "@/lib/renderMarkdown";
-
-const mockedRenderMarkdown = vi.mocked(renderMarkdown);
-
 describe("renderMessageMarkdown", () => {
-  beforeEach(() => {
-    mockedRenderMarkdown.mockClear();
+  let renderMessageMarkdown: typeof import("@/lib/markdownCache").renderMessageMarkdown;
+  let mockedRenderMarkdown: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+
+    vi.doMock("@/lib/renderMarkdown", () => ({
+      renderMarkdown: vi.fn((md: string) => `<p>${md}</p>`),
+    }));
+
+    const cacheModule = await import("@/lib/markdownCache");
+    const renderModule = await import("@/lib/renderMarkdown");
+
+    renderMessageMarkdown = cacheModule.renderMessageMarkdown;
+    mockedRenderMarkdown = vi.mocked(renderModule.renderMarkdown);
   });
 
   it("calls renderMarkdown on first invocation with a given id", () => {
-    // Use a unique id to avoid cross-test cache hits
-    const id = 1000;
+    const id = 1;
     const content = "Hello world";
     const result = renderMessageMarkdown(id, content);
 
@@ -26,7 +33,7 @@ describe("renderMessageMarkdown", () => {
   });
 
   it("returns cached result on subsequent calls with same id", () => {
-    const id = 2000;
+    const id = 1;
     const content = "Cached content";
 
     const first = renderMessageMarkdown(id, content);
@@ -38,7 +45,7 @@ describe("renderMessageMarkdown", () => {
   });
 
   it("does not re-render even if content argument differs for the same id", () => {
-    const id = 3000;
+    const id = 1;
 
     const first = renderMessageMarkdown(id, "original");
     const second = renderMessageMarkdown(id, "different");
@@ -49,8 +56,8 @@ describe("renderMessageMarkdown", () => {
   });
 
   it("caches different ids independently", () => {
-    const id1 = 4000;
-    const id2 = 4001;
+    const id1 = 1;
+    const id2 = 2;
 
     const result1 = renderMessageMarkdown(id1, "content A");
     const result2 = renderMessageMarkdown(id2, "content B");
@@ -61,7 +68,7 @@ describe("renderMessageMarkdown", () => {
   });
 
   it("returns the rendered HTML string", () => {
-    const id = 5000;
+    const id = 1;
     mockedRenderMarkdown.mockReturnValueOnce("<strong>test</strong>");
 
     const result = renderMessageMarkdown(id, "**test**");

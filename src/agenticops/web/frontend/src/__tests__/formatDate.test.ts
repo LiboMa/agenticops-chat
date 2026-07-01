@@ -11,6 +11,10 @@ describe("formatShortDate", () => {
     expect(result).toContain("30");
   });
 
+  it("produces exact expected format string", () => {
+    expect(formatShortDate("2024-07-04T09:05:00Z")).toBe("Jul 4, 09:05");
+  });
+
   it("formats a string date to short date in UTC", () => {
     const result = formatShortDate("2024-07-04T09:05:00Z");
     expect(result).toContain("Jul");
@@ -55,6 +59,10 @@ describe("formatFullDate", () => {
     expect(result).toContain("45");
   });
 
+  it("produces exact expected format string", () => {
+    expect(formatFullDate("2024-01-15T14:30:45Z")).toBe("Jan 15, 2024, 14:30:45");
+  });
+
   it("formats a string date to full date in UTC", () => {
     const result = formatFullDate("2023-11-28T08:15:30Z");
     expect(result).toContain("2023");
@@ -91,6 +99,10 @@ describe("formatUtcClock", () => {
     const date = new Date("2024-01-15T14:30:00Z");
     const result = formatUtcClock(date);
     expect(result).toMatch(/ UTC$/);
+  });
+
+  it("produces exact expected format string", () => {
+    expect(formatUtcClock(new Date("2024-06-03T09:15:00Z"))).toBe("06/03/2024, 09:15 UTC");
   });
 
   it("includes year, month, day, hour, minute in UTC", () => {

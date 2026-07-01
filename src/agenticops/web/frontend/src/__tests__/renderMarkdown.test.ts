@@ -291,4 +291,30 @@ describe("renderMarkdown", () => {
       expect(result).toContain("print('hello')");
     });
   });
+
+  describe("negative paths / malformed markdown", () => {
+    it("handles unclosed code block gracefully by auto-closing at end of input", () => {
+      const md = "```javascript\nconst x = 1;\nno closing fence";
+      const result = renderMarkdown(md);
+      // The renderer should still produce valid HTML with a closing </code></pre>
+      expect(result).toContain('<pre class="md-pre" data-lang="javascript"><code>');
+      expect(result).toContain("const x = 1;");
+      expect(result).toContain("no closing fence");
+      expect(result).toContain("</code></pre>");
+      // Content inside the unclosed block should be escaped, not treated as markdown
+      expect(result).not.toContain('<p class="md-p">no closing fence</p>');
+    });
+
+    it("treats unclosed bold markers as literal text", () => {
+      const result = renderMarkdown("This is **not closed");
+      // Unclosed ** should not produce a dangling <strong> tag
+      expect(result).toContain('<p class="md-p">');
+      // The literal ** remain in the output since no closing marker was found
+      expect(result).toContain("**not closed");
+      // Should not have an unmatched opening <strong> without a closing tag
+      const strongOpen = (result.match(/<strong>/g) || []).length;
+      const strongClose = (result.match(/<\/strong>/g) || []).length;
+      expect(strongOpen).toBe(strongClose);
+    });
+  });
 });
