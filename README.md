@@ -2,7 +2,7 @@
 
 **Agent-first cloud operations platform.** A team of specialized AI agents scans your AWS infrastructure, detects issues, finds root causes, plans fixes, and — for low-risk problems — remediates them autonomously. They also **learn**: every operation refines a self-optimizing memory and skill library.
 
-> **Version**: 1.1.1 · **Latest release**: [Concurrent chat sessions + fast open](docs/MVP-1.1.1-RELEASE.md) · **Full history** below.
+> **Version**: 2.0.0 (Methos) · **Latest release**: [Token & Cost Observability + Governed Autonomy + Credential Safety](docs/MVP-2.0.0-RELEASE.md) · **Full history** below.
 
 Three ways in — all driving the same agents:
 

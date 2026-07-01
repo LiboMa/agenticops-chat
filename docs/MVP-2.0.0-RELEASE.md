@@ -1,6 +1,6 @@
 # AgenticOps v2.0.0 "Methos" Release — 治理型自治 + 企业流程 + 预防性运维
 
-> **版本**: 2.0.0 (Methos) | **日期**: 2026-06-12 | **分支**: `MVP-2.0.0.methos-release`
+> **版本**: 2.0.0 (Methos) | **日期**: 2026-06-12 (updated 2026-07-01) | **分支**: `MVP-2.0.0.methos-release`
 
 ---
 
@@ -107,13 +107,57 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 
 **通知渠道键名修复（2026-06-18）**：`SESNotifier` 读 `config["to"]` 但 UI/`channels.yaml` 用的键是 `recipients` → `recipients=[]` → `send()` 静默 `return False` 从不调 SES（`ops-ses-email` 渠道完全不发邮件）；`EmailNotifier`(SMTP) 同类错配（`smtp_user`/`from_email`/`to_emails` vs UI 的 `username`/`from_addr`/`to_addrs`）。两者改为优先读 UI/YAML 键、旧键作向后兼容别名，已在远程实例实发验证（`send()=True`）。
 
-## 九、其他交付
+## 九、Token & Cost Observability
+
+> **"花了多少钱？谁花的？哪个 Agent 最贵？"** —— 从"能跑"到"跑得起"的成本可视化闭环。
+
+**交付**：`cost.py` + `services/cost_service.py` + `web/routers/cost.py` + CLI `aiops cost` + Frontend dashboard + per-message footer
+
+### 核心架构
+
+| 层 | 模块 | 职责 |
+|----|------|------|
+| 纯计算 | `cost.py` | `compute_cost(model_id, tokens) → USD`，基于 `config.token_cost_table`（per-1M rates），never raises |
+| 写入快照 | `agent_log_service` | 每次 agent 调用时计算 `cost_usd` + 记录 `actor_type/actor_id` + `cache_write_tokens`，火写即忘 |
+| 聚合 | `cost_service.cost_summary()` | 实时 GROUP BY agent_logs，无 rollup 表；支持 bucket=hour/day/month/year × group_by=agent/actor/model/none |
+| API | `GET /api/cost/summary` | period 快捷（7d/30d/month/year）+ 任意 start/end + filters |
+| CLI | `aiops cost --period month --by agent` | Rich table：totals + breakdown |
+| 前端 Dashboard | AgentMetrics → CostDashboard | KPI scorecards + recharts stacked-bar/line 混合图 + donut 占比 |
+| 前端 per-message | TokenMetrics footer | `↑in ↓out Σtotal · $cost ▾`，展开查 sub-agent 明细（trace timeline） |
+
+### Actor 归因
+
+每条 token 消耗归属到触发源：
+
+| actor_type | 来源 | actor_id |
+|-----------|------|----------|
+| `user` | Web chat SSE | request.state.user |
+| `cli` | CLI REPL / headless | OS username |
+| `system` | Pipeline / RCA / resolution services | — |
+| `schedule` | Scheduler 定时巡检 | schedule name |
+
+### Schema 变更（additive, nullable）
+
+- `AgentLog` += `cache_write_tokens`, `cost_usd`, `actor_type`, `actor_id` + index `idx_agent_log_actor_time`
+- `ChatMessage` += `trace_id`（关联 agent_logs 链路）
+- `ChatMessageResponse` += `trace_id`, `cost_usd`
+
+### 前端变更
+
+- 新增 recharts 依赖
+- `useCostSummary` hook（TanStack Query → `/api/cost/summary`）
+- `useTraceTimeline` hook（per-message expand）
+- `TokenMetrics.tsx` 重写为可展开 footer（单击展开 sub-agent 表格）
+- `AgentMetrics.tsx` 新增 CostDashboard section + timeline 适配新 API 形状（`.calls` / `.totals`）
+- `AgentLogTimeline` 类型更新匹配后端响应
+
+## 十、其他交付
 
 - **ACP Enhanced Backend**：新增 Kiro CLI + Codex 两个 provider（共享自实现 JSON-RPC/stdio AcpClient）；`enhanced_task` 流式输出桥接到 chat SSE；Settings → Enhanced Backend 选择器。默认关闭。
 - **品牌 Logo**：全新 SVG logo + icon（`frontend/public/`：logo.svg / logo-icon.svg / favicon-16/32 / logo-192/512），侧栏品牌位从渐变字母 "A" 占位升级为正式 logo，favicon 全套接入 index.html。
-- **文档**：`docs/MVP-2.0.0-ARCHITECTURE.md`（架构决策 + 调研依据 + YAGNI 清单）、`docs/WORKFLOW.md` 新增 Prevention hooks 节 + 凭证 AuthN/AuthZ 流程图（已随账户寻址重构更新：移除 ContextVar 节点与 ambient 分支，AuthZ 入口改为 `get_subprocess_env_for_account`）。
+- **文档**：`docs/MVP-2.0.0-ARCHITECTURE.md`（架构决策 + 调研依据 + YAGNI 清单）、`docs/WORKFLOW.md` 新增 Prevention hooks 节 + 凭证 AuthN/AuthZ 流程图 + Token & Cost Observability 节。
 
-## 十、新增配置（settings.yaml）
+## 十一、新增配置（settings.yaml）
 
 | 键 | 默认 | 说明 |
 |----|------|------|
@@ -122,9 +166,11 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 | `itsm_enabled` / `itsm_dry_run` | `false` / `true` | ITSM 桥 + dry-run 模式 |
 | `patrol_graph_checks_enabled` | `true` | 巡检 SPOF/容量风险步骤 |
 | `rca_topology_context_enabled` | `true` | RCA 拓扑上下文注入 |
+| `token_cost_table` | (4 models) | Per-model per-1M-token USD rates（input/output/cache_read/cache_write）|
 
-## 十一、测试与验证
+## 十二、测试与验证
 
+- **Token & Cost Observability（23 新测试）**：`test_cost.py`(5) + `test_cost_migration.py`(9) + `test_agent_log_cost.py`(1) + `test_cost_service.py`(3) + `test_cost_api.py`(4) + `test_actor_attribution.py`(4) + `test_message_token_usage.py`(2) + `test_cli_cost.py`(2)；加上 179 个相邻区域回归测试全绿
 - **62 个新测试**：prompt 预算金样 + 卫生回归（27）、策略模拟门（11）、巡检图步骤（6+12 更新）、RCA 拓扑块（7）—— 全绿
 - **账户寻址重构（补丁）**：新增 `tests/test_account_resolver.py`（18）+ 重写凭证/执行套件（subprocess 注入、会话隔离、execution 阶梯、SSM 错误分类、run_kubectl/run_aws_cli 账户解析）；改动区 419 测试全绿
 - **通知键名修复（补丁）**：`tests/test_notifier.py` 新增 `TestConfigKeyMapping`（5）—— SES/SMTP 的 recipients 键映射回归；152 notifier 测试全绿
@@ -132,7 +178,7 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 - 前端 `npx tsc --noEmit` 通过；dist 已重建（logo + favicon 入包）
 - **远程部署验证**：`iac/deploy-sg`（ap-southeast-1，`i-0935450a95f321942`）已部署 main 最新；运行环境核验旧符号不可导入、`run_on_host` 默认 `method=auto`、日志无事故签名；`ops-ses-email` 实发 `send()=True`
 
-## 十二、升级说明
+## 十三、升级说明
 
 1. 零破坏性：所有新行为受配置门控且默认值复刻旧行为（policy 默认规则 = legacy L0/L1；模拟门 fail-soft）
 2. `config/policies.yaml` 首次纳入版本管理 —— 这是自治契约文件，修改需评审
