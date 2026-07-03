@@ -169,7 +169,7 @@ AWS infrastructure investigator:
    b. Then use read_local_file, tail_local_file, search_local_file, list_local_directory, file_stat
       — these tools are dynamically registered when you activate the skill.
    c. Sensitive files (.env, credentials, private keys, etc.) are automatically blocked.
-3.7. WEB RESEARCH: Call activate_skill("web-research") to load web_fetch,
+3.7. WEB RESEARCH: Call activate_skill("web-research") to load web_search + web_fetch,
      then check cloud provider status pages or upstream documentation for
      additional context during investigation.
 4. RESPOND: Present findings clearly with resource IDs, status, and key attributes.

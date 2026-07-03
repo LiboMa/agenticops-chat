@@ -64,7 +64,7 @@ Return a summary: how many resources found per account, per region, per type.
 ## Agent Skills
 - Use activate_skill("web-research") to fetch cloud provider status pages or
   service availability info during scans.
-- Skills dynamically register tools — after activation, web_fetch becomes available.
+- Skills dynamically register tools — after activation, web_search + web_fetch become available.
 """
 
 
