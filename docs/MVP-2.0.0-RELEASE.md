@@ -1,6 +1,6 @@
 # AgenticOps v2.0.0 Release — 治理型自治 + 企业流程 + 预防性运维
 
-> **版本**: 2.0.0 | **日期**: 2026-06-12 (updated 2026-07-01) | **分支**: `MVP-2.0.0-release`
+> **版本**: 2.0.0 | **日期**: 2026-06-12 (updated 2026-07-03) | **分支**: `MVP-2.0.0-release`
 
 ---
 
@@ -153,6 +153,7 @@ HealthPatrol 新增第 3 步 `AnalyzeGraphRisksStep`：纯代码跑 SPOF 检测�
 
 ## 十、其他交付
 
+- **web_search（DuckDuckGo）**：`web-research` skill v1.1 新增 `web_search` 工具（lite→html 双端点降级、零新依赖、广告过滤、uddg 解链）；agent 可先搜后 `web_fetch` 深读。
 - **ACP Enhanced Backend**：新增 Kiro CLI + Codex 两个 provider（共享自实现 JSON-RPC/stdio AcpClient）；`enhanced_task` 流式输出桥接到 chat SSE；Settings → Enhanced Backend 选择器。默认关闭。
 - **品牌 Logo**：全新 SVG logo + icon（`frontend/public/`：logo.svg / logo-icon.svg / favicon-16/32 / logo-192/512），侧栏品牌位从渐变字母 "A" 占位升级为正式 logo，favicon 全套接入 index.html。
 - **文档**：`docs/MVP-2.0.0-ARCHITECTURE.md`（架构决策 + 调研依据 + YAGNI 清单）、`docs/WORKFLOW.md` 新增 Prevention hooks 节 + 凭证 AuthN/AuthZ 流程图 + Token & Cost Observability 节。
