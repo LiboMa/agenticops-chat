@@ -58,7 +58,7 @@ export function useCostSummary(params?: CostSummaryParams) {
 
   return useQuery({
     queryKey: ["cost-summary", params],
-    queryFn: () => apiFetch<CostSummaryData>(`/api/cost/summary${query ? `?${query}` : ""}`),
+    queryFn: () => apiFetch<CostSummaryData>(`/cost/summary${query ? `?${query}` : ""}`),
     staleTime: 30_000,
   });
 }
