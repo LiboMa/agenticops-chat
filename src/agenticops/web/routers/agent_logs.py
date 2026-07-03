@@ -42,6 +42,10 @@ async def api_list_agent_logs(
                 "input_tokens": r.input_tokens,
                 "output_tokens": r.output_tokens,
                 "cache_read_tokens": r.cache_read_tokens,
+                "cache_write_tokens": r.cache_write_tokens,
+                "cost_usd": r.cost_usd,
+                "actor_type": r.actor_type,
+                "actor_id": r.actor_id,
                 "duration_ms": r.duration_ms,
                 "status": r.status,
                 "error": r.error,
@@ -73,11 +77,13 @@ async def api_agent_log_timeline(trace_id: str):
         total_input = 0
         total_output = 0
         total_cache_read = 0
+        total_cost = 0.0
         total_duration = 0
         for r in rows:
             total_input += r.input_tokens
             total_output += r.output_tokens
             total_cache_read += r.cache_read_tokens
+            total_cost += r.cost_usd or 0.0
             total_duration += r.duration_ms
             calls.append({
                 "id": r.id,
@@ -87,6 +93,7 @@ async def api_agent_log_timeline(trace_id: str):
                 "input_tokens": r.input_tokens,
                 "output_tokens": r.output_tokens,
                 "cache_read_tokens": r.cache_read_tokens,
+                "cost_usd": r.cost_usd,
                 "tool_calls": r.tool_calls,
                 "duration_ms": r.duration_ms,
                 "status": r.status,
@@ -101,6 +108,7 @@ async def api_agent_log_timeline(trace_id: str):
                 "input_tokens": total_input,
                 "output_tokens": total_output,
                 "cache_read_tokens": total_cache_read,
+                "cost_usd": round(total_cost, 6),
                 "duration_ms": total_duration,
                 "call_count": len(calls),
             },
@@ -122,6 +130,7 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
                 func.sum(AgentLog.input_tokens).label("total_input"),
                 func.sum(AgentLog.output_tokens).label("total_output"),
                 func.sum(AgentLog.cache_read_tokens).label("total_cache_read"),
+                func.sum(AgentLog.cost_usd).label("total_cost"),
                 func.sum(AgentLog.duration_ms).label("total_duration_ms"),
                 func.sum(AgentLog.tool_calls).label("total_tool_calls"),
                 func.sum(
@@ -135,16 +144,20 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
         per_agent = {}
         grand_input = 0
         grand_output = 0
+        grand_cost = 0.0
         for r in rows:
             inp = r.total_input or 0
             out = r.total_output or 0
+            cost = r.total_cost or 0.0
             grand_input += inp
             grand_output += out
+            grand_cost += cost
             per_agent[r.agent_name] = {
                 "calls": r.call_count,
                 "input_tokens": inp,
                 "output_tokens": out,
                 "cache_read_tokens": r.total_cache_read or 0,
+                "cost_usd": round(cost, 6),
                 "total_duration_ms": r.total_duration_ms or 0,
                 "errors": r.error_count or 0,
                 "tool_calls": r.total_tool_calls or 0,
@@ -158,6 +171,7 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
                 func.sum(AgentLog.input_tokens).label("total_input"),
                 func.sum(AgentLog.output_tokens).label("total_output"),
                 func.sum(AgentLog.cache_read_tokens).label("total_cache_read"),
+                func.sum(AgentLog.cost_usd).label("total_cost"),
                 func.sum(AgentLog.duration_ms).label("total_duration_ms"),
             )
             .filter(AgentLog.created_at >= cutoff, AgentLog.model_id.isnot(None))
@@ -172,6 +186,7 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
                 "input_tokens": r.total_input or 0,
                 "output_tokens": r.total_output or 0,
                 "cache_read_tokens": r.total_cache_read or 0,
+                "cost_usd": round(r.total_cost or 0.0, 6),
                 "total_duration_ms": r.total_duration_ms or 0,
             }
 
@@ -181,4 +196,5 @@ async def api_agent_log_summary(hours: int = Query(24, le=720)):
             "per_model": per_model,
             "total_input_tokens": grand_input,
             "total_output_tokens": grand_output,
+            "total_cost_usd": round(grand_cost, 6),
         }

@@ -80,6 +80,11 @@ LOCAL FILE OUTPUT:
   activate_skill("local-os-operator") first to load the write_local_file tool,
   then use write_local_file to save the content.
 
+WEB RESEARCH:
+- If a report needs external context (upstream incident reports, CVE details,
+  vendor changelogs), call activate_skill("web-research") to load web_search +
+  web_fetch, then cite fetched sources by URL.
+
 REPORT DISTRIBUTION:
 - After saving a report, if the user requests distribution (or if you are instructed
   to distribute), call activate_skill("notification-operator") to load notification tools.

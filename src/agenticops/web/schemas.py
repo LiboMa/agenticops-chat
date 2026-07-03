@@ -585,6 +585,8 @@ class ChatMessageResponse(BaseModel):
     content: str
     tool_calls: Optional[list] = None
     token_usage: Optional[dict] = None
+    trace_id: Optional[str] = None
+    cost_usd: Optional[float] = None
     attachments: Optional[list] = None
     created_at: datetime
 

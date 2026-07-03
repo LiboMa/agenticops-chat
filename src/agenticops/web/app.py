@@ -260,6 +260,8 @@ from agenticops.web.routers import memory as _memory_router
 app.include_router(_memory_router.router)
 from agenticops.web.routers import accounts as _accounts_router
 app.include_router(_accounts_router.router)
+from agenticops.web.routers import cost as _cost_router
+app.include_router(_cost_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -4172,6 +4174,8 @@ async def api_get_chat_messages(
             messages=[ChatMessageResponse(
                 id=m.id, role=m.role, content=m.content,
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
+                trace_id=m.trace_id,
+                cost_usd=(m.token_usage or {}).get("cost_usd"),
                 attachments=m.attachments, created_at=m.created_at,
             ) for m in page_chrono],
             has_more=has_more,
@@ -4426,6 +4430,8 @@ async def api_send_chat_message(session_id: str, request: Request):
         tool_calls = []
         input_tokens = 0
         output_tokens = 0
+        cache_read_tokens = 0
+        cache_write_tokens = 0
         try:
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
@@ -4471,6 +4477,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     if _u["input"] or _u["output"]:
                         input_tokens = _u["input"]
                         output_tokens = _u["output"]
+                        cache_read_tokens = _u.get("cache_read", 0)
+                        cache_write_tokens = _u.get("cache_write", 0)
                     # If accumulated text is empty, extract from result
                     if not accumulated and hasattr(res, "__str__"):
                         accumulated = str(res)
@@ -4489,12 +4497,25 @@ async def api_send_chat_message(session_id: str, request: Request):
                 if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
                     logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
                 else:
+                    _tu: dict | None = None
+                    if input_tokens:
+                        from agenticops.cost import compute_cost
+                        from agenticops.config import get_agent_model_config
+                        _msg_model, _ = get_agent_model_config("main")
+                        _tu = {
+                            "input": input_tokens, "output": output_tokens,
+                            "cache_read": cache_read_tokens,
+                            "cache_write": cache_write_tokens,
+                            "model": _msg_model,
+                        }
+                        _tu["cost_usd"] = compute_cost(_msg_model, _tu)
                     db.add(ChatMessage(
                         session_id=db_session_pk,
                         role="assistant",
                         content=accumulated,
                         tool_calls=tool_calls if tool_calls else None,
-                        token_usage={"input": input_tokens, "output": output_tokens} if input_tokens else None,
+                        token_usage=_tu,
+                        trace_id=_chat_trace_id,
                     ))
 
             # Auto-name session after first exchange
@@ -4530,6 +4551,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     duration_ms=int((time.monotonic() - _chat_start_time) * 1000),
                     trace_id=_chat_trace_id,
                     model_id=_main_model_id,
+                    actor_type="user",
+                    actor_id=getattr(getattr(request, "state", None), "user", None),
                 )
             except Exception:
                 logger.debug("Failed to log main agent call", exc_info=True)

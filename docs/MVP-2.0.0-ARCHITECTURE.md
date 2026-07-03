@@ -1,7 +1,7 @@
-# MVP-2.0.0 "Methos" — 架构升级决策文档
+# MVP-2.0.0 — 架构升级决策文档
 
 > 2026-06-11 · 基于 5 路深度调研（业界竞品 / ITSM 流程 / Self-improving SOTA / 多云-IDC 抽象 / 代码全量审计）的综合产出
-> 分支：`MVP-2.0.0.methos-release`
+> 分支：`MVP-2.0.0-release`
 
 ---
 
@@ -177,7 +177,8 @@ class SupportsExecute(Protocol):   def execute(...) -> dict
 1. **Verified-success-only distillation**（Voyager 规则）：只有 post-fix 验证通过的修复才触发 skill/memory 蒸馏 — 在 resolution_service 挂钩（Phase 2 wiring）。
 2. **Reflexion failure memos**：验证失败或人工 override 时强制写一条 `type=feedback` 的"我为什么错了"记忆。
 3. **LLM-as-judge plan review**：Haiku 对每个 FixPlan 按 rubric（爆炸半径/可逆性/前置条件覆盖）打分，作为 policy engine 的输入信号（Phase 2）。
-4. **Eval harness 三环**（Phase 2-3 路线图，写进 PPT 的 roadmap）：
+4. **Token & Cost Observability**：每次 agent 调用写入 cost_usd（基于 token_cost_table per-model rates）+ actor 归因（user/cli/system/schedule）；实时聚合查询 cost_service（无 rollup 表）；Web dashboard（recharts scorecard+chart+donut）+ per-message 展开 footer + `aiops cost` CLI。决策：快照式写入（不回算历史）+ fire-and-forget（不阻断主路径）。
+5. **Eval harness 三环**（Phase 2-3 路线图，写进 PPT 的 roadmap）：
    - Ring 1 黄金事件回放（夜跑，memory ON/OFF 对照 → 学习效应一图呈现）
    - Ring 2 故障注入实验室（已有 infra/eks-lab 10 场景，升级成 AIOpsLab 式 oracle 评分）
    - Ring 3 公开基准（直接跑 ITBench/AIOpsLab，"AgenticOps 解决 X% vs 业界 13.8%" = 最强第三方背书）
@@ -199,7 +200,7 @@ class SupportsExecute(Protocol):   def execute(...) -> dict
 | 3 | Capability/ResourceRef/Protocols + SSH/Prometheus/K8s providers | providers/* | ✅ Done |
 | 4 | Metrics Service + /api/metrics/improvement | services/metrics_service.py | ✅ Done |
 | 5 | 全量测试通过 + 文档更新 | tests/* docs/* | ✅ 526/527 pass |
-| 6 | 客户级 PPT + Demo 脚本 | docs/AgenticOps-2.0-Methos.pptx | ✅ Done |
+| 6 | 客户级 PPT + Demo 脚本 | docs/AgenticOps-2.0.pptx | ✅ Done |
 | 7 | Azure ARG / GCP CAI 读路径实装、蒸馏验证门、eval Ring1 | — | 2.1 |
 
 ---

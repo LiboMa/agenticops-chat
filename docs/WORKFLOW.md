@@ -985,6 +985,17 @@ Bot:  Report sent to slack-incidents channel
 
 ---
 
+## Token & Cost Observability
+
+Every agent call is logged with token counts and cost (computed from `config.token_cost_table` at write time). Attribution tracks who triggered the spend: `user`, `cli`, `system`, or `schedule`.
+
+- **Per-message footer** (Web chat): each assistant message shows `↑in ↓out Σtotal · $cost`, click to expand sub-agent breakdown via trace timeline.
+- **Cost dashboard** (Web → Agent Metrics): KPI scorecards + stacked-bar/line chart + donut, filterable by day/month/year × agent/actor/model.
+- **CLI**: `aiops cost --period month --by agent` renders a Rich table with totals and breakdown.
+- **API**: `GET /api/cost/summary?period=30d&group_by=agent` returns `{totals, series, breakdown}`.
+
+---
+
 ## CLI Slash Command Quick Reference
 
 | Command | Purpose |

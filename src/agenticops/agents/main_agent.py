@@ -172,7 +172,7 @@ ROUTING RULES:
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
    This is your CATCH-ALL for AWS queries that don't fit rules 2-9.
 11. Web research: When you need external web data (status pages, documentation,
-    CVE info), call activate_skill("web-research") to load web_fetch, then
+    CVE info), call activate_skill("web-research") to load web_search + web_fetch, then
     fetch the relevant URL. Only public URLs — private IPs blocked for security.
     Sub-agents (SRE, detect, scan) can also activate this skill independently.
 12. Document analysis: When the user shares a PDF, DOCX, CSV, or XLSX file (via @path or upload),

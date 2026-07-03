@@ -747,9 +747,10 @@ class Settings(BaseSettings):
     # Token cost rates per 1M tokens by model family
     token_cost_table: dict[str, dict[str, float]] = Field(
         default={
-            "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_read": 1.50},
-            "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
-            "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.08},
+            "claude-opus-4-8":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+            "claude-opus-4-6":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+            "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+            "claude-haiku-4-5":  {"input": 0.80, "output": 4.0,  "cache_read": 0.08, "cache_write": 1.00},
         },
         description="Token cost rates per 1M tokens by model family",
     )

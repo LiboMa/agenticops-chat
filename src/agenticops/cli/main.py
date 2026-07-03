@@ -3652,6 +3652,57 @@ def unmanage(
 
 
 @app.command()
+def cost(
+    period: str = typer.Option("30d", "--period", "-p", help="Time window: day, 7d, 30d, month, year"),
+    by: str = typer.Option("agent", "--by", "-b", help="Group by: agent, actor, model, none"),
+):
+    """Show token & cost summary over a time window."""
+    from datetime import timedelta, timezone
+    from agenticops.services import cost_service
+    from rich.table import Table
+
+    _periods = {
+        "day": (timedelta(days=1), "hour"),
+        "7d": (timedelta(days=7), "day"),
+        "30d": (timedelta(days=30), "day"),
+        "month": (timedelta(days=30), "day"),
+        "year": (timedelta(days=365), "month"),
+    }
+    delta, bucket = _periods.get(period, _periods["30d"])
+    end = datetime.now(timezone.utc)
+    start = end - delta
+
+    data = cost_service.cost_summary(start=start, end=end, bucket=bucket, group_by=by)
+    totals = data["totals"]
+
+    console.print(
+        f"\n[bold]Cost Summary[/bold] ({period}, by {by})\n"
+        f"  Total: [green]${totals['cost_usd']:.4f}[/green] · "
+        f"{totals.get('total_tokens', 0):,} tokens · "
+        f"cache {totals.get('cache_hit_pct', 0):.0f}% · "
+        f"{totals.get('call_count', 0)} calls\n"
+    )
+
+    breakdown = data.get("breakdown", [])
+    if breakdown:
+        table = Table(title="Breakdown")
+        table.add_column("Key", style="cyan")
+        table.add_column("Calls", justify="right")
+        table.add_column("Tokens", justify="right")
+        table.add_column("Cache%", justify="right")
+        table.add_column("Cost ($)", justify="right", style="green")
+        for row in breakdown:
+            table.add_row(
+                str(row["key"]),
+                str(row.get("calls", 0)),
+                f"{row.get('tokens', 0):,}",
+                f"{row.get('cache_hit_pct', 0):.0f}%",
+                f"${row['cost_usd']:.4f}",
+            )
+        console.print(table)
+
+
+@app.command()
 def issues(
     severity: Optional[str] = typer.Option(None, "-s", "--severity", help="Filter by severity: critical, high, medium, low"),
     status: Optional[str] = typer.Option("open", "--status", help="Filter by status: open, investigating, resolved"),
@@ -3799,7 +3850,8 @@ def _run_headless(query: str, account: Optional[str] = None):
         with display.live_display():
             display.start("Thinking...")
             try:
-                with track_agent("main", "chat_headless", query[:200]) as tracker:
+                with track_agent("main", "chat_headless", query[:200],
+                                actor_type="cli", actor_id=__import__("getpass").getuser()) as tracker:
                     result = agent(enriched)
                     tracker.set_result(result)
                 display.complete("Done")
@@ -3825,7 +3877,8 @@ def _run_headless(query: str, account: Optional[str] = None):
         for w in warnings:
             print(f"Warning: {w}", file=sys.stderr)
         try:
-            with track_agent("main", "chat_headless", query[:200]) as tracker:
+            with track_agent("main", "chat_headless", query[:200],
+                            actor_type="cli", actor_id=__import__("getpass").getuser()) as tracker:
                 result = agent(enriched)
                 tracker.set_result(result)
         except Exception as e:
@@ -4227,7 +4280,8 @@ def chat(
                 handler.start()
                 try:
                     from agenticops.services.agent_log_service import track_agent as _track
-                    with _track("main", "chat", user_input[:200]) as _trk:
+                    with _track("main", "chat", user_input[:200],
+                                actor_type="cli", actor_id=__import__("getpass").getuser()) as _trk:
                         result = agent(enriched_input)
                         _trk.set_result(result)
                 except Exception as e:

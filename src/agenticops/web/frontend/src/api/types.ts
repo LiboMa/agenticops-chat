@@ -523,10 +523,30 @@ export interface AgentLogEntry {
 
 export interface AgentLogTimeline {
   trace_id: string;
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_duration_ms: number;
-  entries: AgentLogEntry[];
+  calls: Array<{
+    id: number;
+    agent_name: string;
+    action: string;
+    parent_agent: string | null;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cost_usd: number | null;
+    tool_calls: number;
+    duration_ms: number;
+    status: string;
+    error: string | null;
+    model_id: string | null;
+    created_at: string;
+  }>;
+  totals: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cost_usd: number;
+    duration_ms: number;
+    call_count: number;
+  };
 }
 
 export interface AgentLogSummary {
@@ -573,7 +593,16 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   tool_calls?: Array<{ name: string; status: string }>;
-  token_usage?: { input: number; output: number };
+  token_usage?: {
+    input: number;
+    output: number;
+    cache_read?: number;
+    cache_write?: number;
+    cost_usd?: number;
+    model?: string;
+  };
+  trace_id?: string;
+  cost_usd?: number;
   attachments?: Array<{ filename: string; size: number }>;
   created_at: string;
 }

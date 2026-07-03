@@ -15,7 +15,8 @@ import json
 import logging
 import re
 import socket
-from urllib.parse import urlparse
+from html import unescape
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from strands import tool
@@ -95,6 +96,101 @@ def _strip_html(html: str) -> str:
     # Collapse multiple blank lines
     html = re.sub(r"\n{3,}", "\n\n", html)
     return html.strip()
+
+
+# ── DuckDuckGo search ─────────────────────────────────────────────────
+SEARCH_TIMEOUT_SECONDS = 15
+MAX_SEARCH_RESULTS = 20
+DEFAULT_SEARCH_RESULTS = 8
+
+_DDG_ENDPOINTS = (
+    "https://lite.duckduckgo.com/lite/",
+    "https://html.duckduckgo.com/html/",
+)
+
+# DDG answers bare clients with an anomaly/bot challenge (HTTP 202), so the
+# search POST must look like a real browser form submit — full header set,
+# not just a User-Agent. (web_fetch keeps its own AgenticOps/1.0 UA.)
+_SEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Content-Type": "application/x-www-form-urlencoded",
+}
+
+_NO_RESULTS = "no results parsed"
+
+# Result anchors: lite uses class='result-link', html uses class="result__a"
+# (quote style varies). Group 1 = full attribute string, group 2 = title HTML.
+_RESULT_A_RE = re.compile(
+    r"<a\s+([^>]*class=['\"]result(?:-link|__a)['\"][^>]*)>(.*?)</a>",
+    re.DOTALL | re.IGNORECASE,
+)
+_HREF_RE = re.compile(r"href=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_SNIPPET_RE = re.compile(
+    r"<(?:td|a|div)[^>]*class=['\"]result(?:-snippet|__snippet)['\"][^>]*>(.*?)</(?:td|a|div)>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _clean_text(fragment: str) -> str:
+    """Strip tags, decode HTML entities, and collapse whitespace."""
+    text = re.sub(r"<[^>]+>", "", fragment)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _decode_ddg_href(href: str) -> str | None:
+    """Resolve a DDG result href to the real target URL.
+
+    DDG wraps results in redirect links (//duckduckgo.com/l/?uddg=<encoded>).
+    Returns None for ad links (y.js / ad_domain), DDG-internal links, and
+    anything that isn't a plain http(s) URL.
+    """
+    href = href.strip()
+    if "y.js" in href or "ad_domain=" in href:
+        return None
+    if href.startswith("//"):
+        href = "https:" + href
+    if href.startswith("/"):
+        return None  # relative DDG-internal link (pagination etc.)
+    parsed = urlparse(href)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    if parsed.hostname.endswith("duckduckgo.com"):
+        if parsed.path.startswith("/l/"):
+            target = parse_qs(parsed.query).get("uddg", [None])[0]
+            if target and target.startswith(("http://", "https://")):
+                return target
+        return None
+    return href
+
+
+def _parse_ddg_results(html_text: str, limit: int) -> list[dict]:
+    """Extract [{title, url, snippet}] from DDG lite/html result markup."""
+    results: list[dict] = []
+    matches = list(_RESULT_A_RE.finditer(html_text))
+    for i, match in enumerate(matches):
+        href_match = _HREF_RE.search(match.group(1))
+        if not href_match:
+            continue
+        url = _decode_ddg_href(href_match.group(1))
+        if not url:
+            continue
+        # Snippet lives between this anchor and the next result anchor.
+        seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(html_text)
+        snippet_match = _SNIPPET_RE.search(html_text, match.end(), seg_end)
+        results.append({
+            "title": _clean_text(match.group(2)),
+            "url": url,
+            "snippet": _clean_text(snippet_match.group(1)) if snippet_match else "",
+        })
+        if len(results) >= limit:
+            break
+    return results
 
 
 @tool
@@ -204,3 +300,75 @@ def web_fetch(url: str, method: str = "GET", headers: str = "") -> str:
         return f"Error: Too many redirects from {url}."
     except Exception as e:
         return f"Error fetching {url}: {e}"
+
+
+def _search_ddg_endpoint(endpoint: str, query: str, limit: int) -> tuple[list[dict], str | None]:
+    """POST one DDG endpoint. Returns (results, error); error is None on success."""
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT_SECONDS, follow_redirects=False) as client:
+            response = client.post(endpoint, data={"q": query}, headers=_SEARCH_HEADERS)
+    except httpx.TimeoutException:
+        return [], f"timeout after {SEARCH_TIMEOUT_SECONDS}s"
+    except httpx.HTTPError as e:
+        return [], f"connection error: {e}"
+
+    if response.status_code in (202, 403):
+        return [], f"HTTP {response.status_code} (rate-limited / bot challenge)"
+    if response.status_code != 200:
+        return [], f"HTTP {response.status_code}"
+    if len(response.content) > MAX_RESPONSE_BYTES:
+        return [], f"response too large ({len(response.content):,} bytes)"
+
+    results = _parse_ddg_results(response.text, limit)
+    if not results:
+        return [], _NO_RESULTS
+    return results, None
+
+
+@tool
+def web_search(query: str, max_results: int = 8) -> str:
+    """Search the web via DuckDuckGo and return a numbered result list.
+
+    Use this when you do NOT know the exact URL — search first, then call
+    web_fetch on a promising result URL to read the page in depth.
+
+    Args:
+        query: Search terms (e.g., "EKS node NotReady kubelet PLEG").
+        max_results: Number of results to return, 1-20 (default 8).
+
+    Returns:
+        Numbered plain-text list — title, URL, snippet per result — truncated
+        to 4000 chars. Failures return text starting with "Error:".
+
+    Examples:
+        web_search(query="CVE-2024-3094 xz backdoor affected versions")
+        web_search(query="aws alb 502 troubleshooting", max_results=5)
+    """
+    query = query.strip()
+    if not query:
+        return "Error: query is empty."
+    try:
+        limit = max(1, min(int(max_results), MAX_SEARCH_RESULTS))
+    except (TypeError, ValueError):
+        limit = DEFAULT_SEARCH_RESULTS
+
+    errors = []
+    for endpoint in _DDG_ENDPOINTS:
+        results, error = _search_ddg_endpoint(endpoint, query, limit)
+        if results:
+            lines = [f"Query: {query}", "Engine: duckduckgo", ""]
+            for idx, item in enumerate(results, 1):
+                lines.append(f"{idx}. {item['title']}")
+                lines.append(f"   {item['url']}")
+                if item["snippet"]:
+                    lines.append(f"   {item['snippet']}")
+            return _truncate("\n".join(lines))
+        errors.append(f"{urlparse(endpoint).hostname}: {error}")
+
+    if all(e.endswith(_NO_RESULTS) for e in errors):
+        return f"No results found for: {query}"
+    return (
+        "Error: DuckDuckGo search failed ("
+        + "; ".join(errors)
+        + "). If rate-limited, retry after a short wait."
+    )

@@ -2,7 +2,7 @@
 
 **Agent-first cloud operations platform.** A team of specialized AI agents scans your AWS infrastructure, detects issues, finds root causes, plans fixes, and — for low-risk problems — remediates them autonomously. They also **learn**: every operation refines a self-optimizing memory and skill library.
 
-> **Version**: 1.1.1 · **Latest release**: [Concurrent chat sessions + fast open](docs/MVP-1.1.1-RELEASE.md) · **Full history** below.
+> **Version**: 2.0.0 · **Latest release**: [Token & Cost Observability + Governed Autonomy + Credential Safety](docs/MVP-2.0.0-RELEASE.md) · **Full history** below.
 
 Three ways in — all driving the same agents:
 
@@ -21,7 +21,7 @@ The whole system follows a few deliberate rules — they explain most of the des
 
 1. **Agents as tools.** The Main agent is a *pure router*; each specialist (Scan, Detect, RCA, SRE, Executor, Reporter) is exposed as a callable tool. No specialist talks to another directly.
 2. **Read/plan/execute are separated.** SRE *plans* fixes but never touches infrastructure; only the Executor acts, and only after an approval gate. Risk-tiered: L0/L1 auto-approve, L2/L3 require a human.
-3. **Tiered models for cost.** Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing and high-throughput work (Main, Scan, Detect, Reporter), Haiku available as the economy tier. Per-agent overridable.
+3. **Tiered models for cost.** Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing and high-throughput work (Main, Scan, Detect, Reporter), Haiku available as the economy tier. Per-agent overridable. Token & cost is tracked per-call with real-time dashboards (Web + `aiops cost` CLI).
 4. **Agents learn, safely.** Memory and skills self-optimize within hard safety boundaries — agent writes land as drafts; promotion is security-gated; human-authored knowledge is pinned and never auto-touched.
 5. **One source of truth for config.** `config/settings.yaml` defines everything; env vars override it. Code never hardcodes values.
 6. **Simple by default.** SQLite + file-based memory locally; Postgres + S3 only when you opt into the cloud profile. No dependency added without a present-day need.
@@ -271,7 +271,7 @@ Most recent first. Each links to detailed notes.
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **[2.0.0 "Methos"](docs/MVP-2.0.0-RELEASE.md)** | 2026-06-19 | Governed Autonomy (policy engine) · ITSM bridge · Multi-cloud capability layer (SSH/Prometheus/Kubernetes providers) · self-improvement metrics · prevention triad (SPOF patrol + RCA topology + simulation gate) · **account-addressed credentials** (kills the ContextVar wrong-account defect; explicit account resolution, fail-closed, SSM→SSH access ladder) · SES/SMTP notifier key-mapping fix |
+| **[2.0.0](docs/MVP-2.0.0-RELEASE.md)** | 2026-06-19 | Governed Autonomy (policy engine) · ITSM bridge · Multi-cloud capability layer (SSH/Prometheus/Kubernetes providers) · self-improvement metrics · prevention triad (SPOF patrol + RCA topology + simulation gate) · **account-addressed credentials** (kills the ContextVar wrong-account defect; explicit account resolution, fail-closed, SSM→SSH access ladder) · SES/SMTP notifier key-mapping fix |
 | **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions + fast open; paste/drag-drop multi-attachment; open-webui-style chat UI refresh; agent window-config fix (Full Context + Web→YAML persist); unified **Messaging** settings (merged Notifications + IM Bots) |
 | **[1.1.0](docs/MVP-1.1.0-RELEASE.md)** | 2026-05-31 | Autonomous **agent memory** (self-optimizing, Hermes-style) + autonomous **skills** (agent-created, security-gated promotion) |
 | **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | Loader/UX hardening; skill index recall improvements |

@@ -16,12 +16,14 @@ class _AgentTracker:
     """Accumulates metrics from a Strands agent result."""
 
     __slots__ = ("input_tokens", "output_tokens", "cache_read_tokens",
-                 "tool_call_count", "output_summary", "status", "error")
+                 "cache_write_tokens", "tool_call_count", "output_summary",
+                 "status", "error")
 
     def __init__(self):
         self.input_tokens: int = 0
         self.output_tokens: int = 0
         self.cache_read_tokens: int = 0
+        self.cache_write_tokens: int = 0
         self.tool_call_count: int = 0
         self.output_summary: str = ""
         self.status: str = "success"
@@ -35,6 +37,7 @@ class _AgentTracker:
                 self.input_tokens = usage.get("inputTokens", 0)
                 self.output_tokens = usage.get("outputTokens", 0)
                 self.cache_read_tokens = usage.get("cacheReadInputTokens", 0)
+                self.cache_write_tokens = usage.get("cacheWriteInputTokens", 0)
         except Exception:
             pass
 
@@ -64,16 +67,25 @@ def log_agent_call(
     input_tokens: int = 0,
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
     duration_ms: int = 0,
     status: str = "success",
     error: Optional[str] = None,
     trace_id: Optional[str] = None,
     parent_agent: Optional[str] = None,
     model_id: Optional[str] = None,
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> None:
     """Fire-and-forget DB write for an agent call. Errors logged, never raised."""
     try:
         from agenticops.models import AgentLog, get_db_session
+        from agenticops.cost import compute_cost
+
+        cost_usd = compute_cost(model_id or "", {
+            "input": input_tokens, "output": output_tokens,
+            "cache_read": cache_read_tokens, "cache_write": cache_write_tokens,
+        })
 
         with get_db_session() as db:
             db.add(AgentLog(
@@ -85,12 +97,16 @@ def log_agent_call(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                cost_usd=cost_usd,
                 duration_ms=duration_ms,
                 status=status,
                 error=error[:1000] if error else None,
                 trace_id=trace_id,
                 parent_agent=parent_agent,
                 model_id=model_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
             ))
     except Exception:
         logger.debug("Failed to log agent call for %s", agent_name, exc_info=True)
@@ -102,6 +118,8 @@ def track_agent(
     action: str,
     input_summary: str,
     parent_agent: Optional[str] = None,
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ):
     """Context manager that records agent invocation metrics.
 
@@ -138,10 +156,13 @@ def track_agent(
             input_tokens=tracker.input_tokens,
             output_tokens=tracker.output_tokens,
             cache_read_tokens=tracker.cache_read_tokens,
+            cache_write_tokens=tracker.cache_write_tokens,
             duration_ms=duration_ms,
             status=tracker.status,
             error=tracker.error,
             trace_id=get_trace_id(),
             parent_agent=parent_agent,
             model_id=model_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
         )

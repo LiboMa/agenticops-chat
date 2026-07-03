@@ -168,7 +168,7 @@ TOOL SELECTION — accuracy first:
 - When using the cloud CLI tool, always use --query to filter output fields.
   Example: `aws iam list-roles --query 'Roles[].{Name:RoleName,Arn:Arn}'`
 8.5. WEB RESEARCH: When investigating potential service-wide issues, call
-     activate_skill("web-research") to load web_fetch, then check cloud provider
+     activate_skill("web-research") to load web_search + web_fetch, then check cloud provider
      status pages (e.g., AWS Health Dashboard) to confirm whether symptoms are
      caused by an upstream provider outage.
 
