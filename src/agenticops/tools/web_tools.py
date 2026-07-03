@@ -300,3 +300,75 @@ def web_fetch(url: str, method: str = "GET", headers: str = "") -> str:
         return f"Error: Too many redirects from {url}."
     except Exception as e:
         return f"Error fetching {url}: {e}"
+
+
+def _search_ddg_endpoint(endpoint: str, query: str, limit: int) -> tuple[list[dict], str | None]:
+    """POST one DDG endpoint. Returns (results, error); error is None on success."""
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT_SECONDS, follow_redirects=False) as client:
+            response = client.post(endpoint, data={"q": query}, headers=_SEARCH_HEADERS)
+    except httpx.TimeoutException:
+        return [], f"timeout after {SEARCH_TIMEOUT_SECONDS}s"
+    except httpx.HTTPError as e:
+        return [], f"connection error: {e}"
+
+    if response.status_code in (202, 403):
+        return [], f"HTTP {response.status_code} (rate-limited / bot challenge)"
+    if response.status_code != 200:
+        return [], f"HTTP {response.status_code}"
+    if len(response.content) > MAX_RESPONSE_BYTES:
+        return [], f"response too large ({len(response.content):,} bytes)"
+
+    results = _parse_ddg_results(response.text, limit)
+    if not results:
+        return [], _NO_RESULTS
+    return results, None
+
+
+@tool
+def web_search(query: str, max_results: int = 8) -> str:
+    """Search the web via DuckDuckGo and return a numbered result list.
+
+    Use this when you do NOT know the exact URL — search first, then call
+    web_fetch on a promising result URL to read the page in depth.
+
+    Args:
+        query: Search terms (e.g., "EKS node NotReady kubelet PLEG").
+        max_results: Number of results to return, 1-20 (default 8).
+
+    Returns:
+        Numbered plain-text list — title, URL, snippet per result — truncated
+        to 4000 chars. Failures return text starting with "Error:".
+
+    Examples:
+        web_search(query="CVE-2024-3094 xz backdoor affected versions")
+        web_search(query="aws alb 502 troubleshooting", max_results=5)
+    """
+    query = query.strip()
+    if not query:
+        return "Error: query is empty."
+    try:
+        limit = max(1, min(int(max_results), MAX_SEARCH_RESULTS))
+    except (TypeError, ValueError):
+        limit = DEFAULT_SEARCH_RESULTS
+
+    errors = []
+    for endpoint in _DDG_ENDPOINTS:
+        results, error = _search_ddg_endpoint(endpoint, query, limit)
+        if results:
+            lines = [f"Query: {query}", "Engine: duckduckgo", ""]
+            for idx, item in enumerate(results, 1):
+                lines.append(f"{idx}. {item['title']}")
+                lines.append(f"   {item['url']}")
+                if item["snippet"]:
+                    lines.append(f"   {item['snippet']}")
+            return _truncate("\n".join(lines))
+        errors.append(f"{urlparse(endpoint).hostname}: {error}")
+
+    if all(e.endswith(_NO_RESULTS) for e in errors):
+        return f"No results found for: {query}"
+    return (
+        "Error: DuckDuckGo search failed ("
+        + "; ".join(errors)
+        + "). If rate-limited, retry after a short wait."
+    )

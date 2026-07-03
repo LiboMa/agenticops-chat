@@ -352,3 +352,110 @@ class TestParseDdgResults:
 
     def test_no_results_empty_list(self):
         assert _parse_ddg_results("<html><body>challenge</body></html>", limit=5) == []
+
+
+# ── web_search tool ───────────────────────────────────────────────────
+
+import httpx  # noqa: E402
+
+from agenticops.tools.web_tools import web_search  # noqa: E402
+
+
+def _search_resp(status=200, text=""):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.text = text
+    resp.content = text.encode()
+    return resp
+
+
+def _wire_client(mock_client_cls, side_effect):
+    """Wire mocked httpx.Client context manager; side_effect drives .post()."""
+    inst = MagicMock()
+    inst.post = MagicMock(side_effect=side_effect)
+    mock_client_cls.return_value.__enter__ = MagicMock(return_value=inst)
+    mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+    return inst
+
+
+class TestWebSearch:
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_lite_success(self, mock_client_cls):
+        inst = _wire_client(mock_client_cls, [_search_resp(200, LITE_HTML)])
+        out = web_search(query="kubernetes node notready")
+        assert "Engine: duckduckgo" in out
+        assert "1. Kubernetes: Node 'NotReady' [SOLVED]" in out
+        assert "https://www.shellhacks.com/kubernetes-node-notready/" in out
+        assert "https://docs.aws.amazon.com/eks/troubleshooting" in out
+        assert "Sponsored" not in out  # ad filtered
+        assert inst.post.call_count == 1  # lite sufficed, no fallback
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_lite_challenge_falls_back_to_html(self, mock_client_cls):
+        inst = _wire_client(mock_client_cls, [
+            _search_resp(202, "challenge"),
+            _search_resp(200, HTML_ENDPOINT_HTML),
+        ])
+        out = web_search(query="anything")
+        assert "Example Page" in out
+        assert inst.post.call_count == 2
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_both_endpoints_fail(self, mock_client_cls):
+        _wire_client(mock_client_cls, [
+            _search_resp(202, "challenge"),
+            httpx.ConnectTimeout("boom"),
+        ])
+        out = web_search(query="anything")
+        assert out.startswith("Error: DuckDuckGo search failed")
+        assert "lite.duckduckgo.com" in out and "html.duckduckgo.com" in out
+        assert "retry" in out.lower()
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_no_results_is_not_an_error(self, mock_client_cls):
+        empty = "<html><body>nothing here</body></html>"
+        _wire_client(mock_client_cls, [_search_resp(200, empty), _search_resp(200, empty)])
+        out = web_search(query="qzxv nonexistent")
+        assert out == "No results found for: qzxv nonexistent"
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_max_results_clamped(self, mock_client_cls):
+        many = "".join(
+            f'<a href="https://ex.com/{i}" class="result-link">R{i}</a>' for i in range(30)
+        )
+        _wire_client(mock_client_cls, [_search_resp(200, many)])
+        out = web_search(query="q", max_results=50)  # clamps to 20
+        assert "20. R19" in out
+        assert "21." not in out
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_max_results_floor(self, mock_client_cls):
+        many = "".join(
+            f'<a href="https://ex.com/{i}" class="result-link">R{i}</a>' for i in range(5)
+        )
+        _wire_client(mock_client_cls, [_search_resp(200, many)])
+        out = web_search(query="q", max_results=0)  # clamps to 1
+        assert "1. R0" in out
+        assert "2." not in out
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_empty_query_no_network(self, mock_client_cls):
+        out = web_search(query="   ")
+        assert out == "Error: query is empty."
+        mock_client_cls.assert_not_called()
+
+    @patch("agenticops.tools.web_tools.httpx.Client")
+    def test_output_truncated(self, mock_client_cls):
+        long_snip = "x" * 900
+        many = "".join(
+            f'<a href="https://ex.com/{i}" class="result-link">R{i}</a>'
+            f'<td class="result-snippet">{long_snip}</td>'
+            for i in range(10)
+        )
+        _wire_client(mock_client_cls, [_search_resp(200, many)])
+        out = web_search(query="q", max_results=10)
+        assert out.endswith("(output truncated)")
+
+    def test_exported_from_tools_package(self):
+        from agenticops.tools import web_search as exported
+        assert exported is not None

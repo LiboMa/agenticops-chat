@@ -59,8 +59,9 @@ both attempts.
 - Per-endpoint timeout 15 s (worst case 30 s total — same ceiling as `web_fetch`)
 - HTTP 202/403 → treated as rate-limit: error text says "rate-limited, retry later"
 - Parsing via `re` (consistent with `_strip_html` in the same file; no new parser dep)
-- Search requests send a browser-like User-Agent (module constant `SEARCH_USER_AGENT`)
-  to reduce bot blocking; `web_fetch`'s `AgenticOps/1.0` UA is unchanged
+- Search requests send a full browser-like header set (module constant
+  `_SEARCH_HEADERS`) — live probing (2026-07-03) showed DDG answers bare
+  clients with an HTTP 202 anomaly challenge; `web_fetch`'s UA is unchanged
 
 ### uddg link decoding
 
