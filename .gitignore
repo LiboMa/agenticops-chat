@@ -83,3 +83,6 @@ tfplan
 MagicMock/
 auto-demo_settings.json
 .superpowers/
+
+# Editor / agent tool dirs
+.kiro/
