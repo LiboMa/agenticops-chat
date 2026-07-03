@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 _RCA_SKILLS_BLOCK = skills_activation_block(
     extra_routes=[
         'Service degradation/latency/5xx/cascading failures → activate_skill("distributed-tracing")',
+        'Unknown errors/CVE/vendor docs → activate_skill("web-research") for web_search + web_fetch',
     ],
     outro="The skill provides decision trees and command references — use them to guide your investigation.",
 )

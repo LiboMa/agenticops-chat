@@ -131,7 +131,8 @@ SKILL ACTIVATION:
 Before executing steps that involve host-level or Kubernetes operations, call activate_skill
 to load relevant domain knowledge (e.g., activate_skill("linux-admin") for host commands,
 activate_skill("kubernetes-admin") for kubectl operations). This helps you understand the
-commands and verify they are correct before execution.
+commands and verify they are correct before execution. If a step fails with an unfamiliar
+error, activate_skill("web-research") loads web_search + web_fetch for upstream research.
 
 LOCAL FILE ACCESS:
 When you need to read local configs, logs, templates, or verify file-based pre/post-checks:
