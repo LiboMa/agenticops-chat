@@ -258,8 +258,9 @@ class TestSkillDiscovery:
     def test_web_research_tools_resolve(self):
         from agenticops.skills.loader import resolve_skill_tools
         tools = resolve_skill_tools("web-research")
-        assert len(tools) == 1
+        assert len(tools) == 2
         tool_names = [getattr(t, "__name__", getattr(t, "tool_name", "")) for t in tools]
+        assert any("web_search" in n for n in tool_names)
         assert any("web_fetch" in n for n in tool_names)
 
 
