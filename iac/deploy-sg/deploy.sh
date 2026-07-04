@@ -189,9 +189,10 @@ cd /opt/agenticops
 git checkout -- .
 git pull origin ${GIT_BRANCH}
 
-# Backend
+# Backend — lockfile-first install (prevents dependency drift)
 source .venv/bin/activate
-uv pip install -e ".[im,files,reports]"
+uv pip install -r requirements.txt
+uv pip install -e ".[im,files,reports]" --no-deps
 
 # Frontend
 cd src/agenticops/web/frontend
@@ -212,8 +213,17 @@ grep -q -- '--timeout-keep-alive' /etc/systemd/system/agenticops.service || \
   sed -i 's/--workers 4/--workers 4 --timeout-keep-alive 30/' /etc/systemd/system/agenticops.service
 systemctl daemon-reload
 systemctl restart agenticops
-sleep 3
-curl -sf http://localhost:8000/api/health && echo "HEALTH OK" || echo "HEALTH FAILED"
+# Wait for 4 workers to start (each ~2s)
+for i in 1 2 3 4 5 6; do
+  sleep 3
+  if curl -sf http://localhost:8000/api/health; then
+    echo " HEALTH OK"
+    exit 0
+  fi
+done
+echo "HEALTH FAILED"
+journalctl -u agenticops --no-pager -n 20
+exit 1
 SCRIPT
 
     run_on_instance "$INSTANCE_ID" "$REDEPLOY_SCRIPT" "Redeploying (git pull + rebuild)"

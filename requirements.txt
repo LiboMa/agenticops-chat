@@ -253,7 +253,9 @@ python-socks==2.8.1
 pywin32==311 ; sys_platform == 'win32'
     # via mcp
 pyyaml==6.0.3
-    # via langchain-core
+    # via
+    #   langchain-core
+    #   strands-agents
 referencing==0.37.0
     # via
     #   jsonschema
@@ -298,7 +300,7 @@ starlette==0.52.1
     #   fastapi
     #   mcp
     #   sse-starlette
-strands-agents==1.26.0
+strands-agents==1.45.0
     # via agenticops
 tenacity==9.1.4
     # via langchain-core
