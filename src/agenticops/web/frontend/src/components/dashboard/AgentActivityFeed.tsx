@@ -7,7 +7,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 export function AgentActivityFeed() {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const logs = useAgentLogs({ limit: 10 });
+  const logs = useAgentLogs({ limit: 10 }, { refetchInterval: 10_000 });
 
   return (
     <div className="duo-fade">

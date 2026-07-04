@@ -9,7 +9,7 @@ interface AgentLogParams {
   offset?: number;
 }
 
-export function useAgentLogs(params?: AgentLogParams) {
+export function useAgentLogs(params?: AgentLogParams, opts?: { refetchInterval?: number }) {
   const qs = new URLSearchParams();
   if (params?.agent_name) qs.set("agent_name", params.agent_name);
   if (params?.status) qs.set("status", params.status);
@@ -21,6 +21,7 @@ export function useAgentLogs(params?: AgentLogParams) {
     queryKey: ["agent-logs", params],
     queryFn: () =>
       apiFetch<AgentLogEntry[]>(`/agent-logs${query ? `?${query}` : ""}`),
+    refetchInterval: opts?.refetchInterval,
   });
 }
 
@@ -33,10 +34,11 @@ export function useAgentTimeline(traceId: string | null) {
   });
 }
 
-export function useAgentLogSummary(hours: number) {
+export function useAgentLogSummary(hours: number, opts?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ["agent-log-summary", hours],
     queryFn: () =>
       apiFetch<AgentLogSummary>(`/agent-logs/summary?hours=${hours}`),
+    refetchInterval: opts?.refetchInterval,
   });
 }

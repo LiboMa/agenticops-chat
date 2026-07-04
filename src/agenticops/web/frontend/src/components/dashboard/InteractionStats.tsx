@@ -13,7 +13,7 @@ function fmtTokens(n: number): string {
 /** 24h 交互统计:聚合行 + per-agent CSS 横条。 */
 export function InteractionStats() {
   const { t } = useLocale();
-  const summary = useAgentLogSummary(24);
+  const summary = useAgentLogSummary(24, { refetchInterval: 10_000 });
 
   const per = summary.data?.per_agent ?? {};
   const rows = Object.values(per) as Array<{ calls: number; input_tokens: number; output_tokens: number; errors: number; cost_usd?: number }>;
