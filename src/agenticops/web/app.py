@@ -280,6 +280,16 @@ def _allowed_model_ids() -> set[str]:
     return {p["value"] for p in get_model_presets()} | set(MODEL_ALIASES.values())
 
 
+def _effective_main_model(session_id: str) -> str:
+    """Session model override if set, else global main model (for cost attribution)."""
+    from agenticops.config import get_agent_model_config
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if row and row.model_id:
+            return row.model_id
+    return get_agent_model_config("main")[0]
+
+
 
 # ============================================================================
 # Routes
@@ -4533,8 +4543,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                     _tu: dict | None = None
                     if input_tokens:
                         from agenticops.cost import compute_cost
-                        from agenticops.config import get_agent_model_config
-                        _msg_model, _ = get_agent_model_config("main")
+                        _msg_model = _effective_main_model(session_id)
                         _tu = {
                             "input": input_tokens, "output": output_tokens,
                             "cache_read": cache_read_tokens,
@@ -4571,8 +4580,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             # Log main agent call metrics
             try:
                 from agenticops.services.agent_log_service import log_agent_call
-                from agenticops.config import get_agent_model_config
-                _main_model_id, _ = get_agent_model_config("main")
+                _main_model_id = _effective_main_model(session_id)
                 log_agent_call(
                     agent_name="main",
                     action="chat",

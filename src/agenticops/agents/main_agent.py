@@ -204,8 +204,11 @@ OUTPUT FORMATTING:
 """
 
 
-def create_main_agent() -> Agent:
+def create_main_agent(model_id_override: str = "") -> Agent:
     """Create and return the Main Agent (Orchestrator).
+
+    Args:
+        model_id_override: Per-session model id; empty = use global config.
 
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
@@ -228,6 +231,8 @@ def create_main_agent() -> Agent:
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("main")
+    if model_id_override:
+        model_id = model_id_override
     cache_kwargs: dict = {}
     if settings.bedrock_cache_enabled:
         cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}

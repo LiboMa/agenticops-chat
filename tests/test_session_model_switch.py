@@ -89,3 +89,47 @@ class TestPatchModelId:
                          json={"model_id": "global.anthropic.claude-opus-4-8"})
             mock_mgr.remove.assert_called_once_with(session_id)
             mock_mgr.clear.assert_not_called()
+
+
+class TestModelResolution:
+    def test_create_main_agent_accepts_override(self):
+        import inspect
+        from agenticops.agents.main_agent import create_main_agent
+        assert "model_id_override" in inspect.signature(create_main_agent).parameters
+
+    def test_get_or_create_passes_session_model(self, client, session_id):
+        from agenticops.web import session_manager as sm
+        with patch("agenticops.web.app.get_model_presets", return_value=PRESETS):
+            client.patch(f"/api/chat/sessions/{session_id}",
+                         json={"model_id": "global.anthropic.claude-opus-4-8"})
+        with patch.object(sm, "create_main_agent") as mock_create:
+            mock_create.return_value.messages = []
+            from agenticops.web.app import _chat_sessions
+            _chat_sessions.remove(session_id)
+            _chat_sessions.get_or_create(session_id)
+            mock_create.assert_called_once_with(model_id_override="global.anthropic.claude-opus-4-8")
+            _chat_sessions.remove(session_id)
+
+    def test_auto_session_passes_empty_override(self, client, session_id):
+        from agenticops.web import session_manager as sm
+        with patch.object(sm, "create_main_agent") as mock_create:
+            mock_create.return_value.messages = []
+            from agenticops.web.app import _chat_sessions
+            _chat_sessions.remove(session_id)
+            _chat_sessions.get_or_create(session_id)
+            mock_create.assert_called_once_with(model_id_override="")
+            _chat_sessions.remove(session_id)
+
+
+class TestEffectiveModelForCost:
+    def test_effective_model_uses_override(self, client, session_id):
+        from agenticops.web.app import _effective_main_model
+        with patch("agenticops.web.app.get_model_presets", return_value=PRESETS):
+            client.patch(f"/api/chat/sessions/{session_id}",
+                         json={"model_id": "global.anthropic.claude-opus-4-8"})
+        assert _effective_main_model(session_id) == "global.anthropic.claude-opus-4-8"
+
+    def test_effective_model_auto_falls_back_to_global(self, client, session_id):
+        from agenticops.web.app import _effective_main_model
+        from agenticops.config import get_agent_model_config
+        assert _effective_main_model(session_id) == get_agent_model_config("main")[0]
