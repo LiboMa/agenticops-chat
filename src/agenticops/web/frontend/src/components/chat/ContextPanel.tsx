@@ -237,11 +237,11 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
               <div className="flex-1 h-1.5 bg-secondary rounded-full">
                 <div
                   className="h-1.5 bg-primary rounded-full"
-                  style={{ width: `${rca.data.confidence_score * 100}%` }}
+                  style={{ width: `${(rca.data.confidence ?? 0) * 100}%` }}
                 />
               </div>
               <span className="text-foreground font-medium">
-                {Math.round(rca.data.confidence_score * 100)}%
+                {Math.round((rca.data.confidence ?? 0) * 100)}%
               </span>
             </div>
             <div

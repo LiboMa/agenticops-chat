@@ -51,6 +51,7 @@
   "issues.title": "问题与修复",
   "issues.all": "全部",
   "issues.open": "待处理",
+  "issues.active": "进行中",
   "issues.inProgress": "处理中",
   "issues.resolved": "已解决",
   "issues.search": "搜索问题...",

@@ -77,7 +77,8 @@ export interface RCAResult {
   anomaly_id: number;
   analysis_type: string;
   root_cause: string;
-  confidence_score: number;
+  /** API field is `confidence` (0-1); was mis-typed confidence_score → NaN% in UI */
+  confidence: number;
   contributing_factors: string[];
   recommendations: string[];
   related_resources: string[];

@@ -51,6 +51,7 @@
   "issues.title": "Issues & Plans",
   "issues.all": "All",
   "issues.open": "Open",
+  "issues.active": "Active",
   "issues.inProgress": "In Progress",
   "issues.resolved": "Resolved",
   "issues.search": "Search issues...",

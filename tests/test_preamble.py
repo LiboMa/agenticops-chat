@@ -246,20 +246,17 @@ class TestPerAgentWindowSizeConfig:
             val = getattr(settings, f"agent_{name}_window_size")
             assert isinstance(val, int), f"agent_{name}_window_size should be int, got {type(val)}"
 
-    def test_rca_window_size_from_yaml(self):
-        """RCA window size should be 0 (auto) via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_rca_window_size == 0
-
-    def test_sre_window_size_from_yaml(self):
-        """SRE window size should be -1 (unlimited) via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_sre_window_size == -1
-
-    def test_executor_window_size_from_yaml(self):
-        """Executor window size should be set to 100 via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_executor_window_size == 100
+    def test_window_sizes_match_yaml(self):
+        """settings.agent_*_window_size must reflect settings.yaml (loading works;
+        no hardcoded expected values — the yaml is owner-tuned at runtime)."""
+        import yaml
+        from agenticops.config import settings, _YAML_CONFIG_PATH
+        with open(_YAML_CONFIG_PATH) as f:
+            data = yaml.safe_load(f) or {}
+        for name in ("rca", "sre", "executor"):
+            key = f"agent_{name}_window_size"
+            if key in data:
+                assert getattr(settings, key) == data[key], f"{key}: settings != yaml"
 
 
 # ── Display: cost table from config ──────────────────────────────────

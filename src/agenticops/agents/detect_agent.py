@@ -88,17 +88,22 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
       - `aws guardduty list-detectors` → get detector ID
       - `aws guardduty list-findings --detector-id DID --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`
       - `aws guardduty get-findings --detector-id DID --finding-ids [IDs]` for details
-      - Create HealthIssue for severity >= 7: source="guardduty", severity=low (governance) UNLESS active exploitation on reachable service → critical
+      - Create HealthIssue for severity >= 7: source="guardduty". Severity: map from the GuardDuty
+        finding — active exploitation / credential compromise (Impact, CredentialAccess, Persistence
+        on an in-use identity) → critical; GuardDuty severity >= 7 → high; else medium
    b) **Security Hub Critical Findings**:
       - `aws securityhub get-findings --filters '{"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}],"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'`
-      - Create HealthIssue for CRITICAL findings: source="security_hub"
+      - Create HealthIssue for CRITICAL findings: source="security_hub", severity=high
+        (CRITICAL label from the provider is a strong signal — never downgrade below high)
    c) **Inspector Vulnerabilities**:
       - `aws inspector2 list-findings --filter-criteria '{"severity":[{"comparison":"EQUALS","value":"CRITICAL"}],"findingStatus":[{"comparison":"EQUALS","value":"ACTIVE"}]}'`
-      - Create HealthIssue for CRITICAL CVEs: source="inspector", severity=low (governance) UNLESS network-reachable + actively exploitable → escalate to high
+      - Create HealthIssue for CRITICAL CVEs: source="inspector", severity=medium (patch backlog)
+        UNLESS network-reachable + actively exploitable → high; on internet-facing + exploit in the wild → critical
    d) **Open Security Groups** (0.0.0.0/0 on sensitive ports):
       - `aws ec2 describe-security-groups` and filter for IpRanges containing 0.0.0.0/0
       - Flag ports 22, 3389, 3306, 5432, 6379, 27017, 9200 open to world
-      - Create HealthIssue: source="security_audit", severity=low (long-term governance)
+      - Create HealthIssue: source="security_audit". Severity: DB/admin port (3306/5432/6379/27017/9200/3389/22)
+        open to 0.0.0.0/0 on an in-use resource → medium; unused/empty SG → low
    e) **IAM Credential Hygiene** (global, run once):
       - `aws iam generate-credential-report` then `aws iam get-credential-report`
       - Flag: root access keys, users without MFA, stale credentials (>90 days)
@@ -143,11 +148,14 @@ Priority 3 — MEDIUM (capacity & resource planning):
 - Resource utilization trending toward limits (days/weeks horizon)
 
 Priority 4 — LOW (long-term governance, security hardening):
-- Security misconfigurations: open SGs, unencrypted volumes, stale credentials (>90 days)
-- Compliance gaps: missing CloudTrail, no encryption at rest
-- GuardDuty/SecurityHub findings (unless CRITICAL CVE on network-reachable resource → escalate to HIGH)
-- IAM hygiene: root access keys, users without MFA
-- Informational deviations, minor non-critical findings
+- Compliance gaps with no active exposure: missing CloudTrail, no encryption at rest on non-critical data
+- Stale credentials (>90 days) on unused identities; tag compliance; informational deviations
+
+SEVERITY SANITY CHECK (apply before create_health_issue):
+If the title you are about to write contains CRITICAL/HIGH (e.g., quoting a provider's finding
+label) but your chosen severity is low, RE-EVALUATE — provider-critical findings are at least
+medium, and anything indicating active compromise or a reachable attack path is high/critical.
+Severity must match what the title claims, or the issue list becomes untrustworthy.
 
 ESCALATION RULE: Any security finding that directly enables unauthorized access to a reachable
 service (e.g., CRITICAL CVE on internet-facing instance, active exploitation detected by GuardDuty

@@ -390,13 +390,13 @@ function RcaSection({
           <div className="flex justify-between text-sm mb-1">
             <span className="text-muted-foreground">{t("issues.confidence")}</span>
             <span className="font-medium text-foreground">
-              {Math.round(r.confidence_score * 100)}%
+              {Math.round((r.confidence ?? 0) * 100)}%
             </span>
           </div>
           <div className="w-full bg-secondary rounded-full h-2">
             <div
               className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${r.confidence_score * 100}%` }}
+              style={{ width: `${(r.confidence ?? 0) * 100}%` }}
             />
           </div>
         </div>

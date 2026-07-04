@@ -160,6 +160,7 @@ FIX RISK LEVELS:
 - critical: Data migration, downtime required, or irreversible
 
 RULES:
+- Verify resource validity and account permissions up front so tool calls do not fail.
 - Only READ operations on AWS. The only writes are to our metadata DB.
 - Always search SOPs and similar cases BEFORE forming conclusions.
 - Include CloudTrail evidence when available — cite specific event names and timestamps.

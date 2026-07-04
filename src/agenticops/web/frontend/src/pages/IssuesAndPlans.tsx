@@ -15,12 +15,14 @@ import type { Anomaly, Resource } from "@/api/types";
 
 /* ── Issues helpers ─────────────────────────────────────────────── */
 
-type Phase = "all" | "open" | "in_progress" | "resolved";
+type Phase = "all" | "active" | "resolved" | "dismissed";
 type Severity = "all" | "critical" | "high" | "medium" | "low";
 type SortKey = "newest" | "oldest" | "severity";
 
-const OPEN_STATUSES = new Set(["open"]);
-const IN_PROGRESS_STATUSES = new Set([
+// Auto-pipeline moves issues out of literal "open" within seconds, so the tab
+// groups by ops semantics: Active = anything not yet closed.
+const ACTIVE_STATUSES = new Set([
+  "open",
   "investigating",
   "acknowledged",
   "root_cause_identified",
@@ -29,12 +31,11 @@ const IN_PROGRESS_STATUSES = new Set([
   "fix_executing",
   "fix_executed",
 ]);
-const RESOLVED_STATUSES = new Set(["resolved"]);
 
 function getPhase(status: string): Phase {
-  if (OPEN_STATUSES.has(status)) return "open";
-  if (IN_PROGRESS_STATUSES.has(status)) return "in_progress";
-  if (RESOLVED_STATUSES.has(status)) return "resolved";
+  if (ACTIVE_STATUSES.has(status)) return "active";
+  if (status === "resolved") return "resolved";
+  if (status === "dismissed") return "dismissed";
   return "all";
 }
 
@@ -145,13 +146,13 @@ function IssuesView({
   const allIssues = data ?? [];
 
   const counts = useMemo(() => {
-    const c = { all: 0, open: 0, in_progress: 0, resolved: 0 };
+    const c = { all: 0, active: 0, resolved: 0, dismissed: 0 };
     for (const issue of allIssues) {
       c.all++;
       const p = getPhase(issue.status);
-      if (p === "open") c.open++;
-      else if (p === "in_progress") c.in_progress++;
+      if (p === "active") c.active++;
       else if (p === "resolved") c.resolved++;
+      else if (p === "dismissed") c.dismissed++;
     }
     return c;
   }, [allIssues]);
@@ -179,9 +180,9 @@ function IssuesView({
 
   const chips: { key: Phase; label: string; count: number }[] = [
     { key: "all", label: t("issues.all"), count: counts.all },
-    { key: "open", label: t("issues.open"), count: counts.open },
-    { key: "in_progress", label: t("issues.inProgress"), count: counts.in_progress },
+    { key: "active", label: t("issues.active"), count: counts.active },
     { key: "resolved", label: t("issues.resolved"), count: counts.resolved },
+    { key: "dismissed", label: t("issues.dismissed"), count: counts.dismissed },
   ];
 
   return (
