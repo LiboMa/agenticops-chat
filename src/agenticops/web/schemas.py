@@ -571,6 +571,8 @@ class ChatSessionUpdate(BaseModel):
     pinned: Optional[bool] = None
     starred: Optional[bool] = None
     archived: Optional[bool] = None
+    # "" = set Auto (stored NULL); omitted = don't change; non-empty = validated model id
+    model_id: Optional[str] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -604,6 +606,8 @@ class ChatSessionResponse(BaseModel):
     pinned: bool = False
     starred: bool = False
     archived: bool = False
+    # Per-session main-agent model override; None = Auto (follow global config)
+    model_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
