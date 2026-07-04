@@ -2,7 +2,7 @@ import { useAgentLogSummary } from "@/hooks/useAgentLogs";
 import { agentShare } from "@/lib/agentShare";
 import { useLocale } from "@/i18n/LocaleContext";
 
-const BAR_COLORS = ["bg-primary-600", "bg-primary-400", "bg-primary-300", "bg-primary-200", "bg-primary-100"];
+const SEG_COLORS = ["bg-primary-600", "bg-primary-400", "bg-primary-300", "bg-primary-200", "bg-primary-100"];
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -10,7 +10,7 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-/** 24h 交互统计:聚合行 + per-agent CSS 横条。 */
+/** 24h 交互统计 — 紧凑单行:聚合数字 + 分段占比条 + 前三 agent(Cost/Token 整合)。 */
 export function InteractionStats() {
   const { t } = useLocale();
   const summary = useAgentLogSummary(24, { refetchInterval: 10_000 });
@@ -29,39 +29,27 @@ export function InteractionStats() {
   );
   const shares = agentShare(per);
 
+  if (summary.isError || totals.calls === 0) return null;
+
   return (
-    <div className="mb-8 duo-fade">
-      <div className="text-[11px] font-medium tracking-[0.1em] uppercase text-muted-foreground mb-3">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 mb-8 bg-card border rounded-lg duo-fade text-sm">
+      <span className="text-[11px] font-medium tracking-[0.1em] uppercase text-muted-foreground">
         {t("dashboard.interactions")}
+      </span>
+      <span className="font-mono text-foreground">{totals.calls} {t("dashboard.calls24h")}</span>
+      <span className="font-mono text-muted-foreground text-xs">↑{fmtTokens(totals.input)} ↓{fmtTokens(totals.output)} · ${totals.cost.toFixed(2)}</span>
+      {totals.errors > 0 && (
+        <span className="text-red-500 text-xs">{totals.errors} {t("dashboard.errors")}</span>
+      )}
+      {/* 分段堆叠占比条 */}
+      <div className="flex-1 min-w-[120px] h-2 rounded-full overflow-hidden flex bg-muted">
+        {shares.slice(0, 5).map((s, i) => (
+          <div key={s.name} className={SEG_COLORS[i] ?? "bg-primary-100"} style={{ width: `${s.pct}%` }} title={`${s.name} ${s.pct}%`} />
+        ))}
       </div>
-      <div className="bg-card border rounded-lg px-5 py-4">
-        {summary.isError || totals.calls === 0 ? (
-          <div className="text-sm text-muted-foreground">—</div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3 text-sm">
-              <span className="font-mono text-2xl font-light">{totals.calls}</span>
-              <span className="text-muted-foreground">{t("dashboard.calls24h")}</span>
-              <span className="font-mono text-muted-foreground">↑{fmtTokens(totals.input)} ↓{fmtTokens(totals.output)}</span>
-              <span className="font-mono text-foreground">${totals.cost.toFixed(2)}</span>
-              {totals.errors > 0 && (
-                <span className="text-red-500 text-xs">{totals.errors} {t("dashboard.errors")}</span>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              {shares.slice(0, 5).map((s, i) => (
-                <div key={s.name} className="flex items-center gap-2 text-xs">
-                  <span className="w-16 text-muted-foreground truncate">{s.name}</span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${BAR_COLORS[i] ?? "bg-primary-100"}`} style={{ width: `${s.pct}%` }} />
-                  </div>
-                  <span className="w-14 text-right font-mono text-muted-foreground">{s.calls} · {s.pct}%</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <span className="text-xs text-muted-foreground whitespace-nowrap">
+        {shares.slice(0, 3).map((s) => `${s.name} ${s.pct}%`).join(" · ")}
+      </span>
     </div>
   );
 }

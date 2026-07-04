@@ -11,23 +11,23 @@
 | 实时机制 | **统一轮询 10s**(四数据源 `refetchInterval: 10_000`,页面不可见自动暂停;不做 SSE,YAGNI) |
 | 日志形态 | **精简流 + 链到详情**(最近 10 条一行一条,点击跳 AgentMetrics trace) |
 
-## 2. 布局(六区块 → 五区块,一屏)
+## 2. 布局(v2 — 2026-07-04 用户验收反馈修订:运维统计为主、Cost/Token 整合为一条、Fix Plans 恢复)
 
 ```
-┌─ ServiceStatusBar(新) ──────────────────────────────────────┐
-│ ● DB 3ms  ● AWS ok  ● Disk 52%  │  Executor On · 0 active   │
+┌─ ServiceStatusBar ──────────────────────────────────────────┐
+│ ● DB 3ms  ● AWS ok  ● Disk  │  Executor On · 0    v0.9.0    │
 ├─ KPI 行(保留) ───────────────────────────────────────────────┤
 │ Resources │ Open Issues │ Critical │ Accounts                │
-├─ InteractionStats(新,替换 Trends) ───────────────────────────┤
-│ 24h: 47 calls · ↑1.2M ↓89K tok · $12.40 · 2 errors          │
-│ per-agent 横条(main/scan/sre/…,CSS 宽度百分比)                │
-├─ AgentActivityFeed(新) ─────────┬─ Issues + Schedules(精简) ─┤
-│ 最近10条: 时间 agent·action 耗时 $ │ open issues 前5 + badge    │
-│ 点击行 → AgentMetrics trace 详情  │ schedules 下次执行           │
-└─────────────────────────────────┴────────────────────────────┘
+├─ InteractionStats(紧凑单行,Cost/Token 整合) ─────────────────┤
+│ 77 calls·↑597K ↓316K·$37.20·2 err ▐█████▌ main 36%·sre 31% │
+├─ 主区 Row 1(重点) ──────────────────────┬───────────────────┤
+│ Open Issues 表(2列宽,8行,含账户/资源列)    │ Active Fix Plans   │
+├─ 主区 Row 2(重点) ──────────────────────┼───────────────────┤
+│ AgentActivityFeed(2列宽,最近10条)         │ Scheduled Jobs     │
+└─────────────────────────────────────────┴───────────────────┘
 ```
 
-**砍掉**:Trends 卡(7/30/90d)、Resources by Type 格子(Resources 页已有)、Active Fix Plans 卡、Recent Activity(audit log,被 AgentActivityFeed 替代)。Dashboard.tsx 456 → ~200 行(只做布局编排)。
+**砍掉**:Trends 卡(7/30/90d)、Resources by Type 格子(Resources 页已有)、Recent Activity(audit log,被 AgentActivityFeed 替代)。**保留恢复**:Active Fix Plans 卡(v1 曾砍,用户要求保留)。InteractionStats 从"聚合行+5 行横条"压缩为**单行条**:聚合数字 + 一根分段堆叠占比条 + 前三 agent 文字占比;无数据时整条隐藏。
 
 ## 3. 数据源(全部现成,零新后端)
 
