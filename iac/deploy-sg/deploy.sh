@@ -186,8 +186,9 @@ export UV_PYTHON_INSTALL_DIR=/opt/uv-python
 git config --global --add safe.directory /opt/agenticops
 
 cd /opt/agenticops
-git checkout -- .
-git pull origin ${GIT_BRANCH}
+git fetch origin ${GIT_BRANCH}:refs/remotes/origin/${GIT_BRANCH}
+git checkout ${GIT_BRANCH} 2>/dev/null || git checkout -b ${GIT_BRANCH} origin/${GIT_BRANCH}
+git reset --hard origin/${GIT_BRANCH}
 
 # Backend — lockfile-first install (prevents dependency drift)
 source .venv/bin/activate
