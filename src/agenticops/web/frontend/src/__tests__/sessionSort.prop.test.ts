@@ -37,6 +37,7 @@ const chatSessionArb: fc.Arbitrary<ChatSession> = fc
     pinned: fc.boolean(),
     starred: fc.boolean(),
     archived: fc.boolean(),
+    model_id: fc.constantFrom<string | null>(null, "global.anthropic.claude-opus-4-8"),
   });
 
 function tier(s: ChatSession): number {

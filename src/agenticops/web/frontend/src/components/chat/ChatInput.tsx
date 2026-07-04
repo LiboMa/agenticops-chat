@@ -5,14 +5,14 @@ import {
   filesFromDrop,
   validateFiles,
 } from "@/lib/attachments";
+import { ModelSelector } from "./ModelSelector";
 
 interface Props {
   onSend: (message: string, files: File[]) => void;
   onCancel?: () => void;
   disabled?: boolean;
   streaming?: boolean;
-  detailLevel?: string;
-  onDetailLevelChange?: (level: string) => void;
+  sessionId?: string | null;
 }
 
 // Attachment carries a stable id so removal + React keys never use the array index
@@ -29,7 +29,7 @@ function nextAttachId(): string {
   return `att-${_attachSeq}`;
 }
 
-export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, onDetailLevelChange }: Props) {
+export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: Props) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -173,20 +173,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, detailLevel, 
             onChange={handleFileSelect}
           />
 
-          {/* Detail level selector */}
-          {onDetailLevelChange && (
-            <select
-              value={detailLevel ?? "medium"}
-              onChange={(e) => onDetailLevelChange(e.target.value)}
-              disabled={disabled}
-              className="self-center text-[11px] border-none rounded-lg px-1.5 py-1 text-muted-foreground bg-transparent hover:bg-muted focus:outline-none disabled:opacity-50 cursor-pointer"
-              title="Response detail level"
-            >
-              <option value="concise">Concise</option>
-              <option value="medium">Medium</option>
-              <option value="detailed">Detailed</option>
-            </select>
-          )}
+          {/* Per-session model selector */}
+          <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />
 
           {/* Attach button */}
           <button

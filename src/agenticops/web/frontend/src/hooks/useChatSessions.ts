@@ -54,6 +54,8 @@ export function useUpdateChatSession() {
       pinned?: boolean;
       starred?: boolean;
       archived?: boolean;
+      /** "" = Auto (follow global); non-empty = model id; omit = don't change */
+      model_id?: string;
     }) =>
       apiFetch<ChatSession>(`/chat/sessions/${sessionId}`, {
         method: "PATCH",

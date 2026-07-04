@@ -586,6 +586,8 @@ export interface ChatSession {
   pinned: boolean;
   starred: boolean;
   archived: boolean;
+  /** Per-session main-agent model override; null = Auto (follow global config) */
+  model_id: string | null;
 }
 
 export interface ChatMessage {

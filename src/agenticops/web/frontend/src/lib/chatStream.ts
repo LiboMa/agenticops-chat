@@ -89,7 +89,7 @@ class ChatStreamStore {
     this.controllers.get(sessionId)?.abort();
   }
 
-  async send(sessionId: string, content: string, files?: File[], detailLevel?: string) {
+  async send(sessionId: string, content: string, files?: File[]) {
     if (this.isStreaming(sessionId)) return;
 
     this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null });
@@ -124,13 +124,11 @@ class ChatStreamStore {
         const formData = new FormData();
         formData.append("content", content);
         files.forEach((f) => formData.append("file", f));
-        if (detailLevel && detailLevel !== "medium") formData.append("detail_level", detailLevel);
         res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: "POST", headers: authHeaders, body: formData, signal: controller.signal,
         });
       } else {
         const body: Record<string, string> = { content };
-        if (detailLevel && detailLevel !== "medium") body.detail_level = detailLevel;
         res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
