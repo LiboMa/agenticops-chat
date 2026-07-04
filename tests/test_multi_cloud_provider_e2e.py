@@ -369,12 +369,11 @@ class TestAssumeRoleUsesProvider:
 
 
 class TestOpsAgentMultiAccount:
-    def test_no_unsafe_first_in_ops_agent(self):
-        """ops_agent must not use .filter_by(is_enabled=True).first()."""
-        import inspect
-        import agenticops.agent.ops_agent as mod
-        source = inspect.getsource(mod)
-        assert "filter_by(is_enabled=True).first()" not in source
+    def test_legacy_ops_agent_removed(self):
+        """Legacy OpsAgent module has been removed (tech debt cleanup)."""
+        import pytest
+        with pytest.raises(ImportError, match="removed"):
+            import agenticops.agent  # noqa: F401
 
 
 # ══════════════════════════════════════════════════════════════════

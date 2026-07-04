@@ -264,14 +264,14 @@ class TestPerAgentWindowSizeConfig:
         assert settings.agent_rca_window_size == 0
 
     def test_sre_window_size_from_yaml(self):
-        """SRE window size should be 0 (auto) via settings.yaml."""
+        """SRE window size should be -1 (unlimited) via settings.yaml."""
         from agenticops.config import settings
-        assert settings.agent_sre_window_size == 0
+        assert settings.agent_sre_window_size == -1
 
     def test_executor_window_size_from_yaml(self):
-        """Executor window size should be set to 20 via settings.yaml."""
+        """Executor window size should be set to 100 via settings.yaml."""
         from agenticops.config import settings
-        assert settings.agent_executor_window_size == 20
+        assert settings.agent_executor_window_size == 100
 
 
 # ── Display: cost table from config ──────────────────────────────────

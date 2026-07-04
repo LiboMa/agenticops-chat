@@ -43,7 +43,10 @@ class TestProviderRegistry:
         assert "azure" in PROVIDERS
         assert "gcp" in PROVIDERS
         assert "alicloud" in PROVIDERS
-        assert len(PROVIDERS) == 4
+        assert "ssh" in PROVIDERS
+        assert "prometheus" in PROVIDERS
+        assert "kubernetes" in PROVIDERS
+        assert len(PROVIDERS) == 7
 
     def test_get_provider_aws(self):
         from agenticops.providers.aws import AWSProvider

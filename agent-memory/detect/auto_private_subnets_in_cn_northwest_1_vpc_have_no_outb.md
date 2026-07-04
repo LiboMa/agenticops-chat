@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-03-26'
 created_by: user
 last_confirmed: '2026-03-26'
-last_used: '2026-06-09'
+last_used: '2026-06-17'
 related_issue_id: 266
 resource_pattern: vpc-01319a84eaaeb8d0d/*
 source: auto
