@@ -33,10 +33,10 @@
 
 | 区块 | 端点 | Hook |
 |---|---|---|
-| ServiceStatusBar | `GET /api/health`(checks: database/aws/disk + status/version)+ 现有 `useExecutorStatus` | 新 `useHealth`(10s) |
+| ServiceStatusBar | `GET /api/health`(checks: database/aws/disk + status/version)+ 现有 `useExecutorStatus` | 新 `useHealth`(10s;唯一新 hook) |
 | KPI | `GET /api/stats` | 现有 `useStats`(refetchInterval 收敛为 10s) |
-| InteractionStats | `GET /api/agent-logs/summary?hours=24`(per_agent: call_count/tokens/cost/error_count)+ `GET /api/cost/summary` | 新 `useAgentLogSummary`(10s) |
-| AgentActivityFeed | `GET /api/agent-logs?limit=10` | 新/复用 `useAgentLogs`(10s) |
+| InteractionStats | `GET /api/agent-logs/summary?hours=24`(per_agent: call_count/tokens/cost/error_count) | **已有** `useAgentLogSummary(24)`(useAgentLogs.ts;调用处传 10s 轮询 options 或收敛该 hook) |
+| AgentActivityFeed | `GET /api/agent-logs?limit=10` | **已有** `useAgentLogs({limit:10})` |
 | Issues/Schedules | 现有 `useAnomalies`/`useSchedules` | 现有(不加轮询,staleTime 已够) |
 
 ## 4. 组件结构
@@ -46,7 +46,7 @@ pages/Dashboard.tsx              → 重写为布局编排(~200 行)
 components/dashboard/            (新目录)
   ServiceStatusBar.tsx           灯带:每组件 status 点(ok=green/error=red)+ latency;整体不可达 → 红条 "API unreachable"
   InteractionStats.tsx           聚合行 + per-agent 横条;百分比计算抽纯函数 agentShare(summary) 便于 vitest
-  AgentActivityFeed.tsx          10 行日志流;行点击 → navigate(`/app/agent-metrics?trace=${trace_id}`)(AgentMetrics 已支持 trace 查询参数则复用;否则仅跳页)
+  AgentActivityFeed.tsx          10 行日志流;行点击 → navigate("/app/agent-metrics")(侦察确认:AgentMetrics 的 trace 抽屉是内部 state 而非 URL 参数,且该页不动 → 仅跳页,不带参)
 ```
 
 - 横条用纯 CSS 宽度百分比(`style={{width: pct+"%"}}` + primary 色阶),**不引图表库**。
