@@ -134,7 +134,7 @@ onSelect(value):
 
 | 场景 | 行为 |
 |---|---|
-| **Welcome 模式**(session 未创建) | pill 照常显示、可打开可选择;选择结果存组件 state,`useLazySessionCreate` 创建 session 后立刻补一个 PATCH 带上 model_id。不新增后端参数(POST /sessions 不加字段,保持 API 面最小) |
+| **Welcome 模式**(session 未创建) | **pill 隐藏**(`sessionId=null` → 组件返回 null)。session 由第一条消息懒创建,创建后 pill 即出现、可切换。(按已批准 plan 实现;曾考虑的"本地暂存+创建后补 PATCH"方案按 YAGNI 裁剪) |
 | **Streaming 中** | pill `disabled` + Tooltip(§1.3);后端 409 是兜底,前端禁用是第一道 |
 | **presets 为空**(Bedrock 拉取失败且无 alias) | pill 只显示 "Auto",点击弹出仅含 Auto 一项 + muted 提示行 "模型列表不可用" |
 | **session.model_id 不在 presets 里**(如全局配置后来删了该模型) | pill 显示 `shortName(model_id)` 照常;popover 里该值不在列表 → 顶部额外显示当前值一行(选中态,muted 注 "不在当前列表") |
