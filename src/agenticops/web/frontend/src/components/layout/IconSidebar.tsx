@@ -1,12 +1,10 @@
 import { NavLink } from "react-router-dom";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { useLocale } from "@/i18n/LocaleContext";
 import { NavItems, ICON_PATHS, SvgIcon } from "./NavItems";
 
-export function IconSidebar() {
+export function IconSidebar({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
   const { t } = useLocale();
-  const [expanded, setExpanded] = usePersistedState<boolean>("aiops-nav-expanded", false);
 
   return (
     <Tooltip.Provider delayDuration={200}>
@@ -42,7 +40,7 @@ export function IconSidebar() {
             {expanded && <span className="text-sm truncate">{t("nav.settings")}</span>}
           </NavLink>
           <button
-            onClick={() => setExpanded(!expanded)}
+            onClick={onToggle}
             className={`flex items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors ${
               expanded ? "gap-3 px-3 h-10 w-full" : "w-10 h-10 justify-center"
             }`}
