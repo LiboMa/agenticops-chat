@@ -73,3 +73,25 @@ class TestPersistenceLayer:
     def test_response_schema_has_field(self):
         from agenticops.web.schemas import ChatMessageResponse
         assert "suggestions" in ChatMessageResponse.model_fields
+
+
+class TestCliStreamingSuppression:
+    def _drive(self, chunks):
+        from unittest.mock import MagicMock, patch
+        from agenticops.cli.display import StreamingCallbackHandler
+        h = StreamingCallbackHandler(MagicMock())
+        printed = []
+        with patch.object(h, "_flush_buf", side_effect=lambda: (printed.extend(h._buf), h._buf.clear())):
+            for c in chunks:
+                h(data=c)
+            h(complete=True)
+        return "".join(printed)
+
+    def test_marker_split_across_chunks_suppressed(self):
+        out = self._drive(["answer done\n<<SUG", 'GEST>>["a","b"]'])
+        assert "SUGGEST" not in out
+        assert "answer done" in out
+
+    def test_partial_lookalike_flushed_at_end(self):
+        out = self._drive(["price is 1<<2 ok"])
+        assert out.endswith("ok")

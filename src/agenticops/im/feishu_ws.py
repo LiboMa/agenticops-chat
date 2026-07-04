@@ -294,6 +294,8 @@ class FeishuWSService:
                 set_im_origin(None)  # clear after agent completes
                 set_trace_id(None)
                 response_text = str(result)
+                from agenticops.chat.suggestions import extract_suggestions
+                response_text, _ = extract_suggestions(response_text)
                 logger.info(
                     ">>> Agent response (first 300): %s", response_text[:300]
                 )

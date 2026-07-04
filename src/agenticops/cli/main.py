@@ -3840,6 +3840,8 @@ def _run_headless(query: str, account: Optional[str] = None):
                 raise typer.Exit(1)
 
         response = str(result)
+        from agenticops.chat.suggestions import extract_suggestions
+        response, _ = extract_suggestions(response)
         console.print()
         if response.startswith("#") or "```" in response:
             console.print(Markdown(response))
@@ -4260,6 +4262,8 @@ def chat(
                     ctx.add_to_history("assistant", response)
                     continue
                 response = str(result)
+                from agenticops.chat.suggestions import extract_suggestions
+                response, _ = extract_suggestions(response)
 
                 # Extract token usage from Strands metrics (main + sub-agents)
                 from agenticops.agents.metrics import extract_token_usage
