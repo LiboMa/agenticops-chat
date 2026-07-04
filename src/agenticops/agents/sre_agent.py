@@ -207,7 +207,7 @@ SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE
 
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
     """Create a reusable SRE Agent instance."""
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("sre")
     cache_kwargs: dict = {}
@@ -275,6 +275,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("sre"),
+        context_manager=get_agent_context_manager("sre"),
         tools=_tools,
     )
 

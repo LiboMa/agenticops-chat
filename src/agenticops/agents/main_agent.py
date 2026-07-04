@@ -234,7 +234,7 @@ def create_main_agent(model_id_override: str = "") -> Agent:
         logger.debug("Skills Curator run skipped", exc_info=True)
 
     from agenticops.config import get_scan_focus, resolve_scan_services
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("main")
     if model_id_override:
@@ -271,6 +271,7 @@ If the user explicitly requests a different scope, honor their request over this
             system_prompt=build_system_prompt(prompt, include_account=False, agent_name="main"),
             model=model,
             conversation_manager=get_agent_conversation_manager("main"),
+            context_manager=get_agent_context_manager("main"),
             tools=[
                 # Sub-agents as tools
                 scan_agent,

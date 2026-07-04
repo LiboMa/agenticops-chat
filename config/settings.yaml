@@ -10,7 +10,7 @@ agent_main_model_id: global.anthropic.claude-opus-4-8
 agent_scan_model_id: global.anthropic.claude-sonnet-4-6
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_model_id: global.anthropic.claude-opus-4-6-v1
-agent_sre_model_id: global.anthropic.claude-opus-4-8
+agent_sre_model_id: global.anthropic.claude-fable-5
 agent_executor_model_id: global.anthropic.claude-opus-4-6-v1
 agent_reporter_model_id: global.anthropic.claude-sonnet-4-6
 agent_main_max_tokens: 0
@@ -24,7 +24,7 @@ executor_smart_model: true
 executor_simple_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_window_size: 0
 agent_sre_window_size: -1
-agent_executor_window_size: 100
+agent_executor_window_size: 1800
 token_cost_table:
   claude-opus-4-8:
     input: 15.0
@@ -47,6 +47,7 @@ token_cost_table:
     cache_read: 0.08
     cache_write: 1.0
 bedrock_cache_enabled: true
+strands_context_manager_auto: true
 embedding_model_id: amazon.titan-embed-text-v2:0
 embedding_dimension: 1024
 embedding_enabled: true
@@ -56,6 +57,7 @@ patrol_graph_checks_enabled: true
 rca_topology_context_enabled: true
 executor_enabled: true
 executor_auto_approve_l0_l1: true
+executor_hitl_enabled: false
 ssh_default_user: ''
 ssh_default_key_path: ''
 ssh_bastion_host: ''
@@ -112,11 +114,11 @@ skills_draft_stale_days: 30
 skills_draft_archive_days: 60
 skills_security_scan_on_promote: true
 acp_enhanced_enabled: true
-acp_enhanced_backend: kiro-cli
+acp_enhanced_backend: claude-code
 acp_use_bedrock: true
 acp_timeout_seconds: 300
 acp_auto_approve_permissions: true
 agent_main_window_size: -1
-agent_reporter_window_size: 800
+agent_reporter_window_size: 1800
 agent_detect_window_size: 8000
 agent_scan_window_size: 1000

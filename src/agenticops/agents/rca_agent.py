@@ -249,7 +249,7 @@ def rca_agent(issue_id: int) -> str:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
             # Resolve provider CLI tool from issue's account
@@ -282,6 +282,7 @@ def rca_agent(issue_id: int) -> str:
                 model=model,
                 callback_handler=None,
                 conversation_manager=get_agent_conversation_manager("rca"),
+                context_manager=get_agent_context_manager("rca"),
                 tools=[
                     assume_role,
                     get_active_account,

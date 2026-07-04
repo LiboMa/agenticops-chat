@@ -148,9 +148,11 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `auto_rca_enabled` | `true` | Auto-trigger RCA |
 | `auto_fix_enabled` | `true` | Auto-fix pipeline |
 | `executor_auto_approve_l0_l1` | `true` | Auto-approve L0/L1 |
+| `executor_hitl_enabled` | `false` | Add a Strands `HumanInTheLoop` intervention as a 2nd SDK-level approval gate on executor (default off; primary gate stays `get_approved_fix_plan` + DB state machine). Read-only tools allow-listed; mutating tools raise interrupt |
 | `notifications_enabled` | `true` | Auto-notifications |
 | `notifications_consolidated` | `true` | Suppress per-issue notifications during Scan/Detect/RCA; only final report sent. Set `false` for dev/debug |
 | `bedrock_cache_enabled` | `true` | Prompt caching on all agents |
+| `strands_context_manager_auto` | `true` | Strands SDK auto context management (SummarizingConversationManager + ContextOffloader) on all 8 agent builds. Coexists with per-agent `conversation_manager` (SDK preserves ours, only adds ContextOffloader). Offloads oversized tool results (AWS CLI/describe) to keep context bounded |
 | `agent_{name}_model_id` | `""` | Per-agent model override (7 agents: main/scan/detect/rca/sre/executor/reporter) |
 | `agent_{name}_max_tokens` | `0` | Per-agent max_tokens override (0 = use bedrock_max_tokens) |
 | `deployment_profile` | `local` | local or cloud |
