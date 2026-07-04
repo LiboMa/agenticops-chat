@@ -11,7 +11,7 @@ agent_scan_model_id: global.anthropic.claude-sonnet-4-6
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_model_id: global.anthropic.claude-opus-4-6-v1
 agent_sre_model_id: global.anthropic.claude-opus-4-8
-agent_executor_model_id: global.anthropic.claude-opus-4-8
+agent_executor_model_id: global.anthropic.claude-opus-4-6-v1
 agent_reporter_model_id: global.anthropic.claude-sonnet-4-6
 agent_main_max_tokens: 0
 agent_scan_max_tokens: 0
@@ -56,7 +56,6 @@ patrol_graph_checks_enabled: true
 rca_topology_context_enabled: true
 executor_enabled: true
 executor_auto_approve_l0_l1: true
-# Host access ladder (SSM → SSH fallback for run_on_host method="auto")
 ssh_default_user: ''
 ssh_default_key_path: ''
 ssh_bastion_host: ''
@@ -71,7 +70,6 @@ itsm_jira_email: ''
 itsm_jira_project_key: OPS
 notifications_enabled: true
 notifications_consolidated: false
-agent_output_detail: medium
 issue_exclude_patterns: []
 scan_focus: all
 alert_pipeline_mode: both
@@ -120,5 +118,5 @@ acp_timeout_seconds: 300
 acp_auto_approve_permissions: true
 agent_main_window_size: -1
 agent_reporter_window_size: 800
-agent_detect_window_size: 800
-agent_scan_window_size: 800
+agent_detect_window_size: 8000
+agent_scan_window_size: 1000

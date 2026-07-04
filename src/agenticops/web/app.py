@@ -4330,13 +4330,11 @@ async def api_send_chat_message(session_id: str, request: Request):
     file_documents: list[tuple[str, bytes, str, str]] = []
     attachments: list[dict] | None = None
 
-    detail_level_req: Optional[str] = None
     scan_focus_req: Optional[str] = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
-        detail_level_req = str(form.get("detail_level", "")).strip() or None
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
         uploads = form.getlist("file")
         valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
@@ -4389,7 +4387,6 @@ async def api_send_chat_message(session_id: str, request: Request):
     else:
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
-        detail_level_req = payload.detail_level
         scan_focus_req = payload.scan_focus
 
     # Intercept /channel command before agent dispatch
@@ -4451,11 +4448,6 @@ async def api_send_chat_message(session_id: str, request: Request):
         db_session_pk = row.id
 
     async def _generate():
-        # Set detail level for this request if provided
-        if detail_level_req:
-            from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
-            if detail_level_req in VALID_DETAIL_LEVELS:
-                set_detail_level(detail_level_req)
         # Set scan focus for this request if provided
         if scan_focus_req:
             from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus

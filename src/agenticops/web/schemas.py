@@ -577,7 +577,6 @@ class ChatSessionUpdate(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
-    detail_level: Optional[str] = Field(None, description="Agent output detail: concise, medium, or detailed")
     scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
 
 

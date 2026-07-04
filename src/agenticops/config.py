@@ -487,12 +487,6 @@ class Settings(BaseSettings):
         description="Default admin password for initial seed",
     )
 
-    # Agent output detail level
-    agent_output_detail: str = Field(
-        default="medium",
-        description="Default agent output detail level: concise, medium, or detailed",
-    )
-
     # Issue exclude patterns — regex patterns to suppress issue creation
     issue_exclude_patterns: list[str] = Field(default_factory=list)
 
@@ -944,37 +938,6 @@ def save_to_yaml(keys: dict[str, Any]) -> None:
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
     with open(yaml_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-
-# ── Agent Detail Level ──────────────────────────────────────────────
-
-VALID_DETAIL_LEVELS = ("concise", "medium", "detailed")
-
-_detail_level_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "agent_detail_level", default=settings.agent_output_detail
-)
-
-
-def get_detail_level() -> str:
-    """Get the current agent output detail level from context."""
-    return _detail_level_var.get()
-
-
-def set_detail_level(level: str) -> contextvars.Token:
-    """Set the agent output detail level in context.
-
-    Args:
-        level: One of 'concise', 'medium', or 'detailed'.
-
-    Returns:
-        Token that can be used to reset to the previous value.
-
-    Raises:
-        ValueError: If level is not valid.
-    """
-    if level not in VALID_DETAIL_LEVELS:
-        raise ValueError(f"Invalid detail level '{level}'. Must be one of: {', '.join(VALID_DETAIL_LEVELS)}")
-    return _detail_level_var.set(level)
 
 
 # ── Scan Focus (resource category filter) ─────────────────────────────
