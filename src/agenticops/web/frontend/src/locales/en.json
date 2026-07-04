@@ -20,6 +20,8 @@
   "chat.model.followGlobal": "Auto (follow global setting)",
   "chat.model.switchTooltip": "Model for this session",
   "chat.model.streamingLocked": "Wait for the current response to finish",
+  "chat.contextPanel.agentCheck": "Ask agent to check",
+  "chat.contextPanel.checkPrompt": "Check the current status of I#{id}: verify whether the issue still exists, and suggest next steps",
   "chat.placeholder": "Ask about AWS resources, health issues, or reports... (Cmd+Enter to send)",
   "chat.saveAsReport": "Save as Report",
   "chat.selectSession": "Select a session or create a new one",

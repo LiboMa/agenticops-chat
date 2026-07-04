@@ -20,6 +20,8 @@
   "chat.model.followGlobal": "自动（跟随全局设置）",
   "chat.model.switchTooltip": "本会话使用的模型",
   "chat.model.streamingLocked": "等待当前回复完成后可切换",
+  "chat.contextPanel.agentCheck": "让 agent 检查",
+  "chat.contextPanel.checkPrompt": "检查 I#{id} 的当前状态,确认问题是否仍存在,并给出下一步建议",
   "chat.placeholder": "询问 AWS 资源、健康问题或报告... (Cmd+Enter 发送)",
   "chat.saveAsReport": "保存为报告",
   "chat.selectSession": "选择一个会话或创建新会话",

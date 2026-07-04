@@ -278,6 +278,7 @@ export default function Chat() {
               isFetchingOlder={isFetchingOlder}
               onLoadOlder={fetchOlder}
               onSuggestionPick={(text) => sendMessage(text)}
+              onIssueRefClick={setContextIssueId}
             />
 
             {/* Error banner */}
@@ -310,6 +311,11 @@ export default function Chat() {
             <ContextPanel
               issueId={contextIssueId}
               onClose={() => setContextIssueId(null)}
+              onAgentCheck={() => {
+                if (contextIssueId == null) return;
+                sendMessage(t("chat.contextPanel.checkPrompt").replace("{id}", String(contextIssueId)));
+              }}
+              agentCheckDisabled={streaming}
             />
           </div>
         </>

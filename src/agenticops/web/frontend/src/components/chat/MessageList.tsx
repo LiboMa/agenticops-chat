@@ -18,6 +18,7 @@ interface Props {
   isFetchingOlder?: boolean;
   onLoadOlder?: () => void;
   onSuggestionPick?: (text: string) => void;
+  onIssueRefClick?: (issueId: number) => void;
 }
 
 export function MessageList({
@@ -30,16 +31,22 @@ export function MessageList({
   isFetchingOlder,
   onLoadOlder,
   onSuggestionPick,
+  onIssueRefClick,
 }: Props) {
   const navigate = useNavigate();
   const parentRef = useRef<HTMLDivElement>(null);
 
   const handleRefClick = (e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a.md-ref") as HTMLAnchorElement | null;
-    if (anchor) {
-      e.preventDefault();
-      navigate(new URL(anchor.href).pathname);
+    if (!anchor) return;
+    e.preventDefault();
+    const pathname = new URL(anchor.href).pathname;
+    const issueMatch = pathname.match(/^\/app\/issues\/(\d+)$/);
+    if (issueMatch && onIssueRefClick) {
+      onIssueRefClick(Number(issueMatch[1]));
+      return;
     }
+    navigate(pathname);
   };
 
   // One virtual row per message; the streaming bubble is rendered as a sticky

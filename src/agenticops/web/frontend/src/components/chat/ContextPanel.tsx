@@ -19,6 +19,8 @@ import type { PipelineEvent, FixPlan } from "@/api/types";
 interface Props {
   issueId: number | null;
   onClose: () => void;
+  onAgentCheck?: () => void;
+  agentCheckDisabled?: boolean;
 }
 
 /* ── Stage colors for timeline ──────────────────────────────────── */
@@ -40,7 +42,7 @@ const STATUS_ICONS: Record<string, string> = {
   skipped: "minus",
 };
 
-export function ContextPanel({ issueId, onClose }: Props) {
+export function ContextPanel({ issueId, onClose, onAgentCheck, agentCheckDisabled }: Props) {
   const { t } = useLocale();
 
   if (!issueId) return null;
@@ -52,15 +54,30 @@ export function ContextPanel({ issueId, onClose }: Props) {
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           I#{issueId}
         </span>
-        <button
-          onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          title={t("common.close")}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {onAgentCheck && (
+            <button
+              onClick={onAgentCheck}
+              disabled={agentCheckDisabled}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+              title={t("chat.contextPanel.agentCheck")}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {t("chat.contextPanel.agentCheck")}
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title={t("common.close")}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Tabs content */}
