@@ -18,7 +18,7 @@ export interface StreamCallbacks {
   /** Fired once per completed assistant turn with the final text + tools + tokens. */
   onDone?: (
     sessionId: string,
-    payload: { content: string; toolCalls: ToolCall[]; tokenMetrics: { input: number; output: number } | null },
+    payload: { content: string; toolCalls: ToolCall[]; tokenMetrics: { input: number; output: number } | null; suggestions?: string[] },
   ) => void;
   /** Fired when the backend auto-renames the session. */
   onRenamed?: (sessionId: string, name: string) => void;
@@ -100,7 +100,8 @@ class ChatStreamStore {
     // Completed-turn payload, handed to the cache layer in `finally` AFTER the
     // live slice is cleared (prevents a flash where both the streaming trailer
     // and the persisted row render at once).
-    let donePayload: { content: string; toolCalls: ToolCall[]; tokenMetrics: { input: number; output: number } | null } | null = null;
+    let donePayload: { content: string; toolCalls: ToolCall[]; tokenMetrics: { input: number; output: number } | null; suggestions?: string[] } | null = null;
+    let doneSuggestions: string[] = [];
 
     // Token coalescing buffer (avoids O(n^2) markdown re-parse downstream).
     let pendingText = "";
@@ -197,6 +198,7 @@ class ChatStreamStore {
                 this.set(sessionId, {
                   tokenMetrics: { input: data.input_tokens ?? 0, output: data.output_tokens ?? 0 },
                 });
+                doneSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
                 break;
               case "error":
                 this.set(sessionId, { error: data.message ?? "Unknown error" });
@@ -215,9 +217,10 @@ class ChatStreamStore {
       const final = this.states.get(sessionId) ?? EMPTY;
       if (!final.error) {
         donePayload = {
-          content: final.content,
+          content: final.content.split("<<SUGGEST>>")[0].trimEnd(),
           toolCalls: final.toolCalls,
           tokenMetrics: final.tokenMetrics,
+          suggestions: doneSuggestions,
         };
       }
     } catch (err: unknown) {

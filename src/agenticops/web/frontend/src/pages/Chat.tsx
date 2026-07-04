@@ -277,6 +277,7 @@ export default function Chat() {
               hasOlder={hasOlder}
               isFetchingOlder={isFetchingOlder}
               onLoadOlder={fetchOlder}
+              onSuggestionPick={(text) => sendMessage(text)}
             />
 
             {/* Error banner */}

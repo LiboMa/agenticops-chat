@@ -605,6 +605,8 @@ export interface ChatMessage {
   };
   trace_id?: string;
   cost_usd?: number;
+  /** Follow-up suggestion chips from the reply tail; only rendered on the last assistant message */
+  suggestions?: string[];
   attachments?: Array<{ filename: string; size: number }>;
   created_at: string;
 }
