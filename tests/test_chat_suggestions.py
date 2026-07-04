@@ -41,3 +41,35 @@ class TestExtractSuggestions:
 
     def test_empty_text(self):
         assert extract_suggestions("") == ("", [])
+
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture()
+def client():
+    from agenticops.web.app import app
+    return TestClient(app)
+
+
+class TestPersistenceLayer:
+    def test_chat_message_has_suggestions_column(self):
+        from agenticops.models import ChatMessage
+        assert hasattr(ChatMessage, "suggestions")
+
+    def test_messages_api_echoes_suggestions(self, client):
+        from agenticops.models import ChatMessage, ChatSession, get_db_session
+        r = client.post("/api/chat/sessions", json={})
+        sid = r.json()["session_id"]
+        with get_db_session() as db:
+            row = db.query(ChatSession).filter(ChatSession.session_id == sid).first()
+            db.add(ChatMessage(session_id=row.id, role="assistant",
+                               content="hi", suggestions=["next step"]))
+        msgs = client.get(f"/api/chat/sessions/{sid}/messages").json()["messages"]
+        assert msgs[-1]["suggestions"] == ["next step"]
+        client.delete(f"/api/chat/sessions/{sid}")
+
+    def test_response_schema_has_field(self):
+        from agenticops.web.schemas import ChatMessageResponse
+        assert "suggestions" in ChatMessageResponse.model_fields

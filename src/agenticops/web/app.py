@@ -4200,7 +4200,8 @@ async def api_get_chat_messages(
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
                 trace_id=m.trace_id,
                 cost_usd=(m.token_usage or {}).get("cost_usd"),
-                attachments=m.attachments, created_at=m.created_at,
+                attachments=m.attachments, suggestions=m.suggestions,
+                created_at=m.created_at,
             ) for m in page_chrono],
             has_more=has_more,
             next_cursor=next_cursor,
@@ -4528,6 +4529,8 @@ async def api_send_chat_message(session_id: str, request: Request):
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)
+            from agenticops.chat.suggestions import extract_suggestions
+            _clean_text, _suggestions = extract_suggestions(accumulated)
             with get_db_session() as db:
                 if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
                     logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
@@ -4546,7 +4549,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     db.add(ChatMessage(
                         session_id=db_session_pk,
                         role="assistant",
-                        content=accumulated,
+                        content=_clean_text,
+                        suggestions=_suggestions or None,
                         tool_calls=tool_calls if tool_calls else None,
                         token_usage=_tu,
                         trace_id=_chat_trace_id,
@@ -4595,6 +4599,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                 "data": json.dumps({
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    "suggestions": _suggestions,
                 }),
             }
         except Exception as e:

@@ -589,6 +589,7 @@ class ChatMessageResponse(BaseModel):
     trace_id: Optional[str] = None
     cost_usd: Optional[float] = None
     attachments: Optional[list] = None
+    suggestions: Optional[list] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

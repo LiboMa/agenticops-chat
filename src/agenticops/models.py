@@ -819,6 +819,8 @@ class ChatMessage(Base):
     token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     attachments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Suggestion chips extracted from the reply tail (MVP-2.0.1); NULL = none
+    suggestions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -1063,6 +1065,14 @@ def init_db(engine=None):
         if "model_id" not in columns:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN model_id VARCHAR(200)"))
+                conn.commit()
+
+    # Migration: add suggestion-chips column to chat_messages if missing
+    if insp.has_table("chat_messages"):
+        cols = {c["name"] for c in insp.get_columns("chat_messages")}
+        if "suggestions" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN suggestions JSON"))
                 conn.commit()
 
     # Migration: add provider column to health_issues if missing, backfill 'aws'
