@@ -168,7 +168,6 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `acp_kiro_command` / `acp_kiro_args` | `kiro-cli` / `["acp","--trust-all-tools"]` | Kiro CLI ACP launch (uses kiro's own login) |
 | `acp_codex_command` / `acp_codex_args` | `npx` / `["-y","@zed-industries/codex-acp"]` | Codex ACP launch (needs `OPENAI_API_KEY`) |
 | `scan_focus` | `all` | Resource categories filter |
-| `agent_output_detail` | `medium` | concise/medium/detailed |
 | `patrol_graph_checks_enabled` | `true` | SPOF + capacity-risk graph analysis step in health patrol (prevention; findings create HealthIssues with auto_rca off) |
 | `rca_topology_context_enabled` | `true` | Inject topology context (neighbors, blast radius, recent graph changes) into RCA invocation prompts |
 

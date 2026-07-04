@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticops.cli.display import TokenUsage
 from agenticops.cli.formatters import TABLE_STYLES
-from agenticops.config import AGENT_NAMES, MODEL_ALIASES, VALID_DETAIL_LEVELS, VALID_SCAN_FOCUS
+from agenticops.config import AGENT_NAMES, MODEL_ALIASES, VALID_SCAN_FOCUS
 
 
 class ChatContext:
@@ -16,7 +16,6 @@ class ChatContext:
         self.output_format = "table"  # table, json, wide
         self.table_style = os.environ.get("AIOPS_TABLE_STYLE", "default")
         self.account = None
-        self.detail_level = "medium"  # concise, medium, detailed
         self.scan_focus = "all"  # computing, networking, databases, storage, security, billing, all
         self.current_model = "sonnet"  # friendly name — default matches settings.bedrock_model_id
         self.agent = None  # set after agent creation; enables /model runtime switching
@@ -31,13 +30,6 @@ class ChatContext:
     def set_output(self, fmt: str):
         if fmt in ["table", "json", "wide", "yaml"]:
             self.output_format = fmt
-            return True
-        return False
-
-    def set_detail(self, level: str) -> bool:
-        """Set agent output detail level (concise, medium, detailed)."""
-        if level in VALID_DETAIL_LEVELS:
-            self.detail_level = level
             return True
         return False
 

@@ -287,7 +287,6 @@ class TestSessionBackwardCompat:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         ctx.account = "test-account"
         ctx.output_format = "json"
-        ctx.detail_level = "detailed"
 
         result = _slash_session(ctx, ["save", "test_compat"])
         assert "Session saved" in result

@@ -1658,7 +1658,6 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 
 [cyan]Other:[/cyan]
   /clear                           Clear screen
-  /detail [concise|medium|detailed] Set agent output detail level
   /model [agent] [alias]             Switch agent model (or /model reset)
   /help [topic]                    Show help
 
@@ -2559,7 +2558,6 @@ Usage: /workflow <name> [options]"""
     workflow_name = args[0].lower()
 
     if workflow_name in ["full-scan", "fullscan"]:
-        (ctx.detail_level == "detailed") and console.print("[dim]Starting full-scan workflow...[/dim]")
         results = []
         results.append(_slash_scan(ctx, []))
         results.append(_slash_detect(ctx, []))
@@ -2635,7 +2633,6 @@ def _slash_context(ctx: ChatContext, args: list) -> str:
         return f"""[bold]Current Context:[/bold]
   Account: {ctx.account or 'default'}
   Output Format: {ctx.output_format}
-  Detail Level: {ctx.detail_level}
 
 Usage:
   /context account <name>   Switch account context
@@ -2653,7 +2650,6 @@ Usage:
     elif cmd == "reset":
         ctx.account = None
         ctx.output_format = "table"
-        ctx.detail_level = "medium"
         return "[green]Context reset to defaults.[/green]"
 
     return "[yellow]Usage: /context [account <name> | reset][/yellow]"
@@ -2830,7 +2826,6 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         session_data = {
             "account": ctx.account,
             "output_format": ctx.output_format,
-            "detail_level": ctx.detail_level,
             "saved_at": datetime.now().isoformat(),
         }
         session_file.write_text(json.dumps(session_data, indent=2))
@@ -2848,7 +2843,6 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         data = json.loads(session_file.read_text())
         ctx.account = data.get("account")
         ctx.output_format = data.get("output_format", "table")
-        ctx.detail_level = data.get("detail_level", "medium")
         return f"[green]Session loaded: {name}[/green]"
 
     # ------------------------------------------------------------------
@@ -3504,20 +3498,6 @@ def handle_slash_command(ctx: ChatContext, command: str) -> Optional[str]:
     if cmd in ["exit", "quit", "q"]:
         return "__EXIT__"
 
-    # Detail level command
-    if cmd in ("detail", "verbosity", "verbose"):
-        from agenticops.config import VALID_DETAIL_LEVELS
-        if args:
-            level = args[0].lower()
-            if ctx.set_detail(level):
-                return f"[green]Detail level set to: {level}[/green]"
-            return f"[yellow]Invalid level '{level}'. Use: {', '.join(VALID_DETAIL_LEVELS)}[/yellow]"
-        # No args — cycle: concise → medium → detailed → concise
-        levels = list(VALID_DETAIL_LEVELS)
-        idx = (levels.index(ctx.detail_level) + 1) % len(levels)
-        ctx.set_detail(levels[idx])
-        return f"[green]Detail level: {ctx.detail_level}[/green]"
-
     # Scan focus command
     if cmd in ("focus", "scan_focus"):
         from agenticops.config import VALID_SCAN_FOCUS
@@ -4062,7 +4042,6 @@ def chat(
     query: Optional[str] = typer.Argument(None, help="Single query (headless mode)"),
     query_flag: Optional[str] = typer.Option(None, "--query", "-q", help="Query string (headless mode)"),
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
-    detail: Optional[str] = typer.Option(None, "--detail", "-d", help="Output detail level: concise, medium, detailed"),
     focus: Optional[str] = typer.Option(None, "--focus", "-f", help="Resource focus: computing,networking,databases,storage,security,billing,all"),
     debug: bool = typer.Option(False, "--debug", help="Show debug logs (default: clean streaming output only)"),
     resume: bool = typer.Option(False, "--resume", help="Resume the most recently active non-archived session"),
@@ -4079,11 +4058,9 @@ def chat(
       echo "list issues" | aiops chat         # pipe mode
       aiops chat "analyze I#42 and check R#17"
       aiops chat "review this log @/tmp/error.log"
-      aiops chat -d concise "quick status"    # concise output
       aiops chat -f security "scan my account"  # security-only scan
     """
     import sys
-    from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
     from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
 
     # Suppress log noise by default — only show WARNING+
@@ -4095,13 +4072,6 @@ def chat(
             logging.getLogger(noisy).setLevel(logging.WARNING)
     else:
         logging.getLogger().setLevel(logging.DEBUG)
-
-    # Apply detail level if specified
-    if detail:
-        if detail not in VALID_DETAIL_LEVELS:
-            console.print(f"[red]Invalid detail level '{detail}'. Use: {', '.join(VALID_DETAIL_LEVELS)}[/red]")
-            raise typer.Exit(1)
-        set_detail_level(detail)
 
     # Apply scan focus if specified
     if focus:
@@ -4169,7 +4139,7 @@ def chat(
         "/scan", "/detect", "/analyze", "/ack", "/resolve",
         "/workflow", "/schedule", "/notify", "/channel",
         "/session", "/context", "/export", "/output",
-        "/detail", "/model", "/exit", "/quit",
+        "/model", "/exit", "/quit",
     ]
     completer = WordCompleter(slash_commands, ignore_case=True)
 
@@ -4264,9 +4234,8 @@ def chat(
                 if media_count:
                     console.print(f"[dim]Attached {media_count} media file(s) for analysis[/dim]")
 
-            # Set detail level and scan focus from context before each agent call
-            from agenticops.config import set_detail_level as _set_dl, set_scan_focus as _set_sf
-            _set_dl(ctx.detail_level)
+            # Set scan focus from context before each agent call
+            from agenticops.config import set_scan_focus as _set_sf
             _set_sf(ctx.scan_focus)
 
             # Set trace_id for this REPL turn
