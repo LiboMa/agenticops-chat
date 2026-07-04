@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useAnomaly } from "@/hooks/useAnomaly";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
@@ -45,10 +45,23 @@ const STATUS_ICONS: Record<string, string> = {
 export function ContextPanel({ issueId, onClose, onAgentCheck, agentCheckDisabled }: Props) {
   const { t } = useLocale();
 
+  // House rule: side panels close on ESC (and slide in from the right).
+  useEffect(() => {
+    if (!issueId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [issueId, onClose]);
+
   if (!issueId) return null;
 
   return (
-    <div className="h-full flex flex-col bg-card border-l border-border">
+    <div
+      key={issueId}
+      className="h-full flex flex-col bg-card border-l border-border animate-[slideInRight_0.2s_ease-out]"
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">

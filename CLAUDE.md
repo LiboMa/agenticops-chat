@@ -92,6 +92,8 @@ Web Dashboard ──────┘         │
 | `components/` | Chat components, layout (AppShell, Sidebar, Header) |
 | `api/` | `client.ts`, `types.ts` |
 
+**Popup/panel house rule (2026-07-04):** every overlay/side-panel/dialog ① animates in with `animate-[slideInRight_0.2s_ease-out]` (keyframe in tailwind.config.ts) and ② closes on ESC (window keydown listener bound while open, or Radix primitive which has it built in). Reference implementations: `chat/ContextPanel.tsx`, `chat/SaveReportDialog.tsx`.
+
 ### Skills (`skills/`) — autonomous, self-optimizing (cycle③ 2026-05-31)
 
 15 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis, security-engineer. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
