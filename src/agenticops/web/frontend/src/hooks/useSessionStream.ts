@@ -23,6 +23,7 @@ export function useSessionStream(sessionId: string | null) {
           content: payload.content,
           tool_calls: payload.toolCalls,
           token_usage: payload.tokenMetrics ?? undefined,
+          suggestions: payload.suggestions?.length ? payload.suggestions : undefined,
           created_at: new Date().toISOString(),
         };
         appendMessageToCache(qc, sid, assistantMsg);
@@ -47,7 +48,7 @@ export function useSessionStream(sessionId: string | null) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const send = useCallback(
-    (content: string, files?: File[], detailLevel?: string) => {
+    (content: string, files?: File[]) => {
       if (!sessionId) return;
       // Optimistically append the user's message so it shows immediately.
       const userMsg: ChatMessage = {
@@ -60,7 +61,7 @@ export function useSessionStream(sessionId: string | null) {
         created_at: new Date().toISOString(),
       };
       appendMessageToCache(qc, sessionId, userMsg);
-      void chatStream.send(sessionId, content, files, detailLevel);
+      void chatStream.send(sessionId, content, files);
     },
     [sessionId, qc],
   );

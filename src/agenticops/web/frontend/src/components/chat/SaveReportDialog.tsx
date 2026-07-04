@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateReportFromSession } from "@/hooks/useReports";
 import type { Report } from "@/api/types";
@@ -33,9 +33,18 @@ export default function SaveReportDialog({ sessionId, sessionName, onClose }: Pr
     );
   };
 
+  // House rule: popups close on ESC.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
-      <div className="bg-background rounded-xl shadow-2xl w-full max-w-md mx-4">
+      <div className="bg-background rounded-xl shadow-2xl w-full max-w-md mx-4 animate-[slideInRight_0.2s_ease-out]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-lg font-semibold text-foreground">Save as Report</h2>

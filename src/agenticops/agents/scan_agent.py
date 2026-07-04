@@ -162,7 +162,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         Discovered resource counts per account, region, and type.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
         model_id, max_tokens = get_agent_model_config("scan")
         cache_kwargs: dict = {}
@@ -191,6 +191,7 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             model=bedrock_model,
             callback_handler=None,
             conversation_manager=get_agent_conversation_manager("scan"),
+            context_manager=get_agent_context_manager("scan"),
             tools=tools,
         )
 

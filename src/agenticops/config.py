@@ -170,6 +170,10 @@ class Settings(BaseSettings):
 
     # Prompt caching toggle
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
+    strands_context_manager_auto: bool = Field(
+        default=True,
+        description="Enable Strands SDK auto context management (SummarizingConversationManager + ContextOffloader) on all agents. Coexists with per-agent conversation_manager.",
+    )
 
     # CLI tool output limit (0 = unlimited)
     cli_max_output_chars: int = Field(default=0, description="Max chars for CLI tool output (0 = no limit)")
@@ -487,12 +491,6 @@ class Settings(BaseSettings):
         description="Default admin password for initial seed",
     )
 
-    # Agent output detail level
-    agent_output_detail: str = Field(
-        default="medium",
-        description="Default agent output detail level: concise, medium, or detailed",
-    )
-
     # Issue exclude patterns — regex patterns to suppress issue creation
     issue_exclude_patterns: list[str] = Field(default_factory=list)
 
@@ -518,6 +516,10 @@ class Settings(BaseSettings):
     executor_auto_approve_l0_l1: bool = Field(
         default=True,
         description="Auto-approve L0/L1 fix plans for execution",
+    )
+    executor_hitl_enabled: bool = Field(
+        default=False,
+        description="Add a Strands HumanInTheLoop intervention as a second SDK-level approval gate on the executor. Default off; the existing get_approved_fix_plan gate + DB state machine remain the primary gate. When on, mutating tools raise interrupts (interrupt/resume) — resume-wiring to the approval UI is a follow-up.",
     )
     executor_step_timeout: int = Field(
         default=300,
@@ -927,6 +929,57 @@ def get_agent_conversation_manager(agent_name: str):
     return SlidingWindowConversationManager(window_size=ws, per_turn=True)
 
 
+def get_agent_context_manager(agent_name: str):
+    """Return "auto" to enable Strands SDK auto context management, or None to disable.
+
+    Gated by settings.strands_context_manager_auto. When "auto" is combined with an
+    explicit conversation_manager (which every agent passes), the SDK preserves our
+    conversation_manager and only adds the ContextOffloader plugin — so per-agent
+    window strategy (Null / SlidingWindow) is unchanged; we just gain offloading of
+    oversized tool results. Returns None (== Agent default) when disabled, so toggling
+    the flag off restores exact pre-change behavior.
+
+    agent_name is accepted for future per-agent override symmetry with
+    get_agent_conversation_manager; currently the flag is global.
+    """
+    if settings.strands_context_manager_auto:
+        return "auto"
+    return None
+
+
+def get_executor_interventions():
+    """Return the interventions list for the executor agent.
+
+    Gated by settings.executor_hitl_enabled (default False -> []). When enabled,
+    adds ONE HumanInTheLoop handler as a *second*, SDK-level safety net on top of
+    the existing primary gate (get_approved_fix_plan tool check + DB state machine +
+    L0/L1 risk tiering). Read-only / verification tools are allow-listed so they run
+    without prompting; only mutating tools (run_aws_cli, run_on_host, run_kubectl)
+    raise an interrupt. Returns [] when disabled so the executor behaves exactly as
+    before. Import is lazy so the SDK symbol is only touched when the gate is on.
+    """
+    if not settings.executor_hitl_enabled:
+        return []
+    from strands.vended_interventions.hitl import HumanInTheLoop
+    return [
+        HumanInTheLoop(
+            allowed_tools=[
+                "get_approved_fix_plan",
+                "run_aws_cli_readonly",
+                "describe_ec2",
+                "describe_rds",
+                "describe_vpcs",
+                "describe_security_groups",
+                "describe_load_balancers",
+                "describe_eks_clusters",
+                "query_reachability",
+                "find_network_path",
+                "detect_network_anomalies",
+            ],
+        )
+    ]
+
+
 def save_to_yaml(keys: dict[str, Any]) -> None:
     """Persist specific settings back to config/settings.yaml (CLI use only).
 
@@ -944,37 +997,6 @@ def save_to_yaml(keys: dict[str, Any]) -> None:
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
     with open(yaml_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-
-# ── Agent Detail Level ──────────────────────────────────────────────
-
-VALID_DETAIL_LEVELS = ("concise", "medium", "detailed")
-
-_detail_level_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "agent_detail_level", default=settings.agent_output_detail
-)
-
-
-def get_detail_level() -> str:
-    """Get the current agent output detail level from context."""
-    return _detail_level_var.get()
-
-
-def set_detail_level(level: str) -> contextvars.Token:
-    """Set the agent output detail level in context.
-
-    Args:
-        level: One of 'concise', 'medium', or 'detailed'.
-
-    Returns:
-        Token that can be used to reset to the previous value.
-
-    Raises:
-        ValueError: If level is not valid.
-    """
-    if level not in VALID_DETAIL_LEVELS:
-        raise ValueError(f"Invalid detail level '{level}'. Must be one of: {', '.join(VALID_DETAIL_LEVELS)}")
-    return _detail_level_var.set(level)
 
 
 # ── Scan Focus (resource category filter) ─────────────────────────────

@@ -77,7 +77,8 @@ export interface RCAResult {
   anomaly_id: number;
   analysis_type: string;
   root_cause: string;
-  confidence_score: number;
+  /** API field is `confidence` (0-1); was mis-typed confidence_score → NaN% in UI */
+  confidence: number;
   contributing_factors: string[];
   recommendations: string[];
   related_resources: string[];
@@ -586,6 +587,8 @@ export interface ChatSession {
   pinned: boolean;
   starred: boolean;
   archived: boolean;
+  /** Per-session main-agent model override; null = Auto (follow global config) */
+  model_id: string | null;
 }
 
 export interface ChatMessage {
@@ -603,6 +606,8 @@ export interface ChatMessage {
   };
   trace_id?: string;
   cost_usd?: number;
+  /** Follow-up suggestion chips from the reply tail; only rendered on the last assistant message */
+  suggestions?: string[];
   attachments?: Array<{ filename: string; size: number }>;
   created_at: string;
 }

@@ -571,11 +571,12 @@ class ChatSessionUpdate(BaseModel):
     pinned: Optional[bool] = None
     starred: Optional[bool] = None
     archived: Optional[bool] = None
+    # "" = set Auto (stored NULL); omitted = don't change; non-empty = validated model id
+    model_id: Optional[str] = None
 
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
-    detail_level: Optional[str] = Field(None, description="Agent output detail: concise, medium, or detailed")
     scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
 
 
@@ -588,6 +589,7 @@ class ChatMessageResponse(BaseModel):
     trace_id: Optional[str] = None
     cost_usd: Optional[float] = None
     attachments: Optional[list] = None
+    suggestions: Optional[list] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -604,6 +606,8 @@ class ChatSessionResponse(BaseModel):
     pinned: bool = False
     starred: bool = False
     archived: bool = False
+    # Per-session main-agent model override; None = Auto (follow global config)
+    model_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

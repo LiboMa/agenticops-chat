@@ -58,45 +58,35 @@ class TestBuildSystemPrompt:
 # ── Preamble: get_output_rules ───────────────────────────────────────
 
 class TestGetOutputRules:
-    """Tests for get_output_rules from preamble."""
+    """Output rules are fixed (single medium template since MVP-2.0.1)."""
 
-    def test_concise_rules(self):
+    def test_generic_rules(self):
         from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="concise"):
-            rules = get_output_rules()
-            assert "~500 tokens" in rules
-
-    def test_medium_rules(self):
-        from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="medium"):
-            rules = get_output_rules()
-            assert "~1500 tokens" in rules
-
-    def test_detailed_rules(self):
-        from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="detailed"):
-            rules = get_output_rules()
-            assert "~4000 tokens" in rules
+        rules = get_output_rules()
+        assert "~1500 tokens" in rules
 
     def test_rca_addenda_appended(self):
         from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="medium"):
-            rules = get_output_rules(agent_type="rca")
-            assert "Root Cause" in rules
-            assert "Contributing Factors" in rules
+        rules = get_output_rules(agent_type="rca")
+        assert "Root Cause" in rules
+        assert "Contributing Factors" in rules
 
     def test_sre_addenda_appended(self):
         from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="medium"):
-            rules = get_output_rules(agent_type="sre")
-            assert "Mode A" in rules
+        rules = get_output_rules(agent_type="sre")
+        assert "Mode A" in rules
 
     def test_generic_no_addenda(self):
         from agenticops.agents.preamble import get_output_rules
-        with patch("agenticops.agents.preamble.get_detail_level", return_value="medium"):
-            rules = get_output_rules(agent_type="generic")
-            assert "Root Cause" not in rules
-            assert "Mode A" not in rules
+        rules = get_output_rules(agent_type="generic")
+        assert "Root Cause" not in rules
+        assert "Mode A" not in rules
+
+    def test_detail_level_machinery_gone(self):
+        import agenticops.config as cfg
+        assert not hasattr(cfg, "set_detail_level")
+        assert not hasattr(cfg, "get_detail_level")
+        assert not hasattr(cfg, "VALID_DETAIL_LEVELS")
 
 
 # ── Loader: backward compat re-exports ────────────────────────────────
@@ -116,11 +106,9 @@ class TestLoaderBackwardCompat:
             assert "BASE PROMPT" in result
             assert "OUTPUT FORMAT RULES" in result
 
-    def test_output_rules_dict_importable(self):
+    def test_output_rules_importable(self):
         from agenticops.skills.loader import _OUTPUT_RULES
-        assert "concise" in _OUTPUT_RULES
-        assert "medium" in _OUTPUT_RULES
-        assert "detailed" in _OUTPUT_RULES
+        assert "OUTPUT FORMAT RULES" in _OUTPUT_RULES
 
 
 # ── Skill XML Truncation ─────────────────────────────────────────────
@@ -258,20 +246,17 @@ class TestPerAgentWindowSizeConfig:
             val = getattr(settings, f"agent_{name}_window_size")
             assert isinstance(val, int), f"agent_{name}_window_size should be int, got {type(val)}"
 
-    def test_rca_window_size_from_yaml(self):
-        """RCA window size should be 0 (auto) via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_rca_window_size == 0
-
-    def test_sre_window_size_from_yaml(self):
-        """SRE window size should be -1 (unlimited) via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_sre_window_size == -1
-
-    def test_executor_window_size_from_yaml(self):
-        """Executor window size should be set to 100 via settings.yaml."""
-        from agenticops.config import settings
-        assert settings.agent_executor_window_size == 100
+    def test_window_sizes_match_yaml(self):
+        """settings.agent_*_window_size must reflect settings.yaml (loading works;
+        no hardcoded expected values — the yaml is owner-tuned at runtime)."""
+        import yaml
+        from agenticops.config import settings, _YAML_CONFIG_PATH
+        with open(_YAML_CONFIG_PATH) as f:
+            data = yaml.safe_load(f) or {}
+        for name in ("rca", "sre", "executor"):
+            key = f"agent_{name}_window_size"
+            if key in data:
+                assert getattr(settings, key) == data[key], f"{key}: settings != yaml"
 
 
 # ── Display: cost table from config ──────────────────────────────────

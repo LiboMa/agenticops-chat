@@ -6,7 +6,7 @@ export function useStats() {
   return useQuery({
     queryKey: ["stats"],
     queryFn: () => apiFetch<Stats>("/stats"),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
   });
 }

@@ -25,6 +25,18 @@ const STATUS_LABELS: Record<string, string> = {
   dismissed: "dismissed",
 };
 
+/** Meta line: drop "unknown" placeholders, show the tail of ARNs (the id part carries the signal). */
+function shortResourceRef(type: string | null | undefined, id: string | null | undefined): string {
+  const t = type && type !== "unknown" ? type : "";
+  let rid = id ?? "";
+  if (rid.startsWith("arn:")) {
+    rid = rid.split(/[/:]/).filter(Boolean).pop() ?? rid;
+  }
+  if (rid.length > 28) rid = "…" + rid.slice(-28);
+  if (t && rid) return `${t}/${rid}`;
+  return t || rid;
+}
+
 /** Statuses where inline quick-actions are available */
 const ACTIONABLE = new Set<string>([
   "open",
@@ -116,7 +128,11 @@ export const IssueRow = React.memo(function IssueRow({ issue, onClick }: Props) 
             {issue.title}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            {issue.region} · {issue.resource_type}/{issue.resource_id?.slice(0, 20)} · {formatShortDate(issue.detected_at)}
+            {[
+              issue.region && issue.region !== "unknown" ? issue.region : "",
+              shortResourceRef(issue.resource_type, issue.resource_id),
+              formatShortDate(issue.detected_at),
+            ].filter(Boolean).join(" · ")}
           </div>
         </div>
 

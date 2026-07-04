@@ -631,7 +631,7 @@ flowchart LR
     HIST --> VIRT["Virtualized MessageList<br/>(@tanstack/react-virtual)"]
 ```
 
-**Concurrency.** The SSE read-loop lives in a module-level `chatStream` store keyed by `session_id`, not inside the React page. Navigating between sessions does **not** stop generation — multiple sessions stream at once, and a live ● dot in the session list marks each one that is actively streaming. The input is disabled per-session (only the conversation that is streaming), never globally. Backend `contextvars` (`detail_level`, `scan_focus`, `trace_id`) isolate concurrent streams to different sessions; same-session concurrent turns are still rejected by the Strands agent lock (one turn per conversation, by design).
+**Concurrency.** The SSE read-loop lives in a module-level `chatStream` store keyed by `session_id`, not inside the React page. Navigating between sessions does **not** stop generation — multiple sessions stream at once, and a live ● dot in the session list marks each one that is actively streaming. The input is disabled per-session (only the conversation that is streaming), never globally. Backend `contextvars` (`scan_focus`, `trace_id`) isolate concurrent streams to different sessions; same-session concurrent turns are still rejected by the Strands agent lock (one turn per conversation, by design).
 
 **Fast open.** History is **cursor-paginated**: `GET /api/chat/sessions/{id}/messages?limit=50&before=<msg_id>` returns the newest page plus a `next_cursor` (the `before` id for the next-older page). `GET /api/chat/sessions/{id}` is **metadata-only** (no longer ships the full history). The message list is **virtualized** (`@tanstack/react-virtual`) so only visible rows are in the DOM; scrolling to the top loads the older page, with scroll-anchoring so the viewport doesn't jump.
 
@@ -810,11 +810,6 @@ aiops chat "analyze this error log @/tmp/error.log"
 # With image analysis
 aiops chat "what's wrong in this screenshot @/tmp/dashboard.png"
 
-# Control output detail level (-d / --detail)
-aiops chat -d concise "quick status of prod"     # ~500 tokens, bullets only
-aiops chat -d medium "check health of EC2"        # ~1500 tokens (default)
-aiops chat --detail detailed "deep dive on I#42"  # ~4000 tokens, full narrative
-
 # Chain commands in CI/CD
 aiops chat "scan EC2 in us-east-1" && \
 aiops chat "check health of EC2" && \
@@ -822,8 +817,6 @@ aiops chat "generate daily report"
 ```
 
 **TTY detection:** Rich formatting when running in terminal, plain text when piped.
-
-**Detail levels:** Use `/detail` in interactive mode or `--detail` in headless mode to control how much detail agents return. `concise` gives root cause + bullets only; `medium` (default) adds evidence + recommendations; `detailed` provides full narrative with complete evidence chain.
 
 ---
 
@@ -1013,7 +1006,6 @@ Every agent call is logged with token counts and cost (computed from `config.tok
 | `/execute <ID>` | Execute fix plan |
 | `/report list` | List reports |
 | `/context set <key> <val>` | Set chat context |
-| `/detail [concise\|medium\|detailed]` | Set agent output detail level |
 | `/channel list\|show\|test\|set` | Manage notification channels (YAML-backed) |
 | `/send_to <target> <content>` | Send content to channel or IM alias |
 | `/output json` | Switch to JSON output |
@@ -1048,10 +1040,10 @@ curl -N -X POST $BASE/chat/sessions/{id}/messages \
   -H 'Content-Type: application/json' \
   -d '{"content": "check health of EC2"}'
 
-# Send message with detail level
-curl -N -X POST $BASE/chat/sessions/{id}/messages \
+# Switch this session's model (per-session; "" = Auto, follow global)
+curl -X PATCH $BASE/chat/sessions/{id} \
   -H 'Content-Type: application/json' \
-  -d '{"content": "deep dive on EC2", "detail_level": "detailed"}'
+  -d '{"model_id": "global.anthropic.claude-opus-4-8"}'
 
 # Upload image for analysis
 curl -X POST $BASE/chat/sessions/{id}/messages \
@@ -1106,7 +1098,6 @@ export AIOPS_NOTIFICATIONS_ENABLED=true         # Auto-notify on pipeline events
 # Features
 export AIOPS_SKILLS_ENABLED=true       # Enable agent skills (default: true)
 export AIOPS_EMBEDDING_ENABLED=true    # Enable vector embeddings (default: true)
-export AIOPS_AGENT_OUTPUT_DETAIL=medium  # Agent output detail: concise, medium, detailed
 
 # Web & Auth
 export AIOPS_CORS_ORIGINS="http://localhost:3000,https://myapp.example.com"

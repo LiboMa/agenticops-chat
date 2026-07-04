@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolCallChip } from "./ToolCallChip";
 import { TokenMetrics } from "./TokenMetrics";
+import { SuggestionChips } from "./SuggestionChips";
 import type { ChatMessage } from "@/api/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { renderMessageMarkdown } from "@/lib/markdownCache";
@@ -16,6 +17,8 @@ interface Props {
   hasOlder?: boolean;
   isFetchingOlder?: boolean;
   onLoadOlder?: () => void;
+  onSuggestionPick?: (text: string) => void;
+  onIssueRefClick?: (issueId: number) => void;
 }
 
 export function MessageList({
@@ -27,16 +30,23 @@ export function MessageList({
   hasOlder,
   isFetchingOlder,
   onLoadOlder,
+  onSuggestionPick,
+  onIssueRefClick,
 }: Props) {
   const navigate = useNavigate();
   const parentRef = useRef<HTMLDivElement>(null);
 
   const handleRefClick = (e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a.md-ref") as HTMLAnchorElement | null;
-    if (anchor) {
-      e.preventDefault();
-      navigate(new URL(anchor.href).pathname);
+    if (!anchor) return;
+    e.preventDefault();
+    const pathname = new URL(anchor.href).pathname;
+    const issueMatch = pathname.match(/^\/app\/issues\/(\d+)$/);
+    if (issueMatch && onIssueRefClick) {
+      onIssueRefClick(Number(issueMatch[1]));
+      return;
     }
+    navigate(pathname);
   };
 
   // One virtual row per message; the streaming bubble is rendered as a sticky
@@ -91,7 +101,7 @@ export function MessageList({
   }, [messages, streamingContent, streaming]);
 
   const streamingHtml = useMemo(
-    () => (streamingContent ? renderMarkdown(streamingContent) : ""),
+    () => (streamingContent ? renderMarkdown(streamingContent.split("<<SUGGEST>>")[0]) : ""),
     [streamingContent],
   );
 
@@ -133,7 +143,12 @@ export function MessageList({
               style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
               className="pb-7"
             >
-              <MessageRow msg={msg} />
+              <MessageRow
+                msg={msg}
+                isLast={vi.index === messages.length - 1}
+                streaming={streaming}
+                onSuggestionPick={onSuggestionPick}
+              />
             </div>
           );
         })}
@@ -182,7 +197,12 @@ export function MessageList({
   );
 }
 
-function MessageRow({ msg }: { msg: ChatMessage }) {
+function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
+  msg: ChatMessage;
+  isLast?: boolean;
+  streaming?: boolean;
+  onSuggestionPick?: (text: string) => void;
+}) {
   return (
     <div className={msg.role === "user" ? "flex justify-end" : "flex gap-3"}>
       {msg.role === "assistant" && (
@@ -214,6 +234,10 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
         />
         {msg.role === "assistant" && msg.token_usage && (
           <TokenMetrics msg={msg} />
+        )}
+        {msg.role === "assistant" && isLast && !streaming && onSuggestionPick &&
+          Array.isArray(msg.suggestions) && msg.suggestions.length > 0 && (
+          <SuggestionChips suggestions={msg.suggestions} onPick={onSuggestionPick} />
         )}
       </div>
     </div>

@@ -154,6 +154,8 @@ class StreamingCallbackHandler:
         self._live: Optional[Live] = None
         self._buf: list = []       # text buffer for batched output
         self._last_flush = 0.0
+        self._suppress = False    # <<SUGGEST>> marker 已现,吞掉后续所有 data
+        self._tail = ""           # 滞留的可能-是-marker-前缀 的尾巴
 
     def _show_spinner(self, text: str, style: str = "dots"):
         """Show/update animated spinner via Rich Live."""
@@ -230,13 +232,35 @@ class StreamingCallbackHandler:
                     self._complete_step()
                 self._phase = "streaming"
                 print()  # blank line before response
-            self._buf.append(data)
+            from agenticops.chat.suggestions import SUGGEST_MARKER
+            if self._suppress:
+                return
+            combined = self._tail + data
+            midx = combined.find(SUGGEST_MARKER)
+            if midx != -1:
+                printable = combined[:midx].rstrip("\n")
+                self._suppress = True
+                self._tail = ""
+            else:
+                # 滞留可能是 marker 前缀的最长后缀,等下一 chunk 拼合判断
+                hold = 0
+                for k in range(min(len(SUGGEST_MARKER) - 1, len(combined)), 0, -1):
+                    if SUGGEST_MARKER.startswith(combined[-k:]):
+                        hold = k
+                        break
+                printable = combined[:-hold] if hold else combined
+                self._tail = combined[-hold:] if hold else ""
+            if printable:
+                self._buf.append(printable)
             now = time.time()
-            if now - self._last_flush > 0.05 or "\n" in data:
+            if now - self._last_flush > 0.05 or "\n" in (printable or ""):
                 self._flush_buf()
 
         # Complete
         if complete:
+            if self._tail and not self._suppress:
+                self._buf.append(self._tail)
+                self._tail = ""
             self._flush_buf()
             if self._live:
                 self._live.stop()

@@ -92,6 +92,8 @@ Web Dashboard ──────┘         │
 | `components/` | Chat components, layout (AppShell, Sidebar, Header) |
 | `api/` | `client.ts`, `types.ts` |
 
+**Popup/panel house rule (2026-07-04):** every overlay/side-panel/dialog ① animates in with `animate-[slideInRight_0.2s_ease-out]` (keyframe in tailwind.config.ts) and ② closes on ESC (window keydown listener bound while open, or Radix primitive which has it built in). Reference implementations: `chat/ContextPanel.tsx`, `chat/SaveReportDialog.tsx`.
+
 ### Skills (`skills/`) — autonomous, self-optimizing (cycle③ 2026-05-31)
 
 15 domain skills: linux-admin, network-engineer, kubernetes-admin, database-admin, elasticsearch, monitoring, log-analysis, aws-compute, aws-storage, local-os-operator, web-research, distributed-tracing, notification-operator, document-analysis, security-engineer. Each: SKILL.md + references/*.md. Guide: `skills/ADDING_SKILLS.md`. Scan and detect agents also have `activate_skill` for dynamic tool registration.
@@ -148,9 +150,11 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `auto_rca_enabled` | `true` | Auto-trigger RCA |
 | `auto_fix_enabled` | `true` | Auto-fix pipeline |
 | `executor_auto_approve_l0_l1` | `true` | Auto-approve L0/L1 |
+| `executor_hitl_enabled` | `false` | Add a Strands `HumanInTheLoop` intervention as a 2nd SDK-level approval gate on executor (default off; primary gate stays `get_approved_fix_plan` + DB state machine). Read-only tools allow-listed; mutating tools raise interrupt |
 | `notifications_enabled` | `true` | Auto-notifications |
 | `notifications_consolidated` | `true` | Suppress per-issue notifications during Scan/Detect/RCA; only final report sent. Set `false` for dev/debug |
 | `bedrock_cache_enabled` | `true` | Prompt caching on all agents |
+| `strands_context_manager_auto` | `true` | Strands SDK auto context management (SummarizingConversationManager + ContextOffloader) on all 8 agent builds. Coexists with per-agent `conversation_manager` (SDK preserves ours, only adds ContextOffloader). Offloads oversized tool results (AWS CLI/describe) to keep context bounded |
 | `agent_{name}_model_id` | `""` | Per-agent model override (7 agents: main/scan/detect/rca/sre/executor/reporter) |
 | `agent_{name}_max_tokens` | `0` | Per-agent max_tokens override (0 = use bedrock_max_tokens) |
 | `deployment_profile` | `local` | local or cloud |
@@ -168,7 +172,6 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `acp_kiro_command` / `acp_kiro_args` | `kiro-cli` / `["acp","--trust-all-tools"]` | Kiro CLI ACP launch (uses kiro's own login) |
 | `acp_codex_command` / `acp_codex_args` | `npx` / `["-y","@zed-industries/codex-acp"]` | Codex ACP launch (needs `OPENAI_API_KEY`) |
 | `scan_focus` | `all` | Resource categories filter |
-| `agent_output_detail` | `medium` | concise/medium/detailed |
 | `patrol_graph_checks_enabled` | `true` | SPOF + capacity-risk graph analysis step in health patrol (prevention; findings create HealthIssues with auto_rca off) |
 | `rca_topology_context_enabled` | `true` | Inject topology context (neighbors, blast radius, recent graph changes) into RCA invocation prompts |
 

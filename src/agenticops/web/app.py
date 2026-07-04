@@ -267,6 +267,28 @@ app.include_router(_cost_router.router)
 _chat_sessions = ChatSessionManager()
 _executor_service = ExecutorService(poll_interval=settings.executor_poll_interval)
 
+# Sessions with an SSE response currently streaming — used to reject
+# mid-stream model switches (409). Entries removed in the generator's finally.
+_streaming_sessions: set[str] = set()
+
+from agenticops.services.model_service import get_model_presets  # noqa: E402
+
+
+def _allowed_model_ids() -> set[str]:
+    """Valid per-session model ids: cached presets ∪ alias targets (no live call beyond preset cache)."""
+    from agenticops.config import MODEL_ALIASES
+    return {p["value"] for p in get_model_presets()} | set(MODEL_ALIASES.values())
+
+
+def _effective_main_model(session_id: str) -> str:
+    """Session model override if set, else global main model (for cost attribution)."""
+    from agenticops.config import get_agent_model_config
+    with get_db_session() as db:
+        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        if row and row.model_id:
+            return row.model_id
+    return get_agent_model_config("main")[0]
+
 
 
 # ============================================================================
@@ -4093,6 +4115,7 @@ async def api_create_chat_session(payload: ChatSessionCreate):
             id=row.id, session_id=row.session_id, name=row.name,
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=0,
+            model_id=row.model_id,
         )
 
 
@@ -4121,6 +4144,7 @@ async def api_list_chat_sessions(
                 created_at=r.created_at, updated_at=r.updated_at,
                 last_activity_at=r.last_activity_at, message_count=cnt,
                 pinned=r.pinned, starred=r.starred, archived=r.archived,
+                model_id=r.model_id,
             ))
         return result
 
@@ -4176,7 +4200,8 @@ async def api_get_chat_messages(
                 tool_calls=m.tool_calls, token_usage=m.token_usage,
                 trace_id=m.trace_id,
                 cost_usd=(m.token_usage or {}).get("cost_usd"),
-                attachments=m.attachments, created_at=m.created_at,
+                attachments=m.attachments, suggestions=m.suggestions,
+                created_at=m.created_at,
             ) for m in page_chrono],
             has_more=has_more,
             next_cursor=next_cursor,
@@ -4185,6 +4210,14 @@ async def api_get_chat_messages(
 
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
 async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
+    model_field_set = "model_id" in payload.model_fields_set
+    if model_field_set and session_id in _streaming_sessions:
+        raise HTTPException(409, "A response is still streaming — stop it before switching models")
+    if model_field_set and payload.model_id:
+        allowed = _allowed_model_ids()
+        if payload.model_id not in allowed:
+            raise HTTPException(400, f"Unknown model id. Allowed: {sorted(allowed)[:10]} ...")
+
     with get_db_session() as db:
         row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
         if not row:
@@ -4199,6 +4232,11 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         archiving = payload.archived is True and not row.archived
         if payload.archived is not None:
             row.archived = payload.archived
+        model_changed = False
+        if model_field_set:
+            new_model = payload.model_id or None  # "" sentinel → NULL (Auto)
+            model_changed = new_model != row.model_id
+            row.model_id = new_model
         row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
@@ -4207,7 +4245,12 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=cnt,
             pinned=row.pinned, starred=row.starred, archived=row.archived,
+            model_id=row.model_id,
         )
+
+    # Rebuild this session's agent with the new model on next message
+    if model_changed:
+        _chat_sessions.remove(session_id)
 
     # Trigger memory extraction in the background when archiving
     if archiving:
@@ -4288,13 +4331,11 @@ async def api_send_chat_message(session_id: str, request: Request):
     file_documents: list[tuple[str, bytes, str, str]] = []
     attachments: list[dict] | None = None
 
-    detail_level_req: Optional[str] = None
     scan_focus_req: Optional[str] = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
-        detail_level_req = str(form.get("detail_level", "")).strip() or None
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
         uploads = form.getlist("file")
         valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
@@ -4347,7 +4388,6 @@ async def api_send_chat_message(session_id: str, request: Request):
     else:
         payload = ChatMessageCreate(**(await request.json()))
         user_content = payload.content
-        detail_level_req = payload.detail_level
         scan_focus_req = payload.scan_focus
 
     # Intercept /channel command before agent dispatch
@@ -4409,11 +4449,6 @@ async def api_send_chat_message(session_id: str, request: Request):
         db_session_pk = row.id
 
     async def _generate():
-        # Set detail level for this request if provided
-        if detail_level_req:
-            from agenticops.config import VALID_DETAIL_LEVELS, set_detail_level
-            if detail_level_req in VALID_DETAIL_LEVELS:
-                set_detail_level(detail_level_req)
         # Set scan focus for this request if provided
         if scan_focus_req:
             from agenticops.config import VALID_SCAN_FOCUS, set_scan_focus
@@ -4432,6 +4467,7 @@ async def api_send_chat_message(session_id: str, request: Request):
         output_tokens = 0
         cache_read_tokens = 0
         cache_write_tokens = 0
+        _streaming_sessions.add(session_id)
         try:
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
@@ -4493,6 +4529,8 @@ async def api_send_chat_message(session_id: str, request: Request):
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)
+            from agenticops.chat.suggestions import extract_suggestions
+            _clean_text, _suggestions = extract_suggestions(accumulated)
             with get_db_session() as db:
                 if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
                     logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
@@ -4500,8 +4538,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                     _tu: dict | None = None
                     if input_tokens:
                         from agenticops.cost import compute_cost
-                        from agenticops.config import get_agent_model_config
-                        _msg_model, _ = get_agent_model_config("main")
+                        _msg_model = _effective_main_model(session_id)
                         _tu = {
                             "input": input_tokens, "output": output_tokens,
                             "cache_read": cache_read_tokens,
@@ -4512,7 +4549,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     db.add(ChatMessage(
                         session_id=db_session_pk,
                         role="assistant",
-                        content=accumulated,
+                        content=_clean_text,
+                        suggestions=_suggestions or None,
                         tool_calls=tool_calls if tool_calls else None,
                         token_usage=_tu,
                         trace_id=_chat_trace_id,
@@ -4538,8 +4576,7 @@ async def api_send_chat_message(session_id: str, request: Request):
             # Log main agent call metrics
             try:
                 from agenticops.services.agent_log_service import log_agent_call
-                from agenticops.config import get_agent_model_config
-                _main_model_id, _ = get_agent_model_config("main")
+                _main_model_id = _effective_main_model(session_id)
                 log_agent_call(
                     agent_name="main",
                     action="chat",
@@ -4562,6 +4599,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                 "data": json.dumps({
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    "suggestions": _suggestions,
                 }),
             }
         except Exception as e:
@@ -4580,6 +4618,8 @@ async def api_send_chat_message(session_id: str, request: Request):
                     token_usage=err_meta,
                 ))
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
+        finally:
+            _streaming_sessions.discard(session_id)
 
     return EventSourceResponse(_generate())
 

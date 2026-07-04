@@ -803,6 +803,9 @@ class ChatSession(Base):
     starred: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Per-session main-agent model override; NULL = Auto (follow global config)
+    model_id: Mapped[Optional[str]] = mapped_column(String(200), default=None)
+
 
 class ChatMessage(Base):
     """Individual message in a chat session."""
@@ -816,6 +819,8 @@ class ChatMessage(Base):
     token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     attachments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Suggestion chips extracted from the reply tail (MVP-2.0.1); NULL = none
+    suggestions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -1052,6 +1057,22 @@ def init_db(engine=None):
         if "trace_id" not in cols:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN trace_id VARCHAR(36)"))
+                conn.commit()
+
+    # Migration: add per-session model override to chat_sessions if missing
+    if insp.has_table("chat_sessions"):
+        columns = {col["name"] for col in insp.get_columns("chat_sessions")}
+        if "model_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN model_id VARCHAR(200)"))
+                conn.commit()
+
+    # Migration: add suggestion-chips column to chat_messages if missing
+    if insp.has_table("chat_messages"):
+        cols = {c["name"] for c in insp.get_columns("chat_messages")}
+        if "suggestions" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN suggestions JSON"))
                 conn.commit()
 
     # Migration: add provider column to health_issues if missing, backfill 'aws'

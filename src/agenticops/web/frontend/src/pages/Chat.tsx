@@ -23,7 +23,6 @@ export default function Chat() {
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const { data: sessions } = useChatSessions();
-  const [detailLevel, setDetailLevel] = usePersistedState("aiops-detail-level", "medium");
 
   // Whether we're in "welcome" mode (no active session)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -141,7 +140,7 @@ export default function Chat() {
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
   const handleWelcomeSend = (content: string, files: File[]) => {
-    sendFirstMessage(content, files, detailLevel);
+    sendFirstMessage(content, files);
   };
 
   return (
@@ -219,8 +218,7 @@ export default function Chat() {
               onSend={handleWelcomeSend}
               disabled={creating}
               streaming={false}
-              detailLevel={detailLevel}
-              onDetailLevelChange={setDetailLevel}
+              sessionId={null}
             />
           </>
         ) : !selectedId ? (
@@ -279,6 +277,8 @@ export default function Chat() {
               hasOlder={hasOlder}
               isFetchingOlder={isFetchingOlder}
               onLoadOlder={fetchOlder}
+              onSuggestionPick={(text) => sendMessage(text)}
+              onIssueRefClick={setContextIssueId}
             />
 
             {/* Error banner */}
@@ -290,12 +290,11 @@ export default function Chat() {
 
             {/* Chat input */}
             <ChatInput
-              onSend={(msg, files) => sendMessage(msg, files, detailLevel)}
+              onSend={(msg, files) => sendMessage(msg, files)}
               onCancel={cancel}
               disabled={streaming}
               streaming={streaming}
-              detailLevel={detailLevel}
-              onDetailLevelChange={setDetailLevel}
+              sessionId={selectedId}
             />
           </>
         )}
@@ -312,6 +311,11 @@ export default function Chat() {
             <ContextPanel
               issueId={contextIssueId}
               onClose={() => setContextIssueId(null)}
+              onAgentCheck={() => {
+                if (contextIssueId == null) return;
+                sendMessage(t("chat.contextPanel.checkPrompt").replace("{id}", String(contextIssueId)));
+              }}
+              agentCheckDisabled={streaming}
             />
           </div>
         </>

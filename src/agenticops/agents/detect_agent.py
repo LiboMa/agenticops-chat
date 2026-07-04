@@ -83,34 +83,42 @@ STRATEGY: Passive-first, active-second, with statistical fallback.
    - Call query_provider_metrics to get cross-platform metrics for a resource.
    - Cross-reference external alerts with CloudWatch findings for corroboration.
 7. SECURITY HEALTH CHECKS (always run when scope='all' or scope='security'):
-   Use the cloud CLI tool for all security checks:
-   a) **GuardDuty Threats**:
-      - `aws guardduty list-detectors` → get detector ID
-      - `aws guardduty list-findings --detector-id DID --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`
-      - `aws guardduty get-findings --detector-id DID --finding-ids [IDs]` for details
-      - Create HealthIssue for severity >= 7: source="guardduty", severity=low (governance) UNLESS active exploitation on reachable service → critical
-   b) **Security Hub Critical Findings**:
-      - `aws securityhub get-findings --filters '{"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}],"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'`
-      - Create HealthIssue for CRITICAL findings: source="security_hub"
-   c) **Inspector Vulnerabilities**:
-      - `aws inspector2 list-findings --filter-criteria '{"severity":[{"comparison":"EQUALS","value":"CRITICAL"}],"findingStatus":[{"comparison":"EQUALS","value":"ACTIVE"}]}'`
-      - Create HealthIssue for CRITICAL CVEs: source="inspector", severity=low (governance) UNLESS network-reachable + actively exploitable → escalate to high
-   d) **Open Security Groups** (0.0.0.0/0 on sensitive ports):
-      - `aws ec2 describe-security-groups` and filter for IpRanges containing 0.0.0.0/0
-      - Flag ports 22, 3389, 3306, 5432, 6379, 27017, 9200 open to world
-      - Create HealthIssue: source="security_audit", severity=low (long-term governance)
-   e) **IAM Credential Hygiene** (global, run once):
-      - `aws iam generate-credential-report` then `aws iam get-credential-report`
-      - Flag: root access keys, users without MFA, stale credentials (>90 days)
-      - Create HealthIssue for root access keys or root without MFA: source="iam_audit", severity=low (governance)
-   f) **CloudTrail Integrity**:
-      - `aws cloudtrail describe-trails` → check multi-region trail exists
-      - `aws cloudtrail get-trail-status --name TRAIL` → check IsLogging
-      - Create HealthIssue if no trail or logging disabled: source="cloudtrail_audit", severity=low (governance)
-   g) **Encryption Gaps**:
-      - `aws ec2 describe-volumes --query 'Volumes[?!Encrypted]'` → unencrypted EBS
-      - `aws rds describe-db-instances --query 'DBInstances[?!StorageEncrypted]'` → unencrypted RDS
-      - Create HealthIssue if critical data resources are unencrypted: source="encryption_audit", severity=low (governance)
+   Check each FINDING CLASS below using the target cloud's native services via the cloud CLI
+   tool. AWS commands are examples — on other providers use the equivalent service
+   (Alibaba Cloud: Security Center/ActionTrail/RAM; GCP: Security Command Center/Cloud Audit
+   Logs/Cloud IAM; Azure: Defender for Cloud/Activity Log/Entra ID).
+
+   SEVERITY MAPPING (cloud-neutral, applies to every class):
+   - Active threat (exploitation in progress, credential compromise, anomalous use of a live
+     identity) → critical
+   - Provider-labeled CRITICAL posture finding, or a reachable attack path on an in-use
+     resource → high
+   - Provider-labeled CRITICAL vulnerability without a known-reachable path (patch backlog),
+     or sensitive port open to the world on an in-use resource → medium
+   - Pure governance/compliance gaps with no active exposure → low
+   - Never downgrade a provider-critical signal below medium.
+
+   Finding classes:
+   a) **Threat detection findings** (active threats flagged by the provider's threat detector;
+      AWS example: GuardDuty `aws guardduty list-findings --finding-criteria '{"Criterion":{"severity":{"Gte":4}}}'`)
+      → source="threat_detection"
+   b) **Security posture findings** (provider's aggregated security-standard violations;
+      AWS example: `aws securityhub get-findings --filters '{"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}],"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'`)
+      → source="security_posture"
+   c) **Vulnerability scan findings** (CVEs in images/instances from the provider's scanner;
+      AWS example: `aws inspector2 list-findings --filter-criteria '{"severity":[{"comparison":"EQUALS","value":"CRITICAL"}]}'`)
+      → source="vuln_scan"
+   d) **Network exposure** (firewall/security-group rules open to 0.0.0.0/0 on sensitive ports
+      22, 3389, 3306, 5432, 6379, 27017, 9200; AWS example: `aws ec2 describe-security-groups`)
+      → source="network_exposure"
+   e) **Identity credential hygiene** (root/primary-account keys, users without MFA, stale
+      credentials >90 days; AWS example: `aws iam get-credential-report`)
+      → source="identity_hygiene"
+   f) **Audit trail integrity** (account-wide audit logging missing or disabled;
+      AWS example: `aws cloudtrail get-trail-status`) → source="audit_logging"
+   g) **Encryption gaps** (data stores without encryption at rest;
+      AWS example: `aws ec2 describe-volumes --query 'Volumes[?!Encrypted]'`)
+      → source="encryption_audit"
 
 8. For confirmed problems, call create_health_issue with:
    - severity, source, title, description, alarm_name, metric_data, related_changes.
@@ -120,12 +128,14 @@ SEVERITY CLASSIFICATION (SRE priority — reachability first):
 Priority 1 — CRITICAL (immediate operational impact, resolve NOW):
 - ANY reachability failure: instance unreachable, endpoint down, connection refused/timeout,
   health check failing, DNS resolution failure, port unreachable
-- Compute: EC2 StatusCheckFailed, ECS task crash-looping, Lambda invocation errors > 50%
-- Networking: NAT Gateway ErrorPortAllocation/PacketsDropCount > 0, VPC blackhole routes,
-  ELB UnHealthyHostCount > 0, target group with 0 healthy targets, NLB connection errors
-- Database: RDS/Aurora connection failures, replica lag causing read timeouts, cluster failover,
-  ElastiCache unreachable, DynamoDB throttling causing request failures
-- Storage: S3 5xx errors, EFS mount failures, EBS volume detached/impaired
+- Compute: instance status-check failure, container task crash-looping, function invocation
+  errors > 50% (AWS examples: EC2 StatusCheckFailed, ECS, Lambda)
+- Networking: NAT errors/packet drops, blackhole routes, load balancer with unhealthy or
+  0 healthy targets, connection errors (AWS examples: NAT Gateway, VPC routes, ELB/NLB)
+- Database: connection failures, replica lag causing read timeouts, cluster failover, cache
+  unreachable, throttling causing request failures (AWS examples: RDS/Aurora, ElastiCache, DynamoDB)
+- Storage: object-store 5xx errors, file-system mount failures, block volume detached/impaired
+  (AWS examples: S3, EFS, EBS)
 - Service down, data loss risk imminent
 
 Priority 2 — HIGH (performance degradation, short-term danger signals):
@@ -139,23 +149,27 @@ Priority 2 — HIGH (performance degradation, short-term danger signals):
 Priority 3 — MEDIUM (capacity & resource planning):
 - Capacity approaching limits: disk > 80%, connections > 70%, IOPS nearing provisioned max
 - Performance anomaly (Z-score deviation) without user-facing impact yet
-- Missing CloudWatch alarms for critical resources
+- Missing metric alarms for critical resources (e.g., CloudWatch on AWS)
 - Resource utilization trending toward limits (days/weeks horizon)
 
 Priority 4 — LOW (long-term governance, security hardening):
-- Security misconfigurations: open SGs, unencrypted volumes, stale credentials (>90 days)
-- Compliance gaps: missing CloudTrail, no encryption at rest
-- GuardDuty/SecurityHub findings (unless CRITICAL CVE on network-reachable resource → escalate to HIGH)
-- IAM hygiene: root access keys, users without MFA
-- Informational deviations, minor non-critical findings
+- Compliance gaps with no active exposure: missing account-wide audit trail, no encryption
+  at rest on non-critical data
+- Stale credentials (>90 days) on unused identities; tag compliance; informational deviations
+
+SEVERITY SANITY CHECK (apply before create_health_issue):
+If the title you are about to write contains CRITICAL/HIGH (e.g., quoting a provider's finding
+label) but your chosen severity is low, RE-EVALUATE — provider-critical findings are at least
+medium, and anything indicating active compromise or a reachable attack path is high/critical.
+Severity must match what the title claims, or the issue list becomes untrustworthy.
 
 ESCALATION RULE: Any security finding that directly enables unauthorized access to a reachable
-service (e.g., CRITICAL CVE on internet-facing instance, active exploitation detected by GuardDuty
-severity >= 8) should be escalated to CRITICAL.
+service (e.g., CRITICAL CVE on an internet-facing instance, active exploitation flagged at the
+threat detector's top severity band) should be escalated to CRITICAL.
 
 RULES:
-- Only READ operations on AWS. The only write is create_health_issue in our metadata DB.
-- Always include related_changes (CloudTrail) in HealthIssue records when available.
+- Only READ operations on the cloud provider. The only write is create_health_issue in our metadata DB.
+- Always include related_changes (from the provider's audit trail, e.g. CloudTrail) when available.
 - Do NOT call LLM for simple alarm state checks - use tools directly.
 - Return a structured summary: total resources checked, alarms found, issues created,
   AND security findings summary (threats, vulnerabilities, misconfigurations, compliance gaps).
@@ -197,7 +211,7 @@ def _build_detect_agent_for_account(
     Returns:
         Agent instance pre-configured for the given account
     """
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("detect")
     cache_kwargs: dict = {}
@@ -225,6 +239,7 @@ def _build_detect_agent_for_account(
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("detect"),
+        context_manager=get_agent_context_manager("detect"),
         tools=[
             cli_tool,
             get_managed_resources,
@@ -271,7 +286,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health summary: issues found, severity breakdown, security findings.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
             # Check account count to decide parallel vs single-agent mode.
@@ -337,6 +352,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     model=model,
                     callback_handler=None,
                     conversation_manager=get_agent_conversation_manager("detect"),
+                    context_manager=get_agent_context_manager("detect"),
                     tools=[
                         # Multi-account variant: these two enable account switching,
                         # absent from the account-locked parallel path (see above).
