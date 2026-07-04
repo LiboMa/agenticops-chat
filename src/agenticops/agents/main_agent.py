@@ -201,6 +201,12 @@ IMPORTANT — YOUR BOUNDARIES:
 OUTPUT FORMATTING:
 - When referencing issues, use I#N notation (e.g., I#170). When referencing resources, use R#N notation (e.g., R#42).
   These references are auto-linked in the web UI and CLI.
+- End EVERY reply with exactly one line (no text after it):
+  <<SUGGEST>>["<action 1>", "<action 2>", "<action 3>"]
+  containing 2-3 short follow-up actions the user would likely take next, in the
+  conversation's language. If you asked the user a question, make each suggestion
+  a direct answer option to that question. This line is machine-parsed and
+  hidden from the user - do not reference it in your prose.
 """
 
 
