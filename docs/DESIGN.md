@@ -4,8 +4,8 @@
 
 AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM Multi-Agent 架构实现自动化的资源扫描、异常检测、根因分析、修复计划制定与执行，以及多渠道通知。支持 CLI、Web Dashboard、IM Bot（飞书/钉钉/企业微信）三入口。
 
-**版本**: 0.9.0-beta
-**技术栈**: Python 3.11+, SQLAlchemy, FastAPI, Strands Agents SDK, AWS Bedrock (Claude Sonnet 4.6 / Haiku 4.5 / Opus 4.6)
+**版本**: 2.0.1
+**技术栈**: Python 3.11+, SQLAlchemy, FastAPI, Strands Agents SDK 1.45, AWS Bedrock (Claude Opus 4.8 / Sonnet 4.6 / Haiku 4.5 / Opus 4.6)
 
 ---
 
@@ -495,7 +495,9 @@ SQS:
 
 **工具模块**: 10个工具模块，共 40+ 工具函数，覆盖资源扫描、指标采集、异常检测、根因分析、报告生成、知识库检索、网络拓扑、图算法 (SPOF/容量/依赖链/变更模拟)、调度管理、通知发送、文件操作等功能。
 
-**动态输出规则**: 通过 `contextvars.ContextVar` 控制 Agent 输出详细度（concise/medium/detailed），`build_prompt_with_skills()` 在 Agent 创建时注入对应级别的 OUTPUT FORMAT RULES。
+**输出规则**: 固定采用中等详度模板（`preamble.OUTPUT_RULES` 单一常量 + RCA/SRE 附加规则），`get_output_rules(agent_type)` 在 Agent 创建时注入。原 concise/medium/detailed 三级 ContextVar 旋钮已于 2.0.1 全链路移除（改为每会话模型切换）。
+
+**上下文治理** (2.0.1): 全部 8 处 Agent 构造启用 Strands `context_manager="auto"`（`SummarizingConversationManager` + `ContextOffloader`），与 per-agent `conversation_manager` 共存——保留各 agent 窗口策略，额外将超大工具结果 offload 后留预览、按需 `retrieve_offloaded_content` 取回。由 `strands_context_manager_auto` 开关控制。
 
 ---
 
@@ -603,7 +605,7 @@ aiops arch -o json      # JSON格式
 | **输出** | `/output json\|table\|wide\|yaml` | 输出格式 |
 | **通知** | `/channel list\|show\|test\|set` | 通知渠道管理 (YAML-backed) |
 | | `/send_to <target> <content>` | 发送内容到渠道或IM别名 |
-| **输出** | `/detail [concise\|medium\|detailed]` | Agent 输出详细度控制 |
+| **模型** | 每会话模型切换（composer 模型 pill / Web PATCH `model_id`） | 覆盖全局默认，仅影响本会话主 agent |
 | **其他** | `/clear`, `/verbose` | 辅助命令 |
 
 **会话持久化**:
@@ -657,7 +659,8 @@ aiops arch -o json      # JSON格式
 | `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | L0/L1 自动审批 | `true` |
 | `AIOPS_NOTIFICATIONS_ENABLED` | 事件自动通知 | `true` |
 | `AIOPS_SKILLS_ENABLED` | Agent 技能系统 | `true` |
-| `AIOPS_AGENT_OUTPUT_DETAIL` | 输出详细度 | `medium` |
+| `AIOPS_STRANDS_CONTEXT_MANAGER_AUTO` | SDK 自动上下文治理 + ContextOffloader | `true` |
+| `AIOPS_EXECUTOR_HITL_ENABLED` | executor 叠加 HumanInTheLoop 审批门 | `false` |
 | `AIOPS_API_AUTH_ENABLED` | API Key 认证 | `false` |
 | `AIOPS_CORS_ORIGINS` | CORS 允许源 | `""` (dev-mode) |
 | `AIOPS_FEISHU_WS_ENABLED` | 飞书 WS 长连接 | `true` |
