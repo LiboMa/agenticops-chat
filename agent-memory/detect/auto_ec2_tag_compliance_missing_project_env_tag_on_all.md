@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-05-29'
 created_by: user
 last_confirmed: '2026-05-29'
-last_used: '2026-06-17'
+last_used: '2026-07-05'
 related_issue_id: 363
 resource_pattern: EC2-fleet/*
 source: auto

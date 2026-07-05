@@ -4,7 +4,7 @@ confidence: 5
 created_at: '2026-05-26'
 created_by: user
 last_confirmed: '2026-05-26'
-last_used: '2026-06-17'
+last_used: '2026-07-05'
 source: chat
 status: active
 type: preference
