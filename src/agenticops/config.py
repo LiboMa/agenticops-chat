@@ -453,6 +453,46 @@ class Settings(BaseSettings):
         description="Args for the Codex ACP agent launch; needs OPENAI_API_KEY (AIOPS_ACP_CODEX_ARGS)",
     )
 
+    # ── Galaxy (resource relationship graph) ───────────────────────
+    galaxy_enabled: bool = Field(
+        default=True,
+        description="Enable the Galaxy resource graph build pipeline + API (AIOPS_GALAXY_ENABLED)",
+    )
+    galaxy_build_interval_minutes: int = Field(
+        default=60,
+        description="Interval for the auto GalaxyBuild schedule (AIOPS_GALAXY_BUILD_INTERVAL_MINUTES)",
+    )
+    galaxy_model_id: str = Field(
+        default="",
+        description="Override model for Galaxy LLM enrichment; empty = bedrock_model_id_cheap (AIOPS_GALAXY_MODEL_ID)",
+    )
+    galaxy_batch_size: int = Field(
+        default=40,
+        description="Max resources per LLM enrichment batch (AIOPS_GALAXY_BATCH_SIZE)",
+    )
+    galaxy_confidence_min: float = Field(
+        default=0.5,
+        description="Minimum confidence to keep an LLM edge (AIOPS_GALAXY_CONFIDENCE_MIN)",
+    )
+    galaxy_drop_rate_alert: float = Field(
+        default=0.05,
+        description="LLM-edge drop rate above which a build logs a WARNING (AIOPS_GALAXY_DROP_RATE_ALERT)",
+    )
+    galaxy_expand_node_cap: int = Field(
+        default=200,
+        description="Max resource nodes returned by /api/galaxy/expand before truncation (AIOPS_GALAXY_EXPAND_NODE_CAP)",
+    )
+    galaxy_llm_exclude_types: list[str] = Field(
+        default_factory=lambda: ["IAMRole", "KMS", "S3", "ECR_Repository"],
+        description="Resource types excluded from LLM enrichment (relationship-sparse leaf types)",
+    )
+    galaxy_builds_keep: int = Field(
+        default=24,
+        description="Number of most-recent GalaxyBuild rows to retain; older rows pruned after each "
+        "successful build to bound DB growth (each row stores full rule+llm graph blobs). "
+        "0 = keep all (AIOPS_GALAXY_BUILDS_KEEP)",
+    )
+
     file_tools_admin_mode: bool = Field(
         default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "

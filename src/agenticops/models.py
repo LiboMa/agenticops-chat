@@ -1159,6 +1159,7 @@ def init_db(engine=None):
     import agenticops.audit.models  # noqa: F401
     import agenticops.scheduler.scheduler  # noqa: F401
     import agenticops.notify.notifier  # noqa: F401
+    import agenticops.galaxy.models  # noqa: F401 — register galaxy_* tables in Base metadata
 
     Base.metadata.create_all(engine)
 
