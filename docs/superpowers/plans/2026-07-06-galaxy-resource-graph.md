@@ -784,6 +784,29 @@ def test_incremental_skips_when_no_change(db, seeded, monkeypatch):
     second = B.build_graph(trigger="auto", full=False)
     assert second == first
     assert calls["n"] == n_after_first
+
+
+def test_prune_keeps_only_recent_builds(db):
+    # 30 completed builds; prune keep=5 leaves the 5 newest.
+    for _ in range(30):
+        db.add(GalaxyBuild(status="completed", trigger="manual"))
+    db.commit()
+    with get_db_session() as s:
+        B._prune_old_builds(s, keep=5)
+    with get_db_session() as s:
+        rows = s.query(GalaxyBuild.id).order_by(GalaxyBuild.id.desc()).all()
+        assert len(rows) == 5
+        assert [r.id for r in rows] == sorted([r.id for r in rows], reverse=True)
+
+
+def test_prune_keep_zero_disables(db):
+    for _ in range(3):
+        db.add(GalaxyBuild(status="completed", trigger="manual"))
+    db.commit()
+    with get_db_session() as s:
+        B._prune_old_builds(s, keep=0)
+    with get_db_session() as s:
+        assert s.query(GalaxyBuild).count() == 3
 ```
 
 - [ ] **Step 2: Run it, verify failure**
@@ -926,16 +949,28 @@ def _parse_llm_edges(text: str) -> list:
     return edges if isinstance(edges, list) else []
 
 
-def _evidence_grounded(evidence: str, resource: dict) -> bool:
-    """The claimed evidence value must actually appear in the target's raw_data/tags."""
+def _evidence_grounded(evidence: str, endpoints: list) -> bool:
+    """The claimed evidence value must actually appear in at least one endpoint's
+    raw_data/tags. Evidence for a relationship commonly lives on the SOURCE end
+    (e.g. an EC2 whose raw_data cites a VpcId), not the target, and edges pointing
+    at group/account nodes have no target raw_data at all — so we ground against
+    whichever endpoints are real resources. Still fail-closed: the value must exist
+    in some real resource's data; the LLM cannot invent it."""
     if not isinstance(evidence, str) or not evidence.strip():
         return False
-    haystack = hashing.canonical_json({"raw_data": resource.get("raw_data", {}),
-                                       "tags": resource.get("tags", {})}).lower()
     # Extract the value after '=' if present, else use the whole string token.
     value = evidence.split("=", 1)[1] if "=" in evidence else evidence
     value = value.strip().strip('"').strip("'").lower()
-    return bool(value) and value in haystack
+    if not value:
+        return False
+    for res in endpoints:
+        if not res:
+            continue
+        haystack = hashing.canonical_json({"raw_data": res.get("raw_data", {}),
+                                           "tags": res.get("tags", {})}).lower()
+        if value in haystack:
+            return True
+    return False
 
 
 def _verify_edges(edges: list, valid_ids: set, node_by_id: dict, resources_by_node: dict) -> tuple:
@@ -956,8 +991,10 @@ def _verify_edges(edges: list, valid_ids: set, node_by_id: dict, resources_by_no
         if conf < settings.galaxy_confidence_min:
             dropped += 1
             continue
-        target_res = resources_by_node.get(tgt)
-        if target_res is not None and not _evidence_grounded(e.get("evidence", ""), target_res):
+        # Ground evidence against either endpoint (source and/or target resource).
+        # Group/account endpoints have no entry in resources_by_node -> skipped.
+        endpoints = [resources_by_node.get(src), resources_by_node.get(tgt)]
+        if any(r is not None for r in endpoints) and not _evidence_grounded(e.get("evidence", ""), endpoints):
             dropped += 1
             continue
         key = (src, tgt, rtype)
@@ -1076,6 +1113,7 @@ def build_graph(trigger: str = "manual", full: bool = False) -> int:
             b.input_tokens = in_tok
             b.output_tokens = out_tok
             b.cost_usd = cost
+            _prune_old_builds(s, keep=settings.galaxy_builds_keep)
         logger.info("galaxy: build %s completed — %d nodes, %d edges, %d dropped, $%.4f",
                     build_id, len(rule_graph["nodes"]), len(rule_graph["edges"]) + len(merged),
                     total_dropped, cost)
@@ -1116,6 +1154,25 @@ def _persist_state(session, current_hashes: dict, removed: set, build_id: int) -
     for pk in removed:
         if pk in existing:
             session.delete(existing[pk])
+
+
+def _prune_old_builds(session, keep: int) -> None:
+    """Retain only the `keep` most-recent build rows to bound DB growth.
+
+    Each GalaxyBuild row stores the full rule+llm graph JSON blobs (hundreds of KB
+    to several MB at scale), and only the latest completed build is ever read, so
+    unbounded retention would grow the DB by GBs/month. keep<=0 disables pruning.
+    """
+    if keep is None or keep <= 0:
+        return
+    keep_ids = [row.id for row in (session.query(GalaxyBuild.id)
+                                   .order_by(GalaxyBuild.id.desc())
+                                   .limit(keep).all())]
+    if not keep_ids:
+        return
+    (session.query(GalaxyBuild)
+     .filter(GalaxyBuild.id.notin_(keep_ids))
+     .delete(synchronize_session=False))
 ```
 
 - [ ] **Step 4: Run builder tests, verify pass**
@@ -2341,7 +2398,8 @@ git push --no-verify
 1. **L2 is code-generated, not a separate LLM call.** The spec describes L2 as "an LLM global index." For the PoC, `_compact_index()` generates the ~40-tok-per-resource summary in code and injects it into *every* L3 batch prompt as read-only context — this gives cross-batch visibility (the spec's goal) without a second LLM round-trip, at lower cost. A dedicated LLM global-grouping call can be split out later if batch-blindness proves material.
 2. **`/rebuild` awaits the build in a worker thread** (`await asyncio.to_thread(build_graph, ...)`) rather than returning immediately, so the returned `build_id` is the completed build (deterministic for tests) *without* blocking the event loop. The concurrency guard (single `running` row) prevents overlap. If UI responsiveness on huge inventories becomes an issue, switch to `background_tasks.add_task(build_graph, ...)` and let the frontend poll `/status`.
 3. **Overview group-level edges are empty** in the PoC (`overview.edges = []`); the overview conveys structure via account/group nodes with counts, and relationships are shown after drill-down in `/expand`. Cross-group edge aggregation is a later enhancement.
-4. **Evidence grounding is substring-based** (`_evidence_grounded`): the value the LLM cites must literally appear in the target's `raw_data`/`tags`. This is deliberately strict (fail-closed) and may drop some legitimate-but-paraphrased edges — acceptable, since the cost of a false edge is higher than a missing advisory one (spec §0).
+4. **Evidence grounding is substring-based against EITHER endpoint** (`_evidence_grounded`): the value the LLM cites must literally appear in the `raw_data`/`tags` of the source *or* target resource. (During implementation, target-only grounding was found to false-drop legitimate edges — evidence for a relationship usually lives on the source end, e.g. an EC2 citing a `VpcId`, and edges pointing at group/account nodes have no target `raw_data` at all. Two-endpoint grounding stays fail-closed — the value must exist in some real resource's data, the LLM cannot invent it — while not punishing correct source-side evidence.) Still deliberately strict; may drop some legitimate-but-paraphrased edges, acceptable per spec §0.
+5. **Build history is pruned to `galaxy_builds_keep` (default 24).** Each `GalaxyBuild` row stores the full rule+llm graph JSON blobs (~0.5 MB at 1287 resources, multi-MB at scale) and only the latest is ever read; hourly builds would otherwise grow the DB by GBs/month. After each successful build, `_prune_old_builds` deletes all but the N newest rows. (Added during implementation after a DB-growth review; not in the original spec.) `keep<=0` disables pruning.
 
 ## Self-Review
 
