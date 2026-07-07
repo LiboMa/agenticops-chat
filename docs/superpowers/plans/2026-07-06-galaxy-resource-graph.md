@@ -1397,6 +1397,7 @@ async def overview():
         rule = latest.rule_graph or {}
         nodes = rule.get("nodes", [])
         edges = rule.get("edges", [])
+        build_id = latest.id  # capture inside session (avoid DetachedInstanceError after close)
         node_res_id = _resource_ids_by_node(s)
     health = _health_by_resource_id()
 
@@ -1439,7 +1440,7 @@ async def overview():
         out_nodes.append({**n, "resource_count": c["resource_count"], "open_issues": c["open_issues"],
                           "health": c["health"], "types": c["types"]})
     # Group-level edges among top nodes only (account contains group is implicit; keep empty for PoC overview).
-    return {"nodes": out_nodes, "edges": [], "build_id": latest.id}
+    return {"nodes": out_nodes, "edges": [], "build_id": build_id}
 
 
 @router.get("/expand")
