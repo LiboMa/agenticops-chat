@@ -345,6 +345,27 @@ class Scheduler:
                 self._execute_agent_chain(schedule_obj, execution_id)
             return
 
+        # GalaxyBuild: whole-inventory graph build — account-agnostic, run once.
+        if pipeline_name == "GalaxyBuild":
+            from agenticops.galaxy.builder import build_graph
+            try:
+                build_id = build_graph(trigger="auto", full=False)
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "completed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.result = {"pipeline": "GalaxyBuild", "build_id": build_id}
+            except Exception as e:
+                logger.error(f"GalaxyBuild schedule '{schedule_name}' failed: {e}")
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.error = str(e)
+            return
+
         try:
             # Get accounts — expunge so they can be used outside the session
             accounts = []

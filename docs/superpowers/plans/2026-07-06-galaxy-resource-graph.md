@@ -1551,6 +1551,8 @@ def db(tmp_path, monkeypatch):
     import agenticops.models as models_mod
     from agenticops.config import settings
     from agenticops.models import Base
+    import agenticops.scheduler.scheduler  # noqa: F401 — register schedule_executions table
+    import agenticops.galaxy.models  # noqa: F401 — register galaxy_* tables
     models_mod._engine = None
     settings.database_url = f"sqlite:///{tmp_path}/galaxy_sched.db"
     engine = models_mod.get_engine()
@@ -1647,13 +1649,32 @@ async def api_trigger_scan(req: ScanRequest, background_tasks: BackgroundTasks):
 Then, immediately before `return {` (line 1651), insert:
 
 ```python
-    # Post-scan hook: kick an incremental Galaxy build (guarded no-op if one is running).
+    # Post-scan hook: kick an incremental Galaxy build (guarded no-op if one is
+    # running). Best-effort and fully fault-isolated — an opportunistic rebuild must
+    # never break the scan response (missing tables, Bedrock down, etc.).
     if settings.galaxy_enabled:
-        from agenticops.galaxy.builder import build_graph
-        background_tasks.add_task(build_graph, "scan", False)
+        background_tasks.add_task(_safe_galaxy_rebuild_after_scan)
 ```
 
-Verify `BackgroundTasks` is imported at the top of app.py; if not, add `BackgroundTasks` to the existing `from fastapi import ...` line.
+And define the fault-isolated wrapper just above `@app.post("/api/scan")` (background tasks in
+Starlette's TestClient run synchronously and their exceptions propagate into the response, so
+the rebuild MUST swallow its own errors):
+
+```python
+def _safe_galaxy_rebuild_after_scan() -> None:
+    """Fault-isolated incremental Galaxy build for the post-scan hook.
+
+    Runs as a background task; any failure (unmigrated DB, Bedrock unreachable, …)
+    is logged and swallowed so it can never affect the scan response.
+    """
+    try:
+        from agenticops.galaxy.builder import build_graph
+        build_graph(trigger="scan", full=False)
+    except Exception:
+        logger.debug("galaxy: post-scan rebuild skipped", exc_info=True)
+```
+
+Verify `BackgroundTasks` is imported at the top of app.py; if not, add `BackgroundTasks` to the existing `from fastapi import ...` line. (`logger` is already defined at app.py module scope.)
 
 - [ ] **Step 6: Seed the auto schedule in lifespan**
 

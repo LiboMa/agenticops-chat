@@ -146,6 +146,30 @@ async def lifespan(app: FastAPI):
         scheduler_instance = Scheduler()
         scheduler_instance.start()
         logger.info("Cron scheduler started (this worker elected)")
+        if settings.galaxy_enabled:
+            try:
+                from agenticops.scheduler.scheduler import Scheduler as _Sched, Schedule as _Schedule
+                # Read names inside a live session — Scheduler.list_schedules() returns
+                # ORM objects from a closed session, so `.name` on them raises
+                # DetachedInstanceError (expire_on_commit=True). Query names directly.
+                with get_db_session() as _s:
+                    _existing = {row.name for row in _s.query(_Schedule).all()}
+                if "galaxy-auto-build" not in _existing:
+                    _mins = max(1, settings.galaxy_build_interval_minutes)
+                    # Build a cron that reflects the configured interval:
+                    #  <60  -> every _mins minutes (best with divisors of 60);
+                    #  >=60 -> minute 0 of every (_mins // 60) hours.
+                    if _mins < 60:
+                        _cron = f"*/{_mins} * * * *"
+                    else:
+                        _cron = f"0 */{max(1, _mins // 60)} * * *"
+                    _Sched.add_schedule(
+                        name="galaxy-auto-build", pipeline_name="GalaxyBuild",
+                        cron_expression=_cron, config={},
+                    )
+                    logger.info("galaxy: seeded auto-build schedule (cron=%s, interval=%d min)", _cron, _mins)
+            except Exception:
+                logger.debug("galaxy: auto schedule seed skipped", exc_info=True)
     else:
         logger.info("Cron scheduler skipped (another worker owns it)")
 
@@ -1641,8 +1665,21 @@ class ScanRequest(BaseModel):
     regions: Optional[List[str]] = None
 
 
+def _safe_galaxy_rebuild_after_scan() -> None:
+    """Fault-isolated incremental Galaxy build for the post-scan hook.
+
+    Runs as a background task; any failure (unmigrated DB, Bedrock unreachable, …)
+    is logged and swallowed so it can never affect the scan response.
+    """
+    try:
+        from agenticops.galaxy.builder import build_graph
+        build_graph(trigger="scan", full=False)
+    except Exception:
+        logger.debug("galaxy: post-scan rebuild skipped", exc_info=True)
+
+
 @app.post("/api/scan")
-async def api_trigger_scan(req: ScanRequest):
+async def api_trigger_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     """Trigger parallel resource scan across enabled accounts."""
     from agenticops.scanner import scan_accounts_parallel
     result = await scan_accounts_parallel(
@@ -1650,6 +1687,11 @@ async def api_trigger_scan(req: ScanRequest):
         focus=req.focus,
         regions=req.regions,
     )
+    # Post-scan hook: kick an incremental Galaxy build (guarded no-op if one is
+    # running). Best-effort and fully fault-isolated — an opportunistic rebuild must
+    # never break the scan response (missing tables, Bedrock down, etc.).
+    if settings.galaxy_enabled:
+        background_tasks.add_task(_safe_galaxy_rebuild_after_scan)
     return {
         "total_found": result.total_found,
         "total_updated": result.total_updated,
@@ -3458,7 +3500,7 @@ async def api_list_schedules():
 async def api_pipeline_options():
     """Return available pipeline names and AgentChain config schema."""
     return {
-        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"],
+        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "GalaxyBuild", "AgentChain"],
         "agent_chain_config": {
             "prompt": {"type": "string", "required": True, "description": "Task description for the agent"},
             "skills": {"type": "array", "required": False, "description": "Skills to activate"},
