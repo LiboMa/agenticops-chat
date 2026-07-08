@@ -86,7 +86,9 @@ function GalaxyInner() {
 
   const b = status.data?.build;
   return (
-    <div className="relative h-full w-full">
+    // Escape AppShell <main>'s p-6 auto-height box and claim real viewport height —
+    // h-full alone collapses to 0 inside an auto-height parent (same fix as Chat.tsx).
+    <div className="relative h-[calc(100vh-2.25rem)] -m-6 w-auto">
       {/* Build status bar */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 px-4 py-2
                       bg-card/90 border-b border-border text-xs text-muted-foreground">
@@ -107,9 +109,12 @@ function GalaxyInner() {
           <input type="checkbox" checked={worstOnly} onChange={(e) => setWorstOnly(e.target.checked)} />
           {t("galaxy.worstOnly")}
         </label>
+        {rebuild.isError && <span className="text-red-400">{String(rebuild.error)}</span>}
         <button className="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50"
                 disabled={rebuild.isPending || b?.status === "running"}
-                onClick={() => rebuild.mutate(true)}>{t("galaxy.rebuild")}</button>
+                onClick={() => rebuild.mutate(true)}>
+          {rebuild.isPending || b?.status === "running" ? t("galaxy.building") : t("galaxy.rebuild")}
+        </button>
       </div>
 
       {expand.data?.truncated && (
