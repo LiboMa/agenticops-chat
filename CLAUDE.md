@@ -73,6 +73,7 @@ Web Dashboard ──────┘         │
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
 | `chat/` | `preprocessor.py`, `file_reader.py`, `send_to.py`, `channel.py` | Message preprocessing, file upload, I#/R# refs, /send_to, /channel |
 | `graph/` | `engine.py`, `algorithms.py`, `collectors.py`, `types.py`, `api.py`, `tools.py` | Infrastructure graph: SPOF, capacity risk, dependency chain, change sim |
+| `galaxy/` | `models.py`, `hashing.py`, `rules.py`, `builder.py`, `api.py` | Resource relationship graph (LLM-hybrid, PoC): L1 code rules (containment/ID-ref/tag-group, `provenance=rule`) + L3 LLM semantic enrichment (Haiku, temp=0) with **fail-closed verification** (endpoints must exist in inventory + evidence grounded in `raw_data`); content-hash incremental builds ($0 when unchanged); `provenance`-gated trust (llm edges advisory-only, never drive execution); build history pruned to `galaxy_builds_keep`. Independent of `graph/`. Endpoints `/api/galaxy/{rebuild,status,overview,expand}`; frontend `/galaxy` (React Flow) |
 | `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py`, `evolution.py`, `curator.py`, `review.py`, `improvement_store.py` | Skill discovery (XML-escaped, YAML colon-fallback, kebab-case name validation, 200-char index), security classification, run_on_host/run_kubectl, autonomous create/improve, Curator lifecycle, security-gated promote/rollback, improvement audit |
 | `notify/` | `notifier.py`, `im_config.py` | Multi-channel notifications, YAML channel config |
 | `im/` | `feishu_ws.py` | IM bot (Feishu WebSocket), alert channel routing |
@@ -174,6 +175,15 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `scan_focus` | `all` | Resource categories filter |
 | `patrol_graph_checks_enabled` | `true` | SPOF + capacity-risk graph analysis step in health patrol (prevention; findings create HealthIssues with auto_rca off) |
 | `rca_topology_context_enabled` | `true` | Inject topology context (neighbors, blast radius, recent graph changes) into RCA invocation prompts |
+| `galaxy_enabled` | `true` | Enable Galaxy graph build pipeline + `/api/galaxy` + post-scan/hourly triggers |
+| `galaxy_build_interval_minutes` | `60` | Auto `galaxy-auto-build` schedule cadence |
+| `galaxy_model_id` | `""` | Override model for Galaxy LLM enrichment (empty = `bedrock_model_id_cheap`) |
+| `galaxy_batch_size` | `40` | Max resources per LLM enrichment batch |
+| `galaxy_confidence_min` | `0.5` | Minimum confidence to keep an LLM edge |
+| `galaxy_drop_rate_alert` | `0.05` | LLM-edge drop rate that logs a WARNING (drift smoke detector) |
+| `galaxy_expand_node_cap` | `200` | Max nodes per `/expand` before truncation |
+| `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` | Relationship-sparse leaf types excluded from LLM enrichment |
+| `galaxy_builds_keep` | `24` | Newest build rows retained (older pruned after each build to bound DB growth) |
 
 ## HealthIssue State Machine
 

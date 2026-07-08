@@ -743,6 +743,16 @@ def test_verify_keeps_grounded_edge(db):
     assert kept[0]["provenance"] == "llm"
 
 
+def test_evidence_grounding_prose_tolerant_but_failclosed():
+    # Natural-language evidence citing a REAL term ('payments') grounds...
+    res = {"raw_data": {"Purpose": "payments"}, "tags": {"Project": "payments"}}
+    assert B._evidence_grounded("name shares prefix payments", [res]) is True
+    # ...but a fabricated term or pure stopwords do NOT (fail-closed preserved).
+    assert B._evidence_grounded("these belong to billing", [res]) is False
+    assert B._evidence_grounded("shares prefix with same", [res]) is False
+    assert B._evidence_grounded("Project=nonexistent", [res]) is False
+
+
 def test_build_graph_full_pipeline_with_mocked_llm(db, seeded, monkeypatch):
     # LLM proposes one valid grouping edge (grounded) and one hallucinated endpoint (dropped).
     def fake_call(prompt, model_id, max_tokens):
@@ -955,22 +965,39 @@ def _evidence_grounded(evidence: str, endpoints: list) -> bool:
     (e.g. an EC2 whose raw_data cites a VpcId), not the target, and edges pointing
     at group/account nodes have no target raw_data at all — so we ground against
     whichever endpoints are real resources. Still fail-closed: the value must exist
-    in some real resource's data; the LLM cannot invent it."""
+    in some real resource's data; the LLM cannot invent it.
+
+    Grounding strategy (fail-closed but prose-tolerant):
+      - If evidence is `key=value`, the value must appear verbatim in an endpoint.
+      - Otherwise (natural-language evidence like "name shares prefix payments"),
+        at least one significant token (len >= 4, not a stopword) must appear in an
+        endpoint's data. A cited term the LLM invented (present in no real resource)
+        still fails — so hallucinated relationships are rejected."""
     if not isinstance(evidence, str) or not evidence.strip():
         return False
-    # Extract the value after '=' if present, else use the whole string token.
-    value = evidence.split("=", 1)[1] if "=" in evidence else evidence
-    value = value.strip().strip('"').strip("'").lower()
-    if not value:
-        return False
+
+    haystacks = []
     for res in endpoints:
         if not res:
             continue
-        haystack = hashing.canonical_json({"raw_data": res.get("raw_data", {}),
-                                           "tags": res.get("tags", {})}).lower()
-        if value in haystack:
-            return True
-    return False
+        haystacks.append(hashing.canonical_json(
+            {"raw_data": res.get("raw_data", {}), "tags": res.get("tags", {})}).lower())
+    if not haystacks:
+        return False
+
+    if "=" in evidence:
+        value = evidence.split("=", 1)[1].strip().strip('"').strip("'").lower()
+        return bool(value) and any(value in h for h in haystacks)
+
+    # Natural-language evidence: require a significant cited token to be grounded.
+    _STOP = {"name", "shares", "prefix", "same", "both", "with", "that", "this",
+             "have", "share", "belong", "belongs", "part", "from", "into", "they"}
+    import re as _re
+    tokens = [t for t in _re.split(r"[^a-z0-9_-]+", evidence.lower())
+              if len(t) >= 4 and t not in _STOP]
+    if not tokens:
+        return False
+    return any(t in h for t in tokens for h in haystacks)
 
 
 def _verify_edges(edges: list, valid_ids: set, node_by_id: dict, resources_by_node: dict) -> tuple:
@@ -2427,7 +2454,9 @@ git push --no-verify
 1. **L2 is code-generated, not a separate LLM call.** The spec describes L2 as "an LLM global index." For the PoC, `_compact_index()` generates the ~40-tok-per-resource summary in code and injects it into *every* L3 batch prompt as read-only context — this gives cross-batch visibility (the spec's goal) without a second LLM round-trip, at lower cost. A dedicated LLM global-grouping call can be split out later if batch-blindness proves material.
 2. **`/rebuild` awaits the build in a worker thread** (`await asyncio.to_thread(build_graph, ...)`) rather than returning immediately, so the returned `build_id` is the completed build (deterministic for tests) *without* blocking the event loop. The concurrency guard (single `running` row) prevents overlap. If UI responsiveness on huge inventories becomes an issue, switch to `background_tasks.add_task(build_graph, ...)` and let the frontend poll `/status`.
 3. **Overview group-level edges are empty** in the PoC (`overview.edges = []`); the overview conveys structure via account/group nodes with counts, and relationships are shown after drill-down in `/expand`. Cross-group edge aggregation is a later enhancement.
-4. **Evidence grounding is substring-based against EITHER endpoint** (`_evidence_grounded`): the value the LLM cites must literally appear in the `raw_data`/`tags` of the source *or* target resource. (During implementation, target-only grounding was found to false-drop legitimate edges — evidence for a relationship usually lives on the source end, e.g. an EC2 citing a `VpcId`, and edges pointing at group/account nodes have no target `raw_data` at all. Two-endpoint grounding stays fail-closed — the value must exist in some real resource's data, the LLM cannot invent it — while not punishing correct source-side evidence.) Still deliberately strict; may drop some legitimate-but-paraphrased edges, acceptable per spec §0.
+4. **Evidence grounding is against EITHER endpoint, `key=value` verbatim or prose token-match** (`_evidence_grounded`). Two refinements were forced during implementation, both caught by tests:
+   - **Either-endpoint** (not target-only): evidence for a relationship usually lives on the *source* (e.g. an EC2 citing a `VpcId`), and edges into group/account nodes have no target `raw_data` at all — target-only grounding false-dropped every source-evidenced and every group edge.
+   - **Prose-tolerant**: real LLM evidence is often natural language ("name shares prefix payments"), which never matches as a whole substring. For non-`key=value` evidence we now require a significant cited token (len ≥ 4, not a stopword) to appear in an endpoint's data. This stays **fail-closed** — a term the LLM invented (in no real resource) is still rejected, verified by `test_evidence_grounding_prose_tolerant_but_failclosed` — while not punishing correct prose rationale. (Note: the primary hallucination defense remains the endpoint-existence check; evidence grounding is the secondary gate on edges whose endpoints exist but whose rationale might be fabricated.) Still deliberately strict per spec §0.
 5. **Build history is pruned to `galaxy_builds_keep` (default 24).** Each `GalaxyBuild` row stores the full rule+llm graph JSON blobs (~0.5 MB at 1287 resources, multi-MB at scale) and only the latest is ever read; hourly builds would otherwise grow the DB by GBs/month. After each successful build, `_prune_old_builds` deletes all but the N newest rows. (Added during implementation after a DB-growth review; not in the original spec.) `keep<=0` disables pruning.
 
 ## Self-Review

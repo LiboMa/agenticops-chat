@@ -134,22 +134,39 @@ def _evidence_grounded(evidence: str, endpoints: list) -> bool:
     (e.g. an EC2 whose raw_data cites a VpcId), not the target, and edges pointing
     at group/account nodes have no target raw_data at all — so we ground against
     whichever endpoints are real resources. Still fail-closed: the value must exist
-    in some real resource's data; the LLM cannot invent it."""
+    in some real resource's data; the LLM cannot invent it.
+
+    Grounding strategy (fail-closed but prose-tolerant):
+      - If evidence is `key=value`, the value must appear verbatim in an endpoint.
+      - Otherwise (natural-language evidence like "name shares prefix payments"),
+        at least one significant token (len >= 4, not a stopword) must appear in an
+        endpoint's data. A cited term the LLM invented (present in no real resource)
+        still fails — so hallucinated relationships are rejected."""
     if not isinstance(evidence, str) or not evidence.strip():
         return False
-    # Extract the value after '=' if present, else use the whole string token.
-    value = evidence.split("=", 1)[1] if "=" in evidence else evidence
-    value = value.strip().strip('"').strip("'").lower()
-    if not value:
-        return False
+
+    haystacks = []
     for res in endpoints:
         if not res:
             continue
-        haystack = hashing.canonical_json({"raw_data": res.get("raw_data", {}),
-                                           "tags": res.get("tags", {})}).lower()
-        if value in haystack:
-            return True
-    return False
+        haystacks.append(hashing.canonical_json(
+            {"raw_data": res.get("raw_data", {}), "tags": res.get("tags", {})}).lower())
+    if not haystacks:
+        return False
+
+    if "=" in evidence:
+        value = evidence.split("=", 1)[1].strip().strip('"').strip("'").lower()
+        return bool(value) and any(value in h for h in haystacks)
+
+    # Natural-language evidence: require a significant cited token to be grounded.
+    _STOP = {"name", "shares", "prefix", "same", "both", "with", "that", "this",
+             "have", "share", "belong", "belongs", "part", "from", "into", "they"}
+    import re as _re
+    tokens = [t for t in _re.split(r"[^a-z0-9_-]+", evidence.lower())
+              if len(t) >= 4 and t not in _STOP]
+    if not tokens:
+        return False
+    return any(t in h for t in tokens for h in haystacks)
 
 
 def _verify_edges(edges: list, valid_ids: set, node_by_id: dict, resources_by_node: dict) -> tuple:

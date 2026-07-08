@@ -75,6 +75,16 @@ def test_verify_keeps_grounded_edge(db):
     assert kept[0]["provenance"] == "llm"
 
 
+def test_evidence_grounding_prose_tolerant_but_failclosed():
+    # Natural-language evidence citing a REAL term ('payments') grounds...
+    res = {"raw_data": {"Purpose": "payments"}, "tags": {"Project": "payments"}}
+    assert B._evidence_grounded("name shares prefix payments", [res]) is True
+    # ...but a fabricated term or pure stopwords do NOT (fail-closed preserved).
+    assert B._evidence_grounded("these belong to billing", [res]) is False
+    assert B._evidence_grounded("shares prefix with same", [res]) is False
+    assert B._evidence_grounded("Project=nonexistent", [res]) is False
+
+
 def test_build_graph_full_pipeline_with_mocked_llm(db, seeded, monkeypatch):
     # LLM proposes one valid grouping edge (grounded) and one hallucinated endpoint (dropped).
     def fake_call(prompt, model_id, max_tokens):
