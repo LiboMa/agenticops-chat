@@ -7,7 +7,7 @@
   "nav.settings": "Settings",
   "nav.agentMetrics": "Agent Metrics",
   "nav.skills": "Skills",
-
+  "nav.galaxy": "Galaxy",
   "chat.sessions": "Sessions",
   "chat.newChat": "New Chat",
   "chat.search": "Search sessions...",
@@ -47,7 +47,6 @@
   "chat.showArchived": "Show archived",
   "chat.pinned": "Pinned",
   "chat.starred": "Starred",
-
   "issues.title": "Issues & Plans",
   "issues.all": "All",
   "issues.open": "Open",
@@ -142,7 +141,6 @@
   "issues.rcaFailed": "RCA trigger failed",
   "issues.fixPlanTriggered": "Fix plan generation triggered. It may take a minute -- refresh to see results.",
   "issues.fixPlanFailed": "Fix plan generation failed",
-
   "dashboard.resources": "Resources",
   "dashboard.openIssues": "Open Issues",
   "dashboard.critical": "Critical",
@@ -168,7 +166,6 @@
   "dashboard.severity": "Severity",
   "dashboard.mttr": "MTTR",
   "dashboard.fixRate": "Fix Rate",
-
   "settings.title": "Settings",
   "settings.general": "General",
   "settings.accounts": "Accounts",
@@ -199,7 +196,6 @@
   "settings.reloadMcp": "Reload",
   "settings.excludePatterns": "Issue Exclude Patterns",
   "settings.excludePatternsDesc": "Regex patterns to auto-suppress matching issue titles",
-
   "skills.title": "Skills",
   "skills.create": "Create Skill",
   "skills.import": "Import",
@@ -221,14 +217,11 @@
   "skills.improving": "Improving...",
   "skills.promoting": "Promoting...",
   "skills.saving": "Saving...",
-
   "resources.title": "Resources",
   "resources.back": "Resources",
   "resources.search": "Search by ID, name, or type...",
-
   "schedules.title": "Schedules",
   "reports.title": "Reports",
-
   "common.loading": "Loading...",
   "common.error": "Error",
   "common.retry": "Retry",
@@ -241,5 +234,22 @@
   "common.noData": "No data",
   "common.back": "Back",
   "common.on": "On",
-  "common.off": "Off"
+  "common.off": "Off",
+  "galaxy.building": "Building…",
+  "galaxy.builtNodes": "Nodes",
+  "galaxy.edges": "Edges",
+  "galaxy.dropped": "Dropped",
+  "galaxy.noBuild": "No build yet — click Rebuild",
+  "galaxy.nextCheck": "Next check",
+  "galaxy.rebuild": "Rebuild",
+  "galaxy.backToOverview": "Back to overview",
+  "galaxy.worstOnly": "Issues only",
+  "galaxy.truncated": "Showing top nodes (truncated)",
+  "galaxy.empty": "No resources — run a scan first",
+  "galaxy.type": "Type",
+  "galaxy.region": "Region",
+  "galaxy.health": "Health",
+  "galaxy.openResource": "Open resource",
+  "galaxy.resources": "Resources",
+  "galaxy.openIssues": "Open issues"
 }

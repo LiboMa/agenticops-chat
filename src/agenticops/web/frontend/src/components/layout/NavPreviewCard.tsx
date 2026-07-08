@@ -26,6 +26,9 @@ export function NavPreviewCard({ id, labelKey }: { id: string; labelKey: string 
   } else if (id === "skills") {
     const rows = qc.getQueryData<unknown[]>(["skills"]);
     if (Array.isArray(rows)) summary = `${rows.length} skills`;
+  } else if (id === "galaxy") {
+    const ov = qc.getQueryData<{ nodes: unknown[] }>(["galaxy-overview"]);
+    if (ov && Array.isArray(ov.nodes)) summary = `${ov.nodes.length} groups`;
   }
 
   return (

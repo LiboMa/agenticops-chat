@@ -2193,12 +2193,19 @@ Expected: no TS errors, build succeeds. (If `applyNodeChanges`/`NodeChange` type
 
 - [ ] **Step 11: Commit**
 
+Note two repo gitignore quirks discovered during implementation:
+- `.gitignore` has a bare `lib/` rule (for Python build artifacts) that also matches the
+  frontend `src/lib/`; its existing `*.ts` siblings are force-tracked, so `galaxyLayout.ts`
+  needs `git add -f`.
+- `dist/` is gitignored (only `index.html` + one asset were ever force-added); the built
+  bundle is NOT committed — the deploy pipeline rebuilds it. Do **not** commit `dist/`.
+
 ```bash
 cd /Users/malibo/MyDev/AgenticOps
+git add -f src/agenticops/web/frontend/src/lib/galaxyLayout.ts
 git add src/agenticops/web/frontend/package.json src/agenticops/web/frontend/package-lock.json \
         src/agenticops/web/frontend/src/api/types.ts \
         src/agenticops/web/frontend/src/hooks/useGalaxy.ts \
-        src/agenticops/web/frontend/src/lib/galaxyLayout.ts \
         src/agenticops/web/frontend/src/pages/Galaxy.tsx \
         src/agenticops/web/frontend/src/App.tsx \
         src/agenticops/web/frontend/src/components/layout/NavItems.tsx \

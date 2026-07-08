@@ -7,7 +7,7 @@
   "nav.settings": "设置",
   "nav.agentMetrics": "Agent 指标",
   "nav.skills": "技能",
-
+  "nav.galaxy": "全景图",
   "chat.sessions": "会话",
   "chat.newChat": "新对话",
   "chat.search": "搜索会话...",
@@ -47,7 +47,6 @@
   "chat.showArchived": "显示归档",
   "chat.pinned": "已置顶",
   "chat.starred": "已收藏",
-
   "issues.title": "问题与修复",
   "issues.all": "全部",
   "issues.open": "待处理",
@@ -142,7 +141,6 @@
   "issues.rcaFailed": "根因分析触发失败",
   "issues.fixPlanTriggered": "修复计划生成已触发，可能需要一分钟 -- 刷新查看结果。",
   "issues.fixPlanFailed": "修复计划生成失败",
-
   "dashboard.resources": "资源",
   "dashboard.openIssues": "未解决问题",
   "dashboard.critical": "严重",
@@ -168,7 +166,6 @@
   "dashboard.severity": "严重程度",
   "dashboard.mttr": "平均修复时间",
   "dashboard.fixRate": "修复率",
-
   "settings.title": "设置",
   "settings.general": "常规",
   "settings.accounts": "账户",
@@ -199,7 +196,6 @@
   "settings.reloadMcp": "重载",
   "settings.excludePatterns": "问题排除规则",
   "settings.excludePatternsDesc": "正则表达式模式，自动屏蔽匹配的问题标题",
-
   "skills.title": "技能",
   "skills.create": "创建技能",
   "skills.import": "导入",
@@ -221,14 +217,11 @@
   "skills.improving": "改进中...",
   "skills.promoting": "发布中...",
   "skills.saving": "保存中...",
-
   "resources.title": "资源",
   "resources.back": "资源",
   "resources.search": "搜索 ID、名称或类型...",
-
   "schedules.title": "定时任务",
   "reports.title": "报告",
-
   "common.loading": "加载中...",
   "common.error": "错误",
   "common.retry": "重试",
@@ -241,5 +234,22 @@
   "common.noData": "暂无数据",
   "common.back": "返回",
   "common.on": "开启",
-  "common.off": "关闭"
+  "common.off": "关闭",
+  "galaxy.building": "构建中…",
+  "galaxy.builtNodes": "节点",
+  "galaxy.edges": "关系",
+  "galaxy.dropped": "丢弃",
+  "galaxy.noBuild": "尚无构建 — 点击重建",
+  "galaxy.nextCheck": "下次检查",
+  "galaxy.rebuild": "重建",
+  "galaxy.backToOverview": "返回全景",
+  "galaxy.worstOnly": "仅看有问题",
+  "galaxy.truncated": "仅显示重点节点（已截断）",
+  "galaxy.empty": "暂无资源 — 请先扫描",
+  "galaxy.type": "类型",
+  "galaxy.region": "区域",
+  "galaxy.health": "健康",
+  "galaxy.openResource": "打开资源",
+  "galaxy.resources": "资源数",
+  "galaxy.openIssues": "未处理问题"
 }

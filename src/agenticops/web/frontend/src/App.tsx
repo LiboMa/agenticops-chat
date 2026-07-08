@@ -19,6 +19,7 @@ const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
 const AgentMetrics = lazy(() => import("@/pages/AgentMetrics"));
 const Skills = lazy(() => import("@/pages/Skills"));
 const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
+const Galaxy = lazy(() => import("@/pages/Galaxy"));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = getAuthToken();
@@ -158,6 +159,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <SkillDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="galaxy"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Galaxy />
                 </Suspense>
               }
             />
