@@ -606,8 +606,43 @@ Report，Researcher可尽可能的自主式和Orcheatracher讨论，看看有哪
 * [TDDO] - 与Devops/Security Agents 相连，如果可以
 
 
-### 2026.5.29 
+### 2026.5.29 - 记忆功能
 我现在要对现在近个分析以及Agentic
 Agents的架构，提示词，WebUI/CLI/Chat功能，做作一个全面的检查，请启动一个新的分支Agenticops-alayws-memrized
 ,修复潜在的Bug和提高优化点，之后，我想对所有Agents的记忆功能、永续记忆、增强记忆、自主优化记忆，做一个质的升级和全面的优化，同时在管理以及创建Skills层
 面，要做得更加的灵活和自主，就如Hermes[https://github.com/NousResearch/hermes-agent.git]一样
+
+### 2026.6.21
+* 对Main Agents提示词做了加强
+* 使用Fable 5 模型对整体Pipeline做了Review以及代码Bug修复
+* 验证已经是业界主流方案，架构也没有问题
+* 增加Logo设计
+* 增加ITSM流程，对接Connector 多云，Service Now/Jira拓展
+* 多账号增强，不再依赖本地环境的AK/SK
+
+### 2026.7.3
+
+现在我要启动MVP-2.0.1的更新
+1. 对前端chat/Web UI Chat做一个整体性的优化，对于Chat box，用户可以随时更换模型，去掉 Concise/Medium/Detailed的设置。
+2. chat UI 整体的性能优化，以及交互支持图表、图片、以及交互问题反问时的快捷点击按钮可以引导用户进行下一步操作。
+3. Nav bar交互优化，支持托拽及缩略图及文字与图共同存在。
+4. 统计业页更简洁更实用，且有定期后台有实时活动更新。包括，交互活动统计、后台Log运行情况统计，定时任务、Schedule Job，以及用户交互的内容情况分析。各项服务状态总结与状态提醒。
+
+
+### 2026.7.4
+1. 完成端Chat 优化，有反问按钮。
+2. 完成Strands-SDK 从 strands-agents==1.26.0  ==>1.45.0 的基于提升 见 [docs](./docs/strands-sdk-2026-enhancement-report.html)
+         能力    裁决    影响    成本    理由（一句话）
+      升级 1.26 → 1.45    前置    高    低-中    一切新特性的入口；需回归测试
+      context_manager="auto"    接    最高    极低    一行，成本/准确率双赢，治大输出
+      ContextOffloader    接    高    低    直解 tool_result too large
+      HumanInTheLoop    接    高    低    原生复刻 L0/L1 审批，接现有 IM
+      structured_output_model    接    中    低    FixPlan/RCA 类型安全，去解析层
+      OTLP 可观测性    接    中    低    补 tracing 缺口，环境变量即得
+      Evals SDK（回归测试）    接    中-高    中    硬化 7-agent，独立包无需迁移
+
+### 2026.7.5 - 自主托管及Context
+* 想对现有的资源做一个图、逻辑关系相关的梳理和展示，对，我说的是所有的资源。就像Context的上下文关系一样。现在想要从前端、后端、应用级别做一个整体服务状态的梳理和输
+  出。最终目标就是使用用户在一张Graph图里可以看到服务与服务、服务与资源、服务与项目、标签等得到一个全貌的关系图，用户可以了解、拖拽、点击浏览等。同时，对未来做一个
+有自主维护的场景探索，可以在无人职守的情况下，自动扫描资源、自动阶段运营、自主的增强整个系统的稳定性与健壮性。用户可以选择 --
+一键托管，就把Agenticops所有现行的功能接管，自主运营维护了（当然这个是PoC阶段）可以和我一起做一个原型出来，然后我们来看看下一步如何走。
