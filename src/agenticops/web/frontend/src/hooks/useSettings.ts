@@ -16,6 +16,8 @@ export interface AppSettings {
   skills_improvement_notify: boolean;
   agent_models: Record<string, AgentModelConfig>;
   model_presets: { label: string; value: string; context_window?: number }[];
+  // Galaxy build model override — "" = use cheap tier (bedrock_model_id_cheap)
+  galaxy_model_id: string;
   // IM WebSocket status (read-only, auto-detected from channels.yaml)
   feishu_ws_active: boolean;
   slack_ws_active: boolean;

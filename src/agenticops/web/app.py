@@ -711,6 +711,8 @@ async def api_get_settings():
         "skills_improvement_notify": settings.skills_improvement_notify,
         "agent_models": agent_models,
         "model_presets": model_presets,
+        # Galaxy build model override — "" means use bedrock_model_id_cheap
+        "galaxy_model_id": settings.galaxy_model_id,
         # IM WebSocket status (read-only, derived from channels.yaml)
         "feishu_ws_active": feishu_ws_active,
         "slack_ws_active": slack_ws_active,
@@ -747,7 +749,7 @@ async def api_update_settings(body: dict = Body(...)):
     # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
     ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
 
-    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models"}
+    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models", "galaxy_model_id"}
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -829,6 +831,15 @@ async def api_update_settings(body: dict = Body(...)):
     if acp_yaml:
         save_to_yaml(acp_yaml)
         _chat_sessions.clear()
+
+    # Galaxy build model override — persist to YAML. "" = use bedrock_model_id_cheap.
+    # A non-empty value must be a known preset (same guard as agent model_id would get).
+    if "galaxy_model_id" in body:
+        val = str(body["galaxy_model_id"] or "")
+        if val and val not in _allowed_model_ids():
+            raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
+        settings.galaxy_model_id = val
+        save_to_yaml({"galaxy_model_id": val})
 
     return await api_get_settings()
 
