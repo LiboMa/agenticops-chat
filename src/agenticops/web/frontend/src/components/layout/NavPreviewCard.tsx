@@ -26,11 +26,22 @@ export function NavPreviewCard({ id, labelKey }: { id: string; labelKey: string 
   } else if (id === "skills") {
     const rows = qc.getQueryData<unknown[]>(["skills"]);
     if (Array.isArray(rows)) summary = `${rows.length} skills`;
+  } else if (id === "galaxy") {
+    const g = qc.getQueryData<{ nodes: unknown[] }>(["galaxy-graph"]);
+    if (g && Array.isArray(g.nodes)) summary = `${g.nodes.length} nodes`;
   }
 
   return (
     <div className="w-44">
-      <div className="text-xs font-medium text-foreground">{t(labelKey)}</div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-medium text-foreground">{t(labelKey)}</span>
+        {id === "galaxy" && (
+          <span className="text-[9px] uppercase tracking-wide px-1 py-px rounded
+                           bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            {t("galaxy.experimental")}
+          </span>
+        )}
+      </div>
       {summary && <div className="text-[11px] text-muted-foreground mt-0.5">{summary}</div>}
     </div>
   );

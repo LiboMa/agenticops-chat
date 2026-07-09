@@ -73,6 +73,7 @@ Web Dashboard ──────┘         │
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
 | `chat/` | `preprocessor.py`, `file_reader.py`, `send_to.py`, `channel.py` | Message preprocessing, file upload, I#/R# refs, /send_to, /channel |
 | `graph/` | `engine.py`, `algorithms.py`, `collectors.py`, `types.py`, `api.py`, `tools.py` | Infrastructure graph: SPOF, capacity risk, dependency chain, change sim |
+| `galaxy/` | `models.py`, `hashing.py`, `rules.py`, `builder.py`, `api.py` | Resource relationship graph (LLM-hybrid, PoC, **Experimental**): L1 code rules (containment/ID-ref/tag-group, `provenance=rule`) + L3 LLM semantic enrichment (Haiku, temp=0) with **fail-closed verification** (endpoints must exist in inventory + evidence grounded in `raw_data`, either endpoint); content-hash incremental builds ($0 when unchanged); `provenance`-gated trust (llm edges advisory-only, never drive execution); build history pruned to `galaxy_builds_keep`. Independent of `graph/`. Endpoints `/api/galaxy/{rebuild,status,overview,expand,graph}`. Frontend `/galaxy`: **Canvas starfield** (d3-force, fixed Nebula-Violet theme, ~1300 nodes) — pulse for warning/critical, dashed llm edges; single-click → right key-info panel; issue → centered Dialog; "view raw_data" → 2nd right-side panel with collapsible `JsonTree` (`components/galaxy/`) |
 | `skills/` | `loader.py`, `security.py`, `tools.py`, `execution.py`, `evolution.py`, `curator.py`, `review.py`, `improvement_store.py` | Skill discovery (XML-escaped, YAML colon-fallback, kebab-case name validation, 200-char index), security classification, run_on_host/run_kubectl, autonomous create/improve, Curator lifecycle, security-gated promote/rollback, improvement audit |
 | `notify/` | `notifier.py`, `im_config.py` | Multi-channel notifications, YAML channel config |
 | `im/` | `feishu_ws.py` | IM bot (Feishu WebSocket), alert channel routing |
@@ -87,9 +88,9 @@ Web Dashboard ──────┘         │
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | 14 pages: Dashboard, Chat, IssuesAndPlans, IssueDetail, Resources(detail), ReportDetail, Reports, ScheduleDetail, Schedules, AgentMetrics, Skills, SkillDetail, Settings, Login |
-| `hooks/` | 25+ TanStack Query hooks (incl. chatStream-backed useSessionStream/useChatMessages, useMessaging, useCostSummary, useTraceTimeline) |
-| `components/` | Chat components, layout (AppShell, Sidebar, Header) |
+| `pages/` | 15 pages: Dashboard, Chat, IssuesAndPlans, IssueDetail, Resources(detail), ReportDetail, Reports, ScheduleDetail, Schedules, AgentMetrics, Skills, SkillDetail, Settings, Login, Galaxy |
+| `hooks/` | 25+ TanStack Query hooks (incl. chatStream-backed useSessionStream/useChatMessages, useMessaging, useCostSummary, useTraceTimeline, useGalaxy) |
+| `components/` | Chat components, layout (AppShell, Sidebar, Header), `galaxy/` (GalaxyNodePanel, GalaxyIssueDialog, GalaxyRawDataPanel, JsonTree) |
 | `api/` | `client.ts`, `types.ts` |
 
 **Popup/panel house rule (2026-07-04):** every overlay/side-panel/dialog ① animates in with `animate-[slideInRight_0.2s_ease-out]` (keyframe in tailwind.config.ts) and ② closes on ESC (window keydown listener bound while open, or Radix primitive which has it built in). Reference implementations: `chat/ContextPanel.tsx`, `chat/SaveReportDialog.tsx`.
@@ -116,7 +117,8 @@ File-based markdown memory under `agent-memory/<agent>/*.md` (+ `shared/`) is th
 - **Frontmatter**: `agent, type(feedback|pattern|preference|baseline|umbrella), status(active|stale|archived), confidence(1-5), source, created_by(user|agent), created_at, last_confirmed, last_used, absorbed_into/absorbed_from, resource_pattern`.
 - **Hermes-style Curator** (`curator.py`, zero LLM): size-cap (`memory_max_active`, default 15) forces self-merge at write time; background lifecycle `active→stale(30d)→archived(60d)` by `last_used`; **never deletes** (archives to `<agent>/.archive/`, recoverable via `restore_memory`); **reactivate-on-use** (touched on injection). Runs at each main-agent build (gated by `memory_curator_enabled`).
 - **Agent autonomy**: `memory_manage` tool (add/patch/merge/remove/search) lets agents self-curate; agent-written memories tagged `created_by=agent` (provenance, human-auditable). Gated by `memory_autonomous_write`.
-- **Injection**: frozen-snapshot — loaded once at agent build via `build_system_prompt`, top-`memory_max_active` by confidence then recency; writes take effect NEXT session (protects Bedrock prompt-cache).
+- **Injection**: frozen-snapshot — loaded once at agent build via `build_system_prompt`, top-`memory_max_active` by confidence then recency; writes take effect NEXT session (protects Bedrock prompt-cache). Injection also `touch_last_used`s each memory (reactivate-on-use).
+- **Concurrency-safe writes**: `_atomic_write_text` writes a **per-(pid,thread,counter)-unique** tmp then `os.replace` (atomic, last-writer-wins). Required because parallel agent builds all touch the same `shared/` memories at once — a fixed tmp name previously raced (`FileNotFoundError` on `os.replace`).
 - **Config** (settings.yaml): `memory_max_active`, `memory_stale_days`, `memory_archive_days`, `memory_autonomous_write`, `memory_curator_enabled`.
 - **Deferred (YAGNI)**: episodic semantic-recall tier (vectors) — only `kb/vector_store.py` for KB case search today; S3 Vectors is a future cloud-only option, not built.
 
@@ -174,6 +176,15 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `scan_focus` | `all` | Resource categories filter |
 | `patrol_graph_checks_enabled` | `true` | SPOF + capacity-risk graph analysis step in health patrol (prevention; findings create HealthIssues with auto_rca off) |
 | `rca_topology_context_enabled` | `true` | Inject topology context (neighbors, blast radius, recent graph changes) into RCA invocation prompts |
+| `galaxy_enabled` | `true` | Enable Galaxy graph build pipeline + `/api/galaxy` + post-scan/hourly triggers |
+| `galaxy_build_interval_minutes` | `60` | Auto `galaxy-auto-build` schedule cadence |
+| `galaxy_model_id` | `""` | Override model for Galaxy LLM enrichment (empty = `bedrock_model_id_cheap`) |
+| `galaxy_batch_size` | `40` | Max resources per LLM enrichment batch |
+| `galaxy_confidence_min` | `0.5` | Minimum confidence to keep an LLM edge |
+| `galaxy_drop_rate_alert` | `0.05` | LLM-edge drop rate that logs a WARNING (drift smoke detector) |
+| `galaxy_expand_node_cap` | `200` | Max nodes per `/expand` before truncation |
+| `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` | Relationship-sparse leaf types excluded from LLM enrichment |
+| `galaxy_builds_keep` | `24` | Newest build rows retained (older pruned after each build to bound DB growth) |
 
 ## HealthIssue State Machine
 
@@ -220,3 +231,4 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 5.不碰与需求无关的代码，每行改动都对应明确的要求. 
 6. Each Time, 请从Plan Mode 开始
 7. each time when after finsh the development phase, auto-update the docs/ workflows, and readme or related documentation, keep it updated.
+8. use .venv as default python env, source it as needed.

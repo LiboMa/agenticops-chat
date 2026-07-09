@@ -15,9 +15,11 @@ Directory layout::
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import re
+import threading
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -101,11 +103,30 @@ def _serialize_frontmatter(fm: dict[str, Any], body: str) -> str:
     return f"---\n{fm_str}\n---\n\n{body}\n"
 
 
+# monotonic counter for unique tmp names; next() on itertools.count is atomic in CPython
+_tmp_counter = itertools.count()
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
-    """Write text atomically: temp file in same dir + os.replace (crash-safe)."""
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    """Write text atomically: unique temp file in same dir + os.replace (crash-safe).
+
+    The tmp name is made unique per (pid, thread, counter) so concurrent writers —
+    e.g. multiple agents touching the same shared/ memory during parallel builds —
+    never clobber each other's tmp (which previously caused os.replace to hit a
+    vanished tmp -> FileNotFoundError). os.replace itself is atomic, so last-writer
+    wins on the final file and both writers succeed.
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{next(_tmp_counter)}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except BaseException:
+        # never leave a stray tmp behind if the write/replace fails midway
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 # ── Loading ─────────────────────────────────────────────────────────

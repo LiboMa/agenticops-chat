@@ -94,7 +94,9 @@ cd "$APP_DIR"
 rm -rf .venv
 UV_PYTHON_INSTALL_DIR=/opt/uv-python uv venv .venv --python 3.12
 source .venv/bin/activate
-uv pip install -e ".[im,files,reports]"
+# Install from lockfile first (exact versions), then editable project without pulling deps
+uv pip install -r requirements.txt
+uv pip install -e ".[im,files,reports]" --no-deps
 
 # -----------------------------------------------------------------------------
 # Frontend: Build React SPA

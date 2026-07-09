@@ -138,3 +138,61 @@ agent 运行时的 SDK 现代化。7 项候选增强经评估收紧为 **4 做 3
 |------|------|------|
 | `strands_context_manager_auto` | `true` | 全 agent 启用 SDK 自动上下文治理 + ContextOffloader |
 | `executor_hitl_enabled` | `false` | executor 叠加一层 Strands HumanInTheLoop 审批门（主门仍是现有 gate） |
+
+---
+
+## Sub-project F — Galaxy 全景资源关系图（LLM 混合构图，Experimental）(2026-07-08)
+
+`/galaxy` — 把整个多账号资源清单渲染成一张可交互的**星云图**，同时是未来"一键托管自主运营"模式的世界模型基础。核心是一套**三层混合构图 + 产线级信任模型**。
+
+### 三层混合构图（机械关系=代码，语义关系=LLM）
+
+- **L1 代码规则**（`rules.py`，零幻觉）：从 `raw_data` 确定性推导包含边、ID 引用边、安全组边、标签归组边，全部 `provenance=rule`。
+- **L2 全局索引**（代码生成）：每资源一行 ~40 tok 摘要，作为只读上下文注入每个 L3 批次，解决分批盲区。
+- **L3 LLM 语义增强**（`builder.py`，Haiku temp=0）：仅对脏批次推断语义边（如 `inferred_group`），每批 ≤`galaxy_batch_size`。
+
+### 产线级信任模型（不容纰漏）
+
+- **fail-closed 机器质检**：LLM 边两端必须在库存中（无法发明资源）+ evidence 必须能在**任一端点** `raw_data/tags` 回验 + 置信度闸；未过则丢弃并计数，丢弃率超 `galaxy_drop_rate_alert` 记 WARNING。
+- **provenance 分级**：`rule` 边=事实骨架（可作未来执行依据）；`llm` 边=仅辅助、前端虚线、**永不驱动执行**。
+- 真实实测：1287 资源全量构建 5m11s / $1.27，175 条 LLM 边过验、361 条被 fail-closed 丢弃。
+
+### 内容哈希增量（成本可控）
+
+- 每小时定时任务先做内容哈希 diff（剥离易变字段）：无变化→<1s 退出、$0、不调 LLM；仅对变化资源重跑 L3，未变资源沿用上次 LLM 边。稳态 ~$1-3/月（对比纯 LLM 每小时全量 $1,100+/月）。
+- build 历史剪枝到 `galaxy_builds_keep`（默认 24）以约束 DB 增长（每行存完整 rule+llm 图 blob）。
+
+### 前端 — Canvas 星云（固定 Nebula Violet 主题）
+
+- d3-force 力导向一次铺开全清单（~1300 节点）；warning/critical 脉冲、rule 边实线 / llm 边虚线；滚轮缩放、拖拽平移、双击星团聚焦、悬停高亮邻居。
+- **交互分工（house rule）**：细节→右侧滑动面板，临时数据→Dialog。
+  - 单击节点 → **右侧关键信息面板**（状态 + open issues 带 `IssueStatusBadge`）。
+  - 点 issue → **居中 Dialog**（RCA/指标，ESC 关闭继续看下一个）。
+  - 点「查看原始数据」→ **第二层右侧面板**：可折叠、可搜索的 `JsonTree` 渲染深层嵌套 `raw_data`（解决固定宽度显示不全）。
+- 依赖：移除 `@xyflow/react` + `@dagrejs/dagre`，改用细粒度 d3 子包（Galaxy bundle 221KB→79KB）。
+
+### Docs / specs
+
+- Design spec: `docs/superpowers/specs/2026-07-05-galaxy-resource-graph-design.md`
+- Plan: `docs/superpowers/plans/2026-07-06-galaxy-resource-graph.md`
+- Workflow: `docs/WORKFLOW.md` → "Galaxy — Resource Relationship Graph" 段
+
+### 新增 config 开关一览
+
+| 开关 | 默认 | 作用 |
+|------|------|------|
+| `galaxy_enabled` | `true` | 启用 Galaxy 构图管线 + `/api/galaxy` + 每小时/扫描后触发 |
+| `galaxy_build_interval_minutes` | `60` | 自动构建 cadence |
+| `galaxy_model_id` | `""` | LLM 增强模型覆盖（空=`bedrock_model_id_cheap`） |
+| `galaxy_batch_size` | `40` | 每个 LLM 批次最大资源数 |
+| `galaxy_confidence_min` | `0.5` | LLM 边保留的最低置信度 |
+| `galaxy_drop_rate_alert` | `0.05` | 丢弃率超此值记 WARNING（漂移烟雾探测） |
+| `galaxy_expand_node_cap` | `200` | `/expand` 单次返回节点上限 |
+| `galaxy_builds_keep` | `24` | 保留最近 N 条 build（旧的剪枝） |
+
+---
+
+## 修复 — Agent Memory 并发原子写 (2026-07-09)
+
+- 多 agent 并行构建时都会 `touch_last_used` 同一 `shared/` memory（reactivate-on-use），`_atomic_write_text` 旧的**固定 tmp 名** `.{name}.tmp` 导致并发写互相覆盖 → `os.replace` 命中已消失的 tmp → `FileNotFoundError`（被 DEBUG 吞掉，但刷屏 + 偶尔 `last_used` 丢更新）。
+- 修复：tmp 名按 `(pid, thread, 单调计数器)` 唯一化；`os.replace` 仍原子（last-writer-wins）；失败清理 tmp。回归测试 12 线程×25 touch 同一文件 + E2E 7 agent×15 并发 load 全绿。

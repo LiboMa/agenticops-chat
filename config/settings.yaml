@@ -122,3 +122,16 @@ agent_main_window_size: -1
 agent_reporter_window_size: 1800
 agent_detect_window_size: 8000
 agent_scan_window_size: 1000
+galaxy_enabled: true
+galaxy_build_interval_minutes: 60
+galaxy_model_id: ""
+galaxy_batch_size: 40
+galaxy_confidence_min: 0.5
+galaxy_drop_rate_alert: 0.05
+galaxy_expand_node_cap: 200
+galaxy_llm_exclude_types:
+- IAMRole
+- KMS
+- S3
+- ECR_Repository
+galaxy_builds_keep: 24

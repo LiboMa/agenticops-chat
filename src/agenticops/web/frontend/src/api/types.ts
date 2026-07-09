@@ -779,3 +779,87 @@ export interface FixPlanWithExecutions {
   created_at: string;
   executions: FixExecution[];
 }
+
+export type GalaxyHealth = "healthy" | "warning" | "critical";
+
+export interface GalaxyNode {
+  id: string;
+  kind: "account" | "group" | "resource";
+  name: string;
+  resource_type?: string;
+  region?: string;
+  provider?: string;
+  account_id?: number | null;
+  resource_count?: number;
+  open_issues?: number;
+  health?: GalaxyHealth;
+  types?: Record<string, number>;
+  group_kind?: string;
+  member_count?: number;
+}
+
+export interface GalaxyEdge {
+  source: string;
+  target: string;
+  relation_type: string;
+  provenance: "rule" | "llm";
+  evidence?: string;
+  confidence?: number;
+}
+
+export interface GalaxyBuildInfo {
+  id: number;
+  status: "running" | "completed" | "failed";
+  trigger: string;
+  full: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  node_count: number;
+  edge_count: number;
+  dropped_edge_count: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string | null;
+}
+
+export interface GalaxyStatus {
+  build: GalaxyBuildInfo | null;
+  next_check_minutes: number;
+}
+
+export interface GalaxyOverview {
+  nodes: GalaxyNode[];
+  edges: GalaxyEdge[];
+  build_id: number | null;
+}
+
+export interface GalaxyExpand {
+  nodes: GalaxyNode[];
+  edges: GalaxyEdge[];
+  truncated: boolean;
+}
+
+// Full starfield payload (slim). Node/edge keys are shortened server-side.
+export interface GalaxyGraphNode {
+  id: string;
+  kind: "account" | "group" | "resource";
+  name: string;
+  type: string;
+  acct?: number | null;
+  health?: GalaxyHealth;
+  members?: number;
+}
+export interface GalaxyGraphEdge {
+  s: string;
+  t: string;
+  r: string;
+  p: "rule" | "llm";
+  ev?: string;
+  c?: number;
+}
+export interface GalaxyGraph {
+  nodes: GalaxyGraphNode[];
+  edges: GalaxyGraphEdge[];
+  build_id: number | null;
+}

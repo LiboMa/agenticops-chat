@@ -931,6 +931,57 @@ function AgentModelsCard() {
   );
 }
 
+/* ── Galaxy Build Model Card ────────────────────────────────────── */
+
+function GalaxyModelCard() {
+  const settingsQ = useSettings();
+  const updateMut = useUpdateSettings();
+  const s = settingsQ.data;
+
+  if (settingsQ.isLoading) return <Card><CardBody><Spinner /></CardBody></Card>;
+  if (settingsQ.error) return <Card><CardBody><ErrorBanner message={settingsQ.error.message} onRetry={() => settingsQ.refetch()} /></CardBody></Card>;
+  if (!s) return null;
+
+  const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
+  const current = s.galaxy_model_id ?? "";
+  const currentPreset = presets.find((p) => p.value === current);
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">Galaxy Build Model</h2>
+        <span className="text-xs text-muted-foreground">LLM used for Galaxy graph semantic enrichment (L3)</span>
+      </CardHeader>
+      <CardBody>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-md">
+            <p className="text-sm text-foreground">Model ID</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              An extraction task (temp=0) — the cheap tier (Haiku) is recommended.
+              LLM edges are always fail-closed verified regardless of model.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={current}
+              onChange={(e) => updateMut.mutate({ galaxy_model_id: e.target.value })}
+              disabled={updateMut.isPending}
+              className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[280px]"
+            >
+              <option value="">Default (cheap tier · Haiku)</option>
+              {presets.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+              {current && !currentPreset && <option value={current}>{current}</option>}
+            </select>
+            <Badge className="bg-violet-100 text-violet-700">Experimental</Badge>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ── IM Connections (read-only) ─────────────────────────────────── */
 
 function IMConnectionsCard({ feishuActive, slackActive }: { feishuActive: boolean; slackActive: boolean }) {
@@ -1285,6 +1336,9 @@ export default function Settings() {
 
       {/* ── Agent Models ─────────────────────────────────────── */}
       <AgentModelsCard />
+
+      {/* ── Galaxy Build Model ───────────────────────────────── */}
+      <GalaxyModelCard />
 
       {/* ── IM Connections (read-only status) ────────────────── */}
       {s && <IMConnectionsCard feishuActive={s.feishu_ws_active} slackActive={s.slack_ws_active} />}

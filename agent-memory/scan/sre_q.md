@@ -4,9 +4,9 @@ confidence: 5
 created_at: '2026-05-24'
 created_by: user
 last_confirmed: '2026-05-24'
-last_used: '2026-07-05'
+last_used: '2026-07-04'
 source: chat
-status: active
+status: archived
 type: pattern
 ---
 

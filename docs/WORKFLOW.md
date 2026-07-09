@@ -989,6 +989,55 @@ Every agent call is logged with token counts and cost (computed from `config.tok
 
 ---
 
+## Galaxy — Resource Relationship Graph (LLM-Hybrid)
+
+`/galaxy` is a draggable, drill-down whole-inventory relationship graph. Its innovation is a **three-layer hybrid build** with a strict trust model: mechanical relationships are derived by code (never wrong), semantic relationships are proposed by an LLM but must pass fail-closed machine verification before entering the graph — and every edge is tagged with its `provenance` so LLM output can never be mistaken for fact.
+
+### Trust model (production-grade reliability)
+
+| Edge kind | Source | `provenance` | Rendered | May drive autonomous action? |
+|---|---|---|---|---|
+| Containment, ID reference, tag grouping | Code rules (L1) | `rule` | solid line | Yes (future) |
+| Inferred grouping / semantic links | LLM + verification (L3) | `llm` | dashed line | **Never** — advisory only |
+
+An LLM edge is **dropped** unless: (1) both endpoint node ids exist in the code-derived inventory (the LLM cannot invent a resource), and (2) its `evidence` string is grounded in a real resource's `raw_data`/`tags`. Drop rate above `galaxy_drop_rate_alert` (5%) logs a WARNING — a prompt/model-drift smoke detector.
+
+### Build pipeline
+
+```mermaid
+flowchart TD
+  R[cloud_resources raw_data] --> D{content-hash diff}
+  D -- no change --> Skip[skip · $0]
+  D -- dirty/full --> L1[L1 code rules<br/>provenance=rule]
+  L1 --> L2[L2 compact global index]
+  L2 --> L3[L3 LLM enrichment<br/>Haiku temp=0]
+  L3 --> V{fail-closed verify<br/>endpoints + evidence}
+  V -- drop --> Cnt[dropped counter]
+  V -- keep --> M[merge + stabilize]
+  L1 --> M
+  M --> B[(galaxy_builds)]
+  B --> API[/api/galaxy/overview·expand·graph/]
+  API --> UI[Canvas starfield /galaxy]
+```
+
+- **Content-hash incremental**: an hourly job hashes each resource (volatile fields stripped) and diffs against the last build. No change → exits in <1s at **$0** (no LLM call). Only changed resources are re-analyzed; unchanged resources carry forward their prior LLM edges. Steady-state cost ~$1–3/month vs $1,100+/month for naive hourly full rebuilds.
+- **Triggers**: hourly `galaxy-auto-build` schedule · manual "Rebuild" button (`?full=true`) · post-scan hook (fault-isolated, best-effort).
+- **Bounded storage**: only the newest `galaxy_builds_keep` (default 24) build rows are retained; each stores the full rule+llm graph blobs, so older rows are pruned after each successful build.
+
+### Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/galaxy/rebuild?full=` | Trigger a build (409 if one is running); runs off the event loop via `asyncio.to_thread` |
+| `GET /api/galaxy/status` | Latest build: status, node/edge/dropped counts, cost, next auto-check |
+| `GET /api/galaxy/overview` | Top layer: account + group nodes with resource counts, type distribution, health rollup |
+| `GET /api/galaxy/expand?group=&types=&health=` | Drill into a group: member resource nodes + rule/llm edges (with provenance), health-colored, capped at `galaxy_expand_node_cap` |
+| `GET /api/galaxy/graph` | Full slim payload (all nodes + rule/llm edges, health overlay) — feeds the client-side starfield layout |
+
+Frontend (`pages/Galaxy.tsx`, **Experimental**): a **Canvas starfield** — d3-force lays out the whole inventory at once (~1300 nodes) on a fixed Nebula-Violet dark canvas; warning/critical nodes pulse, rule edges solid / llm edges dashed. Scroll-zoom, drag-pan, double-click a cluster to focus, hover to highlight neighbors. **Single-click a node → right-side key-info panel** (status, open issues with `IssueStatusBadge`); click an issue → a centered **Dialog** (RCA/metrics, ESC to dismiss and check the next); "view raw_data" → a **second right-side panel** rendering the nested JSON as a collapsible, searchable `JsonTree` (`components/galaxy/{GalaxyNodePanel,GalaxyIssueDialog,GalaxyRawDataPanel,JsonTree}.tsx`). House rule: detail → right slide panels; transient data → dialogs. Live health tallies sit in the bottom-left legend.
+
+---
+
 ## CLI Slash Command Quick Reference
 
 | Command | Purpose |
