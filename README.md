@@ -2,7 +2,11 @@
 
 **Agent-first cloud operations platform.** A team of specialized AI agents scans your AWS infrastructure, detects issues, finds root causes, plans fixes, and — for low-risk problems — remediates them autonomously. They also **learn**: every operation refines a self-optimizing memory and skill library.
 
-> **Version**: 2.0.1 · **Latest release**: [Chat/Dashboard/Nav UX overhaul + Strands 1.45 context governance](docs/MVP-2.0.1-RELEASE.md) · **Full history** below.
+**Who it's for:** SRE / platform / cloud-ops teams who want an on-call copilot that closes the loop from *alert → root cause → fix* — not just another dashboard. Point it at your AWS accounts; it patrols, explains what broke and why, and (with your approval policy) fixes low-risk issues on its own while a human stays in the loop for anything risky.
+
+> **Version**: 2.0.1 · **Latest release**: [Chat/Dashboard/Nav UX overhaul + Strands 1.45 context governance + Galaxy (experimental)](docs/MVP-2.0.1-RELEASE.md) · **Full history** below.
+>
+> **Maturity:** the agent pipeline + CLI/Web/API are the validated core (10/10 closed-loop lab, see [Validation](#validation)). The one-click `deploy-sg` sandbox is exercised end-to-end; the `ec2`/`ecs`/`eks` Terraform stacks are scaffolding (see [Deployment](#deployment) for per-method maturity). Galaxy is an experimental PoC.
 
 Three ways in — all driving the same agents:
 
@@ -169,13 +173,13 @@ In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/mo
 
 ### Web Dashboard
 
-React 18 + TypeScript + Tailwind + TanStack Query, served by FastAPI at `http://localhost:8000`. 13 pages (+ Login): Dashboard, Chat, Issues & Plans, Issue Detail, Resource Detail, Schedules, Schedule Detail, Reports, Report Detail, Agent Metrics, Skills, Skill Detail, Settings.
+React 18 + TypeScript + Tailwind + TanStack Query, served by FastAPI at `http://localhost:8000`. 15 pages (+ Login): Dashboard, Chat, Issues & Plans, Issue Detail, Resource Detail, Schedules, Schedule Detail, Reports, Report Detail, Agent Metrics, Skills, Skill Detail, Settings, **Galaxy** *(experimental relationship graph)*.
 
 The **Chat** page streams multiple concurrent sessions (background streaming, instant open) — see [v1.1.1 notes](docs/MVP-1.1.1-RELEASE.md).
 
 ### API
 
-80+ REST endpoints; full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills`, `/api/graph`, `/api/settings`, `/api/auth`.
+180+ REST endpoints; full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/settings`, `/api/auth`.
 
 ---
 
@@ -199,27 +203,72 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 
 ## Deployment
 
-| Target | Path | Command |
-|--------|------|---------|
-| **Docker** | `docker/` | `docker build -f docker/Dockerfile -t agenticops . && docker run -p 8000:8000 …` |
-| **EC2** | `iac/ec2/` | `terraform apply` |
-| **ECS (Fargate)** | `iac/ecs/` | `terraform apply` |
-| **EKS** | `iac/eks/` | `terraform apply` |
-| **One-click (Singapore)** | `iac/deploy-sg/` | `./deploy.sh apply` — CloudFront → ALB → EC2 in ap-southeast-1 |
+Pick by intent. Every method runs the *same* app; they differ in infra + maturity.
 
+| Method | Intent | Maturity | Backend |
+|--------|--------|----------|---------|
+| **Local (pip)** | Dev / evaluation | ✅ Stable | SQLite + files |
+| **Docker** | Dev / self-host single container | ✅ Stable | SQLite (mount vol) or Postgres |
+| **`iac/deploy-sg`** (one-click) | **Dev sandbox on AWS** | ✅ Exercised end-to-end | EC2 + CloudFront, ap-southeast-1 |
+| **`iac/ec2` · `iac/ecs` · `iac/eks`** (Terraform) | **Production on AWS** | ⚠️ Scaffolding — last verified 2026-05, not end-to-end tested; validate before production use | RDS Postgres + S3 |
+| **`infra/cloud-deploy`** (CloudFormation) | Alt full-stack provision | ⚠️ Older (2026-03); prefer Terraform | RDS or SQLite-on-EFS |
+
+> **Dev vs Production:** `deploy-sg` is a **single-box dev sandbox** (one EC2, broad IAM, SQLite) — do **not** run production on it. Production is the `ec2/ecs/eks` Terraform stacks (RDS + S3, two-layer IAM), which currently need validation before you rely on them.
+
+Each method below follows the same shape: **prereqs → deploy → access → rollback**.
+
+### 1. Local (pip) — dev / evaluation
 ```bash
-docker run -d -p 8000:8000 \
-  -v /data/agenticops:/app/data \
-  -e AIOPS_ADMIN_PASSWORD=MyPassword \
-  -e AIOPS_BEDROCK_REGION=us-east-1 \
-  agenticops:latest
+# prereqs: Python 3.12, AWS creds with Bedrock access
+pip install -e .                      # add ".[cloud]" for Postgres + pgvector
+aiops quickstart --yes                # init + start; dashboard at http://localhost:8000
+# rollback: just stop the process (aiops service stop)
 ```
 
-**Auth** (default-on for cloud profiles): login via `POST /api/auth/login` (`admin` / `aiops2026`, change with `AIOPS_ADMIN_PASSWORD`); 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+### 2. Docker — dev / single-container self-host
+```bash
+# prereqs: Docker, AWS creds (mounted or via env), Bedrock access
+docker build -f docker/Dockerfile -t agenticops:latest .
+docker run -d -p 8000:8000 \
+  -v /data/agenticops:/app/data \
+  -e AIOPS_ADMIN_PASSWORD=change-me \
+  -e AIOPS_BEDROCK_REGION=us-east-1 \
+  agenticops:latest
+# access: http://localhost:8000  ·  rollback: docker stop <id> (data persists in the volume)
+```
+Details + full env-var table: [`docker/README.md`](docker/README.md).
 
-**Singapore deployment access**: the one-click `deploy-sg` stack fronts the app with CloudFront. Use the CloudFront default domain (`./deploy.sh` prints `cloudfront_url`, e.g. `https://d1o50vxhknqf6d.cloudfront.net`) which is always reachable; a custom domain via Route53 + ACM is optional and requires a live domain. `deploy.sh redeploy [branch]` pulls + rebuilds + restarts on the instance via SSM. Note: the instance uses an auto-assigned public IP that changes on stop/start — drive ops via the instance ID / SSM, not a hard-coded IP.
+### 3. AWS dev sandbox — `iac/deploy-sg` (one-click, ap-southeast-1)
+CloudFront → ALB → single EC2, provisioned + app-installed in one command. This is the path exercised end-to-end.
+```bash
+# prereqs: aws + terraform CLIs, AWS creds for ap-southeast-1
+cd iac/deploy-sg
+./deploy.sh plan                      # preview infra changes
+./deploy.sh apply                     # create infra + install app (prints cloudfront_url)
+./deploy.sh redeploy [branch]         # pull branch + rebuild + restart (via SSM); default: main
+./deploy.sh destroy                   # tear down everything
+```
+- **Access:** the printed `cloudfront_url` (e.g. `https://<id>.cloudfront.net`) is always reachable. A custom Route53 + ACM domain is optional.
+- **Ops note:** the instance's public IP changes on stop/start — drive ops via the **instance ID / SSM**, never a hard-coded IP.
+- **Rollback:** `redeploy` to a previous branch/tag, or `destroy` + re-`apply`.
 
-Details: [`docker/README.md`](docker/README.md) · [`iac/ec2/README.md`](iac/ec2/README.md) · [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
+### 4. AWS production — `iac/ec2` / `iac/ecs` / `iac/eks` (Terraform) ⚠️
+RDS Postgres + S3, two-layer IAM (platform + target-account). **Scaffolding — last verified 2026-05, not yet end-to-end tested; validate in a staging account before production.**
+```bash
+# prereqs: aws + terraform CLIs, an ACM cert, target VPC/subnets
+cd iac/ec2                            # (or iac/ecs — Fargate, iac/eks — Kubernetes)
+cp terraform.tfvars.example terraform.tfvars   # edit: region, admin_password, acm_cert_arn, …
+terraform init
+terraform apply -target=module.ecr -auto-approve   # push image first
+terraform apply -auto-approve
+# rollback: terraform destroy (or redeploy a prior image tag)
+```
+Per-stack details: [`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md).
+
+### Auth (all AWS deployments)
+Login via `POST /api/auth/login` (`admin` / `aiops2026` — **change immediately** with `AIOPS_ADMIN_PASSWORD`). 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+
+More: [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 
 ---
 
