@@ -77,12 +77,14 @@ tfplan
 
 # Playwright MCP dumps + scratch screenshots
 .playwright-mcp/
+.superpowers/
 *.png
 
 # Test scratch artifacts
 MagicMock/
 auto-demo_settings.json
-.superpowers/
 
 # Editor / agent tool dirs
 .kiro/
+.claude/
+touch.txt

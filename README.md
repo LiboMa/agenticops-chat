@@ -45,6 +45,7 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Messaging** | Unified Settings → Messaging tab: bot apps (Feishu/Slack/DingTalk/WeCom credentials), channels (Slack/Email/SES/SNS/Feishu/DingTalk/WeCom/Webhook), and delivery logs — schema-driven config with masked secrets, via `/api/messaging/*` |
 | **MCP Servers** | Claude-Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload |
 | **Graph Engine** | NetworkX infrastructure graph: SPOF detection, capacity risk, dependency chains, change simulation (agent tools) |
+| **Galaxy** *(Experimental)* | `/galaxy` whole-inventory relationship graph — Canvas starfield of every resource, health-colored with pulsing anomalies. Mechanical edges derived by code (`provenance=rule`); semantic edges proposed by an LLM but **fail-closed verified** (endpoints must exist + evidence grounded in `raw_data`) so hallucinations never enter as fact. Content-hash incremental builds ($0 when unchanged) |
 
 ---
 
@@ -245,6 +246,7 @@ src/agenticops/
 ├── memory/       # Self-optimizing file-based agent memory + Curator
 ├── skills/       # Skill loader, security, execution, Curator, promote/rollback
 ├── graph/        # Infrastructure graph engine + SRE algorithms
+├── galaxy/       # Galaxy relationship graph (LLM-hybrid, fail-closed): rules + builder + api
 ├── kb/           # Knowledge Base (vector store: SQLite/pgvector/S3)
 ├── cli/          # CLI entry + chat + init wizard
 ├── web/          # FastAPI backend + React SPA (frontend/)
@@ -271,7 +273,7 @@ Most recent first. Each links to detailed notes.
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **[2.0.1](docs/MVP-2.0.1-RELEASE.md)** | 2026-07-04 | Frontend UX overhaul — Chat composer per-session **model switch** (detail-level knob removed) · **rich chat** (model-generated suggestion chips + in-place `I#` issue locate) · **nav sidebar 2.0** (expandable, drag-reorder, hover preview) · **dashboard 2.0** (5-block realtime stats, 10s polling) · **Strands 1.45** upgrade — `context_manager="auto"` (token savings + oversized-tool-result offload) + optional executor **HITL** safety gate |
+| **[2.0.1](docs/MVP-2.0.1-RELEASE.md)** | 2026-07-08 | Frontend UX overhaul — Chat composer per-session **model switch** · **rich chat** (suggestion chips + in-place `I#` locate) · **nav sidebar 2.0** · **dashboard 2.0** · **Strands 1.45** (`context_manager="auto"` + optional executor **HITL**) · **Galaxy** *(Experimental)* — LLM-hybrid whole-inventory relationship graph with fail-closed verification + Canvas starfield UI |
 | **[2.0.0](docs/MVP-2.0.0-RELEASE.md)** | 2026-06-19 | Governed Autonomy (policy engine) · ITSM bridge · Multi-cloud capability layer (SSH/Prometheus/Kubernetes providers) · self-improvement metrics · prevention triad (SPOF patrol + RCA topology + simulation gate) · **account-addressed credentials** (kills the ContextVar wrong-account defect; explicit account resolution, fail-closed, SSM→SSH access ladder) · SES/SMTP notifier key-mapping fix |
 | **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | Concurrent chat sessions + fast open; paste/drag-drop multi-attachment; open-webui-style chat UI refresh; agent window-config fix (Full Context + Web→YAML persist); unified **Messaging** settings (merged Notifications + IM Bots) |
 | **[1.1.0](docs/MVP-1.1.0-RELEASE.md)** | 2026-05-31 | Autonomous **agent memory** (self-optimizing, Hermes-style) + autonomous **skills** (agent-created, security-gated promotion) |

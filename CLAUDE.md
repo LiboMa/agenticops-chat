@@ -88,9 +88,9 @@ Web Dashboard ──────┘         │
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | 14 pages: Dashboard, Chat, IssuesAndPlans, IssueDetail, Resources(detail), ReportDetail, Reports, ScheduleDetail, Schedules, AgentMetrics, Skills, SkillDetail, Settings, Login |
-| `hooks/` | 25+ TanStack Query hooks (incl. chatStream-backed useSessionStream/useChatMessages, useMessaging, useCostSummary, useTraceTimeline) |
-| `components/` | Chat components, layout (AppShell, Sidebar, Header) |
+| `pages/` | 15 pages: Dashboard, Chat, IssuesAndPlans, IssueDetail, Resources(detail), ReportDetail, Reports, ScheduleDetail, Schedules, AgentMetrics, Skills, SkillDetail, Settings, Login, Galaxy |
+| `hooks/` | 25+ TanStack Query hooks (incl. chatStream-backed useSessionStream/useChatMessages, useMessaging, useCostSummary, useTraceTimeline, useGalaxy) |
+| `components/` | Chat components, layout (AppShell, Sidebar, Header), `galaxy/` (GalaxyNodePanel, GalaxyIssueDialog, GalaxyRawDataPanel, JsonTree) |
 | `api/` | `client.ts`, `types.ts` |
 
 **Popup/panel house rule (2026-07-04):** every overlay/side-panel/dialog ① animates in with `animate-[slideInRight_0.2s_ease-out]` (keyframe in tailwind.config.ts) and ② closes on ESC (window keydown listener bound while open, or Radix primitive which has it built in). Reference implementations: `chat/ContextPanel.tsx`, `chat/SaveReportDialog.tsx`.
