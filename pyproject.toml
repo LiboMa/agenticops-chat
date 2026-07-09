@@ -23,7 +23,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "httpx>=0.24.0",
     # Agent/LLM
-    "strands-agents>=0.1.0",
+    "strands-agents>=1.45.0,<2.0.0",
     "langchain-aws>=0.1.0",
     "langchain-core>=0.1.0",
     # Utils

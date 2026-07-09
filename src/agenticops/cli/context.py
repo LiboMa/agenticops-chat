@@ -49,12 +49,17 @@ class ChatContext:
         if self.agent is None:
             return False
         from strands.models.bedrock import BedrockModel
+        from strands.models.model import CacheConfig
         from agenticops.config import settings, get_bedrock_boto_session
         model_id = MODEL_ALIASES[alias]
+        cache_kwargs: dict = {}
+        if settings.bedrock_cache_enabled:
+            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
         self.agent.model = BedrockModel(
             model_id=model_id,
             boto_session=get_bedrock_boto_session(),
             max_tokens=settings.bedrock_max_tokens,
+            **cache_kwargs,
         )
         # Also update settings so get_agent_model_config("main") reflects the change
         settings.agent_main_model_id = model_id
