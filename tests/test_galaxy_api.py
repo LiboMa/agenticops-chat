@@ -83,3 +83,17 @@ def test_expand_group_health_and_provenance(client):
     assert ec2["health"] == "critical"  # from the open critical HealthIssue on i-1
     assert body["truncated"] is False
     assert all("provenance" in e for e in body["edges"])
+
+
+def test_graph_full_payload(client):
+    client.post("/api/galaxy/rebuild", params={"full": True})
+    r = client.get("/api/galaxy/graph")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["build_id"] is not None
+    kinds = {n["kind"] for n in body["nodes"]}
+    assert {"account", "group", "resource"} <= kinds
+    # slim edge keys (s/t/r/p), health overlay on the EC2
+    assert all({"s", "t", "r", "p"} <= set(e) for e in body["edges"])
+    ec2 = next(n for n in body["nodes"] if n["id"] == "res:2")
+    assert ec2["health"] == "critical"

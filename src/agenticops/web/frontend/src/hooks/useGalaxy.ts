@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { GalaxyStatus, GalaxyOverview, GalaxyExpand } from "@/api/types";
+import type { GalaxyStatus, GalaxyOverview, GalaxyExpand, GalaxyGraph } from "@/api/types";
 
 export function useGalaxyStatus() {
   return useQuery({
@@ -8,6 +8,14 @@ export function useGalaxyStatus() {
     queryFn: () => apiFetch<GalaxyStatus>("/galaxy/status"),
     refetchInterval: (q) =>
       q.state.data?.build?.status === "running" ? 5_000 : 60_000,
+  });
+}
+
+export function useGalaxyGraph() {
+  return useQuery({
+    queryKey: ["galaxy-graph"],
+    queryFn: () => apiFetch<GalaxyGraph>("/galaxy/graph"),
+    staleTime: 60_000,
   });
 }
 

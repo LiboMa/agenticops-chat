@@ -178,3 +178,43 @@ async def expand(group: str = Query(...), types: Optional[str] = None, health: s
     out_edges = [e for e in (rule_edges + llm_edges)
                  if e["source"] in kept_ids and e["target"] in kept_ids]
     return {"nodes": members, "edges": out_edges, "truncated": truncated}
+
+
+@router.get("/graph")
+async def graph():
+    """Full starfield payload: every node (slim, health-overlaid) + all rule+llm edges.
+
+    Feeds the Canvas force-directed 'galaxy' view, which lays out and renders the
+    entire inventory at once (client-side). Slimmed to keep the payload small.
+    """
+    with get_db_session() as s:
+        latest = _latest_completed(s)
+        if latest is None:
+            return {"nodes": [], "edges": [], "build_id": None}
+        rule = latest.rule_graph or {}
+        llm = latest.llm_graph or {}
+        raw_nodes = rule.get("nodes", [])
+        rule_edges = rule.get("edges", [])
+        llm_edges = llm.get("edges", [])
+        build_id = latest.id
+        node_res_id = _resource_ids_by_node(s)
+    health = _health_by_resource_id()
+
+    nodes = []
+    for n in raw_nodes:
+        slim = {"id": n["id"], "kind": n["kind"], "name": (n.get("name") or "")[:60],
+                "type": n.get("resource_type") or n.get("group_kind") or "",
+                "acct": n.get("account_id")}
+        if n["kind"] == "resource":
+            slim["health"] = health.get(node_res_id.get(n["id"], ""), "healthy")
+        elif n["kind"] == "group":
+            slim["members"] = n.get("member_count", 0)
+        nodes.append(slim)
+
+    edges = []
+    for e in rule_edges:
+        edges.append({"s": e["source"], "t": e["target"], "r": e["relation_type"], "p": "rule"})
+    for e in llm_edges:
+        edges.append({"s": e["source"], "t": e["target"], "r": e["relation_type"], "p": "llm",
+                      "ev": (e.get("evidence") or "")[:120], "c": e.get("confidence")})
+    return {"nodes": nodes, "edges": edges, "build_id": build_id}

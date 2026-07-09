@@ -839,3 +839,27 @@ export interface GalaxyExpand {
   edges: GalaxyEdge[];
   truncated: boolean;
 }
+
+// Full starfield payload (slim). Node/edge keys are shortened server-side.
+export interface GalaxyGraphNode {
+  id: string;
+  kind: "account" | "group" | "resource";
+  name: string;
+  type: string;
+  acct?: number | null;
+  health?: GalaxyHealth;
+  members?: number;
+}
+export interface GalaxyGraphEdge {
+  s: string;
+  t: string;
+  r: string;
+  p: "rule" | "llm";
+  ev?: string;
+  c?: number;
+}
+export interface GalaxyGraph {
+  nodes: GalaxyGraphNode[];
+  edges: GalaxyGraphEdge[];
+  build_id: number | null;
+}
