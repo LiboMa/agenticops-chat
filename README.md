@@ -4,6 +4,8 @@
 
 **Who it's for:** SRE / platform / cloud-ops teams who want an on-call copilot that closes the loop from *alert → root cause → fix* — not just another dashboard. Point it at your AWS accounts; it patrols, explains what broke and why, and (with your approval policy) fixes low-risk issues on its own while a human stays in the loop for anything risky.
 
+> **Language:** **English (current)** · [中文](README_CN.md)
+>
 > **Version**: 2.0.1 · **Latest release**: [Chat/Dashboard/Nav UX overhaul + Strands 1.45 context governance + Galaxy (experimental)](docs/MVP-2.0.1-RELEASE.md) · **Full history** below.
 >
 > **Maturity:** the agent pipeline + CLI/Web/API are the validated core (10/10 closed-loop lab, see [Validation](#validation)). The one-click `deploy-sg` sandbox is exercised end-to-end; the `ec2`/`ecs`/`eks` Terraform stacks are scaffolding (see [Deployment](#deployment) for per-method maturity). Galaxy is an experimental PoC.
