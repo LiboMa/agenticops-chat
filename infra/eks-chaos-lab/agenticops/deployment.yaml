@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agenticops
+  namespace: agenticops
+  labels: { app: agenticops }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: agenticops }
+  template:
+    metadata:
+      labels: { app: agenticops }
+    spec:
+      serviceAccountName: agenticops
+      volumes:
+        - name: kubeconfig
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+      initContainers:
+        - name: write-kubeconfig
+          image: __IMAGE__
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              cat > /var/run/agenticops/kubeconfig <<EOF
+              apiVersion: v1
+              kind: Config
+              clusters:
+              - name: in-cluster
+                cluster:
+                  server: https://kubernetes.default.svc
+                  certificate-authority: ${CA}
+              contexts:
+              - name: in-cluster
+                context:
+                  cluster: in-cluster
+                  user: agenticops-sa
+                  namespace: chaos-lab
+              current-context: in-cluster
+              users:
+              - name: agenticops-sa
+                user:
+                  token: ${TOKEN}
+              EOF
+              echo "kubeconfig written"
+          volumeMounts:
+            - { name: kubeconfig, mountPath: /var/run/agenticops }
+      containers:
+        - name: agenticops
+          image: __IMAGE__
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: { name: agenticops-config }
+            - secretRef: { name: agenticops-secret }
+          volumeMounts:
+            - { name: kubeconfig, mountPath: /var/run/agenticops }
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "3Gi" }
