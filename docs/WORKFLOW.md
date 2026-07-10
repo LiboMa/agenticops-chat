@@ -1220,6 +1220,55 @@ Each case is documented in `docs/cases/case-N-*.md` with:
 
 ---
 
+## Chaos E2E Runbook
+
+The **EKS Chaos E2E Harness** validates the AgenticOps 感知→分析→解决→记录 loop end-to-end by injecting faults on the `agenticops-chaos-lab` EKS cluster (us-east-1) and asserting that the system perceives, analyzes, resolves, and records each scenario without human intervention.
+
+### Prerequisites
+- `kubectl` context set to `agenticops-chaos-lab`
+- AWS CLI configured for the lab account
+- Python with `requests`, `pyyaml`, `pytest`
+
+### Deploy the App In-Cluster
+```bash
+cd infra/eks-chaos-lab/agenticops
+bash deploy-app.sh --admin-password YOUR_PASSWORD
+```
+The app runs as a ClusterIP Service — never exposed publicly.
+
+### Run the E2E Suite
+From the remote server (with network access to the cluster):
+```bash
+cd infra/eks-chaos-lab/e2e
+export AIOPS_ADMIN_PASSWORD=YOUR_PASSWORD
+
+# All scenarios (6 assert + 2 evidence)
+bash run-e2e.sh
+
+# Deterministic pass/fail only
+bash run-e2e.sh --assert-only
+
+# Chat + report capture only
+bash run-e2e.sh --evidence-only
+```
+
+### Interpret Results
+- **JUnit XML**: `results/junit.xml` — standard CI artifact
+- **Evidence**: per-scenario snapshots (chat transcripts, cluster state, report PDFs) under `results/`
+- **Four phases asserted** (assert mode):
+  - **感知 (Perceive)**: HealthIssue matching the scenario appears
+  - **分析 (Analyze)**: RCAResult attached
+  - **解决 (Resolve)**: issue → `resolved`, FixPlan executed, cluster end-state fixed
+  - **记录 (Record)**: pipeline timeline contains fix/resolve events
+
+### Safety Guarantees
+- App is ClusterIP-only; sole ingress is the `kubectl port-forward` tunnel opened by `run-e2e.sh`.
+- Every scenario restores on teardown; `restore-all.sh` runs unconditionally (trap EXIT).
+
+**Full harness docs**: [infra/eks-chaos-lab/e2e/README.md](../infra/eks-chaos-lab/e2e/README.md)
+
+---
+
 ## Deployment
 
 ### Docker (推荐)

@@ -88,3 +88,7 @@ auto-demo_settings.json
 .kiro/
 .claude/
 touch.txt
+
+# Chaos E2E run artifacts (keep the dir, ignore contents)
+infra/eks-chaos-lab/e2e/results/*
+!infra/eks-chaos-lab/e2e/results/.gitkeep
