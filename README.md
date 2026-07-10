@@ -17,6 +17,8 @@ Three ways in — all driving the same agents:
    (Feishu/Slack/…)
 ```
 
+📖 **See the full request-to-remediation flow — with Mermaid diagrams — in [`docs/WORKFLOW.md`](docs/WORKFLOW.md).**
+
 ---
 
 ## Design Principles
@@ -74,17 +76,17 @@ IM Bots ────────────┘        │                  SRE 
 
 Models are per-agent overrides in `config/settings.yaml` (`agent_*_model_id`), winning over the tier defaults in `config.py`. Committed defaults:
 
-| Agent | Model (settings.yaml) | Role |
-|-------|-----------------------|------|
-| **Main** | Opus 4.8 | Pure router — dispatches to specialists |
-| **RCA** | Opus 4.6 | Root cause analysis (Skills + KB + Graph) |
-| **SRE** | Opus 4.8 | Fix-plan generation — **never executes** |
-| **Executor** | Opus 4.8 | Multi-backend execution (AWS / SSM / kubectl) |
-| **Scan** | Sonnet 4.6 | Resource discovery |
-| **Detect** | Sonnet 4.6 | Health monitoring + anomaly detection |
-| **Reporter** | Sonnet 4.6 | Report generation |
+| Agent | Model | Responsibility |
+|-------|-------|----------------|
+| **Main** | Opus 4.8 | **Router / orchestrator.** The only agent that talks to the user; classifies each request and dispatches to the right specialist(s) as tools, then composes their outputs. Holds no ops tools of its own — pure control flow, so routing stays cheap and auditable. |
+| **Scan** | Sonnet 4.6 | **Inventory discovery.** Enumerates resources across accounts/regions via provider CLIs (20+ AWS service types), normalizes them, and upserts into the metadata DB. Feeds every downstream agent + the graph/Galaxy builders. High-throughput, read-only. |
+| **Detect** | Sonnet 4.6 | **Health monitoring & anomaly detection.** Pulls CloudWatch alarms/metrics, runs Z-score anomaly detection, ingests Prometheus/CloudWatch/Datadog webhooks, and opens deduped `HealthIssue`s (SHA-256 fingerprint). Also runs the proactive patrol (SPOF + capacity-risk graph checks). Read-only. |
+| **RCA** | Opus 4.6 | **Root cause analysis.** For an open issue, correlates CloudTrail change events, the infrastructure graph (neighbors + blast radius), Knowledge Base cases, and domain Skills to produce a grounded root cause + confidence. Read-only investigation; writes an `RCAResult`, never touches infra. |
+| **SRE** | Opus 4.8 | **Fix-plan generation — plans, never acts.** Turns an RCA into a concrete, risk-tiered (L0–L3) remediation plan with exact steps + rollback. Strictly **read-only**: it proposes; only the Executor can act, and only after the approval gate. Enforces one-issue→one-active-plan. |
+| **Executor** | Opus 4.8 | **The only agent that changes infrastructure.** Executes an *approved* fix plan across backends — AWS CLI, SSM (→SSH fallback), `kubectl` — with account-addressed credential resolution (fail-closed, never ambient). Auto-runs L0/L1 after approval; L2/L3 require a human. Drives the 9-state issue lifecycle to `resolved`. |
+| **Reporter** | Sonnet 4.6 | **Reporting & knowledge capture.** Generates daily/weekly/incident/inventory reports (Markdown/HTML/PDF, local or S3) and distills resolved incidents into reusable Knowledge Base SOPs so future RCAs get faster. Read-only over ops data. |
 
-Defaults from `config/settings.yaml` — Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet elsewhere.
+Defaults from `config/settings.yaml` — Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing + high-throughput work. The **safety spine**: only SRE plans, only Executor acts, and only through the approval gate — see [Auto-Fix Pipeline](#auto-fix-pipeline) and the [end-to-end workflow guide](docs/WORKFLOW.md).
 
 Models are fetched dynamically from Bedrock; override per agent in `config/settings.yaml` or via `AIOPS_AGENT_{NAME}_MODEL_ID`. Switch at runtime with CLI `/model` or Web Settings.
 
@@ -266,7 +268,7 @@ terraform apply -auto-approve
 Per-stack details: [`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md).
 
 ### Auth (all AWS deployments)
-Login via `POST /api/auth/login` (`admin` / `aiops2026` — **change immediately** with `AIOPS_ADMIN_PASSWORD`). 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
 
 More: [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 
