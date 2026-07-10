@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "EC2ReadOnly", "Effect": "Allow", "Action": ["ec2:Describe*", "ec2:Get*"], "Resource": "*" },
+    { "Sid": "EKSReadOnly", "Effect": "Allow", "Action": ["eks:Describe*", "eks:List*"], "Resource": "*" },
+    { "Sid": "CloudWatchReadOnly", "Effect": "Allow", "Action": ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"], "Resource": "*" },
+    { "Sid": "LogsReadOnly", "Effect": "Allow", "Action": ["logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:StartQuery", "logs:GetQueryResults", "logs:StopQuery"], "Resource": "*" },
+    { "Sid": "CloudTrailReadOnly", "Effect": "Allow", "Action": ["cloudtrail:LookupEvents", "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:GetEventSelectors"], "Resource": "*" },
+    { "Sid": "ELBReadOnly", "Effect": "Allow", "Action": ["elasticloadbalancing:Describe*"], "Resource": "*" },
+    { "Sid": "BedrockInvoke", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": "*" }
+  ]
+}
