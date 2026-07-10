@@ -13,7 +13,7 @@ case "${ACTION}" in
     if [[ -f /tmp/agenticops-backend-svc.yaml ]]; then
       kubectl apply -f /tmp/agenticops-backend-svc.yaml || true
     else
-      kubectl expose deployment backend -n "${NS}" --name=backend --port=80 --target-port=8080 2>/dev/null || true
+      kubectl expose deployment backend -n "${NS}" --name=backend --port=6379 --target-port=6379 2>/dev/null || true
     fi
     echo "backend Service restored."
     ;;

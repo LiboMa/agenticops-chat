@@ -50,12 +50,10 @@ eksctl create iamserviceaccount \
   --namespace "${NS}" --name agenticops \
   --attach-policy-arn "${POLICY_ARN}" \
   --approve --override-existing-serviceaccounts
-IRSA_ROLE_ARN=$(aws iam list-roles \
-  --query "Roles[?contains(RoleName, 'agenticops') && contains(RoleName, 'chaos-lab')].Arn | [0]" \
-  --output text 2>/dev/null || echo "")
-# Fallback: read the annotation eksctl set on the SA.
-if [[ -z "${IRSA_ROLE_ARN}" || "${IRSA_ROLE_ARN}" == "None" ]]; then
-  IRSA_ROLE_ARN=$(kubectl get sa agenticops -n "${NS}" -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}')
+IRSA_ROLE_ARN=$(kubectl get sa agenticops -n "${NS}" -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}')
+if [[ -z "${IRSA_ROLE_ARN}" ]]; then
+  echo "ERROR: eksctl did not set the IRSA role-arn annotation on sa/agenticops. Aborting."
+  exit 1
 fi
 echo "  IRSA role: ${IRSA_ROLE_ARN}"
 

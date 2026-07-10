@@ -10,6 +10,8 @@ Proves the AgenticOps 感知→分析→解决→记录 loop against injected fa
 - App deployed in-cluster: `bash ../agenticops/deploy-app.sh`
 - Cluster + workloads + alarms up: `bash ../setup.sh`
 
+**Note:** The harness derives `AWS_ACCOUNT_ID` from the machine running it and registers it as the `chaos-lab` account. Ensure your AWS credentials match the lab account where the cluster's IRSA role resides.
+
 ## Run
 ```bash
 export AIOPS_ADMIN_PASSWORD=...        # matches deploy-app.sh --admin-password
