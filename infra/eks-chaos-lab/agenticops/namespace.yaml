@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agenticops
+  labels:
+    app.kubernetes.io/part-of: agenticops
+    purpose: chaos-e2e-monitor
