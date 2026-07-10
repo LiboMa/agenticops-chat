@@ -1,0 +1,114 @@
+# Each scenario: inject a fault, perceive via a CloudWatch webhook, assert the
+# four phases (or capture evidence), then restore. Paths are relative to the
+# eks-chaos-lab directory. `alert` mirrors a genuine CloudWatch alarm transition.
+- id: scale-to-zero
+  mode: assert
+  description: Frontend + backend scaled to 0 replicas
+  inject:  "chaos/pod-kill.sh scale-zero"
+  restore: "chaos/pod-kill.sh restore"
+  perceive:
+    title_pattern: "running pods|replicas|scaled|pods"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-RunningPods-Low"
+      NewStateValue: "ALARM"
+      NewStateReason: "Running pod count below threshold in chaos-lab"
+      Trigger: { MetricName: "pod_number_of_running_pods", Namespace: "ContainerInsights" }
+  expect_fix: { kind: replicas_min, namespace: chaos-lab, deployment: frontend, min: 1 }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: bad-image
+  mode: assert
+  description: Frontend set to a non-existent image tag (ImagePullBackOff)
+  inject:  "chaos/config-break.sh bad-image"
+  restore: "chaos/config-break.sh restore"
+  perceive:
+    title_pattern: "image|ImagePull|restart|pull"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-PodRestarts-High"
+      NewStateValue: "ALARM"
+      NewStateReason: "Container restart count high (ImagePullBackOff) in chaos-lab"
+      Trigger: { MetricName: "pod_number_of_container_restarts", Namespace: "ContainerInsights" }
+  expect_fix: { kind: image_not_contains, namespace: chaos-lab, deployment: frontend, substring: "nonexistent" }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: crashloop-config
+  mode: assert
+  description: Invalid nginx config → CrashLoopBackOff
+  inject:  "chaos/config-break.sh bad-config"
+  restore: "chaos/config-break.sh restore"
+  perceive:
+    title_pattern: "crash|config|restart|running pods"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-PodRestarts-High"
+      NewStateValue: "ALARM"
+      NewStateReason: "CrashLoopBackOff in chaos-lab frontend"
+      Trigger: { MetricName: "pod_number_of_container_restarts", Namespace: "ContainerInsights" }
+  expect_fix: { kind: replicas_min, namespace: chaos-lab, deployment: frontend, min: 1 }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: node-drained
+  mode: assert
+  description: A node cordoned + drained
+  inject:  "chaos/node-drain.sh drain"
+  restore: "chaos/node-drain.sh restore"
+  perceive:
+    title_pattern: "node|drain|cordon|schedul"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-NodeCount-Low"
+      NewStateValue: "ALARM"
+      NewStateReason: "Schedulable node count dropped in cluster"
+      Trigger: { MetricName: "cluster_node_count", Namespace: "ContainerInsights" }
+  expect_fix: { kind: node_schedulable }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: resource-stress
+  mode: assert
+  description: stress-ng pod pins node CPU/memory
+  inject:  "chaos/resource-stress.sh start"
+  restore: "chaos/resource-stress.sh stop"
+  perceive:
+    title_pattern: "cpu|memory|stress|utiliz"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-NodeCPU-High"
+      NewStateValue: "ALARM"
+      NewStateReason: "Node CPU utilization high in chaos-lab"
+      Trigger: { MetricName: "node_cpu_utilization", Namespace: "ContainerInsights" }
+  expect_fix: { kind: no_pod_label, namespace: chaos-lab, selector: "chaos=resource-stress" }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: netpol-block
+  mode: assert
+  description: NetworkPolicy blocks all ingress to backend
+  inject:  "chaos/network-chaos.sh block"
+  restore: "chaos/network-chaos.sh restore"
+  perceive:
+    title_pattern: "network|connection|backend|unhealthy|timeout"
+    alert:
+      AlarmName: "EKS-agenticops-chaos-lab-Backend-Unreachable"
+      NewStateValue: "ALARM"
+      NewStateReason: "Frontend cannot reach backend (connection refused/timeout)"
+      Trigger: { MetricName: "backend_connection_errors", Namespace: "ContainerInsights" }
+  expect_fix: { kind: no_networkpolicy, namespace: chaos-lab, name: chaos-block-backend }
+  timeout_perceive_s: 120
+  timeout_resolve_s: 480
+
+- id: coredns-down
+  mode: evidence
+  description: CoreDNS scaled to 0 — cluster-wide DNS failures
+  inject:  "e2e/scenarios/coredns-down.sh break"
+  restore: "e2e/scenarios/coredns-down.sh restore"
+  chat_prompt: "Investigate and fix the cluster-wide DNS resolution failures in the agenticops-chaos-lab cluster."
+  timeout_evidence_s: 600
+
+- id: service-deleted
+  mode: evidence
+  description: backend Service deleted — endpoints empty
+  inject:  "e2e/scenarios/service-deleted.sh break"
+  restore: "e2e/scenarios/service-deleted.sh restore"
+  chat_prompt: "The backend service in namespace chaos-lab appears to be missing. Investigate and restore it."
+  timeout_evidence_s: 600
