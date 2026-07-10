@@ -1,0 +1,102 @@
+# Cluster-wide READ + node uncordon (patch nodes) + pod eviction (drain recovery).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agenticops-observe
+rules:
+  - apiGroups: [""]
+    resources: [pods, nodes, services, endpoints, events, namespaces, configmaps, persistentvolumeclaims, persistentvolumes, replicationcontrollers]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies, ingresses]
+    verbs: [get, list, watch]
+  - apiGroups: ["autoscaling"]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: [pods, nodes]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [patch]                 # uncordon
+  - apiGroups: [""]
+    resources: [pods/eviction]
+    verbs: [create]                # drain recovery
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agenticops-observe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agenticops-observe
+subjects:
+  - kind: ServiceAccount
+    name: agenticops
+    namespace: agenticops
+---
+# Mutating verbs — SCOPED to the chaos-lab target namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agenticops-remediate
+  namespace: chaos-lab
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, deployments/scale, replicasets]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [configmaps, services]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, delete]
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [get, list, watch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agenticops-remediate
+  namespace: chaos-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agenticops-remediate
+subjects:
+  - kind: ServiceAccount
+    name: agenticops
+    namespace: agenticops
+---
+# CoreDNS scale-back — SCOPED to kube-system, deployments only, patch/scale only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agenticops-dns-remediate
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, deployments/scale]
+    verbs: [get, list, watch, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agenticops-dns-remediate
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agenticops-dns-remediate
+subjects:
+  - kind: ServiceAccount
+    name: agenticops
+    namespace: agenticops
