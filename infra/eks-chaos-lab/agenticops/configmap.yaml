@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agenticops-config
+  namespace: agenticops
+data:
+  AIOPS_BEDROCK_REGION: "us-east-1"
+  AIOPS_AUTO_RCA_ENABLED: "true"
+  AIOPS_AUTO_FIX_ENABLED: "true"
+  AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1: "true"
+  AIOPS_EXECUTOR_HITL_ENABLED: "false"
+  AIOPS_NOTIFICATIONS_ENABLED: "false"
+  AIOPS_API_AUTH_ENABLED: "true"
+  AIOPS_EKS_CLUSTER_NAME: "agenticops-chaos-lab"
+  AIOPS_DATABASE_URL: "sqlite:////data/agenticops.db"
+  KUBECONFIG: "/var/run/agenticops/kubeconfig"
