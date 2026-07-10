@@ -19,6 +19,8 @@ metadata:
     app: stress-test
     chaos: resource-stress
 spec:
+  nodeSelector:
+    role: chaos-lab
   containers:
     - name: stress
       image: alexeiled/stress-ng:latest

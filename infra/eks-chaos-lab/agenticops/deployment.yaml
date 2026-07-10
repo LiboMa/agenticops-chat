@@ -13,6 +13,13 @@ spec:
       labels: { app: agenticops }
     spec:
       serviceAccountName: agenticops
+      nodeSelector:
+        role: agenticops-app
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: agenticops
+          effect: NoSchedule
       volumes:
         - name: kubeconfig
           emptyDir: {}

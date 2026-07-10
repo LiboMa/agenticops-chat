@@ -26,6 +26,21 @@ managedNodeGroups:
     tags:
       Project: agenticops
       Environment: chaos-lab
+  - name: agenticops-ng
+    instanceType: t3.medium
+    minSize: 1
+    maxSize: 1
+    desiredCapacity: 1
+    volumeSize: 20
+    labels:
+      role: agenticops-app
+    taints:
+      - key: dedicated
+        value: agenticops
+        effect: NoSchedule
+    tags:
+      Project: agenticops
+      Environment: chaos-lab
 
 cloudWatch:
   clusterLogging:

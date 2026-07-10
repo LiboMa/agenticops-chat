@@ -6,7 +6,7 @@ set -euo pipefail
 ACTION="${1:-}"
 
 get_first_node() {
-    kubectl get nodes -o jsonpath='{.items[0].metadata.name}'
+    kubectl get nodes -l role=chaos-lab -o jsonpath='{.items[0].metadata.name}'
 }
 
 case "${ACTION}" in
