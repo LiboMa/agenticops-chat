@@ -68,22 +68,24 @@ infra/eks-chaos-lab/e2e/scenarios/       # NEW: ported scenario scripts (coredns
 
 - [ ] **Step 1: Create the policy file**
 
-The base is the existing `infra/eks-chaos-lab/iam/readonly-policy.json` (EC2/EKS/CloudWatch/Logs/CloudTrail/ELB read) plus Bedrock invoke. Write:
+The policy is the **complete** existing `infra/eks-chaos-lab/iam/readonly-policy.json` (ALL 16 statements — EC2, EKS, CloudWatch, Logs, CloudTrail, ELB, S3, RDS, Lambda, ECS, DynamoDB, SQS/SNS, IAM, **STS `GetCallerIdentity`** — the `environment`-source credential resolver requires this to validate — AutoScaling, Tagging) with one `BedrockInvoke` statement appended. Build it by copying the base verbatim and appending Bedrock (do NOT hand-truncate the statement list):
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Sid": "EC2ReadOnly", "Effect": "Allow", "Action": ["ec2:Describe*", "ec2:Get*"], "Resource": "*" },
-    { "Sid": "EKSReadOnly", "Effect": "Allow", "Action": ["eks:Describe*", "eks:List*"], "Resource": "*" },
-    { "Sid": "CloudWatchReadOnly", "Effect": "Allow", "Action": ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"], "Resource": "*" },
-    { "Sid": "LogsReadOnly", "Effect": "Allow", "Action": ["logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:StartQuery", "logs:GetQueryResults", "logs:StopQuery"], "Resource": "*" },
-    { "Sid": "CloudTrailReadOnly", "Effect": "Allow", "Action": ["cloudtrail:LookupEvents", "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:GetEventSelectors"], "Resource": "*" },
-    { "Sid": "ELBReadOnly", "Effect": "Allow", "Action": ["elasticloadbalancing:Describe*"], "Resource": "*" },
-    { "Sid": "BedrockInvoke", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": "*" }
-  ]
-}
+```bash
+python3 - <<'PY'
+import json
+base = json.load(open("infra/eks-chaos-lab/iam/readonly-policy.json"))
+base["Statement"].append({
+    "Sid": "BedrockInvoke",
+    "Effect": "Allow",
+    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+    "Resource": "*",
+})
+json.dump(base, open("infra/eks-chaos-lab/iam/agenticops-irsa-policy.json", "w"), indent=2)
+print("wrote", len(base["Statement"]), "statements")
+PY
 ```
+
+Expected: `wrote 17 statements`. This is read-only + Bedrock invoke only — no `Put*`/`Create*`/`Delete*`/`Update*`/`Modify*`/write actions (least-privilege for the perceive path).
 
 - [ ] **Step 2: Validate JSON**
 
@@ -1483,6 +1485,25 @@ Expected: `syntax ok`, `results ignored`, and `.gitkeep` NOT ignored (exit 1).
 git add infra/eks-chaos-lab/e2e/run-e2e.sh infra/eks-chaos-lab/e2e/results/.gitkeep infra/eks-chaos-lab/e2e/README.md .gitignore docs/WORKFLOW.md
 git commit -m "feat(chaos-e2e): run-e2e.sh remote entrypoint + README + WORKFLOW runbook"
 ```
+
+---
+
+## Task 12b: Pin the app to a dedicated node (final-review Important #2)
+
+**Rationale:** The app is `replicas:1` + `emptyDir`; the `node-drained` and `resource-stress` scenarios could evict it (dropping its DB + the port-forward tunnel mid-suite). Fix by giving the app its own tainted node and scoping the chaos scripts to the chaos nodes only. **Dependency:** the node-drain/stress scripts MUST target `role=chaos-lab` nodes, else draining the app's node strands the pod (Pending).
+
+**Files:**
+- Modify: `infra/eks-chaos-lab/cluster.yaml` (add a dedicated 1-node group)
+- Modify: `infra/eks-chaos-lab/agenticops/deployment.yaml` (nodeSelector + toleration)
+- Modify: `infra/eks-chaos-lab/chaos/node-drain.sh` (target chaos nodes only)
+- Modify: `infra/eks-chaos-lab/chaos/resource-stress.sh` (pin stress pod to chaos nodes)
+
+- [ ] **Step 1: cluster.yaml — dedicated tainted node group** (added `agenticops-ng`: 1× t3.medium, label `role: agenticops-app`, taint `dedicated=agenticops:NoSchedule`). Note: total nodes becomes 3; the real `NodeCount-Low` alarm is NOT on the test's critical path (perception is webhook-seeded), so this is fine.
+- [ ] **Step 2: deployment.yaml — nodeSelector `role: agenticops-app` + toleration for `dedicated=agenticops:NoSchedule`.** The taint keeps chaos workloads (frontend/backend/stress) off the app node; the nodeSelector keeps the app on it.
+- [ ] **Step 3: node-drain.sh — `get_first_node` selects `-l role=chaos-lab`** so drain never targets the app node.
+- [ ] **Step 4: resource-stress.sh — add `nodeSelector: role: chaos-lab`** to the stress pod (defense-in-depth; the taint already blocks the app node).
+- [ ] **Step 5: Validate** YAML parses; `bash -n` both scripts; `kubectl apply --dry-run=client` optional; e2e still collects 8.
+- [ ] **Step 6: Commit.**
 
 ---
 
