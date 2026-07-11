@@ -6,13 +6,20 @@ kind: ClusterConfig
 metadata:
   name: agenticops-chaos-lab
   region: us-east-1
-  version: "1.29"
+  version: "1.30"
   tags:
     Project: agenticops
     Environment: chaos-lab
 
 iam:
   withOIDC: true
+
+# No NAT gateway (avoids Elastic IP consumption — us-east-1 EIP quota is full).
+# Nodes sit in public subnets and reach the internet directly via the IGW.
+# Adequate for a throwaway chaos-test cluster.
+vpc:
+  nat:
+    gateway: Disable
 
 managedNodeGroups:
   - name: chaos-lab-ng
@@ -21,6 +28,7 @@ managedNodeGroups:
     maxSize: 3
     desiredCapacity: 2
     volumeSize: 20
+    privateNetworking: false   # public subnet + auto public IP (no NAT needed)
     labels:
       role: chaos-lab
     tags:
@@ -32,6 +40,7 @@ managedNodeGroups:
     maxSize: 1
     desiredCapacity: 1
     volumeSize: 20
+    privateNetworking: false   # public subnet + auto public IP (no NAT needed)
     labels:
       role: agenticops-app
     taints:
