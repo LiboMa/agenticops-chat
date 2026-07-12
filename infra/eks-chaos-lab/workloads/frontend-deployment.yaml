@@ -57,7 +57,11 @@ metadata:
   labels:
     app: frontend
 spec:
-  type: LoadBalancer
+  # HARD RULE: test apps are NEVER PublicAccessible. ClusterIP only — no
+  # internet-facing LoadBalancer/NodePort. Reach it privately via
+  # `kubectl port-forward svc/frontend -n chaos-lab 8080:80` (same private
+  # access pattern the agenticops app itself uses).
+  type: ClusterIP
   selector:
     app: frontend
   ports:
