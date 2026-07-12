@@ -38,3 +38,27 @@ Add more by appending to `scenarios.yaml`.
 ## Safety
 - App is ClusterIP-only; the sole ingress is the port-forward tunnel.
 - Every scenario restores on teardown; `restore-all.sh` runs at the very end.
+
+## Live-run notes (validated 2026-07-11 on a real EKS cluster)
+
+Three fault classes drove the full autonomous loop end-to-end (each PASSED):
+
+| Scenario | Fault class | Agent fix (auto, L1) |
+|----------|-------------|----------------------|
+| `bad-image` | image pull failure | roll back to the valid image |
+| `crashloop-config` | bad nginx config / CrashLoop | restore the valid ConfigMap |
+| `netpol-block` | network isolation | delete the deny-all NetworkPolicy |
+
+**`scale-to-zero` is intentionally different.** The agent reads EKS audit logs,
+sees a human (`kubectl scale ... --replicas=0`) caused it, classifies the fix as
+**L2**, and inserts a **manual-approval gate** — it will not auto-revert a
+deliberate-looking operator action. Under `executor_auto_approve_l0_l1` this
+issue stops at `fix_planned` (correct behaviour, not a bug). Assert-mode targets
+genuine *system* faults (image/config/network); human-action scenarios should
+assert `fix_planned` + a gated plan, not `resolved`.
+
+**Port collision gotcha:** if a local `uvicorn agenticops.web.app` (or anything)
+already holds `:8000`, `kubectl port-forward` silently fails to bind and requests
+hit the *other* app (symptom: `401` on login against a stale local DB).
+`run-e2e.sh` now auto-selects a free local port and verifies a real login
+through the tunnel before running. Override with `LOCAL_PORT=<n>`.
