@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-05-31'
-last_used: '2026-07-05'
+last_used: '2026-07-12'
 ---
 
 # Linux Admin Skill
@@ -357,6 +357,38 @@ System unresponsive but SSH works:
 | `scp` | File copy over SSH | `-r` (recursive), `-l` (bandwidth limit), `-o ProxyJump=` |
 | `rsync` | Incremental sync | `-avz -e ssh` (archive+compress), `--bwlimit` |
 | `sshd` | Server management | `-t` (test config), `-T` (effective config) |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

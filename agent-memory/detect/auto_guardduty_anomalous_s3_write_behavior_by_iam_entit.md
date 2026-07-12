@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-07-08'
 created_by: user
 last_confirmed: '2026-07-08'
-last_used: '2026-07-09'
+last_used: '2026-07-12'
 related_issue_id: 418
 resource_pattern: arn:aws:s3:::unknown/*
 source: auto
