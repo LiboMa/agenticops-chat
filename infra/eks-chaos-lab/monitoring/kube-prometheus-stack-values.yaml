@@ -1,0 +1,101 @@
+# kube-prometheus-stack values for the agenticops-chaos-lab cluster.
+# Chart: prometheus-community/kube-prometheus-stack
+#
+# HARD RULE: internal-only. Every component is ClusterIP — no LoadBalancer /
+# NodePort / Ingress. Reach the UIs privately via kubectl port-forward:
+#   kubectl port-forward svc/kps-grafana -n monitoring 3000:80
+#   kubectl port-forward svc/kps-kube-prometheus-stack-prometheus -n monitoring 9090:9090
+#
+# Sized for a 2x t3.medium test cluster; scheduled on the chaos-lab nodes
+# (the agenticops-app node is tainted/dedicated). gp3 persistence via the
+# EBS CSI driver.
+
+# ---- Prometheus ----
+prometheus:
+  service:
+    type: ClusterIP
+  prometheusSpec:
+    retention: 3d
+    scrapeInterval: 30s
+    # Auto-discover ServiceMonitors/PodMonitors in ALL namespaces (so the
+    # chaos-lab workloads + agenticops app can be scraped if they expose them).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    nodeSelector:
+      role: chaos-lab
+    resources:
+      requests:
+        cpu: 250m
+        memory: 700Mi
+      limits:
+        cpu: "1"
+        memory: 1500Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: gp3
+          resources:
+            requests:
+              storage: 20Gi
+
+# ---- Grafana ----
+grafana:
+  enabled: true
+  service:
+    type: ClusterIP   # internal only; access via port-forward
+  # NOTE: real admin password is set at install time via --set grafana.adminPassword
+  # (kept out of git). Default here is a placeholder only.
+  adminPassword: "CHANGE_ME_AT_INSTALL"
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: gp3
+  nodeSelector:
+    role: chaos-lab
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: utc
+
+# ---- Alertmanager ----
+alertmanager:
+  service:
+    type: ClusterIP
+  alertmanagerSpec:
+    nodeSelector:
+      role: chaos-lab
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: gp3
+          resources:
+            requests:
+              storage: 2Gi
+
+# ---- Bundled exporters ----
+# node-exporter runs as a DaemonSet (tolerations added so it also lands on the
+# tainted agenticops-app node for full node coverage).
+prometheus-node-exporter:
+  tolerations:
+    - operator: Exists
+kube-state-metrics:
+  nodeSelector:
+    role: chaos-lab
+
+# kube-prometheus-stack bundles metrics via kube-state-metrics + node-exporter;
+# provides the metrics.k8s.io that HPAs need is NOT included (that's
+# metrics-server) — left out to stay lean; add separately if HPA metrics wanted.
