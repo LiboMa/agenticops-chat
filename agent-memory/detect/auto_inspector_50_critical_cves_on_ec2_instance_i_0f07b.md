@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-07-08'
 created_by: user
 last_confirmed: '2026-07-08'
-last_used: '2026-07-12'
+last_used: '2026-07-13'
 related_issue_id: 416
 resource_pattern: i-0f07b14e8a09636e8/*
 source: auto
