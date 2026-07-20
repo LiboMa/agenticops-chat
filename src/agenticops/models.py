@@ -336,6 +336,14 @@ class RCAResult(Base):
     similar_cases: Mapped[list] = mapped_column(JSON, default=list)
     model_id: Mapped[str] = mapped_column(String(100), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # ── RCA Quality (MVP-2.2.0) ──
+    evidence: Mapped[list] = mapped_column(JSON, default=list)  # [{type, ref, summary}]
+    evidence_verified: Mapped[Optional[bool]] = mapped_column(nullable=True)  # deterministic check vs tool trace
+    critic_verdict: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # supported|weak|refuted|disputed_by_execution
+    critic_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    human_verdict: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # correct|incorrect
+    human_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     health_issue: Mapped["HealthIssue"] = relationship(back_populates="rca_results")
@@ -359,7 +367,8 @@ _ISSUE_TRANSITIONS: dict[str, set[str]] = {
     "open":                   {"investigating", "acknowledged", "resolved", "dismissed"},
     "investigating":          {"acknowledged", "root_cause_identified", "fix_planned", "resolved", "dismissed"},
     "acknowledged":           {"investigating", "root_cause_identified", "fix_planned", "resolved", "dismissed"},
-    "root_cause_identified":  {"fix_planned", "resolved", "dismissed"},
+    # investigating back-edge: legal RCA re-run on an already-analyzed issue
+    "root_cause_identified":  {"investigating", "fix_planned", "resolved", "dismissed"},
     "fix_planned":            {"fix_approved", "resolved", "dismissed"},
     "fix_approved":           {"fix_executing", "resolved", "dismissed"},
     "fix_executing":          {"fix_executed", "resolved", "dismissed"},
@@ -404,6 +413,7 @@ class HealthIssue(Base):
         Index("idx_health_issue_severity_status", "severity", "status"),
         Index("idx_health_issue_fingerprint", "fingerprint"),
         Index("idx_health_issue_resource_status", "resource_id", "status"),
+        Index("idx_health_issue_type", "issue_type"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -424,6 +434,8 @@ class HealthIssue(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     detected_by: Mapped[str] = mapped_column(String(50), default="detect_agent")
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Issue type classification (Signal Gate identity component, MVP-2.2.0)
+    issue_type: Mapped[str] = mapped_column(String(40), default="other")
     # Fingerprint deduplication
     fingerprint: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     occurrence_count: Mapped[int] = mapped_column(default=1)
@@ -764,11 +776,18 @@ class IMAlias(Base):
 
 
 class AlertEvent(Base):
-    """Inbound alert event from external monitoring systems."""
+    """Signal ledger row — every inbound event (webhook alert, agent detection,
+    REST create, resolution notice) with its Signal Gate disposition.
+
+    Historically webhook-only ("alert event"); MVP-2.2.0 generalizes it into
+    the unified Signal record behind the Signals view.
+    """
 
     __tablename__ = "alert_events"
     __table_args__ = (
         Index("idx_alert_source_dedup", "source", "external_id"),
+        Index("idx_alert_fingerprint_time", "fingerprint", "received_at"),
+        Index("idx_alert_disposition", "disposition"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -783,6 +802,15 @@ class AlertEvent(Base):
     status: Mapped[str] = mapped_column(String(30), default="received")  # received, processed, ignored, error
     received_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # ── Signal Gate (MVP-2.2.0) ──
+    kind: Mapped[str] = mapped_column(String(20), default="alert")  # alert|detection|resolution|manual
+    fingerprint: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # structured identity v2
+    resource_id: Mapped[str] = mapped_column(String(500), default="")  # normalized resource ID
+    account_id: Mapped[str] = mapped_column(String(100), default="")
+    issue_type: Mapped[str] = mapped_column(String(40), default="other")
+    disposition: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # promoted|merged|noise|error
+    disposition_reason: Mapped[str] = mapped_column(String(200), default="")
+    gate_evidence: Mapped[dict] = mapped_column(JSON, default=dict)  # rules hit, candidates, LLM verdict
 
 
 class ChatSession(Base):
@@ -964,6 +992,54 @@ def init_db(engine=None):
                 "ON health_issues(resource_id, status)"
             ))
             conn.commit()
+
+    # Migration (MVP-2.2.0): Signal Gate ledger columns on alert_events
+    if insp.has_table("alert_events"):
+        columns = {col["name"] for col in insp.get_columns("alert_events")}
+        if "disposition" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN kind VARCHAR(20) DEFAULT 'alert'"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN fingerprint VARCHAR(64)"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN resource_id VARCHAR(500) DEFAULT ''"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN account_id VARCHAR(100) DEFAULT ''"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN issue_type VARCHAR(40) DEFAULT 'other'"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN disposition VARCHAR(20)"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN disposition_reason VARCHAR(200) DEFAULT ''"))
+                conn.execute(text("ALTER TABLE alert_events ADD COLUMN gate_evidence JSON"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_alert_fingerprint_time "
+                    "ON alert_events(fingerprint, received_at)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_alert_disposition ON alert_events(disposition)"
+                ))
+                conn.commit()
+
+    # Migration (MVP-2.2.0): issue_type on health_issues
+    if insp.has_table("health_issues"):
+        columns = {col["name"] for col in insp.get_columns("health_issues")}
+        if "issue_type" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE health_issues ADD COLUMN issue_type VARCHAR(40) DEFAULT 'other'"))
+                conn.execute(text("UPDATE health_issues SET issue_type = 'other' WHERE issue_type IS NULL"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_health_issue_type ON health_issues(issue_type)"
+                ))
+                conn.commit()
+
+    # Migration (MVP-2.2.0): RCA quality columns on rca_results
+    if insp.has_table("rca_results"):
+        columns = {col["name"] for col in insp.get_columns("rca_results")}
+        if "evidence_verified" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN evidence JSON"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN evidence_verified BOOLEAN"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN critic_verdict VARCHAR(30)"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN critic_notes TEXT"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN human_verdict VARCHAR(10)"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN human_note TEXT"))
+                conn.execute(text("ALTER TABLE rca_results ADD COLUMN verified_at DATETIME"))
+                conn.commit()
 
     # Migration: add trace_id columns to health_issues, pipeline_events, alert_events
     for tbl in ("health_issues", "pipeline_events", "alert_events"):
