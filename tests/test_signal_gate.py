@@ -186,7 +186,7 @@ class TestL1Rules:
         assert (d2.disposition, d2.reason) == ("merged", "exact_fingerprint")
         assert d2.issue_id == d1.issue_id
 
-        issue = db_session.query(HealthIssue).get(d1.issue_id)
+        issue = db_session.get(HealthIssue, d1.issue_id)
         assert issue.occurrence_count == 2
         assert db_session.query(AlertEvent).count() == 2
 
@@ -201,7 +201,7 @@ class TestL1Rules:
 
     def test_resolved_cooldown_merges(self, db_session, gate_settings):
         d1 = _process(_sig())
-        issue = db_session.query(HealthIssue).get(d1.issue_id)
+        issue = db_session.get(HealthIssue, d1.issue_id)
         issue.status = "resolved"
         issue.resolved_at = datetime.now(timezone.utc) - timedelta(minutes=10)
         db_session.commit()
@@ -214,7 +214,7 @@ class TestL1Rules:
     def test_flapping_noise_after_threshold(self, db_session, gate_settings):
         # resolved long ago so cooldown doesn't swallow; flap counted on signals
         d1 = _process(_sig())
-        issue = db_session.query(HealthIssue).get(d1.issue_id)
+        issue = db_session.get(HealthIssue, d1.issue_id)
         issue.status = "resolved"
         issue.resolved_at = datetime.now(timezone.utc) - timedelta(hours=5)
         db_session.commit()
