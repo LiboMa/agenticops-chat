@@ -50,6 +50,8 @@ class AlertPayload:
     resource_hint: str  # best-effort resource ID (e.g., i-xxx, arn:..., pod name)
     tags: dict[str, str] = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
+    kind: str = "alert"  # alert | resolution (firing vs recovered/OK notification)
+    issue_type: str = "other"  # Signal Gate taxonomy (classify_issue_type)
 
 
 class MonitoringProvider(ABC):

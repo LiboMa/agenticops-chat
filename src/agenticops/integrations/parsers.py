@@ -234,46 +234,63 @@ def parse_grafana(body: dict) -> AlertPayload:
     Returns:
         An AlertPayload with source='grafana'.
     """
+    entries = parse_grafana_all(body)
+    return entries[0] if entries else parse_generic(body)
+
+
+def parse_grafana_all(body: dict) -> list[AlertPayload]:
+    """Parse EVERY alert in a Grafana webhook payload (one AlertPayload each).
+
+    A resolved alert (``status: resolved`` per entry, or top-level
+    ``state: ok``) becomes ``kind="resolution"``.
+    """
+    from agenticops.services.signal_gate import classify_issue_type
+
     alerts = body.get("alerts", [])
-    if not isinstance(alerts, list):
-        alerts = []
-    alert = alerts[0] if alerts else {}
+    if not isinstance(alerts, list) or not alerts:
+        alerts = [{}]
 
-    labels = alert.get("labels", {})
-    if not isinstance(labels, dict):
-        labels = {}
+    body_state = str(body.get("state", "")).lower()
+    out: list[AlertPayload] = []
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        labels = alert.get("labels", {})
+        if not isinstance(labels, dict):
+            labels = {}
+        annotations = alert.get("annotations", {})
+        if not isinstance(annotations, dict):
+            annotations = {}
 
-    annotations = alert.get("annotations", {})
-    if not isinstance(annotations, dict):
-        annotations = {}
+        external_id = str(alert.get("fingerprint", "") or body.get("groupKey", ""))
+        if not external_id:
+            external_id = _hash_title(body.get("title", ""))
 
-    # External ID: prefer fingerprint, then groupKey.
-    external_id = str(alert.get("fingerprint", "") or body.get("groupKey", ""))
-    if not external_id:
-        external_id = _hash_title(body.get("title", ""))
+        raw_severity = labels.get("severity", "")
+        if not raw_severity:
+            state_map = {"alerting": "high", "ok": "low", "pending": "medium", "no_data": "medium"}
+            raw_severity = state_map.get(body_state, "medium")
+        severity = _normalize_severity(str(raw_severity))
 
-    # Severity: prefer explicit label, then infer from state.
-    raw_severity = labels.get("severity", "")
-    if not raw_severity:
-        state = body.get("state", "").lower()
-        state_map = {"alerting": "high", "ok": "low", "pending": "medium", "no_data": "medium"}
-        raw_severity = state_map.get(state, "medium")
-    severity = _normalize_severity(str(raw_severity))
+        title = body.get("title", "") or labels.get("alertname", "")
+        alertname = labels.get("alertname", "")
+        description = annotations.get("description", "") or annotations.get("summary", "")
+        resource_hint = labels.get("instance", "") or labels.get("pod", "")
+        resolved = str(alert.get("status", "")).lower() == "resolved" or body_state == "ok"
 
-    title = body.get("title", "") or labels.get("alertname", "")
-    description = annotations.get("description", "") or annotations.get("summary", "")
-    resource_hint = labels.get("instance", "") or labels.get("pod", "")
-
-    return AlertPayload(
-        source="grafana",
-        external_id=str(external_id),
-        severity=severity,
-        title=title,
-        description=description,
-        resource_hint=resource_hint,
-        tags=dict(labels),
-        raw=body,
-    )
+        out.append(AlertPayload(
+            source="grafana",
+            external_id=str(external_id),
+            severity=severity,
+            title=title,
+            description=description,
+            resource_hint=resource_hint,
+            tags=dict(labels),
+            raw=body,
+            kind="resolution" if resolved else "alert",
+            issue_type=classify_issue_type(title, alertname=alertname),
+        ))
+    return out
 
 
 def parse_prometheus(body: dict) -> AlertPayload:
@@ -291,53 +308,68 @@ def parse_prometheus(body: dict) -> AlertPayload:
     Returns:
         An AlertPayload with source='prometheus'.
     """
+    entries = parse_prometheus_all(body)
+    return entries[0] if entries else parse_generic(body)
+
+
+def parse_prometheus_all(body: dict) -> list[AlertPayload]:
+    """Parse EVERY alert in an AlertManager payload (one AlertPayload each).
+
+    Fixes the historical alerts[0]-only collapse: a grouped notification with
+    N alerts yields N signals, each with its own fingerprint. A per-entry
+    ``status: resolved`` becomes ``kind="resolution"``.
+    """
+    from agenticops.services.signal_gate import classify_issue_type
+
     alerts = body.get("alerts", [])
-    if not isinstance(alerts, list):
-        alerts = []
-    alert = alerts[0] if alerts else {}
+    if not isinstance(alerts, list) or not alerts:
+        alerts = [{}]
 
-    labels = alert.get("labels", {})
-    if not isinstance(labels, dict):
-        labels = {}
-
-    annotations = alert.get("annotations", {})
-    if not isinstance(annotations, dict):
-        annotations = {}
-
-    # External ID: prefer fingerprint from the first alert.
-    external_id = str(alert.get("fingerprint", ""))
-    if not external_id:
-        external_id = _hash_title(labels.get("alertname", ""))
-
-    # Severity: from labels.severity (Prometheus convention).
-    raw_severity = labels.get("severity", "")
-    severity = _normalize_severity(str(raw_severity))
-
-    title = labels.get("alertname", "")
-    description = annotations.get("description", "") or annotations.get("summary", "")
-
-    # Resource hint: look for common Kubernetes/infrastructure label keys.
     _RESOURCE_HINT_KEYS = (
         "pod", "instance", "node", "container", "deployment",
         "statefulset", "daemonset",
     )
-    resource_hint = ""
-    for key in _RESOURCE_HINT_KEYS:
-        value = labels.get(key, "")
-        if value:
-            resource_hint = str(value)
-            break
+    out: list[AlertPayload] = []
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        labels = alert.get("labels", {})
+        if not isinstance(labels, dict):
+            labels = {}
+        annotations = alert.get("annotations", {})
+        if not isinstance(annotations, dict):
+            annotations = {}
 
-    return AlertPayload(
-        source="prometheus",
-        external_id=str(external_id),
-        severity=severity,
-        title=title,
-        description=description,
-        resource_hint=resource_hint,
-        tags=dict(labels),
-        raw=body,
-    )
+        external_id = str(alert.get("fingerprint", ""))
+        if not external_id:
+            external_id = _hash_title(labels.get("alertname", ""))
+
+        severity = _normalize_severity(str(labels.get("severity", "")))
+        title = labels.get("alertname", "")
+        description = annotations.get("description", "") or annotations.get("summary", "")
+
+        resource_hint = ""
+        for key in _RESOURCE_HINT_KEYS:
+            value = labels.get(key, "")
+            if value:
+                resource_hint = str(value)
+                break
+
+        resolved = str(alert.get("status", body.get("status", ""))).lower() == "resolved"
+
+        out.append(AlertPayload(
+            source="prometheus",
+            external_id=str(external_id),
+            severity=severity,
+            title=title,
+            description=description,
+            resource_hint=resource_hint,
+            tags=dict(labels),
+            raw=body,
+            kind="resolution" if resolved else "alert",
+            issue_type=classify_issue_type(title, alertname=title),
+        ))
+    return out
 
 
 def parse_cloudwatch(body: dict) -> AlertPayload:
@@ -355,12 +387,16 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
     Returns:
         An AlertPayload with source='cloudwatch'.
     """
+    from agenticops.services.signal_gate import classify_issue_type
+
     alarm_name = body.get("AlarmName", "")
 
-    # External ID: deterministic hash of the alarm name.
-    external_id = _hash_title(alarm_name) if alarm_name else ""
+    # External ID: AlarmArn when present (matches the polling provider's
+    # identity, unifying both ingest routes); fallback to alarm-name hash.
+    external_id = str(body.get("AlarmArn", "")) or (_hash_title(alarm_name) if alarm_name else "")
 
-    # Severity: map NewStateValue to canonical levels.
+    # Severity: map NewStateValue to canonical levels. An OK notification is a
+    # recovery signal (kind=resolution), not a fresh alert.
     state_value = body.get("NewStateValue", "").upper()
     _STATE_SEVERITY_MAP = {
         "ALARM": "high",
@@ -400,6 +436,7 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
     if state_value:
         tags["state"] = state_value
 
+    trigger_dict = trigger if isinstance(trigger, dict) else {}
     return AlertPayload(
         source="cloudwatch",
         external_id=str(external_id),
@@ -409,6 +446,12 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
         resource_hint=resource_hint,
         tags=tags,
         raw=body,
+        kind="resolution" if state_value == "OK" else "alert",
+        issue_type=classify_issue_type(
+            title,
+            namespace=str(trigger_dict.get("Namespace", "")),
+            metric=str(trigger_dict.get("MetricName", "")),
+        ),
     )
 
 
@@ -548,3 +591,30 @@ def parse_alert(body: dict, source: str = "") -> AlertPayload:
     alert.severity = _normalize_severity(alert.severity)
 
     return alert
+
+
+def parse_alerts(body: dict, source: str = "") -> list[AlertPayload]:
+    """Parse a webhook payload into ALL contained alerts (MVP-2.2.0).
+
+    Multi-alert payloads (Prometheus/Grafana groups) yield one AlertPayload
+    per entry; single-alert sources yield a one-element list. Severity is
+    normalised and issue_type back-filled on every entry.
+    """
+    from agenticops.services.signal_gate import classify_issue_type
+
+    if not source:
+        source = detect_source(body)
+    src = source.lower()
+
+    if src == "prometheus":
+        alerts = parse_prometheus_all(body)
+    elif src == "grafana":
+        alerts = parse_grafana_all(body)
+    else:
+        alerts = [_PARSER_MAP.get(src, parse_generic)(body)]
+
+    for alert in alerts:
+        alert.severity = _normalize_severity(alert.severity)
+        if not alert.issue_type or alert.issue_type == "other":
+            alert.issue_type = classify_issue_type(alert.title)
+    return alerts

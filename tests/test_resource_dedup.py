@@ -245,22 +245,17 @@ class TestSeverityRank:
 
 
 class TestWebhookResourceMerge:
-    """Tests for _merge_into_webhook_issue in alert_processor."""
+    """Webhook merges now go through signal_gate.merge_into_issue (unified)."""
 
     def test_webhook_merge_basic(self):
-        from agenticops.integrations.alert_processor import _merge_into_webhook_issue
+        from agenticops.services.signal_gate import merge_into_issue
 
         session = MagicMock()
-        issue = _make_health_issue(metric_data={}, occurrence_count=1, severity="low")
+        issue = _make_health_issue(metric_data={}, occurrence_count=1,
+                                   severity="low", status="acknowledged")
 
-        alert = MagicMock()
-        alert.source = "prometheus"
-        alert.title = "HighCPU"
-        alert.description = "CPU > 95%"
-        alert.severity = "high"
-        alert.external_id = "ext123"
-
-        _merge_into_webhook_issue(session, issue, alert)
+        merge_into_issue(session, issue, "webhook_prometheus", "HighCPU",
+                         "CPU > 95%", "high", "ext123", {}, [])
 
         assert issue.occurrence_count == 2
         assert issue.severity == "high"
@@ -270,36 +265,22 @@ class TestWebhookResourceMerge:
         assert snapshot["title"] == "HighCPU"
 
     def test_webhook_merge_no_downgrade(self):
-        from agenticops.integrations.alert_processor import _merge_into_webhook_issue
+        from agenticops.services.signal_gate import merge_into_issue
 
         session = MagicMock()
         issue = _make_health_issue(severity="critical")
 
-        alert = MagicMock()
-        alert.source = "cloudwatch"
-        alert.title = "t"
-        alert.description = "d"
-        alert.severity = "low"
-        alert.external_id = ""
-
-        _merge_into_webhook_issue(session, issue, alert)
+        merge_into_issue(session, issue, "webhook_cloudwatch", "t", "d", "low", "", {}, [])
         assert issue.severity == "critical"
 
     def test_webhook_merge_cap(self):
-        from agenticops.integrations.alert_processor import _merge_into_webhook_issue
+        from agenticops.services.signal_gate import merge_into_issue
 
         session = MagicMock()
         existing_alerts = [{"timestamp": f"t{i}"} for i in range(50)]
         issue = _make_health_issue(metric_data={"merged_alerts": existing_alerts})
 
-        alert = MagicMock()
-        alert.source = "s"
-        alert.title = "t"
-        alert.description = "d"
-        alert.severity = "low"
-        alert.external_id = ""
-
-        _merge_into_webhook_issue(session, issue, alert)
+        merge_into_issue(session, issue, "s", "t", "d", "low", "", {}, [])
         assert len(issue.metric_data["merged_alerts"]) == 50
 
 

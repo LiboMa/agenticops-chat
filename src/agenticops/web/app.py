@@ -2417,7 +2417,7 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
         )
 
     from agenticops.config import generate_trace_id, set_trace_id
-    from agenticops.integrations.parsers import parse_alert
+    from agenticops.integrations.parsers import parse_alerts
     from agenticops.integrations.alert_processor import process_alert
 
     # Generate trace_id at alert entry point
@@ -2425,27 +2425,33 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
     set_trace_id(trace_id)
 
     try:
-        alert = parse_alert(body, source=source)
+        alerts = parse_alerts(body, source=source)
     except Exception as e:
         logger.warning("Failed to parse webhook alert: %s", e)
         raise HTTPException(status_code=400, detail=f"Failed to parse alert: {e}")
 
-    result = process_alert(alert, trace_id=trace_id)
+    # Multi-alert payloads (Prometheus/Grafana groups) → one signal each.
+    results = [process_alert(alert, trace_id=trace_id) for alert in alerts]
 
-    if result.action == "error":
-        raise HTTPException(status_code=500, detail=result.message)
+    if all(r.action == "error" for r in results):
+        raise HTTPException(status_code=500, detail=results[0].message)
 
-    is_dedup = result.action == "deduplicated"
-    return JSONResponse(
-        status_code=200 if is_dedup else 201,
-        content={
-            "message": result.message,
-            "alert_event_id": result.alert_event_id,
-            "health_issue_id": result.health_issue_id,
-            "deduplicated": is_dedup,
-            "trace_id": trace_id,
-        },
-    )
+    primary = next((r for r in results if r.action == "created"), results[0])
+    is_dedup = primary.action != "created"
+    content = {
+        "message": primary.message,
+        "alert_event_id": primary.alert_event_id,
+        "health_issue_id": primary.health_issue_id,
+        "deduplicated": primary.action == "deduplicated",
+        "trace_id": trace_id,
+    }
+    if len(results) > 1:
+        content["signals"] = [
+            {"action": r.action, "alert_event_id": r.alert_event_id,
+             "health_issue_id": r.health_issue_id}
+            for r in results
+        ]
+    return JSONResponse(status_code=200 if is_dedup else 201, content=content)
 
 
 # ============================================================================
