@@ -159,6 +159,15 @@ class Settings(BaseSettings):
     agent_executor_max_tokens: int = Field(default=0, description="Max tokens for executor agent")
     agent_reporter_max_tokens: int = Field(default=0, description="Max tokens for reporter agent")
 
+    # Per-agent extended-thinking budget tokens (0 = thinking off)
+    agent_main_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for main agent (0 = off)")
+    agent_scan_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for scan agent")
+    agent_detect_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for detect agent")
+    agent_rca_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for RCA agent")
+    agent_sre_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for SRE agent")
+    agent_executor_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for executor agent")
+    agent_reporter_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for reporter agent")
+
     # Per-agent sliding window size (0 = use bedrock_window_size)
     agent_main_window_size: int = Field(default=0, description="Window size for main agent (0 = bedrock_window_size)")
     agent_scan_window_size: int = Field(default=0, description="Window size for scan agent")
@@ -667,6 +676,70 @@ class Settings(BaseSettings):
         description="Minutes after issue resolution before same fingerprint can create new issue (AIOPS_DEDUP_RESOLVED_COOLDOWN_MINUTES)",
     )
 
+    # Signal Gate (MVP-2.2.0) — unified noise/dedup judgment for all issue-creation paths
+    signal_gate_enabled: bool = Field(
+        default=True,
+        description="Route all HealthIssue creation through the deterministic-first Signal Gate (AIOPS_SIGNAL_GATE_ENABLED)",
+    )
+    signal_gate_llm_enabled: bool = Field(
+        default=True,
+        description="Enable the L2 gray-zone LLM merge judgment (merge-or-new only, never noise)",
+    )
+    signal_gate_llm_model: str = Field(
+        default="",
+        description="Model for L2 gray-zone judgment (empty = bedrock_model_id_cheap)",
+    )
+    signal_gate_confidence_min: float = Field(
+        default=0.7,
+        description="Minimum LLM confidence to accept a gray-zone merge; below → promote (fail-open)",
+    )
+    signal_gate_candidate_cap: int = Field(
+        default=5,
+        description="Max candidate active issues shown to the L2 judgment",
+    )
+    noise_flap_threshold: int = Field(
+        default=3,
+        description="Signals with the same fingerprint within the flap window at/after which further signals are noise",
+    )
+    noise_flap_window_minutes: int = Field(
+        default=30,
+        description="Flapping detection window in minutes",
+    )
+    signal_retention_days: int = Field(
+        default=30,
+        description="Days to retain Signal (alert_events) rows before background pruning",
+    )
+
+    # RCA Quality (MVP-2.2.0)
+    rca_min_confidence_for_autofix: float = Field(
+        default=0.6,
+        description="RCA confidence below this does NOT auto-trigger SRE; issue flagged needs_review",
+    )
+    rca_critic_enabled: bool = Field(
+        default=True,
+        description="Run a cheap-model adversarial critic pass after each RCA",
+    )
+    rca_critic_model_id: str = Field(
+        default="",
+        description="Model for the RCA critic (empty = bedrock_model_id_cheap)",
+    )
+    rca_timeout_seconds: int = Field(
+        default=900,
+        description="Wall-clock watchdog for an RCA run; on timeout log rca failed + needs_review",
+    )
+    rca_incident_memory_enabled: bool = Field(
+        default=True,
+        description="Inject prior same-fingerprint/type RCA conclusions (with verification status) into the RCA prompt",
+    )
+    rca_incident_memory_max: int = Field(
+        default=3,
+        description="Max prior incidents injected into the RCA prompt",
+    )
+    rca_max_iterations: int = Field(
+        default=40,
+        description="Max agent event-loop turns per RCA run (0 = uncapped)",
+    )
+
     # Notifications
     notifications_enabled: bool = Field(
         default=True,
@@ -890,6 +963,11 @@ def get_agent_model_config(agent_name: str) -> tuple[str, int]:
     if max_tokens <= 0:
         max_tokens = settings.bedrock_max_tokens
     return model_id, max_tokens
+
+
+def get_agent_thinking_budget(agent_name: str) -> int:
+    """Extended-thinking budget tokens for an agent (0 = thinking off)."""
+    return getattr(settings, f"agent_{agent_name}_thinking_budget", 0)
 
 
 def validate_agent_model_ids() -> list[str]:

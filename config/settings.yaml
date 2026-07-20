@@ -78,6 +78,24 @@ alert_pipeline_mode: both
 im_alert_detection_enabled: true
 im_alert_cooldown_seconds: 60
 dedup_resolved_cooldown_minutes: 60
+# Signal Gate (MVP-2.2.0)
+signal_gate_enabled: true
+signal_gate_llm_enabled: true
+signal_gate_llm_model: ''
+signal_gate_confidence_min: 0.7
+signal_gate_candidate_cap: 5
+noise_flap_threshold: 3
+noise_flap_window_minutes: 30
+signal_retention_days: 30
+# RCA Quality (MVP-2.2.0)
+rca_min_confidence_for_autofix: 0.6
+rca_critic_enabled: true
+rca_critic_model_id: ''
+rca_timeout_seconds: 900
+rca_incident_memory_enabled: true
+rca_incident_memory_max: 3
+rca_max_iterations: 40
+agent_rca_thinking_budget: 4096
 skills_enabled: true
 skills_auto_improve_enabled: true
 skills_post_resolution_review: true
