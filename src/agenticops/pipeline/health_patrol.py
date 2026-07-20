@@ -135,6 +135,7 @@ class AnalyzeGraphRisksStep(PipelineStep):
                     f"(affected components: {item.affected_components})"
                 ),
                 auto_rca=False,
+                issue_type="spof",
             )
             issues_created.append(result)
 
@@ -152,6 +153,7 @@ class AnalyzeGraphRisksStep(PipelineStep):
                     f"({risk.current:.0f}/{risk.maximum:.0f})"
                 ),
                 auto_rca=False,
+                issue_type="capacity_risk",
             )
             issues_created.append(result)
 

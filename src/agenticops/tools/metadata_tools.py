@@ -255,15 +255,13 @@ def save_resources(resources_json: str, account_id: int = 0, provider: str = "")
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
-# All states where an issue is still "active" — should NOT create duplicates
-_ACTIVE_ISSUE_STATUSES = (
-    "open", "investigating", "acknowledged",
-    "root_cause_identified", "fix_planned",
-    "fix_approved", "fix_executing", "fix_executed",
-    "dismissed",
+# Canonical status sets live in services/signal_gate.py (single owner);
+# aliased here for backward compatibility with existing imports/tests.
+from agenticops.services.signal_gate import (  # noqa: E402
+    ACTIVE_ISSUE_STATUSES as _ACTIVE_ISSUE_STATUSES,
+    RESOURCE_DEDUP_STATUSES,
 )
 
-RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
 _MERGED_ALERTS_CAP = 50
 
 
@@ -352,186 +350,69 @@ def _create_health_issue_impl(
     metric_data: str = "{}",
     related_changes: str = "[]",
     auto_rca: bool = True,
+    issue_type: str = "",
 ) -> str:
-    """Create a health issue with fingerprint dedup. Plain function (no @tool).
+    """Create a health issue via the Signal Gate. Plain function (no @tool).
+
+    All dedup/noise judgment lives in services/signal_gate.process_signal
+    (L1 deterministic rules + L2 gray-zone LLM). Return strings preserve the
+    legacy formats agents already parse.
 
     auto_rca=False skips the auto-RCA trigger — used by structural risk sources
     (e.g. graph patrol SPOF/capacity findings) where a CloudTrail-style forensic
     RCA is not meaningful.
     """
-    session = get_session()
     try:
-        # Parse JSON fields
+        from agenticops.services.signal_gate import SignalInput, process_signal
+
         try:
             metric_data_parsed = json.loads(metric_data) if isinstance(metric_data, str) else metric_data
         except json.JSONDecodeError:
+            metric_data_parsed = {}
+        if not isinstance(metric_data_parsed, dict):
             metric_data_parsed = {}
 
         try:
             changes_parsed = json.loads(related_changes) if isinstance(related_changes, str) else related_changes
         except json.JSONDecodeError:
             changes_parsed = []
+        if not isinstance(changes_parsed, list):
+            changes_parsed = []
 
-        # Check exclude patterns
-        for compiled in _compiled_exclude_patterns():
-            if compiled.search(title):
-                logger.info("Suppressed issue: title '%s' matched exclude pattern", title)
-                return f"Suppressed: issue title matched exclude pattern"
-
-        now = datetime.now(timezone.utc)
-        fingerprint = _compute_fingerprint(source, resource_id, title)
-
-        # Fingerprint-based deduplication: match any active (non-resolved) issue
-        existing = (
-            session.query(HealthIssue)
-            .filter(
-                HealthIssue.fingerprint == fingerprint,
-                HealthIssue.status.in_(_ACTIVE_ISSUE_STATUSES),
-            )
-            .order_by(HealthIssue.detected_at.desc())
-            .first()
-        )
-
-        if existing:
-            existing.occurrence_count += 1
-            existing.last_seen = now
-            # Only update description/metrics for early-stage issues
-            if existing.status in ("open", "investigating"):
-                existing.description = description
-                existing.metric_data = metric_data_parsed
-                existing.related_changes = changes_parsed
-            # Always escalate severity
-            if _SEVERITY_RANK.get(severity.lower(), 0) > _SEVERITY_RANK.get(existing.severity, 0):
-                existing.severity = severity.lower()
-            session.commit()
-
-            try:
-                from agenticops.services.pipeline_events import log_event
-                log_event(existing.id, "issue_deduplicated", "detection", "skipped",
-                          detail={"existing_id": existing.id, "count": existing.occurrence_count})
-            except Exception:
-                pass
-
-            return (
-                f"Deduplicated: updated existing HealthIssue #{existing.id} "
-                f"(status={existing.status}, count={existing.occurrence_count}): "
-                f"[{existing.severity.upper()}] {existing.title}"
-            )
-
-        # Resolved cooldown: avoid flapping re-detection
-        cooldown = settings.dedup_resolved_cooldown_minutes
-        if cooldown > 0:
-            recently_resolved = (
-                session.query(HealthIssue)
-                .filter(
-                    HealthIssue.fingerprint == fingerprint,
-                    HealthIssue.status == "resolved",
-                    HealthIssue.resolved_at >= now - timedelta(minutes=cooldown),
-                )
-                .order_by(HealthIssue.resolved_at.desc())
-                .first()
-            )
-            if recently_resolved:
-                recently_resolved.occurrence_count += 1
-                recently_resolved.last_seen = now
-                session.commit()
-                return (
-                    f"Suppressed: HealthIssue #{recently_resolved.id} was resolved "
-                    f"{int((now - recently_resolved.resolved_at).total_seconds() // 60)}min ago "
-                    f"(cooldown={cooldown}min). Bumped count to {recently_resolved.occurrence_count}."
-                )
-
-        # Resource-based dedup: merge into existing open issue for the same resource
-        if settings.resource_dedup_enabled and resource_id and resource_id != "unknown":
-            resource_match = (
-                session.query(HealthIssue)
-                .filter(
-                    HealthIssue.resource_id == resource_id,
-                    HealthIssue.status.in_(RESOURCE_DEDUP_STATUSES),
-                )
-                .order_by(HealthIssue.detected_at.desc())
-                .first()
-            )
-            if resource_match:
-                return _merge_into_existing_issue(
-                    session, resource_match, source, title, description,
-                    severity, fingerprint, metric_data_parsed, changes_parsed,
-                )
-
-        # Inject trace_id from ContextVar
-        from agenticops.config import get_im_origin, get_trace_id
-        trace_id = get_trace_id()
-
-        # Inject IM origin if called from an IM agent context
-        im_origin = get_im_origin()
-        if im_origin and isinstance(metric_data_parsed, dict):
-            metric_data_parsed["im_origin"] = im_origin
-        elif im_origin and not metric_data_parsed:
-            metric_data_parsed = {"im_origin": im_origin}
-
-        # Auto-resolve account_id and provider from resource inventory
-        account_id = None
-        provider = None
-        if resource_id and resource_id != "unknown":
-            res = session.query(CloudResource).filter_by(resource_id=resource_id).first()
-            if res:
-                account_id = res.account_id
-                provider = res.provider
-        # Fallback: use single enabled account, or skip if ambiguous
-        if not account_id:
-            enabled = session.query(CloudAccount).filter_by(is_enabled=True).all()
-            if len(enabled) == 1:
-                account_id = enabled[0].id
-                provider = provider or enabled[0].provider
-
-        issue = HealthIssue(
-            resource_id=resource_id,
-            provider=provider or "aws",
-            severity=severity.lower(),
+        decision = process_signal(SignalInput(
             source=source,
             title=title,
             description=description,
-            alarm_name=alarm_name or None,
+            severity=severity,
+            resource_id=resource_id or "",
+            issue_type=issue_type or "",
+            upstream_key=alarm_name or "",
+            kind="detection",
             metric_data=metric_data_parsed,
             related_changes=changes_parsed,
-            status="open",
+            alarm_name=alarm_name,
+            auto_rca=auto_rca,
             detected_by="detect_agent",
-            fingerprint=fingerprint,
-            occurrence_count=1,
-            first_seen=now,
-            last_seen=now,
-            trace_id=trace_id,
-            account_id=account_id,
-        )
-        session.add(issue)
-        session.commit()
+        ))
 
-        # Log pipeline event
-        try:
-            from agenticops.services.pipeline_events import log_event
-            log_event(issue.id, "issue_created", "detection",
-                      detail={"severity": severity, "fingerprint": fingerprint, "source": source})
-        except Exception:
-            pass
-
-        # Auto-trigger RCA for newly created issues
-        if auto_rca:
-            from agenticops.services.rca_service import trigger_auto_rca
-            trigger_auto_rca(issue.id, trace_id=trace_id)
-
-        # Auto-notify
-        try:
-            from agenticops.services.notification_service import notify_issue_created
-            notify_issue_created(issue.id, severity, title, resource_id)
-        except Exception:
-            logger.debug("Notification trigger failed", exc_info=True)
-
-        return f"Created HealthIssue #{issue.id}: [{severity.upper()}] {title}"
+        if decision.disposition == "promoted":
+            return f"Created HealthIssue #{decision.issue_id}: [{severity.upper()}] {title}"
+        if decision.disposition == "merged":
+            if decision.reason == "resolved_cooldown":
+                return (
+                    f"Suppressed: HealthIssue #{decision.issue_id} was recently resolved "
+                    f"(cooldown={settings.dedup_resolved_cooldown_minutes}min). "
+                    f"Bumped count to {decision.occurrence_count}."
+                )
+            return (
+                f"Deduplicated: updated existing HealthIssue #{decision.issue_id} "
+                f"(status={decision.issue_status}, count={decision.occurrence_count}, "
+                f"reason={decision.reason}): [{severity.upper()}] {title}"
+            )
+        # noise
+        return f"Suppressed: {decision.reason} (signal #{decision.signal_id} recorded, no issue created)"
     except Exception as e:
-        session.rollback()
         return f"Error creating health issue: {e}"
-    finally:
-        session.close()
 
 
 @tool
@@ -544,26 +425,34 @@ def create_health_issue(
     alarm_name: str = "",
     metric_data: str = "{}",
     related_changes: str = "[]",
+    issue_type: str = "",
 ) -> str:
-    """Create a new health issue record in the metadata database.
+    """Create a new health issue record via the Signal Gate.
 
-    Uses fingerprint-based deduplication: if an open/investigating issue with the
-    same fingerprint (source + resource_id + normalised title) exists and was last
-    seen within 5 minutes, the existing issue is updated instead of creating a
-    duplicate.
+    Every call is judged before insert: exact-identity or same-resource+type
+    repeats MERGE into the existing issue (occurrence count bumped); flapping
+    (>=3 same-identity signals in 30min) and excluded patterns become NOISE
+    signals (recorded, recoverable, no issue). Only genuinely new problems
+    create a HealthIssue. The return string states which happened.
 
     Args:
-        resource_id: AWS resource ID (e.g., i-1234567890abcdef0)
+        resource_id: Cloud resource ID (e.g., i-1234567890abcdef0)
         severity: Issue severity: critical, high, medium, or low
         source: Detection source: cloudwatch_alarm, metric_anomaly, log_pattern, or manual
         title: Brief issue title
         description: Detailed description of the issue
-        alarm_name: CloudWatch alarm name if source is cloudwatch_alarm
+        alarm_name: Alarm/rule name if applicable (also strengthens dedup identity)
         metric_data: JSON object with relevant metric data
         related_changes: JSON array of related CloudTrail events
+        issue_type: Problem classification — one of: cpu_spike, memory_pressure,
+            disk_full, network_flap, connectivity, security_exposure,
+            security_finding, iam_risk, cert_expiry, availability, capacity_risk,
+            spof, cost_anomaly, config_drift, performance_degradation, other.
+            ALWAYS pass this; leave empty only if truly unclassifiable
+            (auto-classified from the title as fallback).
 
     Returns:
-        Confirmation with the new HealthIssue ID.
+        Confirmation: created / deduplicated (merged) / suppressed (noise).
     """
     return _create_health_issue_impl(
         resource_id=resource_id,
@@ -575,6 +464,7 @@ def create_health_issue(
         metric_data=metric_data,
         related_changes=related_changes,
         auto_rca=True,
+        issue_type=issue_type,
     )
 
 

@@ -167,6 +167,12 @@ ESCALATION RULE: Any security finding that directly enables unauthorized access 
 service (e.g., CRITICAL CVE on an internet-facing instance, active exploitation flagged at the
 threat detector's top severity band) should be escalated to CRITICAL.
 
+ISSUE TYPE (required on every create_health_issue):
+Pass issue_type from this taxonomy — it is the dedup identity key, so classify consistently:
+cpu_spike, memory_pressure, disk_full, network_flap, connectivity, security_exposure,
+security_finding, iam_risk, cert_expiry, availability, capacity_risk, spof, cost_anomaly,
+config_drift, performance_degradation, other.
+
 RULES:
 - Only READ operations on the cloud provider. The only write is create_health_issue in our metadata DB.
 - Always include related_changes (from the provider's audit trail, e.g. CloudTrail) when available.
