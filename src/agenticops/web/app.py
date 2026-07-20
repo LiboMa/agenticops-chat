@@ -288,6 +288,8 @@ from agenticops.web.routers import cost as _cost_router
 app.include_router(_cost_router.router)
 from agenticops.galaxy.api import router as _galaxy_router
 app.include_router(_galaxy_router)
+from agenticops.web.routers import signals as _signals_router
+app.include_router(_signals_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -2129,28 +2131,41 @@ async def api_get_health_issue(issue_id: int):
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
 async def api_create_health_issue(data: HealthIssueCreate):
-    """Create a new health issue. Auto-triggers RCA in background."""
-    with get_db_session() as session:
-        issue = HealthIssue(
-            resource_id=data.resource_id,
-            provider=data.provider or "aws",
-            severity=data.severity,
-            source=data.source,
-            title=data.title,
-            description=data.description,
-            alarm_name=data.alarm_name,
-            metric_data=data.metric_data,
-            related_changes=data.related_changes,
+    """Create a new health issue via the Signal Gate (dedup applies; MVP-2.2.0).
+
+    A duplicate of an active issue returns THAT issue (merged) instead of
+    inserting a second row — the REST path historically bypassed all dedup.
+    """
+    from agenticops.services.signal_gate import SignalInput, process_signal
+
+    decision = process_signal(SignalInput(
+        source=data.source,
+        title=data.title,
+        description=data.description,
+        severity=data.severity,
+        resource_id=data.resource_id or "",
+        provider=data.provider or "aws",
+        issue_type=getattr(data, "issue_type", "") or "",
+        upstream_key=data.alarm_name or "",
+        kind="manual",
+        metric_data=data.metric_data or {},
+        related_changes=data.related_changes or [],
+        alarm_name=data.alarm_name or "",
+        detected_by="api",
+    ))
+
+    if decision.disposition == "noise":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Suppressed by signal gate ({decision.reason}); "
+                   f"signal #{decision.signal_id} recorded. Use POST /api/signals/{decision.signal_id}/promote to force.",
         )
-        session.add(issue)
-        session.flush()
-        response = HealthIssueResponse.model_validate(issue)
 
-    # Auto-trigger RCA after commit
-    from agenticops.services.rca_service import trigger_auto_rca
-    trigger_auto_rca(response.id)
-
-    return response
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=decision.issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=500, detail="Gate returned unknown issue id")
+        return HealthIssueResponse.from_issue(issue, None)
 
 
 @app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)

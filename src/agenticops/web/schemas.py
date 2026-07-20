@@ -221,6 +221,26 @@ class HealthIssueCreate(BaseModel):
     alarm_name: Optional[str] = Field(None, max_length=200)
     metric_data: dict = Field(default_factory=dict)
     related_changes: List = Field(default_factory=list)
+    issue_type: Optional[str] = Field(None, max_length=40)
+
+
+class SignalResponse(BaseModel):
+    """Schema for a Signal (gated alert_events row)."""
+    id: int
+    received_at: datetime
+    kind: str = "alert"
+    source: str
+    title: str
+    severity: str
+    issue_type: str = "other"
+    resource_id: str = ""
+    disposition: Optional[str] = None
+    disposition_reason: str = ""
+    gate_evidence: dict = Field(default_factory=dict)
+    health_issue_id: Optional[int] = None
+    trace_id: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class HealthIssueUpdate(BaseModel):
@@ -254,6 +274,7 @@ class HealthIssueResponse(BaseModel):
     merged_alerts: List = Field(default_factory=list)
     account_id: Optional[int] = None
     account_name: Optional[str] = None
+    issue_type: str = "other"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -281,6 +302,7 @@ class HealthIssueResponse(BaseModel):
             merged_alerts=md.get("merged_alerts", []),
             account_id=issue.account_id,
             account_name=account_name,
+            issue_type=getattr(issue, "issue_type", "other") or "other",
         )
 
 

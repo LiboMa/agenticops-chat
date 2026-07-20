@@ -214,3 +214,54 @@ class TestAgentPathStrings:
             )
         assert created.startswith("Created HealthIssue #")
         assert merged.startswith("Deduplicated: updated existing HealthIssue #")
+
+
+class TestRestPathAndSignalsApi:
+    @pytest.fixture
+    def client(self, db_session, gate_settings):
+        from fastapi.testclient import TestClient
+        from agenticops.web.app import app
+
+        return TestClient(app)
+
+    def _create_body(self, **kw):
+        body = {
+            "resource_id": "i-rest1", "severity": "high", "source": "manual",
+            "title": "RDS connections exhausted", "description": "too many conns",
+            "issue_type": "capacity_risk",
+        }
+        body.update(kw)
+        return body
+
+    def test_rest_duplicate_merges(self, client, db_session):
+        """Acceptance #4: REST duplicate POST → same issue, no second row."""
+        with patch("agenticops.services.rca_service.trigger_auto_rca"), \
+             patch("agenticops.services.notification_service.notify_issue_created"):
+            r1 = client.post("/api/health-issues", json=self._create_body())
+            r2 = client.post("/api/health-issues", json=self._create_body())
+        assert r1.status_code == 201 and r2.status_code == 201
+        assert r1.json()["id"] == r2.json()["id"]
+        assert r2.json()["occurrence_count"] == 2
+        assert db_session.query(HealthIssue).count() == 1
+
+    def test_signals_api_list_and_promote(self, client, db_session, gate_settings):
+        gate_settings.issue_exclude_patterns = [r"(?i)benign blip"]
+        with patch("agenticops.services.rca_service.trigger_auto_rca"), \
+             patch("agenticops.services.notification_service.notify_issue_created"):
+            resp = client.post("/api/health-issues",
+                               json=self._create_body(title="Benign blip in metrics"))
+            assert resp.status_code == 409  # suppressed as noise
+
+            listed = client.get("/api/signals", params={"disposition": "noise"})
+            assert listed.status_code == 200
+            signals = listed.json()
+            assert len(signals) == 1
+            assert signals[0]["disposition_reason"] == "excluded_pattern"
+
+            promoted = client.post(f"/api/signals/{signals[0]['id']}/promote")
+        assert promoted.status_code == 201
+        issue_id = promoted.json()["health_issue_id"]
+        assert db_session.get(HealthIssue, issue_id) is not None
+        row = db_session.get(AlertEvent, signals[0]["id"])
+        db_session.refresh(row)
+        assert (row.disposition, row.disposition_reason) == ("promoted", "manual_override")
