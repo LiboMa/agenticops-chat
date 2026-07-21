@@ -4,7 +4,7 @@
 
 AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent architecture (Strands SDK on AWS Bedrock). Provides `aiops chat` interactive REPL, React web dashboard with streaming chat, resource scanning, anomaly detection, fix planning, and reporting across AWS accounts.
 
-**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-1.1.1-RELEASE.md` (latest: concurrent chat sessions + fast open)
+**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (latest: Signal Gate noise reduction + RCA quality quintet)
 
 ## Protected Files
 
@@ -28,7 +28,8 @@ Web Dashboard ──────┘         │
 
 - **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
 - **Tiered models**: `bedrock_model_id` (default Sonnet 4.6 — mid tier for router/executor), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Per-agent overrides live in `config/settings.yaml` (`agent_*_model_id`) and win over tier defaults — the committed defaults run main on Opus 4.8, sre on claude-fable-5, rca/executor on Opus 4.6, scan/detect/reporter on Sonnet 4.6.
-- **Auto-fix pipeline**: HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve
+- **Auto-fix pipeline**: HealthIssue → RCA → post-RCA quality gate (evidence check → critic → confidence ≥ 0.6) → SRE → Approve(L0/L1) → Execute → Resolve. Low-confidence/refuted RCA → `needs_review`, no auto-fix
+- **Signal Gate (MVP-2.2.0)**: ALL issue creation (webhook/agent/REST) flows through `services/signal_gate.process_signal` — L1 deterministic rules (fingerprint-v2 = account|provider|resource|issue_type|upstream-key, flapping, cooldown, resource+type merge) + L2 cheap-LLM gray-zone judge (merge-or-new ONLY, never noise, fail-open). Every event = one auditable Signal row (`alert_events`); `GET /api/signals` + promote endpoint
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)
 
@@ -67,7 +68,7 @@ Web Dashboard ──────┘         │
 | `web/` | `app.py`, `session_manager.py`, `routers/cost.py` | FastAPI (~70 endpoints), per-session agents, SSE streaming; concurrent chat sessions via frontend `chatStream` store; cursor-paginated + virtualized history; `GET /api/cost/summary` (real-time token/cost aggregation); unified Settings **Messaging** tab via `/api/messaging/*` (facade over channels.yaml + im-apps.yaml + NotificationLog; old `/api/notifications/*` + `/api/settings/{channels,im-apps}` deprecated) |
 | `agents/` | `main_agent.py`, `scan_agent.py`, `detect_agent.py`, `rca_agent.py`, `sre_agent.py`, `executor_agent.py`, `reporter_agent.py` | 7 agents (1 router + 6 specialists) |
 | `tools/` | `metadata_tools.py`, `aws_cli_tool.py` | Agent tools: DB CRUD, AWS CLI wrapper |
-| `services/` | `pipeline_service.py`, `rca_service.py`, `notification_service.py`, `pipeline_events.py`, `resolution_service.py`, `executor_service.py`, `cost_service.py` | Auto-fix pipeline, auto-RCA, notifications, event timeline, token/cost aggregation |
+| `services/` | `pipeline_service.py`, `rca_service.py`, `rca_quality.py`, `signal_gate.py`, `notification_service.py`, `pipeline_events.py`, `resolution_service.py`, `executor_service.py`, `cost_service.py` | Auto-fix pipeline, auto-RCA + post-RCA quality gate (evidence check → critic → confidence gate), **Signal Gate** (unified dedup/noise judgment for ALL issue-creation paths: L1 deterministic rules + L2 gray-zone LLM merge-only), notifications, event timeline, token/cost aggregation |
 | `cost.py` | — | Pure token→USD cost computation via `config.token_cost_table`; `compute_cost(model, tokens)` never raises |
 | `models.py` | — | SQLAlchemy models: HealthIssue, FixPlan, RCAResult, Report, etc. |
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
@@ -185,6 +186,17 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `galaxy_expand_node_cap` | `200` | Max nodes per `/expand` before truncation |
 | `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` | Relationship-sparse leaf types excluded from LLM enrichment |
 | `galaxy_builds_keep` | `24` | Newest build rows retained (older pruned after each build to bound DB growth) |
+| `signal_gate_enabled` | `true` | Route all HealthIssue creation through the Signal Gate (false = legacy dedup only) |
+| `signal_gate_llm_enabled` | `true` | L2 gray-zone LLM merge judgment (cheap tier, merge-or-new only) |
+| `signal_gate_confidence_min` | `0.7` | Min LLM confidence to accept a gray-zone merge (below → promote) |
+| `noise_flap_threshold` / `noise_flap_window_minutes` | `3` / `30` | Same-fingerprint signals in window at/after which further ones are noise |
+| `signal_retention_days` | `30` | Signal (alert_events) row retention |
+| `rca_min_confidence_for_autofix` | `0.6` | RCA confidence below this → needs_review, no auto-SRE |
+| `rca_critic_enabled` | `true` | Cheap-model adversarial critic after each RCA (refuted → ×0.5 confidence) |
+| `rca_timeout_seconds` | `900` | RCA watchdog (timeout → failed event + needs_review) |
+| `rca_incident_memory_enabled` / `rca_incident_memory_max` | `true` / `3` | Inject prior same-fingerprint RCA conclusions (with verdicts) into the RCA prompt |
+| `rca_max_iterations` | `40` | Max event-loop turns per RCA run |
+| `agent_{name}_thinking_budget` | `0` | Extended-thinking budget tokens (yaml enables rca=4096) |
 
 ## HealthIssue State Machine
 
