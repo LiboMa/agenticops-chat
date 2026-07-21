@@ -268,9 +268,9 @@ def executor_agent(fix_plan_id: int) -> str:
             ],
         )
 
-        from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
-        with track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent="main") as tracker:
+        with track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"Execute FixPlan #{fix_plan_id}. "
                 f"Follow the 7-step execution protocol exactly. "

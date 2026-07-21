@@ -447,13 +447,13 @@ def rca_agent(issue_id: int) -> str:
             if incident_memory_block:
                 prompt = f"{prompt}\n\n{incident_memory_block}"
 
-            from agenticops.agents.preamble import invoke_with_retry
+            from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
             from agenticops.services.agent_log_service import track_agent
             invoke_kwargs = {}
             if settings.rca_max_iterations > 0:
                 invoke_kwargs["limits"] = {"turns": settings.rca_max_iterations}
             started_at = datetime.now(timezone.utc)
-            with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
+            with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
                 result = invoke_with_retry(agent, prompt, **invoke_kwargs)
                 tracker.set_result(result)
 

@@ -139,7 +139,6 @@ Priority 1 — CRITICAL (immediate operational impact, resolve NOW):
 - Service down, data loss risk imminent
 
 Priority 2 — HIGH (performance degradation, short-term danger signals):
-# - CPU/Memory sustained > 90% causing latency spikes
 - Memory sustained > 90% causing latency spikes
 - Response time P99 > SLA threshold, elevated error rates (>5%)
 - Database connection pool exhaustion approaching, replication lag growing
@@ -279,10 +278,11 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
     """Check resource health via CloudWatch alarms, metrics, and security posture.
 
     USE FOR: "health", "detect", "issues", "problems", "check", "status", and
-    security checks — "security audit", "security posture", "vulnerability",
-    "compliance", "GuardDuty", "SecurityHub", "Inspector", "IAM audit"
+    security AUDITS that should produce HealthIssues — "security audit",
+    "security posture", "vulnerability scan", "compliance", "IAM audit"
     (use scope='security' for security-only). Creates HealthIssues for findings.
-    NOT FOR: resource inventory (scan_agent) or root-cause analysis (rca_agent).
+    NOT FOR: resource inventory (scan_agent), root-cause analysis (rca_agent),
+    or read-only findings queries like "show GuardDuty findings" (sre_query).
 
     Args:
         scope: Resource type filter (e.g., 'EC2', 'RDS', 'security') or 'all'.
@@ -389,9 +389,9 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     ],
                 )
 
-                from agenticops.agents.preamble import invoke_with_retry
+                from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
                 from agenticops.services.agent_log_service import track_agent
-                with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent="main") as tracker:
+                with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent=infer_parent_agent()) as tracker:
                     result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
                     tracker.set_result(result)
                 return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)

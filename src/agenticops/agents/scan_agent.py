@@ -151,7 +151,10 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
 
     USE FOR: "scan", "discover", "inventory", "refresh my resources",
     "what do I have deployed". Security-only scan: services='security'.
-    NOT FOR: health/status checks (detect_agent) or one-off AWS queries (sre_query).
+    Also carries check_health() — a multi-account parallel health-check wrapper
+    that delegates to detect agents (inventory-then-check workflows).
+    NOT FOR: standalone health/status checks (detect_agent) or one-off AWS
+    queries (sre_query).
 
     Args:
         services: Comma-separated categories (compute,database,storage,container,
@@ -195,12 +198,12 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
             tools=tools,
         )
 
-        from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
         from agenticops.services.notification_service import batch_mode
         prompt = f"Scan resources. Services: {services}. Regions: {regions}."
         with batch_mode():
-            with track_agent("scan", "scan_resources", f"services={services} regions={regions}", parent_agent="main") as tracker:
+            with track_agent("scan", "scan_resources", f"services={services} regions={regions}", parent_agent=infer_parent_agent()) as tracker:
                 result = invoke_with_retry(agent, prompt)
                 tracker.set_result(result)
         return str(result)

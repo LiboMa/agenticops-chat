@@ -197,6 +197,23 @@ _TRANSIENT_MARKERS = (
 )
 
 
+def infer_parent_agent(default: str = "main") -> str:
+    """Attribute a sub-agent run to its actual caller by thread naming.
+
+    The auto-pipeline spawns daemon threads named auto-rca-* / auto-sre-* /
+    auto-exec* and the scheduler/patrol use their own names; chat-tool
+    invocations run on request threads (→ default "main").
+    """
+    import threading as _threading
+
+    name = _threading.current_thread().name.lower()
+    if name.startswith(("auto-rca", "auto-sre", "auto-exec", "auto-approve")):
+        return "pipeline"
+    if "patrol" in name or "scheduler" in name or "schedule" in name:
+        return "patrol"
+    return default
+
+
 def thinking_request_fields(agent_name: str, max_tokens: int):
     """Bedrock extended-thinking request fields for an agent, or None.
 

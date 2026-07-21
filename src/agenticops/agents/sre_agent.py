@@ -307,10 +307,10 @@ def sre_agent(issue_id: int) -> str:
         except Exception:
             pass
 
-        from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
         agent = _create_sre_agent(cli_tool=cli_tool)
-        with track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent="main") as tracker:
+        with track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"Generate a Fix Plan for HealthIssue #{issue_id}. "
                 f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."
@@ -343,11 +343,11 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
         Investigation results with resource details.
     """
     try:
-        from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
         cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
         agent = _create_sre_agent(cli_tools=cli_tools)
-        with track_agent("sre", "query", f"region={region} query={query[:200]}", parent_agent="main") as tracker:
+        with track_agent("sre", "query", f"region={region} query={query[:200]}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"General AWS investigation (Mode B). Region: {region}\n"
                 f"Query: {query}\n"

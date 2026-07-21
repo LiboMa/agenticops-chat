@@ -454,7 +454,7 @@ def distill_case_study(health_issue_id: int) -> str:
 
 def _build_distillation_context(health_issue_id: int) -> Optional[dict]:
     """Load HealthIssue + RCAResult and build raw context for distillation."""
-    from agenticops.models import HealthIssue, RCAResult, get_db_session
+    from agenticops.models import FixPlan, HealthIssue, RCAResult, get_db_session
 
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
@@ -469,6 +469,24 @@ def _build_distillation_context(health_issue_id: int) -> Optional[dict]:
         )
         if not rca:
             return None
+
+        # Prefer the REAL (approved/executed) SRE FixPlan over the RCA's
+        # never-executed draft — cases should teach proven remediations.
+        fix_plan_data = rca.fix_plan
+        real_plan = (
+            session.query(FixPlan)
+            .filter(FixPlan.health_issue_id == health_issue_id,
+                    FixPlan.status.in_(("approved", "executing", "executed")))
+            .order_by(FixPlan.created_at.desc())
+            .first()
+        )
+        if real_plan is not None:
+            fix_plan_data = {
+                "title": real_plan.title,
+                "steps": real_plan.steps,
+                "risk_level": real_plan.risk_level,
+                "status": real_plan.status,
+            }
 
         return {
             "issue_id": issue.id,
@@ -488,7 +506,7 @@ def _build_distillation_context(health_issue_id: int) -> Optional[dict]:
             "confidence": rca.confidence,
             "contributing_factors": rca.contributing_factors,
             "recommendations": rca.recommendations,
-            "fix_plan": rca.fix_plan,
+            "fix_plan": fix_plan_data,
             "fix_risk_level": rca.fix_risk_level,
             "sop_used": rca.sop_used,
             "similar_cases": rca.similar_cases,

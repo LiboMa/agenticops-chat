@@ -931,6 +931,16 @@ FULL_CONTEXT = -1
 
 # Per-model-family window size defaults (used when agent_X_window_size == 0)
 MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
+    "claude-fable-5": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
+    },
+    "claude-opus-4-8": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
+    },
     "claude-opus-4-6": {
         "main": 200, "scan": 120, "detect": 120,
         "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,

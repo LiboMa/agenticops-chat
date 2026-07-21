@@ -27,7 +27,7 @@ Web Dashboard ──────┘         │
 ```
 
 - **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
-- **Tiered models**: `bedrock_model_id` (default Sonnet 4.6 — mid tier for router/executor), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Per-agent overrides live in `config/settings.yaml` (`agent_*_model_id`) and win over tier defaults — the committed defaults run main/sre/executor on Opus 4.8, scan/detect/reporter on Sonnet 4.6, rca on Opus 4.6.
+- **Tiered models**: `bedrock_model_id` (default Sonnet 4.6 — mid tier for router/executor), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Per-agent overrides live in `config/settings.yaml` (`agent_*_model_id`) and win over tier defaults — the committed defaults run main on Opus 4.8, sre on claude-fable-5, rca/executor on Opus 4.6, scan/detect/reporter on Sonnet 4.6.
 - **Auto-fix pipeline**: HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)

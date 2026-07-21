@@ -51,7 +51,6 @@ REPORT GENERATION PROTOCOL:
    - **Issues Detail**: For each issue, include severity, resource, title, RCA summary
      (if available), status, and recommendations.
    - **Resource Inventory** (for daily/inventory): Total resources by type and region.
-   - **Service Security Focus** (for daily/inventory): all enabled services's support status, version info, security, certificate expiration, EOS info.
    - **Recommendations**: Aggregated action items prioritized by severity.
 4. SAVE: Call save_report with the full markdown content.
 5. KNOWLEDGE BASE (optional): For resolved issues with high-confidence RCA,
@@ -157,9 +156,9 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             ],
         )
 
-        from agenticops.agents.preamble import invoke_with_retry
+        from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
-        with track_agent("reporter", "generate_report", f"type={report_type} scope={scope}", parent_agent="main") as tracker:
+        with track_agent("reporter", "generate_report", f"type={report_type} scope={scope}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"Generate a {report_type} report. Scope: {scope}. "
                 f"Follow the report generation protocol.",
