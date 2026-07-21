@@ -6,6 +6,7 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
 import { useLocale } from "@/i18n/LocaleContext";
 import { IssueRow } from "@/components/ui/IssueRow";
+import { SignalsPanel } from "@/components/signals/SignalsPanel";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -71,56 +72,57 @@ const PAGE_SIZES = [50, 100, 200];
 
 /* ── Main component ─────────────────────────────────────────────── */
 
-type View = "issues" | "resources";
+type View = "issues" | "resources" | "signals";
 
 export default function IssuesAndPlans() {
   const { t } = useLocale();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const view: View = searchParams.get("view") === "resources" ? "resources" : "issues";
+  const viewParam = searchParams.get("view");
+  const view: View =
+    viewParam === "resources" ? "resources" : viewParam === "signals" ? "signals" : "issues";
 
   function setView(v: View) {
-    if (v === "resources") {
-      setSearchParams({ view: "resources" });
-    } else {
+    if (v === "issues") {
       setSearchParams({});
+    } else {
+      setSearchParams({ view: v });
     }
   }
+
+  const titles: Record<View, string> = {
+    issues: t("issues.title"),
+    resources: t("resources.title"),
+    signals: t("signals.title"),
+  };
 
   return (
     <div className="space-y-4">
       {/* View toggle */}
       <div className="flex items-center gap-4">
-        <h1 className="text-xl font-semibold text-foreground">
-          {view === "issues" ? t("issues.title") : t("resources.title")}
-        </h1>
+        <h1 className="text-xl font-semibold text-foreground">{titles[view]}</h1>
         <div className="flex bg-secondary rounded-lg p-0.5">
-          <button
-            onClick={() => setView("issues")}
-            className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-              view === "issues"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t("issues.title")}
-          </button>
-          <button
-            onClick={() => setView("resources")}
-            className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-              view === "resources"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t("resources.title")}
-          </button>
+          {(["issues", "resources", "signals"] as View[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                view === v
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {titles[v]}
+            </button>
+          ))}
         </div>
       </div>
 
       {view === "issues" ? (
         <IssuesView navigate={navigate} t={t} />
+      ) : view === "signals" ? (
+        <SignalsPanel />
       ) : (
         <ResourcesView navigate={navigate} t={t} initialType={searchParams.get("type") || ""} />
       )}

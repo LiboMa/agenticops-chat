@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAnomaly } from "@/hooks/useAnomaly";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
+import { useRcaFeedback } from "@/hooks/useSignals";
 import {
   useFixPlans,
   useApproveFixPlan,
@@ -331,7 +332,7 @@ function IssueTab({
       </Card>
 
       {/* RCA Section */}
-      <RcaSection rca={rca} rcaLoading={rcaLoading} onRunRca={onRunRca} t={t} />
+      <RcaSection issueId={a.id} rca={rca} rcaLoading={rcaLoading} onRunRca={onRunRca} t={t} />
     </div>
   );
 }
@@ -341,16 +342,19 @@ function IssueTab({
 /* ================================================================== */
 
 function RcaSection({
+  issueId,
   rca,
   rcaLoading,
   onRunRca,
   t,
 }: {
+  issueId: number;
   rca: ReturnType<typeof useAnomalyRca>;
   rcaLoading: boolean;
   onRunRca: () => void;
   t: (key: string) => string;
 }) {
+  const feedback = useRcaFeedback(issueId);
   if (rca.isLoading) return <Spinner label="Loading RCA..." />;
 
   if (!rca.data) {
@@ -381,9 +385,60 @@ function RcaSection({
   return (
     <Card>
       <CardBody>
-        <h2 className="text-xl font-semibold text-foreground mb-4">
-          {t("issues.rcaResults")}
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+            {t("issues.rcaResults")}
+            {r.evidence_verified === true && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" title={t("issues.rcaEvidenceVerifiedHint")}>
+                {t("issues.rcaEvidenceVerified")}
+              </span>
+            )}
+            {r.evidence_verified === false && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" title={t("issues.rcaEvidenceUnverifiedHint")}>
+                {t("issues.rcaEvidenceUnverified")}
+              </span>
+            )}
+            {r.critic_verdict && (
+              <span
+                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  r.critic_verdict === "supported"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                }`}
+                title={r.critic_notes ?? ""}
+              >
+                critic: {r.critic_verdict}
+              </span>
+            )}
+          </h2>
+          {/* Human verdict (ground-truth capture) */}
+          <div className="flex items-center gap-1">
+            {r.human_verdict ? (
+              <span className="text-xs text-muted-foreground">
+                {t("issues.rcaHumanVerdict")}: {r.human_verdict === "correct" ? "👍" : "👎"}
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => feedback.mutate({ verdict: "correct" })}
+                  disabled={feedback.isPending}
+                  title={t("issues.rcaMarkCorrect")}
+                  className="px-2 py-1 text-sm rounded-md bg-secondary hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  👍
+                </button>
+                <button
+                  onClick={() => feedback.mutate({ verdict: "incorrect" })}
+                  disabled={feedback.isPending}
+                  title={t("issues.rcaMarkIncorrect")}
+                  className="px-2 py-1 text-sm rounded-md bg-secondary hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  👎
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
         {/* Confidence bar */}
         <div className="mb-6">

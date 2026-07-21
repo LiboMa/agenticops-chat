@@ -48,6 +48,22 @@ export interface MergedAlert {
   fingerprint?: string;
 }
 
+export interface Signal {
+  id: number;
+  received_at: string;
+  kind: "alert" | "detection" | "resolution" | "manual";
+  source: string;
+  title: string;
+  severity: string;
+  issue_type: string;
+  resource_id: string;
+  disposition: "promoted" | "merged" | "noise" | "error" | null;
+  disposition_reason: string;
+  gate_evidence: Record<string, unknown>;
+  health_issue_id: number | null;
+  trace_id: string | null;
+}
+
 export interface Anomaly {
   id: number;
   resource_id: string;
@@ -70,6 +86,7 @@ export interface Anomaly {
   merged_alerts?: MergedAlert[];
   account_id: number | null;
   account_name: string | null;
+  issue_type?: string;
 }
 
 export interface RCAResult {
@@ -84,6 +101,12 @@ export interface RCAResult {
   related_resources: string[];
   llm_model: string;
   created_at: string;
+  // RCA quality (MVP-2.2.0)
+  evidence?: { type: string; ref: string; summary: string }[];
+  evidence_verified?: boolean | null;
+  critic_verdict?: string | null;
+  critic_notes?: string | null;
+  human_verdict?: "correct" | "incorrect" | null;
 }
 
 export interface Report {

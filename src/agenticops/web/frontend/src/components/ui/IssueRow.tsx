@@ -126,6 +126,14 @@ export const IssueRow = React.memo(function IssueRow({ issue, onClick }: Props) 
           <div className="text-sm text-foreground">
             <span className="text-muted-foreground font-mono">#{issue.id}</span>{" "}
             {issue.title}
+            {(issue.occurrence_count ?? 1) > 1 && (
+              <span
+                className="ml-2 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                title={`Recurred ${issue.occurrence_count} times (signal-gate merged)`}
+              >
+                ×{issue.occurrence_count}
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
             {[
