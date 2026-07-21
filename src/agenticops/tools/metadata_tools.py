@@ -651,23 +651,30 @@ def save_rca_result(
     sop_used: str = "",
     similar_cases: str = "[]",
     model_id: str = "",
+    evidence: str = "[]",
 ) -> str:
-    """Save RCA analysis result to metadata and update HealthIssue status.
+    """Persist the RCA analysis result and set the issue to 'root_cause_identified'.
 
-    Creates an RCAResult record linked to the HealthIssue and sets the issue
-    status to 'root_cause_identified'.
+    Pure persistence: the post-RCA quality pipeline (evidence verification,
+    critic review, confidence gate, auto-SRE trigger) runs AFTER the agent
+    finishes — do not expect this call to start remediation.
 
     Args:
         health_issue_id: The HealthIssue ID this analysis is for
         root_cause: Root cause description
         confidence: Confidence score 0.0-1.0
         contributing_factors: JSON array of contributing factors
-        recommendations: JSON array of recommendations
-        fix_plan: JSON object with step-by-step remediation plan
-        fix_risk_level: Risk level: unknown, low, medium, high, critical
+        recommendations: JSON array of recommendations, ordered by impact
+        fix_plan: (compat only — remediation planning is the SRE agent's job)
+        fix_risk_level: (compat only)
         sop_used: SOP filename used during analysis, if any
         similar_cases: JSON array of similar case references
         model_id: LLM model ID used for analysis
+        evidence: JSON array of evidence items you actually gathered this run:
+            [{"type": "cloudtrail|metric|log|kb|trace|cli", "ref": "<exact event
+            name / metric name / log snippet / case id you cited>", "summary":
+            "<one line>"}]. Each ref is verified against your real tool calls —
+            uncited or fabricated refs reduce the stored confidence.
 
     Returns:
         Confirmation with the new RCAResult ID.
@@ -693,6 +700,13 @@ def save_rca_result(
     except json.JSONDecodeError:
         cases_parsed = []
 
+    try:
+        evidence_parsed = json.loads(evidence) if isinstance(evidence, str) else evidence
+    except json.JSONDecodeError:
+        evidence_parsed = []
+    if not isinstance(evidence_parsed, list):
+        evidence_parsed = []
+
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
@@ -710,10 +724,25 @@ def save_rca_result(
             sop_used=sop_used or None,
             similar_cases=cases_parsed,
             model_id=model_id,
+            evidence=evidence_parsed,
         )
         session.add(rca)
 
-        issue.status = "root_cause_identified"
+        # Status via the state machine (no more silent bypass). If the agent
+        # skipped the 'investigating' step, hop through it (both hops legal);
+        # a genuinely illegal transition keeps the current status.
+        status_note = ""
+        try:
+            from agenticops.models import validate_status_transition
+            try:
+                validate_status_transition(issue.status, "root_cause_identified")
+                issue.status = "root_cause_identified"
+            except ValueError:
+                validate_status_transition(issue.status, "investigating")
+                validate_status_transition("investigating", "root_cause_identified")
+                issue.status = "root_cause_identified"
+        except ValueError as e:
+            status_note = f" (status unchanged: {e})"
         session.commit()
 
         # Log pipeline event
@@ -724,28 +753,10 @@ def save_rca_result(
         except Exception:
             pass
 
-        # Auto-trigger SRE fix plan generation
-        try:
-            from agenticops.services.pipeline_service import trigger_auto_sre
-            trigger_auto_sre(health_issue_id, trace_id=issue.trace_id)
-        except Exception as e:
-            logger.warning("Failed to trigger auto-SRE: %s", e)
-
-        # Auto-notify + IM origin update
-        try:
-            from agenticops.services.notification_service import notify_rca_completed, notify_im_origin
-            notify_rca_completed(health_issue_id, root_cause, rca.confidence)
-            notify_im_origin(
-                health_issue_id, "rca_completed",
-                f"RCA completed for Issue #{health_issue_id}: {root_cause[:200]}. Confidence: {rca.confidence:.0%}",
-            )
-        except Exception:
-            logger.debug("Notification trigger failed", exc_info=True)
-
         return (
             f"RCAResult #{rca.id} saved for HealthIssue #{health_issue_id}. "
             f"Root cause: {root_cause[:100]}... Confidence: {rca.confidence:.0%}. "
-            f"Issue status updated to 'root_cause_identified'."
+            f"Issue status updated to 'root_cause_identified'.{status_note}"
         )
     except Exception as e:
         session.rollback()
@@ -1321,7 +1332,31 @@ def mark_fix_failed(health_issue_id: int, execution_id: int, reason: str = "") -
         # Keep status at fix_approved so a retry or new plan is possible
         if issue.status != "fix_approved":
             issue.status = "fix_approved"
-            session.commit()
+
+        # Execution-failure feedback (MVP-2.2.0): a failed fix disputes the
+        # RCA it was based on — surface that on the RCAResult for review.
+        rca = (
+            session.query(RCAResult)
+            .filter_by(health_issue_id=health_issue_id)
+            .order_by(RCAResult.created_at.desc())
+            .first()
+        )
+        if rca is not None:
+            rca.critic_verdict = "disputed_by_execution"
+            note = f"Fix execution #{execution_id} failed"
+            if reason:
+                note += f": {reason}"
+            rca.critic_notes = ((rca.critic_notes + "\n") if rca.critic_notes else "") + note
+        session.commit()
+
+        if rca is not None:
+            try:
+                from agenticops.services.pipeline_events import log_event
+                log_event(health_issue_id, "rca_disputed", "rca",
+                          detail={"rca_id": rca.id, "execution_id": execution_id,
+                                  "reason": (reason or "")[:200]})
+            except Exception:
+                pass
 
         msg = (
             f"HealthIssue #{health_issue_id} remains in 'fix_approved' (retry allowed). "

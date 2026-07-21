@@ -5310,6 +5310,73 @@ class IssueFeedbackRequest(BaseModel):
     confidence: int = Field(default=3, ge=1, le=5)
 
 
+class RcaFeedbackRequest(BaseModel):
+    """Schema for RCA-level human verdict (MVP-2.2.0 ground-truth capture)."""
+    verdict: str = Field(..., pattern="^(correct|incorrect)$")
+    note: str = ""
+
+
+@app.post("/api/health-issues/{issue_id}/rca-feedback", status_code=201)
+async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest):
+    """Record a human verdict on the latest RCA result for an issue.
+
+    'incorrect' also writes an rca agent-memory entry so future runs on the
+    same pattern see the correction (ground-truth flywheel start).
+    """
+    from datetime import timezone as _tz
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+        rca = (
+            session.query(RCAResult)
+            .filter_by(health_issue_id=issue_id)
+            .order_by(RCAResult.created_at.desc())
+            .first()
+        )
+        if not rca:
+            raise HTTPException(status_code=404, detail="No RCA result for this issue")
+        rca.human_verdict = data.verdict
+        rca.human_note = data.note or None
+        rca.verified_at = datetime.now(_tz.utc)
+        rca_id = rca.id
+        root_cause = rca.root_cause or ""
+        issue_type = getattr(issue, "issue_type", "other")
+        resource_id = issue.resource_id
+
+    try:
+        from agenticops.services.pipeline_events import log_event
+        log_event(issue_id, "rca_human_feedback", "rca",
+                  detail={"rca_id": rca_id, "verdict": data.verdict,
+                          "note": (data.note or "")[:200]})
+    except Exception:
+        pass
+
+    if data.verdict == "incorrect":
+        try:
+            from agenticops.memory.agent_memory import save_memory_file
+
+            body = (
+                f"For {issue_type} issues on `{resource_id}`, the conclusion "
+                f"\"{root_cause[:300]}\" was judged INCORRECT by a human "
+                f"(issue I#{issue_id}, RCA #{rca_id})."
+            )
+            if data.note:
+                body += f"\n\nHuman note: {data.note}"
+            body += "\n\nDo not repeat this conclusion without new decisive evidence."
+            save_memory_file(
+                "rca", f"rca_feedback_issue_{issue_id}",
+                memory_type="feedback", source="user", body=body,
+                related_issue_id=issue_id, collision_safe=True,
+            )
+        except Exception:
+            logger.debug("rca feedback memory write failed", exc_info=True)
+
+    return {"rca_id": rca_id, "verdict": data.verdict,
+            "message": f"Human verdict '{data.verdict}' recorded on RCA #{rca_id}"}
+
+
 class AgentMemoryResponse(BaseModel):
     """Schema for agent memory entry."""
     agent: str

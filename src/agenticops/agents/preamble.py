@@ -197,6 +197,27 @@ _TRANSIENT_MARKERS = (
 )
 
 
+def thinking_request_fields(agent_name: str, max_tokens: int):
+    """Bedrock extended-thinking request fields for an agent, or None.
+
+    Enabled per-agent via agent_{name}_thinking_budget in settings.yaml.
+    The budget must be strictly below max_tokens (Bedrock requirement);
+    otherwise thinking is skipped with a warning rather than failing the call.
+    """
+    from agenticops.config import get_agent_thinking_budget
+
+    budget = get_agent_thinking_budget(agent_name)
+    if budget <= 0:
+        return None
+    if budget >= max_tokens:
+        _retry_logger.warning(
+            "thinking budget %d >= max_tokens %d for agent %s — thinking disabled",
+            budget, max_tokens, agent_name,
+        )
+        return None
+    return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+
+
 def _is_transient_error(e: Exception) -> bool:
     """True if the exception looks retry-worthy (structured code first, then substring)."""
     code = None
@@ -211,7 +232,8 @@ def _is_transient_error(e: Exception) -> bool:
     return any(m in err_lower for m in _TRANSIENT_MARKERS)
 
 
-def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: float = 3.0):
+def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: float = 3.0,
+                      **invoke_kwargs):
     """Invoke a Strands agent with retry on transient Bedrock errors.
 
     Args:
@@ -219,6 +241,7 @@ def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: floa
         prompt: The user message to send.
         max_retries: Total attempts (default 2 = 1 original + 1 retry).
         backoff: Seconds to wait between retries.
+        **invoke_kwargs: Passed through to agent() (e.g. limits={"turns": N}).
 
     Returns:
         The agent result object.
@@ -228,7 +251,7 @@ def invoke_with_retry(agent, prompt: str, *, max_retries: int = 2, backoff: floa
     """
     for attempt in range(1, max_retries + 1):
         try:
-            return agent(prompt)
+            return agent(prompt, **invoke_kwargs)
         except Exception as e:
             is_transient = _is_transient_error(e)
             if not is_transient:

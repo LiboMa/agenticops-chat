@@ -297,8 +297,9 @@ class TestPipelineServiceTriggers:
 class TestMetadataToolHooks:
     """Test that metadata tools trigger the pipeline correctly."""
 
-    def test_save_rca_result_triggers_auto_sre(self, db_session, enable_pipeline):
-        """save_rca_result() should call trigger_auto_sre."""
+    def test_save_rca_result_is_pure_persistence(self, db_session, enable_pipeline):
+        """MVP-2.2.0: save_rca_result persists only; auto-SRE moved to the
+        post-RCA quality pipeline (run_post_rca_pipeline gates on confidence)."""
         issue_id = _create_test_issue(db_session)
         # Set to investigating first (valid transition from open)
         issue = db_session.query(HealthIssue).filter_by(id=issue_id).first()
@@ -320,7 +321,27 @@ class TestMetadataToolHooks:
 
             assert "RCAResult" in result
             assert "root_cause_identified" in result
-            mock_trigger.assert_called_once()
+            mock_trigger.assert_not_called()
+
+    def test_post_rca_pipeline_triggers_auto_sre(self, db_session, enable_pipeline):
+        """The confidence gate (not save) now owns the auto-SRE trigger."""
+        import json as _json
+        from datetime import datetime, timedelta, timezone
+
+        issue_id = _create_test_issue(db_session)
+        rca_id = _create_rca_result(db_session, issue_id)
+
+        from agenticops.services.rca_quality import run_post_rca_pipeline
+
+        critic = _json.dumps({"verdict": "supported", "notes": "ok"})
+        with patch("agenticops.services.pipeline_service.trigger_auto_sre") as mock_trigger, \
+             patch("agenticops.services.signal_gate._call_bedrock",
+                   return_value=(critic, {"input": 1, "output": 1})), \
+             patch("agenticops.services.notification_service.notify_rca_completed"), \
+             patch("agenticops.services.notification_service.notify_im_origin"):
+            run_post_rca_pipeline(issue_id, [],
+                                  datetime.now(timezone.utc) - timedelta(minutes=5))
+        mock_trigger.assert_called_once()
 
     def test_save_fix_plan_triggers_auto_approve(self, db_session, enable_pipeline):
         """save_fix_plan() should call trigger_auto_approve."""
@@ -388,7 +409,8 @@ class TestFullE2EPipeline:
         print(f"\n[1] HealthIssue #{issue_id} created: status=open")
 
         # ── Step 2: Simulate RCA completion ───────────────────────────
-        # Mock the SRE trigger to prevent actual agent call, but capture
+        # save persists; the post-RCA quality pipeline (confidence gate)
+        # triggers SRE — run it with critic/notify mocked.
         with patch("agenticops.services.pipeline_service.trigger_auto_sre") as mock_sre:
             from agenticops.tools.metadata_tools import save_rca_result
 
@@ -405,8 +427,21 @@ class TestFullE2EPipeline:
                 fix_plan='{"steps": [{"action": "host_command", "command": "kill -9 PID"}]}',
                 fix_risk_level="medium",
             )
+            mock_sre.assert_not_called()  # pure persistence now
+
+            import json as _json
+            from datetime import datetime, timedelta, timezone as _tz
+            from agenticops.services.rca_quality import run_post_rca_pipeline
+
+            critic = _json.dumps({"verdict": "supported", "notes": "ok"})
+            with patch("agenticops.services.signal_gate._call_bedrock",
+                       return_value=(critic, {"input": 1, "output": 1})), \
+                 patch("agenticops.services.notification_service.notify_rca_completed"), \
+                 patch("agenticops.services.notification_service.notify_im_origin"):
+                run_post_rca_pipeline(issue_id, [],
+                                      datetime.now(_tz.utc) - timedelta(minutes=5))
             mock_sre.assert_called_once()
-            print(f"[2] RCA saved: {rca_result}")
+            print(f"[2] RCA saved + gated: {rca_result}")
 
         # Verify RCA state
         db_session.expire_all()

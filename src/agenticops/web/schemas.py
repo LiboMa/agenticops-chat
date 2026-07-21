@@ -141,6 +141,12 @@ class RCAResponse(BaseModel):
     similar_cases: List
     model_id: str
     created_at: datetime
+    # RCA quality (MVP-2.2.0)
+    evidence: List = Field(default_factory=list)
+    evidence_verified: Optional[bool] = None
+    critic_verdict: Optional[str] = None
+    critic_notes: Optional[str] = None
+    human_verdict: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

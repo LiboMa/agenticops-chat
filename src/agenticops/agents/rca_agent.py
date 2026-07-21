@@ -6,6 +6,7 @@ and persists structured RCA results. Exposed as a tool for the Main Agent
 """
 
 import logging
+from datetime import datetime, timezone
 
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
@@ -95,15 +96,15 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    b. Call analyze_vpc_topology with the affected resource's VPC ID for a holistic view
       of subnets (public/private), routing, gateways, peering, endpoints, SG dependencies,
       and blackhole routes. Check the reachability_summary for issues.
-   b. For individual deep-dives, use describe_security_groups, describe_route_tables, etc.
-   c. If behind a load balancer, call describe_load_balancers to check target health.
-   d. For EKS workloads: call describe_eks_clusters and map_eks_to_vpc_topology to understand
+   c. For individual deep-dives, use describe_security_groups, describe_route_tables, etc.
+   d. If behind a load balancer, call describe_load_balancers to check target health.
+   e. For EKS workloads: call describe_eks_clusters and map_eks_to_vpc_topology to understand
       cluster networking. Use check_eks_pod_ip_capacity if pod scheduling failures are suspected.
       Call describe_eks_nodegroups for node-level health issues.
-   e. Call query_reachability to verify subnet internet connectivity with exact path trace.
-   f. Call find_network_path for point-to-point traffic path analysis.
-   g. Call detect_network_anomalies to find structural issues (routing loops, orphan nodes, blackholes).
-   h. Call query_impact_radius to assess blast radius of suspected failed component.
+   f. Call query_reachability to verify subnet internet connectivity with exact path trace.
+   g. Call find_network_path for point-to-point traffic path analysis.
+   h. Call detect_network_anomalies to find structural issues (routing loops, orphan nodes, blackholes).
+   i. Call query_impact_radius to assess blast radius of suspected failed component.
 6. INVESTIGATE METRICS:
    a. Call get_metrics for the affected resource (relevant metrics based on resource type).
    b. Call query_logs if log patterns are relevant to the issue.
@@ -130,9 +131,16 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    - Identify the most likely root cause with confidence score (0.0-1.0).
    - List contributing factors.
    - Provide actionable recommendations ordered by impact.
-   - Create a fix plan with step-by-step remediation.
-   - Assess fix risk level: low, medium, high, or critical.
-8. SAVE: Call save_rca_result with all findings.
+   - Compile the evidence list: every CloudTrail event, metric, log line, KB case,
+     or trace you are citing, as [{"type", "ref", "summary"}]. Only cite what you
+     actually retrieved THIS run — refs are verified against your tool calls, and
+     fabricated refs reduce the stored confidence.
+   NOTE: Do NOT create a fix plan — remediation planning is the SRE agent's job;
+   your recommendations feed it.
+8. SAVE: Call save_rca_result with all findings, including the evidence parameter.
+   An INCIDENT MEMORY block may be present in your task prompt (prior conclusions
+   for this same problem) — treat it as a prior to confirm or refute with fresh
+   evidence, never as the answer.
 8.5. EXTENDED INVESTIGATION: Use the provided cloud CLI tool for services not covered
      by specialized tools (ElastiCache, Redshift, Step Functions, API Gateway, etc.).
 8.6. __LOCAL_FILE_BLOCK__
@@ -233,6 +241,101 @@ def _build_topology_context(resource_id: str, max_chars: int = 2000) -> str:
         return ""
 
 
+def _build_incident_memory(issue, max_chars: int = 2000) -> str:
+    """INCIDENT MEMORY block: prior verified conclusions for the same problem.
+
+    Precise recall (same fingerprint, else same issue_type+resource) of up to
+    rca_incident_memory_max FINISHED issues, each with its verification status
+    (human verdict > critic verdict) and fix outcome. Priors, not answers —
+    the prompt tells the agent to confirm or refute with fresh evidence.
+    Fail-soft: any error returns "".
+    """
+    if not settings.rca_incident_memory_enabled or issue is None:
+        return ""
+    try:
+        from agenticops.models import FixExecution, FixPlan, HealthIssue, RCAResult, get_db_session
+
+        with get_db_session() as db:
+            candidates = []
+            if issue.fingerprint:
+                candidates = (
+                    db.query(HealthIssue)
+                    .filter(HealthIssue.fingerprint == issue.fingerprint,
+                            HealthIssue.id != issue.id,
+                            HealthIssue.status.in_(("resolved", "dismissed")))
+                    .order_by(HealthIssue.detected_at.desc())
+                    .limit(settings.rca_incident_memory_max)
+                    .all()
+                )
+            if not candidates and issue.resource_id and issue.resource_id != "unknown":
+                candidates = (
+                    db.query(HealthIssue)
+                    .filter(HealthIssue.resource_id == issue.resource_id,
+                            HealthIssue.issue_type == getattr(issue, "issue_type", "other"),
+                            HealthIssue.id != issue.id,
+                            HealthIssue.status.in_(("resolved", "dismissed")))
+                    .order_by(HealthIssue.detected_at.desc())
+                    .limit(settings.rca_incident_memory_max)
+                    .all()
+                )
+            if not candidates:
+                return ""
+
+            entries = []
+            for prior in candidates:
+                rca = (
+                    db.query(RCAResult)
+                    .filter_by(health_issue_id=prior.id)
+                    .order_by(RCAResult.created_at.desc())
+                    .first()
+                )
+                if rca is None:
+                    continue
+                verdict_bits = []
+                if rca.human_verdict:
+                    verdict_bits.append(f"human={rca.human_verdict}")
+                if rca.critic_verdict:
+                    verdict_bits.append(f"critic={rca.critic_verdict}")
+                flag = " ⚠ this conclusion was refuted by a failed fix" \
+                    if rca.critic_verdict == "disputed_by_execution" else ""
+                fix_bit = ""
+                plan = (
+                    db.query(FixPlan)
+                    .filter_by(health_issue_id=prior.id)
+                    .order_by(FixPlan.created_at.desc())
+                    .first()
+                )
+                if plan is not None:
+                    execution = (
+                        db.query(FixExecution)
+                        .filter_by(fix_plan_id=plan.id)
+                        .order_by(FixExecution.id.desc())
+                        .first()
+                    )
+                    exec_status = execution.status if execution else plan.status
+                    fix_bit = f" | fix: {plan.title[:60]} → {exec_status}"
+                when = prior.resolved_at or prior.detected_at
+                entries.append(
+                    (1 if rca.human_verdict == "correct" else 0,
+                     f"- I#{prior.id} [{when:%Y-%m-%d}] root_cause: {rca.root_cause[:200]} "
+                     f"(confidence {rca.confidence:.0%}"
+                     f"{', ' + ', '.join(verdict_bits) if verdict_bits else ''})"
+                     f"{fix_bit}{flag}")
+                )
+            if not entries:
+                return ""
+            entries.sort(key=lambda e: e[0], reverse=True)  # human-confirmed first
+            block = (
+                "INCIDENT MEMORY (prior conclusions for this same problem — treat as PRIORS, "
+                "not answers; confirm or refute with THIS run's evidence):\n"
+                + "\n".join(e[1] for e in entries)
+            )
+            return block[:max_chars]
+    except Exception:
+        logger.debug("incident memory unavailable for issue #%s", getattr(issue, "id", "?"), exc_info=True)
+        return ""
+
+
 @tool
 def rca_agent(issue_id: int) -> str:
     """Perform Root Cause Analysis on a HealthIssue.
@@ -253,9 +356,10 @@ def rca_agent(issue_id: int) -> str:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
-            # Resolve provider CLI tool from issue's account
+            # Resolve provider CLI tool from issue's account (+ incident memory)
             cli_tool = None
             issue_resource_id = ""
+            incident_memory_block = ""
             try:
                 from agenticops.models import HealthIssue, get_db_session
                 with get_db_session() as db:
@@ -264,6 +368,7 @@ def rca_agent(issue_id: int) -> str:
                         issue_resource_id = issue.resource_id or ""
                         if issue.account_id:
                             cli_tool = get_cli_tool_for_issue(issue.account_id)
+                        incident_memory_block = _build_incident_memory(issue)
             except Exception:
                 pass
 
@@ -271,6 +376,10 @@ def rca_agent(issue_id: int) -> str:
             cache_kwargs: dict = {}
             if settings.bedrock_cache_enabled:
                 cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+            from agenticops.agents.preamble import thinking_request_fields
+            thinking_fields = thinking_request_fields("rca", max_tokens)
+            if thinking_fields:
+                cache_kwargs["additional_request_fields"] = thinking_fields
             model = BedrockModel(
                 model_id=model_id,
                 boto_session=get_bedrock_boto_session(),
@@ -335,12 +444,27 @@ def rca_agent(issue_id: int) -> str:
             topology_block = _build_topology_context(issue_resource_id)
             if topology_block:
                 prompt = f"{prompt}\n\n{topology_block}"
+            if incident_memory_block:
+                prompt = f"{prompt}\n\n{incident_memory_block}"
 
             from agenticops.agents.preamble import invoke_with_retry
             from agenticops.services.agent_log_service import track_agent
+            invoke_kwargs = {}
+            if settings.rca_max_iterations > 0:
+                invoke_kwargs["limits"] = {"turns": settings.rca_max_iterations}
+            started_at = datetime.now(timezone.utc)
             with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent="main") as tracker:
-                result = invoke_with_retry(agent, prompt)
+                result = invoke_with_retry(agent, prompt, **invoke_kwargs)
                 tracker.set_result(result)
+
+            # Post-RCA quality pipeline: evidence verification → critic →
+            # confidence gate → (pass) auto-SRE / (fail) needs_review.
+            # save_rca_result is pure persistence since MVP-2.2.0.
+            try:
+                from agenticops.services.rca_quality import run_post_rca_pipeline
+                run_post_rca_pipeline(issue_id, list(agent.messages), started_at)
+            except Exception:
+                logger.exception("post-RCA quality pipeline failed for issue #%d", issue_id)
             return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")
