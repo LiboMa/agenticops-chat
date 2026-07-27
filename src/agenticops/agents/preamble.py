@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Optional
 
 from agenticops.config import settings
 
@@ -214,25 +215,103 @@ def infer_parent_agent(default: str = "main") -> str:
     return default
 
 
+def thinking_fields_for_budget(budget: int, max_tokens: int):
+    """Bedrock extended-thinking request fields for a budget, or None.
+
+    Bedrock requires thinking_budget_min <= budget < max_tokens. An illegal
+    budget disables thinking (with a warning) rather than failing the call.
+    """
+    from agenticops.config import settings
+
+    if budget <= 0:
+        return None
+    floor = settings.thinking_budget_min
+    if budget < floor:
+        _retry_logger.warning(
+            "thinking budget %d below minimum %d — thinking disabled", budget, floor,
+        )
+        return None
+    if budget >= max_tokens:
+        _retry_logger.warning(
+            "thinking budget %d >= max_tokens %d — thinking disabled", budget, max_tokens,
+        )
+        return None
+    return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+
+
+def effort_to_budget(effort: Optional[str], max_tokens: int):
+    """Map a named effort level to a budget, or None if the name is unknown.
+
+    None/"" mean "no explicit choice" (Auto) — the caller falls back to the
+    per-agent base budget.
+    """
+    from agenticops.config import settings
+
+    if not effort:
+        return None
+    budget = settings.thinking_effort_presets.get(str(effort).lower())
+    if budget is None:
+        _retry_logger.warning("unknown effort level %r — falling back to Auto", effort)
+        return None
+    return _clamp_budget(int(budget), max_tokens)
+
+
+def resolve_thinking_budget(agent_name: str, max_tokens: int, *,
+                            escalate: int = 0, override: Optional[str] = None) -> int:
+    """Effective thinking budget for one agent run (pure, no IO).
+
+    Precedence: explicit `override` (an effort preset name) > per-agent base
+    budget from settings.yaml, escalated by `escalate` tiers.
+
+    A base of 0 means thinking is off for this agent; escalation never turns it
+    on. The result is clamped so a legal Bedrock request is always possible,
+    and returns 0 when no legal budget fits under max_tokens.
+    """
+    from agenticops.config import get_agent_thinking_budget, settings
+
+    from_override = effort_to_budget(override, max_tokens)
+    if from_override is not None:
+        return from_override
+
+    # A misconfigured base disables thinking (and warns) rather than being
+    # silently rescued — clamping is for escalation, not for bad config.
+    base = get_agent_thinking_budget(agent_name)
+    if base <= 0:
+        return 0
+    if base < settings.thinking_budget_min or base >= max_tokens:
+        _retry_logger.warning(
+            "agent %s thinking budget %d outside [%d, %d) — thinking disabled",
+            agent_name, base, settings.thinking_budget_min, max_tokens,
+        )
+        return 0
+    if escalate <= 0:
+        return base
+    return _clamp_budget(base + settings.thinking_escalation_step * escalate, max_tokens)
+
+
+def _clamp_budget(budget: int, max_tokens: int) -> int:
+    """Keep a budget legal for Bedrock, or 0 when no legal value fits."""
+    from agenticops.config import settings
+
+    if budget <= 0:
+        return 0
+    floor = settings.thinking_budget_min
+    ceiling = max_tokens - floor          # leave room for the visible answer
+    if ceiling < floor:
+        return 0                          # max_tokens too small for thinking at all
+    return min(budget, ceiling)
+
+
 def thinking_request_fields(agent_name: str, max_tokens: int):
     """Bedrock extended-thinking request fields for an agent, or None.
 
     Enabled per-agent via agent_{name}_thinking_budget in settings.yaml.
-    The budget must be strictly below max_tokens (Bedrock requirement);
-    otherwise thinking is skipped with a warning rather than failing the call.
+    Thin wrapper kept for the existing per-agent call sites; escalation and
+    interactive overrides go through resolve_thinking_budget.
     """
-    from agenticops.config import get_agent_thinking_budget
-
-    budget = get_agent_thinking_budget(agent_name)
-    if budget <= 0:
-        return None
-    if budget >= max_tokens:
-        _retry_logger.warning(
-            "thinking budget %d >= max_tokens %d for agent %s — thinking disabled",
-            budget, max_tokens, agent_name,
-        )
-        return None
-    return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    return thinking_fields_for_budget(
+        resolve_thinking_budget(agent_name, max_tokens), max_tokens,
+    )
 
 
 def _is_transient_error(e: Exception) -> bool:

@@ -455,15 +455,18 @@ class ChatSessionManager:
             # Expensive work — outside global lock
             logger.info("Creating agent for session %s", session_id)
             session_model = ""
+            session_effort = ""
             try:
                 from agenticops.models import ChatSession, get_db_session
                 with get_db_session() as db:
                     row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-                    if row and row.model_id:
-                        session_model = row.model_id
+                    if row:
+                        session_model = row.model_id or ""
+                        session_effort = row.effort or ""
             except Exception:
                 logger.warning("Could not read session model for %s; using global", session_id, exc_info=True)
-            agent = create_main_agent(model_id_override=session_model)
+            agent = create_main_agent(model_id_override=session_model,
+                                      effort_override=session_effort)
             history = _load_history_messages(session_id, settings.session_history_depth)
             if history:
                 agent.messages.extend(history)

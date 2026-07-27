@@ -834,6 +834,9 @@ class ChatSession(Base):
     # Per-session main-agent model override; NULL = Auto (follow global config)
     model_id: Mapped[Optional[str]] = mapped_column(String(200), default=None)
 
+    # Per-session effort (thinking) override: off|standard|deep; NULL = Auto
+    effort: Mapped[Optional[str]] = mapped_column(String(20), default=None)
+
 
 class ChatMessage(Base):
     """Individual message in a chat session."""
@@ -1135,13 +1138,15 @@ def init_db(engine=None):
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN trace_id VARCHAR(36)"))
                 conn.commit()
 
-    # Migration: add per-session model override to chat_sessions if missing
+    # Migration: add per-session model / effort overrides to chat_sessions if missing
     if insp.has_table("chat_sessions"):
         columns = {col["name"] for col in insp.get_columns("chat_sessions")}
-        if "model_id" not in columns:
-            with engine.connect() as conn:
+        with engine.connect() as conn:
+            if "model_id" not in columns:
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN model_id VARCHAR(200)"))
-                conn.commit()
+            if "effort" not in columns:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN effort VARCHAR(20)"))
+            conn.commit()
 
     # Migration: add suggestion-chips column to chat_messages if missing
     if insp.has_table("chat_messages"):

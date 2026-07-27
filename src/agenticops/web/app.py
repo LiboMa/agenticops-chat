@@ -4191,7 +4191,7 @@ async def api_create_chat_session(payload: ChatSessionCreate):
             id=row.id, session_id=row.session_id, name=row.name,
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=0,
-            model_id=row.model_id,
+            model_id=row.model_id, effort=row.effort,
         )
 
 
@@ -4220,7 +4220,7 @@ async def api_list_chat_sessions(
                 created_at=r.created_at, updated_at=r.updated_at,
                 last_activity_at=r.last_activity_at, message_count=cnt,
                 pinned=r.pinned, starred=r.starred, archived=r.archived,
-                model_id=r.model_id,
+                model_id=r.model_id, effort=r.effort,
             ))
         return result
 
@@ -4287,12 +4287,17 @@ async def api_get_chat_messages(
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
 async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
     model_field_set = "model_id" in payload.model_fields_set
-    if model_field_set and session_id in _streaming_sessions:
-        raise HTTPException(409, "A response is still streaming — stop it before switching models")
+    effort_field_set = "effort" in payload.model_fields_set
+    if (model_field_set or effort_field_set) and session_id in _streaming_sessions:
+        raise HTTPException(409, "A response is still streaming — stop it before switching model or effort")
     if model_field_set and payload.model_id:
         allowed = _allowed_model_ids()
         if payload.model_id not in allowed:
             raise HTTPException(400, f"Unknown model id. Allowed: {sorted(allowed)[:10]} ...")
+    if effort_field_set and payload.effort:
+        allowed_effort = set(settings.thinking_effort_presets)
+        if payload.effort not in allowed_effort:
+            raise HTTPException(400, f"Unknown effort level. Allowed: {sorted(allowed_effort)}")
 
     with get_db_session() as db:
         row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
@@ -4308,11 +4313,15 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         archiving = payload.archived is True and not row.archived
         if payload.archived is not None:
             row.archived = payload.archived
-        model_changed = False
+        agent_changed = False   # model or effort → this session's agent must be rebuilt
         if model_field_set:
             new_model = payload.model_id or None  # "" sentinel → NULL (Auto)
-            model_changed = new_model != row.model_id
+            agent_changed = new_model != row.model_id
             row.model_id = new_model
+        if effort_field_set:
+            new_effort = payload.effort or None   # "" sentinel → NULL (Auto)
+            agent_changed = agent_changed or new_effort != row.effort
+            row.effort = new_effort
         row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
@@ -4321,11 +4330,11 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
             created_at=row.created_at, updated_at=row.updated_at,
             last_activity_at=row.last_activity_at, message_count=cnt,
             pinned=row.pinned, starred=row.starred, archived=row.archived,
-            model_id=row.model_id,
+            model_id=row.model_id, effort=row.effort,
         )
 
-    # Rebuild this session's agent with the new model on next message
-    if model_changed:
+    # Rebuild this session's agent with the new model/effort on next message
+    if agent_changed:
         _chat_sessions.remove(session_id)
 
     # Trigger memory extraction in the background when archiving

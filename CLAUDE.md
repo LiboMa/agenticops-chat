@@ -4,7 +4,7 @@
 
 AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent architecture (Strands SDK on AWS Bedrock). Provides `aiops chat` interactive REPL, React web dashboard with streaming chat, resource scanning, anomaly detection, fix planning, and reporting across AWS accounts.
 
-**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (latest: Signal Gate noise reduction + RCA quality quintet)
+**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (Signal Gate noise reduction + RCA quality quintet), `docs/MVP-2.2.1-RELEASE.md` (latest: effort/thinking policy — backend escalation + per-session chat override)
 
 ## Protected Files
 
@@ -196,7 +196,10 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `rca_timeout_seconds` | `900` | RCA watchdog (timeout → failed event + needs_review) |
 | `rca_incident_memory_enabled` / `rca_incident_memory_max` | `true` / `3` | Inject prior same-fingerprint RCA conclusions (with verdicts) into the RCA prompt |
 | `rca_max_iterations` | `40` | Max event-loop turns per RCA run |
-| `agent_{name}_thinking_budget` | `0` | Extended-thinking budget tokens (yaml enables rca=4096) |
+| `agent_{name}_thinking_budget` | `0` | Extended-thinking base budget tokens (yaml enables rca=4096); 0 = off, and escalation never turns it on |
+| `thinking_escalation_step` | `4096` | Tokens added per escalation tier (MVP-2.2.1: RCA gets +1 tier for critical severity, +1 for a rerun after needs_review/disputed — they stack) |
+| `thinking_budget_min` | `1024` | Bedrock minimum; a budget below this (or ≥ max_tokens) disables thinking instead of sending an illegal request |
+| `thinking_effort_presets` | `{off:0, standard:4096, deep:12288}` | Named effort levels backing the per-session chat override (`chat_sessions.effort`, NULL = Auto). Keys must be quoted in YAML — bare `off` parses as boolean false |
 
 ## HealthIssue State Machine
 

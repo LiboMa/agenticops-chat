@@ -61,8 +61,17 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
 
     from agenticops.config import get_agent_model_config
     rca_model_id, _ = get_agent_model_config("rca")
+    # Record the effort actually given to the model — this is what makes the
+    # "does thinking improve RCA quality" question answerable from the DB.
+    try:
+        from agenticops.agents.rca_agent import resolve_rca_effort
+        thinking_budget, escalate_reason = resolve_rca_effort(health_issue_id)
+    except Exception:
+        thinking_budget, escalate_reason = 0, ""
     log_event(health_issue_id, "rca_started", "rca", "started",
-              detail={"model_id": rca_model_id}, trace_id=trace_id)
+              detail={"model_id": rca_model_id, "thinking_budget": thinking_budget,
+                      "escalate_reason": escalate_reason},
+              trace_id=trace_id)
     try:
         from agenticops.agents.rca_agent import rca_agent
 

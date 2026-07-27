@@ -601,6 +601,8 @@ class ChatSessionUpdate(BaseModel):
     archived: Optional[bool] = None
     # "" = set Auto (stored NULL); omitted = don't change; non-empty = validated model id
     model_id: Optional[str] = None
+    # "" = set Auto (stored NULL); omitted = don't change; else off|standard|deep
+    effort: Optional[str] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -636,6 +638,8 @@ class ChatSessionResponse(BaseModel):
     archived: bool = False
     # Per-session main-agent model override; None = Auto (follow global config)
     model_id: Optional[str] = None
+    # Per-session effort (thinking) override; None = Auto
+    effort: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

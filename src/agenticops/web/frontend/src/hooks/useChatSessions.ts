@@ -56,6 +56,8 @@ export function useUpdateChatSession() {
       archived?: boolean;
       /** "" = Auto (follow global); non-empty = model id; omit = don't change */
       model_id?: string;
+      /** "" = Auto; else off|standard|deep; omit = don't change */
+      effort?: string;
     }) =>
       apiFetch<ChatSession>(`/chat/sessions/${sessionId}`, {
         method: "PATCH",

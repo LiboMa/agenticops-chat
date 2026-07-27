@@ -107,7 +107,8 @@ class TestModelResolution:
             from agenticops.web.app import _chat_sessions
             _chat_sessions.remove(session_id)
             _chat_sessions.get_or_create(session_id)
-            mock_create.assert_called_once_with(model_id_override="global.anthropic.claude-opus-4-8")
+            mock_create.assert_called_once_with(
+                model_id_override="global.anthropic.claude-opus-4-8", effort_override="")
             _chat_sessions.remove(session_id)
 
     def test_auto_session_passes_empty_override(self, client, session_id):
@@ -117,8 +118,33 @@ class TestModelResolution:
             from agenticops.web.app import _chat_sessions
             _chat_sessions.remove(session_id)
             _chat_sessions.get_or_create(session_id)
-            mock_create.assert_called_once_with(model_id_override="")
+            mock_create.assert_called_once_with(model_id_override="", effort_override="")
             _chat_sessions.remove(session_id)
+
+    def test_session_effort_reaches_agent_build(self, client, session_id):
+        """Per-session effort override travels the same path as model_id."""
+        from agenticops.web import session_manager as sm
+        r = client.patch(f"/api/chat/sessions/{session_id}", json={"effort": "deep"})
+        assert r.status_code == 200 and r.json()["effort"] == "deep"
+        with patch.object(sm, "create_main_agent") as mock_create:
+            mock_create.return_value.messages = []
+            from agenticops.web.app import _chat_sessions
+            _chat_sessions.remove(session_id)
+            _chat_sessions.get_or_create(session_id)
+            mock_create.assert_called_once_with(model_id_override="", effort_override="deep")
+            _chat_sessions.remove(session_id)
+
+    def test_invalid_effort_rejected(self, client, session_id):
+        assert client.patch(f"/api/chat/sessions/{session_id}",
+                            json={"effort": "turbo"}).status_code == 400
+
+    def test_effort_switch_blocked_while_streaming(self, client, session_id):
+        _streaming_sessions.add(session_id)
+        try:
+            assert client.patch(f"/api/chat/sessions/{session_id}",
+                                json={"effort": "deep"}).status_code == 409
+        finally:
+            _streaming_sessions.discard(session_id)
 
 
 class TestEffectiveModelForCost:

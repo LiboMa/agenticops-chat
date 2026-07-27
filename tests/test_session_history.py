@@ -448,7 +448,7 @@ class TestGetOrCreateWithHistory:
         creation_order = []
         barrier = threading.Barrier(2, timeout=5)
 
-        def slow_create(model_id_override=""):
+        def slow_create(model_id_override="", effort_override=""):
             agent = MagicMock()
             agent.messages = []
             return agent

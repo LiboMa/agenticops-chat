@@ -209,11 +209,13 @@ OUTPUT FORMATTING:
 """
 
 
-def create_main_agent(model_id_override: str = "") -> Agent:
+def create_main_agent(model_id_override: str = "", effort_override: str = "") -> Agent:
     """Create and return the Main Agent (Orchestrator).
 
     Args:
         model_id_override: Per-session model id; empty = use global config.
+        effort_override: Per-session effort level (off|standard|deep);
+            empty = Auto (follow agent_main_thinking_budget).
 
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
@@ -241,6 +243,12 @@ def create_main_agent(model_id_override: str = "") -> Agent:
     cache_kwargs: dict = {}
     if settings.bedrock_cache_enabled:
         cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+    from agenticops.agents.preamble import resolve_thinking_budget, thinking_fields_for_budget
+    thinking_fields = thinking_fields_for_budget(
+        resolve_thinking_budget("main", max_tokens, override=effort_override), max_tokens,
+    )
+    if thinking_fields:
+        cache_kwargs["additional_request_fields"] = thinking_fields
     model = BedrockModel(
         model_id=model_id,
         boto_session=get_bedrock_boto_session(),

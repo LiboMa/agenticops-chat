@@ -102,6 +102,17 @@ rca_incident_memory_enabled: true
 rca_incident_memory_max: 3
 rca_max_iterations: 40
 agent_rca_thinking_budget: 4096
+
+# Effort (thinking) policy — MVP-2.2.1, EXPERIMENTAL.
+# The base budget above is escalated one step per tier: critical severity +1,
+# rerun after needs_review/disputed +1 (they stack). Presets back the per-session
+# effort override in chat. Bedrock requires min <= budget < max_tokens.
+thinking_escalation_step: 4096
+thinking_budget_min: 1024
+thinking_effort_presets:
+  "off": 0          # quoted — bare off/on are booleans in YAML
+  "standard": 4096
+  "deep": 12288
 skills_enabled: true
 skills_auto_improve_enabled: true
 skills_post_resolution_review: true

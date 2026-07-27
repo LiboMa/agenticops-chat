@@ -168,6 +168,15 @@ class Settings(BaseSettings):
     agent_executor_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for executor agent")
     agent_reporter_thinking_budget: int = Field(default=0, description="Extended thinking budget tokens for reporter agent")
 
+    # Effort (thinking) policy — MVP-2.2.1. Escalation adds one step per tier on
+    # top of the per-agent base budget; presets serve interactive overrides.
+    thinking_escalation_step: int = Field(default=4096, description="Tokens added per escalation tier on top of the base thinking budget")
+    thinking_budget_min: int = Field(default=1024, description="Bedrock minimum thinking budget; below this thinking is disabled instead of sent")
+    thinking_effort_presets: dict[str, int] = Field(
+        default_factory=lambda: {"off": 0, "standard": 4096, "deep": 12288},
+        description="Named effort levels for interactive (chat) overrides",
+    )
+
     # Per-agent sliding window size (0 = use bedrock_window_size)
     agent_main_window_size: int = Field(default=0, description="Window size for main agent (0 = bedrock_window_size)")
     agent_scan_window_size: int = Field(default=0, description="Window size for scan agent")

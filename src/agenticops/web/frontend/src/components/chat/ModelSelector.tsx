@@ -4,6 +4,9 @@ import { useSettings } from "@/hooks/useSettings";
 import { useChatSessions, useUpdateChatSession } from "@/hooks/useChatSessions";
 import { useLocale } from "@/i18n/LocaleContext";
 
+/** Effort levels; "" = Auto (follow the agent's configured thinking budget). */
+const EFFORT_LEVELS = ["", "off", "standard", "deep"] as const;
+
 /** Strip provider prefix: "global.anthropic.claude-opus-4-8" → "claude-opus-4-8" */
 function shortName(id: string): string {
   const parts = id.split(".");
@@ -33,9 +36,15 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
   const labelFor = (id: string) => presets.find((p) => p.value === id)?.label ?? shortName(id);
   const current = session?.model_id ?? null;
   const currentLabel = current ? labelFor(current) : `${t("chat.model.auto")} · ${labelFor(globalMain)}`;
+  const currentEffort = session?.effort ?? null;
 
   const select = (value: string) => {
     if ((value || null) !== current) update.mutate({ sessionId, model_id: value });
+    setOpen(false);
+  };
+
+  const selectEffort = (value: string) => {
+    if ((value || null) !== currentEffort) update.mutate({ sessionId, effort: value });
     setOpen(false);
   };
 
@@ -54,6 +63,11 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
           <span className={`truncate ${current ? "text-primary-600 dark:text-primary-400 font-medium" : ""}`}>
             {currentLabel}
           </span>
+          {currentEffort && (
+            <span className="shrink-0 text-[10px] text-primary-600 dark:text-primary-400 font-medium">
+              · {t(`chat.effort.${currentEffort}`)}
+            </span>
+          )}
           <svg className={`w-3 h-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
@@ -110,6 +124,32 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
               </span>
             </button>
           ))}
+
+          {/* ── Effort (extended thinking) ─────────────────────────── */}
+          <div className="h-px bg-border my-1 mx-2" />
+          <div className="px-2.5 py-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+            {t("chat.effort.label")}
+          </div>
+          {EFFORT_LEVELS.map((level) => {
+            const active = (level || null) === currentEffort;
+            return (
+              <button
+                key={level || "auto"}
+                onClick={() => selectEffort(level)}
+                className="w-full flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-muted focus:bg-muted focus:outline-none transition-colors"
+              >
+                {active ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
+                <span className="min-w-0">
+                  <span className={`block text-xs text-foreground truncate ${active ? "font-medium" : ""}`}>
+                    {t(level ? `chat.effort.${level}` : "chat.effort.auto")}
+                  </span>
+                  <span className="block text-[10px] text-muted-foreground/60 truncate">
+                    {t(level ? `chat.effort.${level}Hint` : "chat.effort.autoHint")}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

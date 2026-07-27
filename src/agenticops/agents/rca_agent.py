@@ -336,6 +336,61 @@ def _build_incident_memory(issue, max_chars: int = 2000) -> str:
         return ""
 
 
+def _rca_escalation(issue, last_rca) -> tuple[int, str]:
+    """How many effort tiers this RCA run earns, and why (pure, fail-safe).
+
+    Two inputs only (MVP-2.2.1 experiment — deliberately narrow so the effect
+    stays attributable): critical severity, and a rerun after the previous
+    conclusion failed the quality gate or was refuted by a failed fix. They
+    stack. Any uncertainty resolves to 0 — attribution failure must never
+    raise the price.
+    """
+    if issue is None:
+        return 0, ""
+    reasons: list[str] = []
+    try:
+        if (issue.severity or "").lower() == "critical":
+            reasons.append("critical")
+        metric_data = issue.metric_data if isinstance(issue.metric_data, dict) else {}
+        rerun = bool(metric_data.get("needs_review")) or (
+            last_rca is not None
+            and last_rca.critic_verdict in ("refuted", "disputed_by_execution")
+        )
+        if rerun:
+            reasons.append("rerun")
+    except Exception:
+        logger.debug("escalation attribution failed; staying at base effort", exc_info=True)
+        return 0, ""
+    return len(reasons), "+".join(reasons)
+
+
+def resolve_rca_effort(issue_id: int) -> tuple[int, str]:
+    """(thinking_budget, escalate_reason) for an RCA run on this issue.
+
+    Single source of truth so the rca_started event reports exactly what the
+    model was given. Never raises — falls back to the base budget.
+    """
+    from agenticops.agents.preamble import resolve_thinking_budget
+    from agenticops.config import get_agent_model_config
+
+    _, max_tokens = get_agent_model_config("rca")
+    escalate, reason = 0, ""
+    try:
+        from agenticops.models import HealthIssue, RCAResult, get_db_session
+        with get_db_session() as db:
+            issue = db.query(HealthIssue).filter_by(id=issue_id).first()
+            last_rca = (
+                db.query(RCAResult)
+                .filter_by(health_issue_id=issue_id)
+                .order_by(RCAResult.created_at.desc())
+                .first()
+            )
+            escalate, reason = _rca_escalation(issue, last_rca)
+    except Exception:
+        logger.debug("RCA effort attribution failed for #%s", issue_id, exc_info=True)
+    return resolve_thinking_budget("rca", max_tokens, escalate=escalate), reason
+
+
 @tool
 def rca_agent(issue_id: int) -> str:
     """Perform Root Cause Analysis on a HealthIssue.
@@ -376,10 +431,16 @@ def rca_agent(issue_id: int) -> str:
             cache_kwargs: dict = {}
             if settings.bedrock_cache_enabled:
                 cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-            from agenticops.agents.preamble import thinking_request_fields
-            thinking_fields = thinking_request_fields("rca", max_tokens)
+            from agenticops.agents.preamble import thinking_fields_for_budget
+            thinking_budget, escalate_reason = resolve_rca_effort(issue_id)
+            thinking_fields = thinking_fields_for_budget(thinking_budget, max_tokens)
             if thinking_fields:
                 cache_kwargs["additional_request_fields"] = thinking_fields
+                if escalate_reason:
+                    logger.info(
+                        "RCA #%d effort escalated to %d tokens (%s)",
+                        issue_id, thinking_budget, escalate_reason,
+                    )
             model = BedrockModel(
                 model_id=model_id,
                 boto_session=get_bedrock_boto_session(),

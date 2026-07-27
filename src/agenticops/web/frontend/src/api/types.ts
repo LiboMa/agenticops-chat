@@ -612,6 +612,8 @@ export interface ChatSession {
   archived: boolean;
   /** Per-session main-agent model override; null = Auto (follow global config) */
   model_id: string | null;
+  /** Per-session effort (thinking) override: off|standard|deep; null = Auto */
+  effort?: string | null;
 }
 
 export interface ChatMessage {
