@@ -32,7 +32,12 @@ spec:
           args:
             - |
               set -eu
-              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              # Reference the projected token BY PATH (tokenFile), never inline its
+              # value: the kubelet rotates projected SA tokens (~1h), so a baked-in
+              # copy goes stale and every kubectl fix then fails with "the server has
+              # asked for the client to provide credentials". Found live 2026-07-27
+              # when L2 remediations aborted on a 15-day-old pod.
+              TOKEN_FILE=/var/run/secrets/kubernetes.io/serviceaccount/token
               CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
               cat > /var/run/agenticops/kubeconfig <<EOF
               apiVersion: v1
@@ -52,9 +57,9 @@ spec:
               users:
               - name: agenticops-sa
                 user:
-                  token: ${TOKEN}
+                  tokenFile: ${TOKEN_FILE}
               EOF
-              echo "kubeconfig written"
+              echo "kubeconfig written (tokenFile — auto-picks up rotated tokens)"
           volumeMounts:
             - { name: kubeconfig, mountPath: /var/run/agenticops }
       containers:

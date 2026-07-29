@@ -6,6 +6,8 @@ AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent arch
 
 **User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (Signal Gate noise reduction + RCA quality quintet), `docs/MVP-2.2.1-RELEASE.md` (latest: effort/thinking policy — backend escalation + per-session chat override)
 
+**Live E2E evidence:** `docs/MVP-2.2.0-CHAOS-E2E-REPORT.md` (L1 chaos: image/config/network on a real EKS cluster), `docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md` (L2 chaos: production-named faults; Signal Gate dedup + effort escalation validated live). Fault scripts: `infra/eks-chaos-lab/chaos/` (L1), `infra/eks-chaos-lab/faults-l2/` (L2).
+
 ## Protected Files
 
 - **`RAW-Idea-latest-v3.md`** — Core idea document. **NEVER delete, move, or modify.**

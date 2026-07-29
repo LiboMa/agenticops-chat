@@ -75,7 +75,7 @@ thinking_effort_presets:
 | 5 | effort=NULL 的 session 行为与 2.2.0 逐字节一致 | ✅ `test_no_override_matches_2_2_0_behaviour` |
 | 6 | 老库 `init_db()` 自动补列且幂等 | ✅ `test_ensure_column_is_idempotent` |
 | 7 | `thinking_request_fields` 保持 2.2.0 契约（7 处调用点不改） | ✅ `test_legacy_wrapper_unchanged` |
-| 8 | 真实环境 E2E + 主人确认后才 push | 待执行 |
+| 8 | 真实环境 E2E + 主人确认后才 push | ✅ 见 `docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md`（EKS L2 混沌 5/5，主人确认后 push） |
 
 **测试**：新增 `tests/test_effort_policy.py`（26 用例，全绿）；`npx tsc --noEmit` + `npm run build` 通过。
 
@@ -84,6 +84,10 @@ thinking_effort_presets:
 上线跑一周后按 `thinking_budget` 分组，对比 `confidence` / `evidence_verified` 通过率 / `critic_verdict=refuted` 数量（SQL 见 plan §5）。
 
 **若高 budget 组无显著提升 → 把 base 降回 0，并把这个结论写进文档。负结果也是结果，比留着一个未验证的常量好。** 若显著提升 → 考虑抬高 base。
+
+**取样注意（2026-07-27 实测）**：CloudWatch parser 按设计把 `ALARM → high`、不看告警正文，所以
+**CloudWatch 来源的 issue 几乎永远不会因 severity 升档**，8192/12288 组样本会很稀。要么走带显式
+`severity` 的通用 webhook，要么接受升档样本主要来自"重跑"因子。
 
 ## Future
 
