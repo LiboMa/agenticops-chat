@@ -2,8 +2,8 @@
 name: web-research
 description: Search the open web (DuckDuckGo) and fetch public URLs — status pages,
   docs, CVE data, changelogs. Provides web_search + web_fetch tools with security
-  controls (private-IP blocking, size limits, timeouts). Use when investigation
-  needs external internet information and you may not know the exact URL.
+  controls (private-IP blocking, size limits, timeouts). Use when investigation needs
+  external internet information and you may not know the exact URL.
 metadata:
   author: agenticops
   version: '1.1'
@@ -16,7 +16,7 @@ status: active
 skill_version: '1.1'
 created_at: '2026-06-01'
 last_improved_at: '2026-07-03'
-last_used: '2026-07-01'
+last_used: '2026-07-30'
 ---
 
 # Web Research Skill
@@ -111,15 +111,3 @@ Multiple resources showing same symptoms
 - **Redirects**: Returns target URL — call again to follow
 - **Errors**: Descriptive message with status code
 - **All output**: Truncated to 4000 characters
-
-
-
-
-
-
-
-
-
-
-
-

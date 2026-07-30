@@ -1,10 +1,18 @@
 ---
 name: aws-storage
-description: "AWS storage troubleshooting — covers S3 (access denied, replication, lifecycle), EBS (IOPS limits, burst credits, snapshots), EFS (mount issues, throughput modes, burst credits), and FSx. Includes decision trees for performance issues, access problems, and cost optimization."
+description: AWS storage troubleshooting — covers S3 (access denied, replication,
+  lifecycle), EBS (IOPS limits, burst credits, snapshots), EFS (mount issues, throughput
+  modes, burst credits), and FSx. Includes decision trees for performance issues,
+  access problems, and cost optimization.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: storage
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-07-10'
+last_used: '2026-07-29'
 ---
 
 # AWS Storage Skill

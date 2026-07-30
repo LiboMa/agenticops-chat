@@ -38,8 +38,12 @@ def _days_since(iso: str, today: date) -> int:
 
 
 def _write_skill_md(skill_dir: Path, fm: dict, body: str) -> None:
+    # rstrip the body: parse_frontmatter returns it with its trailing newlines
+    # intact, so appending "\n" here grew the file by one blank line on EVERY
+    # touch_skill_used (linux-admin had accumulated 276). Unlike the memory
+    # module's parser, the skills parser does not strip — so we must.
     fm_str = yaml.dump(fm, default_flow_style=False, allow_unicode=True, sort_keys=False).strip()
-    text = f"---\n{fm_str}\n---\n\n{body}\n"
+    text = f"---\n{fm_str}\n---\n\n{body.rstrip()}\n"
     tmp = skill_dir / ".SKILL.md.tmp"
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, skill_dir / "SKILL.md")

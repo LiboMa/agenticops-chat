@@ -1,10 +1,18 @@
 ---
 name: security-engineer
-description: "AWS security posture assessment and incident response — covers IAM analysis (overprivileged roles, unused credentials, MFA gaps), Security Hub findings, GuardDuty threats, Inspector vulnerabilities, S3 public access, SG/NACL misconfigurations, KMS key rotation, WAF rules, Config compliance, and CloudTrail integrity."
+description: AWS security posture assessment and incident response — covers IAM analysis
+  (overprivileged roles, unused credentials, MFA gaps), Security Hub findings, GuardDuty
+  threats, Inspector vulnerabilities, S3 public access, SG/NACL misconfigurations,
+  KMS key rotation, WAF rules, Config compliance, and CloudTrail integrity.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: security
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-07-10'
+last_used: '2026-07-29'
 ---
 
 # Security Engineer Skill

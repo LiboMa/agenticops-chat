@@ -1,14 +1,22 @@
 ---
 name: notification-operator
-description: "Send notifications and distribute formatted reports to channels (Feishu, Slack, Email, SES, SNS, DingTalk, WeCom, Webhook). Supports batch multi-channel delivery with format-aware conversion (HTML, PDF, Markdown). Activate to gain send and distribute tools."
+description: Send notifications and distribute formatted reports to channels (Feishu,
+  Slack, Email, SES, SNS, DingTalk, WeCom, Webhook). Supports batch multi-channel
+  delivery with format-aware conversion (HTML, PDF, Markdown). Activate to gain send
+  and distribute tools.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: operations
 tools:
-  - agenticops.tools.notification_tools.list_notification_channels
-  - agenticops.tools.notification_tools.send_to_channel
-  - agenticops.tools.notification_tools.distribute_report
+- agenticops.tools.notification_tools.list_notification_channels
+- agenticops.tools.notification_tools.send_to_channel
+- agenticops.tools.notification_tools.distribute_report
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-07-10'
+last_used: '2026-07-28'
 ---
 
 # Notification Operator Skill

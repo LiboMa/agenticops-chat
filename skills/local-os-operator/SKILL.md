@@ -184,5 +184,3 @@ Need file info (not content)
 | `search_local_file` | `search_local_file(path="/var/log/app.log", pattern="ERROR")` | Matching lines with line numbers |
 | `list_local_directory` | `list_local_directory(path="/etc/nginx", pattern="*.conf", recursive=True)` | Files with sizes |
 | `file_stat` | `file_stat(path="/etc/nginx/nginx.conf")` | Size, mtime, perms, owner |
-
-

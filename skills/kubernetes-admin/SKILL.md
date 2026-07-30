@@ -1,10 +1,18 @@
 ---
 name: kubernetes-admin
-description: "Kubernetes administration and troubleshooting — covers pod debugging (CrashLoopBackOff, OOMKilled, ImagePullBackOff, Pending), node issues, CNI/networking, CoreDNS, PVC/storage, HPA/VPA autoscaling, and EKS-specific patterns. Includes decision trees for common failure modes."
+description: Kubernetes administration and troubleshooting — covers pod debugging
+  (CrashLoopBackOff, OOMKilled, ImagePullBackOff, Pending), node issues, CNI/networking,
+  CoreDNS, PVC/storage, HPA/VPA autoscaling, and EKS-specific patterns. Includes decision
+  trees for common failure modes.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: containers
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-07-15'
+last_used: '2026-07-15'
 ---
 
 # Kubernetes Admin Skill

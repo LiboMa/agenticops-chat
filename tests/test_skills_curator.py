@@ -76,6 +76,37 @@ def test_touch_keeps_human_skill_active(tmp_skills):
     assert fm["status"] == "active"
 
 
+def test_repeated_touch_does_not_grow_the_file(tmp_skills):
+    """Each touch used to append a blank line (linux-admin reached 276)."""
+    from agenticops.skills.curator import touch_skill_used
+    sdir, ddir = tmp_skills
+    path = sdir / "linux-admin" / "SKILL.md"
+    _write_skill(sdir, "linux-admin", "user", "2026-01-01")
+    touch_skill_used("linux-admin")          # settles the last_used value
+    baseline = path.stat().st_size
+    for _ in range(5):
+        touch_skill_used("linux-admin")
+    assert path.stat().st_size == baseline
+    text = path.read_text()
+    assert not text.endswith("\n\n"), "body accumulated trailing blank lines"
+
+
+def test_touch_preserves_body_content(tmp_skills):
+    """rstrip must not eat real body text."""
+    from agenticops.skills.curator import touch_skill_used
+    from agenticops.skills.loader import parse_frontmatter
+    sdir, ddir = tmp_skills
+    d = sdir / "s"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: s\ndescription: d\ncreated_by: user\nstatus: active\n---\n\n"
+        "# Heading\n\nline one\n\n| a | b |\n"
+    )
+    touch_skill_used("s")
+    _, body = parse_frontmatter((d / "SKILL.md").read_text())
+    assert "# Heading" in body and "line one" in body and "| a | b |" in body
+
+
 def test_restore_skill_from_archive(tmp_skills):
     from agenticops.skills.curator import restore_skill
     sdir, ddir = tmp_skills

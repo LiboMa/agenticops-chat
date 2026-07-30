@@ -1,10 +1,18 @@
 ---
 name: network-engineer
-description: "CCIE-level network engineering troubleshooting — covers routing, switching, firewall analysis, VPN diagnostics, load balancing, MTU analysis, TCP/IP diagnostics, and AWS VPC networking. Includes decision trees for connectivity failures, latency issues, packet loss, and DNS problems."
+description: CCIE-level network engineering troubleshooting — covers routing, switching,
+  firewall analysis, VPN diagnostics, load balancing, MTU analysis, TCP/IP diagnostics,
+  and AWS VPC networking. Includes decision trees for connectivity failures, latency
+  issues, packet loss, and DNS problems.
 metadata:
   author: agenticops
-  version: "1.0"
+  version: '1.0'
   domain: networking
+created_by: user
+status: active
+skill_version: '1.0'
+created_at: '2026-07-10'
+last_used: '2026-07-29'
 ---
 
 # Network Engineer Skill
