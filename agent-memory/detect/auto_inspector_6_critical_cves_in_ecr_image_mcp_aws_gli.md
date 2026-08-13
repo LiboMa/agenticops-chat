@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-07-08'
 created_by: user
 last_confirmed: '2026-07-08'
-last_used: '2026-08-07'
+last_used: '2026-08-13'
 related_issue_id: 419
 resource_pattern: arn:aws:ecr:us-east-1:533267047935:repository/*
 source: auto

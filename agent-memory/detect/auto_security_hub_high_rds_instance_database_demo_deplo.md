@@ -4,7 +4,7 @@ confidence: 2
 created_at: '2026-07-08'
 created_by: user
 last_confirmed: '2026-07-08'
-last_used: '2026-08-07'
+last_used: '2026-08-13'
 related_issue_id: 417
 resource_pattern: arn:aws:rds:us-east-1:533267047935:db:database-demo/*
 source: auto

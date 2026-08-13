@@ -4,7 +4,7 @@ confidence: 5
 created_at: '2026-06-12'
 created_by: user
 last_confirmed: '2026-06-15'
-last_used: '2026-08-07'
+last_used: '2026-08-13'
 resource_pattern: EC2/*
 source: chat
 status: active
