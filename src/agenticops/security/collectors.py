@@ -92,8 +92,61 @@ def collect_posture(account: str) -> list[PostureFinding]:
     return findings
 
 
+def _enabled_regions(account: str) -> list[str]:
+    """Enabled regions for an account, read from its CloudAccount snapshot
+    (resolver.get_account_snapshot). Falls back to the configured default region
+    when the account lists none."""
+    try:
+        from agenticops.credentials.resolver import get_account_snapshot
+        snap = get_account_snapshot(account, "aws")
+        if snap and snap.regions:
+            return list(snap.regions)
+    except Exception as e:
+        logger.warning("enabled-regions lookup failed for %s: %s", account, e)
+    from agenticops.config import settings
+    return [settings.bedrock_region]
+
+
+def _port_in_range(port: int, frm, to) -> bool:
+    if frm is None or to is None:  # all ports
+        return True
+    try:
+        return int(frm) <= port <= int(to)
+    except (TypeError, ValueError):
+        return False
+
+
+def _rule_open_to_internet(rule: dict) -> bool:
+    for r in rule.get("IpRanges", []):
+        if r.get("CidrIp") == "0.0.0.0/0":
+            return True
+    for r in rule.get("Ipv6Ranges", []):
+        if r.get("CidrIpv6") == "::/0":
+            return True
+    return False
+
+
 def collect_network_findings(account: str) -> list[PostureFinding]:
-    return []
+    """SG open-surface: 0.0.0.0/0 (or ::/0) ingress to sensitive ports. Fail-soft."""
+    out: list[PostureFinding] = []
+    try:
+        for region in _enabled_regions(account):
+            ec2 = _get_client("ec2", region, account)
+            for sg in ec2.describe_security_groups().get("SecurityGroups", []):
+                gid = sg.get("GroupId", "")
+                for rule in sg.get("IpPermissions", []):
+                    if not _rule_open_to_internet(rule):
+                        continue
+                    proto = rule.get("IpProtocol", "-1")
+                    for port, control_id in SENSITIVE_PORTS.items():
+                        if proto in ("-1", "tcp") and _port_in_range(port, rule.get("FromPort"), rule.get("ToPort")):
+                            out.append(PostureFinding(
+                                "network", control_id, gid, "SecurityGroup",
+                                f"0.0.0.0/0 ingress to port {port}", "high"))
+    except Exception as e:
+        logger.warning("collect_network_findings failed for %s: %s", account, e)
+        return []
+    return out
 
 
 def collect_data_findings(account: str) -> list[PostureFinding]:

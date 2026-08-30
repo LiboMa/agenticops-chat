@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from agenticops.security.collectors import (
-    PostureFinding, collect_iam_findings, collect_posture,
+    PostureFinding, collect_iam_findings, collect_network_findings, collect_posture,
 )
 
 
@@ -50,3 +50,37 @@ class TestCollectPostureOrchestrator:
              patch("agenticops.security.collectors.collect_logging_findings", return_value=[]):
             out = collect_posture("acct-a")
         assert out == good  # iam blew up, network survived
+
+
+class TestNetworkCollector:
+    def _sg(self, gid, port):
+        return {"GroupId": gid, "GroupName": gid, "IpPermissions": [{
+            "IpProtocol": "tcp", "FromPort": port, "ToPort": port,
+            "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}
+
+    def test_open_ssh_flagged_41(self):
+        client = MagicMock()
+        client.describe_security_groups.return_value = {"SecurityGroups": [self._sg("sg-1", 22)]}
+        with patch("agenticops.security.collectors._get_client", return_value=client), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_network_findings("acct-a")
+        assert any(f.control_id == "cis-4.1" and f.resource_id == "sg-1" for f in out)
+
+    def test_open_rdp_flagged_42(self):
+        client = MagicMock()
+        client.describe_security_groups.return_value = {"SecurityGroups": [self._sg("sg-2", 3389)]}
+        with patch("agenticops.security.collectors._get_client", return_value=client), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_network_findings("acct-a")
+        assert any(f.control_id == "cis-4.2" for f in out)
+
+    def test_scoped_cidr_not_flagged(self):
+        sg = {"GroupId": "sg-3", "GroupName": "sg-3", "IpPermissions": [{
+            "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+            "IpRanges": [{"CidrIp": "10.0.0.0/8"}]}]}
+        client = MagicMock()
+        client.describe_security_groups.return_value = {"SecurityGroups": [sg]}
+        with patch("agenticops.security.collectors._get_client", return_value=client), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_network_findings("acct-a")
+        assert out == []  # not open to the internet
