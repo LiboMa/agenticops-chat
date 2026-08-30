@@ -170,3 +170,13 @@ galaxy_llm_exclude_types:
 - S3
 - ECR_Repository
 galaxy_builds_keep: 24
+
+# ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
+security_review_enabled: true
+security_poll_interval_minutes: 10
+security_posture_interval_minutes: 60
+security_reachability_nacl_enabled: true
+security_advisor_enabled: true
+security_advisor_critic_enabled: true
+security_snapshot_retention_days: 90
+security_model_id: ""

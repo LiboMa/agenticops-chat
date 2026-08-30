@@ -511,6 +511,40 @@ class Settings(BaseSettings):
         "0 = keep all (AIOPS_GALAXY_BUILDS_KEEP)",
     )
 
+    # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
+    security_review_enabled: bool = Field(
+        default=True,
+        description="Enable the cloud security review engine (dual-frequency collect + CIS scoring + reachability) (AIOPS_SECURITY_REVIEW_ENABLED)",
+    )
+    security_poll_interval_minutes: int = Field(
+        default=10,
+        description="Fast-frequency SecurityIncrementalPoll schedule interval (AIOPS_SECURITY_POLL_INTERVAL_MINUTES)",
+    )
+    security_posture_interval_minutes: int = Field(
+        default=60,
+        description="Slow-frequency SecurityPostureSnapshot schedule interval (AIOPS_SECURITY_POSTURE_INTERVAL_MINUTES)",
+    )
+    security_reachability_nacl_enabled: bool = Field(
+        default=True,
+        description="Include NACL evaluation in ingress reachability; missing NACL data -> undetermined (AIOPS_SECURITY_REACHABILITY_NACL_ENABLED)",
+    )
+    security_advisor_enabled: bool = Field(
+        default=True,
+        description="Enable the evidence-grounded LLM recommendation advisor (Stage 5) (AIOPS_SECURITY_ADVISOR_ENABLED)",
+    )
+    security_advisor_critic_enabled: bool = Field(
+        default=True,
+        description="Run an adversarial critic over each recommendation; refuted -> dropped (AIOPS_SECURITY_ADVISOR_CRITIC_ENABLED)",
+    )
+    security_snapshot_retention_days: int = Field(
+        default=90,
+        description="Days of SecuritySnapshot rows to retain before pruning (AIOPS_SECURITY_SNAPSHOT_RETENTION_DAYS)",
+    )
+    security_model_id: str = Field(
+        default="",
+        description="Override model for the security advisor; empty = bedrock_model_id_cheap (AIOPS_SECURITY_MODEL_ID)",
+    )
+
     file_tools_admin_mode: bool = Field(
         default=True,
         description="Allow file tools to read admin paths (~/.ssh, ~/.aws, ~/.kube). "
