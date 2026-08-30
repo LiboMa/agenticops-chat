@@ -173,6 +173,8 @@ def _build_sg_dependency_map(
             "name": sg.get("GroupName", ""),
             "references": set(),
             "referenced_by": set(),
+            "inbound_rules": _format_sg_rules(sg.get("IpPermissions", [])),
+            "outbound_rules": _format_sg_rules(sg.get("IpPermissionsEgress", [])),
         }
 
     # Scan rules for references
