@@ -68,6 +68,14 @@ class Base(DeclarativeBase):
     pass
 
 
+# Secret-redaction at the DB write boundary: scrub AWS keys / AK-SK / passwords
+# / private keys out of every String/Text/JSON column before any flush. Listens
+# on the base Session class so all sessionmakers are covered. Idempotent.
+from agenticops.security.db_redaction import install_db_redaction  # noqa: E402
+
+install_db_redaction()
+
+
 class ResourceStatus(str, Enum):
     """Resource status enumeration."""
 

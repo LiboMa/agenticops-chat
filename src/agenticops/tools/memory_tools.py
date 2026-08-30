@@ -26,13 +26,20 @@ from agenticops.memory.agent_memory import (
     search_memories,
 )
 from agenticops.config import settings
+from agenticops.security import redact_secrets
 
 logger = logging.getLogger(__name__)
 
 
 def _slugify(text: str) -> str:
-    """Convert text to a filesystem-safe slug for filenames."""
-    slug = text.lower().strip()
+    """Convert text to a filesystem-safe slug for filenames.
+
+    Secrets are scrubbed BEFORE lowercasing: an AWS key ID lowercased no longer
+    matches the (uppercase) key-ID shape, so a raw key could otherwise survive
+    into a filename — and content-redaction can't fix a filename. This is the
+    single choke point for memory slugs, so scrubbing here covers every caller.
+    """
+    slug = redact_secrets(text).lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "_", slug)
     slug = slug.strip("_")
     return slug[:60] if slug else "memory"
@@ -71,7 +78,7 @@ def record_agent_feedback(
     if memory_type not in valid_types:
         return json.dumps({"error": f"Invalid memory_type '{memory_type}'. Must be one of: {valid_types}"})
 
-    filename = _slugify(description[:50]) + ".md"
+    filename = _slugify(description) + ".md"
     issue_id = related_issue_id if related_issue_id > 0 else None
 
     try:
@@ -177,7 +184,7 @@ def memory_manage(
         return json.dumps({"matches": results[:10], "total": len(results)})
 
     if action == "add":
-        fname = _slugify(description[:50]) + ".md"
+        fname = _slugify(description) + ".md"
         try:
             fp = save_memory_file(
                 agent_name=agent_name, filename=fname, memory_type=memory_type,

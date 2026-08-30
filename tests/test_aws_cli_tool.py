@@ -80,7 +80,6 @@ class TestClassifyCommand:
         "aws kms describe-key --key-id alias/test",
         "aws kms list-keys",
         "aws secretsmanager list-secrets",
-        "aws secretsmanager get-secret-value --secret-id test",
         "aws ecr describe-repositories",
         "aws ecr list-images --repository-name test",
         "aws codepipeline list-pipelines",
@@ -147,6 +146,32 @@ class TestClassifyCommand:
     ])
     def test_blocked_commands(self, cmd):
         assert _classify_command(cmd) == "blocked"
+
+    # -- Secret-revealing reads are blocked (must not enter agent context) --
+
+    @pytest.mark.parametrize("cmd", [
+        "aws secretsmanager get-secret-value --secret-id prod/db",
+        "aws sts get-session-token --duration-seconds 3600",
+        "aws sts get-federation-token --name temp",
+        "aws ecr get-login-password --region us-east-1",
+        "aws ecr get-authorization-token",
+        "aws ssm get-parameter --name /prod/db/password --with-decryption",
+        "aws ssm get-parameters --names /a /b --with-decryption",
+    ])
+    def test_secret_revealing_reads_blocked(self, cmd):
+        assert _classify_command(cmd) == "blocked"
+
+    # -- But metadata reads that audits rely on stay allowed --
+
+    @pytest.mark.parametrize("cmd", [
+        "aws secretsmanager describe-secret --secret-id prod/db",
+        "aws secretsmanager list-secrets",
+        "aws sts get-caller-identity",
+        "aws iam list-access-keys --user-name svc",
+        "aws ssm get-parameter --name /prod/config/region",
+    ])
+    def test_metadata_reads_still_readonly(self, cmd):
+        assert _classify_command(cmd) == "readonly"
 
     # -- Organizations read-only is now allowed --
 

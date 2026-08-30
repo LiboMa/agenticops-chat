@@ -84,9 +84,8 @@ READONLY_PREFIXES = [
     "aws acm describe-", "aws acm list-", "aws acm get-",
     # KMS
     "aws kms describe-", "aws kms list-", "aws kms get-",
-    # Secrets Manager
+    # Secrets Manager — metadata only; get-secret-value is BLOCKED (returns plaintext)
     "aws secretsmanager describe-", "aws secretsmanager list-",
-    "aws secretsmanager get-secret-value",
     # ECR
     "aws ecr describe-", "aws ecr list-", "aws ecr get-",
     # CodePipeline
@@ -146,6 +145,16 @@ WRITE_PREFIXES = [
 ]
 
 BLOCKED_PATTERNS = [
+    # ── Secret-REVEALING reads: never pull live credentials into agent context.
+    # (Metadata reads like `iam list-access-keys` stay allowed — they return
+    #  only key IDs, which the persistence-layer redactor masks on write.)
+    "get-secret-value",            # secretsmanager — returns plaintext secret
+    "sts get-session-token",       # mints temporary AK/SK + session token
+    "sts get-federation-token",    # mints temporary AK/SK + session token
+    "ecr get-login-password",      # returns a usable registry password
+    "ecr get-authorization-token", # returns base64 registry credentials
+    "--with-decryption",           # SSM SecureString → plaintext secret value
+    # ── Destructive operations
     "aws iam create-user", "aws iam delete-user",
     "aws iam create-access-key", "aws iam attach-",
     # Organizations — block destructive subcommands, allow read-only (describe/list)
@@ -285,9 +294,11 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
 
     if tier == "blocked":
         return (
-            f"Error: This command is blocked for safety. "
-            f"Destructive operations like IAM user management and instance termination "
-            f"are not allowed through this tool. Command: {command}"
+            f"Error: This command is blocked for safety. Destructive operations "
+            f"(IAM user management, instance termination) and secret-revealing reads "
+            f"(get-secret-value, sts get-session-token, ecr get-login-password, "
+            f"--with-decryption) are not allowed — live credentials must never enter "
+            f"agent context. Use metadata reads (describe-/list-) instead. Command: {command}"
         )
 
     if tier in ("write", "unknown") and not require_confirmation:

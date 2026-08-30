@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from agenticops.config import settings
+from agenticops.security.redaction import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,12 @@ def _atomic_write_text(path: Path, text: str) -> None:
     never clobber each other's tmp (which previously caused os.replace to hit a
     vanished tmp -> FileNotFoundError). os.replace itself is atomic, so last-writer
     wins on the final file and both writers succeed.
+
+    All memory writes funnel through here, so this is also the single chokepoint
+    that scrubs AWS keys / secrets / passwords before anything hits disk — no
+    credential must ever be persisted to Agent Memory (owner mandate).
     """
+    text = redact_secrets(text)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{next(_tmp_counter)}.tmp")
     try:
         tmp.write_text(text, encoding="utf-8")
