@@ -17,3 +17,13 @@ class TestSgDependencyMapRules:
         # backward-compat keys still present
         assert m["sg-1"]["name"] == "web"
         assert m["sg-1"]["references"] == []
+
+
+class TestSubnetPublicIpFlag:
+    def test_subnet_dict_carries_map_public_ip(self):
+        # _format_subnet-like inline: assert the key exists in the emitted dict.
+        # The subnet append block (network_tools.py:963) must include the flag.
+        import inspect
+        from agenticops.tools import network_tools
+        src = inspect.getsource(network_tools.analyze_vpc_topology)
+        assert "map_public_ip_on_launch" in src

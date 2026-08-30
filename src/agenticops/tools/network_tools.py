@@ -971,6 +971,7 @@ def analyze_vpc_topology(region: str, vpc_id: str, account: str = "") -> str:
                 "available_ips": s.get("AvailableIpAddressCount"),
                 "route_table_id": rt_id,
                 "default_route_target": default_target,
+                "map_public_ip_on_launch": s.get("MapPublicIpOnLaunch", False),
             })
 
         # Format route tables
