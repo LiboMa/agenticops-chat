@@ -170,6 +170,25 @@ async def lifespan(app: FastAPI):
                     logger.info("galaxy: seeded auto-build schedule (cron=%s, interval=%d min)", _cron, _mins)
             except Exception:
                 logger.debug("galaxy: auto schedule seed skipped", exc_info=True)
+        if settings.security_review_enabled:
+            try:
+                from agenticops.scheduler.scheduler import Scheduler as _SSched, Schedule as _SSchedule
+                from agenticops.security.posture_snapshot import cron_from_interval
+                with get_db_session() as _s:
+                    _names = {row.name for row in _s.query(_SSchedule).all()}
+                for _name, _pipeline, _interval in (
+                    ("security-posture-snapshot", "SecurityPostureSnapshot", settings.security_posture_interval_minutes),
+                    ("security-incremental-poll", "SecurityIncrementalPoll", settings.security_poll_interval_minutes),
+                ):
+                    if _name not in _names:
+                        _cron = cron_from_interval(_interval)
+                        _SSched.add_schedule(
+                            name=_name, pipeline_name=_pipeline,
+                            cron_expression=_cron, config={},
+                        )
+                        logger.info("security: seeded %s schedule (cron=%s)", _name, _cron)
+            except Exception:
+                logger.debug("security: auto schedule seed skipped", exc_info=True)
     else:
         logger.info("Cron scheduler skipped (another worker owns it)")
 

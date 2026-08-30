@@ -366,6 +366,33 @@ class Scheduler:
                         execution.error = str(e)
             return
 
+        # SecurityPostureSnapshot / SecurityIncrementalPoll: account-agnostic
+        # system jobs (like GalaxyBuild) — resolve accounts internally.
+        if pipeline_name in ("SecurityPostureSnapshot", "SecurityIncrementalPoll"):
+            from agenticops.security import posture_snapshot, incremental_poll
+            runner = (
+                posture_snapshot.run_posture_snapshot
+                if pipeline_name == "SecurityPostureSnapshot"
+                else incremental_poll.run_incremental_poll
+            )
+            try:
+                count = runner()
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "completed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.result = {"pipeline": pipeline_name, "count": count}
+            except Exception as e:
+                logger.error(f"{pipeline_name} schedule '{schedule_name}' failed: {e}")
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.error = str(e)
+            return
+
         try:
             # Get accounts — expunge so they can be used outside the session
             accounts = []
