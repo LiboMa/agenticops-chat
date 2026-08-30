@@ -122,3 +122,43 @@ class TestIngressReachabilityConservative:
         inst = {"instance_id": "i-1", "state": "running",
                 "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}
         assert reach(instance=inst, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+
+from agenticops.security.collectors import PostureFinding
+from agenticops.security.reachability import annotate, port_for_control
+
+
+def test_port_for_control():
+    assert port_for_control("cis-4.1") == 22
+    assert port_for_control("cis-4.2") == 3389
+    assert port_for_control("cis-1.3") is None
+
+
+# NACL 默认开启（security_reachability_nacl_enabled=True）。一旦 Stage 3（Task 3.2）
+# 加上 NACL gate，缺 nacl 数据的 finding 会变 'undetermined'。这里传一个 allow-all
+# NACL，使本 SG 路径用例在 Stage 2（gate 未落、nacl 被忽略）与 Stage 3（gate 生效、
+# allow-all 放行）两阶段都稳定绿——不要靠 monkeypatch 全局 setting。
+_ALLOW_ALL_NACL = {
+    "inbound": [{"rule_number": 100, "protocol": "-1", "cidr": "0.0.0.0/0",
+                 "action": "allow", "port_from": None, "port_to": None}],
+    "outbound": [{"rule_number": 100, "protocol": "-1", "cidr": "0.0.0.0/0",
+                  "action": "allow", "port_from": None, "port_to": None}],
+}
+
+
+def test_annotate_marks_network_findings():
+    f = PostureFinding("network", "cis-4.1", "sg-open", "SecurityGroup", "0.0.0.0/0:22")
+    instances = {"i-1": {"instance_id": "i-1", "state": "running", "public_ip": "1.2.3.4",
+                         "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}}
+    subnets = {"sn-1": {"subnet_id": "sn-1", "type": "public",
+                        "default_route_target": "igw-1", "map_public_ip_on_launch": True}}
+    sgs = {"sg-open": {"inbound_rules": [{"protocol": "tcp", "ports": "22", "sources": ["0.0.0.0/0"]}]}}
+    out = annotate([f], instances, subnets, sgs, nacls={"sn-1": _ALLOW_ALL_NACL})
+    assert out[0]["reachability"] == "reachable"
+    assert out[0]["path"] == ["internet", "sn-1", "i-1:22"]
+
+
+def test_annotate_non_network_is_na():
+    f = PostureFinding("iam", "cis-1.3", "alice", "IAMUser", "stale key")
+    out = annotate([f], {}, {}, {})
+    assert out[0]["reachability"] == "n/a"
