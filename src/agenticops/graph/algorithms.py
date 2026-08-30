@@ -287,6 +287,27 @@ def _sg_opens_port(security_groups: dict, sg_ids: list, port: int):
     return False, all_known
 
 
+_EPHEMERAL_PROBE_PORT = 49152  # representative of the 1024-65535 return range
+
+
+def _nacl_allows(entries: list, port: int, src_cidr: str = "0.0.0.0/0") -> bool:
+    """Ordered first-match NACL evaluation. Entries pre-sorted by rule_number.
+    Returns True iff the first rule matching (protocol tcp/all, cidr covers src,
+    port in range) is 'allow'. No match -> implicit deny (False)."""
+    for e in entries:
+        proto = str(e.get("protocol", "-1"))
+        if proto not in ("-1", "6"):  # all or tcp
+            continue
+        cidr = e.get("cidr", "")
+        if cidr not in ("0.0.0.0/0", src_cidr):
+            continue
+        frm, to = e.get("port_from"), e.get("port_to")
+        in_range = (frm is None or to is None) or (int(frm) <= port <= int(to))
+        if proto == "-1" or in_range:
+            return e.get("action") == "allow"
+    return False  # implicit deny
+
+
 def internet_ingress_reachability(*, instance, subnet, security_groups, port,
                                   nacl=None, nacl_required=False) -> IngressVerdict:
     """Deterministic, directed, conservative ingress reachability.
@@ -338,7 +359,13 @@ def internet_ingress_reachability(*, instance, subnet, security_groups, port,
             return IngressVerdict(iid, port, "undetermined", "some security groups not resolved", [])
         return IngressVerdict(iid, port, "not_reachable", "no SG rule opens the port to the internet", [])
 
-    # Stage 3 inserts the NACL gate here (nacl / nacl_required).
+    if nacl_required:
+        if nacl is None:
+            return IngressVerdict(iid, port, "undetermined", "NACL data missing", [])
+        if not _nacl_allows(nacl.get("inbound", []), port):
+            return IngressVerdict(iid, port, "not_reachable", "NACL inbound denies the port", [])
+        if not _nacl_allows(nacl.get("outbound", []), _EPHEMERAL_PROBE_PORT):
+            return IngressVerdict(iid, port, "not_reachable", "NACL outbound denies ephemeral return", [])
 
     return IngressVerdict(iid, port, "reachable", "internet ingress path open",
                           ["internet", subnet.get("subnet_id", "?"), f"{iid}:{port}"])

@@ -192,3 +192,59 @@ def test_collect_network_acls_orders_and_maps_subnets():
     assert [e["rule_number"] for e in out["sn-1"]["inbound"]] == [100, 200]
     assert out["sn-1"]["inbound"][0]["action"] == "deny"
     assert out["sn-1"]["outbound"][0]["action"] == "allow"
+
+
+NACL_ALLOW_ALL = {
+    "inbound": [{"rule_number": 100, "protocol": "-1", "cidr": "0.0.0.0/0",
+                 "action": "allow", "port_from": None, "port_to": None}],
+    "outbound": [{"rule_number": 100, "protocol": "-1", "cidr": "0.0.0.0/0",
+                  "action": "allow", "port_from": None, "port_to": None}],
+}
+
+
+class TestNaclGate:
+    def test_nacl_allow_all_reachable(self):
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=NACL_ALLOW_ALL, nacl_required=True)
+        assert v.state == "reachable"
+
+    def test_nacl_inbound_deny_not_reachable(self):
+        nacl = {"inbound": [
+            {"rule_number": 100, "protocol": "6", "cidr": "0.0.0.0/0",
+             "action": "deny", "port_from": 22, "port_to": 22}],
+            "outbound": NACL_ALLOW_ALL["outbound"]}
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=nacl, nacl_required=True)
+        assert v.state == "not_reachable"
+        assert "nacl" in v.reason.lower()
+
+    def test_nacl_outbound_ephemeral_deny_not_reachable(self):
+        nacl = {"inbound": NACL_ALLOW_ALL["inbound"],
+                "outbound": [{"rule_number": 100, "protocol": "6", "cidr": "0.0.0.0/0",
+                              "action": "deny", "port_from": 1024, "port_to": 65535}]}
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=nacl, nacl_required=True)
+        assert v.state == "not_reachable"
+
+    def test_nacl_ordered_first_match_wins(self):
+        # rule 100 denies 22, rule 200 allows all -> first match (deny) wins
+        nacl = {"inbound": [
+            {"rule_number": 100, "protocol": "6", "cidr": "0.0.0.0/0",
+             "action": "deny", "port_from": 22, "port_to": 22},
+            {"rule_number": 200, "protocol": "-1", "cidr": "0.0.0.0/0",
+             "action": "allow", "port_from": None, "port_to": None}],
+            "outbound": NACL_ALLOW_ALL["outbound"]}
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=nacl, nacl_required=True)
+        assert v.state == "not_reachable"
+
+    def test_nacl_required_but_missing_undetermined(self):
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=None, nacl_required=True)
+        assert v.state == "undetermined"
+
+    def test_nacl_disabled_ignores_nacl(self):
+        # nacl_required False -> Stage 2 behavior, reachable even with no nacl data
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
+                  port=22, nacl=None, nacl_required=False)
+        assert v.state == "reachable"
