@@ -211,3 +211,35 @@ def collect_logging_findings(account: str) -> list[PostureFinding]:
     except Exception as e:
         logger.warning("collect_logging_findings failed for %s: %s", account, e)
         return []
+
+
+def collect_network_acls(account: str, region: str, vpc_id: str = "") -> dict[str, dict]:
+    """Return {subnet_id: {nacl_id, inbound:[entry], outbound:[entry]}}, entries
+    sorted by rule_number ascending. Fail-soft (returns {} on error)."""
+    by_subnet: dict[str, dict] = {}
+    try:
+        ec2 = _get_client("ec2", region, account)
+        filters = [{"Name": "vpc-id", "Values": [vpc_id]}] if vpc_id else []
+        resp = ec2.describe_network_acls(Filters=filters) if filters else ec2.describe_network_acls()
+        for acl in resp.get("NetworkAcls", []):
+            inbound, outbound = [], []
+            for e in sorted(acl.get("Entries", []), key=lambda x: x.get("RuleNumber", 32767)):
+                pr = e.get("PortRange") or {}
+                item = {
+                    "rule_number": e.get("RuleNumber"),
+                    "protocol": str(e.get("Protocol", "-1")),
+                    "cidr": e.get("CidrBlock", ""),
+                    "action": e.get("RuleAction", "deny"),
+                    "port_from": pr.get("From"),
+                    "port_to": pr.get("To"),
+                }
+                (outbound if e.get("Egress") else inbound).append(item)
+            for assoc in acl.get("Associations", []):
+                sid = assoc.get("SubnetId")
+                if sid:
+                    by_subnet[sid] = {"nacl_id": acl.get("NetworkAclId"),
+                                      "inbound": inbound, "outbound": outbound}
+    except Exception as e:
+        logger.warning("collect_network_acls failed for %s/%s: %s", account, region, e)
+        return {}
+    return by_subnet

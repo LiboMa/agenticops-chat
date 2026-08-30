@@ -162,3 +162,33 @@ def test_annotate_non_network_is_na():
     f = PostureFinding("iam", "cis-1.3", "alice", "IAMUser", "stale key")
     out = annotate([f], {}, {}, {})
     assert out[0]["reachability"] == "n/a"
+
+
+from unittest.mock import MagicMock, patch
+from agenticops.security.collectors import collect_network_acls
+from agenticops.graph.types import NodeType
+
+
+def test_nodetype_network_acl_exists():
+    assert NodeType.NETWORK_ACL.value == "network_acl"
+
+
+def test_collect_network_acls_orders_and_maps_subnets():
+    acl = {"NetworkAclId": "acl-1", "Associations": [{"SubnetId": "sn-1"}],
+           "Entries": [
+               {"RuleNumber": 200, "Protocol": "6", "RuleAction": "allow",
+                "Egress": False, "CidrBlock": "0.0.0.0/0", "PortRange": {"From": 80, "To": 80}},
+               {"RuleNumber": 100, "Protocol": "6", "RuleAction": "deny",
+                "Egress": False, "CidrBlock": "0.0.0.0/0", "PortRange": {"From": 22, "To": 22}},
+               {"RuleNumber": 100, "Protocol": "-1", "RuleAction": "allow",
+                "Egress": True, "CidrBlock": "0.0.0.0/0"},
+           ]}
+    ec2 = MagicMock()
+    ec2.describe_network_acls.return_value = {"NetworkAcls": [acl]}
+    with patch("agenticops.security.collectors._get_client", return_value=ec2):
+        out = collect_network_acls("acct-a", "us-east-1", "vpc-1")
+    assert out["sn-1"]["nacl_id"] == "acl-1"
+    # inbound ordered by rule_number ascending
+    assert [e["rule_number"] for e in out["sn-1"]["inbound"]] == [100, 200]
+    assert out["sn-1"]["inbound"][0]["action"] == "deny"
+    assert out["sn-1"]["outbound"][0]["action"] == "allow"

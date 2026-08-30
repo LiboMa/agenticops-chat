@@ -32,6 +32,7 @@ class NodeType(str, Enum):
     ECS_TASK = "ecs_task"
     TARGET_GROUP = "target_group"
     ELASTICACHE_CLUSTER = "elasticache_cluster"
+    NETWORK_ACL = "network_acl"
 
 
 class EdgeType(str, Enum):
