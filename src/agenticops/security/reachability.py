@@ -6,6 +6,7 @@ three-state verdict + exposure path back onto the finding."""
 from __future__ import annotations
 
 from agenticops.graph.algorithms import internet_ingress_reachability
+from agenticops.security.collectors import collect_network_acls
 
 _CONTROL_PORT = {"cis-4.1": 22, "cis-4.2": 3389}
 
@@ -55,3 +56,10 @@ def annotate(findings, instances, subnets, security_groups, nacls=None):
         results.append({"finding": f, "reachability": best.state,
                         "path": best.path, "port": port})
     return results
+
+
+def annotate_account(findings, account, region, vpc_id, instances, subnets, security_groups):
+    """Pull real NACLs for the account/vpc then delegate to annotate(). NACL fetch
+    failure -> {} (annotate marks affected findings 'undetermined' under nacl_required)."""
+    nacls = collect_network_acls(account, region, vpc_id)
+    return annotate(findings, instances, subnets, security_groups, nacls=nacls)

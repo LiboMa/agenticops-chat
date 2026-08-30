@@ -248,3 +248,24 @@ class TestNaclGate:
         v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22),
                   port=22, nacl=None, nacl_required=False)
         assert v.state == "reachable"
+
+
+from unittest.mock import patch
+from agenticops.security.reachability import annotate_account
+from agenticops.security.collectors import PostureFinding
+
+
+def test_annotate_account_pulls_nacls_and_marks_undetermined_when_denied():
+    f = PostureFinding("network", "cis-4.1", "sg-open", "SecurityGroup", "0.0.0.0/0:22")
+    instances = {"i-1": {"instance_id": "i-1", "state": "running", "public_ip": "1.2.3.4",
+                         "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}}
+    subnets = {"sn-1": {"subnet_id": "sn-1", "type": "public",
+                        "default_route_target": "igw-1", "map_public_ip_on_launch": True}}
+    sgs = {"sg-open": {"inbound_rules": [{"protocol": "tcp", "ports": "22", "sources": ["0.0.0.0/0"]}]}}
+    nacls = {"sn-1": {"nacl_id": "acl-1",
+                      "inbound": [{"rule_number": 100, "protocol": "6", "cidr": "0.0.0.0/0",
+                                   "action": "deny", "port_from": 22, "port_to": 22}],
+                      "outbound": []}}
+    with patch("agenticops.security.reachability.collect_network_acls", return_value=nacls):
+        out = annotate_account([f], "acct-a", "us-east-1", "vpc-1", instances, subnets, sgs)
+    assert out[0]["reachability"] == "not_reachable"  # NACL inbound denies 22
