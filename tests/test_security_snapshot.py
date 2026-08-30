@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agenticops.models import Base, SecuritySnapshot, SecurityRecommendation
+from agenticops.security.collectors import PostureFinding
 
 
 @pytest.fixture
@@ -45,3 +46,66 @@ class TestSecurityModels:
         assert got.snapshot_id is None
         assert got.evidence_refs == ["sg-abc"]
         assert got.status == "open"
+
+
+class TestRunPostureSnapshot:
+    def test_writes_one_snapshot_per_account(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        from agenticops import models
+
+        # in-memory DB shared by the job
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        engine = create_engine("sqlite:///:memory:")
+        models.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+
+        from contextlib import contextmanager
+        @contextmanager
+        def _sess():
+            s = Session()
+            try:
+                yield s; s.commit()
+            finally:
+                s.close()
+
+        monkeypatch.setattr(ps, "get_db_session", _sess)
+        monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a", "acct-b"])
+        monkeypatch.setattr(ps, "collect_posture",
+                            lambda a: [PostureFinding("network", "cis-4.1", "sg-1", "SG", "open")])
+
+        n = ps.run_posture_snapshot()
+        assert n == 2
+        with _sess() as s:
+            snaps = s.query(models.SecuritySnapshot).all()
+            assert len(snaps) == 2
+            assert 0 < snaps[0].overall_score < 100  # one control failed
+            assert snaps[0].cis_results["cis-4.1"] == "fail"
+
+    def test_account_failure_is_isolated(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        from agenticops import models
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from contextlib import contextmanager
+        engine = create_engine("sqlite:///:memory:")
+        models.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        @contextmanager
+        def _sess():
+            s = Session()
+            try:
+                yield s; s.commit()
+            finally:
+                s.close()
+        monkeypatch.setattr(ps, "get_db_session", _sess)
+        monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["bad", "good"])
+
+        def _collect(a):
+            if a == "bad":
+                raise RuntimeError("creds failed")
+            return []
+        monkeypatch.setattr(ps, "collect_posture", _collect)
+
+        n = ps.run_posture_snapshot()
+        assert n == 1  # good account still produced a snapshot
