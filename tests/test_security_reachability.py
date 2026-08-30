@@ -27,3 +27,61 @@ class TestSubnetPublicIpFlag:
         from agenticops.tools import network_tools
         src = inspect.getsource(network_tools.analyze_vpc_topology)
         assert "map_public_ip_on_launch" in src
+
+
+from agenticops.graph.algorithms import internet_ingress_reachability as reach
+
+
+def _sg_open(port):
+    return {"sg-open": {"inbound_rules": [
+        {"protocol": "tcp", "ports": str(port), "sources": ["0.0.0.0/0"]}]}}
+
+
+PUB_SUBNET = {"subnet_id": "sn-1", "type": "public",
+              "default_route_target": "igw-1", "map_public_ip_on_launch": True}
+INSTANCE = {"instance_id": "i-1", "state": "running", "public_ip": "1.2.3.4",
+            "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}
+
+
+class TestIngressReachability:
+    def test_all_conditions_met_reachable(self):
+        v = reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22)
+        assert v.state == "reachable"
+        assert v.path == ["internet", "sn-1", "i-1:22"]
+
+    def test_no_public_ip_not_reachable(self):
+        inst = {**INSTANCE, "public_ip": None}
+        assert reach(instance=inst, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "not_reachable"
+
+    def test_private_subnet_no_igw_not_reachable(self):
+        sn = {**PUB_SUBNET, "type": "private", "default_route_target": "nat-1"}
+        assert reach(instance=INSTANCE, subnet=sn, security_groups=_sg_open(22), port=22).state == "not_reachable"
+
+    def test_blackhole_default_route_not_reachable(self):
+        sn = {**PUB_SUBNET, "default_route_target": "blackhole"}
+        assert reach(instance=INSTANCE, subnet=sn, security_groups=_sg_open(22), port=22).state == "not_reachable"
+
+    def test_sg_does_not_open_port_not_reachable(self):
+        assert reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=_sg_open(80), port=22).state == "not_reachable"
+
+    def test_instance_stopped_not_reachable(self):
+        inst = {**INSTANCE, "state": "stopped"}
+        assert reach(instance=inst, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "not_reachable"
+
+    def test_missing_subnet_undetermined(self):
+        assert reach(instance=INSTANCE, subnet=None, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+    def test_sg_referenced_but_absent_undetermined(self):
+        # instance points at sg-x which isn't in the map, and no SG opens the port -> can't rule out
+        inst = {**INSTANCE, "security_group_ids": ["sg-x"]}
+        assert reach(instance=inst, subnet=PUB_SUBNET, security_groups={}, port=22).state == "undetermined"
+
+    def test_port_range_match_reachable(self):
+        sgs = {"sg-open": {"inbound_rules": [
+            {"protocol": "tcp", "ports": "20-30", "sources": ["0.0.0.0/0"]}]}}
+        assert reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=sgs, port=22).state == "reachable"
+
+    def test_all_protocol_all_ports_reachable(self):
+        sgs = {"sg-open": {"inbound_rules": [
+            {"protocol": "all", "ports": "all", "sources": ["0.0.0.0/0"]}]}}
+        assert reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=sgs, port=22).state == "reachable"

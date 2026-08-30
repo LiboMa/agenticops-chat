@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import networkx as nx
@@ -234,6 +235,94 @@ def can_reach_internet(graph: InfraGraph, subnet_id: str) -> ReachabilityResult:
         can_reach_internet=False,
         blocking_reason="No path found from subnet to any Internet Gateway",
     )
+
+
+@dataclass
+class IngressVerdict:
+    """Directed internet->instance:port reachability, three-state + conservative."""
+    instance_id: str
+    port: int
+    state: str          # "reachable" | "not_reachable" | "undetermined"
+    reason: str
+    path: list[str]     # ["internet", subnet_id, "instance:port"] when reachable
+
+
+def _ports_match(rule_ports: str, port: int) -> bool:
+    if rule_ports in ("all", "", None):
+        return True
+    if "-" in str(rule_ports):
+        lo, hi = str(rule_ports).split("-", 1)
+        try:
+            return int(lo) <= port <= int(hi)
+        except ValueError:
+            return False
+    try:
+        return int(rule_ports) == port
+    except ValueError:
+        return False
+
+
+def _proto_match(proto: str) -> bool:
+    return str(proto).lower() in ("all", "-1", "tcp")
+
+
+def _sg_opens_port(security_groups: dict, sg_ids: list, port: int):
+    """Return (opened: bool, all_sgs_known: bool). Conservative: if a referenced
+    SG is absent from the map and nothing else opens the port, caller -> undetermined."""
+    all_known = True
+    for sg_id in sg_ids:
+        sg = security_groups.get(sg_id)
+        if sg is None:
+            all_known = False
+            continue
+        for rule in sg.get("inbound_rules", []):
+            sources = rule.get("sources", [])
+            open_src = any(s.startswith("0.0.0.0/0") or s.startswith("::/0") for s in sources)
+            if open_src and _proto_match(rule.get("protocol", "")) and _ports_match(rule.get("ports"), port):
+                return True, all_known
+    return False, all_known
+
+
+def internet_ingress_reachability(*, instance, subnet, security_groups, port,
+                                  nacl=None, nacl_required=False) -> IngressVerdict:
+    """Deterministic, directed, conservative ingress reachability.
+
+    reachable iff: public IP AND subnet has non-blackhole IGW default route AND
+    a SG inbound rule opens 0.0.0.0/0 to the port AND (Stage 3) NACL allows in+out
+    AND instance running. Any missing input -> undetermined (never not_reachable)."""
+    iid = (instance or {}).get("instance_id", "?")
+
+    if not instance or not subnet:
+        return IngressVerdict(iid, port, "undetermined", "missing instance or subnet data", [])
+    for key in ("state", "subnet_id", "security_group_ids"):
+        if key not in instance:
+            return IngressVerdict(iid, port, "undetermined", f"instance missing {key}", [])
+    if "public_ip" not in instance:
+        return IngressVerdict(iid, port, "undetermined", "instance missing public_ip", [])
+
+    if instance.get("state") != "running":
+        return IngressVerdict(iid, port, "not_reachable", "instance not running", [])
+    if not instance.get("public_ip"):
+        return IngressVerdict(iid, port, "not_reachable", "no public IP", [])
+
+    target = subnet.get("default_route_target")
+    if target is None:
+        return IngressVerdict(iid, port, "not_reachable", "subnet has no default route (isolated)", [])
+    if target == "blackhole":
+        return IngressVerdict(iid, port, "not_reachable", "default route is a blackhole", [])
+    if not str(target).startswith("igw-"):
+        return IngressVerdict(iid, port, "not_reachable", "no IGW default route (egress-only)", [])
+
+    opened, all_known = _sg_opens_port(security_groups, instance.get("security_group_ids", []), port)
+    if not opened:
+        if not all_known:
+            return IngressVerdict(iid, port, "undetermined", "some security groups not resolved", [])
+        return IngressVerdict(iid, port, "not_reachable", "no SG rule opens the port to the internet", [])
+
+    # Stage 3 inserts the NACL gate here (nacl / nacl_required).
+
+    return IngressVerdict(iid, port, "reachable", "internet ingress path open",
+                          ["internet", subnet.get("subnet_id", "?"), f"{iid}:{port}"])
 
 
 def impact_analysis(graph: InfraGraph, failed_node_id: str) -> ImpactResult:
