@@ -1391,3 +1391,49 @@ def get_session() -> Session:
     """
     SessionLocal = sessionmaker(bind=get_engine())
     return SessionLocal()
+
+
+# ============================================================================
+# Cloud Security Review (MVP-2.5.0)
+# ============================================================================
+
+
+class SecuritySnapshot(Base):
+    """Point-in-time security posture snapshot (time series)."""
+
+    __tablename__ = "security_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="aws")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+    overall_score: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
+    category_scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    exposure_paths: Mapped[list] = mapped_column(JSON, default=list)
+    cis_results: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class SecurityRecommendation(Base):
+    """Evidence-grounded security recommendation (advisor output)."""
+
+    __tablename__ = "security_recommendations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("security_snapshots.id"), nullable=True, index=True
+    )
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    category: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(256))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    critic_verdict: Mapped[str] = mapped_column(String(16), default="")  # supported|weak|refuted
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|acknowledged|dismissed|applied
