@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 from agenticops.security.collectors import (
-    PostureFinding, collect_iam_findings, collect_network_findings, collect_posture,
+    PostureFinding, collect_iam_findings, collect_network_findings,
+    collect_data_findings, collect_logging_findings, collect_posture,
 )
 
 
@@ -84,3 +85,47 @@ class TestNetworkCollector:
              patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
             out = collect_network_findings("acct-a")
         assert out == []  # not open to the internet
+
+
+class TestDataLoggingCollectors:
+    def test_public_bucket_flagged(self):
+        s3 = MagicMock()
+        s3.list_buckets.return_value = {"Buckets": [{"Name": "public-b"}]}
+        s3.get_public_access_block.return_value = {"PublicAccessBlockConfiguration": {
+            "BlockPublicAcls": False, "IgnorePublicAcls": False,
+            "BlockPublicPolicy": False, "RestrictPublicBuckets": False}}
+        with patch("agenticops.security.collectors._get_client", return_value=s3), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_data_findings("acct-a")
+        assert any(f.control_id == "cis-2.1" and f.resource_id == "public-b" for f in out)
+
+    def test_unencrypted_ebs_flagged(self):
+        client = MagicMock()
+        client.list_buckets.return_value = {"Buckets": []}
+        paginator = MagicMock()
+        paginator.paginate.return_value = [{"Volumes": [{"VolumeId": "vol-1", "Encrypted": False}]}]
+        client.get_paginator.return_value = paginator
+        with patch("agenticops.security.collectors._get_client", return_value=client), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_data_findings("acct-a")
+        assert any(f.control_id == "cis-enc" and f.resource_id == "vol-1" for f in out)
+
+    def test_no_multiregion_trail_flagged(self):
+        ct = MagicMock()
+        ct.describe_trails.return_value = {"trailList": [
+            {"Name": "t1", "IsMultiRegionTrail": False, "TrailARN": "arn:t1"}]}
+        ct.get_trail_status.return_value = {"IsLogging": True}
+        with patch("agenticops.security.collectors._get_client", return_value=ct), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_logging_findings("acct-a")
+        assert any(f.control_id == "cis-3.1" for f in out)
+
+    def test_multiregion_logging_trail_passes(self):
+        ct = MagicMock()
+        ct.describe_trails.return_value = {"trailList": [
+            {"Name": "t1", "IsMultiRegionTrail": True, "TrailARN": "arn:t1"}]}
+        ct.get_trail_status.return_value = {"IsLogging": True}
+        with patch("agenticops.security.collectors._get_client", return_value=ct), \
+             patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            out = collect_logging_findings("acct-a")
+        assert out == []

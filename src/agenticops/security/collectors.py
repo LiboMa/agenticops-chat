@@ -149,9 +149,65 @@ def collect_network_findings(account: str) -> list[PostureFinding]:
     return out
 
 
+def _bucket_public(cfg: dict) -> bool:
+    """A bucket is public-capable if any of the 4 public-access-block flags is off."""
+    pab = cfg.get("PublicAccessBlockConfiguration", {})
+    return not all([
+        pab.get("BlockPublicAcls", False), pab.get("IgnorePublicAcls", False),
+        pab.get("BlockPublicPolicy", False), pab.get("RestrictPublicBuckets", False),
+    ])
+
+
 def collect_data_findings(account: str) -> list[PostureFinding]:
-    return []
+    """S3 public access (cis-2.1) + unencrypted EBS volumes (cis-enc). Fail-soft."""
+    out: list[PostureFinding] = []
+    # S3 is global-ish: enumerate once via the default region client.
+    try:
+        from agenticops.config import settings
+        s3 = _get_client("s3", settings.bedrock_region, account)
+        for b in s3.list_buckets().get("Buckets", []):
+            name = b.get("Name", "")
+            try:
+                cfg = s3.get_public_access_block(Bucket=name)
+                if _bucket_public(cfg):
+                    out.append(PostureFinding("data", "cis-2.1", name, "S3Bucket",
+                                              "bucket public access not fully blocked", "high"))
+            except Exception:
+                # No PAB configured at all == public-capable.
+                out.append(PostureFinding("data", "cis-2.1", name, "S3Bucket",
+                                          "no public-access-block configured", "high"))
+    except Exception as e:
+        logger.warning("collect_data_findings(s3) failed for %s: %s", account, e)
+    # EBS encryption per region.
+    try:
+        for region in _enabled_regions(account):
+            ec2 = _get_client("ec2", region, account)
+            for page in ec2.get_paginator("describe_volumes").paginate():
+                for vol in page.get("Volumes", []):
+                    if not vol.get("Encrypted", False):
+                        out.append(PostureFinding("data", "cis-enc", vol.get("VolumeId", ""),
+                                                  "EBSVolume", "volume not encrypted at rest"))
+    except Exception as e:
+        logger.warning("collect_data_findings(ebs) failed for %s: %s", account, e)
+    return out
 
 
 def collect_logging_findings(account: str) -> list[PostureFinding]:
-    return []
+    """CloudTrail: at least one multi-region trail actively logging (cis-3.1). Fail-soft."""
+    try:
+        from agenticops.config import settings
+        ct = _get_client("cloudtrail", settings.bedrock_region, account)
+        trails = ct.describe_trails().get("trailList", [])
+        for t in trails:
+            if not t.get("IsMultiRegionTrail"):
+                continue
+            try:
+                if ct.get_trail_status(Name=t.get("TrailARN") or t.get("Name")).get("IsLogging"):
+                    return []  # a compliant trail exists
+            except Exception:
+                continue
+        return [PostureFinding("logging", "cis-3.1", "account", "CloudTrail",
+                               "no multi-region trail actively logging", "high")]
+    except Exception as e:
+        logger.warning("collect_logging_findings failed for %s: %s", account, e)
+        return []
