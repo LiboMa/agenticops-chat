@@ -263,7 +263,11 @@ def _ports_match(rule_ports: str, port: int) -> bool:
 
 
 def _proto_match(proto: str) -> bool:
-    return str(proto).lower() in ("all", "-1", "tcp")
+    # "6" is TCP's IANA protocol number; AWS DescribeSecurityGroups can emit the
+    # numeric form and _format_sg_rules passes IpProtocol through unchanged, so a
+    # rule like {"protocol": "6", ...} must count as opening a TCP port (else a
+    # genuinely-open port reads as not_reachable — a conservative-bias violation).
+    return str(proto).lower() in ("all", "-1", "tcp", "6")
 
 
 def _sg_opens_port(security_groups: dict, sg_ids: list, port: int):
@@ -307,9 +311,24 @@ def internet_ingress_reachability(*, instance, subnet, security_groups, port,
 
     target = subnet.get("default_route_target")
     if target is None:
+        # _classify_subnet_type (network_tools.py) emits None from two distinct
+        # paths that must NOT collapse to the same verdict:
+        #   route_table_id present -> a route table WAS resolved and has no
+        #     0.0.0.0/0 route: genuinely isolated -> not_reachable.
+        #   route_table_id absent  -> no route table could be resolved (partial
+        #     DescribeRouteTables / scoped perms): incomplete data, not a fact.
+        #     Conservative bias: undetermined, never a false not_reachable that
+        #     would hide a possibly-exposed instance.
+        if subnet.get("route_table_id") is None:
+            return IngressVerdict(iid, port, "undetermined", "route table unresolved (incomplete data)", [])
         return IngressVerdict(iid, port, "not_reachable", "subnet has no default route (isolated)", [])
     if target == "blackhole":
         return IngressVerdict(iid, port, "not_reachable", "default route is a blackhole", [])
+    if target == "unknown":
+        # A default route demonstrably exists but its target is unidentified
+        # (network_tools.py emits the literal "unknown"): can't prove egress-only,
+        # so stay conservative rather than assert not_reachable.
+        return IngressVerdict(iid, port, "undetermined", "default route target unidentified", [])
     if not str(target).startswith("igw-"):
         return IngressVerdict(iid, port, "not_reachable", "no IGW default route (egress-only)", [])
 

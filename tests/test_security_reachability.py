@@ -85,3 +85,40 @@ class TestIngressReachability:
         sgs = {"sg-open": {"inbound_rules": [
             {"protocol": "all", "ports": "all", "sources": ["0.0.0.0/0"]}]}}
         assert reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=sgs, port=22).state == "reachable"
+
+
+class TestIngressReachabilityConservative:
+    """R26 conservative-bias hardening: route-target None disambiguation,
+    unidentified target, numeric TCP protocol, and missing-field undetermined."""
+
+    def test_route_none_but_rt_resolved_isolated_not_reachable(self):
+        # route table WAS resolved and has no default route -> genuinely isolated
+        sn = {**PUB_SUBNET, "default_route_target": None, "route_table_id": "rtb-1"}
+        assert reach(instance=INSTANCE, subnet=sn, security_groups=_sg_open(22), port=22).state == "not_reachable"
+
+    def test_route_none_and_rt_unresolved_undetermined(self):
+        # no route table could be resolved (partial data) -> conservative undetermined
+        sn = {**PUB_SUBNET, "default_route_target": None, "route_table_id": None}
+        assert reach(instance=INSTANCE, subnet=sn, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+    def test_route_target_unknown_undetermined(self):
+        sn = {**PUB_SUBNET, "default_route_target": "unknown"}
+        assert reach(instance=INSTANCE, subnet=sn, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+    def test_numeric_tcp_protocol_opens_port_reachable(self):
+        sgs = {"sg-open": {"inbound_rules": [
+            {"protocol": "6", "ports": "22", "sources": ["0.0.0.0/0"]}]}}
+        assert reach(instance=INSTANCE, subnet=PUB_SUBNET, security_groups=sgs, port=22).state == "reachable"
+
+    def test_instance_none_undetermined(self):
+        assert reach(instance=None, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+    def test_instance_missing_state_undetermined(self):
+        inst = {"instance_id": "i-1", "public_ip": "1.2.3.4",
+                "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}
+        assert reach(instance=inst, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "undetermined"
+
+    def test_instance_missing_public_ip_key_undetermined(self):
+        inst = {"instance_id": "i-1", "state": "running",
+                "subnet_id": "sn-1", "security_group_ids": ["sg-open"]}
+        assert reach(instance=inst, subnet=PUB_SUBNET, security_groups=_sg_open(22), port=22).state == "undetermined"
