@@ -1,6 +1,8 @@
 # MVP-2.5.0 Release Notes — 云安全审查（Cloud Security Review）
 
-> Version: 2.5.0 · Branch: `MVP-2.5.0`（规划中） · Date: 2026-08-29 · 主题：安全态势体检 + 精确可达性关联
+> Version: 2.5.0 · Branch: `MVP-2.5.0` · Date: 2026-08-29（P1 Stages 0–7 交付：2026-08-31） · 主题：安全态势体检 + 精确可达性关联
+>
+> **状态：P1（Stages 0–7）已实现并通过真实账户只读 E2E** —— 证据见 `docs/MVP-2.5.0-E2E-REPORT.md`。P1.5 / P2 / P3 见下方路线图。
 >
 > **本文件是云安全审查方向的顶层基线 —— 之后所有新建的安全相关研发（P1 → P3 及后续）都必须挂靠本文件的「四条精确度原则」与「路线图」。**
 >
@@ -108,6 +110,31 @@ security_snapshot_retention_days: 90     # 快照保留
 | 5 | 发现经 signal_gate 去重：同一暴露跨多轮轮询折叠为一个 open issue |
 | 6 | 全程走目标账户凭证，多账户不串号 |
 | 7 | 真实环境 E2E + 主人确认后才 push |
+
+## P1 交付状态（Stages 0–7 ✅）
+
+| Stage | 交付 | 状态 |
+|-------|------|------|
+| 0 | 数据模型（`SecuritySnapshot`/`SecurityRecommendation`/`SecurityPollCursor`）+ 双频 scheduler system job（config field + dispatch 分支 + startup seed） | ✅ |
+| 1 | 确定性采集层 `collectors.py`（IAM/S3/logging/VPC-EC2/EBS，账户寻址走 provider 层，零 LLM） | ✅ |
+| 2 | 可复现 CIS 评分 `scoring.py`（纯函数，无 random/time/LLM）+ ingress 可达性算法（SG + 公网IP + 子网/IGW 路由 + 运行态） | ✅ |
+| 3 | **含 NACL 的三态可达性**（`NETWORK_ACL` 节点 + 有序 allow/deny 求值；缺数据→`undetermined`）+ 账户级 `annotate` | ✅ |
+| 4 | 快频增量 poll（guardduty/securityhub/cloudtrail，cursor + fail-soft）+ 慢频 exposure_paths 接线 + 可执行发现 → `signal_gate` | ✅ |
+| 5 | 证据接地建议器 `advisor.py`（parse → ground-to-inventory → critic → fail-closed，唯一 LLM 环节） | ✅ |
+| 6 | `services/security_service.py` + `/api/security/*`（5 端点）+ `security-review` 报告 + 前端 `/app/security` + Dashboard 高亮卡 | ✅ |
+| 7 | 全量回归（3859 passed）+ 真实账户只读 E2E（2 账户，含中国区）+ 文档 | ✅ |
+
+**验收纲要对照（全部通过，证据见 E2E 报告）：**
+
+| # | 标准 | E2E 验证 |
+|---|------|----------|
+| 1 | 可达性保守偏报，不误报 | 真实数据三态齐现：Global 9 reachable / 22 undetermined / 2 not_reachable；缺路由/NACL 数据 → `undetermined`，未降级为 `not_reachable` |
+| 2 | 采集 fail-soft，cursor 不回退 | 中国区 IAM/S3/CloudTrail 令牌失效 → 跳过 + WARNING，快照照常产出；cursor 仅成功时前移 |
+| 3 | CIS 评分可复现 | `scoring.py` 经确认为纯函数（无 random/time/LLM）；由 `test_security_scoring` 锁定 |
+| 4 | 建议证据接地 | 8 条建议全部 critic-`supported` 入库；未 grounded / refuted / 异常 → 丢弃（0 行） |
+| 5 | signal_gate 去重 | 真实运行 1110 条安全信号 → 865 merged（78% 去重），仅 245 条 promoted |
+| 6 | 多账户不串号 | 采集全程经 provider 层目标账户凭证，无 ambient 回退 |
+| 7 | E2E + 主人确认后才 push | 只读 E2E 完成，已写证据报告，等待主人确认 |
 
 ## Future
 

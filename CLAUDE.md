@@ -4,7 +4,7 @@
 
 AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent architecture (Strands SDK on AWS Bedrock). Provides `aiops chat` interactive REPL, React web dashboard with streaming chat, resource scanning, anomaly detection, fix planning, and reporting across AWS accounts.
 
-**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (Signal Gate noise reduction + RCA quality quintet), `docs/MVP-2.2.1-RELEASE.md` (latest: effort/thinking policy — backend escalation + per-session chat override)
+**User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (Signal Gate noise reduction + RCA quality quintet), `docs/MVP-2.2.1-RELEASE.md` (effort/thinking policy — backend escalation + per-session chat override), `docs/MVP-2.5.0-RELEASE.md` (latest: Cloud Security Review — dual-frequency posture + CIS scoring + NACL-aware three-state reachability + evidence-grounded advisor; E2E in `docs/MVP-2.5.0-E2E-REPORT.md`)
 
 **Live E2E evidence:** `docs/MVP-2.2.0-CHAOS-E2E-REPORT.md` (L1 chaos: image/config/network on a real EKS cluster), `docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md` (L2 chaos: production-named faults; Signal Gate dedup + effort escalation validated live). Fault scripts: `infra/eks-chaos-lab/chaos/` (L1), `infra/eks-chaos-lab/faults-l2/` (L2).
 
@@ -84,6 +84,7 @@ Web Dashboard ──────┘         │
 | `memory/` | `agent_memory.py`, `curator.py`, `migrate_backfill.py` | File-based self-optimizing agent memory (Hermes-style); single core, no DB |
 | `pipeline/` | `rag_pipeline.py`, `orchestrator.py`, `health_patrol.py` | RAG pipeline, patrol orchestrator |
 | `integrations/` | `alert_processor.py`, `parsers.py` | Webhook alert processing, source parsers |
+| `security/` | `collectors.py`, `scoring.py`, `reachability.py`, `posture_snapshot.py`, `incremental_poll.py`, `advisor.py` | **Cloud Security Review engine (MVP-2.5.0)** — dual-frequency deterministic collection (slow `SecurityPostureSnapshot` + fast `SecurityIncrementalPoll` cursor-based, both account-addressed through the provider layer, fail-soft per collector/source) + **reproducible CIS scoring** (`scoring.py` pure: no random/time/LLM; reachability & recommendations never alter scores) + **NACL-aware three-state ingress reachability** (`reachable`/`not_reachable`/`undetermined`; missing route/NACL data → `undetermined`, never `not_reachable` — conservative bias) + **evidence-grounded advisor** (`advisor.py`, the only LLM component: parse→ground-to-inventory→per-rec critic→fail-closed persist, ungrounded/refuted/any-exception → 0 rows). All issue creation flows through `signal_gate.process_signal` (fingerprint-v2 dedup). Tables `security_snapshots`/`security_recommendations`/`security_poll_cursors`. Endpoints `/api/security/{summary,trend,findings,recommendations,attack-paths}`; report `security-review`; frontend `/app/security` + Dashboard highlight card |
 | `storage/` | `backend.py` | Storage backends (local/S3) for reports + KB |
 | `acp/` | `types.py`, `registry.py`, `jsonrpc.py`, `mapping.py`, `client.py`, `backends/{claude_code,kiro_cli,codex}.py` | Optional ACP enhanced backend (MVP-1.3.0) — protocol-agnostic `EnhancedBackend` abstraction + registry; self-implemented JSON-RPC/stdio `AcpClient` (per-provider `protocol_version`); 3 providers: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`), `codex` (`codex-acp`, needs `OPENAI_API_KEY`). `enhanced_task` async-gen tool (`agents/enhanced.py`) streams live via `ToolStreamEvent`→SSE, conditionally into main/sre. Provider chosen in Settings→Enhanced Backend. Default off (`acp_enhanced_enabled`) |
 
@@ -202,6 +203,14 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `thinking_escalation_step` | `4096` | Tokens added per escalation tier (MVP-2.2.1: RCA gets +1 tier for critical severity, +1 for a rerun after needs_review/disputed — they stack) |
 | `thinking_budget_min` | `1024` | Bedrock minimum; a budget below this (or ≥ max_tokens) disables thinking instead of sending an illegal request |
 | `thinking_effort_presets` | `{off:0, standard:4096, deep:12288}` | Named effort levels backing the per-session chat override (`chat_sessions.effort`, NULL = Auto). Keys must be quoted in YAML — bare `off` parses as boolean false |
+| `security_review_enabled` | `true` | Enable the cloud security review engine (dual-frequency collect + CIS scoring + reachability) |
+| `security_poll_interval_minutes` | `10` | Fast-frequency `SecurityIncrementalPoll` schedule interval |
+| `security_posture_interval_minutes` | `60` | Slow-frequency `SecurityPostureSnapshot` schedule interval |
+| `security_reachability_nacl_enabled` | `true` | Include NACL evaluation in ingress reachability; missing NACL data → `undetermined` |
+| `security_advisor_enabled` | `true` | Enable the evidence-grounded LLM recommendation advisor (Stage 5) |
+| `security_advisor_critic_enabled` | `true` | Adversarial critic over each recommendation; refuted → dropped (fail-closed) |
+| `security_snapshot_retention_days` | `90` | Days of `SecuritySnapshot` rows retained before pruning |
+| `security_model_id` | `""` | Override model for the security advisor; empty = `bedrock_model_id_cheap` |
 
 ## HealthIssue State Machine
 

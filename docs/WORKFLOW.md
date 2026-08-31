@@ -671,6 +671,50 @@ EnhancedBackend abstraction + registry  (protocol-agnostic core)
 
 ---
 
+## Cloud Security Review (MVP-2.5.0)
+
+A dedicated posture engine (`security/`) that runs on **two independent cadences** and turns raw cloud config into scored, reachability-annotated, deduplicated, and (optionally) LLM-advised findings. Everything is deterministic where it counts and fail-safe where it can't be.
+
+```mermaid
+flowchart TD
+    subgraph Slow["SecurityPostureSnapshot — every security_posture_interval_minutes (60)"]
+        C1[collectors.py<br/>IAM · S3 · logging · VPC/EC2 · EBS<br/>account-addressed via provider layer] --> SC[scoring.py<br/>pure CIS scoring<br/>no random/time/LLM]
+        C1 --> RE[reachability.py<br/>NACL-aware ingress<br/>reachable / not_reachable / undetermined]
+        SC --> SNAP[(security_snapshots<br/>score · category · CIS · exposure_paths)]
+        RE --> SNAP
+        SNAP --> ADV[advisor.py — LLM<br/>parse → ground-to-inventory → critic → fail-closed]
+        ADV --> REC[(security_recommendations)]
+        SNAP --> EPS[actionable findings → signal_gate]
+    end
+    subgraph Fast["SecurityIncrementalPoll — every security_poll_interval_minutes (10)"]
+        CUR[(security_poll_cursors)] --> P[poll guardduty · securityhub · cloudtrail<br/>since cursor · fail-soft per source]
+        P --> EMIT[each finding → signal_gate]
+        P -->|success| CUR
+    end
+    EPS --> SG{{signal_gate.process_signal<br/>fingerprint-v2 dedup}}
+    EMIT --> SG
+    SG --> HI[(HealthIssue)]
+    HI --> UI[/api/security/* · /app/security · security-review report/]
+    REC --> UI
+    SNAP --> UI
+```
+
+**Principles enforced end-to-end** (validated live in `docs/MVP-2.5.0-E2E-REPORT.md`):
+- **Reproducible scoring** — `scoring.py` is pure; reachability and recommendations never feed back into scores.
+- **Conservative reachability** — missing route/NACL data yields `undetermined`, never a false `not_reachable`.
+- **Fail-closed advisor** — a recommendation whose `evidence_refs` aren't all present in inventory, or that the critic refutes, or that triggers any exception, is dropped (0 rows). The advisor never blocks or corrupts a snapshot.
+- **Fail-soft collectors/pollers** — a failed collector or poll source is skipped with a WARNING; the snapshot is still produced and a poll cursor is only advanced on success.
+- **One issue per fingerprint** — every finding (posture + poll) flows through the Signal Gate; duplicates merge instead of storming.
+
+**Using it:**
+- **Web**: **`/app/security`** shows per-account scores, a score trend, CIS radar, findings, recommendations, and exposure paths; the Dashboard shows a security highlight card (min account score + reachable-path count).
+- **API**: `GET /api/security/{summary,trend,findings,recommendations,attack-paths}`.
+- **Report**: `POST /api/reports/generate {"report_type":"security-review"}` (or ask the reporter agent for a "security review report").
+- **Schedules**: `SecurityPostureSnapshot` (slow) and `SecurityIncrementalPoll` (fast) are registered pipelines; cadence via `security_posture_interval_minutes` / `security_poll_interval_minutes`.
+- **Config**: `security_review_enabled`, `security_advisor_enabled`, `security_advisor_critic_enabled`, `security_reachability_nacl_enabled`, `security_snapshot_retention_days`, `security_model_id` (empty = `bedrock_model_id_cheap`).
+
+---
+
 ## Quick Tutorials
 
 ### Tutorial 1: First Scan — Discover Your AWS Resources
