@@ -109,3 +109,49 @@ class TestRunPostureSnapshot:
 
         n = ps.run_posture_snapshot()
         assert n == 1  # good account still produced a snapshot
+
+
+import json
+from unittest.mock import MagicMock, patch as _patch
+
+
+class TestAggregateTopology:
+    def test_aggregates_across_vpcs(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        topo = {"subnets": [{"subnet_id": "sn-1", "type": "public",
+                             "default_route_target": "igw-1", "map_public_ip_on_launch": True}],
+                "security_group_dependency_map": {
+                    "sg-1": {"name": "web", "inbound_rules": [
+                        {"protocol": "tcp", "ports": "22", "sources": ["0.0.0.0/0"]}]}}}
+        compute = {"ec2_instances": [{"instance_id": "i-1", "state": "running",
+                                      "public_ip": "1.2.3.4", "subnet_id": "sn-1",
+                                      "security_group_ids": ["sg-1"]}]}
+        ec2 = MagicMock()
+        ec2.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-1"}]}
+        monkeypatch.setattr(ps, "_enabled_regions", lambda a: ["us-east-1"], raising=False)
+        with _patch("agenticops.security.posture_snapshot._agg_get_client", return_value=ec2), \
+             _patch("agenticops.tools.network_tools.analyze_vpc_topology",
+                    return_value=json.dumps(topo)), \
+             _patch("agenticops.graph.collectors.collect_vpc_compute", return_value=compute), \
+             _patch("agenticops.security.collectors.collect_network_acls",
+                    return_value={"sn-1": {"nacl_id": "acl-1", "inbound": [], "outbound": []}}):
+            instances, subnets, sgs, nacls = ps._aggregate_topology("acct-a")
+        assert instances["i-1"]["subnet_id"] == "sn-1"
+        assert subnets["sn-1"]["type"] == "public"
+        assert sgs["sg-1"]["inbound_rules"][0]["ports"] == "22"
+        assert nacls["sn-1"]["nacl_id"] == "acl-1"
+
+    def test_region_failure_is_isolated(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        monkeypatch.setattr(ps, "_enabled_regions", lambda a: ["bad-1", "us-east-1"], raising=False)
+        good_ec2 = MagicMock()
+        good_ec2.describe_vpcs.return_value = {"Vpcs": []}
+
+        def _client(service, region, account):
+            if region == "bad-1":
+                raise RuntimeError("region down")
+            return good_ec2
+        with _patch("agenticops.security.posture_snapshot._agg_get_client", side_effect=_client), \
+             _patch("agenticops.security.collectors.collect_network_acls", return_value={}):
+            instances, subnets, sgs, nacls = ps._aggregate_topology("acct-a")
+        assert (instances, subnets, sgs, nacls) == ({}, {}, {}, {})

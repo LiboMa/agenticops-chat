@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from agenticops.config import settings
 from agenticops.models import SecuritySnapshot, get_db_session
-from agenticops.security.collectors import collect_posture
+from agenticops.security.collectors import _enabled_regions, collect_posture
 from agenticops.security.scoring import score
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,51 @@ def _prune_old_snapshots(session) -> None:
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.security_snapshot_retention_days)
     session.query(SecuritySnapshot).filter(SecuritySnapshot.created_at < cutoff).delete()
+
+
+def _agg_get_client(service: str, region: str, account: str):
+    """Indirection point so tests can patch the provider-layer client."""
+    from agenticops.security.collectors import _get_client
+    return _get_client(service, region, account)
+
+
+def _aggregate_topology(account: str) -> tuple[dict, dict, dict, dict]:
+    """(instances, subnets, security_groups, nacls) across enabled regions.
+    Fail-soft per region and per VPC — partial data is fine (reachability marks
+    anything it cannot resolve as 'undetermined', never 'not_reachable')."""
+    import json as _json
+
+    from agenticops.security.collectors import collect_network_acls
+
+    instances: dict = {}
+    subnets: dict = {}
+    sgs: dict = {}
+    nacls: dict = {}
+    for region in _enabled_regions(account):
+        try:
+            ec2 = _agg_get_client("ec2", region, account)
+            vpc_ids = [v["VpcId"] for v in ec2.describe_vpcs().get("Vpcs", [])]
+            nacls.update(collect_network_acls(account, region))
+        except Exception as e:
+            logger.warning("topology region %s failed for %s: %s", region, account, e)
+            continue
+        for vpc_id in vpc_ids:
+            try:
+                from agenticops.graph.collectors import collect_vpc_compute
+                from agenticops.tools.network_tools import analyze_vpc_topology
+                topo = _json.loads(analyze_vpc_topology(region, vpc_id, account))
+                for sn in topo.get("subnets", []) or []:
+                    if sn.get("subnet_id"):
+                        subnets[sn["subnet_id"]] = sn
+                sgs.update(topo.get("security_group_dependency_map", {}) or {})
+                comp = collect_vpc_compute(region, vpc_id, account)
+                for inst in comp.get("ec2_instances", []) or []:
+                    if inst.get("instance_id"):
+                        instances[inst["instance_id"]] = inst
+            except Exception as e:
+                logger.warning("topology vpc %s/%s failed for %s: %s",
+                               region, vpc_id, account, e)
+    return instances, subnets, sgs, nacls
 
 
 def run_posture_snapshot() -> int:
