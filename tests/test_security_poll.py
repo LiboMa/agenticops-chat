@@ -153,3 +153,45 @@ class TestSecurityHubPoller:
         assert filters["RecordState"] == [{"Value": "ACTIVE", "Comparison": "EQUALS"}]
         assert filters["WorkflowStatus"] == [{"Value": "NEW", "Comparison": "EQUALS"}]
         assert filters["UpdatedAt"][0]["Start"] == "2026-08-31T00:00:00+00:00"
+
+
+def _ct_event(name, eid="e-1", when=None, username="alice"):
+    return {"EventId": eid, "EventName": name, "Username": username,
+            "EventTime": when or datetime(2026, 8, 31, 2, 0, tzinfo=timezone.utc),
+            "Resources": [{"ResourceName": "trail-1", "ResourceType": "AWS::CloudTrail::Trail"}]}
+
+
+class TestCloudTrailPoller:
+    def _client(self, events):
+        ct = MagicMock()
+        paginator = MagicMock()
+        paginator.paginate.return_value = [{"Events": events}]
+        ct.get_paginator.return_value = paginator
+        return ct
+
+    def test_high_risk_event_captured(self):
+        from agenticops.security.incremental_poll import poll_cloudtrail
+        ct = self._client([_ct_event("StopLogging")])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert len(out) == 1
+        assert out[0].source == "cloudtrail"
+        assert out[0].severity == "high"
+        assert "StopLogging" in out[0].title
+        assert out[0].resource_id == "trail-1"
+
+    def test_benign_event_filtered_out(self):
+        from agenticops.security.incremental_poll import poll_cloudtrail
+        ct = self._client([_ct_event("DescribeInstances")])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert out == []
+
+    def test_username_fallback_resource(self):
+        from agenticops.security.incremental_poll import poll_cloudtrail
+        ev = _ct_event("CreateAccessKey")
+        ev["Resources"] = []
+        ct = self._client([ev])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert out[0].resource_id == "alice"

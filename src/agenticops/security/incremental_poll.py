@@ -133,6 +133,50 @@ def poll_securityhub(account: str, region: str, since_iso: str) -> list[Security
     return out
 
 
+HIGH_RISK_EVENTS = frozenset({
+    # logging tampering
+    "DeleteTrail", "StopLogging", "UpdateTrail", "PutEventSelectors", "DeleteFlowLogs",
+    # network exposure
+    "AuthorizeSecurityGroupIngress",
+    # identity escalation
+    "CreateUser", "CreateAccessKey", "CreateLoginProfile", "AttachUserPolicy",
+    "PutUserPolicy", "DeactivateMFADevice",
+    # data exposure
+    "PutBucketAcl", "PutBucketPolicy", "DeleteBucketPolicy",
+    # encryption tampering
+    "DisableKey", "ScheduleKeyDeletion",
+})
+
+
+def poll_cloudtrail(account: str, region: str, since_iso: str) -> list[SecurityEvent]:
+    """High-risk CloudTrail management events since the cursor. Raises on API error.
+
+    lookup_events supports only one LookupAttribute per call, so we pull the
+    window and filter client-side against HIGH_RISK_EVENTS."""
+    ct = _get_client("cloudtrail", region, account)
+    start = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
+    out: list[SecurityEvent] = []
+    paginator = ct.get_paginator("lookup_events")
+    for page in paginator.paginate(StartTime=start):
+        for e in page.get("Events", []):
+            name = e.get("EventName", "")
+            if name not in HIGH_RISK_EVENTS:
+                continue
+            res = (e.get("Resources") or [{}])[0]
+            user = e.get("Username", "unknown")
+            when = e.get("EventTime")
+            out.append(SecurityEvent(
+                source="cloudtrail", event_id=e.get("EventId", ""),
+                title=f"High-risk API call: {name}",
+                description=f"{name} invoked by {user}",
+                severity="high",
+                resource_id=res.get("ResourceName") or user,
+                resource_type=res.get("ResourceType", "unknown"),
+                occurred_at=when.isoformat() if hasattr(when, "isoformat") else str(when or since_iso),
+            ))
+    return out
+
+
 def run_incremental_poll() -> int:
     """Return the number of new findings emitted. Filled in by Task 4.5."""
     return 0
