@@ -8,7 +8,7 @@ last_used: '2026-07-07'
 related_issue_id: 323
 resource_pattern: iam-users-stale-keys/*
 source: auto
-status: active
+status: stale
 type: feedback
 ---
 

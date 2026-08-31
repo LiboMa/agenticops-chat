@@ -8,7 +8,7 @@ last_used: '2026-07-07'
 related_issue_id: 288
 resource_pattern: i-9aa0edd0/*
 source: user
-status: active
+status: stale
 type: feedback
 ---
 

@@ -8,7 +8,7 @@ last_used: '2026-07-07'
 related_issue_id: 266
 resource_pattern: vpc-01319a84eaaeb8d0d/*
 source: auto
-status: active
+status: stale
 type: feedback
 ---
 

@@ -8,7 +8,7 @@ last_used: '2026-07-07'
 related_issue_id: 122
 resource_pattern: sa-malibo/*
 source: auto
-status: active
+status: stale
 type: feedback
 ---
 

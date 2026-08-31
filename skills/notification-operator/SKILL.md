@@ -16,7 +16,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-07-10'
-last_used: '2026-07-28'
+last_used: '2026-08-01'
 ---
 
 # Notification Operator Skill
@@ -156,3 +156,4 @@ Send a critical incident report only to high-severity channels:
 | `send_to_channel` | `send_to_channel(target_name="email", content="15", content_type="report")` | JSON: {success, message} |
 | `distribute_report` | `distribute_report(report_id="15")` | JSON: {success, results per channel} |
 | `distribute_report` | `distribute_report(report_id="15", channel_names="a,b", severity="high")` | JSON: {success, results per channel} |
+

@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-07-10'
-last_used: '2026-07-29'
+last_used: '2026-08-12'
 ---
 
 # Security Engineer Skill
@@ -253,3 +253,9 @@ aws ec2 create-snapshot --volume-id VOL --description "Forensic snapshot - incid
 | S3 buckets with public access | > 0 | Any | Data exposure risk |
 | CloudTrail logging disabled | > 0 | Multi-region trail missing | Audit trail |
 | Inspector CRITICAL CVEs | > 0 | > 10 (network reachable) | Exploitable vulns |
+
+
+
+
+
+

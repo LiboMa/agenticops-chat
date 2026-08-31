@@ -1437,3 +1437,22 @@ class SecurityRecommendation(Base):
     critic_verdict: Mapped[str] = mapped_column(String(16), default="")  # supported|weak|refuted
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default="open")  # open|acknowledged|dismissed|applied
+
+
+class SecurityPollCursor(Base):
+    """Incremental-poll cursor per (account, source, region) — ISO8601 string."""
+
+    __tablename__ = "security_poll_cursors"
+    __table_args__ = (
+        UniqueConstraint("account_id", "source", "region", name="uq_security_poll_cursor"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(32))  # guardduty | securityhub | cloudtrail
+    region: Mapped[str] = mapped_column(String(32))
+    cursor: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
