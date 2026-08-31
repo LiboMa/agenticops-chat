@@ -222,6 +222,7 @@ class TestExposureWiring:
         monkeypatch.setattr(ps, "collect_posture", lambda a: [f])
         monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
         monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
+        monkeypatch.setattr(ps, "recommend", lambda *a, **k: 0, raising=False)
         with _patch("agenticops.security.posture_snapshot.annotate",
                     return_value=_annotated("reachable")):
             n = ps.run_posture_snapshot()
@@ -236,3 +237,42 @@ class TestExposureWiring:
         monkeypatch.setattr(ps, "_aggregate_topology", _boom)
         n = ps.run_posture_snapshot()
         assert n == 1  # snapshot still written, exposure_paths []
+
+
+class TestAdvisorWiring:
+    def test_recommend_called_with_flushed_snapshot_id(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        from agenticops import models
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from contextlib import contextmanager
+        engine = create_engine("sqlite:///:memory:")
+        models.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+
+        @contextmanager
+        def _sess():
+            s = Session()
+            try:
+                yield s
+                s.commit()
+            finally:
+                s.close()
+
+        monkeypatch.setattr(ps, "get_db_session", _sess)
+        monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a"])
+        f = PostureFinding("iam", "cis-1.10", "alice", "IAMUser", "no mfa", "high")
+        monkeypatch.setattr(ps, "collect_posture", lambda a: [f])
+        monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
+        monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
+        calls = []
+        monkeypatch.setattr(ps, "recommend",
+                            lambda sid, acct, res, fnd: calls.append((sid, acct)) or 0,
+                            raising=False)
+        n = ps.run_posture_snapshot()
+        assert n == 1
+        assert len(calls) == 1
+        sid, acct = calls[0]
+        assert acct == "acct-a"
+        with _sess() as s:
+            assert s.query(models.SecuritySnapshot).one().id == sid

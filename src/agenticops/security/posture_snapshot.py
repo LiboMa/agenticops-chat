@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from agenticops.config import settings
 from agenticops.models import SecuritySnapshot, get_db_session
+from agenticops.security.advisor import recommend
 from agenticops.security.collectors import _enabled_regions, collect_posture
 from agenticops.security.reachability import annotate
 from agenticops.security.scoring import score
@@ -155,17 +156,22 @@ def run_posture_snapshot() -> int:
             except Exception as e:
                 logger.warning("reachability annotation failed for %s: %s "
                                "(snapshot written without exposure paths)", account, e)
+            snapshot_id = None
             with get_db_session() as session:
-                session.add(SecuritySnapshot(
+                snap = SecuritySnapshot(
                     account_id=account, provider="aws",
                     overall_score=result.overall_score,
                     category_scores=result.category_scores,
                     metrics=result.metrics,
                     exposure_paths=_build_exposure_paths(annotated),
                     cis_results=result.cis_results,
-                ))
+                )
+                session.add(snap)
+                session.flush()
+                snapshot_id = snap.id
                 _prune_old_snapshots(session)
             _emit_posture_signals(account, annotated)
+            recommend(snapshot_id, account, result, findings)  # fail-closed inside
             written += 1
         except Exception as e:
             logger.warning("posture snapshot failed for account %s: %s", account, e)
