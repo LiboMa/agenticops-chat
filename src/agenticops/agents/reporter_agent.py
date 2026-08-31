@@ -43,6 +43,7 @@ REPORT GENERATION PROTOCOL:
      Call search_similar_cases if patterns repeat.
    - **inventory**: Call get_managed_resources (scope filter if provided).
      Call list_health_issues to cross-reference issues against resources.
+   - **security-review**: Latest SecuritySnapshot scores, CIS results, exposure paths, open recommendations — use the generate_report tool with report_type="security-review".
    - **conversation**: Use the above tools as needed to answer user queries about health issues, RCA, or inventory.
    
 3. FORMAT: Generate a well-structured markdown report with these sections:
@@ -110,7 +111,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
     NOT FOR: live health checks (detect_agent) or ad-hoc queries (sre_query).
 
     Args:
-        report_type: Type of report: daily, incident, or inventory
+        report_type: Type of report: daily, incident, inventory, or security-review
         scope: Resource type filter (e.g., 'EC2', 'RDS') or 'all' for all resources
 
     Returns:

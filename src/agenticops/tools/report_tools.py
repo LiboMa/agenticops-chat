@@ -38,7 +38,7 @@ def save_report(
     Returns:
         Confirmation with the Report ID and file path.
     """
-    valid_types = {"daily", "incident", "inventory", "network", "newsletter"}
+    valid_types = {"daily", "incident", "inventory", "network", "newsletter", "security-review"}
     if report_type.lower() not in valid_types:
         return f"Invalid report_type '{report_type}'. Valid: {', '.join(sorted(valid_types))}"
 

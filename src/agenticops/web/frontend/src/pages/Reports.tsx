@@ -15,6 +15,7 @@ const TYPE_COLORS: Record<string, string> = {
   conversation: "bg-violet-100 text-violet-700",
   anomaly: "bg-orange-100 text-orange-700",
   newsletter: "bg-amber-100 text-amber-700",
+  "security-review": "bg-rose-100 text-rose-700",
 };
 
 /** Strip markdown noise (headings/emphasis/tables/rules) so raw report bodies read as prose. */

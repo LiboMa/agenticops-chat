@@ -169,7 +169,7 @@ class ReportResponse(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     """Schema for report generation request."""
-    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter|conversation|incident)$")
+    report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter|conversation|incident|security-review)$")
     account_name: Optional[str] = None
 
 

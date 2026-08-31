@@ -3219,6 +3219,8 @@ async def api_generate_report(request: ReportGenerateRequest):
                 generator.generate_daily_report()
             elif request.report_type == "inventory":
                 generator.generate_inventory_report()
+            elif request.report_type == "security-review":
+                generator.generate_security_review_report()
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown report type: {request.report_type}")
 
