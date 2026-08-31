@@ -888,3 +888,57 @@ export interface GalaxyGraph {
   edges: GalaxyGraphEdge[];
   build_id: number | null;
 }
+
+// ── Security review (MVP-2.5.0) ────────────────────────────────
+export interface SecurityAccountScore {
+  account_id: string;
+  overall_score: number;
+  category_scores: Record<string, number>;
+  created_at: string | null;
+  reachable_paths: number;
+  open_findings: number;
+}
+
+export interface SecuritySummary {
+  accounts: SecurityAccountScore[];
+  generated_at: string;
+}
+
+export interface SecurityTrendPoint {
+  account_id: string;
+  created_at: string | null;
+  overall_score: number;
+}
+
+export interface SecurityFindingItem {
+  id: number;
+  title: string;
+  severity: string;
+  status: string;
+  resource_id: string;
+  issue_type: string;
+  detected_by: string;
+  last_seen: string | null;
+  reachability: string | null;
+}
+
+export interface SecurityRecommendationItem {
+  id: number;
+  account_id: string;
+  category: string;
+  title: string;
+  detail: string;
+  severity: string;
+  critic_verdict: string;
+  confidence: number;
+  status: string;
+  created_at: string | null;
+}
+
+export interface AttackPathItem {
+  account_id: string;
+  resource_id: string;
+  port: number | null;
+  path: string[];
+  reachability: string;
+}
