@@ -2,7 +2,7 @@
 
 > Version: 2.5.0 · Branch: `MVP-2.5.0` · Date: 2026-08-29（P1 Stages 0–7 交付：2026-08-31） · 主题：安全态势体检 + 精确可达性关联
 >
-> **状态：P1（Stages 0–7）已实现并通过真实账户只读 E2E** —— 证据见 `docs/MVP-2.5.0-E2E-REPORT.md`。P1.5 / P2 / P3 见下方路线图。
+> **状态：P1（Stages 0–7）已实现、通过真实账户只读 E2E、并于 2026-08-31 经主人确认 push 到 `origin/MVP-2.5.0`** —— 证据见 `docs/MVP-2.5.0-E2E-REPORT.md`。P1.5 / P2 / P3 见下方路线图。
 >
 > **本文件是云安全审查方向的顶层基线 —— 之后所有新建的安全相关研发（P1 → P3 及后续）都必须挂靠本文件的「四条精确度原则」与「路线图」。**
 >
@@ -134,7 +134,7 @@ security_snapshot_retention_days: 90     # 快照保留
 | 4 | 建议证据接地 | 8 条建议全部 critic-`supported` 入库；未 grounded / refuted / 异常 → 丢弃（0 行） |
 | 5 | signal_gate 去重 | 真实运行 1110 条安全信号 → 865 merged（78% 去重），仅 245 条 promoted |
 | 6 | 多账户不串号 | 采集全程经 provider 层目标账户凭证，无 ambient 回退 |
-| 7 | E2E + 主人确认后才 push | 只读 E2E 完成，已写证据报告，等待主人确认 |
+| 7 | E2E + 主人确认后才 push | 只读 E2E 完成 + 证据报告归档 + 主人确认（2026-08-31）→ `MVP-2.5.0` 已 push |
 
 ## Future
 

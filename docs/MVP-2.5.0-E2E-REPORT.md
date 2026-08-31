@@ -132,4 +132,4 @@ Frontend built clean (`/app/security` route + Dashboard highlight card + nav shi
 All 8 acceptance dimensions pass on **two real AWS accounts (including a China-partition account)**:
 regression green · deterministic reproducible scoring · NACL-aware three-state reachability (all three states observed) · fail-soft collectors · evidence-grounded advisor with critic + fail-closed persist · cursor-based incremental poll · Signal Gate 78% dedup · full web/API/report/frontend.
 
-**Recommended push (pending owner confirmation):** `git push --no-verify origin MVP-2.5.0`
+**Push:** owner confirmed on 2026-08-31 → `git push --no-verify origin MVP-2.5.0` executed; branch published (77 commits ahead of `main`).
