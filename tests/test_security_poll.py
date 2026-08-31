@@ -195,3 +195,73 @@ class TestCloudTrailPoller:
         with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
             out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
         assert out[0].resource_id == "alice"
+
+
+class TestRunIncrementalPoll:
+    def _setup(self, monkeypatch, sess_factory, pollers):
+        import agenticops.security.incremental_poll as ip
+        monkeypatch.setattr(ip, "get_db_session", sess_factory, raising=False)
+        monkeypatch.setattr(ip, "_resolve_security_accounts", lambda: ["acct-a"])
+        monkeypatch.setattr(ip, "_enabled_regions", lambda a: ["us-east-1"])
+        monkeypatch.setattr(ip, "_reachability_lookup", lambda a: {})
+        monkeypatch.setattr(ip, "_SOURCE_POLLERS", pollers)
+        return ip
+
+    def test_signals_emitted_and_cursor_advanced(self, monkeypatch, sess_factory):
+        from agenticops.security.incremental_poll import SecurityEvent
+        ev = SecurityEvent("guardduty", "f-1", "t", "d", "high", "i-1", "Instance",
+                           "2026-08-31T02:00:00+00:00")
+        ip = self._setup(monkeypatch, sess_factory, {"guardduty": lambda a, r, s: [ev]})
+        calls = []
+        with patch("agenticops.services.signal_gate.process_signal",
+                   side_effect=lambda sig: calls.append(sig) or MagicMock(disposition="promoted")):
+            n = ip.run_incremental_poll()
+        assert n == 1
+        sig = calls[0]
+        assert sig.source == "security_poll"
+        assert sig.upstream_key == "f-1"
+        assert sig.issue_type == "security_finding"
+        assert sig.auto_rca is True
+        assert sig.detected_by == "security_poll"
+        assert sig.kind == "detection"
+        assert sig.account_id == "acct-a"
+        with sess_factory() as s:
+            row = s.query(models.SecurityPollCursor).filter_by(source="guardduty").one()
+            assert row.cursor > "2026-08-31"  # advanced to poll_start (now)
+
+    def test_source_failure_does_not_advance_cursor(self, monkeypatch, sess_factory):
+        def _boom(a, r, s):
+            raise RuntimeError("api down")
+        ip = self._setup(monkeypatch, sess_factory, {"guardduty": _boom})
+        with patch("agenticops.services.signal_gate.process_signal") as ps:
+            n = ip.run_incremental_poll()
+        assert n == 0
+        ps.assert_not_called()
+        with sess_factory() as s:
+            assert s.query(models.SecurityPollCursor).count() == 0
+
+    def test_reachability_from_snapshot_attached(self, monkeypatch, sess_factory):
+        from agenticops.security.incremental_poll import SecurityEvent
+        ev = SecurityEvent("guardduty", "f-2", "t", "d", "high", "i-9", "Instance",
+                           "2026-08-31T02:00:00+00:00")
+        ip = self._setup(monkeypatch, sess_factory, {"guardduty": lambda a, r, s: [ev]})
+        monkeypatch.setattr(ip, "_reachability_lookup", lambda a: {
+            "i-9": {"reachability": "reachable", "path": ["internet", "sn-1", "i-9:22"], "port": 22}})
+        calls = []
+        with patch("agenticops.services.signal_gate.process_signal",
+                   side_effect=lambda sig: calls.append(sig) or MagicMock(disposition="promoted")):
+            ip.run_incremental_poll()
+        assert calls[0].metric_data["reachability"] == "reachable"
+
+    def test_reachability_lookup_reads_latest_snapshot(self, sess_factory, monkeypatch):
+        import agenticops.security.incremental_poll as ip
+        monkeypatch.setattr(ip, "get_db_session", sess_factory, raising=False)
+        with sess_factory() as s:
+            s.add(models.SecuritySnapshot(
+                account_id="acct-a", provider="aws", overall_score=50.0,
+                exposure_paths=[{"resource_id": "sg-1", "port": 22,
+                                 "path": ["internet", "sn-1", "i-7:22"],
+                                 "reachability": "reachable"}]))
+        m = ip._reachability_lookup("acct-a")
+        assert m["sg-1"]["reachability"] == "reachable"
+        assert m["i-7"]["reachability"] == "reachable"  # instance id from path tail

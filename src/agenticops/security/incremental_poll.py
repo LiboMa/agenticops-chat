@@ -11,6 +11,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from agenticops.models import get_db_session
+from agenticops.security.collectors import _enabled_regions
+from agenticops.security.posture_snapshot import _resolve_security_accounts
+
 logger = logging.getLogger(__name__)
 
 _BACKFILL_HOURS = 24  # first run: bounded backfill window
@@ -177,6 +181,93 @@ def poll_cloudtrail(account: str, region: str, since_iso: str) -> list[SecurityE
     return out
 
 
+_SOURCE_POLLERS = {
+    "guardduty": poll_guardduty,
+    "securityhub": poll_securityhub,
+    "cloudtrail": poll_cloudtrail,
+}
+# Event-like sources warrant auto-RCA; posture/config aggregates do not (spec 3.6).
+_AUTO_RCA = {"guardduty": True, "cloudtrail": True, "securityhub": False}
+_ISSUE_TYPE = {"guardduty": "security_finding", "securityhub": "security_finding",
+               "cloudtrail": "config_drift"}
+
+
+def _reachability_lookup(account: str) -> dict[str, dict]:
+    """{resource_id | instance_id: exposure row} from the account's latest
+    snapshot — deterministic enrichment lookup for the fast path. Fail-soft {}."""
+    try:
+        from agenticops.models import SecuritySnapshot
+        with get_db_session() as session:
+            snap = (session.query(SecuritySnapshot)
+                    .filter_by(account_id=account)
+                    .order_by(SecuritySnapshot.created_at.desc()).first())
+            if not snap:
+                return {}
+            out: dict[str, dict] = {}
+            for p in snap.exposure_paths or []:
+                row = dict(p)
+                out[str(p.get("resource_id", ""))] = row
+                path = p.get("path") or []
+                if path:
+                    out[str(path[-1]).split(":", 1)[0]] = row
+            out.pop("", None)
+            return out
+    except Exception as e:
+        logger.warning("reachability lookup failed for %s: %s", account, e)
+        return {}
+
+
+def _emit_signal(event: SecurityEvent, account: str, reach_map: dict) -> bool:
+    """One SecurityEvent -> signal gate. Fail-soft per event."""
+    try:
+        from agenticops.services.signal_gate import SignalInput, process_signal
+        metric_data = {"security_source": event.source, "occurred_at": event.occurred_at}
+        reach = reach_map.get(event.resource_id)
+        if reach:
+            metric_data.update({"reachability": reach.get("reachability"),
+                                "path": reach.get("path"), "port": reach.get("port")})
+        process_signal(SignalInput(
+            source="security_poll",
+            title=event.title[:300],
+            description=event.description,
+            severity=event.severity,
+            resource_id=event.resource_id,
+            account_id=account,
+            issue_type=_ISSUE_TYPE[event.source],
+            upstream_key=event.event_id,
+            kind="detection",
+            metric_data=metric_data,
+            raw=event.raw,
+            auto_rca=_AUTO_RCA[event.source],
+            detected_by="security_poll",
+        ))
+        return True
+    except Exception as e:
+        logger.warning("emit signal failed (%s %s): %s", event.source, event.event_id, e)
+        return False
+
+
 def run_incremental_poll() -> int:
-    """Return the number of new findings emitted. Filled in by Task 4.5."""
-    return 0
+    """Poll every (account x region x source) since its cursor, emit signals.
+    A failed source keeps its cursor (retry next round); a successful source
+    advances to poll_start even with zero events."""
+    emitted = 0
+    for account in _resolve_security_accounts():
+        reach_map = _reachability_lookup(account)
+        for region in _enabled_regions(account):
+            for source, poller in _SOURCE_POLLERS.items():
+                poll_start = datetime.now(timezone.utc).isoformat()
+                with get_db_session() as session:
+                    since = _get_cursor(session, account, source, region)
+                try:
+                    events = poller(account, region, since)
+                except Exception as e:
+                    logger.warning("%s poll failed for %s/%s: %s (cursor kept)",
+                                   source, account, region, e)
+                    continue
+                for ev in sorted(events, key=lambda e: e.occurred_at):
+                    if _emit_signal(ev, account, reach_map):
+                        emitted += 1
+                with get_db_session() as session:
+                    _set_cursor(session, account, source, region, poll_start)
+    return emitted
