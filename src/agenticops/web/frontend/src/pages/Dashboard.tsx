@@ -13,6 +13,7 @@ import { formatShortDate } from "@/lib/formatDate";
 import { useNavigate } from "react-router-dom";
 import { useMemo } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useSecuritySummary } from "@/hooks/useSecurity";
 
 const SEV_DOT: Record<string, string> = {
   critical: "bg-red-500",
@@ -31,6 +32,7 @@ export default function Dashboard() {
   const schedules = useSchedules();
   const fixPlans = useFixPlans();
   const navigate = useNavigate();
+  const security = useSecuritySummary();
 
   const activeSchedules = useMemo(
     () => (schedules.data ?? []).filter((s) => s.is_enabled),
@@ -82,6 +84,29 @@ export default function Dashboard() {
 
       {/* 3. Interaction stats — compact single row (cost/token consolidated) */}
       <InteractionStats />
+
+      {/* 3.5 Security highlight (MVP-2.5.0) */}
+      {(() => {
+        const accounts = security.data?.accounts ?? [];
+        if (accounts.length === 0) return null;
+        const minScore = Math.min(...accounts.map((a) => a.overall_score));
+        const reachable = accounts.reduce((n, a) => n + a.reachable_paths, 0);
+        const hot = minScore < 70 || reachable > 0;
+        return (
+          <button
+            onClick={() => navigate("/app/security")}
+            className="w-full text-left bg-card border border-border rounded-lg px-4 py-3 mb-6 flex items-center gap-4 hover:bg-accent/50 transition-colors"
+          >
+            <span className="text-sm text-muted-foreground">{t("dashboard.securityScore")}</span>
+            <span className={`text-2xl font-light font-mono ${hot ? "text-primary" : ""}`}>
+              {minScore.toFixed(1)}
+            </span>
+            <span className="text-sm text-muted-foreground ml-auto">
+              {reachable} {t("dashboard.securityReachable")}
+            </span>
+          </button>
+        );
+      })()}
 
       {/* 4. Row 1: Open Issues (wide) + Active Fix Plans */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

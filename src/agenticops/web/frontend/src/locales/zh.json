@@ -167,6 +167,8 @@
   "issues.rcaFailed": "根因分析触发失败",
   "issues.fixPlanTriggered": "修复计划生成已触发，可能需要一分钟 -- 刷新查看结果。",
   "issues.fixPlanFailed": "修复计划生成失败",
+  "dashboard.securityScore": "安全评分",
+  "dashboard.securityReachable": "个可达暴露",
   "dashboard.resources": "资源",
   "dashboard.openIssues": "未解决问题",
   "dashboard.critical": "严重",

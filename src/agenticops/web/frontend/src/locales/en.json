@@ -167,6 +167,8 @@
   "issues.rcaFailed": "RCA trigger failed",
   "issues.fixPlanTriggered": "Fix plan generation triggered. It may take a minute -- refresh to see results.",
   "issues.fixPlanFailed": "Fix plan generation failed",
+  "dashboard.securityScore": "Security score",
+  "dashboard.securityReachable": "reachable exposures",
   "dashboard.resources": "Resources",
   "dashboard.openIssues": "Open Issues",
   "dashboard.critical": "Critical",
