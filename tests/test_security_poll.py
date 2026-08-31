@@ -111,3 +111,45 @@ class TestGuardDutyPoller:
         with patch("agenticops.security.incremental_poll._get_client", return_value=gd):
             with pytest.raises(RuntimeError):
                 poll_guardduty("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+
+
+def _sh_finding(fid, label, updated="2026-08-31T02:00:00Z"):
+    return {"Id": fid, "UpdatedAt": updated,
+            "Title": "S3 bucket public", "Description": "Bucket allows public read.",
+            "Severity": {"Label": label},
+            "Resources": [{"Id": "arn:aws:s3:::b1", "Type": "AwsS3Bucket"}]}
+
+
+class TestSecurityHubPoller:
+    def _client(self, findings):
+        sh = MagicMock()
+        paginator = MagicMock()
+        paginator.paginate.return_value = [{"Findings": findings}]
+        sh.get_paginator.return_value = paginator
+        return sh
+
+    def test_maps_finding(self):
+        from agenticops.security.incremental_poll import poll_securityhub
+        sh = self._client([_sh_finding("arn:f1", "HIGH")])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=sh):
+            out = poll_securityhub("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert out[0].source == "securityhub"
+        assert out[0].severity == "high"
+        assert out[0].resource_id == "arn:aws:s3:::b1"
+
+    def test_informational_maps_to_low(self):
+        from agenticops.security.incremental_poll import poll_securityhub
+        sh = self._client([_sh_finding("arn:f2", "INFORMATIONAL")])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=sh):
+            out = poll_securityhub("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert out[0].severity == "low"
+
+    def test_filters_include_active_new_and_cursor(self):
+        from agenticops.security.incremental_poll import poll_securityhub
+        sh = self._client([])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=sh):
+            poll_securityhub("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        filters = sh.get_paginator.return_value.paginate.call_args.kwargs["Filters"]
+        assert filters["RecordState"] == [{"Value": "ACTIVE", "Comparison": "EQUALS"}]
+        assert filters["WorkflowStatus"] == [{"Value": "NEW", "Comparison": "EQUALS"}]
+        assert filters["UpdatedAt"][0]["Start"] == "2026-08-31T00:00:00+00:00"

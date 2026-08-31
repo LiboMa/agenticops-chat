@@ -107,6 +107,32 @@ def poll_guardduty(account: str, region: str, since_iso: str) -> list[SecurityEv
     return out
 
 
+def poll_securityhub(account: str, region: str, since_iso: str) -> list[SecurityEvent]:
+    """SecurityHub ACTIVE+NEW findings updated since the cursor. Raises on API error."""
+    sh = _get_client("securityhub", region, account)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out: list[SecurityEvent] = []
+    paginator = sh.get_paginator("get_findings")
+    for page in paginator.paginate(Filters={
+        "UpdatedAt": [{"Start": since_iso, "End": now_iso}],
+        "RecordState": [{"Value": "ACTIVE", "Comparison": "EQUALS"}],
+        "WorkflowStatus": [{"Value": "NEW", "Comparison": "EQUALS"}],
+    }):
+        for f in page.get("Findings", []):
+            res = (f.get("Resources") or [{}])[0]
+            label = str((f.get("Severity") or {}).get("Label", "MEDIUM")).lower()
+            out.append(SecurityEvent(
+                source="securityhub", event_id=f.get("Id", ""),
+                title=f.get("Title", "Security Hub finding"),
+                description=f.get("Description", ""),
+                severity="low" if label == "informational" else label,
+                resource_id=res.get("Id", "unknown"),
+                resource_type=res.get("Type", "unknown"),
+                occurred_at=f.get("UpdatedAt", since_iso),
+            ))
+    return out
+
+
 def run_incremental_poll() -> int:
     """Return the number of new findings emitted. Filled in by Task 4.5."""
     return 0
