@@ -67,9 +67,12 @@ class TestSecurityJobStubs:
         assert n == 1
         assert sess.add.call_count == 1
 
-    def test_run_incremental_poll_stub_returns_int(self):
-        from agenticops.security.incremental_poll import run_incremental_poll
-        assert run_incremental_poll() == 0
+    def test_run_incremental_poll_returns_int(self):
+        from unittest.mock import patch
+        from agenticops.security import incremental_poll
+        # Hermetic: no enabled accounts -> zero emissions, no AWS/DB access.
+        with patch.object(incremental_poll, "_resolve_security_accounts", return_value=[]):
+            assert incremental_poll.run_incremental_poll() == 0
 
     def test_cron_from_interval_minutes(self):
         # helper mirrors galaxy seed's <60 -> */N, >=60 -> 0 */(N//60)

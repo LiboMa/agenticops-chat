@@ -155,3 +155,84 @@ class TestAggregateTopology:
              _patch("agenticops.security.collectors.collect_network_acls", return_value={}):
             instances, subnets, sgs, nacls = ps._aggregate_topology("acct-a")
         assert (instances, subnets, sgs, nacls) == ({}, {}, {}, {})
+
+
+def _annotated(reach="reachable"):
+    f = PostureFinding("network", "cis-4.1", "sg-1", "SecurityGroup", "0.0.0.0/0:22", "high")
+    return [{"finding": f, "reachability": reach,
+             "path": ["internet", "sn-1", "i-1:22"], "port": 22}]
+
+
+class TestExposureWiring:
+    def test_build_exposure_paths_sorted_and_filtered(self):
+        import agenticops.security.posture_snapshot as ps
+        f_net = PostureFinding("network", "cis-4.1", "sg-b", "SG", "open", "high")
+        f_net2 = PostureFinding("network", "cis-4.2", "sg-a", "SG", "open", "high")
+        f_iam = PostureFinding("iam", "cis-1.3", "alice", "IAMUser", "stale")
+        rows = ps._build_exposure_paths([
+            {"finding": f_net, "reachability": "not_reachable", "path": [], "port": 22},
+            {"finding": f_net2, "reachability": "reachable",
+             "path": ["internet", "sn-1", "i-1:3389"], "port": 3389},
+            {"finding": f_iam, "reachability": "n/a", "path": [], "port": None},
+        ])
+        assert [r["reachability"] for r in rows] == ["reachable", "not_reachable"]
+        assert rows[0]["resource_id"] == "sg-a"
+
+    def test_emit_only_actionable(self):
+        import agenticops.security.posture_snapshot as ps
+        from unittest.mock import MagicMock
+        low = PostureFinding("data", "cis-enc", "vol-1", "EBSVolume", "unencrypted")  # medium
+        high = PostureFinding("iam", "cis-1.4", "<root_account>", "IAMRoot", "root key", "high")
+        annotated = [
+            {"finding": low, "reachability": "n/a", "path": [], "port": None},
+            {"finding": high, "reachability": "n/a", "path": [], "port": None},
+        ]
+        calls = []
+        with _patch("agenticops.services.signal_gate.process_signal",
+                    side_effect=lambda sig: calls.append(sig) or MagicMock()):
+            n = ps._emit_posture_signals("acct-a", annotated)
+        assert n == 1
+        assert calls[0].issue_type == "iam_risk"
+        assert calls[0].auto_rca is False
+        assert calls[0].detected_by == "security_posture"
+        assert calls[0].upstream_key == "cis-1.4|<root_account>"
+
+    def test_snapshot_gets_exposure_paths_and_survives_topology_failure(self, monkeypatch):
+        import agenticops.security.posture_snapshot as ps
+        from agenticops import models
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from contextlib import contextmanager
+        engine = create_engine("sqlite:///:memory:")
+        models.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+
+        @contextmanager
+        def _sess():
+            s = Session()
+            try:
+                yield s
+                s.commit()
+            finally:
+                s.close()
+
+        monkeypatch.setattr(ps, "get_db_session", _sess)
+        monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a"])
+        f = PostureFinding("network", "cis-4.1", "sg-1", "SecurityGroup", "open", "high")
+        monkeypatch.setattr(ps, "collect_posture", lambda a: [f])
+        monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
+        monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
+        with _patch("agenticops.security.posture_snapshot.annotate",
+                    return_value=_annotated("reachable")):
+            n = ps.run_posture_snapshot()
+        assert n == 1
+        with _sess() as s:
+            snap = s.query(models.SecuritySnapshot).one()
+            assert snap.exposure_paths[0]["reachability"] == "reachable"
+
+        # topology aggregation blowing up must not kill the snapshot
+        def _boom(a):
+            raise RuntimeError("topology down")
+        monkeypatch.setattr(ps, "_aggregate_topology", _boom)
+        n = ps.run_posture_snapshot()
+        assert n == 1  # snapshot still written, exposure_paths []

@@ -257,17 +257,17 @@ def run_incremental_poll() -> int:
         for region in _enabled_regions(account):
             for source, poller in _SOURCE_POLLERS.items():
                 poll_start = datetime.now(timezone.utc).isoformat()
-                with get_db_session() as session:
-                    since = _get_cursor(session, account, source, region)
                 try:
+                    with get_db_session() as session:
+                        since = _get_cursor(session, account, source, region)
                     events = poller(account, region, since)
+                    for ev in sorted(events, key=lambda e: e.occurred_at):
+                        if _emit_signal(ev, account, reach_map):
+                            emitted += 1
+                    with get_db_session() as session:
+                        _set_cursor(session, account, source, region, poll_start)
                 except Exception as e:
                     logger.warning("%s poll failed for %s/%s: %s (cursor kept)",
                                    source, account, region, e)
                     continue
-                for ev in sorted(events, key=lambda e: e.occurred_at):
-                    if _emit_signal(ev, account, reach_map):
-                        emitted += 1
-                with get_db_session() as session:
-                    _set_cursor(session, account, source, region, poll_start)
     return emitted

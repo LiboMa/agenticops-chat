@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from agenticops.config import settings
 from agenticops.models import SecuritySnapshot, get_db_session
 from agenticops.security.collectors import _enabled_regions, collect_posture
+from agenticops.security.reachability import annotate
 from agenticops.security.scoring import score
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,57 @@ def _aggregate_topology(account: str) -> tuple[dict, dict, dict, dict]:
     return instances, subnets, sgs, nacls
 
 
+_REACH_ORDER = {"reachable": 0, "undetermined": 1, "not_reachable": 2}
+_CATEGORY_ISSUE_TYPE = {"iam": "iam_risk", "network": "security_exposure",
+                        "data": "security_exposure", "logging": "security_finding"}
+
+
+def _build_exposure_paths(annotated: list, cap: int = 50) -> list[dict]:
+    """Reproducible exposure rows for the snapshot: reachable first, then
+    undetermined, then not_reachable; ties by resource_id. n/a rows dropped."""
+    rows = [{"resource_id": a["finding"].resource_id, "port": a["port"],
+             "path": a["path"], "reachability": a["reachability"]}
+            for a in annotated if a["reachability"] != "n/a"]
+    rows.sort(key=lambda r: (_REACH_ORDER.get(r["reachability"], 3), str(r["resource_id"])))
+    return rows[:cap]
+
+
+def _is_actionable(entry: dict) -> bool:
+    """Actionable finding (spec 'executable'): high severity, or proven-open path."""
+    return entry["finding"].severity_hint == "high" or entry["reachability"] == "reachable"
+
+
+def _emit_posture_signals(account: str, annotated: list) -> int:
+    """Actionable posture findings -> signal gate (auto_rca off). Fail-soft per finding."""
+    emitted = 0
+    for entry in annotated:
+        if not _is_actionable(entry):
+            continue
+        f = entry["finding"]
+        try:
+            from agenticops.services.signal_gate import SignalInput, process_signal
+            process_signal(SignalInput(
+                source="security_posture",
+                title=f"[{f.control_id}] {f.resource_type} {f.resource_id}: {f.raw_check}"[:300],
+                description=f.raw_check,
+                severity=f.severity_hint,
+                resource_id=f.resource_id,
+                account_id=account,
+                issue_type=_CATEGORY_ISSUE_TYPE.get(f.category, "security_finding"),
+                upstream_key=f"{f.control_id}|{f.resource_id}",
+                kind="detection",
+                metric_data={"control_id": f.control_id,
+                             "reachability": entry["reachability"],
+                             "path": entry["path"], "port": entry["port"]},
+                auto_rca=False,
+                detected_by="security_posture",
+            ))
+            emitted += 1
+        except Exception as e:
+            logger.warning("posture signal failed (%s %s): %s", f.control_id, f.resource_id, e)
+    return emitted
+
+
 def run_posture_snapshot() -> int:
     """Collect posture + score + persist one SecuritySnapshot per enabled account.
     Returns the number of snapshots written. Per-account failures are isolated."""
@@ -96,16 +148,24 @@ def run_posture_snapshot() -> int:
         try:
             findings = collect_posture(account)
             result = score(findings)
+            annotated: list = []
+            try:
+                instances, subnets, sgs, nacls = _aggregate_topology(account)
+                annotated = annotate(findings, instances, subnets, sgs, nacls=nacls)
+            except Exception as e:
+                logger.warning("reachability annotation failed for %s: %s "
+                               "(snapshot written without exposure paths)", account, e)
             with get_db_session() as session:
                 session.add(SecuritySnapshot(
                     account_id=account, provider="aws",
                     overall_score=result.overall_score,
                     category_scores=result.category_scores,
                     metrics=result.metrics,
-                    exposure_paths=[],  # filled by reachability in Stage 2+
+                    exposure_paths=_build_exposure_paths(annotated),
                     cis_results=result.cis_results,
                 ))
                 _prune_old_snapshots(session)
+            _emit_posture_signals(account, annotated)
             written += 1
         except Exception as e:
             logger.warning("posture snapshot failed for account %s: %s", account, e)
