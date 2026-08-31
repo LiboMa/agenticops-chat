@@ -55,3 +55,59 @@ class TestCursorStore:
             rows = s.query(models.SecurityPollCursor).all()
             assert len(rows) == 1
             assert rows[0].cursor == "2026-08-31T02:00:00+00:00"
+
+
+def _gd_finding(fid, sev, updated="2026-08-31T02:00:00.000Z", instance="i-1"):
+    return {
+        "Id": fid, "Severity": sev, "UpdatedAt": updated,
+        "Title": "Recon:EC2/PortProbeUnprotectedPort",
+        "Description": "EC2 instance has an unprotected port probed.",
+        "Resource": {"ResourceType": "Instance",
+                     "InstanceDetails": {"InstanceId": instance}},
+    }
+
+
+class TestGuardDutyPoller:
+    def _client(self, findings):
+        gd = MagicMock()
+        gd.list_detectors.return_value = {"DetectorIds": ["det-1"]}
+        paginator = MagicMock()
+        paginator.paginate.return_value = [{"FindingIds": [f["Id"] for f in findings]}]
+        gd.get_paginator.return_value = paginator
+        gd.get_findings.return_value = {"Findings": findings}
+        return gd
+
+    def test_maps_finding_to_security_event(self):
+        from agenticops.security.incremental_poll import poll_guardduty
+        gd = self._client([_gd_finding("f-1", 8.0)])
+        with patch("agenticops.security.incremental_poll._get_client", return_value=gd):
+            out = poll_guardduty("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert len(out) == 1
+        ev = out[0]
+        assert ev.source == "guardduty"
+        assert ev.event_id == "f-1"
+        assert ev.severity == "high"
+        assert ev.resource_id == "i-1"
+        assert ev.occurred_at == "2026-08-31T02:00:00.000Z"
+
+    def test_severity_bands(self):
+        from agenticops.security.incremental_poll import _gd_severity
+        assert _gd_severity(9.1) == "critical"
+        assert _gd_severity(7.0) == "high"
+        assert _gd_severity(4.5) == "medium"
+        assert _gd_severity(2.0) == "low"
+
+    def test_no_detector_returns_empty(self):
+        from agenticops.security.incremental_poll import poll_guardduty
+        gd = MagicMock()
+        gd.list_detectors.return_value = {"DetectorIds": []}
+        with patch("agenticops.security.incremental_poll._get_client", return_value=gd):
+            assert poll_guardduty("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00") == []
+
+    def test_api_error_propagates(self):
+        from agenticops.security.incremental_poll import poll_guardduty
+        gd = MagicMock()
+        gd.list_detectors.side_effect = RuntimeError("boom")
+        with patch("agenticops.security.incremental_poll._get_client", return_value=gd):
+            with pytest.raises(RuntimeError):
+                poll_guardduty("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")

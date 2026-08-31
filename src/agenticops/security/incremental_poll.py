@@ -8,11 +8,32 @@ through the provider layer for the target account — never ambient.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 _BACKFILL_HOURS = 24  # first run: bounded backfill window
+
+
+def _get_client(service: str, region: str, account: str = ""):
+    """Provider-layer client for the target account (never ambient)."""
+    from agenticops.security.collectors import _get_client as _c
+    return _c(service, region, account)
+
+
+@dataclass
+class SecurityEvent:
+    """One normalized fast-path security event from an official source."""
+    source: str          # guardduty | securityhub | cloudtrail
+    event_id: str        # upstream unique id -> SignalInput.upstream_key
+    title: str
+    description: str
+    severity: str        # critical | high | medium | low
+    resource_id: str
+    resource_type: str
+    occurred_at: str     # upstream ISO8601 timestamp
+    raw: dict = field(default_factory=dict)
 
 
 def _get_cursor(session, account: str, source: str, region: str) -> str:
@@ -34,6 +55,56 @@ def _set_cursor(session, account: str, source: str, region: str, value: str) -> 
     else:
         session.add(SecurityPollCursor(
             account_id=account, source=source, region=region, cursor=value))
+
+
+def _gd_severity(sev: float) -> str:
+    """AWS GuardDuty numeric severity bands."""
+    if sev >= 9.0:
+        return "critical"
+    if sev >= 7.0:
+        return "high"
+    if sev >= 4.0:
+        return "medium"
+    return "low"
+
+
+def _gd_resource(finding: dict) -> tuple[str, str]:
+    res = finding.get("Resource", {}) or {}
+    inst = (res.get("InstanceDetails") or {}).get("InstanceId")
+    if inst:
+        return inst, "Instance"
+    key = (res.get("AccessKeyDetails") or {}).get("UserName")
+    if key:
+        return key, "IAMUser"
+    return "unknown", res.get("ResourceType", "unknown")
+
+
+def poll_guardduty(account: str, region: str, since_iso: str) -> list[SecurityEvent]:
+    """GuardDuty findings updated since the cursor. Raises on API error."""
+    gd = _get_client("guardduty", region, account)
+    out: list[SecurityEvent] = []
+    since_ms = int(datetime.fromisoformat(since_iso.replace("Z", "+00:00")).timestamp() * 1000)
+    for det in gd.list_detectors().get("DetectorIds", []):
+        ids: list[str] = []
+        paginator = gd.get_paginator("list_findings")
+        for page in paginator.paginate(
+            DetectorId=det,
+            FindingCriteria={"Criterion": {"updatedAt": {"Gte": since_ms}}},
+        ):
+            ids.extend(page.get("FindingIds", []))
+        for i in range(0, len(ids), 50):
+            for f in gd.get_findings(DetectorId=det, FindingIds=ids[i:i + 50]).get("Findings", []):
+                rid, rtype = _gd_resource(f)
+                out.append(SecurityEvent(
+                    source="guardduty", event_id=f.get("Id", ""),
+                    title=f.get("Title", "GuardDuty finding"),
+                    description=f.get("Description", ""),
+                    severity=_gd_severity(float(f.get("Severity", 0))),
+                    resource_id=rid, resource_type=rtype,
+                    occurred_at=f.get("UpdatedAt", since_iso),
+                    raw={"type": f.get("Type", "")},
+                ))
+    return out
 
 
 def run_incremental_poll() -> int:
