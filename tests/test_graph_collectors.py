@@ -28,7 +28,7 @@ def _paginator(pages: list[dict]):
 
 def _client_factory(clients: dict[str, MagicMock]):
     """Return a function that returns the right mock client for each service."""
-    def factory(service_name, region):
+    def factory(service_name, region, account=""):
         return clients.get(service_name, MagicMock())
     return factory
 
@@ -489,3 +489,21 @@ class TestCollectEcsTopology:
         from agenticops.graph.collectors import collect_ecs_topology
         result = collect_ecs_topology("us-east-1", "c1")
         assert result["tasks"][0]["subnet_id"] == ""
+
+
+class TestAccountAddressing:
+    def test_collect_vpc_compute_threads_account_to_all_clients(self):
+        from unittest.mock import MagicMock, patch
+        from agenticops.graph.collectors import collect_vpc_compute
+        client = MagicMock()
+        paginator = MagicMock()
+        paginator.paginate.return_value = []
+        client.get_paginator.return_value = paginator
+        client.list_functions.return_value = {"Functions": []}
+        client.describe_target_groups.return_value = {"TargetGroups": []}
+        client.describe_cache_clusters.return_value = {"CacheClusters": []}
+        with patch("agenticops.graph.collectors._get_client", return_value=client) as gc:
+            collect_vpc_compute("us-east-1", "vpc-1", account="acct-b")
+        assert gc.call_count >= 2
+        for call in gc.call_args_list:
+            assert call.args[2:] == ("acct-b",) or call.kwargs.get("account") == "acct-b"

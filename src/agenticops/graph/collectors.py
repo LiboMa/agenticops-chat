@@ -18,7 +18,7 @@ def _get_client(service_name: str, region: str, account: str = ""):
     return _aws_get_client(service_name, region, account)
 
 
-def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
+def collect_vpc_compute(region: str, vpc_id: str, account: str = "") -> dict[str, Any]:
     """Collect compute/service resources within a VPC.
 
     Returns:
@@ -35,7 +35,7 @@ def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
 
     # EC2 instances in the VPC
     try:
-        ec2 = _get_client("ec2", region)
+        ec2 = _get_client("ec2", region, account)
         paginator = ec2.get_paginator("describe_instances")
         for page in paginator.paginate(
             Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
@@ -64,7 +64,7 @@ def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
 
     # RDS instances in the VPC
     try:
-        rds = _get_client("rds", region)
+        rds = _get_client("rds", region, account)
         paginator = rds.get_paginator("describe_db_instances")
         for page in paginator.paginate():
             for db in page.get("DBInstances", []):
@@ -95,7 +95,7 @@ def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
 
     # Lambda functions in the VPC
     try:
-        lam = _get_client("lambda", region)
+        lam = _get_client("lambda", region, account)
         paginator = lam.get_paginator("list_functions")
         for page in paginator.paginate():
             for fn in page.get("Functions", []):
@@ -117,7 +117,7 @@ def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
 
     # ELBv2 Target Groups
     try:
-        elbv2 = _get_client("elbv2", region)
+        elbv2 = _get_client("elbv2", region, account)
         paginator = elbv2.get_paginator("describe_target_groups")
         for page in paginator.paginate():
             for tg in page.get("TargetGroups", []):
@@ -150,7 +150,7 @@ def collect_vpc_compute(region: str, vpc_id: str) -> dict[str, Any]:
 
     # ElastiCache clusters in the VPC
     try:
-        ec_client = _get_client("elasticache", region)
+        ec_client = _get_client("elasticache", region, account)
         paginator = ec_client.get_paginator("describe_cache_clusters")
         for page in paginator.paginate(ShowCacheNodeInfo=True):
             for cluster in page.get("CacheClusters", []):
