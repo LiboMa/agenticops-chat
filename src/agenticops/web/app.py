@@ -309,6 +309,8 @@ from agenticops.galaxy.api import router as _galaxy_router
 app.include_router(_galaxy_router)
 from agenticops.web.routers import signals as _signals_router
 app.include_router(_signals_router.router)
+from agenticops.web.routers import security as _security_router
+app.include_router(_security_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -3551,7 +3553,8 @@ async def api_list_schedules():
 async def api_pipeline_options():
     """Return available pipeline names and AgentChain config schema."""
     return {
-        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "GalaxyBuild", "AgentChain"],
+        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "GalaxyBuild",
+                      "SecurityPostureSnapshot", "SecurityIncrementalPoll", "AgentChain"],
         "agent_chain_config": {
             "prompt": {"type": "string", "required": True, "description": "Task description for the agent"},
             "skills": {"type": "array", "required": False, "description": "Skills to activate"},

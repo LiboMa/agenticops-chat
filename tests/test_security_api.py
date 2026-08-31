@@ -94,3 +94,44 @@ class TestSecurityService:
         assert paths == [{"account_id": "acct-a", "resource_id": "sg-1", "port": 22,
                           "path": ["internet", "sn-1", "i-1:22"],
                           "reachability": "reachable"}]
+
+
+from fastapi.testclient import TestClient
+
+from agenticops.web.app import app
+
+client = TestClient(app)
+
+
+class TestSecurityApiContract:
+    def test_summary_endpoint(self):
+        fake = {"accounts": [], "generated_at": "2026-08-31T00:00:00+00:00"}
+        with patch("agenticops.services.security_service.security_summary", return_value=fake):
+            r = client.get("/api/security/summary")
+        assert r.status_code == 200
+        assert r.json() == fake
+
+    def test_trend_params_forwarded(self):
+        with patch("agenticops.services.security_service.security_trend",
+                   return_value=[]) as m:
+            r = client.get("/api/security/trend?days=7&account=acct-a")
+        assert r.status_code == 200
+        assert m.call_args.kwargs == {"days": 7, "account": "acct-a"}
+
+    def test_findings_recommendations_attack_paths(self):
+        with patch("agenticops.services.security_service.security_findings",
+                   return_value=[]), \
+             patch("agenticops.services.security_service.security_recommendations",
+                   return_value=[]), \
+             patch("agenticops.services.security_service.attack_paths",
+                   return_value=[]):
+            assert client.get("/api/security/findings").status_code == 200
+            assert client.get("/api/security/recommendations?status=open").status_code == 200
+            assert client.get("/api/security/attack-paths").status_code == 200
+
+    def test_pipeline_options_include_security_jobs(self):
+        r = client.get("/api/schedules/pipeline-options")
+        assert r.status_code == 200
+        pipes = r.json()["pipelines"]
+        assert "SecurityPostureSnapshot" in pipes
+        assert "SecurityIncrementalPoll" in pipes
