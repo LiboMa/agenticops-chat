@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgenticOps — 平台全景 · 从一个梦，到一套会进化的系统</title>
+<style>
+:root{
+  --bg:#080b14; --bg2:#0c1322; --ink:#eaf0fb; --mut:#9db0cf; --dim:#67789a; --faint:#41506e;
+  --cyan:#38e1ff; --violet:#a78bfa; --amber:#fbbf24; --green:#34d399; --red:#f87171; --pink:#f472b6; --blue:#60a5fa;
+  --line:rgba(255,255,255,.09); --card:rgba(255,255,255,.035); --cardh:rgba(255,255,255,.065);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--bg);color:var(--ink);overflow:hidden;-webkit-font-smoothing:antialiased}
+#stage{position:fixed;inset:0}
+.slide{
+  position:absolute;inset:0;opacity:0;visibility:hidden;
+  display:flex;flex-direction:column;justify-content:center;
+  padding:5vh 6.5vw 8.5vh;transition:opacity .34s ease;overflow:auto;
+  background:
+    radial-gradient(1100px 620px at 16% -10%, rgba(56,225,255,.10), transparent 60%),
+    radial-gradient(1000px 660px at 94% 110%, rgba(167,139,250,.13), transparent 60%),
+    linear-gradient(162deg, var(--bg) 0%, var(--bg2) 100%);
+}
+.slide.active{opacity:1;visibility:visible}
+.slide.center{align-items:center;text-align:center}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-bottom:1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.eyebrow b{color:var(--cyan);font-weight:600}
+.eyebrow .amberpart{color:var(--amber)}
+.eyebrow .vpart{color:var(--violet)}
+h1{font-size:clamp(2rem,4.6vw,3.7rem);line-height:1.08;font-weight:820;letter-spacing:-.02em}
+h2{font-size:clamp(1.5rem,3.1vw,2.5rem);line-height:1.13;font-weight:760;letter-spacing:-.01em;margin-bottom:.4rem}
+h3{font-size:1.02rem;font-weight:700;letter-spacing:.01em}
+.grad{background:linear-gradient(100deg,var(--cyan),var(--violet) 55%,var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
+.warm{background:linear-gradient(100deg,var(--amber),var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
+.green-g{background:linear-gradient(100deg,var(--green),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:clamp(1rem,1.5vw,1.22rem);color:var(--mut);line-height:1.64;max-width:62ch;margin-top:.9rem}
+p{line-height:1.6}
+.mut{color:var(--mut)}.dim{color:var(--dim)}.mono{font-family:var(--mono)}
+.mt1{margin-top:.7rem}.mt2{margin-top:1.3rem}.mt3{margin-top:2rem}
+.grid{display:grid;gap:1rem;margin-top:1.5rem}
+.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}.g6{grid-template-columns:repeat(6,1fr)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:1.1rem 1.2rem;transition:.2s}
+.card:hover{background:var(--cardh);border-color:rgba(255,255,255,.16)}
+.card h3{margin-bottom:.4rem}
+.card p{font-size:.88rem;color:var(--mut);line-height:1.5}
+.card .k{font-family:var(--mono);font-size:.68rem;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.3rem}
+.ac-c{border-top:2px solid var(--cyan)}.ac-v{border-top:2px solid var(--violet)}.ac-a{border-top:2px solid var(--amber)}.ac-g{border-top:2px solid var(--green)}.ac-r{border-top:2px solid var(--red)}.ac-p{border-top:2px solid var(--pink)}.ac-b{border-top:2px solid var(--blue)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.9rem;margin-top:1.6rem}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:1.2rem 1rem;text-align:center}
+.stat .num{font-family:var(--mono);font-size:clamp(1.6rem,3.2vw,2.5rem);font-weight:800;line-height:1}
+.stat .lbl{color:var(--mut);font-size:.8rem;margin-top:.5rem;line-height:1.35}
+.n-c{color:var(--cyan)}.n-v{color:var(--violet)}.n-a{color:var(--amber)}.n-g{color:var(--green)}.n-p{color:var(--pink)}.n-r{color:var(--red)}.n-b{color:var(--blue)}
+.flow{display:flex;align-items:stretch;gap:.4rem;margin-top:1.4rem;flex-wrap:wrap}
+.step{flex:1;min-width:110px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.8rem .75rem}
+.step .s-t{font-weight:700;font-size:.9rem}
+.step .s-d{color:var(--dim);font-size:.72rem;margin-top:.25rem;line-height:1.4}
+.step .s-n{font-family:var(--mono);font-size:.64rem;color:var(--cyan)}
+.arrow{align-self:center;color:var(--faint);font-size:1rem}
+.pill{display:inline-flex;align-items:center;gap:.3rem;font-family:var(--mono);font-size:.7rem;padding:.26rem .58rem;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--mut)}
+.pills{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:1rem}
+.t-c{color:var(--cyan);border-color:rgba(56,225,255,.35)}.t-v{color:var(--violet);border-color:rgba(167,139,250,.35)}.t-a{color:var(--amber);border-color:rgba(251,191,36,.35)}.t-g{color:var(--green);border-color:rgba(52,211,153,.35)}.t-r{color:var(--red);border-color:rgba(248,113,113,.35)}
+.code{font-family:var(--mono);font-size:.78rem;background:rgba(0,0,0,.36);border:1px solid var(--line);border-radius:12px;padding:.95rem 1.1rem;line-height:1.62;color:#c8d6ef;overflow:auto;margin-top:1rem}
+.code .c{color:var(--faint)}.code .kw{color:var(--violet)}.code .st{color:var(--green)}.code .fn{color:var(--cyan)}.code .hl{color:var(--amber)}.code .rd{color:var(--red)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:2.2rem;align-items:center}
+.split.wide{grid-template-columns:1.1fr .9fr}.split.w2{grid-template-columns:.9fr 1.1fr}
+ul.clean{list-style:none;margin-top:.9rem}
+ul.clean li{position:relative;padding-left:1.3rem;margin:.55rem 0;color:var(--mut);line-height:1.55;font-size:.93rem}
+ul.clean li::before{content:"▸";position:absolute;left:0;color:var(--cyan)}
+ul.clean li b{color:var(--ink);font-weight:650}
+ul.clean.violet li::before{color:var(--violet)}ul.clean.amber li::before{color:var(--amber)}ul.clean.green li::before{color:var(--green)}ul.clean.red li::before{color:var(--red)}
+.quote{border-left:3px solid var(--amber);padding:.4rem 0 .4rem 1.3rem;font-size:1.12rem;line-height:1.62;color:var(--ink);font-style:italic;max-width:64ch}
+.big{font-size:clamp(1.5rem,3vw,2.4rem);line-height:1.4;font-weight:600;max-width:22ch;margin:0 auto}
+.diagram{background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:16px;padding:1.4rem;margin-top:1.3rem}
+.node{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.65rem 1rem;display:flex;align-items:center;gap:.6rem;font-size:.88rem}
+.node.router{border-color:rgba(56,225,255,.4);background:rgba(56,225,255,.06)}
+.node .b{font-weight:700}
+.connector{text-align:center;color:var(--faint);font-size:.85rem;padding:.15rem 0}
+.row-spec{display:grid;grid-template-columns:repeat(6,1fr);gap:.5rem;margin-top:.6rem}
+.spec{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.6rem .45rem;text-align:center}
+.spec .sn{font-weight:700;font-size:.84rem}.spec .sd{font-size:.66rem;color:var(--dim);margin-top:.15rem}
+.datebadge{display:inline-block;font-family:var(--mono);font-size:.78rem;color:var(--amber);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:.24rem .6rem;margin-bottom:.7rem}
+.river{display:flex;gap:0;margin-top:1.6rem;overflow-x:auto;padding-bottom:.5rem}
+.rstop{flex:0 0 auto;min-width:140px;position:relative;padding:0 .3rem}
+.rstop .rd{font-family:var(--mono);font-size:.7rem;color:var(--cyan)}
+.rstop .rt{font-size:.82rem;font-weight:650;margin-top:.3rem;line-height:1.35}
+.rstop .rl{height:2px;background:linear-gradient(90deg,var(--cyan),var(--violet));margin:.55rem 0;position:relative}
+.rstop .rl::after{content:"";position:absolute;right:0;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--violet)}
+.ladder{display:flex;flex-direction:column;gap:.5rem;margin-top:1.3rem}
+.rung{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.85rem 1.1rem;display:flex;gap:1rem;align-items:center}
+.rung .lv{font-family:var(--mono);font-weight:800;font-size:1rem;min-width:60px}
+.rung .lt{font-weight:700;font-size:.95rem}.rung .ld{color:var(--dim);font-size:.8rem;margin-top:.2rem}
+.foot{position:fixed;left:6.5vw;right:6.5vw;bottom:2.3vh;display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:.7rem;color:var(--faint);z-index:20}
+.foot .brand{color:var(--dim)}.foot .brand b{color:var(--cyan)}
+.dots{display:flex;gap:5px;flex-wrap:wrap;max-width:64vw;justify-content:center}
+.dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.16);cursor:pointer;transition:.2s}
+.dot.on{background:var(--cyan);transform:scale(1.4)}
+.dot.part{background:rgba(251,191,36,.45)}.dot.on.part{background:var(--amber)}
+.hint{position:fixed;top:2.3vh;right:6.5vw;font-family:var(--mono);font-size:.66rem;color:var(--faint);z-index:20}
+.count{position:fixed;top:2.3vh;left:6.5vw;font-family:var(--mono);font-size:.7rem;color:var(--mut);z-index:20}
+.count b{color:var(--cyan)}
+.chapter{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;color:var(--faint);position:fixed;top:2.3vh;left:50%;transform:translateX(-50%);z-index:20}
+@media print{.slide{position:relative;opacity:1!important;visibility:visible!important;page-break-after:always;height:100vh}.foot,.hint,.count,.dots,.chapter{display:none}}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- ============ 0 · COVER ============ -->
+<section class="slide center active">
+  <div class="eyebrow" style="justify-content:center"><b>AgenticOps</b> · 平台全景技术演示</div>
+  <h1>从一个<span class="warm">梦</span>，<br>到一套会<span class="grad">进化</span>的系统</h1>
+  <p class="lead" style="margin-left:auto;margin-right:auto">一支专家 AI 团队，替你扫描、发现、定位、修复云上的问题——<br>并且<b>越用越聪明</b>。这是它一路走来的全部：架构、流程、技术自动化、Skills 自治、自优化记忆。</p>
+  <div class="pills" style="justify-content:center">
+    <span class="pill t-c">7 Agent 协作</span><span class="pill t-v">自动修复闭环</span><span class="pill t-a">Skills 自主进化</span>
+    <span class="pill t-g">自优化记忆</span><span class="pill t-r">凭证安全铁律</span><span class="pill">6 个月 · 从 CLI 到平台</span>
+  </div>
+  <p class="dim mono mt3" style="font-size:.72rem">2026.02 → 2026.08 · v1.0.0 → v2.5.0 · 一切数字取自本仓库真实记录</p>
+</section>
+
+<!-- ============ 第一部 · 总 ============ -->
+
+<!-- 1 · THE DREAM -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center"><span class="amberpart">第一部 · 总</span> — THE DREAM</div>
+  <div class="big warm">"想想有一天，你早上醒来，打开手机，收到一条消息：<br><span class="grad">昨天发现的几个问题，都已经解决了。</span><br>你喝了口咖啡，听着 Agent 讲它解决问题的过程，<br>开启美好的一天。"</div>
+  <p class="dim mt3" style="font-size:.9rem">—— 这句话，写在项目的第一份核心构想文档里。<br>此后六个月的每一行代码，都是在把这句话变成真的。</p>
+</section>
+
+<!-- 2 · ONE SENTENCE -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 一句话，它是什么</div>
+  <h2>不是又一个<span class="dim">仪表盘</span>，<br>是一个替你<span class="grad">闭环</span>的 on-call 副驾</h2>
+  <p class="lead">一支专业 AI Agent 团队，扫描你的云基础设施、发现问题、找到根因、规划修复，并对低风险问题<b>自主修复</b>——高风险的，永远留一个人在环内。它们还会<b>学习</b>：每一次操作都在打磨一套自优化的记忆与技能库。</p>
+  <div class="grid g3 mt3">
+    <div class="card ac-c"><h3>发现 → 定位 → 修复</h3><p>从 alert 到 root cause 到 fix 的整条链路自动闭合，而不是把问题丢回给你。</p></div>
+    <div class="card ac-v"><h3>安全地自治</h3><p>读、规划、执行三权分立；只有 Executor 能动手，且必须过审批门。</p></div>
+    <div class="card ac-a"><h3>越用越准</h3><p>记忆与技能在硬安全边界内自我优化；人写的知识钉死，Agent 写的只作草稿。</p></div>
+  </div>
+</section>
+
+<!-- 3 · THREE WAYS IN -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 三种入口，一个大脑</div>
+  <h2>你用<span class="grad">自然语言</span>说出意图，<br>剩下的交给这支团队</h2>
+  <div class="diagram">
+    <div style="display:flex;gap:1.5rem;align-items:center;justify-content:center;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:.5rem">
+        <div class="node"><span class="mono n-c">CLI</span> · aiops chat（REPL / headless）</div>
+        <div class="node"><span class="mono n-v">Web</span> · React 仪表盘 · SSE 流式</div>
+        <div class="node"><span class="mono n-a">IM</span> · 飞书 / Slack 机器人</div>
+        <div class="node"><span class="mono n-g">Webhook</span> · Prometheus / CloudWatch / Datadog</div>
+      </div>
+      <div style="font-size:1.6rem;color:var(--faint)">→</div>
+      <div class="node router" style="font-size:1rem;padding:1rem 1.4rem"><span class="b n-c">Main Agent</span> · 路由与编排</div>
+      <div style="font-size:1.6rem;color:var(--faint)">→</div>
+      <div style="display:flex;flex-direction:column;gap:.5rem">
+        <div class="node">6 位专家 Agent</div>
+        <div class="node">经 STS AssumeRole → AWS</div>
+        <div class="node">记忆 · 技能 · 拓扑图 · 知识库</div>
+      </div>
+    </div>
+  </div>
+  <p class="dim mt2" style="max-width:70ch">四种入口，同一支 Agent 团队，一致的处理质量与全程审计留痕。UI 只是握手方式——真正干活的是背后的推理与工具。</p>
+</section>
+
+<!-- 4 · 30-SEC FLOW -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 三十秒看懂全程</div>
+  <h2>一条意图，<span class="grad">跑完整个闭环</span></h2>
+  <div class="flow">
+    <div class="step ac-c"><div class="s-n">SCAN</div><div class="s-t">扫描</div><div class="s-d">盘点多账户资源</div></div><div class="arrow">→</div>
+    <div class="step ac-c"><div class="s-n">DETECT</div><div class="s-t">检测</div><div class="s-d">指标/日志/巡检异常</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-n">RCA</div><div class="s-t">根因</div><div class="s-d">证据链 + 置信度</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-n">SRE</div><div class="s-t">方案</div><div class="s-d">分级修复计划</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-n">APPROVE</div><div class="s-t">审批</div><div class="s-d">L0/L1 自动·高危等人</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-n">EXECUTE</div><div class="s-t">执行</div><div class="s-d">前检→执行→后检</div></div><div class="arrow">→</div>
+    <div class="step ac-g"><div class="s-n">RESOLVE</div><div class="s-t">收敛</div><div class="s-d">案例沉淀入库</div></div>
+  </div>
+  <div class="code mt3"><span class="c"># 一段真实的对话，就能驱动整条链</span>
+<span class="hl">你</span>: 检查一下 prod 的健康 → <span class="fn">Detect</span> 拉 CloudWatch + 指标 + 日志 → 创建 HealthIssue
+<span class="hl">你</span>: 分析 I#42       → <span class="fn">RCA</span> 关联 CloudTrail + 拓扑 + 知识库 → 根因（置信度 0.85）
+<span class="hl">你</span>: 修 I#42         → <span class="fn">SRE</span> 生成分级修复计划（L2：扩容实例）
+<span class="hl">你</span>: 批准 plan 7     → 审批门 → <span class="fn">Executor</span> 前检→执行→后检 → resolved → 案例入库</div>
+</section>
+
+<!-- 5 · SIX PRINCIPLES -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 六条设计信条 · 系统的 DNA</div>
+  <h2>几乎所有设计决策，<span class="grad">都源自这六条</span></h2>
+  <div class="grid g3 mt2">
+    <div class="card ac-c"><div class="k">01</div><h3>Agent 即工具</h3><p>Main 是纯路由；每个专家都是可调用的工具，专家之间不直接对话。</p></div>
+    <div class="card ac-v"><div class="k">02</div><h3>读/规划/执行分离</h3><p>SRE 只规划、绝不动手；只有 Executor 执行，且必须过审批门。风险分级：L0/L1 自动，L2/L3 等人。</p></div>
+    <div class="card ac-a"><div class="k">03</div><h3>分层模型控成本</h3><p>最重的推理用 Opus，路由与高吞吐用 Sonnet，经济档用 Haiku。逐 Agent 可覆盖，token/成本实时可查。</p></div>
+    <div class="card ac-g"><div class="k">04</div><h3>安全地学习</h3><p>记忆与技能在硬边界内自优化：Agent 写入只作草稿，发布须过安检，人写知识钉死不动。</p></div>
+    <div class="card ac-b"><div class="k">05</div><h3>配置单一真相源</h3><p><span class="mono">config/settings.yaml</span> 定义一切，环境变量覆盖它。代码绝不硬编码值。</p></div>
+    <div class="card ac-p"><div class="k">06</div><h3>默认从简</h3><p>本地 SQLite + 文件记忆；只有选 cloud 档才上 Postgres + S3。没有当下需求，绝不引入依赖。</p></div>
+  </div>
+</section>
+
+<!-- 6 · L1-L5 SWEET SPOT -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 刻意的边界：L3–L4 甜蜜点</div>
+  <div class="split wide">
+    <div>
+      <h2>我们<span class="warm">明确不做</span> L5 全自主</h2>
+      <p class="lead">从第一天起就想清楚了边界：告诉你问题在哪、怎么修——低风险我来按按钮，高风险你来点头。这是当下企业最能接受的信任边界，也是价值最浓的地带。</p>
+      <p class="mut mt2">"你告诉我问题在哪、怎么修，我来按按钮。" —— L3 到 L4 之间，就是我们的甜蜜点。</p>
+    </div>
+    <div class="ladder">
+      <div class="rung" style="opacity:.5"><div class="lv dim">L1</div><div><div class="lt">告警转发</div><div class="ld">原样推送 —— 不是我们</div></div></div>
+      <div class="rung ac-c"><div class="lv n-c">L2</div><div><div class="lt">智能摘要</div><div class="ld">降噪 + 聚合 + 优先级 · Detect</div></div></div>
+      <div class="rung ac-v"><div class="lv n-v">L3</div><div><div class="lt">根因 + 修复建议</div><div class="ld">RCA Agent</div></div></div>
+      <div class="rung ac-a"><div class="lv n-a">L4</div><div><div class="lt">人工确认后自动执行</div><div class="ld">SRE + Executor + 审批门 ★ 我们的落点</div></div></div>
+      <div class="rung" style="opacity:.5"><div class="lv dim">L5</div><div><div class="lt">完全自主修复</div><div class="ld">明确不做</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · FULL ARCHITECTURE -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 一张图看全貌</div>
+  <h2>整体架构：<span class="grad">一个路由，六个专家，一层地基</span></h2>
+  <div class="diagram">
+    <div class="node router"><span class="b n-c">Main Agent（路由 · Opus 4.8）</span> —— 唯一与用户对话，分类意图、把专家当工具调度、聚合结果</div>
+    <div class="connector">▼ agents-as-tools ▼</div>
+    <div class="row-spec">
+      <div class="spec"><div class="sn n-c">Scan</div><div class="sd">盘点·只读</div></div>
+      <div class="spec"><div class="sn n-c">Detect</div><div class="sd">检测·只读</div></div>
+      <div class="spec"><div class="sn n-v">RCA</div><div class="sd">根因·只读</div></div>
+      <div class="spec"><div class="sn n-v">SRE</div><div class="sd">规划·只读</div></div>
+      <div class="spec"><div class="sn n-a">Executor</div><div class="sd">唯一动手</div></div>
+      <div class="spec"><div class="sn n-g">Reporter</div><div class="sd">报告·沉淀</div></div>
+    </div>
+    <div class="connector">▼ 共享地基 ▼</div>
+    <div class="grid g4" style="margin-top:.5rem;gap:.5rem">
+      <div class="node" style="justify-content:center">Provider 层 · 多账户凭证</div>
+      <div class="node" style="justify-content:center">自优化记忆 + 技能库</div>
+      <div class="node" style="justify-content:center">拓扑图 · Galaxy · 知识库</div>
+      <div class="node" style="justify-content:center">SQLite / PostgreSQL</div>
+    </div>
+  </div>
+  <p class="dim mt2" style="max-width:72ch">安全脊柱：<b>只有 SRE 规划，只有 Executor 执行，且只通过审批门</b>。这条脊柱贯穿全篇——后面每一个模块，都是它的延伸。</p>
+</section>
+
+<!-- 8 · BY THE NUMBERS -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第一部 · 总</span> — 把"全面"量化出来</div>
+  <h2>规模，与<span class="grad">成长</span></h2>
+  <div class="stats">
+    <div class="stat"><div class="num n-c">7</div><div class="lbl">协作 Agent<br>1 路由 + 6 专家</div></div>
+    <div class="stat"><div class="num n-v">~198</div><div class="lbl">API 路由<br>166 主 + 32 路由器</div></div>
+    <div class="stat"><div class="num n-a">16</div><div class="lbl">前端页面<br>React + TanStack</div></div>
+    <div class="stat"><div class="num n-g">15</div><div class="lbl">领域技能<br>+ Agent 自建草稿</div></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="num n-p">215</div><div class="lbl">Python 模块<br>~35 顶层子系统</div></div>
+    <div class="stat"><div class="num n-b">~29</div><div class="lbl">数据模型表</div></div>
+    <div class="stat"><div class="num n-c">17</div><div class="lbl">服务层</div></div>
+    <div class="stat"><div class="num n-g">207</div><div class="lbl">配置字段<br>settings.yaml</div></div>
+  </div>
+  <div class="card ac-a mt3" style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+    <div><div class="mono dim" style="font-size:.72rem">测试的成长 · 硬化的轨迹</div>
+    <div style="font-size:1.1rem;margin-top:.3rem"><span class="mono n-r">1,200</span> 个测试（2026-04）&nbsp;→&nbsp; <span class="mono n-g">3,859</span> 通过 / 66 skipped（2026-08 回归记录）</div></div>
+    <div class="dim" style="font-size:.85rem;max-width:34ch">数字不是拿来炫的——它是一条"越来越敢自动执行"的信任曲线。</div>
+  </div>
+</section>
+
+<!-- ============ 第二部 · 心路历程 ============ -->
+
+<!-- 9 · TIMELINE OVERVIEW -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — THE JOURNEY · 2026.02 → 2026.08</div>
+  <h2>六个月，<span class="grad">从一行 CLI 长成一个平台</span></h2>
+  <div class="river">
+    <div class="rstop"><div class="rd">02.13</div><div class="rl"></div><div class="rt">为什么是 Agent</div></div>
+    <div class="rstop"><div class="rd">02.27</div><div class="rl"></div><div class="rt">Skills 诞生</div></div>
+    <div class="rstop"><div class="rd">03.01</div><div class="rl"></div><div class="rt">自动修复闭环</div></div>
+    <div class="rstop"><div class="rd">03.07</div><div class="rl"></div><div class="rt">放弃语义网关</div></div>
+    <div class="rstop"><div class="rd">03.10</div><div class="rl"></div><div class="rt">MVP 1.0.0</div></div>
+    <div class="rstop"><div class="rd">05.29</div><div class="rl"></div><div class="rt">记忆觉醒</div></div>
+    <div class="rstop"><div class="rd">06.19</div><div class="rl"></div><div class="rt">治理式自治 2.0</div></div>
+    <div class="rstop"><div class="rd">07.05</div><div class="rl"></div><div class="rt">资源星图</div></div>
+    <div class="rstop"><div class="rd">07.21</div><div class="rl"></div><div class="rt">信任层重构 2.2</div></div>
+    <div class="rstop"><div class="rd">08.31</div><div class="rl"></div><div class="rt">云安全审查 2.5</div></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">这不是一条平滑的直线。中间有过大胆的设想、也有过郑重的放弃——正是那些"想清楚后砍掉的"，塑造了今天的样子。接下来，我们沿着这条河，一段段走。</p>
+</section>
+
+<!-- 10 · CLI-FIRST ORIGIN -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 起点</div>
+  <div class="split wide">
+    <div>
+      <span class="datebadge">2026.02.14 – 02.22</span>
+      <h2>先把 <span class="grad">CLI</span> 做到极致</h2>
+      <p class="lead">最早的几周，没有网页、没有按钮。只有一个 <span class="mono">aiops chat</span> 的对话框、token 追踪、和 27 个后端 API。一切从命令行长出来。</p>
+      <div class="quote mt2">"把 CLI 做极致，API 自然就有了；把 API 做极致，UI 只是一个实现细节。"</div>
+    </div>
+    <div>
+      <ul class="clean">
+        <li><b>02.14</b> — Chat UI：智能截断、去掉假思考动画、markdown 渲染</li>
+        <li><b>02.22</b> — Chat + 后端 API：token 追踪、27 个端点、Anomaly→HealthIssue 迁移</li>
+        <li><b>02.26</b> — 拓扑图计算 + Chat 增强：<span class="mono">@file</span> 附件、<span class="mono">I#N/R#N</span> 引用解析、headless 管道</li>
+      </ul>
+      <p class="dim mt2" style="font-size:.85rem">把精力 100% 投进推理准确率与执行安全性——而不是按钮的颜色。这个取舍，定了整个项目的调性。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 11 · WHY AGENT -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 顿悟一</div>
+  <span class="datebadge">2026.02.13 · 架构愿景讨论</span>
+  <h2>为什么是 <span class="grad">Agent</span>，而不是固定管线？</h2>
+  <div class="split mt2">
+    <div class="card ac-r"><div class="k">Legacy 路径</div><h3>固定管线</h3>
+      <p class="mono mt1" style="color:var(--dim);font-size:.8rem">命令 → 固定代码 → 固定输出</p>
+      <p class="mt1">检测逻辑写死、输出写死、流程写死。只能做代码预定义的事，能力有固定上限。</p>
+    </div>
+    <div class="card ac-g"><div class="k">Agent 路径</div><h3>动态工作流</h3>
+      <p class="mono mt1" style="color:var(--green);font-size:.8rem">自然语言 → LLM 推理 → 动态选工具 → 动态定下一步</p>
+      <p class="mt1">发现部署事件就去查 CloudTrail、把日志和指标关联分析、看到 AccessDenied 知道是权限而非资源不存在。</p>
+    </div>
+  </div>
+  <div class="quote mt3">"这是 Agent 架构的核心投资价值——<span class="warm">架构工作不会过时，只会随模型进步而增值。</span>"</div>
+</section>
+
+<!-- 12 · SKILLS BORN -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — Skills 的诞生</div>
+  <div class="split w2">
+    <div>
+      <span class="datebadge">2026.02.27 – 02.28</span>
+      <h2>一次<span class="grad">质变</span>的扩展</h2>
+      <p class="lead">RCA 和 SRE 查资源时，拿到的信息太不具体——全是资源层面的。于是想到了 Skills：把 SSH、网络、数据库这些能力，以 SKILL.md 包的形式原生挂给任意 Agent。</p>
+      <p class="mut mt2">从此，整个应用有了<b>质的扩展性</b>：遇到新场景，加一个技能包就行，不用改管线。</p>
+    </div>
+    <div>
+      <ul class="clean amber">
+        <li>起步 <b>9 个领域技能</b>：linux / network / k8s / database / elasticsearch / monitoring / log / aws-compute / aws-storage</li>
+        <li>Python 层：loader（发现+解析）· security（三级安全分类）· execution（run_on_host / run_kubectl）</li>
+        <li><b>渐进式加载</b>：系统提示只花 ~636 token，用到才展开 ~3–5K token</li>
+      </ul>
+      <p class="dim mt2" style="font-size:.85rem">这颗种子，后来长成了整个"自主进化的技能库"（见第三部）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 13 · STATE MACHINE & TRUST -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 信任从"不能乱跳"开始</div>
+  <span class="datebadge">2026.02.28 · 优化冲刺</span>
+  <h2>要能自动执行，先得<span class="grad">状态不能乱来</span></h2>
+  <p class="mut mt1" style="max-width:66ch">同一个冲刺里落了三件事，件件都关乎"信任"：9 态状态机（108 个新测试）、API 认证中间件、多模态聊天。其中状态机是自动化的前提——没有它，一个 issue 可能同时"在修"又"已解决"。</p>
+  <div class="flow mt2" style="gap:.3rem">
+    <div class="step"><div class="s-t">open</div></div><div class="arrow">→</div>
+    <div class="step"><div class="s-t">investigating</div></div><div class="arrow">→</div>
+    <div class="step"><div class="s-t">acknowledged</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-t">root_cause_identified</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-t">fix_planned</div></div>
+  </div>
+  <div class="flow" style="gap:.3rem">
+    <div class="step ac-a"><div class="s-t">fix_approved</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">fix_executing</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">fix_executed</div></div><div class="arrow">→</div>
+    <div class="step ac-g"><div class="s-t">resolved</div></div>
+    <div class="arrow" style="color:var(--red)">⟲</div>
+    <div class="step"><div class="s-d">非法转移 → 409</div></div>
+  </div>
+</section>
+
+<!-- 14 · AUTO-FIX ONLINE -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 闭环合上了</div>
+  <div class="split wide">
+    <div>
+      <span class="datebadge">2026.03.01</span>
+      <h2>自动修复流水线<span class="grad">上线</span></h2>
+      <p class="lead">HealthIssue → RCA → SRE → 审批(L0/L1) → 执行 → 收敛，第一次真正跑通。三个独立开关把命门交到运维手里；L2/L3 强制人工。</p>
+      <ul class="clean mt2">
+        <li>多后端执行器：AWS CLI + SSM/SSH + kubectl + Skills</li>
+        <li>动态工具加载：<span class="mono">activate_skill()</span> 运行时注册工具</li>
+        <li>工具输出截断：治住"内容过大溢出上下文"的老毛病</li>
+      </ul>
+    </div>
+    <div>
+      <div class="code"><span class="c"># 三个独立的命门开关</span>
+<span class="hl">auto_fix_enabled</span>            <span class="c"># 总开关</span>
+<span class="hl">executor_auto_approve_l0_l1</span> <span class="c"># 低风险自动批</span>
+<span class="hl">executor_enabled</span>            <span class="c"># 执行器总闸</span>
+
+<span class="c"># 风险分级 → 不同归宿</span>
+L0/L1 <span class="fn">→</span> 全自动
+L2/L3 <span class="rd">→</span> 必须人工审批</div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · THE PIVOT -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 一次郑重的放弃</div>
+  <span class="datebadge">2026.03.06 → 03.07 · [DEPRECATED]</span>
+  <h2>我们本想造一个<span class="dim">"语义网关"</span>，<br>然后<span class="warm">把它砍了</span></h2>
+  <div class="split mt2">
+    <div>
+      <p class="mut">最初的设想很诱人：在告警与大模型之间插一个确定性的"语义翻译降噪层"，把 50 条 JSON 告警聚合成 1 份"结构化案卷"喂给 RCA。</p>
+      <p class="mut mt2">但转念一想——Datadog、Prometheus、CloudWatch 已经如此成熟，我们为什么要重造一个聚合网关？</p>
+    </div>
+    <div class="card ac-g">
+      <div class="k">重新定位</div>
+      <p class="mt1"><b>让告警归告警。</b>把 AgenticOps 当作一名真正的<b class="green-g">数字 SRE 员工</b>来用，而不是又一个监控软件。</p>
+      <p class="mono mt2" style="color:var(--green);font-size:.82rem">Main Agent 监听 → Alert Channel(IM)<br>→ Detect/RCA → Fix Plan[L0..Ln]<br>→ 审批自动修 | 人工修 → resolved</p>
+    </div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">Scan / Detect 没有被废弃，而是退居幕后，成了"后台数据飞轮"——为拓扑富化维护一张最新的系统地图。<b>想清楚后砍掉，比盲目堆功能更难，也更值。</b></p>
+</section>
+
+<!-- 16 · 10/10 VALIDATION -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center"><span class="vpart">第二部 · 心路历程</span> — 证明的时刻</div>
+  <span class="datebadge">2026.03.06 · 闭环验证</span>
+  <h2>在真实 EKS 上，<span class="green-g">10 / 10</span> 闭环</h2>
+  <div class="stats" style="max-width:900px;margin-left:auto;margin-right:auto">
+    <div class="stat"><div class="num n-g">10/10</div><div class="lbl">自动修复率<br>目标 ≥ 7</div></div>
+    <div class="stat"><div class="num n-c">~2 min</div><div class="lbl">平均检测<br>目标 ≤ 3</div></div>
+    <div class="stat"><div class="num n-v">~6.3 min</div><div class="lbl">平均 MTTR<br>目标 ≤ 10</div></div>
+    <div class="stat"><div class="num n-a">~$2–3</div><div class="lbl">每周期成本<br>目标 ≤ $3</div></div>
+  </div>
+  <p class="dim mt3" style="max-width:80ch">10 个真实故障场景全数闭合：OOM · 坏镜像 · 网络策略 · 磁盘压力 · Pod Pending · 目标不健康 · CoreDNS 宕 · PVC Pending · HPA 打满 · 服务被删。<br>这一刻，"早上醒来问题已解决"从愿景变成了可复现的数字。</p>
+</section>
+
+<!-- 17 · IM + DELETED CLASSIFIER -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 删掉，也是进化</div>
+  <div class="split wide">
+    <div>
+      <span class="datebadge">2026.03.08</span>
+      <h2>删掉 305 行<span class="dim">正则分类器</span></h2>
+      <p class="lead">旧的告警分类器是 305 行正则——误报严重。新方案很"反直觉"：让 Main Agent 读全文、验证严重性、自己决定要不要建 issue。用推理替代规则堆砌。</p>
+      <ul class="clean mt2">
+        <li>所有 IM 消息经 Main Agent；告警频道消息包裹 5 步验证提示</li>
+        <li>双 RCA 管线：Webhook（无 LLM 成本）+ IM Agent（同一下游）</li>
+        <li>SHA-256 指纹跨管线去重</li>
+      </ul>
+    </div>
+    <div>
+      <div class="quote">有时候最好的代码，<br>是<span class="warm">被删掉的那 305 行</span>。</div>
+      <p class="dim mt2" style="font-size:.85rem">这正呼应了"信条一"：与其写死规则，不如把判断交给会推理的 Agent——只要给它足够的验证约束。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · MVP 1.0.0 -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 收口</div>
+  <span class="datebadge">2026.03.10 · MVP 1.0.0</span>
+  <h2>第一个里程碑，<span class="grad">7 Agent 架构成形</span></h2>
+  <div class="grid g4 mt2">
+    <div class="card"><h3>FixPlan 去重</h3><p class="dim">一 issue 一计划：草稿更新、锁定拒绝、终态才新建。17 个测试。</p></div>
+    <div class="card"><h3>Pipeline 事件</h3><p class="dim">12 类事件 + <span class="mono">TRC-{hex}</span> 追踪 ID，全程可回放。</p></div>
+    <div class="card"><h3>YAML 频道</h3><p class="dim">channels.yaml 成为通知唯一真相源，消除 DB 表。</p></div>
+    <div class="card"><h3>代码瘦身</h3><p class="dim">CLAUDE.md 从 839 行精简到 ~130；受保护文件声明确立。</p></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">此时的它已经能：扫 20+ AWS 服务、检测异常、根因分析、生成分级修复、双通道告警、多渠道通知、定时巡检。一个能跑通闭环的完整 MVP。</p>
+</section>
+
+<!-- 19 · BOOTSTRAPPING AMBITION -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center"><span class="vpart">第二部 · 心路历程</span> — 更大的野心</div>
+  <span class="datebadge">2026.03.11</span>
+  <div class="big">"我最终的需求，是一个<span class="grad">自举式</span>、<br>主动式的系统——<br>能<span class="warm">自己创建技能</span>、主动接管云资源，<br>永无止境地自主演进。"</div>
+  <div class="grid g2 mt3" style="max-width:820px;margin-left:auto;margin-right:auto;text-align:left">
+    <div class="card ac-v"><h3>两件核心的事</h3><p>好好搞 Prompt（逻辑）· 好好丰富 Skills（能力）。<b>SYSTEM PROMPT 是 Agent 应用的核心。</b></p></div>
+    <div class="card ac-a"><h3>对标人类 SRE 的局限</h3><p>并行处理 N 个告警 · 覆盖所有历史案例 · SOP 永远最新 · 7×24 不疲劳 · 遇新场景自动学习。</p></div>
+  </div>
+</section>
+
+<!-- 20 · MEMORY AWAKENS -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 记忆的觉醒</div>
+  <div class="split wide">
+    <div>
+      <span class="datebadge">2026.05.29 → 2026.05.31 · v1.1.0</span>
+      <h2>让每个 Agent<span class="grad">记得住</span></h2>
+      <p class="lead">要做一次"质的升级"：永续记忆、增强记忆、自主优化记忆——像 Hermes 那样。同一批交付里，技能也变得可由 Agent 自主创建（安检后发布）。</p>
+      <p class="mut mt2">从此，"学习"不再是口号：每一次操作都在打磨一套会自我整理的记忆，和一个会自我生长的技能库。</p>
+    </div>
+    <div>
+      <ul class="clean green">
+        <li><b>文件型 markdown 记忆</b>——不是数据库，是一叠会自己整理的笔记</li>
+        <li><b>零 LLM Curator</b>：闲置记忆 active→stale→archived，<b>永不删除</b>（可恢复）</li>
+        <li><b>人写记忆</b>优先级高于 Agent 写；注入一次、缓存友好</li>
+        <li><b>技能自治</b>：agent 可 add/improve/merge，但只落草稿，promote 前安检</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 21 · MULTI-ACCOUNT + ITSM -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 走向企业级</div>
+  <span class="datebadge">2026.06.19 – 06.21 · v2.0.0 治理式自治</span>
+  <h2>从"能用"到<span class="grad">"敢在生产用"</span></h2>
+  <div class="grid g3 mt2">
+    <div class="card ac-c"><h3>账户寻址凭证</h3><p>杀掉 ContextVar 错号执行缺陷——显式账户解析、fail-closed、SSM→SSH 访问阶梯。不再依赖本地 AK/SK。</p></div>
+    <div class="card ac-v"><h3>治理策略引擎</h3><p>Governed Autonomy：把"什么能自动、什么必须人工"变成可配置的策略。</p></div>
+    <div class="card ac-a"><h3>ITSM 桥接</h3><p>对接 ServiceNow / Jira，多云连接器，把 Agent 嵌进企业既有流程。</p></div>
+    <div class="card ac-g"><h3>多云能力层</h3><p>SSH / Prometheus / Kubernetes provider 抽象，为 Alicloud / GCP 铺路。</p></div>
+    <div class="card ac-b"><h3>预防三件套</h3><p>SPOF 巡检 + RCA 拓扑上下文 + 变更模拟门——从救火转向防火。</p></div>
+    <div class="card ac-p"><h3>自改进指标</h3><p>把 Agent 的行为变成可观测、可优化的数据。</p></div>
+  </div>
+</section>
+
+<!-- 22 · STRANDS 1.45 -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 站上更强的地基</div>
+  <div class="split wide">
+    <div>
+      <span class="datebadge">2026.07.04 – 07.08 · v2.0.1</span>
+      <h2>Strands SDK <span class="grad">1.26 → 1.45</span></h2>
+      <p class="lead">一次基座升级，换来上下文治理的质变。同时前端做了整体 UX 翻新：每会话切模型、反问建议芯片、导航 2.0、仪表盘 2.0。</p>
+      <ul class="clean mt2">
+        <li><span class="mono">context_manager="auto"</span> —— 一行代码，成本/准确率双赢</li>
+        <li><span class="mono">ContextOffloader</span> —— 直解"工具结果过大"</li>
+        <li>可选 <span class="mono">HumanInTheLoop</span> —— 原生复刻 L0/L1 审批门</li>
+      </ul>
+    </div>
+    <div>
+      <div class="quote">好的架构，<br>会<span class="warm">随着地基的进步</span><br>自动变好。</div>
+      <p class="dim mt2" style="font-size:.85rem">这正是 02.13 那条洞察的兑现：换 SDK、换模型，system prompt 与工作流结构都不用改。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 23 · GALAXY IDEA -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 想看见全貌</div>
+  <span class="datebadge">2026.07.05</span>
+  <h2>"我想在<span class="grad">一张图</span>里，<br>看到所有资源的关系"</h2>
+  <p class="lead">服务与服务、服务与资源、服务与项目、标签……像上下文一样，把整个系统的关系网织成一张可拖拽、可点击、可浏览的星图。同时埋下"一键托管"的探索：无人值守下自动扫描、自主增强系统的健壮性。</p>
+  <div class="card ac-v mt3"><h3>这就是 Galaxy 的起点</h3><p>后来它成了一片 ~1300 节点的 Canvas 星空——但从第一天起就定了调：LLM 只能"叙事"，绝不能凭幻觉给出事实（见第三部的 fail-closed 校验）。</p></div>
+</section>
+
+<!-- 24 · TRUST-LAYER REBUILD -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 信任层重构</div>
+  <div class="split w2">
+    <div>
+      <span class="datebadge">2026.07.10 → 07.21 · v2.2.0</span>
+      <h2>直面两个<span class="warm">质量之痛</span></h2>
+      <p class="lead">"同一个问题反复出现在 Issue 列表"、"RCA 结论没校验就直驱自动修复"——这两个痛点，逼出了一次信任层级的重构。</p>
+      <p class="mut mt2">于是有了 <b>Signal Gate 信号门</b>（统一去重降噪）和 <b>RCA 质量五件套</b>（低置信/被反驳的根因不再触发自动修复）。</p>
+    </div>
+    <div>
+      <div class="card ac-c"><div class="k">痛点 A</div><h3>噪音</h3><p>三条创建路径各有一套互不相通的去重；抖动告警每次 flap 都新建 issue + 触发一次完整 Opus RCA。</p></div>
+      <div class="card ac-v mt2" style="margin-top:.8rem"><div class="k">痛点 B</div><h3>盲信</h3><p>0.2 置信度的根因也能直驱自动修复——"言之凿凿的幻觉"是自动化最大的敌人。</p></div>
+    </div>
+  </div>
+  <p class="dim mt2" style="max-width:76ch">这两块是全篇的高潮之一，第三部会逐层拆开它们的内部机制。</p>
+</section>
+
+<!-- 25 · DEVSECOPS PORTAL -->
+<section class="slide">
+  <div class="eyebrow"><span class="vpart">第二部 · 心路历程</span> — 最新的方向</div>
+  <span class="datebadge">2026.08.29 → 08.31 · v2.5.0</span>
+  <h2>把安全信号，收敛成<span class="grad">一份诚实的体检</span></h2>
+  <p class="lead">最新的思考有两层：一是给企业内部一个"有真实运维数据兜底"的技术助手 Portal——第一时间给最终用户最靠谱的结论；二是云安全审查：把散落在各服务里的安全信号，收敛成准实时、可复现、消除误报的态势。</p>
+  <div class="grid g4 mt3">
+    <div class="card ac-c"><h3>可复现评分</h3><p class="dim">CIS 客观基线，跑两次结果一样</p></div>
+    <div class="card ac-a"><h3>三态可达性</h3><p class="dim">保守偏报，不谎报安全</p></div>
+    <div class="card ac-v"><h3>证据接地建议</h3><p class="dim">唯一 LLM 环节，fail-closed</p></div>
+    <div class="card ac-g"><h3>真账户 E2E</h3><p class="dim">含中国分区，只读验证</p></div>
+  </div>
+  <p class="dim mt2 mono" style="font-size:.72rem">走到这里，"总"讲完了，"历程"也讲完了。下面进入"分"——把每个亮点，一层层拆到底。</p>
+</section>
+
+<!-- ============ 第三部 · 分（深拆） ============ -->
+
+<!-- 26 · MODULE A — agents-as-tools -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 A · 架构</span> — 01 Agent 即工具</div>
+  <h2><span class="grad">Agent 即工具</span>：为什么这样分</h2>
+  <p class="mut mt1" style="max-width:66ch">Main Agent 不亲自干活——它把每个专家封装成一个 <span class="mono">@tool</span> 函数。专家之间从不直接对话，全部经由路由。职责单一、可组合、可替换。</p>
+  <div class="diagram">
+    <div class="node router"><span class="b n-c">Main Agent</span> · 唯一持有"控制流"，不持有任何 ops 工具 —— 路由因此便宜且可审计</div>
+    <div class="connector">▼</div>
+    <div class="row-spec">
+      <div class="spec"><div class="sn n-c">scan</div><div class="sd">盘点</div></div>
+      <div class="spec"><div class="sn n-c">detect</div><div class="sd">检测</div></div>
+      <div class="spec"><div class="sn n-v">rca</div><div class="sd">根因</div></div>
+      <div class="spec"><div class="sn n-v">sre</div><div class="sd">规划</div></div>
+      <div class="spec"><div class="sn n-a">executor</div><div class="sd">执行</div></div>
+      <div class="spec"><div class="sn n-g">reporter</div><div class="sd">报告</div></div>
+    </div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><h3>独立上下文</h3><p>每个 Agent 有独立的系统提示、工具集、模型档位、记忆。互不污染。</p></div>
+    <div class="card"><h3>云中立</h3><p>提示词按概念类别写，AWS 服务名只作示例——为 Alicloud/GCP 铺路。</p></div>
+    <div class="card"><h3>加能力 = 加一个 @tool</h3><p>不用改管线：新 <span class="mono">@tool</span> 一挂，Agent 自己会在合适时选它。</p></div>
+  </div>
+</section>
+
+<!-- 27 · THE 7 AGENTS -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 A · 架构</span> — 02 七位专家逐一</div>
+  <h2>每个 Agent 的<span class="grad">职责与档位</span></h2>
+  <div class="grid g4 mt2" style="gap:.7rem">
+    <div class="card ac-c"><div class="k">Opus 4.8 · 路由</div><h3>Main</h3><p>唯一与用户对话；分类意图、把专家当工具调度、聚合输出。纯控制流。</p></div>
+    <div class="card ac-c"><div class="k">Sonnet 4.6 · 只读</div><h3>Scan</h3><p>跨账户/区盘点 20+ AWS 服务类型，归一化 upsert 入库；喂下游所有 Agent + 图/Galaxy。</p></div>
+    <div class="card ac-c"><div class="k">Sonnet 4.6 · 只读</div><h3>Detect</h3><p>CloudWatch 告警/指标、Z-score 异常、Webhook 接入；开去重 HealthIssue；跑 SPOF+容量巡检。</p></div>
+    <div class="card ac-v"><div class="k">Opus 4.6 · 只读</div><h3>RCA</h3><p>关联 CloudTrail 变更、拓扑（邻居+爆炸半径）、知识库、技能，产出带置信度的根因。写 RCAResult，绝不碰基建。</p></div>
+    <div class="card ac-v"><div class="k">Opus 4.8 · 只读</div><h3>SRE</h3><p>把 RCA 变成分级(L0–L3)修复计划+回滚步骤。<b>只规划、绝不执行</b>；一 issue 一活跃计划。</p></div>
+    <div class="card ac-a"><div class="k">Opus 4.8 · 执行</div><h3>Executor</h3><p><b>唯一改基建的 Agent</b>。执行已批准计划：AWS CLI / SSM(→SSH) / kubectl，账户寻址凭证。L0/L1 自动，L2/L3 等人。</p></div>
+    <div class="card ac-g"><div class="k">Sonnet 4.6 · 只读</div><h3>Reporter</h3><p>日/周/事件/清单报告（MD/HTML/PDF，本地或 S3）；把解决的事故蒸馏成可复用 SOP，让下次 RCA 更快。</p></div>
+    <div class="card" style="background:transparent;border-style:dashed;display:flex;align-items:center"><p class="dim">安全脊柱：<b>只 SRE 规划 · 只 Executor 执行 · 只经审批门</b></p></div>
+  </div>
+</section>
+
+<!-- 28 · READ/PLAN/EXECUTE -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 A · 架构</span> — 03 三权分立</div>
+  <h2>读 / 规划 / 执行，<span class="grad">三权分立</span></h2>
+  <p class="mut mt1" style="max-width:66ch">这是整个系统的安全脊柱。把"看"、"想怎么改"、"真的改"拆成三种角色，任何一次基建变更都必须走完全部三关——且中间那关只出图纸，不动扳手。</p>
+  <div class="flow mt3">
+    <div class="step ac-c" style="min-width:180px"><div class="s-t n-c">读（Scan/Detect/RCA）</div><div class="s-d">只读调查：盘点、检测、关联、根因。永不写基建。</div></div>
+    <div class="arrow">→</div>
+    <div class="step ac-v" style="min-width:180px"><div class="s-t n-v">规划（SRE）</div><div class="s-d">出分级修复计划 + 回滚。只提议，不动手。</div></div>
+    <div class="arrow">→</div>
+    <div class="step ac-a" style="min-width:180px"><div class="s-t n-a">审批门</div><div class="s-d">L0/L1 自动放行；L2/L3 拦下等人点头。</div></div>
+    <div class="arrow">→</div>
+    <div class="step ac-g" style="min-width:180px"><div class="s-t n-g">执行（Executor）</div><div class="s-d">唯一动手者。前检→执行→后检，账户寻址凭证。</div></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">为什么值得这么麻烦？因为"能自动修复"的前提是"错了也不会失控"。分权，就是把失控的概率按住。</p>
+</section>
+
+<!-- 29 · TIERED MODELS -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 A · 架构</span> — 04 分层模型经济学</div>
+  <div class="split wide">
+    <div>
+      <h2>贵的脑子用在<span class="grad">刀刃上</span></h2>
+      <p class="lead">三档模型，逐 Agent 覆盖。最难的推理（RCA/SRE/Executor）上 Opus，路由与高吞吐（Main/Scan/Detect/Reporter）用 Sonnet，Haiku 作经济档。每一次调用的 token 与成本都实时可查。</p>
+      <ul class="clean mt2">
+        <li>运行时可切：CLI <span class="mono">/model</span> 与 Web 都写回 <span class="mono">settings.yaml</span> 并清缓存立即生效</li>
+        <li>Prompt 缓存默认开；冻结快照式注入保护命中</li>
+        <li><span class="mono">GET /api/cost/summary</span> + <span class="mono">aiops cost</span> 实时聚合 token→USD</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card ac-a" style="margin-bottom:.7rem"><div class="k">强档 · Opus</div><h3>RCA · SRE · Executor</h3><p>最重的推理与最危险的动作</p></div>
+      <div class="card ac-c" style="margin-bottom:.7rem"><div class="k">中档 · Sonnet 4.6</div><h3>Main · Scan · Detect · Reporter</h3><p>路由与高吞吐</p></div>
+      <div class="card ac-g"><div class="k">经济档 · Haiku 4.5</div><h3>去噪灰区判定等</h3><p>高频、低歧义的活儿</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 30 · LLM UPGRADE = APPRECIATION -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center">第三部 · 分 · <span class="amberpart">模块 A · 架构</span> — 05 升级即增值</div>
+  <h2>换一行 config，<span class="grad">整个系统的推理能力立刻升级</span></h2>
+  <div class="split mt3" style="max-width:940px;margin-left:auto;margin-right:auto;text-align:left">
+    <div class="card ac-g"><div class="k">随模型升级自动变强</div>
+      <ul class="clean green" style="margin-top:.3rem">
+        <li>工具选择更准、更少遗漏步骤</li>
+        <li>多步推理能编排更长的工作流</li>
+        <li>错误理解：AccessDenied ≠ 资源不存在</li>
+        <li>结果综合：从 metrics+logs+CloudTrail 提炼更准的根因</li>
+      </ul>
+    </div>
+    <div class="card ac-c"><div class="k">不随模型变化（确定性代码）</div>
+      <ul class="clean" style="margin-top:.3rem">
+        <li>AWS API 返回的数据本身</li>
+        <li>Z-score 统计检测精度</li>
+        <li>CPU&gt;90%=CRITICAL 这类规则判断</li>
+        <li>CIS 评分的 pass/fail 基线</li>
+      </ul>
+    </div>
+  </div>
+  <p class="dim mt3" style="max-width:70ch">推理层（LLM）与执行层（Tools）分离——所以系统的质量曲线，会在"每次模型升级、每次案例积累"处向上拐一次。</p>
+</section>
+
+<!-- 31 · MODULE B — credential iron rules -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 B · 安全地基</span> — 06 凭证安全铁律</div>
+  <h2>多账户环境里，<span class="warm">绝不在错误的账户上执行</span></h2>
+  <p class="mut mt1" style="max-width:68ch">凭证一旦降级到进程默认（ambient），就等于在错号上动手。所以这条被写成不可协商的铁律，贯穿每一条业务/扫描/执行路径。</p>
+  <div class="grid g3 mt2">
+    <div class="card ac-r"><div class="k">铁律 1–2</div><h3>只走 Provider 层</h3><p>禁止裸用 <span class="mono">boto3.Session()</span> 跨账户；解析失败＝显式报错，<b>绝不静默回退 ambient</b>。</p></div>
+    <div class="card ac-r"><div class="k">铁律 3</div><h3>账户寻址执行</h3><p>业务工具都带显式 <span class="mono">account</span>；子进程注入前先 strip 所有 <span class="mono">AWS_*</span>，再只注入目标账户的冻结凭证。</p></div>
+    <div class="card ac-r"><div class="k">铁律 4–5</div><h3>缓存含账户 + 自动续期</h3><p>缓存 key 双写含 <span class="mono">account_id</span>；AssumeRole 用 botocore 原生刷新器，长任务自动续期。</p></div>
+  </div>
+  <div class="code mt2"><span class="c"># 铁律 6 · 纵深校验：解析出的凭证必须真属于目标账户</span>
+<span class="kw">if</span> credentials.account_id:
+    <span class="kw">assert</span> sts.<span class="fn">get_caller_identity</span>()[<span class="st">"Account"</span>] == credentials.account_id  <span class="rd"># 不匹配 → fail-closed</span></div>
+</section>
+
+<!-- 32 · ACCOUNT-ADDRESSED STORY -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 B · 安全地基</span> — 07 一个被杀掉的缺陷</div>
+  <div class="split wide">
+    <div>
+      <h2>ContextVar 错号执行，<span class="warm">连根拔除</span></h2>
+      <p class="lead">早期用隐式 ContextVar 传"当前账户"，但 Strands 同步工具在 <span class="mono">asyncio.to_thread</span> + <span class="mono">copy_context</span> 里跑——工具内的写入跨不出工具边界。结果：可能在错误的账户上执行。</p>
+      <p class="mut mt2">v2.0.0 把它连根拔除，改为<b>账户寻址</b>：显式 <span class="mono">account</span> → 按目标资源反查库存 → 单账户默认 → fail-closed 列出账户名。</p>
+    </div>
+    <div>
+      <div class="code"><span class="c"># 统一入口，无"无上下文回退 ambient"分支</span>
+credentials/resolver.
+  <span class="fn">get_subprocess_env_for_account</span>(account, region)
+
+<span class="c"># 主机访问降级阶梯</span>
+run_on_host(method=<span class="st">"auto"</span>)
+  SSM <span class="fn">→</span> 分类失败 <span class="fn">→</span> SSH</div>
+      <p class="dim mt2" style="font-size:.85rem">安全不是加一层校验，而是<b>把不安全的路径从代码里删掉</b>——没有回退分支，就没有降级风险。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 33 · MODULE C — auto-fix panorama -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 08 自动修复流水线全景</div>
+  <h2>技术自动化的<span class="grad">主动脉</span></h2>
+  <p class="mut mt1" style="max-width:70ch">一个健康问题从诞生到收敛，每一道关卡都可配置、可审计、可中断。这不是"AI 一把梭"，而是带质量门与审批门的工程流水线。</p>
+  <div class="flow mt2">
+    <div class="step ac-c"><div class="s-t">HealthIssue</div><div class="s-d">经 Signal Gate 诞生</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-t">RCA</div><div class="s-d">根因分析</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">质量门</div><div class="s-d">证据→批判→置信≥0.6</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-t">SRE</div><div class="s-d">生成修复计划</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">审批</div><div class="s-d">L0/L1 自动·高危等人</div></div><div class="arrow">→</div>
+    <div class="step ac-g"><div class="s-t">执行→收敛</div><div class="s-d">前检/后检→入库</div></div>
+  </div>
+  <div class="grid g3 mt3">
+    <div class="card"><h3>低置信＝不自动修</h3><p>置信度&lt;0.6 或被批判驳回 → needs_review，绝不自动派 SRE。宁可不动，不乱动。</p></div>
+    <div class="card"><h3>一 issue 一计划</h3><p>草稿更新、锁定拒绝、终态才新建。杜绝并发计划打架。</p></div>
+    <div class="card"><h3>全程留痕</h3><p>12 类事件 + <span class="mono">TRC-{hex}</span>，Web 时间线可回放整条因果链。</p></div>
+  </div>
+</section>
+
+<!-- 34 · 9-STATE DETAIL -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 09 九态生命周期机</div>
+  <h2>状态不能乱跳，<span class="grad">才谈得上信任</span></h2>
+  <div class="flow mt2" style="gap:.3rem">
+    <div class="step"><div class="s-t">open</div></div><div class="arrow">→</div>
+    <div class="step"><div class="s-t">investigating</div></div><div class="arrow">→</div>
+    <div class="step"><div class="s-t">acknowledged</div></div><div class="arrow">→</div>
+    <div class="step ac-v"><div class="s-t">root_cause_identified</div></div>
+  </div>
+  <div class="flow" style="gap:.3rem">
+    <div class="step ac-v"><div class="s-t">fix_planned</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">fix_approved</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">fix_executing</div></div><div class="arrow">→</div>
+    <div class="step ac-a"><div class="s-t">fix_executed</div></div><div class="arrow">→</div>
+    <div class="step ac-g"><div class="s-t">resolved</div></div>
+  </div>
+  <div class="grid g2 mt3">
+    <div class="card"><h3>由代码强校验</h3><p><span class="mono">validate_status_transition()</span> —— 非法跳转直接 409。前端与 API 共用同一套真相。</p></div>
+    <div class="card"><h3>needs_review 分叉 + 回边</h3><p>质量门未过/超时/被驳回 → 分叉人工复核；<span class="mono">root_cause_identified→investigating</span> 回边让重跑 RCA 合法。</p></div>
+  </div>
+</section>
+
+<!-- 35 · DUAL INTAKE -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 10 双通道告警接入</div>
+  <h2>无论从哪来，<span class="grad">都汇入同一条河</span></h2>
+  <div class="grid g2 mt2">
+    <div class="card ac-c"><div class="k">通道 A · 机器进 · 无 LLM 成本</div><h3>Webhook</h3><p class="mt1">Prometheus/CloudWatch/Datadog 告警经 <span class="mono">parsers</span> 归一化 → <span class="mono">alert_processor</span> → Signal Gate → HealthIssue → RCA。多告警 payload 逐条成 Signal（不再只取 alerts[0]）。</p></div>
+    <div class="card ac-v"><div class="k">通道 B · 人来说 · 有 LLM</div><h3>IM Agent</h3><p class="mt1">飞书 WebSocket / Slack；对话即运维。告警频道消息经 Main Agent 五步验证 → <span class="mono">create_health_issue</span> → 同一下游。</p></div>
+  </div>
+  <div class="connector mt3" style="font-size:1rem">▼ 两条通道，同一个下游 ▼</div>
+  <div class="card ac-a mt1" style="text-align:center"><h3>Signal Gate → Auto-Fix Pipeline → 通知 / 报告</h3><p class="mt1">SHA-256 指纹跨管线去重；7 个管线点 fire-and-forget 多渠道通知；<span class="mono">notifications_consolidated</span> 默认只发终报，避免刷屏。</p></div>
+</section>
+
+<!-- 36 · SIGNAL GATE DEEP -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 11 Signal Gate 深拆</div>
+  <div class="split wide">
+    <div>
+      <h2>把噪音<span class="warm">拦在门外</span>，且每次判定可捞回</h2>
+      <p class="lead">所有 issue 创建——webhook / Agent / REST——都必须穿过同一道门。每个事件都在 <span class="mono">alert_events</span> 留一行可审计的 Signal。</p>
+      <ul class="clean mt2">
+        <li><b>L1 确定性规则（$0）</b>：排除→噪音 · resolution 归并 · 指纹精确命中 · resolved 冷却 · flapping(30min≥3→噪音) · 同资源同类型合并</li>
+        <li><b>L2 灰区 LLM</b>：仅疑似近邻时一次 Haiku 调用；<b>只能 merge 或 new，永不判噪音</b>；置信&lt;0.7 或异常 → 晋升（fail-open）</li>
+        <li><b>可捞回</b>：<span class="mono">GET /api/signals</span> + 一键 promote</li>
+      </ul>
+    </div>
+    <div>
+      <div class="code"><span class="c"># fingerprint v2 —— 标题不再参与身份</span>
+fp = sha256(
+  account | provider | resource_id |
+  <span class="hl">issue_type</span> | 上游 dedup key )
+
+<span class="c"># 三种归宿</span>
+<span class="hl">promoted</span> <span class="c"># 新问题 → 建 issue + 通知 + RCA</span>
+<span class="hl">merged</span>   <span class="c"># 老问题回声 → 静默计数</span>
+<span class="hl">noise</span>    <span class="c"># 抖动/排除 → 不建，可捞回</span></div>
+      <div class="stat mt2" style="grid-template-columns:none"><div class="num n-g">78%</div><div class="lbl">实测去重（真账户 1110 信号 → 865 merged，仅 245 promoted）</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 37 · RCA QUALITY QUINTET -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 12 RCA 质量五件套</div>
+  <h2>让 AI 的判断，<span class="warm">配得上"自动执行"</span></h2>
+  <p class="mut mt1" style="max-width:68ch">每一次 RCA 都要过五道独立机制，任何一道都可能把它拦下转人工。"0.2 置信度直驱自动修复的时代，结束了。"</p>
+  <div class="grid g5 mt2" style="gap:.7rem">
+    <div class="card ac-v"><div class="k">1</div><h3>扩展思考</h3><p>rca thinking budget 4096；关键情形还会叠加升级。</p></div>
+    <div class="card ac-v"><div class="k">2</div><h3>证据门禁</h3><p>纯代码核对每条 evidence.ref 是否真在工具痕迹里；未命中 → ×0.6。</p></div>
+    <div class="card ac-a"><div class="k">3</div><h3>Critic 对抗</h3><p>cheap 模型试图反驳（supported/weak/refuted）；refuted → ×0.5。</p></div>
+    <div class="card ac-a"><div class="k">4</div><h3>置信度门控</h3><p>&lt;0.6 或被反驳 → 不触发 auto-SRE，标 needs_review。</p></div>
+    <div class="card ac-c"><div class="k">5</div><h3>事件记忆</h3><p>同指纹历史结论（含判定）注入——"曾被执行失败驳斥"可见。</p></div>
+  </div>
+  <div class="card ac-r mt2" style="display:flex;gap:1rem;align-items:center"><h3 style="min-width:120px">看门狗</h3><p class="dim"><span class="mono">rca_timeout_seconds=900</span> —— 超时记 failed 事件 + needs_review，不再无声卡在 investigating；<span class="mono">rca_max_iterations=40</span> 轮数护栏。</p></div>
+</section>
+
+<!-- 38 · INCIDENT MEMORY + FEEDBACK -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 C · 流程</span> — 13 事件记忆 + 反馈回路</div>
+  <div class="split wide">
+    <div>
+      <h2>历史是<span class="grad">先验</span>，不是答案</h2>
+      <p class="lead">同指纹/同类型的历史 Issue，把（根因、人工/critic 判定、修复结果）确定性注入下一次 RCA 的提示词。让模型看得见"这个结论上次被执行失败驳斥过"。</p>
+      <ul class="clean mt2">
+        <li><b>👍/👎 反馈</b>：<span class="mono">rca-feedback</span> —— incorrect 自动写一条 rca 纠错记忆</li>
+        <li><b>修复失败自动反噬</b>：<span class="mono">mark_fix_failed</span> 把对应 RCAResult 标 <span class="mono">disputed_by_execution</span></li>
+        <li><b>KB 飞轮</b>：案例蒸馏只读真实 approved/executed 的 SRE 方案，不存从未执行的草稿</li>
+      </ul>
+    </div>
+    <div>
+      <div class="quote">系统不只是"这次答对"，<br>而是<span class="warm">记得上次为什么答错</span>。</div>
+      <p class="dim mt2" style="font-size:.85rem">这是把"越用越准"落到实处的关键闭环——参照 arXiv 2604.03933 的 Incident Memory 模式，经生产数据交叉验证。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 39 · MODULE D — graph engine -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 D · 技术自动化</span> — 14 拓扑图引擎</div>
+  <div class="split wide">
+    <div>
+      <h2>不止"哪坏了"，<br>更是"<span class="grad">坏了会连累谁</span>"</h2>
+      <p class="lead">基于 NetworkX 的图引擎，把资源关系变成可计算的问题：单点故障、容量风险、依赖链、变更模拟、可达性。既救火，也防火。</p>
+      <ul class="clean mt2">
+        <li><b>预防性巡检</b>：SPOF + 容量风险作为健康巡检的一步，主动建 issue</li>
+        <li><b>爆炸半径</b>：依赖链喂给 RCA，让根因带全局视角</li>
+        <li><b>变更模拟</b>：动手之前，先算这一刀会切断哪些路径</li>
+      </ul>
+    </div>
+    <div>
+      <div class="code"><span class="c"># graph/algorithms.py · 真实签名</span>
+<span class="fn">can_reach_internet</span>()            <span class="c"># :176</span>
+<span class="fn">internet_ingress_reachability</span>() <span class="c"># :311 三态</span>
+<span class="fn">dependency_chain_analysis</span>()     <span class="c"># :734</span>
+<span class="fn">detect_spof</span>()                   <span class="c"># :809</span>
+<span class="fn">capacity_risk_analysis</span>()        <span class="c"># :874</span>
+<span class="fn">simulate_change</span>()               <span class="c"># :950</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 40 · SECURITY POSITIONING + 4 PRINCIPLES -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 D · 技术自动化</span> — 15 云安全审查 · 研发宪法</div>
+  <h2>四条<span class="warm">精确度原则</span>（★ 不可协商）</h2>
+  <p class="mut mt1" style="max-width:70ch">目标函数只有一个：拿到最准确的数据、给出最精确的结果。成本与覆盖广度都让位于此。任何违反其一的实现，无论多"智能"，都视为降低准确度。</p>
+  <div class="grid g4 mt2">
+    <div class="card ac-c"><div class="k">原则 1</div><h3>采集零 LLM</h3><p>GuardDuty/Security Hub/Inspector/Config 的 findings 原样采集——让 LLM 重判"CVE 算不算 critical"只会引入幻觉。</p></div>
+    <div class="card ac-v"><div class="k">原则 2</div><h3>精确来自关联</h3><p>单看一条 SG 开放 22 判不了真实风险；降误报的杠杆在跨源关联，不在采集更多。</p></div>
+    <div class="card ac-a"><div class="k">原则 3</div><h3>可达性用确定性图算法</h3><p>LLM 只叙事、不定论；数据不全时标"未确定"而非"安全"——保守偏报。</p></div>
+    <div class="card ac-g"><div class="k">原则 4</div><h3>评分对标基线，建议须接地</h3><p>CIS 客观 pass/fail，不自创权重；LLM 建议须 grounded + 过 critic，refuted 即丢。</p></div>
+  </div>
+</section>
+
+<!-- 41 · SECURITY REACHABILITY -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 D · 技术自动化</span> — 16 三态可达性</div>
+  <div class="split wide">
+    <div>
+      <h2>算的是"<span class="grad">互联网到底能不能打进来</span>"，<br>不是"配置看起来危不危险"</h2>
+      <p class="lead">含 NACL 的有向 internet→instance:port 评估：SG 规则 + 公网 IP + 子网/IGW 路由 + NACL 有序 allow/deny + 运行态。三种结论，保守偏报。</p>
+      <div class="pills mt2">
+        <span class="pill t-g">reachable · 真可达</span>
+        <span class="pill t-r">not_reachable · 真不可达</span>
+        <span class="pill t-a">undetermined · 数据不全</span>
+      </div>
+      <p class="mut mt2">缺路由或 NACL 数据 → 判 <b>undetermined</b>，<b>绝不降级为 not_reachable</b>。宁可多标可疑供人工复核，绝不漏报真威胁。</p>
+    </div>
+    <div>
+      <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat"><div class="num n-g">9</div><div class="lbl">可达</div></div>
+        <div class="stat"><div class="num n-a">22</div><div class="lbl">未确定</div></div>
+        <div class="stat"><div class="num n-r">2</div><div class="lbl">不可达</div></div>
+      </div>
+      <div class="code mt2"><span class="c"># 真账户 E2E · 一条被证实的路径</span>
+internet
+  <span class="fn">→</span> subnet-0cf26cc8b36fbd840
+  <span class="fn">→</span> i-01486c763f52a5379:<span class="hl">22</span></div>
+      <p class="dim mt1" style="font-size:.78rem">"未确定"占多数，正是保守偏报的体现——不谎报安全。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 42 · SECURITY SCORING + ADVISOR -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 D · 技术自动化</span> — 17 可复现评分 + 证据接地顾问</div>
+  <h2>分数可复现，<span class="grad">建议可验证</span></h2>
+  <div class="grid g2 mt2">
+    <div class="card ac-c"><div class="k">scoring.py · 纯函数</div><h3>可复现 CIS 评分</h3>
+      <p class="mt1">无 random、无 time、无 LLM。同一快照跑两次，结果一致。可达性与建议<b>永不改动分数</b>——评分与叙事彻底解耦。</p>
+      <p class="mono dim mt2" style="font-size:.8rem">实测：Global 37.5 / 中国区 62.5（可复现，由 test 锁定）</p>
+    </div>
+    <div class="card ac-g"><div class="k">advisor.py · 唯一 LLM 环节</div><h3>证据接地顾问</h3>
+      <p class="mt1">流水线：解析 → 接地到库存（每条建议须引用真实 <span class="mono">resource_id</span>）→ 逐条 critic → fail-closed 落库。未接地 / 被 refuted / 任何异常 → <b>0 行</b>。</p>
+      <p class="mono dim mt2" style="font-size:.8rem">实测：8 条建议全部 critic-supported 入库</p>
+    </div>
+  </div>
+  <div class="card ac-a mt2" style="display:flex;gap:1rem;align-items:center"><h3 style="min-width:150px">采集：双频 · fail-soft</h3><p class="dim">慢频态势快照(60min) + 快频增量轮询(10min，游标式)；单源失败只跳过 + WARNING，cursor 仅成功时前移。全程走目标账户凭证，多账户不串号。</p></div>
+</section>
+
+<!-- 43 · GALAXY -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 D · 技术自动化</span> — 18 Galaxy 星图（实验性）</div>
+  <div class="split wide">
+    <div>
+      <h2>一片会<span class="grad">呼吸的星空</span>，<br>但幻觉<span class="warm">进不来</span></h2>
+      <p class="lead">L1 代码规则（包含/引用/标签）打底 + L3 LLM 语义增强，全部经 <b>fail-closed 校验</b>：端点必须在库存里、证据必须接地在 raw_data，否则丢弃。</p>
+      <ul class="clean violet mt2">
+        <li><b>provenance 分级信任</b>：LLM 边只作参考，<b>永不驱动执行</b></li>
+        <li><b>内容哈希增量</b>：没变化时 $0，不重复烧钱</li>
+        <li><b>Canvas 星空</b>：~1300 节点 d3-force，warning/critical 脉冲，可下钻 raw_data</li>
+      </ul>
+    </div>
+    <div>
+      <div class="diagram">
+        <div class="node ac-c"><span class="b n-c">L1 规则边</span> · provenance=rule · 可信驱动</div>
+        <div class="connector">＋</div>
+        <div class="node" style="border-style:dashed;border-color:rgba(167,139,250,.4)"><span class="b n-v">L3 LLM 边</span> · 虚线 · advisory-only</div>
+        <div class="connector">▼ fail-closed 校验 ▼</div>
+        <div class="node ac-g"><span class="b n-g">星图</span> · 端点存在 + 证据接地才留下</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 44 · MODULE E — knowledge flywheel -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 E · 自进化</span> — 19 知识飞轮</div>
+  <h2>系统的<span class="green-g">质量曲线</span>，会一次次向上拐</h2>
+  <p class="mut mt1" style="max-width:68ch">这不是 LLM 自身在进化，而是系统给它的参考资料越来越丰富。每解决一次，就沉淀一份案例；下一次同类问题，置信度更高、诊断更快。</p>
+  <div class="ladder mt2">
+    <div class="rung ac-c"><div class="lv n-c">1×</div><div><div class="lt">第 1 次 RDS 连接耗尽</div><div class="ld">KB 无历史 → 从零推理，置信度 0.6 → 解决后蒸馏成案例入库</div></div></div>
+    <div class="rung ac-v"><div class="lv n-v">2×</div><div><div class="lt">第 2 次同类问题</div><div class="ld">KB 命中上次案例 → 参考历史 + 当前数据，置信度 0.9，更快更准</div></div></div>
+    <div class="rung ac-g"><div class="lv n-g">N×</div><div><div class="lt">第 N 次</div><div class="ld">KB 有 N-1 个案例 + 成熟 SOP → 几乎可直接按 SOP 执行</div></div></div>
+  </div>
+  <p class="dim mt2" style="max-width:74ch">飞轮由两个自优化子系统驱动：<b>Agent Memory</b>（行为记忆）与 <b>Skills</b>（能力）。下面两页逐一拆开。</p>
+</section>
+
+<!-- 45 · AGENT MEMORY DEEP -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 E · 自进化</span> — 20 自优化记忆</div>
+  <div class="split wide">
+    <div>
+      <h2>一叠会<span class="grad">自己整理</span>的笔记</h2>
+      <p class="lead">文件型 markdown 是行为记忆的<b>单一内核</b>（旧 DB 表已冻结弃用）。Hermes 风格的零 LLM Curator 让它保持精简、鲜活、可审计。</p>
+      <ul class="clean green mt2">
+        <li><b>写时自合并</b>：超过 <span class="mono">memory_max_active</span>(默认15) 强制自我归并</li>
+        <li><b>永不删除</b>：active→stale(30d)→archived(60d)，归档可 restore</li>
+        <li><b>用即复活</b>：注入时 touch，被用到就回到活跃</li>
+        <li><b>并发安全写</b>：每-(pid,thread,counter) 唯一临时文件 + os.replace 原子落盘</li>
+      </ul>
+    </div>
+    <div>
+      <div class="code"><span class="hl">agent</span>: rca
+<span class="hl">type</span>: feedback | pattern | baseline
+<span class="hl">status</span>: active | stale | archived
+<span class="hl">confidence</span>: 1..5
+<span class="hl">created_by</span>: user | agent   <span class="c"># 人/机可辨</span>
+<span class="hl">last_used</span>: ...            <span class="c"># 复活依据</span>
+<span class="hl">absorbed_into</span>: ...        <span class="c"># 合并血统</span></div>
+      <p class="dim mt2" style="font-size:.78rem">冻结快照式注入：build 时按 confidence→recency 取 top-N，写入<b>下个会话</b>生效——保护 Bedrock 缓存。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 46 · SKILLS AUTONOMY DEEP -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 E · 自进化</span> — 21 Skills 自主管理</div>
+  <h2>技能会<span class="grad">自己生长</span>，发布必须<span class="warm">过安检</span></h2>
+  <p class="mut mt1" style="max-width:70ch">三层渐进披露：系统提示 XML → <span class="mono">activate_skill</span> 全文 → <span class="mono">read_skill_reference</span> 深潜。技能是可执行的，所以自主写入被严格分级。</p>
+  <div class="grid g3 mt2">
+    <div class="card ac-c"><div class="k">自主</div><h3>skill_manage</h3><p>Agent 用 add/improve/merge/deprecate/restore/search 自我策展。写入只落<b>草稿</b>（created_by=agent），绝不自动发布。</p></div>
+    <div class="card ac-v"><div class="k">生命周期</div><h3>Skills Curator</h3><p>零 LLM：闲置草稿 active→stale(30d)→archived(60d)；<b>人写技能钉死</b>；<b>永不删除</b>（移入 .archive/）；<b>用即复活</b>。</p></div>
+    <div class="card ac-a"><div class="k">安检门</div><h3>security-gated 发布</h3><p>promote 前 <span class="mono">scan_skill_safety</span> 扫描 fenced bash 里的高危命令；旧版归档多代可 rollback。</p></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">三条 improve 路径全部记入 improvement_store，留下技能的"家谱"（improved_from 血统）——每一次进化都可追溯。</p>
+</section>
+
+<!-- 47 · GUARDRAILS -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center">第三部 · 分 · <span class="amberpart">模块 E · 自进化</span> — 22 进化，但不失控</div>
+  <h2>自主，<span class="warm">从来不等于放任</span></h2>
+  <div class="grid g4 mt3" style="max-width:1000px;margin-left:auto;margin-right:auto;text-align:left">
+    <div class="card ac-g"><h3>只落草稿</h3><p>Agent 的一切自写（记忆/技能）都是草稿，永不自动生效。</p></div>
+    <div class="card ac-a"><h3>发布过安检</h3><p>技能 promote 前扫描危险命令；危险的挡在门外。</p></div>
+    <div class="card ac-c"><h3>人写知识钉死</h3><p>created_by=user 的记忆与技能永不被 Curator 触碰。</p></div>
+    <div class="card ac-v"><h3>永不删除</h3><p>一切归档可恢复；rollback 多代可回。</p></div>
+  </div>
+  <div class="quote mt3" style="margin-left:auto;margin-right:auto">越是让系统"自己动"，<br>越要把"<span class="grad">不能自己动的地方</span>"钉死。</div>
+</section>
+
+<!-- 48 · MODULE F — web/cli/api -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 F · 平台与体验</span> — 23 三种握手方式</div>
+  <h2>同一套大脑，<span class="grad">三种界面</span></h2>
+  <div class="grid g3 mt2">
+    <div class="card ac-c"><div class="k">CLI</div><h3>aiops chat</h3><p>交互式 REPL + headless；30+ 斜杠命令、init 向导、/model /effort 运行时调节。工程师的原生手感。</p></div>
+    <div class="card ac-v"><div class="k">Web</div><h3>React 仪表盘</h3><p>16 页面 · 45+ TanStack hooks · SSE 流式对话 · 并发会话 · 游标分页 + 虚拟化历史 · 实时成本面板。</p></div>
+    <div class="card ac-a"><div class="k">API</div><h3>FastAPI</h3><p>~198 路由；统一 Messaging 面板；工具流事件经 SSE 直达前端，执行过程实时可见。</p></div>
+  </div>
+  <div class="grid g6 mt3" style="gap:.5rem">
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Dashboard</h3></div>
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Chat</h3></div>
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Issues&amp;Plans</h3></div>
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Galaxy</h3></div>
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Security</h3></div>
+    <div class="card" style="padding:.7rem"><h3 style="font-size:.85rem">Skills</h3></div>
+  </div>
+  <p class="dim mono mt2" style="font-size:.72rem">弹窗家规：每个浮层 slideInRight 入场 + ESC 关闭——细节里也有对使用者的体贴。</p>
+</section>
+
+<!-- 49 · CONFIG ARCHITECTURE -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 F · 平台与体验</span> — 24 配置架构</div>
+  <div class="split wide">
+    <div>
+      <h2>唯一真相源：<span class="grad">settings.yaml</span></h2>
+      <p class="lead">config.py 只定义 schema 与加载逻辑，<b>绝不硬编码任何配置值</b>。207 个字段，从模型档位到安全轮询间隔，一处可调、可审计、可版本化。</p>
+      <ul class="clean mt2">
+        <li>优先级：环境变量(AIOPS_*) &gt; .env &gt; settings.yaml &gt; Field 默认</li>
+        <li>运行时改动落盘：CLI 与 Web 的模型变更都写回 YAML 并清缓存立即生效</li>
+        <li>每个新功能都带回滚阀（如 <span class="mono">signal_gate_enabled=false</span> 回退旧行为）</li>
+      </ul>
+    </div>
+    <div>
+      <div class="code"><span class="hl">env AIOPS_*</span>     <span class="c"># 最高（部署覆盖）</span>
+  ↓
+<span class="hl">.env</span>           <span class="c"># 本地开发</span>
+  ↓
+<span class="hl">settings.yaml</span>  <span class="c"># 单一真相源 ★</span>
+  ↓
+<span class="hl">Field default</span>  <span class="c"># 代码兜底</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 50 · EXTENSIBILITY -->
+<section class="slide">
+  <div class="eyebrow">第三部 · 分 · <span class="amberpart">模块 F · 平台与体验</span> — 25 可扩展性</div>
+  <h2>核心自足，<span class="grad">生态按需接入</span></h2>
+  <div class="grid g4 mt2">
+    <div class="card ac-v"><div class="k">默认关</div><h3>ACP 增强后端</h3><p>把复杂任务委派给 Claude Code / Kiro / Codex；执行过程经 SSE 实时流回。</p></div>
+    <div class="card ac-c"><div class="k">懒启动</div><h3>MCP 服务</h3><p>兼容 Claude Desktop 格式；配一段 JSON 即接入外部能力，热重载。</p></div>
+    <div class="card ac-a"><div class="k">企业流程</div><h3>ITSM 桥接</h3><p>ServiceNow / Jira 连接器，把 Agent 嵌进既有工单流。</p></div>
+    <div class="card ac-g"><div class="k">多渠道</div><h3>Messaging</h3><p>飞书 / Slack / 钉钉 / 企微 / Email / SES / SNS / Webhook，统一面板 + 掩码密钥。</p></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">扩展是可选项、不是负担：ACP 默认关闭，MCP 懒启动。没有当下需求，绝不引入依赖——回到信条六。</p>
+</section>
+
+<!-- ============ 第四部 · 证据与信念 ============ -->
+
+<!-- 51 · REAL VALIDATION -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第四部 · 证据与信念</span> — 26 真实的验证</div>
+  <h2>说过的每个数字，<span class="warm">都能翻到证据</span></h2>
+  <div class="grid g2 mt2">
+    <div class="card ac-c"><div class="k">闭环实验室 · EKS 10 场景</div><h3>10 / 10 自动修复</h3><p class="mt1">检测 ~2min · MTTR ~6.3min · 每周期 ~$2–3。OOM/坏镜像/网络策略/磁盘/Pending/CoreDNS/PVC/HPA/服务删除全数闭合。</p></div>
+    <div class="card ac-g"><div class="k">MVP-2.5.0 · 真账户只读 E2E</div><h3>2 账户（含中国区）</h3><p class="mt1">3,859 回归通过 / 66 skipped / 0 failed；三态可达性齐现；8 条建议全 critic-supported；中国区令牌失效 fail-soft 照常产出快照。</p></div>
+  </div>
+  <div class="card ac-a mt2" style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap">
+    <div><div class="mono dim" style="font-size:.72rem">信任曲线</div><div style="font-size:1.05rem;margin-top:.25rem">测试：<span class="mono n-r">1,200</span>(04) → <span class="mono n-g">3,859</span>(08) &nbsp;·&nbsp; 版本：<span class="mono">1.0.0 → 2.5.0</span></div></div>
+    <div class="dim" style="font-size:.85rem;max-width:36ch">每一次"敢自动执行更多"，背后都是更多测试与更严的质量门在撑着。</div>
+  </div>
+</section>
+
+<!-- 52 · THREE PERSONAS -->
+<section class="slide">
+  <div class="eyebrow"><span class="amberpart">第四部 · 证据与信念</span> — 27 它为谁而造</div>
+  <h2>同一个平台，<span class="grad">三种人各取所需</span></h2>
+  <div class="grid g3 mt2">
+    <div class="card ac-c"><div class="k">SRE / 值班工程师</div><h3>少醒几次，睡个整觉</h3>
+      <ul class="clean mt1"><li>Signal Gate 把告警风暴收成真问题</li><li>RCA 带证据链，不用翻三个控制台</li><li>爆炸半径 + 变更模拟，动手前先算清</li></ul></div>
+    <div class="card ac-v"><div class="k">IT 管理员</div><h3>多账户，一处掌控</h3>
+      <ul class="clean violet mt1"><li>凭证铁律保证"绝不在错号上执行"</li><li>资源盘点 + Galaxy 星图，家底一目了然</li><li>9 态状态机 + 全程审计，合规经得起查</li></ul></div>
+    <div class="card ac-a"><div class="k">安全工程师</div><h3>诚实的姿态，可信的分</h3>
+      <ul class="clean amber mt1"><li>可复现 CIS 评分，跑两次一样</li><li>三态可达性保守偏报，不谎报安全</li><li>证据接地顾问，未接地建议直接丢</li></ul></div>
+  </div>
+  <p class="dim mt3" style="max-width:74ch">还有一类正在成形的用户：企业内部对云环境不熟的最终用户——一个有真实运维数据兜底的技术助手 Portal，第一时间给出最靠谱的结论。</p>
+</section>
+
+<!-- 53 · HONESTY GUARDRAILS -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center"><span class="amberpart">第四部 · 证据与信念</span> — 28 我们的信念</div>
+  <h2>把 AI 造得<span class="warm">诚实</span>，<br>比造得<span class="grad">聪明</span>更难，也更重要</h2>
+  <div class="grid g4 mt3" style="max-width:1000px;margin-left:auto;margin-right:auto;text-align:left">
+    <div class="card ac-g"><div class="k">01</div><h3>证据接地</h3><p>每个结论都能落到真实数据上，落不下就不说。</p></div>
+    <div class="card ac-a"><div class="k">02</div><h3>保守偏报</h3><p>不确定就说"未确定"，绝不谎报安全。</p></div>
+    <div class="card ac-r"><div class="k">03</div><h3>Fail-Closed</h3><p>拿不准宁可少做、不乱做；异常一律收敛到安全态。</p></div>
+    <div class="card ac-c"><div class="k">04</div><h3>人在环内</h3><p>高危动作永远停在审批门前，等一个人点头。</p></div>
+  </div>
+  <p class="dim mt3" style="max-width:66ch">这四条不是事后总结的口号——它们从 Galaxy 的 fail-closed、到 RCA 质量门、到安全审查的四原则，一以贯之。</p>
+</section>
+
+<!-- 54 · RETURN TO THE MORNING -->
+<section class="slide center">
+  <div class="eyebrow" style="justify-content:center"><span class="amberpart">第四部 · 证据与信念</span> — 回到那个早晨</div>
+  <div class="big">你早上醒来，打开手机——<br><span class="grad">"昨天发现的几个问题，都已经解决了。"</span><br><br>六个月前这是一个梦。<br><span class="warm">现在，它是一套会进化的系统。</span></div>
+  <div class="pills mt3" style="justify-content:center">
+    <span class="pill t-c">架构</span><span class="pill t-v">流程</span><span class="pill t-a">技术自动化</span>
+    <span class="pill t-g">Skills 自治</span><span class="pill t-r">自优化记忆</span>
+  </div>
+  <p class="dim mono mt3" style="font-size:.74rem">AgenticOps · v1.0.0 → v2.5.0 · 全景技术演示 · 数据源自本仓库真实记录与 E2E 报告</p>
+</section>
+
+</div>
+
+<!-- CHROME -->
+<div class="count"><b id="cur">1</b> / <span id="tot">55</span></div>
+<div class="chapter" id="chapter"></div>
+<div class="hint">← → 翻页 · Space 前进 · F 全屏 · P 打印PDF</div>
+<div class="foot">
+  <div class="brand"><b>AgenticOps</b> · 从一个梦，到一套会进化的系统</div>
+  <div class="dots" id="dots"></div>
+  <div id="ver">v2.5.0</div>
+</div>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var i=0,N=slides.length;
+  var cur=document.getElementById('cur'),tot=document.getElementById('tot'),dotsEl=document.getElementById('dots'),chap=document.getElementById('chapter');
+  tot.textContent=N;
+  // chapter ranges [startIndex, label]
+  var chapters=[[0,''],[1,'第一部 · 总'],[9,'第二部 · 心路历程'],[26,'第三部 · 分（深拆）'],[51,'第四部 · 证据与信念']];
+  var partStarts={0:1,1:1,9:1,26:1,31:1,33:1,39:1,44:1,48:1,51:1};
+  for(var k=0;k<N;k++){
+    var d=document.createElement('div');d.className='dot'+(partStarts[k]?' part':'');d.dataset.n=k;
+    d.addEventListener('click',function(e){go(+e.target.dataset.n)});
+    dotsEl.appendChild(d);
+  }
+  var dots=[].slice.call(dotsEl.children);
+  function chapterFor(n){var lbl='';for(var c=0;c<chapters.length;c++){if(n>=chapters[c][0])lbl=chapters[c][1];}return lbl;}
+  function render(){
+    slides.forEach(function(s,n){s.classList.toggle('active',n===i)});
+    dots.forEach(function(d,n){d.classList.toggle('on',n===i)});
+    cur.textContent=i+1;chap.textContent=chapterFor(i);
+    if(('#'+(i+1))!==location.hash) history.replaceState(null,'','#'+(i+1));
+  }
+  function go(n){if(n<0)n=0;if(n>N-1)n=N-1;if(n!==i){i=n;render();}}
+  function next(){go(i+1)}function prev(){go(i-1)}
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){e.preventDefault();next();}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();prev();}
+    else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(N-1);}
+    else if(e.key==='f'||e.key==='F'){if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}else{document.exitFullscreen&&document.exitFullscreen();}}
+    else if(e.key==='p'||e.key==='P'){window.print();}
+  });
+  var x0=null;
+  document.addEventListener('touchstart',function(e){x0=e.touches[0].clientX},{passive:true});
+  document.addEventListener('touchend',function(e){if(x0===null)return;var dx=e.changedTouches[0].clientX-x0;if(Math.abs(dx)>50){dx<0?next():prev();}x0=null;},{passive:true});
+  function fromHash(){var h=parseInt((location.hash||'').replace('#',''),10);if(h>=1&&h<=N&&h-1!==i){i=h-1;render();}}
+  var h=parseInt((location.hash||'').replace('#',''),10);if(h>=1&&h<=N)i=h-1;
+  window.addEventListener('hashchange',fromHash);
+  render();
+})();
+</script>
+</body>
+</html>
