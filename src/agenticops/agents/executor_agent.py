@@ -12,7 +12,6 @@ import logging
 
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
-from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import (
@@ -215,9 +214,8 @@ def executor_agent(fix_plan_id: int) -> str:
             except Exception as e:
                 logger.warning("Smart model lookup failed, using default: %s", e)
 
-        cache_kwargs: dict = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+        from agenticops.agents.preamble import bedrock_model_kwargs
+        cache_kwargs = bedrock_model_kwargs(model_id)
         model = BedrockModel(
             model_id=model_id,
             boto_session=get_bedrock_boto_session(),

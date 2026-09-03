@@ -6,6 +6,12 @@ model_aliases:
   opus: global.anthropic.claude-opus-4-6-v1
   sonnet: global.anthropic.claude-sonnet-4-6
   haiku: global.anthropic.claude-haiku-4-5-20251001-v1:0
+  # OpenAI on Bedrock (gpt-5.6-* invoke via global inference profile; gpt-oss ON_DEMAND)
+  gpt-5.6-terra: global.openai.gpt-5.6-terra
+  gpt-5.6-luna: global.openai.gpt-5.6-luna
+  gpt-5.6-sol: global.openai.gpt-5.6-sol
+  gpt-oss-120b: openai.gpt-oss-120b-1:0
+  gpt-oss-20b: openai.gpt-oss-20b-1:0
 agent_main_model_id: global.anthropic.claude-opus-4-8
 agent_scan_model_id: global.anthropic.claude-sonnet-4-6
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
@@ -52,6 +58,43 @@ token_cost_table:
     output: 4.0
     cache_read: 0.08
     cache_write: 1.0
+  # OpenAI on Bedrock — no prompt caching (cache rates 0).
+  # gpt-oss rates = AWS launch list price; gpt-5.6 provisional until official pricing lands.
+  gpt-oss-120b:
+    input: 0.15
+    output: 0.6
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-oss-20b:
+    input: 0.07
+    output: 0.3
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-oss-safeguard-120b:
+    input: 0.15
+    output: 0.6
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-oss-safeguard-20b:
+    input: 0.07
+    output: 0.3
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-5.6-terra:
+    input: 1.25
+    output: 10.0
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-5.6-luna:
+    input: 1.25
+    output: 10.0
+    cache_read: 0.0
+    cache_write: 0.0
+  gpt-5.6-sol:
+    input: 1.25
+    output: 10.0
+    cache_read: 0.0
+    cache_write: 0.0
 bedrock_cache_enabled: true
 strands_context_manager_auto: true
 embedding_model_id: amazon.titan-embed-text-v2:0

@@ -90,7 +90,7 @@ Models are per-agent overrides in `config/settings.yaml` (`agent_*_model_id`), w
 
 Defaults from `config/settings.yaml` — Opus for the heaviest reasoning (RCA, SRE, Executor), Sonnet for routing + high-throughput work. The **safety spine**: only SRE plans, only Executor acts, and only through the approval gate — see [Auto-Fix Pipeline](#auto-fix-pipeline) and the [end-to-end workflow guide](docs/WORKFLOW.md).
 
-Models are fetched dynamically from Bedrock; override per agent in `config/settings.yaml` or via `AIOPS_AGENT_{NAME}_MODEL_ID`. Switch at runtime with CLI `/model` or Web Settings.
+Models are fetched dynamically from Bedrock — Anthropic Claude **and** OpenAI (gpt-oss / GPT-5.x); Anthropic-only features (prompt caching, extended thinking) are auto-gated per model family. Override per agent in `config/settings.yaml` or via `AIOPS_AGENT_{NAME}_MODEL_ID`. Switch at runtime with CLI `/model` or Web Settings.
 
 ### Auto-Fix Pipeline
 

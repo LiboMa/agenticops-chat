@@ -154,32 +154,34 @@ def test_build_detect_agent_for_account_uses_correct_model_config(
 def test_build_detect_agent_for_account_respects_cache_config(
     mock_config, mock_get_agent_config, mock_strands_agent
 ):
-    """Test that cache configuration is respected."""
+    """Cache kwargs follow settings.bedrock_cache_enabled (gated in preamble)."""
+    from agenticops.config import settings as real_settings
+
     mock_agent_cls, mock_model_cls, mock_agent_instance = mock_strands_agent
     mock_cli_tool = MagicMock()
     mock_session = MagicMock()
 
     # Test with cache enabled
-    mock_config.bedrock_cache_enabled = True
-    _build_detect_agent_for_account(
-        acct_name="test-account",
-        acct_id=42,
-        cli_tool=mock_cli_tool,
-        session=mock_session,
-    )
+    with patch.object(real_settings, "bedrock_cache_enabled", True):
+        _build_detect_agent_for_account(
+            acct_name="test-account",
+            acct_id=42,
+            cli_tool=mock_cli_tool,
+            session=mock_session,
+        )
     model_call_kwargs_enabled = mock_model_cls.call_args[1]
     assert "cache_config" in model_call_kwargs_enabled
     assert "cache_tools" in model_call_kwargs_enabled
 
     # Test with cache disabled
     mock_model_cls.reset_mock()
-    mock_config.bedrock_cache_enabled = False
-    _build_detect_agent_for_account(
-        acct_name="test-account",
-        acct_id=42,
-        cli_tool=mock_cli_tool,
-        session=mock_session,
-    )
+    with patch.object(real_settings, "bedrock_cache_enabled", False):
+        _build_detect_agent_for_account(
+            acct_name="test-account",
+            acct_id=42,
+            cli_tool=mock_cli_tool,
+            session=mock_session,
+        )
     model_call_kwargs_disabled = mock_model_cls.call_args[1]
     assert "cache_config" not in model_call_kwargs_disabled
     assert "cache_tools" not in model_call_kwargs_disabled

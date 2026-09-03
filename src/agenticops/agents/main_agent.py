@@ -8,7 +8,6 @@ import logging
 
 from strands import Agent
 from strands.models.bedrock import BedrockModel
-from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.mcp_manager import get_mcp_clients
@@ -240,15 +239,11 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "") ->
     model_id, max_tokens = get_agent_model_config("main")
     if model_id_override:
         model_id = model_id_override
-    cache_kwargs: dict = {}
-    if settings.bedrock_cache_enabled:
-        cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-    from agenticops.agents.preamble import resolve_thinking_budget, thinking_fields_for_budget
+    from agenticops.agents.preamble import bedrock_model_kwargs, resolve_thinking_budget, thinking_fields_for_budget
     thinking_fields = thinking_fields_for_budget(
         resolve_thinking_budget("main", max_tokens, override=effort_override), max_tokens,
     )
-    if thinking_fields:
-        cache_kwargs["additional_request_fields"] = thinking_fields
+    cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
     model = BedrockModel(
         model_id=model_id,
         boto_session=get_bedrock_boto_session(),

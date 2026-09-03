@@ -19,16 +19,21 @@ def normalize_model_key(model_id: str) -> str:
 
     e.g. 'global.anthropic.claude-opus-4-6-v1' -> 'claude-opus-4-6'
          'global.anthropic.claude-haiku-4-5-20251001-v1:0' -> 'claude-haiku-4-5'
+         'openai.gpt-oss-120b-1:0' -> 'gpt-oss-120b'
+         'global.openai.gpt-5.6-terra' -> 'gpt-5.6-terra'
     """
     if not model_id:
         return ""
     key = model_id.strip()
     # drop region/provider prefixes
     key = re.sub(r"^(global|us|eu|apac)\.", "", key)
-    key = re.sub(r"^anthropic\.", "", key)
+    key = re.sub(r"^(anthropic|openai)\.", "", key)
     # claude-<family>-<major>-<minor> ... keep through the minor version
     m = re.match(r"(claude-[a-z]+-\d+-\d+)", key)
-    return m.group(1) if m else key
+    if m:
+        return m.group(1)
+    # other providers: strip a trailing Bedrock version suffix ('-1:0')
+    return re.sub(r"-\d+:\d+$", "", key)
 
 
 def _rates(model_id: str) -> dict | None:

@@ -215,6 +215,36 @@ def infer_parent_agent(default: str = "main") -> str:
     return default
 
 
+def is_anthropic_model(model_id: str) -> bool:
+    """True when a Bedrock model id belongs to the Anthropic/Claude family.
+
+    Matches raw ids ('anthropic.claude-…') and inference profiles
+    ('global.anthropic.…', 'us.anthropic.…'). Non-Anthropic providers on
+    Bedrock (e.g. openai.gpt-oss-*, openai.gpt-5.*) return False.
+    """
+    mid = (model_id or "").lower()
+    return "anthropic." in mid or "claude" in mid
+
+
+def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) -> dict:
+    """Prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
+
+    Anthropic-only request features are dropped for other providers (OpenAI
+    gpt-oss / gpt-5.x on Bedrock): they support neither promptCaching
+    cachePoints nor the anthropic `thinking` field, and sending either fails
+    the whole request. Single source of truth for all agent build sites.
+    """
+    kwargs: dict = {}
+    if not is_anthropic_model(model_id):
+        return kwargs
+    if settings.bedrock_cache_enabled:
+        from strands.models.model import CacheConfig
+        kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+    if thinking_fields:
+        kwargs["additional_request_fields"] = thinking_fields
+    return kwargs
+
+
 def thinking_fields_for_budget(budget: int, max_tokens: int):
     """Bedrock extended-thinking request fields for a budget, or None.
 

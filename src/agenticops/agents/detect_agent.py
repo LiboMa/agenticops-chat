@@ -8,7 +8,6 @@ import logging
 
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
-from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import assume_role
@@ -219,9 +218,8 @@ def _build_detect_agent_for_account(
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("detect")
-    cache_kwargs: dict = {}
-    if settings.bedrock_cache_enabled:
-        cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+    from agenticops.agents.preamble import bedrock_model_kwargs
+    cache_kwargs = bedrock_model_kwargs(model_id)
     model = BedrockModel(
         model_id=model_id,
         boto_session=get_bedrock_boto_session(),
@@ -342,9 +340,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
 
                 model_id, max_tokens = get_agent_model_config("detect")
-                cache_kwargs: dict = {}
-                if settings.bedrock_cache_enabled:
-                    cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+                from agenticops.agents.preamble import bedrock_model_kwargs
+                cache_kwargs = bedrock_model_kwargs(model_id)
                 model = BedrockModel(
                     model_id=model_id,
                     boto_session=get_bedrock_boto_session(),

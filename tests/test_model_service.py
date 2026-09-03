@@ -77,6 +77,46 @@ SAMPLE_BEDROCK_RESPONSE = {
     ]
 }
 
+OPENAI_BEDROCK_RESPONSE = {
+    "modelSummaries": [
+        {
+            "modelId": "openai.gpt-oss-120b-1:0",
+            "modelName": "gpt-oss-120b",
+            "outputModalities": ["TEXT"],
+            "modelLifecycle": {"status": "ACTIVE"},
+            "inferenceTypesSupported": ["ON_DEMAND"],
+        },
+        {
+            "modelId": "openai.gpt-5.6-terra",
+            "modelName": "GPT-5.6 Terra",
+            "outputModalities": ["TEXT"],
+            "modelLifecycle": {"status": "ACTIVE"},
+            "inferenceTypesSupported": ["INFERENCE_PROFILE"],
+        },
+    ]
+}
+
+OPENAI_PROFILE_RESPONSE = {
+    "inferenceProfileSummaries": [
+        {"inferenceProfileId": "global.openai.gpt-5.6-terra"},
+        {"inferenceProfileId": "us.openai.gpt-5.6-terra"},
+    ]
+}
+
+
+def _mock_client(anthropic=None, openai=None):
+    """Bedrock client mock answering list_foundation_models per provider."""
+    client = MagicMock()
+
+    def _lfm(byProvider):
+        if byProvider == "Anthropic":
+            return anthropic or {"modelSummaries": []}
+        return openai or {"modelSummaries": []}
+
+    client.list_foundation_models.side_effect = _lfm
+    client.list_inference_profiles.return_value = OPENAI_PROFILE_RESPONSE
+    return client
+
 
 # ---------------------------------------------------------------------------
 # _fetch_bedrock_models
@@ -84,8 +124,7 @@ SAMPLE_BEDROCK_RESPONSE = {
 
 class TestFetchBedrockModels:
     def test_fetches_and_filters_correctly(self):
-        mock_client = MagicMock()
-        mock_client.list_foundation_models.return_value = SAMPLE_BEDROCK_RESPONSE
+        mock_client = _mock_client(anthropic=SAMPLE_BEDROCK_RESPONSE)
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_client
@@ -101,8 +140,7 @@ class TestFetchBedrockModels:
         assert "anthropic.claude-haiku-4-5-v1" in ids
 
     def test_streaming_flag(self):
-        mock_client = MagicMock()
-        mock_client.list_foundation_models.return_value = SAMPLE_BEDROCK_RESPONSE
+        mock_client = _mock_client(anthropic=SAMPLE_BEDROCK_RESPONSE)
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_client
@@ -116,8 +154,7 @@ class TestFetchBedrockModels:
         assert haiku["streaming"] is False
 
     def test_empty_response(self):
-        mock_client = MagicMock()
-        mock_client.list_foundation_models.return_value = {"modelSummaries": []}
+        mock_client = _mock_client()
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_client
@@ -187,6 +224,86 @@ class TestBuildPresetsFromBedrock:
 
 
 # ---------------------------------------------------------------------------
+# OpenAI provider support
+# ---------------------------------------------------------------------------
+
+class TestOpenAIModels:
+    def test_fetch_includes_openai_with_profile_resolution(self):
+        mock_client = _mock_client(anthropic=SAMPLE_BEDROCK_RESPONSE,
+                                   openai=OPENAI_BEDROCK_RESPONSE)
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_client
+
+        with patch("agenticops.config.get_bedrock_boto_session", return_value=mock_session):
+            models = _fetch_bedrock_models()
+
+        by_id = {m["model_id"]: m for m in models}
+        # ON_DEMAND model invokes by raw id
+        assert by_id["openai.gpt-oss-120b-1:0"]["invoke_id"] == "openai.gpt-oss-120b-1:0"
+        # INFERENCE_PROFILE-only model resolves to the global system profile
+        assert by_id["openai.gpt-5.6-terra"]["invoke_id"] == "global.openai.gpt-5.6-terra"
+        # Claude models unaffected
+        assert "anthropic.claude-opus-4-6-v1" in by_id
+
+    def test_profile_listing_failure_falls_back_to_global_guess(self):
+        mock_client = _mock_client(openai=OPENAI_BEDROCK_RESPONSE)
+        mock_client.list_inference_profiles.side_effect = Exception("boom")
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_client
+
+        with patch("agenticops.config.get_bedrock_boto_session", return_value=mock_session):
+            models = _fetch_bedrock_models()
+
+        terra = next(m for m in models if m["model_id"] == "openai.gpt-5.6-terra")
+        assert terra["invoke_id"] == "global.openai.gpt-5.6-terra"
+
+    def test_one_provider_failing_keeps_the_other(self):
+        mock_client = MagicMock()
+
+        def _lfm(byProvider):
+            if byProvider == "Anthropic":
+                raise Exception("anthropic listing down")
+            return OPENAI_BEDROCK_RESPONSE
+
+        mock_client.list_foundation_models.side_effect = _lfm
+        mock_client.list_inference_profiles.return_value = OPENAI_PROFILE_RESPONSE
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_client
+
+        with patch("agenticops.config.get_bedrock_boto_session", return_value=mock_session):
+            models = _fetch_bedrock_models()
+
+        assert len(models) == 2
+        assert all(m["provider"] == "openai" for m in models)
+
+    def test_presets_for_openai_models(self):
+        raw = [
+            {"model_id": "anthropic.claude-opus-4-6-v1", "model_name": "Claude Opus 4.6",
+             "provider": "anthropic", "invoke_id": "anthropic.claude-opus-4-6-v1",
+             "context_window": 0, "streaming": True},
+            {"model_id": "openai.gpt-oss-120b-1:0", "model_name": "gpt-oss-120b",
+             "provider": "openai", "invoke_id": "openai.gpt-oss-120b-1:0",
+             "context_window": 0, "streaming": True},
+            {"model_id": "openai.gpt-5.6-terra", "model_name": "GPT-5.6 Terra",
+             "provider": "openai", "invoke_id": "global.openai.gpt-5.6-terra",
+             "context_window": 0, "streaming": True},
+        ]
+        presets = _build_presets_from_bedrock(raw)
+        by_value = {p["value"]: p for p in presets}
+
+        # openai preset uses the resolved invoke id, verbatim label, family window
+        assert by_value["openai.gpt-oss-120b-1:0"]["label"] == "gpt-oss-120b"
+        assert by_value["openai.gpt-oss-120b-1:0"]["context_window"] == 128000
+        assert by_value["global.openai.gpt-5.6-terra"]["label"] == "GPT-5.6 Terra"
+        assert by_value["global.openai.gpt-5.6-terra"]["context_window"] == 400000
+        # sort: Claude first, then gpt-5.x, then gpt-oss
+        values = [p["value"] for p in presets]
+        assert values == ["global.anthropic.claude-opus-4-6-v1",
+                          "global.openai.gpt-5.6-terra",
+                          "openai.gpt-oss-120b-1:0"]
+
+
+# ---------------------------------------------------------------------------
 # _get_fallback_presets
 # ---------------------------------------------------------------------------
 
@@ -209,8 +326,7 @@ class TestGetFallbackPresets:
 
 class TestGetModelPresets:
     def test_caching_works(self):
-        mock_client = MagicMock()
-        mock_client.list_foundation_models.return_value = SAMPLE_BEDROCK_RESPONSE
+        mock_client = _mock_client(anthropic=SAMPLE_BEDROCK_RESPONSE)
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_client
@@ -223,8 +339,8 @@ class TestGetModelPresets:
             result1 = get_model_presets()
             result2 = get_model_presets()
 
-        # Second call should use cache — only one API call
-        assert mock_client.list_foundation_models.call_count == 1
+        # Second call should use cache — one API call per provider (Anthropic + OpenAI)
+        assert mock_client.list_foundation_models.call_count == 2
         assert result1 == result2
 
     def test_falls_back_on_api_error(self):
@@ -304,8 +420,7 @@ class TestGetModelPresets:
 
 class TestInvalidateCache:
     def test_invalidate_forces_refresh(self):
-        mock_client = MagicMock()
-        mock_client.list_foundation_models.return_value = SAMPLE_BEDROCK_RESPONSE
+        mock_client = _mock_client(anthropic=SAMPLE_BEDROCK_RESPONSE)
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_client
@@ -319,4 +434,5 @@ class TestInvalidateCache:
             invalidate_cache()
             get_model_presets()
 
-        assert mock_client.list_foundation_models.call_count == 2
+        # 2 fetches × 2 providers (Anthropic + OpenAI)
+        assert mock_client.list_foundation_models.call_count == 4

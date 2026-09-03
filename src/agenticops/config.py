@@ -909,6 +909,15 @@ class Settings(BaseSettings):
             "claude-opus-4-6":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
             "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
             "claude-haiku-4-5":  {"input": 0.80, "output": 4.0,  "cache_read": 0.08, "cache_write": 1.00},
+            # OpenAI on Bedrock — no prompt caching (cache rates 0).
+            # gpt-oss rates = AWS launch list price; gpt-5.6 provisional until official pricing lands.
+            "gpt-oss-120b":           {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-oss-20b":            {"input": 0.07, "output": 0.30, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-oss-safeguard-120b": {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-oss-safeguard-20b":  {"input": 0.07, "output": 0.30, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-5.6-terra":          {"input": 1.25, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-5.6-luna":           {"input": 1.25, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0},
+            "gpt-5.6-sol":            {"input": 1.25, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0},
         },
         description="Token cost rates per 1M tokens by model family",
     )
@@ -995,6 +1004,18 @@ MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
         "executor": 20, "reporter": 80,
     },
     "claude-haiku-4-5": {
+        "main": 60, "scan": 40, "detect": 40,
+        "rca": 80, "sre": 80,
+        "executor": 20, "reporter": 40,
+    },
+    # OpenAI on Bedrock — matches 'global.openai.gpt-5.6-terra/luna/sol'
+    "gpt-5.6": {
+        "main": 100, "scan": 80, "detect": 80,
+        "rca": 200, "sre": 200,
+        "executor": 20, "reporter": 80,
+    },
+    # matches 'openai.gpt-oss-120b-1:0' / '-20b' / '-safeguard-*'
+    "gpt-oss": {
         "main": 60, "scan": 40, "detect": 40,
         "rca": 80, "sre": 80,
         "executor": 20, "reporter": 40,

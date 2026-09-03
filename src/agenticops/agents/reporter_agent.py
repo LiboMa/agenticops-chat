@@ -10,7 +10,6 @@ import logging
 from strands import Agent, tool
 from botocore.config import Config as BotocoreConfig
 from strands.models.bedrock import BedrockModel
-from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.metadata_tools import (
@@ -121,9 +120,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
         model_id, max_tokens = get_agent_model_config("reporter")
-        cache_kwargs: dict = {}
-        if settings.bedrock_cache_enabled:
-            cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+        from agenticops.agents.preamble import bedrock_model_kwargs
+        cache_kwargs = bedrock_model_kwargs(model_id)
         model = BedrockModel(
             model_id=model_id,
             boto_session=get_bedrock_boto_session(),

@@ -1,7 +1,8 @@
 """Model discovery service — dynamic model listing from AWS Bedrock.
 
-Fetches available Claude models from Bedrock API (us-east-1), generates
-standard + 1M context variants, caches with TTL, falls back to config.
+Fetches available Anthropic (Claude) and OpenAI (gpt-oss / gpt-5.x) models
+from the Bedrock API, resolves inference-profile ids where required, caches
+with TTL, falls back to config.
 """
 
 import logging
@@ -14,45 +15,107 @@ logger = logging.getLogger(__name__)
 _models_cache: tuple[float, list[dict[str, Any]]] = (0.0, [])
 _CACHE_TTL = 86400  # 24 hours
 
+# Providers surfaced in the model picker. Anthropic is the platform default;
+# OpenAI covers the ChatGPT-family models Bedrock offers (gpt-oss-*, gpt-5.x).
+_PROVIDERS = ("Anthropic", "OpenAI")
+
+
+def _fetch_inference_profile_ids(client) -> set[str]:
+    """All SYSTEM_DEFINED inference-profile ids (e.g. 'global.openai.gpt-5.6-sol').
+
+    Needed to resolve an invokable id for models that only support
+    INFERENCE_PROFILE inference (no ON_DEMAND). Fail-soft: caller handles
+    exceptions and falls back to a 'global.' prefix guess.
+    """
+    ids: set[str] = set()
+    token = None
+    while True:
+        kwargs: dict[str, Any] = {"typeEquals": "SYSTEM_DEFINED", "maxResults": 250}
+        if token:
+            kwargs["nextToken"] = token
+        resp = client.list_inference_profiles(**kwargs)
+        for p in resp.get("inferenceProfileSummaries", []):
+            pid = p.get("inferenceProfileId", "")
+            if pid:
+                ids.add(pid)
+        token = resp.get("nextToken")
+        if not token:
+            return ids
+
+
+def _resolve_invoke_id(model_id: str, inference_types: list[str],
+                       profile_ids: set[str] | None) -> str:
+    """Map a foundation-model id to the id actually used for invocation.
+
+    ON_DEMAND models invoke by raw id. INFERENCE_PROFILE-only models need a
+    system profile — prefer 'global.' (cross-region), then 'us.'.
+    """
+    if "ON_DEMAND" in inference_types:
+        return model_id
+    for prefix in ("global.", "us."):
+        candidate = f"{prefix}{model_id}"
+        if profile_ids is None or candidate in profile_ids:
+            return candidate
+    return f"global.{model_id}"  # best guess when no profile is listed
+
 
 def _fetch_bedrock_models(region: str = "us-east-1") -> list[dict[str, Any]]:
-    """Call Bedrock API to list available Anthropic models."""
+    """Call Bedrock API to list available Anthropic + OpenAI models."""
     from agenticops.config import get_bedrock_boto_session
 
     client = get_bedrock_boto_session().client("bedrock")
-    response = client.list_foundation_models(byProvider="Anthropic")
 
-    models = []
-    for m in response.get("modelSummaries", []):
-        # Filter: TEXT output, ACTIVE status
-        if "TEXT" not in m.get("outputModalities", []):
-            continue
-        if m.get("modelLifecycle", {}).get("status") != "ACTIVE":
-            continue
+    models: list[dict[str, Any]] = []
+    errors: list[Exception] = []
+    profile_ids: set[str] | None = None
 
-        model_id = m.get("modelId", "")
-        model_name = m.get("modelName", "")
-
-        # Skip embedding or non-claude models
-        if "claude" not in model_id.lower() and "claude" not in model_name.lower():
+    for provider in _PROVIDERS:
+        try:
+            response = client.list_foundation_models(byProvider=provider)
+        except Exception as e:  # one provider failing must not hide the others
+            logger.warning("list_foundation_models(%s) failed: %s", provider, e)
+            errors.append(e)
             continue
 
-        # Extract context window from input token limit
-        input_tokens = 0
-        if "inferenceTypesSupported" in m:
-            # Try to get from response metadata
-            pass
+        for m in response.get("modelSummaries", []):
+            # Filter: TEXT output, ACTIVE status
+            if "TEXT" not in m.get("outputModalities", []):
+                continue
+            if m.get("modelLifecycle", {}).get("status") != "ACTIVE":
+                continue
 
-        # Build label from model name
-        label = model_name or model_id
+            model_id = m.get("modelId", "")
+            model_name = m.get("modelName", "")
 
-        models.append({
-            "model_id": model_id,
-            "model_name": model_name,
-            "context_window": input_tokens,
-            "streaming": "STREAMING" in m.get("inferenceTypesSupported", []),
-        })
+            # Anthropic list includes embeddings etc. — keep claude only
+            if provider == "Anthropic" and "claude" not in model_id.lower() \
+                    and "claude" not in model_name.lower():
+                continue
 
+            inference_types = list(m.get("inferenceTypesSupported", []))
+            invoke_id = model_id
+            if provider == "OpenAI" and "ON_DEMAND" not in inference_types:
+                if profile_ids is None:
+                    try:
+                        profile_ids = _fetch_inference_profile_ids(client)
+                    except Exception as e:
+                        logger.warning("list_inference_profiles failed: %s — "
+                                       "guessing 'global.' profile ids", e)
+                        profile_ids = set()  # _resolve_invoke_id falls through to guess
+                invoke_id = _resolve_invoke_id(model_id, inference_types,
+                                               profile_ids or None)
+
+            models.append({
+                "model_id": model_id,
+                "model_name": model_name,
+                "provider": provider.lower(),
+                "invoke_id": invoke_id,
+                "context_window": 0,
+                "streaming": "STREAMING" in inference_types,
+            })
+
+    if not models and errors:
+        raise errors[0]
     return models
 
 
@@ -74,7 +137,20 @@ def _build_presets_from_bedrock(raw_models: list[dict[str, Any]]) -> list[dict[s
             continue
         seen_ids.add(model_id)
 
-        # Use global. prefix for cross-region inference compatibility
+        if m.get("provider") == "openai":
+            # invoke_id already resolved (raw for ON_DEMAND, profile otherwise)
+            value = m.get("invoke_id") or model_id
+            label = m.get("model_name") or model_id
+            # gpt-oss = 128K context; gpt-5.x larger (display metadata only)
+            window = 128000 if "gpt-oss" in model_id else 400000
+            presets.append({
+                "label": label,
+                "value": value,
+                "context_window": window,
+            })
+            continue
+
+        # Anthropic: use global. prefix for cross-region inference compatibility
         global_id = f"global.{model_id}" if not model_id.startswith("global.") else model_id
 
         # Extract version label (e.g., "4.6", "4.5")
@@ -93,10 +169,14 @@ def _build_presets_from_bedrock(raw_models: list[dict[str, Any]]) -> list[dict[s
             "context_window": 200000,
         })
 
-    # Sort: Opus first, then Sonnet, then Haiku; latest version first
+    # Sort: Claude families first (Opus, Sonnet, Haiku — latest version first),
+    # then OpenAI gpt-5.x, then gpt-oss.
     family_order = {"Opus": 0, "Sonnet": 1, "Haiku": 2}
 
     def _sort_key(p):
+        value = p["value"]
+        if "openai." in value:
+            return (11, 0.0) if "gpt-oss" in value else (10, 0.0)
         parts = p["label"].split(" ")
         fam = parts[0]
         ver = 0.0
@@ -105,7 +185,7 @@ def _build_presets_from_bedrock(raw_models: list[dict[str, Any]]) -> list[dict[s
                 ver = float(parts[1])
             except ValueError:
                 pass
-        return (family_order.get(fam, 99), -ver)
+        return (family_order.get(fam, 9), -ver)
 
     presets.sort(key=_sort_key)
 
@@ -121,7 +201,8 @@ def _get_fallback_presets() -> list[dict[str, Any]]:
 
     presets = []
     for alias, model_id in aliases.items():
-        family = alias.capitalize()
+        # keep gpt-* aliases verbatim ('gpt-oss-120b'.capitalize() mangles them)
+        family = alias if alias.lower().startswith("gpt") else alias.capitalize()
         presets.append({
             "label": family,
             "value": model_id,

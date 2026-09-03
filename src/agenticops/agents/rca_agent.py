@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
-from strands.models.model import CacheConfig
 
 from agenticops.config import settings
 from agenticops.tools.aws_tools import assume_role
@@ -428,19 +427,15 @@ def rca_agent(issue_id: int) -> str:
                 pass
 
             model_id, max_tokens = get_agent_model_config("rca")
-            cache_kwargs: dict = {}
-            if settings.bedrock_cache_enabled:
-                cache_kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
-            from agenticops.agents.preamble import thinking_fields_for_budget
+            from agenticops.agents.preamble import bedrock_model_kwargs, thinking_fields_for_budget
             thinking_budget, escalate_reason = resolve_rca_effort(issue_id)
             thinking_fields = thinking_fields_for_budget(thinking_budget, max_tokens)
-            if thinking_fields:
-                cache_kwargs["additional_request_fields"] = thinking_fields
-                if escalate_reason:
-                    logger.info(
-                        "RCA #%d effort escalated to %d tokens (%s)",
-                        issue_id, thinking_budget, escalate_reason,
-                    )
+            cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
+            if thinking_fields and escalate_reason:
+                logger.info(
+                    "RCA #%d effort escalated to %d tokens (%s)",
+                    issue_id, thinking_budget, escalate_reason,
+                )
             model = BedrockModel(
                 model_id=model_id,
                 boto_session=get_bedrock_boto_session(),
