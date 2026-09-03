@@ -97,21 +97,36 @@ class TestEffortToBudget:
         assert got is not None and got < 8192
 
 
+LEGACY_MODEL = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+ADAPTIVE_MODEL = "global.anthropic.claude-opus-5"
+
+
 class TestThinkingFields:
-    def test_fields_shape(self, effort_settings):
-        assert thinking_fields_for_budget(4096, 16384) == {
+    def test_legacy_budget_shape(self, effort_settings):
+        """Pre-4.6 models keep budget_tokens — they reject adaptive."""
+        assert thinking_fields_for_budget(4096, 16384, LEGACY_MODEL) == {
             "thinking": {"type": "enabled", "budget_tokens": 4096}
         }
 
-    def test_zero_and_illegal_give_none(self, effort_settings):
-        assert thinking_fields_for_budget(0, 16384) is None
-        assert thinking_fields_for_budget(512, 16384) is None
-        assert thinking_fields_for_budget(16384, 16384) is None
+    def test_adaptive_shape(self, effort_settings):
+        """4.6+ models take adaptive + an effort tier; budget_tokens 400s there."""
+        assert thinking_fields_for_budget(4096, 16384, ADAPTIVE_MODEL) == {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "medium"},
+        }
 
-    def test_legacy_wrapper_unchanged(self, effort_settings):
-        """thinking_request_fields keeps its 2.2.0 contract (7 call sites)."""
+    @pytest.mark.parametrize("model", [LEGACY_MODEL, ADAPTIVE_MODEL])
+    def test_zero_and_illegal_give_none(self, effort_settings, model):
+        assert thinking_fields_for_budget(0, 16384, model) is None
+        assert thinking_fields_for_budget(512, 16384, model) is None
+        assert thinking_fields_for_budget(16384, 16384, model) is None
+
+    def test_wrapper_follows_agent_model(self, effort_settings):
+        """thinking_request_fields keeps its 2-arg contract and derives the
+        shape from the agent's own configured model (rca = Opus 4.6)."""
         assert thinking_request_fields("rca", 16384) == {
-            "thinking": {"type": "enabled", "budget_tokens": 4096}
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "medium"},
         }
         assert thinking_request_fields("main", 16384) is None
 
@@ -260,9 +275,12 @@ class TestAgentEffortWiring:
             return MockModel.call_args.kwargs
 
     def test_deep_override_enables_thinking(self, effort_settings):
+        """main runs on Opus 5, which takes adaptive thinking: a 12288 budget
+        must reach Bedrock as effort=xhigh, never as budget_tokens (a 400)."""
         kwargs = self._build(effort_override="deep")
         fields = kwargs.get("additional_request_fields")
-        assert fields and fields["thinking"]["budget_tokens"] == 12288
+        assert fields == {"thinking": {"type": "adaptive"},
+                          "output_config": {"effort": "xhigh"}}
 
     def test_no_override_matches_2_2_0_behaviour(self, effort_settings):
         """agent_main_thinking_budget=0 → byte-identical to 2.2.0 (no fields)."""

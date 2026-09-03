@@ -241,7 +241,8 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "") ->
         model_id = model_id_override
     from agenticops.agents.preamble import bedrock_model_kwargs, resolve_thinking_budget, thinking_fields_for_budget
     thinking_fields = thinking_fields_for_budget(
-        resolve_thinking_budget("main", max_tokens, override=effort_override), max_tokens,
+        resolve_thinking_budget("main", max_tokens, override=effort_override),
+        max_tokens, model_id,
     )
     cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
     model = BedrockModel(

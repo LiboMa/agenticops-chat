@@ -9,6 +9,7 @@ were previously in skills/loader.py.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional
 
@@ -226,16 +227,90 @@ def is_anthropic_model(model_id: str) -> bool:
     return "anthropic." in mid or "claude" in mid
 
 
+# Extended thinking has two incompatible request shapes on Bedrock. Claude 4.6
+# introduced adaptive thinking (`thinking.type=adaptive` + `output_config.effort`)
+# and removed `thinking.budget_tokens`, which now returns a 400 on Opus 4.7/4.8/5,
+# Sonnet 5 and Fable 5/5.1 ("...is not supported for this model. Use
+# thinking.type.adaptive..."). Models before 4.6 reject `adaptive` instead
+# ("adaptive thinking is not supported on this model"). Both shapes verified
+# live against Bedrock us-east-1; 4.6 accepts either, so it takes the modern
+# one — budget_tokens is deprecated there and only ever gets narrower.
+_ADAPTIVE_THINKING_MIN = (4, 6)
+
+
+def _claude_version(model_id: str) -> Optional[tuple[int, int]]:
+    """(major, minor) parsed from a Claude model id, else None.
+
+    'claude-opus-5' -> (5, 0), 'claude-fable-5-1' -> (5, 1),
+    'claude-haiku-4-5-20251001-v1:0' -> (4, 5). None for ids without a
+    `claude-<family>-<major>` shape: pre-4.x ('claude-3-5-sonnet-…') and
+    every non-Anthropic model.
+    """
+    m = re.search(r"claude-[a-z]+-(\d+)(?:-(\d+))?", (model_id or "").lower())
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else None
+
+
+def supports_adaptive_thinking(model_id: str) -> bool:
+    """True when the model takes adaptive thinking + output_config.effort.
+
+    False means the legacy `thinking.budget_tokens` shape — correct for
+    pre-4.6 Claude models and for non-Anthropic ids, whose budget
+    bedrock_model_kwargs translates into their native reasoning_effort.
+    """
+    version = _claude_version(model_id)
+    return version is not None and version >= _ADAPTIVE_THINKING_MIN
+
+
+def _effort_tier(budget: int) -> str:
+    """Map a thinking budget onto an adaptive-thinking effort tier.
+
+    Bedrock takes low|medium|high|xhigh|max. Aligned with
+    thinking_effort_presets so each preset lands on its own tier: 2048 low,
+    4096 medium, 8192 high, 12288 xhigh, anything above that max. Keeping the
+    budget as the internal currency means escalation (which adds tokens) keeps
+    working unchanged — more tokens simply mean a higher tier.
+    """
+    if budget <= 2048:
+        return "low"
+    if budget <= 4096:
+        return "medium"
+    if budget <= 8192:
+        return "high"
+    if budget <= 12288:
+        return "xhigh"
+    return "max"
+
+
+def _openai_reasoning_effort(budget: int) -> Optional[str]:
+    """Map an anthropic-style thinking budget to OpenAI's reasoning_effort tier.
+
+    OpenAI Bedrock models take low|medium|high (verified live on gpt-oss):
+    low ≤ 2048 < medium ≤ 4096 < high. 0 = no override (model default).
+    """
+    if budget <= 0:
+        return None
+    if budget <= 2048:
+        return "low"
+    if budget <= 4096:
+        return "medium"
+    return "high"
+
+
 def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) -> dict:
     """Prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
 
-    Anthropic-only request features are dropped for other providers (OpenAI
-    gpt-oss / gpt-5.x on Bedrock): they support neither promptCaching
-    cachePoints nor the anthropic `thinking` field, and sending either fails
-    the whole request. Single source of truth for all agent build sites.
+    Anthropic models: prompt caching + the anthropic `thinking` field.
+    OpenAI models (gpt-oss / gpt-5.x on Bedrock): no promptCaching cachePoints
+    and no `thinking` field (either fails the whole request) — instead the
+    thinking budget is translated to their native `reasoning_effort` tier.
+    Single source of truth for all agent build sites.
     """
     kwargs: dict = {}
     if not is_anthropic_model(model_id):
+        budget = (thinking_fields or {}).get("thinking", {}).get("budget_tokens", 0)
+        effort = _openai_reasoning_effort(budget)
+        if effort:
+            kwargs["additional_request_fields"] = {"reasoning_effort": effort}
         return kwargs
     if settings.bedrock_cache_enabled:
         from strands.models.model import CacheConfig
@@ -245,8 +320,12 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
     return kwargs
 
 
-def thinking_fields_for_budget(budget: int, max_tokens: int):
+def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
     """Bedrock extended-thinking request fields for a budget, or None.
+
+    `model_id` picks the request shape (see supports_adaptive_thinking) and is
+    required: the two shapes are mutually exclusive, and guessing wrong is a
+    400 at request time rather than a degradation.
 
     Bedrock requires thinking_budget_min <= budget < max_tokens. An illegal
     budget disables thinking (with a warning) rather than failing the call.
@@ -266,6 +345,9 @@ def thinking_fields_for_budget(budget: int, max_tokens: int):
             "thinking budget %d >= max_tokens %d — thinking disabled", budget, max_tokens,
         )
         return None
+    if supports_adaptive_thinking(model_id):
+        return {"thinking": {"type": "adaptive"},
+                "output_config": {"effort": _effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 
@@ -337,10 +419,14 @@ def thinking_request_fields(agent_name: str, max_tokens: int):
 
     Enabled per-agent via agent_{name}_thinking_budget in settings.yaml.
     Thin wrapper kept for the existing per-agent call sites; escalation and
-    interactive overrides go through resolve_thinking_budget.
+    interactive overrides go through resolve_thinking_budget. The request shape
+    follows the agent's own configured model.
     """
+    from agenticops.config import get_agent_model_config
+
+    model_id, _ = get_agent_model_config(agent_name)
     return thinking_fields_for_budget(
-        resolve_thinking_budget(agent_name, max_tokens), max_tokens,
+        resolve_thinking_budget(agent_name, max_tokens), max_tokens, model_id,
     )
 
 

@@ -113,7 +113,9 @@ class TestThinking:
 
         rca_settings.agent_rca_thinking_budget = 4096
         fields = thinking_request_fields("rca", 16384)
-        assert fields == {"thinking": {"type": "enabled", "budget_tokens": 4096}}
+        # RCA runs on Opus 4.6, which takes adaptive thinking + an effort tier
+        assert fields == {"thinking": {"type": "adaptive"},
+                          "output_config": {"effort": "medium"}}
 
     def test_zero_budget_off(self, rca_settings):
         from agenticops.agents.preamble import thinking_request_fields

@@ -353,9 +353,9 @@ flowchart TD
 
     WH --> PARSE["parse_prometheus()<br/>+ create_health_issue()<br/>(fingerprint dedup)"]
 
-    PARSE -->|daemon thread| RCA["④ Auto-RCA<br/>rca_agent() — Sonnet 4.6<br/>Skills + kubectl + KB lookup"]
+    PARSE -->|daemon thread| RCA["④ Auto-RCA<br/>rca_agent() — Opus 4.6<br/>Skills + kubectl + KB lookup"]
 
-    RCA --> SRE["⑤ Auto-SRE<br/>sre_agent() — Sonnet 4.6<br/>Fix plan + risk classification"]
+    RCA --> SRE["⑤ Auto-SRE<br/>sre_agent() — Fable 5.1<br/>Fix plan + risk classification"]
 
     SRE --> APPROVE{"⑥ Auto-Approve"}
     APPROVE -->|L0/L1| AUTO["Auto-approved ✓"]
@@ -1136,7 +1136,7 @@ curl -N -X POST $BASE/chat/sessions/{id}/messages \
 # Switch this session's model (per-session; "" = Auto, follow global)
 curl -X PATCH $BASE/chat/sessions/{id} \
   -H 'Content-Type: application/json' \
-  -d '{"model_id": "global.anthropic.claude-opus-4-8"}'
+  -d '{"model_id": "global.anthropic.claude-opus-5"}'
 
 # Upload image for analysis
 curl -X POST $BASE/chat/sessions/{id}/messages \

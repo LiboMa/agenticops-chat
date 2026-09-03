@@ -75,11 +75,30 @@ class TestBedrockModelKwargs:
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0") == {}
 
-    def test_openai_thinking_dropped(self, monkeypatch):
-        """Anthropic `thinking` request field must never reach an OpenAI model."""
+    def test_openai_thinking_translated_to_reasoning_effort(self, monkeypatch):
+        """Anthropic `thinking` field never reaches an OpenAI model — the
+        budget is translated to their native reasoning_effort tier instead."""
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        assert bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields) == {}
+        kw = bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields)
+        assert kw == {"additional_request_fields": {"reasoning_effort": "medium"}}
+        assert "cache_config" not in kw
+
+    @pytest.mark.parametrize("budget,tier", [
+        (2048, "low"),      # low preset
+        (4096, "medium"),   # legacy standard
+        (8192, "high"),     # high preset
+        (12288, "high"),    # xhigh / legacy deep
+        (15360, "high"),    # max preset after runtime clamping
+    ])
+    def test_reasoning_effort_tiers(self, budget, tier):
+        fields = {"thinking": {"type": "enabled", "budget_tokens": budget}}
+        kw = bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields)
+        assert kw["additional_request_fields"]["reasoning_effort"] == tier
+
+    def test_openai_zero_budget_sends_nothing(self):
+        fields = {"thinking": {"type": "enabled", "budget_tokens": 0}}
+        assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields) == {}
 
     def test_none_thinking_fields_omitted_for_claude(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
@@ -161,3 +180,24 @@ class TestSettingsSync:
             assert key in table, f"token_cost_table missing {key}"
             assert table[key]["input"] > 0
             assert table[key]["output"] > 0
+
+    def test_effort_presets_expose_ui_levels(self):
+        """UI levels auto/low/high/xhigh/max — auto is NULL, rest are presets.
+        Legacy off/standard/deep stay valid for pre-2.5.x sessions."""
+        presets = settings.thinking_effort_presets
+        assert presets["low"] == 2048
+        assert presets["high"] == 8192
+        assert presets["xhigh"] == 12288
+        assert presets["max"] == 24576
+        for legacy in ("off", "standard", "deep"):
+            assert legacy in presets
+
+    def test_effort_names_resolve_to_budgets(self):
+        """New preset names must survive effort_to_budget (incl. max clamping)."""
+        from agenticops.agents.preamble import effort_to_budget
+        max_tokens = 16384
+        assert effort_to_budget("low", max_tokens) == 2048
+        assert effort_to_budget("high", max_tokens) == 8192
+        assert effort_to_budget("xhigh", max_tokens) == 12288
+        # max (24576) clamps to max_tokens - thinking_budget_min
+        assert effort_to_budget("max", max_tokens) == max_tokens - settings.thinking_budget_min

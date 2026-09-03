@@ -429,7 +429,7 @@ def rca_agent(issue_id: int) -> str:
             model_id, max_tokens = get_agent_model_config("rca")
             from agenticops.agents.preamble import bedrock_model_kwargs, thinking_fields_for_budget
             thinking_budget, escalate_reason = resolve_rca_effort(issue_id)
-            thinking_fields = thinking_fields_for_budget(thinking_budget, max_tokens)
+            thinking_fields = thinking_fields_for_budget(thinking_budget, max_tokens, model_id)
             cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
             if thinking_fields and escalate_reason:
                 logger.info(

@@ -173,7 +173,15 @@ class Settings(BaseSettings):
     thinking_escalation_step: int = Field(default=4096, description="Tokens added per escalation tier on top of the base thinking budget")
     thinking_budget_min: int = Field(default=1024, description="Bedrock minimum thinking budget; below this thinking is disabled instead of sent")
     thinking_effort_presets: dict[str, int] = Field(
-        default_factory=lambda: {"off": 0, "standard": 4096, "deep": 12288},
+        default_factory=lambda: {
+            "off": 0,
+            "low": 2048,
+            "standard": 4096,   # legacy alias (pre-2.5.x sessions)
+            "high": 8192,
+            "deep": 12288,      # legacy alias (== xhigh)
+            "xhigh": 12288,
+            "max": 24576,       # clamped to max_tokens-1024 at request time
+        },
         description="Named effort levels for interactive (chat) overrides",
     )
 
@@ -905,6 +913,12 @@ class Settings(BaseSettings):
     # Token cost rates per 1M tokens by model family
     token_cost_table: dict[str, dict[str, float]] = Field(
         default={
+            # Claude 5 family rates provisional (Opus-4.8 / Sonnet-4.6 tiers)
+            # until official pricing lands.
+            "claude-opus-5":      {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+            "claude-sonnet-5":    {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+            "claude-fable-5-1":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+            "claude-fable-5":     {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
             "claude-opus-4-8":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
             "claude-opus-4-6":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
             "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
@@ -981,8 +995,26 @@ AGENT_TIER_DEFAULTS: dict[str, str] = {
 # Sentinel: use NullConversationManager (keep full context, no sliding window)
 FULL_CONTEXT = -1
 
-# Per-model-family window size defaults (used when agent_X_window_size == 0)
+# Per-model-family window size defaults (used when agent_X_window_size == 0).
+# Matching is first-substring-wins (see get_agent_window_size), so a more
+# specific family MUST be listed before its prefix: 'claude-fable-5-1' before
+# 'claude-fable-5', otherwise Fable 5.1 would silently inherit Fable 5.
 MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
+    "claude-opus-5": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
+    },
+    "claude-sonnet-5": {
+        "main": 100, "scan": 80, "detect": 80,
+        "rca": 200, "sre": 200,
+        "executor": 20, "reporter": 80,
+    },
+    "claude-fable-5-1": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
+    },
     "claude-fable-5": {
         "main": 200, "scan": 120, "detect": 120,
         "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,

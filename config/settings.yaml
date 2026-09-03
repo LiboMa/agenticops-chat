@@ -3,20 +3,29 @@ bedrock_profile: default
 bedrock_max_tokens: 16384
 bedrock_window_size: 40
 model_aliases:
-  opus: global.anthropic.claude-opus-4-6-v1
-  sonnet: global.anthropic.claude-sonnet-4-6
+  # Bare aliases track the latest generation; versioned aliases pin exactly.
+  opus: global.anthropic.claude-opus-5
+  sonnet: global.anthropic.claude-sonnet-5
   haiku: global.anthropic.claude-haiku-4-5-20251001-v1:0
+  fable: global.anthropic.claude-fable-5-1
+  opus-5: global.anthropic.claude-opus-5
+  sonnet-5: global.anthropic.claude-sonnet-5
+  fable-5-1: global.anthropic.claude-fable-5-1
+  fable-5: global.anthropic.claude-fable-5
+  opus-4-8: global.anthropic.claude-opus-4-8
+  opus-4-6: global.anthropic.claude-opus-4-6-v1
+  sonnet-4-6: global.anthropic.claude-sonnet-4-6
   # OpenAI on Bedrock (gpt-5.6-* invoke via global inference profile; gpt-oss ON_DEMAND)
   gpt-5.6-terra: global.openai.gpt-5.6-terra
   gpt-5.6-luna: global.openai.gpt-5.6-luna
   gpt-5.6-sol: global.openai.gpt-5.6-sol
   gpt-oss-120b: openai.gpt-oss-120b-1:0
   gpt-oss-20b: openai.gpt-oss-20b-1:0
-agent_main_model_id: global.anthropic.claude-opus-4-8
+agent_main_model_id: global.anthropic.claude-opus-5
 agent_scan_model_id: global.anthropic.claude-sonnet-4-6
 agent_detect_model_id: global.anthropic.claude-sonnet-4-6
 agent_rca_model_id: global.anthropic.claude-opus-4-6-v1
-agent_sre_model_id: global.anthropic.claude-fable-5
+agent_sre_model_id: global.anthropic.claude-fable-5-1
 agent_executor_model_id: global.anthropic.claude-opus-4-6-v1
 agent_reporter_model_id: global.anthropic.claude-sonnet-4-6
 agent_main_max_tokens: 0
@@ -32,7 +41,23 @@ agent_rca_window_size: 0
 agent_sre_window_size: -1
 agent_executor_window_size: 1800
 token_cost_table:
-  # claude-fable-5 rates provisional (Opus-4.8 tier) until official pricing lands
+  # Claude 5 family + fable rates provisional (Opus-4.8 / Sonnet-4.6 tiers)
+  # until official pricing lands. Keys come from cost.normalize_model_key.
+  claude-opus-5:
+    input: 15.0
+    output: 75.0
+    cache_read: 1.5
+    cache_write: 18.75
+  claude-sonnet-5:
+    input: 3.0
+    output: 15.0
+    cache_read: 0.3
+    cache_write: 3.75
+  claude-fable-5-1:
+    input: 15.0
+    output: 75.0
+    cache_read: 1.5
+    cache_write: 18.75
   claude-fable-5:
     input: 15.0
     output: 75.0
@@ -154,8 +179,12 @@ thinking_escalation_step: 4096
 thinking_budget_min: 1024
 thinking_effort_presets:
   "off": 0          # quoted — bare off/on are booleans in YAML
-  "standard": 4096
-  "deep": 12288
+  "low": 2048
+  "standard": 4096  # legacy alias (pre-2.5.x sessions)
+  "high": 8192
+  "deep": 12288     # legacy alias (== xhigh)
+  "xhigh": 12288
+  "max": 24576      # clamped to max_tokens-1024 at request time
 skills_enabled: true
 skills_auto_improve_enabled: true
 skills_post_resolution_review: true

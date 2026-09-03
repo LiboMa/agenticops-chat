@@ -153,14 +153,17 @@ def _build_presets_from_bedrock(raw_models: list[dict[str, Any]]) -> list[dict[s
         # Anthropic: use global. prefix for cross-region inference compatibility
         global_id = f"global.{model_id}" if not model_id.startswith("global.") else model_id
 
-        # Extract version label (e.g., "4.6", "4.5")
+        # Extract version label (e.g. "4.6", "4.5", or a bare "5" — the 5
+        # family ships single-segment versions like 'claude-opus-5').
         version = ""
-        match = re.search(r"claude-(\w+)-(\d+[\.\-]\d+)", model_id)
+        match = re.search(r"claude-([a-z]+)-(\d+(?:[\.\-]\d+)?)", model_id)
         if match:
-            family = match.group(1).capitalize()  # opus, sonnet, haiku
+            family = match.group(1).capitalize()  # opus, sonnet, haiku, fable
             version = match.group(2).replace("-", ".")
         else:
-            family = m.get("model_name", model_id).split(" ")[0]
+            # Unmatched shape (e.g. 'claude-3-5-sonnet-…'): the full model name
+            # is a better label than its first word, which is just "Claude".
+            family = m.get("model_name") or model_id
 
         label = f"{family} {version}" if version else family
         presets.append({
@@ -169,9 +172,9 @@ def _build_presets_from_bedrock(raw_models: list[dict[str, Any]]) -> list[dict[s
             "context_window": 200000,
         })
 
-    # Sort: Claude families first (Opus, Sonnet, Haiku — latest version first),
-    # then OpenAI gpt-5.x, then gpt-oss.
-    family_order = {"Opus": 0, "Sonnet": 1, "Haiku": 2}
+    # Sort: Claude families first (Opus, Sonnet, Fable, Haiku — latest version
+    # first), then OpenAI gpt-5.x, then gpt-oss.
+    family_order = {"Opus": 0, "Sonnet": 1, "Fable": 2, "Haiku": 3}
 
     def _sort_key(p):
         value = p["value"]

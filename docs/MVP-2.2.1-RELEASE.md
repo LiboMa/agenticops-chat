@@ -57,6 +57,10 @@ thinking_effort_presets:
   "deep": 12288
 ```
 
+> **后续变更（Claude 5 接入）**：presets 扩展为 Bedrock 的五档 `low/high/xhigh/max`（`standard`/`deep` 保留为旧会话别名），
+> 且请求形状随模型而变 —— Claude ≥ 4.6 用 adaptive thinking + `output_config.effort`，`budget_tokens` 在其上直接 400。
+> budget 仍是内部计量单位（本文的升级策略逐字不变），只是在出请求前映射成 effort 档位。当前口径见 `CLAUDE.md`。
+
 ## 明确不做（避免污染可度量性）
 
 - ❌ blast radius / 图谱影响面作为升级因子 —— 口径模糊，加进去就无法归因是哪个因子起作用。

@@ -4,8 +4,9 @@ import { useSettings } from "@/hooks/useSettings";
 import { useChatSessions, useUpdateChatSession } from "@/hooks/useChatSessions";
 import { useLocale } from "@/i18n/LocaleContext";
 
-/** Effort levels; "" = Auto (follow the agent's configured thinking budget). */
-const EFFORT_LEVELS = ["", "off", "standard", "deep"] as const;
+/** Effort levels; "" = Auto (follow the agent's configured thinking budget).
+ *  off/standard/deep remain valid backend aliases for pre-2.5.x sessions. */
+const EFFORT_LEVELS = ["", "low", "high", "xhigh", "max"] as const;
 
 /** Strip provider prefix: "global.anthropic.claude-opus-4-8" → "claude-opus-4-8" */
 function shortName(id: string): string {
