@@ -628,6 +628,7 @@ export interface ChatMessage {
     cache_write?: number;
     cost_usd?: number;
     model?: string;
+    error?: string; // persisted when the stream failed (e.g. model unavailable)
   };
   trace_id?: string;
   cost_usd?: number;

@@ -232,7 +232,14 @@ function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
           className="text-sm text-foreground leading-relaxed report-content max-w-none"
           dangerouslySetInnerHTML={{ __html: renderMessageMarkdown(msg.id, msg.content) }}
         />
-        {msg.role === "assistant" && msg.token_usage && (
+        {/* Failed stream persisted with an error (e.g. model unavailable) —
+            render it instead of leaving an empty bubble. */}
+        {msg.role === "assistant" && msg.token_usage?.error && (
+          <div className="text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg px-3 py-2 whitespace-pre-wrap break-words">
+            ⚠ {msg.token_usage.error}
+          </div>
+        )}
+        {msg.role === "assistant" && msg.token_usage && !msg.token_usage.error && (
           <TokenMetrics msg={msg} />
         )}
         {msg.role === "assistant" && isLast && !streaming && onSuggestionPick &&
