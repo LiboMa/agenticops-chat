@@ -8,13 +8,21 @@ path. Nothing inside an imported package is ever run during import.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 import shutil
+import subprocess
+import tarfile
+import tempfile
+import urllib.request
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from agenticops.config import settings
 from agenticops.skills.curator import _write_skill_md
@@ -96,6 +104,10 @@ def _package_files(pkg_dir: Path) -> list[Path]:
             raise _Reject(f"not a regular file: {rel}")
         if not str(p.resolve()).startswith(str(root) + os.sep):
             raise _Reject(f"path escapes package root: {rel}")
+        # A hard link is a regular file inside the root, yet its bytes belong to
+        # some other file on the host — copying it would exfiltrate that content.
+        if p.stat().st_nlink > 1:
+            raise _Reject(f"hard link not allowed: {rel}")
         out.append(p)
     return out
 
@@ -198,3 +210,219 @@ def install_packages(
     if result.installed:
         _invalidate_skills_cache()
     return result
+
+
+_ARCHIVE_SUFFIXES = (".zip", ".tar.gz", ".tgz")
+_ARCHIVE_CTYPES = {"application/zip", "application/gzip", "application/x-gzip", "application/x-tar",
+                   "application/octet-stream"}
+_MARKDOWN_CTYPES = {"text/markdown", "text/plain", "text/x-markdown"}
+_GIT_HOST_RE = re.compile(r"^https?://(?:www\.)?(?:github|gitlab|bitbucket)\.(?:com|org)/[^/]+/[^/]+")
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _check_entry_name(name: str) -> str:
+    """Reject absolute / traversing archive entry names. Returns the normalized name."""
+    norm = os.path.normpath(name)
+    if os.path.isabs(norm) or norm.startswith(("/", "\\")) or norm == ".." or norm.startswith(".." + os.sep):
+        raise ValueError(f"unsafe archive entry: {name}")
+    return norm
+
+
+def _safe_join(dest: Path, name: str) -> Path:
+    out = (dest / _check_entry_name(name)).resolve()
+    if not str(out).startswith(str(dest.resolve()) + os.sep):
+        raise ValueError(f"unsafe archive entry: {name}")
+    return out
+
+
+def _check_entries(items: list[tuple[str, int, bool]]) -> None:
+    """items = [(name, size, is_link_or_special)]. Raises on any hard-limit violation."""
+    max_files = settings.skills_import_max_files
+    if len(items) > max_files:
+        raise ValueError(f"archive has too many files: {len(items)} > {max_files}")
+    cap = settings.skills_import_max_package_bytes
+    total = 0
+    for name, size, is_special in items:
+        _check_entry_name(name)
+        if is_special:
+            raise ValueError(f"archive contains a link/special entry: {name}")
+        total += size
+        if total > cap:
+            raise ValueError(f"archive expands beyond {cap} bytes")
+
+
+def _zip_is_link(info: zipfile.ZipInfo) -> bool:
+    return ((info.external_attr >> 16) & 0o170000) == 0o120000
+
+
+def _unpack(archive: Path, dest: Path) -> None:
+    """Explicit per-entry extraction. Never uses extractall."""
+    dest.mkdir(parents=True, exist_ok=True)
+    if archive.name.lower().endswith(".zip"):
+        with zipfile.ZipFile(archive) as zf:
+            entries = [i for i in zf.infolist() if not i.is_dir()]
+            _check_entries([(i.filename, i.file_size, _zip_is_link(i)) for i in entries])
+            for info in entries:
+                out = _safe_join(dest, info.filename)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(out, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 65536)
+                os.chmod(out, 0o644)
+    else:
+        with tarfile.open(archive, "r:gz") as tf:
+            members = [m for m in tf.getmembers() if not m.isdir()]
+            _check_entries([(m.name, m.size, not m.isreg()) for m in members])
+            for m in members:
+                out = _safe_join(dest, m.name)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                fobj = tf.extractfile(m)
+                if fobj is None:
+                    raise ValueError(f"unreadable archive entry: {m.name}")
+                with open(out, "wb") as dst:
+                    shutil.copyfileobj(fobj, dst, 65536)
+                os.chmod(out, 0o644)
+
+
+def _download(url: str) -> tuple[bytes, str]:
+    """Stream a URL into memory with a hard byte cap. Returns (bytes, content-type)."""
+    cap = settings.skills_import_max_package_bytes
+    req = urllib.request.Request(url, headers={"User-Agent": "aiops-skill-import"})
+    chunks: list[bytes] = []
+    total = 0
+    with urllib.request.urlopen(req, timeout=settings.skills_import_timeout_seconds) as resp:
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        while True:
+            buf = resp.read(65536)
+            if not buf:
+                break
+            total += len(buf)
+            if total > cap:
+                raise ValueError(f"download exceeds {cap} bytes")
+            chunks.append(buf)
+    return b"".join(chunks), ctype
+
+
+def _is_git(uri: str) -> bool:
+    if uri.startswith(("git+", "git@", "ssh://git@")):
+        return True
+    base = uri.split("#", 1)[0]
+    if base.endswith(".git") or ".git@" in base:
+        return True
+    return bool(_GIT_HOST_RE.match(base)) and not base.lower().endswith(_ARCHIVE_SUFFIXES + (".md",))
+
+
+def _fetch_git(uri: str, workdir: Path) -> tuple[Path, str]:
+    url = uri[4:] if uri.startswith("git+") else uri
+    subdir = ""
+    if "#" in url:
+        url, subdir = url.split("#", 1)
+    ref = ""
+    last = url.rsplit("/", 1)[-1]
+    if "@" in last:
+        url, ref = url.rsplit("@", 1)
+
+    dest = workdir / "repo"
+    cmd = ["git", "clone", "--depth", "1"]
+    if ref:
+        cmd += ["--branch", ref]
+    cmd += ["--", url, str(dest)]
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, shell=False,
+        timeout=settings.skills_import_timeout_seconds,
+    )
+    if proc.returncode != 0:
+        raise ValueError(f"git clone failed: {proc.stderr.strip()[:300]}")
+
+    sha = subprocess.run(
+        ["git", "-C", str(dest), "rev-parse", "HEAD"],
+        capture_output=True, text=True, shell=False, timeout=30,
+    ).stdout.strip()
+    shutil.rmtree(dest / ".git", ignore_errors=True)
+
+    root = dest
+    if subdir:
+        root = (dest / _check_entry_name(subdir)).resolve()
+        if not str(root).startswith(str(dest.resolve()) + os.sep) or not root.is_dir():
+            raise ValueError(f"subdir not found in repo: {subdir}")
+    return root, sha or "unknown"
+
+
+def _fetch_http(uri: str, workdir: Path) -> tuple[Path, str]:
+    data, ctype = _download(uri)
+    path_part = urlparse(uri).path.lower()
+
+    if path_part.endswith(_ARCHIVE_SUFFIXES) or ctype in _ARCHIVE_CTYPES:
+        is_zip = path_part.endswith(".zip") or ctype == "application/zip" or data[:2] == b"PK"
+        tmp = workdir / ("download.zip" if is_zip else "download.tar.gz")
+        tmp.write_bytes(data)
+        dest = workdir / "unpacked"
+        _unpack(tmp, dest)
+        return dest, _sha256_bytes(data)
+
+    if path_part.endswith(".md") or ctype in _MARKDOWN_CTYPES:
+        text = data.decode("utf-8", errors="replace")
+        fm, _ = parse_frontmatter(text)
+        raw = (fm.get("name") if isinstance(fm, dict) else None) or Path(urlparse(uri).path).stem
+        # Sanitize only the DIRECTORY name; the frontmatter name still faces full validation later.
+        dirname = re.sub(r"[^a-z0-9-]", "-", str(raw).lower())[:64].strip("-") or "imported-skill"
+        root = workdir / "single"
+        pkg = root / dirname
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "SKILL.md").write_text(text, encoding="utf-8")
+        return root, _sha256_bytes(data)
+
+    raise ValueError(f"unsupported skill source: {uri} (content-type={ctype or 'unknown'})")
+
+
+def fetch(uri: str, workdir: Path) -> tuple[Path, str]:
+    """Resolve a skill source into a local root directory + a provenance ref."""
+    if _is_git(uri):
+        return _fetch_git(uri, workdir)
+    if uri.startswith(("http://", "https://")):
+        return _fetch_http(uri, workdir)
+
+    p = Path(uri).expanduser()
+    if p.is_dir():
+        return p, "local-dir"
+    if p.is_file() and p.name.lower().endswith(_ARCHIVE_SUFFIXES):
+        dest = workdir / "unpacked"
+        _unpack(p, dest)
+        return dest, _sha256_file(p)
+    raise ValueError(f"unsupported skill source: {uri}")
+
+
+def import_skills(uri: str, names: list[str] | None = None) -> ImportResult:
+    """Import skills from a URL / git repo / zip / local path as DRAFTS.
+
+    Human action only — no agent tool calls this. Nothing in the package is
+    executed. Raises on source-level failure (nothing written); per-package
+    problems are reported in ImportResult.skipped / .rejected.
+    """
+    if not settings.skills_import_enabled:
+        raise RuntimeError("skill import is disabled (skills_import_enabled=false)")
+
+    workdir = Path(tempfile.mkdtemp(prefix="aiops-skill-import-"))
+    try:
+        root, source_ref = fetch(uri, workdir)
+        pkgs = discover_packages(root)
+        if not pkgs:
+            raise ValueError(f"no SKILL.md found in source: {uri}")
+        result = install_packages(pkgs, uri, source_ref, names)
+        logger.info(
+            "Skill import from %s (ref=%s): %d installed, %d skipped, %d rejected",
+            uri, source_ref[:12], len(result.installed), len(result.skipped), len(result.rejected),
+        )
+        return result
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)

@@ -282,3 +282,221 @@ class TestInstallPackages:
         install_packages(discover_packages(src), "file://src", "ref")
         staging = ddir / ".staging"
         assert not staging.exists() or list(staging.iterdir()) == []
+
+
+class TestFetchAndImport:
+    def test_local_dir_source(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+
+        res = import_skills(str(src))
+        assert [s.name for s in res.installed] == ["alpha-skill"]
+        assert res.source_ref == "local-dir"
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_local_zip_source(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+        zpath = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.write(src / "alpha-skill" / "SKILL.md", "alpha-skill/SKILL.md")
+
+        res = import_skills(str(zpath))
+        assert [s.name for s in res.installed] == ["alpha-skill"]
+        assert len(res.source_ref) == 64          # sha256 hex
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_zip_path_traversal_entry_rejected(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        _sdir, _ddir = skill_dirs
+        zpath = tmp_path / "evil.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("../escape/SKILL.md", SKILL_MD.format(name="escape-skill"))
+
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            import_skills(str(zpath))
+        assert not (tmp_path / "escape").exists()
+
+    def test_zip_absolute_entry_rejected(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        zpath = tmp_path / "abs.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("/tmp/aiops-evil-skill/SKILL.md", SKILL_MD.format(name="evil-skill"))
+
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            import_skills(str(zpath))
+        assert not Path("/tmp/aiops-evil-skill").exists()
+
+    def test_zip_symlink_entry_rejected(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        zpath = tmp_path / "link.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            info = zipfile.ZipInfo("alpha-skill/link.txt")
+            info.external_attr = (0o120777 << 16)     # symlink mode bits
+            zf.writestr(info, "/etc/passwd")
+            zf.writestr("alpha-skill/SKILL.md", SKILL_MD.format(name="alpha-skill"))
+
+        with pytest.raises(ValueError, match="link/special entry"):
+            import_skills(str(zpath))
+
+    def test_zip_over_size_cap_rejected(self, tmp_path, skill_dirs, monkeypatch):
+        from agenticops.skills.sources import import_skills
+
+        monkeypatch.setattr("agenticops.config.settings.skills_import_max_package_bytes", 256, raising=False)
+        zpath = tmp_path / "big.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("alpha-skill/SKILL.md", SKILL_MD.format(name="alpha-skill"))
+            zf.writestr("alpha-skill/big.txt", "x" * 8192)
+
+        with pytest.raises(ValueError, match="expands beyond"):
+            import_skills(str(zpath))
+
+    def test_zip_over_file_count_rejected(self, tmp_path, skill_dirs, monkeypatch):
+        from agenticops.skills.sources import import_skills
+
+        monkeypatch.setattr("agenticops.config.settings.skills_import_max_files", 2, raising=False)
+        zpath = tmp_path / "many.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("alpha-skill/SKILL.md", SKILL_MD.format(name="alpha-skill"))
+            for i in range(4):
+                zf.writestr(f"alpha-skill/note{i}.md", "x")
+
+        with pytest.raises(ValueError, match="too many files"):
+            import_skills(str(zpath))
+
+    def test_git_repo_source(self, tmp_path, skill_dirs):
+        """Hermetic: clone from a local `git init` repo, never the internet."""
+        import subprocess
+
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        repo = tmp_path / "fakerepo"
+        for n in ("alpha-skill", "beta-skill"):
+            _make_pkg(repo, n)
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+        }
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True, env=env)
+
+        res = import_skills(f"git+file://{repo}")
+        assert sorted(s.name for s in res.installed) == ["alpha-skill", "beta-skill"]
+        assert len(res.source_ref) == 40          # git sha1
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_http_markdown_becomes_single_package(self, tmp_path, skill_dirs, monkeypatch):
+        """Stub the downloader — no real network in tests."""
+        from agenticops.skills import sources
+
+        _sdir, ddir = skill_dirs
+        payload = SKILL_MD.format(name="url-skill").encode("utf-8")
+        monkeypatch.setattr(sources, "_download", lambda url: (payload, "text/markdown"))
+
+        res = sources.import_skills("https://example.invalid/skills/url-skill.md")
+        assert [s.name for s in res.installed] == ["url-skill"]
+        assert (ddir / "url-skill" / "SKILL.md").is_file()
+
+    def test_http_zip_archive(self, tmp_path, skill_dirs, monkeypatch):
+        from agenticops.skills import sources
+
+        _sdir, ddir = skill_dirs
+        zpath = tmp_path / "remote.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("alpha-skill/SKILL.md", SKILL_MD.format(name="alpha-skill"))
+        blob = zpath.read_bytes()
+        monkeypatch.setattr(sources, "_download", lambda url: (blob, "application/zip"))
+
+        res = sources.import_skills("https://example.invalid/bundle.zip")
+        assert [s.name for s in res.installed] == ["alpha-skill"]
+
+    def test_unsupported_uri_raises(self, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        with pytest.raises(ValueError, match="unsupported skill source"):
+            import_skills("ftp://example.invalid/x.tar")
+
+    def test_no_skill_md_in_source_raises(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import import_skills
+
+        empty = tmp_path / "empty"
+        (empty / "docs").mkdir(parents=True)
+        (empty / "docs" / "readme.md").write_text("nothing here", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="no SKILL.md"):
+            import_skills(str(empty))
+
+    def test_import_disabled_refuses(self, tmp_path, skill_dirs, monkeypatch):
+        from agenticops.skills.sources import import_skills
+
+        monkeypatch.setattr("agenticops.config.settings.skills_import_enabled", False, raising=False)
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+        with pytest.raises(RuntimeError, match="disabled"):
+            import_skills(str(src))
+
+    def test_import_never_executes_packaged_scripts(self, tmp_path, skill_dirs):
+        """spec 测试 9：install.sh 会写标记文件；导入后标记文件必须不存在。"""
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        marker = tmp_path / "EXECUTED"
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill", {"install.sh": f"#!/bin/sh\ntouch {marker}\n"})
+
+        import_skills(str(src))
+        assert not marker.exists(), "import must never execute packaged scripts"
+        assert (ddir / "alpha-skill" / "install.sh").is_file()
+
+    def test_hardlink_in_package_rejected(self, tmp_path, skill_dirs):
+        """A hard link passes the symlink/escape checks but still copies foreign bytes."""
+        from agenticops.skills.sources import discover_packages, install_packages
+
+        _sdir, ddir = skill_dirs
+        outside = tmp_path / "outside.txt"
+        outside.write_text("outside content", encoding="utf-8")
+        src = tmp_path / "src"
+        pkg = _make_pkg(src, "alpha-skill")
+        os.link(outside, pkg / "notes.md")
+
+        res = install_packages(discover_packages(src), "file://src", "ref")
+        assert res.installed == []
+        assert "hard link" in res.rejected[0][1]
+        assert not (ddir / "alpha-skill").exists()
+
+    def test_tempdir_cleaned_on_success_and_failure(self, tmp_path, skill_dirs, monkeypatch):
+        import tempfile
+
+        from agenticops.skills.sources import import_skills
+
+        created: list[str] = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def spy(*a, **kw):
+            d = real_mkdtemp(*a, **kw)
+            created.append(d)
+            return d
+
+        monkeypatch.setattr(tempfile, "mkdtemp", spy)
+
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+        import_skills(str(src))
+        with pytest.raises(ValueError):
+            import_skills("ftp://example.invalid/x")
+
+        assert created, "expected import to use a temp workdir"
+        for d in created:
+            assert not Path(d).exists(), f"temp workdir leaked: {d}"
