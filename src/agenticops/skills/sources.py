@@ -19,6 +19,7 @@ import tempfile
 import urllib.request
 import uuid
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -302,26 +303,38 @@ def _unpack(archive: Path, dest: Path) -> None:
                     with open(out, "wb") as dst:
                         shutil.copyfileobj(fobj, dst, 65536)
                     os.chmod(out, 0o644)
-    except (zipfile.BadZipFile, zipfile.LargeZipFile, tarfile.TarError, EOFError, OSError) as e:
+    # zlib.error inherits straight from Exception (neither ValueError nor OSError), and a
+    # corrupt deflate stream raises it from inside the decompressor, past the header checks.
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, tarfile.TarError,
+            zlib.error, EOFError, OSError) as e:
         raise ValueError(f"cannot unpack archive {archive.name}: {type(e).__name__}: {e}") from e
 
 
 def _download(url: str) -> tuple[bytes, str]:
-    """Stream a URL into memory with a hard byte cap. Returns (bytes, content-type)."""
+    """Stream a URL into memory with a hard byte cap. Returns (bytes, content-type).
+
+    A dead or typo'd URL is the likeliest real failure of this feature and is a bad
+    *source*, so URLError/HTTPError/TimeoutError (all OSError subclasses) become
+    ValueError -> HTTP 400. The cap's own ValueError is not an OSError, so it is
+    never swallowed here.
+    """
     cap = settings.skills_import_max_package_bytes
     req = urllib.request.Request(url, headers={"User-Agent": "aiops-skill-import"})
     chunks: list[bytes] = []
     total = 0
-    with urllib.request.urlopen(req, timeout=settings.skills_import_timeout_seconds) as resp:
-        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        while True:
-            buf = resp.read(65536)
-            if not buf:
-                break
-            total += len(buf)
-            if total > cap:
-                raise ValueError(f"download exceeds {cap} bytes")
-            chunks.append(buf)
+    try:
+        with urllib.request.urlopen(req, timeout=settings.skills_import_timeout_seconds) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            while True:
+                buf = resp.read(65536)
+                if not buf:
+                    break
+                total += len(buf)
+                if total > cap:
+                    raise ValueError(f"download exceeds {cap} bytes")
+                chunks.append(buf)
+    except OSError as e:
+        raise ValueError(f"download failed: {e}") from e
     return b"".join(chunks), ctype
 
 
@@ -346,17 +359,30 @@ def _validate_git_url(url: str) -> None:
 
     `<helper>::<cmd>` (`ext::`, `fd::`, any future helper) makes git RUN <cmd>, and
     neither `--` nor `-c protocol.ext.allow=never` stops it when GIT_ALLOW_PROTOCOL is
-    set in the environment. So the only defense that depends on no git behaviour at all
-    is never handing such a URL to git. Rejects run before accepts (fail closed).
+    set in the environment. So the helper and option-shape rejections below rely on no
+    git behaviour whatsoever. Rejects run before accepts (fail closed).
+
+    One residual: for an accepted `ssh://<host>/…` we do rely on git's own
+    "strange hostname" check (git >= 2.14.1) to refuse an option-shaped host. The
+    scp-style branch does NOT rely on git — git accepts an option-shaped scp host, so
+    that case is rejected here explicitly.
     """
     if url.startswith("-"):
         raise ValueError(f"unsupported git transport (option-shaped url): {url}")
     if "::" in url.split("/", 1)[0]:
         raise ValueError(f"unsupported git transport (transport helper): {url}")
-    if _GIT_SCHEME_RE.match(url) or _GIT_SCP_RE.match(url):
+    if _GIT_SCP_RE.match(url):
+        if url.split("@", 1)[1].startswith("-"):
+            raise ValueError(f"unsupported git transport (option-shaped host): {url}")
         return
-    if Path(url).expanduser().exists():
+    if _GIT_SCHEME_RE.match(url):
         return
+    try:
+        if Path(url).expanduser().exists():
+            return
+    except OSError:
+        # e.g. ENAMETOOLONG — an unusable path is simply not an accepted transport.
+        pass
     raise ValueError(f"unsupported git transport: {url}")
 
 

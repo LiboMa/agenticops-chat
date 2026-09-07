@@ -545,6 +545,49 @@ class TestFetchAndImport:
             import_skills(str(bad))
         assert str(excinfo.value)
 
+    def test_corrupt_deflate_stream_raises_valueerror(self, tmp_path, skill_dirs):
+        """zlib.error inherits from Exception, so it slips past ValueError AND OSError.
+
+        `b"not a zip"` dies at the header (BadZipFile) and never reaches the
+        decompressor, which is why the other corrupt-archive test misses this.
+        Deterministic by construction: the whole deflate payload is overwritten with
+        0xff (length preserved, so every header/offset stays valid), which always
+        fails inflate rather than depending on a lucky bit-flip offset.
+        """
+        import struct
+
+        from agenticops.skills.sources import import_skills
+
+        zpath = tmp_path / "deflate.zip"
+        body = SKILL_MD.format(name="alpha-skill").encode("utf-8") * 8
+        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("alpha-skill/SKILL.md", body)
+        with zipfile.ZipFile(zpath) as zf:
+            info = zf.infolist()[0]
+
+        raw = bytearray(zpath.read_bytes())
+        # local file header: 30 fixed bytes, then the name, then the extra field
+        name_len, extra_len = struct.unpack("<HH", raw[info.header_offset + 26:info.header_offset + 30])
+        start = info.header_offset + 30 + name_len + extra_len
+        raw[start:start + info.compress_size] = b"\xff" * info.compress_size
+        zpath.write_bytes(bytes(raw))
+
+        with pytest.raises(ValueError, match="cannot unpack archive"):
+            import_skills(str(zpath))
+
+    def test_download_network_error_raises_valueerror(self, monkeypatch):
+        """A dead/typo'd URL is a bad source (400), not a server fault (500)."""
+        import urllib.error
+
+        from agenticops.skills import sources
+
+        def boom(*a, **kw):
+            raise urllib.error.URLError("nope")
+
+        monkeypatch.setattr(sources.urllib.request, "urlopen", boom)
+        with pytest.raises(ValueError, match="download failed"):
+            sources._download("https://example.invalid/x.md")
+
     def test_nul_in_entry_name_rejected(self):
         from agenticops.skills import sources
 
@@ -641,7 +684,9 @@ class TestFetchAndImport:
         from agenticops.skills.sources import import_skills
 
         marker = tmp_path / "pwn-marker"
-        with pytest.raises(ValueError, match="transport"):
+        # Match OUR message, not git's own "fatal: transport 'ext' not allowed" —
+        # a bare "transport" would let this pass with layer 1a deleted.
+        with pytest.raises(ValueError, match="unsupported git transport"):
             import_skills(f"git+ext::touch {marker}")
         assert not marker.exists(), "ext:: transport executed a command"
 
@@ -653,7 +698,7 @@ class TestFetchAndImport:
 
         monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ext")
         marker = tmp_path / "pwn-marker"
-        with pytest.raises(ValueError, match="transport"):
+        with pytest.raises(ValueError, match="unsupported git transport"):
             import_skills(f"git+ext::touch {marker}")
         assert not marker.exists(), "ext:: transport executed a command"
 
@@ -662,9 +707,23 @@ class TestFetchAndImport:
         from agenticops.skills.sources import import_skills
 
         marker = tmp_path / "pwn-marker"
-        with pytest.raises(ValueError, match="transport"):
+        with pytest.raises(ValueError, match="unsupported git transport"):
             import_skills(f"git+--upload-pack=touch {marker}")
         assert not marker.exists(), "option-shaped git url executed a command"
+
+    def test_git_scp_style_option_shaped_host_rejected(self):
+        """git blocks an option-shaped `ssh://` host but NOT an option-shaped scp host."""
+        from agenticops.skills.sources import _validate_git_url
+
+        with pytest.raises(ValueError, match="unsupported git transport"):
+            _validate_git_url("git@-oProxyCommand:x/y")
+
+    def test_git_overlong_url_raises_valueerror_not_oserror(self, tmp_path, skill_dirs):
+        """Path.exists() re-raises ENAMETOOLONG; that must not escape as OSError (HTTP 500)."""
+        from agenticops.skills.sources import import_skills
+
+        with pytest.raises(ValueError, match="unsupported git transport"):
+            import_skills("git+" + "a" * 300)
 
     def test_git_scp_style_url_is_accepted_by_the_allowlist(self):
         """The allowlist must not reject the legitimate scp-style form."""
