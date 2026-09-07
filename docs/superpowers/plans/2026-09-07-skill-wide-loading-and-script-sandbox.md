@@ -2380,8 +2380,9 @@ class TestImportEntrypoints:
         src = tmp_path / "src"
         _make_pkg(src, "alpha-skill")
 
-        with TestClient(web_app) as client:
-            resp = client.post("/api/skills/import-source", json={"uri": str(src)})
+        # Plain TestClient (no `with`) — matches tests/test_skills_api.py:311 and
+        # avoids firing app startup events for a pure request-level assertion.
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": str(src)})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert [s["name"] for s in body["installed"]] == ["alpha-skill"]
@@ -2394,8 +2395,9 @@ class TestImportEntrypoints:
 
         from agenticops.web.app import app as web_app
 
-        with TestClient(web_app) as client:
-            resp = client.post("/api/skills/import-source", json={"uri": "ftp://example.invalid/x"})
+        resp = TestClient(web_app).post(
+            "/api/skills/import-source", json={"uri": "ftp://example.invalid/x"}
+        )
         assert resp.status_code == 400
         assert "unsupported" in resp.json()["detail"].lower()
 
@@ -2408,8 +2410,7 @@ class TestImportEntrypoints:
         src = tmp_path / "src"
         _make_pkg(src, "alpha-skill")
 
-        with TestClient(web_app) as client:
-            resp = client.post("/api/skills/import-source", json={"uri": str(src)})
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": str(src)})
         assert resp.status_code == 403
 
     def test_legacy_upload_endpoint_still_exists(self):
