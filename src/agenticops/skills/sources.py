@@ -233,6 +233,10 @@ def _sha256_file(path: Path) -> str:
 
 def _check_entry_name(name: str) -> str:
     """Reject absolute / traversing archive entry names. Returns the normalized name."""
+    # Explicit: a NUL would otherwise be rejected later by .resolve()'s lstat with a
+    # misleading message, and only by accident.
+    if "\x00" in name:
+        raise ValueError(f"unsafe archive entry: {name!r}")
     norm = os.path.normpath(name)
     if os.path.isabs(norm) or norm.startswith(("/", "\\")) or norm == ".." or norm.startswith(".." + os.sep):
         raise ValueError(f"unsafe archive entry: {name}")
@@ -267,31 +271,39 @@ def _zip_is_link(info: zipfile.ZipInfo) -> bool:
 
 
 def _unpack(archive: Path, dest: Path) -> None:
-    """Explicit per-entry extraction. Never uses extractall."""
-    dest.mkdir(parents=True, exist_ok=True)
-    if archive.name.lower().endswith(".zip"):
-        with zipfile.ZipFile(archive) as zf:
-            entries = [i for i in zf.infolist() if not i.is_dir()]
-            _check_entries([(i.filename, i.file_size, _zip_is_link(i)) for i in entries])
-            for info in entries:
-                out = _safe_join(dest, info.filename)
-                out.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(info) as src, open(out, "wb") as dst:
-                    shutil.copyfileobj(src, dst, 65536)
-                os.chmod(out, 0o644)
-    else:
-        with tarfile.open(archive, "r:gz") as tf:
-            members = [m for m in tf.getmembers() if not m.isdir()]
-            _check_entries([(m.name, m.size, not m.isreg()) for m in members])
-            for m in members:
-                out = _safe_join(dest, m.name)
-                out.parent.mkdir(parents=True, exist_ok=True)
-                fobj = tf.extractfile(m)
-                if fobj is None:
-                    raise ValueError(f"unreadable archive entry: {m.name}")
-                with open(out, "wb") as dst:
-                    shutil.copyfileobj(fobj, dst, 65536)
-                os.chmod(out, 0o644)
+    """Explicit per-entry extraction. Never uses extractall.
+
+    A corrupt or unreadable archive is a bad *source*, not a server fault, so the
+    archive libraries' own exceptions are re-raised as ValueError (Task 9 maps
+    ValueError -> HTTP 400). Our own ValueErrors pass through unwrapped.
+    """
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        if archive.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(archive) as zf:
+                entries = [i for i in zf.infolist() if not i.is_dir()]
+                _check_entries([(i.filename, i.file_size, _zip_is_link(i)) for i in entries])
+                for info in entries:
+                    out = _safe_join(dest, info.filename)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst, 65536)
+                    os.chmod(out, 0o644)
+        else:
+            with tarfile.open(archive, "r:gz") as tf:
+                members = [m for m in tf.getmembers() if not m.isdir()]
+                _check_entries([(m.name, m.size, not m.isreg()) for m in members])
+                for m in members:
+                    out = _safe_join(dest, m.name)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    fobj = tf.extractfile(m)
+                    if fobj is None:
+                        raise ValueError(f"unreadable archive entry: {m.name}")
+                    with open(out, "wb") as dst:
+                        shutil.copyfileobj(fobj, dst, 65536)
+                    os.chmod(out, 0o644)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, tarfile.TarError, EOFError, OSError) as e:
+        raise ValueError(f"cannot unpack archive {archive.name}: {type(e).__name__}: {e}") from e
 
 
 def _download(url: str) -> tuple[bytes, str]:
@@ -322,6 +334,43 @@ def _is_git(uri: str) -> bool:
     return bool(_GIT_HOST_RE.match(base)) and not base.lower().endswith(_ARCHIVE_SUFFIXES + (".md",))
 
 
+_GIT_SCHEME_RE = re.compile(r"^(?:https|http|ssh|git|file)://", re.IGNORECASE)
+_GIT_SCP_RE = re.compile(r"^[A-Za-z0-9._~+-]+@[A-Za-z0-9._-]+:")
+# Variables that can re-enable a transport helper behind our back. GIT_ALLOW_PROTOCOL
+# is a whitelist that OVERRIDES `-c protocol.<n>.allow=never`, so stripping it matters.
+_GIT_ENV_STRIP = ("GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER")
+
+
+def _validate_git_url(url: str) -> None:
+    """Allowlist the git transport ourselves, before any argv exists.
+
+    `<helper>::<cmd>` (`ext::`, `fd::`, any future helper) makes git RUN <cmd>, and
+    neither `--` nor `-c protocol.ext.allow=never` stops it when GIT_ALLOW_PROTOCOL is
+    set in the environment. So the only defense that depends on no git behaviour at all
+    is never handing such a URL to git. Rejects run before accepts (fail closed).
+    """
+    if url.startswith("-"):
+        raise ValueError(f"unsupported git transport (option-shaped url): {url}")
+    if "::" in url.split("/", 1)[0]:
+        raise ValueError(f"unsupported git transport (transport helper): {url}")
+    if _GIT_SCHEME_RE.match(url) or _GIT_SCP_RE.match(url):
+        return
+    if Path(url).expanduser().exists():
+        return
+    raise ValueError(f"unsupported git transport: {url}")
+
+
+def _git_env() -> dict[str, str]:
+    """Subprocess env for git: real environment minus the transport-helper escapes.
+
+    NOT a sandbox — cloning legitimately needs PATH, HOME and the SSH agent vars.
+    GIT_TERMINAL_PROMPT=0 makes a credential-needing URL fail fast instead of hanging.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_STRIP}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def _fetch_git(uri: str, workdir: Path) -> tuple[Path, str]:
     url = uri[4:] if uri.startswith("git+") else uri
     subdir = ""
@@ -332,22 +381,30 @@ def _fetch_git(uri: str, workdir: Path) -> tuple[Path, str]:
     if "@" in last:
         url, ref = url.rsplit("@", 1)
 
+    _validate_git_url(url)
+    env = _git_env()
+
     dest = workdir / "repo"
-    cmd = ["git", "clone", "--depth", "1"]
+    cmd = ["git", "-c", "protocol.ext.allow=never", "clone", "--depth", "1"]
     if ref:
         cmd += ["--branch", ref]
     cmd += ["--", url, str(dest)]
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, shell=False,
-        timeout=settings.skills_import_timeout_seconds,
-    )
-    if proc.returncode != 0:
-        raise ValueError(f"git clone failed: {proc.stderr.strip()[:300]}")
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, shell=False, env=env,
+            timeout=settings.skills_import_timeout_seconds,
+        )
+        if proc.returncode != 0:
+            raise ValueError(f"git clone failed: {proc.stderr.strip()[:300]}")
 
-    sha = subprocess.run(
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
-        capture_output=True, text=True, shell=False, timeout=30,
-    ).stdout.strip()
+        sha = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"],
+            capture_output=True, text=True, shell=False, env=env, timeout=30,
+        ).stdout.strip()
+    except subprocess.SubprocessError as e:
+        raise ValueError(f"git clone failed: {type(e).__name__}: {e}") from e
+    except OSError as e:
+        raise ValueError(f"git clone failed: {e}") from e
     shutil.rmtree(dest / ".git", ignore_errors=True)
 
     root = dest

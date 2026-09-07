@@ -1,6 +1,8 @@
 """Skill ingestion tests — hermetic: no network, no real AWS, no cloning from the internet."""
 
+import io
 import os
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -313,7 +315,7 @@ class TestFetchAndImport:
         assert (ddir / "alpha-skill" / "SKILL.md").is_file()
 
     def test_zip_path_traversal_entry_rejected(self, tmp_path, skill_dirs):
-        from agenticops.skills.sources import import_skills
+        from agenticops.skills.sources import _unpack, import_skills
 
         _sdir, _ddir = skill_dirs
         zpath = tmp_path / "evil.zip"
@@ -322,6 +324,11 @@ class TestFetchAndImport:
 
         with pytest.raises(ValueError, match="unsafe archive entry"):
             import_skills(str(zpath))
+        # Unpack into a dest WE own, so the side-effect assertion can actually fail:
+        # import_skills unpacks inside its own mkdtemp, where an escape lands beside
+        # that tempdir and never under tmp_path.
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            _unpack(zpath, tmp_path / "unpacked")
         assert not (tmp_path / "escape").exists()
 
     def test_zip_absolute_entry_rejected(self, tmp_path, skill_dirs):
@@ -475,6 +482,221 @@ class TestFetchAndImport:
         assert res.installed == []
         assert "hard link" in res.rejected[0][1]
         assert not (ddir / "alpha-skill").exists()
+
+    def test_local_targz_source(self, tmp_path, skill_dirs):
+        """.tar.gz is an accepted source and the fallback for any archive-ish Content-Type."""
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+        tpath = tmp_path / "bundle.tar.gz"
+        with tarfile.open(tpath, "w:gz") as tf:
+            tf.add(src / "alpha-skill" / "SKILL.md", arcname="alpha-skill/SKILL.md")
+
+        res = import_skills(str(tpath))
+        assert [s.name for s in res.installed] == ["alpha-skill"]
+        assert len(res.source_ref) == 64          # sha256 hex
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_targz_path_traversal_entry_rejected(self, tmp_path, skill_dirs):
+        from agenticops.skills.sources import _unpack, import_skills
+
+        tpath = tmp_path / "evil.tar.gz"
+        payload = SKILL_MD.format(name="escape-skill").encode("utf-8")
+        with tarfile.open(tpath, "w:gz") as tf:
+            info = tarfile.TarInfo("../escape/SKILL.md")
+            info.size = len(payload)
+            tf.addfile(info, io.BytesIO(payload))
+
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            import_skills(str(tpath))
+        # Same reasoning as the zip case: unpack into a dest we own so this can fail.
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            _unpack(tpath, tmp_path / "unpacked")
+        assert not (tmp_path / "escape").exists()
+
+    def test_targz_symlink_member_rejected(self, tmp_path, skill_dirs):
+        """`not m.isreg()` is the tar branch's only link/special defense — pin it."""
+        from agenticops.skills.sources import import_skills
+
+        tpath = tmp_path / "link.tar.gz"
+        with tarfile.open(tpath, "w:gz") as tf:
+            info = tarfile.TarInfo("alpha-skill/link.txt")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "other.txt"
+            tf.addfile(info)
+            body = SKILL_MD.format(name="alpha-skill").encode("utf-8")
+            md = tarfile.TarInfo("alpha-skill/SKILL.md")
+            md.size = len(body)
+            tf.addfile(md, io.BytesIO(body))
+
+        with pytest.raises(ValueError, match="link/special entry"):
+            import_skills(str(tpath))
+
+    def test_corrupt_archive_raises_valueerror(self, tmp_path, skill_dirs):
+        """zipfile/tarfile errors must surface as ValueError (HTTP 400), never a 500."""
+        from agenticops.skills.sources import import_skills
+
+        bad = tmp_path / "broken.zip"
+        bad.write_bytes(b"not a zip at all")
+
+        with pytest.raises(ValueError) as excinfo:
+            import_skills(str(bad))
+        assert str(excinfo.value)
+
+    def test_nul_in_entry_name_rejected(self):
+        from agenticops.skills import sources
+
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            sources._check_entry_name("a\x00b")
+
+    def test_download_byte_cap_enforced(self, monkeypatch):
+        """The streaming cap loop — every other http test stubs _download away."""
+        from agenticops.skills import sources
+
+        monkeypatch.setattr(
+            "agenticops.config.settings.skills_import_max_package_bytes", 1024, raising=False
+        )
+
+        class _Resp:
+            headers = {"Content-Type": "application/zip"}
+
+            def __init__(self):
+                self.left = 8
+
+            def read(self, n):
+                if self.left <= 0:
+                    return b""
+                self.left -= 1
+                return b"x" * 512
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(sources.urllib.request, "urlopen", lambda *a, **kw: _Resp())
+        with pytest.raises(ValueError, match="exceeds"):
+            sources._download("https://example.invalid/big.zip")
+
+    def test_download_parses_content_type(self, monkeypatch):
+        from agenticops.skills import sources
+
+        body = b"# hello\n"
+
+        class _Resp:
+            headers = {"Content-Type": "text/markdown; charset=utf-8"}
+
+            def __init__(self):
+                self.done = False
+
+            def read(self, n):
+                if self.done:
+                    return b""
+                self.done = True
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(sources.urllib.request, "urlopen", lambda *a, **kw: _Resp())
+        assert sources._download("https://example.invalid/x.md") == (body, "text/markdown")
+
+    def test_git_subdir_traversal_rejected(self, tmp_path, skill_dirs):
+        """`#subdir` must never resolve outside the clone. Hermetic local repo."""
+        import subprocess
+
+        from agenticops.skills.sources import import_skills
+
+        repo = tmp_path / "subdirrepo"
+        _make_pkg(repo, "alpha-skill")
+        os.symlink(tmp_path / "outside", repo / "outside-link")
+        (tmp_path / "outside").mkdir()
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+        }
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True, env=env)
+
+        # normpath collapses any `..`, so the entry-name guard fires first here.
+        with pytest.raises(ValueError, match="unsafe archive entry"):
+            import_skills(f"git+file://{repo}#../../etc")
+        # A subdir that survives normalization but is not a directory in the clone.
+        with pytest.raises(ValueError, match="subdir not found"):
+            import_skills(f"git+file://{repo}#nope")
+        # A committed symlink resolving outside the clone — the resolved-prefix check.
+        with pytest.raises(ValueError, match="subdir not found"):
+            import_skills(f"git+file://{repo}#outside-link")
+
+    def test_git_ext_transport_rejected(self, tmp_path, skill_dirs):
+        """`ext::<cmd>` is git's transport-helper form — it runs <cmd>. Must never reach git."""
+        from agenticops.skills.sources import import_skills
+
+        marker = tmp_path / "pwn-marker"
+        with pytest.raises(ValueError, match="transport"):
+            import_skills(f"git+ext::touch {marker}")
+        assert not marker.exists(), "ext:: transport executed a command"
+
+    def test_git_ext_transport_rejected_even_with_git_allow_protocol_env(
+        self, tmp_path, skill_dirs, monkeypatch
+    ):
+        """GIT_ALLOW_PROTOCOL overrides git's own config refusal — our allowlist must not depend on it."""
+        from agenticops.skills.sources import import_skills
+
+        monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ext")
+        marker = tmp_path / "pwn-marker"
+        with pytest.raises(ValueError, match="transport"):
+            import_skills(f"git+ext::touch {marker}")
+        assert not marker.exists(), "ext:: transport executed a command"
+
+    def test_git_url_starting_with_dash_rejected(self, tmp_path, skill_dirs):
+        """A leading `-` could be read as a git option (e.g. --upload-pack=<cmd>)."""
+        from agenticops.skills.sources import import_skills
+
+        marker = tmp_path / "pwn-marker"
+        with pytest.raises(ValueError, match="transport"):
+            import_skills(f"git+--upload-pack=touch {marker}")
+        assert not marker.exists(), "option-shaped git url executed a command"
+
+    def test_git_scp_style_url_is_accepted_by_the_allowlist(self):
+        """The allowlist must not reject the legitimate scp-style form."""
+        from agenticops.skills.sources import _validate_git_url
+
+        _validate_git_url("git@github.com:owner/repo.git")
+
+    def test_git_clone_pins_transport_config_and_sanitizes_env(self, tmp_path, monkeypatch):
+        """Depth layers behind the allowlist: `-c protocol.ext.allow=never` + stripped env."""
+        from agenticops.skills import sources
+
+        monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ext")
+        monkeypatch.setenv("GIT_PROTOCOL_FROM_USER", "1")
+        seen: dict[str, object] = {}
+
+        def spy(cmd, **kw):
+            seen["cmd"] = cmd
+            seen["env"] = kw.get("env")
+            raise AssertionError("stop before any real clone")
+
+        monkeypatch.setattr(sources.subprocess, "run", spy)
+        with pytest.raises(AssertionError):
+            sources._fetch_git(f"git+file://{tmp_path}", tmp_path / "wd")
+
+        cmd = seen["cmd"]
+        assert cmd[:3] == ["git", "-c", "protocol.ext.allow=never"], cmd
+        assert cmd[3] == "clone"
+        env = seen["env"]
+        assert "GIT_ALLOW_PROTOCOL" not in env
+        assert "GIT_PROTOCOL_FROM_USER" not in env
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert env.get("PATH"), "git still needs PATH — this is ingestion, not the sandbox"
 
     def test_tempdir_cleaned_on_success_and_failure(self, tmp_path, skill_dirs, monkeypatch):
         import tempfile
