@@ -433,6 +433,50 @@ class Settings(BaseSettings):
         description="Security-scan a skill before promoting draft->published (blocks dangerous run_on_host) (AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE)",
     )
 
+    # ── Skill wide loading (URL / git / zip) ───────────────────────
+    skills_import_enabled: bool = Field(
+        default=True,
+        description="Enable importing skills from URL/git/zip sources (AIOPS_SKILLS_IMPORT_ENABLED)",
+    )
+    skills_import_max_package_bytes: int = Field(
+        default=2097152,
+        description="Max total bytes per imported skill package (also caps downloads) (AIOPS_SKILLS_IMPORT_MAX_PACKAGE_BYTES)",
+    )
+    skills_import_max_files: int = Field(
+        default=50,
+        description="Max file count per imported skill package (AIOPS_SKILLS_IMPORT_MAX_FILES)",
+    )
+    skills_import_allowed_extensions: list[str] = Field(
+        default=[".md", ".py", ".sh", ".txt", ".json", ".yaml", ".yml", ".csv"],
+        description="File-extension allowlist for imported skill packages (AIOPS_SKILLS_IMPORT_ALLOWED_EXTENSIONS)",
+    )
+    skills_import_timeout_seconds: int = Field(
+        default=60,
+        description="Timeout for download / git clone during skill import (AIOPS_SKILLS_IMPORT_TIMEOUT_SECONDS)",
+    )
+
+    # ── Skill script sandbox (restricted local execution) ──────────
+    skills_sandbox_enabled: bool = Field(
+        default=False,
+        description="Enable running skill-owned *.py/*.sh in the restricted sandbox (AIOPS_SKILLS_SANDBOX_ENABLED)",
+    )
+    skills_sandbox_timeout_seconds: int = Field(
+        default=60,
+        description="Per-run timeout for a sandboxed skill script (AIOPS_SKILLS_SANDBOX_TIMEOUT_SECONDS)",
+    )
+    skills_sandbox_max_output_chars: int = Field(
+        default=20000,
+        description="Truncation cap applied to sandbox stdout and stderr each (AIOPS_SKILLS_SANDBOX_MAX_OUTPUT_CHARS)",
+    )
+    skills_sandbox_require_isolation: bool = Field(
+        default=True,
+        description="Refuse to run when no network isolator (unshare -n / sandbox-exec) is available (AIOPS_SKILLS_SANDBOX_REQUIRE_ISOLATION)",
+    )
+    skills_sandbox_interpreters: dict[str, str] = Field(
+        default={".py": "python", ".sh": "/bin/bash"},
+        description="Suffix -> interpreter allowlist for sandboxed scripts ('python' resolves to sys.executable) (AIOPS_SKILLS_SANDBOX_INTERPRETERS)",
+    )
+
     # ── ACP Enhanced Backend (MVP-1.3.0, optional) ─────────────────
     acp_enhanced_enabled: bool = Field(
         default=False,

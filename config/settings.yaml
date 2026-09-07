@@ -220,6 +220,22 @@ skills_curator_enabled: true
 skills_draft_stale_days: 30
 skills_draft_archive_days: 60
 skills_security_scan_on_promote: true
+
+# ── Skill wide loading (URL / git / zip) ───────────────────────
+skills_import_enabled: true
+skills_import_max_package_bytes: 2097152   # 2 MiB
+skills_import_max_files: 50
+skills_import_allowed_extensions: [".md", ".py", ".sh", ".txt", ".json", ".yaml", ".yml", ".csv"]
+skills_import_timeout_seconds: 60
+
+# ── Skill script sandbox (no credentials, no network) ──────────
+skills_sandbox_enabled: false               # 新执行通道，默认关
+skills_sandbox_timeout_seconds: 60
+skills_sandbox_max_output_chars: 20000
+skills_sandbox_require_isolation: true      # 拿不到隔离器就拒跑，绝不假装无网络
+skills_sandbox_interpreters:
+  ".py": python
+  ".sh": /bin/bash
 acp_enhanced_enabled: true
 acp_enhanced_backend: claude-code
 acp_use_bedrock: true
