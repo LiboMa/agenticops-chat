@@ -42,7 +42,7 @@ from agenticops.graph.tools import (
 )
 from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly  # fallback
 from agenticops.providers.base import get_cli_tool_for_issue
-from agenticops.skills.tools import activate_skill, read_skill_reference
+from agenticops.skills.tools import activate_skill, read_skill_reference, run_skill_script
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.memory_tools import search_agent_memory
@@ -261,6 +261,11 @@ def executor_agent(fix_plan_id: int) -> str:
                 # Agent Skills (domain knowledge + dynamic tool loading)
                 activate_skill,
                 read_skill_reference,
+                # Sandboxed script execution from a published skill package.
+                # Gated: the sandbox ships disabled, and an agent must never see a tool it
+                # cannot use — the tool's own gate returns a message, which reads as a
+                # capability the operator revoked mid-task.
+                *([run_skill_script] if settings.skills_sandbox_enabled else []),
                 # Agent Memory (cross-agent search)
                 search_agent_memory,
             ],

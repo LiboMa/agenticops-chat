@@ -398,3 +398,67 @@ def skill_manage(
         return json.dumps({"status": "restored" if ok else "not_found", "skill": name})
 
     return json.dumps({"error": f"Unknown action '{action}'. Use add|improve|merge|deprecate|restore|search."})
+
+
+@tool
+def run_skill_script(skill_name: str, script: str, args: str = "", stdin_text: str = "") -> str:
+    """Run a script that ships inside a PUBLISHED skill package, in a restricted sandbox.
+
+    The sandbox has NO credentials and NO network: use it for local computation
+    only (parsing logs/JSON, statistics, shaping a report). Anything needing a
+    cloud API must go through run_aws_cli / run_on_host / run_kubectl instead.
+    Draft skills are refused — a skill must be promoted first.
+
+    Args:
+        skill_name: Name of a published skill (e.g. 'log-analysis').
+        script: Path of the script inside that skill package (e.g. 'parse.py').
+        args: Optional shell-style argument string (split with shlex, not a shell).
+        stdin_text: Optional text piped to the script's stdin.
+
+    Returns:
+        Human-readable run summary with exit code, isolation mode, stdout and stderr,
+        or a message starting with 'Sandbox refused' / 'disabled' when it did not run.
+    """
+    import shlex
+
+    from agenticops.config import settings
+
+    if not getattr(settings, "skills_sandbox_enabled", False):
+        return (
+            "Skill script sandbox is disabled (skills_sandbox_enabled=false). "
+            "Ask an operator to enable it in config/settings.yaml."
+        )
+
+    from agenticops.skills import sandbox as _sandbox
+
+    try:
+        parsed = shlex.split(args) if args else None
+    except ValueError as e:
+        return f"Sandbox refused to run: unparsable args ({e})"
+
+    # `run_script` promises that EVERY refusal is a RuntimeError, so only RuntimeError may
+    # wear the "refused" label. Anything else is a defect in our own code: reporting it as a
+    # refusal would tell the agent the security boundary declined, and it would go reasoning
+    # about permissions instead of surfacing the bug. Kept as two branches on purpose — a
+    # blanket `except Exception` here would make Task 7's refusal contract unobservable.
+    try:
+        res = _sandbox.run_script(skill_name, script, parsed, stdin_text or None)
+    except RuntimeError as e:
+        return f"Sandbox refused to run: {e}"
+    except Exception as e:
+        logger.exception("run_skill_script failed on skill=%s script=%s", skill_name, script)
+        return (
+            f"Sandbox internal error (a defect, NOT a policy refusal): "
+            f"{type(e).__name__}: {e}"
+        )
+
+    header = (
+        f"exit_code={res.exit_code} isolation={res.isolation} duration_ms={res.duration_ms}"
+        + (" (output truncated)" if res.truncated else "")
+    )
+    parts = [header]
+    if res.stdout:
+        parts.append(f"--- stdout ---\n{res.stdout}")
+    if res.stderr:
+        parts.append(f"--- stderr ---\n{res.stderr}")
+    return "\n".join(parts)

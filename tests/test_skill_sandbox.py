@@ -794,3 +794,140 @@ class TestDetectIsolation:
         wrapped = _wrap(["python", "x.py"], "sandbox-exec")
         assert wrapped[0] == "sandbox-exec" and "deny network*" in wrapped[2]
         assert _wrap(["python", "x.py"], "none") == ["python", "x.py"]
+
+
+class TestRunSkillScriptTool:
+    """Task 8 — the agent-facing `@tool` in front of `run_script`.
+
+    Two properties beyond the happy path:
+    - a disabled sandbox must refuse WITHOUT starting a process;
+    - a refusal (`RuntimeError`) and an internal bug (anything else) must be
+      distinguishable in the returned text. Labelling a bug as "Sandbox refused"
+      tells the agent the security boundary declined, so it reasons about
+      permissions instead of surfacing a defect.
+    """
+
+    def test_returns_disabled_message_without_starting_a_process(self, sandbox_env, monkeypatch):
+        from agenticops.skills import sandbox
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+        monkeypatch.setattr(
+            "agenticops.config.settings.skills_sandbox_enabled", False, raising=False
+        )
+
+        called = []
+        monkeypatch.setattr(sandbox, "run_script", lambda *a, **k: called.append(1))
+
+        out = run_skill_script("alpha-skill", "hi.sh")
+        assert "disabled" in out.lower()
+        assert called == [], "must not start a process when disabled"
+
+    def test_formats_a_successful_run(self, sandbox_env):
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hello-sandbox\n"})
+
+        out = run_skill_script("alpha-skill", "hi.sh")
+        assert "exit_code=0" in out
+        assert "isolation=none" in out
+        assert "hello-sandbox" in out
+
+    def test_refusal_is_returned_not_raised(self, sandbox_env):
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+
+        out = run_skill_script("alpha-skill", "../../etc/passwd")
+        assert out.startswith("Sandbox refused")
+
+    def test_args_string_is_split_shell_style(self, sandbox_env):
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "args.py": "import sys\nprint('|'.join(sys.argv[1:]))\n",
+        })
+        out = run_skill_script("alpha-skill", "args.py", args="a 'b c' d")
+        assert "a|b c|d" in out
+
+    def test_unparsable_args_are_refused_without_running(self, sandbox_env, monkeypatch):
+        from agenticops.skills import sandbox
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+        called = []
+        monkeypatch.setattr(sandbox, "run_script", lambda *a, **k: called.append(1))
+
+        out = run_skill_script("alpha-skill", "hi.sh", args="unbalanced 'quote")
+        assert out.startswith("Sandbox refused")
+        assert called == []
+
+    def test_a_bug_is_not_reported_as_a_refusal(self, sandbox_env, monkeypatch):
+        """A non-RuntimeError must NOT be laundered into "Sandbox refused".
+
+        Task 7 spent two fix rounds converting every refusal path to RuntimeError so this
+        layer could catch one type. A blanket `except Exception` would make that work
+        unobservable and would tell the agent a permission story about a typo.
+        """
+        from agenticops.skills import sandbox
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+
+        def _boom(*a, **k):
+            raise ValueError("simulated internal defect")
+
+        monkeypatch.setattr(sandbox, "run_script", _boom)
+
+        out = run_skill_script("alpha-skill", "hi.sh")
+        assert "refused" not in out.lower(), out
+        assert "internal error" in out.lower(), out
+        assert "ValueError" in out
+
+    def test_a_runtimeerror_is_reported_as_a_refusal(self, sandbox_env, monkeypatch):
+        from agenticops.skills import sandbox
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+
+        def _refuse(*a, **k):
+            raise RuntimeError("no isolation available")
+
+        monkeypatch.setattr(sandbox, "run_script", _refuse)
+
+        out = run_skill_script("alpha-skill", "hi.sh")
+        assert out.startswith("Sandbox refused")
+        assert "no isolation available" in out
+
+    def test_tool_params_stay_concretely_typed(self):
+        """Strands validates against a pydantic model built from this signature BEFORE the
+        body runs — that validation is the only thing keeping `run_script`'s remaining
+        non-str type escapes unreachable from an agent call. Widening an annotation to Any
+        or adding **kwargs would let a TypeError reach `run_script`, where the
+        internal-error branch would report a bad input as a bug.
+        """
+        import inspect
+        import typing
+
+        from agenticops.skills.tools import run_skill_script
+
+        fn = getattr(run_skill_script, "_tool_func", None) or getattr(
+            run_skill_script, "__wrapped__", run_skill_script
+        )
+        sig = inspect.signature(fn)
+        assert set(sig.parameters) == {"skill_name", "script", "args", "stdin_text"}
+        for name, p in sig.parameters.items():
+            assert p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
+        # tools.py carries `from __future__ import annotations`, so signature annotations are
+        # STRINGS. Resolve them the way pydantic does when Strands builds the input model —
+        # a string that fails to resolve to `str` is exactly the escape this test guards.
+        hints = typing.get_type_hints(fn)
+        for name in ("skill_name", "script", "args", "stdin_text"):
+            assert hints[name] is str, f"{name} must stay concretely `str`, got {hints[name]!r}"
