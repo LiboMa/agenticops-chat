@@ -4,8 +4,24 @@
 
 AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM Multi-Agent 架构实现自动化的资源扫描、异常检测、根因分析、修复计划制定与执行，以及多渠道通知。支持 CLI、Web Dashboard、IM Bot（飞书/钉钉/企业微信）三入口。
 
-**版本**: 2.0.1
-**技术栈**: Python 3.11+, SQLAlchemy, FastAPI, Strands Agents SDK 1.45, AWS Bedrock (Claude Opus 4.8 / Sonnet 4.6 / Haiku 4.5 / Opus 4.6)
+**版本**: 2.5.0（正文主体写于 2.0.1，之后的增量见第 0 节索引）
+**技术栈**: Python 3.12, SQLAlchemy, FastAPI, Strands Agents SDK 1.45, AWS Bedrock（Claude 5 家族：Opus 5 / Sonnet 5 / Fable 5.1；Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5；OpenAI gpt-oss / GPT-5.x）
+
+---
+
+## 0. 自 2.0.1 以来的架构增量（索引）
+
+后续能力按"挂在既有机制上、不新造机制"的原则加入，正文未逐节重写。此表是权威索引：正文与本表冲突时以本表及所指出处为准。
+
+| 增量 | 版本 | 一句话 | 代码 | 出处 |
+|------|------|--------|------|------|
+| Signal Gate | 2.2.0 | 所有建问题路径过同一道门：L1 确定性规则（fingerprint-v2 / 抖动 / 冷却 / 资源+类型合并）+ L2 只合并不丢弃、fail-open 的廉价 LLM 灰区裁判；每事件一条可审计 Signal（`alert_events`），可人工提升 | `services/signal_gate.py`，`web/routers/signals.py` | `MVP-2.2.0-RELEASE.md` |
+| RCA 质量五件套 | 2.2.0 | 证据检查 → 对抗式 critic → 置信度门（< 0.6 → `needs_review`）→ 同指纹事件记忆注入 → 看门狗超时 | `services/rca_quality.py`，`services/rca_service.py` | 同上；`MVP-2.2.0-CHAOS-E2E-REPORT.md` |
+| Effort / thinking 策略 | 2.2.1 | RCA 扩展思考预算按严重级别与重跑自动升档（可叠加）；对话会话可固定 effort 档；Claude ≥ 4.6 用 `adaptive` + `output_config.effort` 形状，< 4.6 用 `budget_tokens`，两者互斥 | `agents/preamble.py`，`config.thinking_effort_presets` | `MVP-2.2.1-RELEASE.md` |
+| 云安全审查 | 2.5.0 | 双频采集（慢频 `SecurityPostureSnapshot` + 快频 `SecurityIncrementalPoll`，账户寻址走 provider 层，fail-soft）、纯函数可复现的 CIS 评分、含 NACL 的三态入口可达性（缺数据 → `undetermined`）、证据接地 fail-closed 建议器（唯一 LLM 环节） | `security/`，`services/security_service.py`，`web/routers/security.py`，前端 `pages/Security.tsx` | `MVP-2.5.0-RELEASE.md`，`MVP-2.5.0-E2E-REPORT.md` |
+| 技能广域加载 + 脚本沙箱 | 2.5.0 追加 | URL / git / zip 导入 → 一律草稿 + 溯源戳；整包安全扫描（`.py` ast 绑定解析 / `.sh` 逐行）；无凭证无网络的脚本沙箱（拿不到隔离器就拒跑，默认关）；Skills 页导入器 | `skills/sources.py`、`skills/security.py`、`skills/sandbox.py`，`web/routers/skills.py`，前端 `pages/Skills.tsx` | 同上「追加交付」；`skills/ADDING_SKILLS.md` |
+| 模型层 | 2.5.0 | Claude 5 家族（单段版本号 `claude-opus-5`）+ Bedrock 上的 OpenAI 模型；Anthropic 专属特性（prompt cache、扩展思考）按模型族门控，唯一真源 `preamble.bedrock_model_kwargs` | `agents/preamble.py`，`config.py` | `CLAUDE.md` Architecture |
+| Web 路由拆分 | 2.5.0 合流 | `app.py` 的 webhooks / schedules / skills 路由抽到 `web/routers/`，`web/schemas.py` 独立成叶子模块；死掉的 `@app.on_event` 移除（lifespan 已覆盖）；227 条路由 | `web/routers/*.py`，`web/schemas.py` | `designs/APP_ROUTER_SPLIT_PLAN.md` |
 
 ---
 

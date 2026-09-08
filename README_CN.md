@@ -6,9 +6,9 @@
 
 > **语言:** [English](README.md) · **中文(当前)**
 >
-> **版本**:2.0.1 · **最新发布**:[Chat/Dashboard/Nav 交互大改 + Strands 1.45 上下文治理 + Galaxy(实验性)](docs/MVP-2.0.1-RELEASE.md) · **完整历史**见下文。
+> **版本**:2.5.0 · **最新发布**:[云安全审查 + 技能广域加载(URL / git / zip)、脚本沙箱与 Skills 页导入器](docs/MVP-2.5.0-RELEASE.md) · **完整历史**见下文 · **文档地图**:[`docs/README.md`](docs/README.md)。
 >
-> **成熟度:** 智能体流水线 + CLI/Web/API 是经验证的核心(10/10 闭环实验室,见 [验证](#验证))。一键 `deploy-sg` 沙箱已端到端跑通;`ec2`/`ecs`/`eks` 的 Terraform 栈仍是脚手架(各方式成熟度见 [部署](#部署))。Galaxy 是实验性 PoC。
+> **成熟度:** 智能体流水线 + CLI/Web/API 是经验证的核心(10/10 闭环实验室,见 [验证](#验证))。云安全审查已在两个真实账号(其一在中国区)只读跑通 —— 见 [E2E 报告](docs/MVP-2.5.0-E2E-REPORT.md)。一键 `deploy-sg` 沙箱已端到端跑通;`ec2`/`ecs`/`eks` 的 Terraform 栈仍是脚手架(各方式成熟度见 [部署](#部署))。Galaxy 是实验性 PoC。
 
 三种入口 —— 都驱动同一批智能体:
 
@@ -29,7 +29,7 @@
 
 1. **智能体即工具。** Main 智能体是*纯路由*;每个专家(Scan、Detect、RCA、SRE、Executor、Reporter)都以可调用工具的形式暴露。专家之间不直接对话。
 2. **读 / 规划 / 执行相互隔离。** SRE 只*规划*修复,永不触碰基础设施;只有 Executor 执行,且必须先过审批门。风险分级:L0/L1 自动批准,L2/L3 需人工。
-3. **分层模型控成本。** 最重的推理(RCA、SRE、Executor)用 Opus,路由与高吞吐工作(Main、Scan、Detect、Reporter)用 Sonnet,Haiku 作为经济档可选。可按智能体覆盖。Token 与成本按每次调用追踪,配实时看板(Web + `aiops cost` CLI)。
+3. **分层模型控成本。** 最需要判断力的地方用 Claude 5 家族(Main 用 Opus 5 路由,SRE 用 Fable 5.1 规划),最重的调查与执行(RCA、Executor)用 Opus 4.6,高吞吐工作(Scan、Detect、Reporter)用 Sonnet 4.6,Haiku 4.5 作为经济档。Bedrock 上的 OpenAI 模型(gpt-oss、GPT-5.x)同样是一等公民;Anthropic 专属特性按模型族门控。可按智能体覆盖;扩展思考的 effort 会对高严重级别或重跑的 RCA 自动升档,也可按对话会话固定。Token 与成本按每次调用追踪,配实时看板(Web + `aiops cost` CLI)。
 4. **智能体安全地学习。** 记忆与技能在硬性安全边界内自优化 —— 智能体的写入先落为草稿;发布经安全门禁;人类撰写的知识被固定,永不被自动改动。
 5. **配置单一真源。** `config/settings.yaml` 定义一切;环境变量覆盖它。代码从不硬编码配置值。
 6. **默认从简。** 本地用 SQLite + 文件记忆;仅在你选择 cloud profile 时才用 Postgres + S3。没有当下需求就不引入任何依赖。
@@ -42,10 +42,12 @@
 |------|------|
 | **扫描 (Scan)** | 20+ 种 AWS 服务类型(EC2、Lambda、RDS、S3、ECS、EKS、DynamoDB、SQS/SNS、VPC/子网/安全组、NAT/TGW、负载均衡器) |
 | **监控与检测 (Monitor & Detect)** | CloudWatch 告警/指标、Z-score 异常检测、Prometheus/CloudWatch/Datadog webhook 接入 |
-| **根因分析 (RCA)** | LLM 驱动的 RCA,结合 CloudTrail 关联、基础设施图、知识库检索 |
+| **信号门 (Signal Gate)** | 所有建问题的路径(webhook、智能体、REST)都过同一道门:确定性去重(fingerprint-v2、抖动、冷却、资源+类型合并)+ 一个只允许*合并*、绝不丢弃的廉价 LLM 灰区裁判。每个事件一条可审计的 Signal 记录,可人工提升为问题 |
+| **根因分析 (RCA)** | LLM 驱动的 RCA,结合 CloudTrail 关联、基础设施图、知识库检索;RCA 后的质量门(证据检查 → 对抗式 critic → 置信度阈值)把薄弱或被驳回的结论送进 `needs_review`,而不是自动修复 |
 | **自动修复流水线** | HealthIssue → RCA → SRE → 审批(L0/L1) → 执行 → 解决 —— 低风险问题自主完成 |
+| **云安全审查** | 双频姿态引擎:每小时一次确定性快照(IAM、S3、日志、VPC/EC2、EBS),由**纯函数、可复现**的评分器按 CIS 打分;含 NACL 的**三态**入口可达性(`reachable` / `not_reachable` / `undetermined` —— 绝不给假的"安全");每 10 分钟增量拉取 GuardDuty / Security Hub / CloudTrail;证据接地的 LLM 建议器 **fail-closed**(未接地或被驳回 → 丢弃)。`/app/security`、`/api/security/*`、`security-review` 报告 |
 | **自优化记忆** | 基于文件的智能体记忆,每次运维中学习;智能体自策展、永不删除的归档、prompt-cache 安全的注入 |
-| **自主技能** | 15 个领域技能,智能体可创建/改进/合并 —— 仅经安全门禁、人类可审计的流程发布 |
+| **自主技能** | 16 个领域技能,智能体可创建/改进/合并 —— 仅经安全门禁、人类可审计的流程发布。**广域加载**:从 URL、Git 仓库或 zip/tar.gz 导入技能包 —— 经 CLI、API,或 Skills 页的「URL / Git 仓库」导入器(逐包结果清单 + *已导入* 徽标)。一切先落为草稿;发布前扫描**整包**(含 `.sh`/`.py`);包内脚本只在受限**沙箱**里运行(无凭证、无网络;默认关闭) |
 | **并发对话** | 多会话同时流式输出;通过游标分页 + 虚拟化历史实现秒开 |
 | **对话附件** | Web 编辑器支持粘贴图片(Cmd+V)、拖拽、多文件上传(最多 5 个);按类型校验大小 |
 | **知识库** | 向量 + 关键词混合检索;把已解决案例蒸馏为可复用 SOP |
@@ -70,6 +72,7 @@ IM Bots ────────────┘        │                  SRE 
                              │
                              ├──► Agent Memory  (agent-memory/*.md —— 自优化)
                              ├──► Agent Skills  (skills/*/SKILL.md —— 自主, 安全门禁)
+                             ├──► Security Engine (security/ —— 姿态快照、CIS 评分、可达性)
                              ├──► SQLite / PostgreSQL  (元数据)
                              └──► MCP Servers  (可选外部工具)
 ```
@@ -80,17 +83,17 @@ IM Bots ────────────┘        │                  SRE 
 
 | 智能体 | 模型 | 职责 |
 |--------|------|------|
-| **Main** | Opus 4.8 | **路由 / 编排。** 唯一与用户对话的智能体;对每个请求分类,并把它作为工具分派给正确的专家,再组合各专家的输出。自身不持有任何运维工具 —— 纯控制流,使路由保持廉价且可审计。 |
+| **Main** | Opus 5 | **路由 / 编排。** 唯一与用户对话的智能体;对每个请求分类,并把它作为工具分派给正确的专家,再组合各专家的输出。自身不持有任何运维工具 —— 纯控制流,使路由保持廉价且可审计。 |
 | **Scan** | Sonnet 4.6 | **清单发现。** 通过 provider CLI 跨账号/区域枚举资源(20+ 种 AWS 服务类型),归一化后 upsert 进元数据库。为所有下游智能体 + 图/Galaxy 构建器供数。高吞吐、只读。 |
 | **Detect** | Sonnet 4.6 | **健康监控与异常检测。** 拉取 CloudWatch 告警/指标,运行 Z-score 异常检测,接入 Prometheus/CloudWatch/Datadog webhook,并开出去重后的 `HealthIssue`(SHA-256 指纹)。同时执行主动巡检(SPOF + 容量风险图检查)。只读。 |
 | **RCA** | Opus 4.6 | **根因分析。** 针对一个未决问题,关联 CloudTrail 变更事件、基础设施图(邻居 + 爆炸半径)、知识库案例和领域技能,产出有据可循的根因 + 置信度。只读调查;写入 `RCAResult`,永不触碰基础设施。 |
-| **SRE** | Opus 4.8 | **修复方案生成 —— 只规划,不动手。** 把 RCA 转化为具体的、按风险分级(L0–L3)的修复方案,含精确步骤 + 回滚。严格**只读**:它只提议;只有 Executor 能执行,且必须先过审批门。强制"一问题 → 一活跃方案"。 |
-| **Executor** | Opus 4.8 | **唯一改动基础设施的智能体。** 执行*已审批*的修复方案,跨后端 —— AWS CLI、SSM(→SSH 兜底)、`kubectl` —— 采用账号寻址的凭证解析(fail-closed,绝不用 ambient)。审批后自动跑 L0/L1;L2/L3 需人工。推动 9 态问题生命周期直到 `resolved`。 |
+| **SRE** | Fable 5.1 | **修复方案生成 —— 只规划,不动手。** 把 RCA 转化为具体的、按风险分级(L0–L3)的修复方案,含精确步骤 + 回滚。严格**只读**:它只提议;只有 Executor 能执行,且必须先过审批门。强制"一问题 → 一活跃方案"。 |
+| **Executor** | Opus 4.6 | **唯一改动基础设施的智能体。** 执行*已审批*的修复方案,跨后端 —— AWS CLI、SSM(→SSH 兜底)、`kubectl` —— 采用账号寻址的凭证解析(fail-closed,绝不用 ambient)。审批后自动跑 L0/L1;L2/L3 需人工。推动 9 态问题生命周期直到 `resolved`。 |
 | **Reporter** | Sonnet 4.6 | **报告与知识沉淀。** 生成日报/周报/事件/清单报告(Markdown/HTML/PDF,本地或 S3),并把已解决事件蒸馏为可复用的知识库 SOP,让后续 RCA 更快。对运维数据只读。 |
 
-默认来自 `config/settings.yaml` —— 最重的推理(RCA、SRE、Executor)用 Opus,路由 + 高吞吐工作用 Sonnet。**安全主线**:只有 SRE 规划、只有 Executor 执行,且必过审批门 —— 见 [自动修复流水线](#自动修复流水线) 与 [端到端工作流指南](docs/WORKFLOW.md)。
+默认来自 `config/settings.yaml` —— Claude 5 家族负责路由与规划(Opus 5、Fable 5.1),Opus 4.6 负责最重的调查与执行(RCA、Executor),Sonnet 4.6 负责高吞吐工作。**安全主线**:只有 SRE 规划、只有 Executor 执行,且必过审批门 —— 见 [自动修复流水线](#自动修复流水线) 与 [端到端工作流指南](docs/WORKFLOW.md)。
 
-模型从 Bedrock 动态获取;按智能体在 `config/settings.yaml` 或经 `AIOPS_AGENT_{NAME}_MODEL_ID` 覆盖。运行时可用 CLI `/model` 或 Web Settings 切换。
+模型从 Bedrock 动态获取 —— Anthropic Claude **与** OpenAI(gpt-oss / GPT-5.x)皆可;Anthropic 专属特性(prompt caching、扩展思考)按模型族自动门控。按智能体在 `config/settings.yaml` 或经 `AIOPS_AGENT_{NAME}_MODEL_ID` 覆盖。运行时可用 CLI `/model` 或 Web Settings 切换。
 
 ### 自动修复流水线
 
@@ -118,7 +121,7 @@ SHA-256 指纹在两条流水线间对问题去重。
 智能体在严格安全边界内随时间改进:
 
 - **记忆** (`agent-memory/<agent>/*.md`) —— Hermes 风格的自优化 Markdown 记忆。智能体经 `memory_manage` 工具 `add/merge/search`;一个零 LLM 的 Curator 让未使用的记忆老化(`active→stale→archived`)且**永不删除**(可恢复)。人类撰写的记忆优先级高于智能体撰写的。构建时一次性注入(prompt-cache 安全)。
-- **技能** (`skills/<name>/SKILL.md`) —— 智能体可经 `skill_manage` `add/improve/merge` 技能,但写入仅落为**草稿**。`promote_skill` 在发布前扫描技能正文中的危险 shell 命令;人类撰写的技能被**固定**,永不被自动修改。所有变更均有版本、可恢复。
+- **技能** (`skills/<name>/SKILL.md`) —— 智能体可经 `skill_manage` `add/improve/merge` 技能,但写入仅落为**草稿**。从 URL / Git 仓库 / zip 导入的技能包同样落为草稿,并盖上溯源戳(`created_by=imported`、来源、ref)。`promote_skill` 在发布前扫描**整包** —— SKILL.md 加上包内所有 `.sh`/`.py`;人类撰写的技能被**固定**,永不被自动修改。所有变更均有版本、可恢复。
 
 完整的记忆 + 技能设计见 [`docs/MVP-1.1.0-RELEASE.md`](docs/MVP-1.1.0-RELEASE.md)。
 
@@ -177,13 +180,13 @@ aiops run report --type daily
 
 ### Web 看板
 
-React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localhost:8000` 提供。15 个页面(+ 登录):Dashboard、Chat、Issues & Plans、Issue Detail、Resource Detail、Schedules、Schedule Detail、Reports、Report Detail、Agent Metrics、Skills、Skill Detail、Settings、**Galaxy** *(实验性关系图)*。
+React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localhost:8000` 提供。15 个页面(+ 登录):Dashboard、Chat、Issues & Plans、Issue Detail、Resource Detail、Schedules、Schedule Detail、Reports、Report Detail、Agent Metrics、Skills、Skill Detail、**Security** *(姿态评分、发现、暴露路径)*、Settings、**Galaxy** *(实验性关系图)*。
 
 **Chat** 页支持多会话并发流式输出(后台流式、秒开)—— 见 [v1.1.1 说明](docs/MVP-1.1.1-RELEASE.md)。
 
 ### API
 
-180+ 个 REST 端点;完整 OpenAPI 在 `http://localhost:8000/docs`。主要分组:`/api/health-issues`、`/api/fix-plans`、`/api/chat/sessions`(SSE)、`/api/resources`、`/api/schedules`、`/api/skills`、`/api/graph`、`/api/galaxy`、`/api/messaging`、`/api/cost`、`/api/settings`、`/api/auth`。
+220+ 个 REST 端点(FastAPI 路由位于 `web/routers/`);完整 OpenAPI 在 `http://localhost:8000/docs`。主要分组:`/api/health-issues`、`/api/fix-plans`、`/api/signals`、`/api/chat/sessions`(SSE)、`/api/resources`、`/api/schedules`、`/api/skills`(+ `/api/skills/import-source`)、`/api/security`、`/api/graph`、`/api/galaxy`、`/api/messaging`、`/api/cost`、`/api/settings`、`/api/auth`。
 
 ---
 
@@ -200,7 +203,10 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 | `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1` | `true` | 自动批准低风险方案 |
 | `AIOPS_MEMORY_AUTONOMOUS_WRITE` | `true` | 允许智能体自写记忆(草稿) |
 | `AIOPS_SKILLS_AUTONOMOUS_WRITE` | `true` | 允许智能体自建技能(草稿) |
-| `AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE` | `true` | 发布前对技能做安全扫描 |
+| `AIOPS_SKILLS_SECURITY_SCAN_ON_PROMOTE` | `true` | 发布前对技能做安全扫描(整包) |
+| `AIOPS_SKILLS_IMPORT_ENABLED` | `true` | 允许从 URL / git / zip 导入技能包(CLI、API、Skills 页) |
+| `AIOPS_SKILLS_SANDBOX_ENABLED` | `false` | 允许 executor 在无凭证、无网络的沙箱里运行已发布技能自带的脚本 |
+| `AIOPS_SECURITY_REVIEW_ENABLED` | `true` | 云安全审查引擎(双频采集 + CIS 评分 + 可达性) |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local`(SQLite/文件)或 `cloud`(Postgres/S3) |
 
 ---
@@ -295,14 +301,15 @@ terraform apply -auto-approve
 src/agenticops/
 ├── agents/       # 7 个 Strands 智能体 (main, scan, detect, rca, sre, executor, reporter)
 ├── tools/        # 智能体工具 (metadata, AWS CLI, web, notification, cloudwatch)
-├── services/     # 流水线服务 (auto-fix, RCA, notifications, events, resolution)
+├── services/     # 流水线服务 (auto-fix, RCA + 质量门, Signal Gate, notifications, events, resolution)
 ├── memory/       # 自优化的文件式智能体记忆 + Curator
-├── skills/       # 技能加载器, security, execution, Curator, promote/rollback
+├── skills/       # 技能加载器, 整包安全扫描, 广域来源导入 (sources), 脚本沙箱, Curator, promote/rollback
+├── security/     # 云安全审查: collectors, 纯函数 CIS 评分, 含 NACL 的可达性, fail-closed 建议器
 ├── graph/        # 基础设施图引擎 + SRE 算法
 ├── galaxy/       # Galaxy 关系图 (LLM 混合, fail-closed): rules + builder + api
 ├── kb/           # 知识库 (向量库: SQLite/pgvector/S3)
 ├── cli/          # CLI 入口 + chat + init 向导
-├── web/          # FastAPI 后端 + React SPA (frontend/)
+├── web/          # FastAPI 应用 + routers/ (webhooks, schedules, skills, security, signals, …) + React SPA (frontend/)
 ├── chat/         # 消息预处理, 文件读取, /send_to, /channel
 ├── notify/  im/  # 多通道通知 + IM 机器人 (飞书/Slack)
 ├── integrations/ # 告警处理器, 源解析器
@@ -312,7 +319,7 @@ src/agenticops/
 └── config.py     # Pydantic settings (AIOPS_ 环境变量前缀)
 
 agent-memory/     # 按智能体 + 共享的 Markdown 记忆 (自优化)
-skills/           # 15 个领域技能包 (+ draft/ 暂存) —— SKILL.md + references/
+skills/           # 16 个领域技能包 (+ draft/ 暂存) —— SKILL.md + references/ (+ 可选脚本)
 config/           # settings.yaml, channels.yaml, im-apps.yaml, mcp-servers.json
 iac/              # Terraform: ec2/, ecs/, eks/, deploy-sg/, modules/
 docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
@@ -326,6 +333,9 @@ docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
 
 | 版本 | 日期 | 亮点 |
 |------|------|------|
+| **[2.5.0](docs/MVP-2.5.0-RELEASE.md)** | 2026-08-31 | **云安全审查** —— 双频姿态引擎(每小时确定性快照 + 每 10 分钟 GuardDuty / Security Hub / CloudTrail 增量拉取)、**纯函数可复现的 CIS 评分**、含 NACL 的**三态可达性**、证据接地的 **fail-closed 建议器**、`/app/security` —— 在两个真实账号只读验证([E2E](docs/MVP-2.5.0-E2E-REPORT.md)) · *2026-09-08 追加:* **技能广域加载**(URL / git / zip → 草稿,整包安全扫描)、**脚本沙箱**(无凭证、无网络,默认关)、Skills 页**导入器**与溯源、`web/routers/` 拆分 |
+| **[2.2.1](docs/MVP-2.2.1-RELEASE.md)** | 2026-07-27 | **Effort / thinking 策略** —— 后端对高严重级别与重跑的 RCA 自动升档扩展思考预算;按对话会话覆盖 effort(`off … max`,NULL = Auto) |
+| **[2.2.0](docs/MVP-2.2.0-RELEASE.md)** | 2026-07-21 | **Signal Gate** 降噪 —— 所有建问题路径过同一道可审计的门(fingerprint-v2、抖动、冷却、合并;LLM 灰区裁判只合并不丢弃) · **RCA 质量五件套**(证据检查 → critic → 置信度门 → 事件记忆 → 看门狗) · 在 [L1](docs/MVP-2.2.0-CHAOS-E2E-REPORT.md) / [L2](docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md) 混沌报告中实地验证 |
 | **[2.0.1](docs/MVP-2.0.1-RELEASE.md)** | 2026-07-08 | 前端交互大改 —— Chat 编辑器**按会话切模型** · **富对话**(建议 chips + `I#` 原地定位) · **导航侧栏 2.0** · **看板 2.0** · **Strands 1.45**(`context_manager="auto"` + 可选 executor **HITL**) · **Galaxy** *(实验性)* —— LLM 混合的全清单关系图,含 fail-closed 校验 + Canvas 星云 UI |
 | **[2.0.0](docs/MVP-2.0.0-RELEASE.md)** | 2026-06-19 | 受治理的自主(策略引擎) · ITSM 桥接 · 多云能力层(SSH/Prometheus/Kubernetes providers) · 自我改进指标 · 预防三件套(SPOF 巡检 + RCA 拓扑 + 模拟门) · **账号寻址凭证**(修掉 ContextVar 错号缺陷;显式账号解析、fail-closed、SSM→SSH 访问阶梯) · SES/SMTP 通知器 key 映射修复 |
 | **[1.1.1](docs/MVP-1.1.1-RELEASE.md)** | 2026-06-02 | 并发对话会话 + 秒开;粘贴/拖拽多附件;open-webui 风格对话 UI 刷新;智能体窗口配置修复(Full Context + Web→YAML 持久化);统一 **Messaging** 设置(合并 Notifications + IM Bots) |
@@ -333,7 +343,7 @@ docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
 | **[1.0.1](docs/MVP-1.0.1-RELEASE.md)** | 2026-05-27 | 加载器/交互加固;技能索引召回改进 |
 | **[1.0.0](docs/MVP-1.0.0-RELEASE.md)** | 2026-03-10 | 首个 MVP —— 7 智能体架构、自动修复流水线、Web 看板、10/10 验证 |
 
-面向用户、含 Mermaid 图的工作流指南:[`docs/WORKFLOW.md`](docs/WORKFLOW.md)。代码库健康审计 + 闭环工程路线图:[`docs/AUDIT-2026-06.md`](docs/AUDIT-2026-06.md)。
+面向用户、含 Mermaid 图的工作流指南:[`docs/WORKFLOW.md`](docs/WORKFLOW.md)。代码库健康审计 + 闭环工程路线图:[`docs/AUDIT-2026-06.md`](docs/AUDIT-2026-06.md)。完整文档地图 —— 持续维护的文档与带日期的历史快照之分,以及双语(README / README_CN)维护规则:[`docs/README.md`](docs/README.md)。
 
 ---
 
@@ -342,7 +352,7 @@ docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
 ```bash
 pip install -e ".[dev]"
 
-pytest tests/ -v                              # 测试
+pytest tests/ -q                              # 全量:4,300+ 用例,约 2 分钟
 python3 -m py_compile src/agenticops/web/app.py   # 后端语法检查
 cd src/agenticops/web/frontend && npx tsc --noEmit && npm run build   # 前端
 uvicorn agenticops.web.app:app --reload --port 8000   # 开发 API 服务器

@@ -877,7 +877,7 @@ Open `http://localhost:8000/app/dashboard` and explore:
 | **Issues & Plans** / **Issue Detail** | View health issues + fix plans, click through to RCA, approve, trigger execution |
 | **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports |
 | **Schedules** / **Schedule Detail** | Set up cron-based automated scans/detections |
-| **Skills** / **Skill Detail** | Browse the 15 domain skills, view/promote/rollback drafts |
+| **Skills** / **Skill Detail** | Browse the 16 domain skills; import packages from a URL / git repo / zip (result manifest, *Imported* badge); view/promote/rollback drafts |
 | **Agent Metrics** | Per-agent token/latency/usage metrics |
 | **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend |
 
@@ -1212,6 +1212,13 @@ curl $BASE/im-aliases
 # Submit webhook alert (Prometheus format)
 curl -X POST $BASE/webhooks/prometheus -H 'Content-Type: application/json' \
   -d '{"alerts":[{"status":"firing","labels":{"alertname":"KubePodOOMKilled"}}]}'
+
+# Import skills from a URL / git repo / archive — everything lands as a draft
+curl -X POST $BASE/skills/import-source -H 'Content-Type: application/json' \
+  -d '{"uri": "git+https://github.com/org/skills.git@main#skills", "names": ["log-triage"]}'
+
+# Cloud Security Review summary (per-account scores, reachable paths, open findings)
+curl $BASE/security/summary
 ```
 
 ---

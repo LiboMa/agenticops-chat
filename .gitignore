@@ -95,3 +95,7 @@ touch.txt
 # Chaos E2E run artifacts (keep the dir, ignore contents)
 infra/eks-chaos-lab/e2e/results/*
 !infra/eks-chaos-lab/e2e/results/.gitkeep
+
+# Documentation screenshots are content, not build output — the global *.png rule above
+# forced every docs/images file to be added with -f; a forgotten -f ships a doc with dead image links.
+!docs/images/**

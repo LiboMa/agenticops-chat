@@ -275,6 +275,8 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 5.不碰与需求无关的代码，每行改动都对应明确的要求. 
 6. Each Time, 请从Plan Mode 开始
 7. each time when after finsh the development phase, auto-update the docs/ workflows, and readme or related documentation, keep it updated.
+   **双语 README 同步**：`README.md` 与 `README_CN.md` 是同一份文档的两种语言——任何一处的改动必须在**同一提交内**
+   同步到另一处（段落一一对应、表格行一一对应、链接相同）。文档地图与"living / 历史快照"划分见 `docs/README.md`。
 8. use .venv as default python env, source it as needed.
 9. **可达面必须逐行列清**：新增任何用户可达能力时，spec/plan 里必须把 CLI / Web API /
    **Web UI**(`web/frontend/src/pages/*.tsx`) / Agent tool / Schedule / Notification

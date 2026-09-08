@@ -136,9 +136,30 @@ security_snapshot_retention_days: 90     # 快照保留
 | 6 | 多账户不串号 | 采集全程经 provider 层目标账户凭证，无 ambient 回退 |
 | 7 | E2E + 主人确认后才 push | 只读 E2E 完成 + 证据报告归档 + 主人确认（2026-08-31）→ `MVP-2.5.0` 已 push |
 
+## 追加交付（2026-09-07 / 09-08，同一版本线，未另起版本号）
+
+云安全审查 P1 推送之后，`MVP-2.5.0` 分支上又交付了一组**技能子系统**能力，并与 `main` 合流。它们不属于安全审查，
+但走的是同一套"一律草稿 + 安全门 + 人类发布"的信任模型。
+
+| 能力 | 一句话 | 代码 | 状态 |
+|------|--------|------|------|
+| **技能广域加载** | `aiops skills import <uri>` / `POST /api/skills/import-source`：从 `http(s)` 归档或单个 SKILL.md、git 仓库（`git+https://…[@ref][#subdir]`）、本地 zip/tar.gz/目录导入；递归发现所有含 `SKILL.md` 的目录，逐包 fail-closed 校验（kebab-case 名、无符号链接、无穿越条目、后缀白名单——**无后缀文件整包拒绝**、文件数与字节上限），staging + 原子 rename；一律落 `skills/draft/`，盖 `created_by=imported` + `source_uri/source_ref/imported_at` 溯源戳；**导入过程绝不执行包内脚本** | `skills/sources.py` | ✅ |
+| **整包安全扫描** | `promote_skill` 扫 SKILL.md 正文 + 包内所有 `.sh`/`.py`：`.py` 走 `ast` 并解析绑定（`model.eval()` 不再误杀），`.sh` 逐行匹配。这是人工发布前的确定性预过滤器，**不是对刻意混淆的抵抗**（`_py_prepass` 不看可达性、不看作用域，已文档化） | `skills/security.py` | ✅ |
+| **脚本沙箱** | `run_skill_script`：已发布技能自带的 `*.py`/`*.sh` 在空环境（仅 `PATH/HOME/LANG`，结构上不可能有 `AWS_*`）+ 网络隔离（`unshare -n` / `sandbox-exec`）里运行；拿不到隔离器就**拒跑**而不是假装隔离；一次性目录、进程组超时、按**字节**截断输出；**默认关闭**（`skills_sandbox_enabled: false`），关着时 executor 工具表里不出现该工具。文件系统写入不受限（已如实文档化） | `skills/sandbox.py` | ✅ |
+| **前端导入器** | Skills → Import → 「URL / Git 仓库」：地址栏式来源字段（左侧槽位实时显示服务端会把输入当成什么，与后端判定顺序一致）、可选名称过滤、结果清单（每包一行：状态记号 / 名称 / 状态词 / 后端原因，已安装行直达草稿详情页）；卡片 **Imported** 徽标、详情页来源行；`GET /api/skills` 返回 `created_by`/`source_uri`，详情另加 `source_ref`/`imported_at` | `web/frontend/src/pages/Skills.tsx`、`lib/skillSource.ts`、`web/routers/skills.py` | ✅ |
+| **导入缺口修复** | `.md` 后缀不再算证据：单文件 URL 必须带有 `name + description` 的 frontmatter 才落盘，GitHub `/blob/` 网页会被拒绝并提示改用 raw 链接（live 复现：一个 290 KB HTML 曾被装成草稿） | `skills/sources.py` | ✅ |
+| **与 main 合流** | `app.py` 的 webhooks / schedules / skills 路由抽到 `web/routers/`，`schemas.py` 独立；死掉的 `@app.on_event` 移除（lifespan 已覆盖）；MVP-2.5.0 在这些区域的增量（多告警 webhook、`import-source`、溯源键、security pipeline options）已逐行移植，227 条路由无重复 | `web/routers/*.py` | ✅ |
+
+**验证**：全量回归 **4333 passed / 85 skipped**；前端 vitest 53；live E2E 见 `MVP-2.5.0-E2E-REPORT.md` 追加节；两次真实误用（HTML 装成草稿、Playwright 手动脚本被 vitest 误匹配）都写进了文档而非掩盖。
+
+**原 spec 明确不做、仍未做**：技能包签名 / commit pin（供应链防篡改）、容器化执行、下发到目标主机执行技能脚本。
+
 ## Future
 
 1. 等保 2.0 / PCI-DSS 等多框架合规映射（中国区账户驱动）。
 2. 攻击路径可视化叠加到 galaxy 星图（暴露链高亮成路径）。
 3. 安全项自动修复剧本（接既有审批管线，需专属安全门设计）。
 4. 变更安全审查（CloudTrail 高危变更 diff + 责任人）。
+5. 技能包签名 / commit-sha pin（导入时校验来源，替代"一律人类审批"的信任基线）。
+6. 沙箱补 cgroup / PID namespace（现状：`setsid()` 的孙进程不被回收，stderr 会如实说明；Linux `unshare -n` 分支在 darwin 上未演练）。
+7. `test_agent_memory_e2e` 隐含依赖已 `init_db` 的数据库——应改为自建临时 DB（合流时在干净 worktree 上暴露）。

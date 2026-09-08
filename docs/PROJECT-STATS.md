@@ -1,8 +1,12 @@
 # AgenticOps — Project Statistics
 
-**Version**: 0.9.0-beta
-**Date**: 2026-04-04
-**Branch**: `main`
+**Version**: 2.5.0
+**Date**: 2026-09-08
+**Branch**: `main` == `MVP-2.5.0` (`f820f19`)
+
+All numbers below are **measured** with the script at the end of this file (line counts via
+`wc -l`-equivalent over `git ls-files`; routes from the live FastAPI app; tests from the last full
+run). Regenerate rather than hand-edit.
 
 ---
 
@@ -10,104 +14,94 @@
 
 ### Total
 
-| Layer | Files | Lines of Code |
-|-------|------:|-------------:|
-| Backend (Python) | ~130 | 50,471 |
-| Frontend (TypeScript/React) | 90 | 13,560 |
-| Tests | 61 | 21,275 |
-| Skills (Markdown) | 48 | — |
-| Infrastructure | 97 | — |
-| **Total** | **~426** | **85,300+** |
+| Layer | Files | Lines |
+|-------|------:|------:|
+| Backend (Python, `src/agenticops/`) | 220 | 66,599 |
+| Frontend (TypeScript/React, `web/frontend/src/`) | 139 | 19,562 |
+| Tests (`tests/`) | 210 | 59,585 |
+| Skills (Markdown, `skills/`) | 50 | — |
+| Infrastructure (`iac/`, `infra/`, `docker/`) | 197 | — |
+| **Total** | **816** | **145,700+** |
 
 ### Backend Breakdown (`src/agenticops/`)
 
-| Module | Files | LOC | Description |
-|--------|------:|----:|-------------|
-| `tools/` | 17 | 7,479 | Agent tools: metadata DB CRUD, AWS CLI wrapper, network, graph tools |
-| `web/` | 5 | 6,926 | FastAPI app (~152 endpoints), schemas, SSE streaming |
-| `cli/` | 6 | 6,863 | Typer CLI: chat REPL, slash commands, init wizard, display |
-| `graph/` | 10 | 4,031 | Infrastructure graph engine (NetworkX): SPOF, capacity, dependencies |
-| `notify/` | 4 | 2,495 | Multi-channel notifications: email/SES, Slack, Feishu, webhook |
-| `agents/` | 9 | 2,099 | 7 Strands SDK agents (main + 6 specialists) |
-| `im/` | 10 | 1,895 | IM bot integration (Feishu WebSocket, Slack) |
-| `integrations/` | 6 | 1,825 | Webhook alert processing, source parsers (Prometheus/CW/Datadog) |
-| `skills/` | 8 | 1,702 | Skill loader, security classifier, execution engine |
-| `pipeline/` | 6 | 1,371 | Pipeline orchestrator, health patrol, RAG pipeline |
-| `services/` | 8 | 1,365 | Auto-fix pipeline, auto-RCA, notification, resolution services |
+| Module | Files | Lines | Description |
+|--------|------:|------:|-------------|
+| `tools/` | 21 | 8,890 | Agent tools: metadata DB CRUD, AWS CLI wrapper (account-addressed), network, graph, cloudwatch, notification |
+| `web/` | 20 | 8,723 | FastAPI app + `routers/` (webhooks, schedules, skills, security, signals, auth, accounts, cost, memory, audit, search, agent logs) + `schemas.py`; 227 routes |
+| `cli/` | 6 | 7,024 | Typer CLI: chat REPL (42 slash commands), init wizard, `skills import`, display |
+| `skills/` | 12 | 4,832 | Loader, bundle security scan (`.py` ast / `.sh` line), wide-source import (`sources`), script sandbox, Curator, review/promote/rollback, tools |
+| `graph/` | 10 | 4,164 | Infrastructure graph engine (NetworkX): SPOF, capacity, dependencies, change simulation |
+| `services/` | 17 | 4,016 | Auto-fix pipeline, RCA + quality gate, Signal Gate, security service, notifications, events, resolution, cost |
+| `agents/` | 11 | 2,922 | 7 Strands agents + preamble (model capability gating, thinking shape) + enhanced (ACP) |
+| `notify/` | 4 | 2,564 | Multi-channel notifications: email/SES, Slack, Feishu, DingTalk, WeCom, SNS, webhook |
+| `im/` | 10 | 1,897 | IM gateways (Feishu WebSocket, Slack, DingTalk, WeCom) |
+| `integrations/` | 6 | 1,767 | Webhook alert processing, source parsers (Prometheus/CloudWatch/Datadog) |
+| `providers/` | 9 | 1,626 | Multi-cloud provider abstraction; AWS AssumeRole with auto-refresh |
+| `models.py` | 1 | 1,458 | SQLAlchemy ORM: 29 tables (HealthIssue, FixPlan, RCAResult, Signal, SecuritySnapshot, …) |
+| `pipeline/` | 6 | 1,455 | Pipeline orchestrator, health patrol, RAG pipeline |
+| `config.py` | 1 | 1,374 | Pydantic-settings schema (~185 fields), YAML loader, model tiers |
+| `security/` | 9 | 1,207 | Cloud Security Review: collectors, pure CIS scoring, NACL-aware reachability, posture snapshot, incremental poll, fail-closed advisor |
+| `chat/` | 7 | 1,191 | Message preprocessor, file reader, /send_to, /channel |
+| `credentials/` | 4 | 1,131 | Credential resolver (fail-closed, account-keyed cache, subprocess env) |
 | `kb/` | 5 | 1,114 | Vector storage (SQLite/pgvector/S3), knowledge base |
-| `chat/` | 5 | 1,101 | Message preprocessor, file upload, /send_to, /channel |
-| `models.py` | 1 | 1,077 | SQLAlchemy ORM: 14 models (CloudAccount, HealthIssue, FixPlan, ...) |
-| `agent/` | 2 | 1,066 | Legacy OpsAgent (pre-Strands, kept for compatibility) |
-| `scan/` | 4 | 959 | AWS resource scanner (AWSScanner) |
-| `providers/` | 6 | 887 | Multi-cloud provider abstraction (AWS/Azure/GCP/Alicloud) |
-| `config.py` | 1 | 791 | Pydantic-settings config, YAML loader, model tier system |
-| `detect/` | 3 | 748 | Anomaly detector: rule engine + statistical (Z-score, IQR) |
-| `scheduler/` | 2 | 666 | Cron scheduler, execution tracking, stale cleanup |
-| `report/` | 2 | 601 | Report generator: daily, anomaly, inventory, network health |
-| `monitor/` | 3 | 574 | CloudWatch metrics collector |
-| `analyze/` | 2 | 345 | RCA engine (Bedrock LLM-powered root cause analysis) |
-| `storage/` | 2 | 186 | Storage backends (local/S3) |
-| `checker/` | 2 | 155 | Parallel multi-account agentic health checker |
+| `scan/` | 4 | 969 | AWS resource scanner |
+| `galaxy/` | 6 | 836 | Galaxy relationship graph (LLM-hybrid, fail-closed verification) |
+| `itsm/` | 5 | 821 | ITSM bridge (ServiceNow / Jira) |
+| `scheduler/` | 2 | 788 | Cron scheduler, 8 pipeline types, execution tracking |
+| `memory/` | 4 | 771 | Self-optimizing file-based agent memory + Curator |
+| `detect/` | 3 | 748 | Anomaly detector: rules + statistics (Z-score, IQR) |
+| `report/` | 2 | 660 | Report generator (daily, incident, inventory, security-review) |
+| `scanner/` `monitor/` | 7 | 1,156 | Scanning helpers, CloudWatch metrics collector |
+| `auth/` `audit/` | 6 | 961 | JWT / API-key auth, audit trail |
+| `acp/` | 10 | 478 | Optional ACP enhanced backend (claude-code / kiro-cli / codex) |
+| `analyze/` `mcp_manager.py` `storage/` `checker/` `cost.py` | 8 | 1,034 | RCA engine, MCP manager, storage backends, health checker, token→USD |
 
 ### Frontend Breakdown (`src/agenticops/web/frontend/src/`)
 
-| Directory | Files | LOC | Description |
-|-----------|------:|----:|-------------|
-| `pages/` | 10 | 5,252 | Dashboard, Chat, Issues, Schedules, Reports, Settings, etc. |
-| `components/` | 37 | 5,317 | Chat, layout (AppShell, Sidebar), DataTable, CronBuilder, badges |
-| `hooks/` | 35 | 1,617 | TanStack Query hooks for all API resources |
-| `api/` | 2 | 652 | API client, TypeScript type definitions |
-| `lib/` | 6 | 410 | Utilities: date formatting, cron helpers, cn() |
+| Directory | Files | Lines | Description |
+|-----------|------:|------:|-------------|
+| `pages/` | 16 | 8,397 | Dashboard, Chat, Issues & Plans, Issue/Resource/Schedule/Report/Skill detail, Schedules, Reports, Agent Metrics, Skills, Security, Settings, Galaxy, Login |
+| `components/` | 49 | 6,121 | Chat, layout (AppShell, Sidebar, Header), galaxy/, ui/ (DataTable, CronBuilder, badges, steppers) |
+| `hooks/` | 45 | 2,220 | TanStack Query hooks for every API resource |
+| `api/` | 2 | 1,027 | API client (auth, `ApiError`), TypeScript types |
+| `lib/` | 14 | 986 | Pure helpers (chat stream, sessions, attachments, cron, skill source detection, …) |
+| `__tests__/` | 8 | 545 | Vitest unit tests over `lib/` (53 cases) |
 
 ---
 
 ## Key Counts
 
-| Metric | Count |
-|--------|------:|
-| API endpoints | 152 |
-| Test functions | 1,200 |
-| Test files | 61 |
-| Agent skills | 15 (+1 draft) |
-| SQLAlchemy models | 14 |
-| Strands agents | 7 (main + scan, detect, rca, sre, executor, reporter) |
-| Pipeline types | 5 (FullScan, Monitoring, DailyReport, HealthPatrol, AgentChain) |
-| Git commits | 227 |
-| Python dependencies | 42 |
-| JS dependencies | 22 |
+| Metric | Count | How measured |
+|--------|------:|--------------|
+| HTTP routes | 227 (217 under `/api/`) | `(method, path)` pairs from `app.routes`, `HEAD` excluded |
+| Test files / functions | 210 / 3,994 | `tests/**/*.py`, `def test_` |
+| Last full run | **4,333 passed · 85 skipped · 0 failed** (~2 min) | `pytest tests/ -q` on 2026-09-08 |
+| Frontend unit tests | 53 | `npx vitest --run` |
+| Agent skills (published) | 16 (+ `draft/`) | `git ls-files skills` package dirs |
+| Web pages | 15 (+ Login) | `pages/*.tsx` |
+| SQLAlchemy tables | 29 | `__tablename__` in `models.py` |
+| Config fields | ~185 | `Field(` declarations in `config.py` |
+| Strands agents | 7 | main + scan, detect, rca, sre, executor, reporter |
+| Pipeline types | 8 | FullScan, Monitoring, DailyReport, HealthPatrol, GalaxyBuild, SecurityPostureSnapshot, SecurityIncrementalPoll, AgentChain |
+| CLI slash commands | 42 | `/help` entries in `cli/main.py` |
 
 ---
 
 ## Architecture Overview
 
 ```
-                    ┌─────────────┐      ┌─────────────┐
-                    │  CLI (aiops) │      │ Web Dashboard│
-                    │  Typer REPL  │      │ React + SSE  │
-                    └──────┬───────┘      └──────┬───────┘
-                           │                     │
-                    ┌──────▼─────────────────────▼──────┐
-                    │         Main Agent (Router)        │
-                    │  Strands SDK · Opus/Sonnet/Haiku   │
-                    └──┬────┬────┬────┬────┬────┬───────┘
-                       │    │    │    │    │    │
-              ┌────────▼┐ ┌▼────▼┐ ┌▼────▼┐ ┌▼────────┐
-              │  Scan   │ │Detect│ │ RCA  │ │   SRE   │
-              │  Agent  │ │Agent │ │Agent │ │  Agent  │
-              └────┬────┘ └──┬───┘ └──┬───┘ └────┬────┘
-                   │         │        │          │
-              ┌────▼─────────▼────────▼──────────▼────┐
-              │          Provider Abstraction          │
-              │   AWS · Azure · GCP · Alicloud         │
-              └────────────────┬──────────────────────┘
-                               │
-                ┌──────────────▼──────────────────┐
-                │        Cloud Resources           │
-                │  EC2 · S3 · RDS · EKS · VPC · …  │
-                └──────────────────────────────────┘
+   CLI (aiops chat) ─┐
+   Web (React+SSE)  ─┼──► Main Agent (router, Opus 5) ──► Scan · Detect · RCA · SRE · Executor · Reporter
+   IM bots / webhook─┘            │
+                                  ├──► Signal Gate (services/) ── every issue-creation path
+                                  ├──► Security engine (security/) ── posture · CIS score · reachability · advisor
+                                  ├──► Agent Memory (agent-memory/) · Agent Skills (skills/, sandboxed scripts)
+                                  ├──► Graph engine (graph/) · Galaxy (galaxy/)
+                                  └──► Provider layer (providers/, credentials/) ──► AWS accounts (AssumeRole, fail-closed)
 ```
 
-**Auto-Fix Pipeline**: HealthIssue → RCA → SRE → Approve (L0-L4) → Execute → Resolve
+**Auto-Fix Pipeline**: HealthIssue → RCA → quality gate → SRE → Approve (L0/L1 auto, L2/L3 human) → Execute → Resolve
 
 **HealthIssue State Machine**: open → investigating → acknowledged → root_cause_identified → fix_planned → fix_approved → fix_executing → fix_executed → resolved (9 states)
 
@@ -115,40 +109,35 @@
 
 ## Roadmap
 
-### Completed (v1.0.0 MVP)
+Forward-looking items live in each release note's *Future* section — most recently
+[`MVP-2.5.0-RELEASE.md`](MVP-2.5.0-RELEASE.md). Items from the old 1.0.1 roadmap that have since
+shipped: `app.py` router split (2.5.0 / main merge), persistent chat sessions (1.1.1),
+knowledge-base RAG in RCA (1.0.x), FixPlan approval in the web UI (1.0.x), compliance scanning
+(2.5.0 Cloud Security Review — CIS).
 
-- [x] Multi-agent architecture (Strands SDK, 7 agents)
-- [x] Multi-cloud provider abstraction (AWS, Azure, GCP, Alicloud stubs)
-- [x] Multi-account support with parallel scanning
-- [x] Auto-fix pipeline with L0-L4 risk levels
-- [x] React web dashboard (15 pages, 152 API endpoints)
-- [x] Interactive CLI with slash commands
-- [x] 15 domain skills with dynamic tool registration
-- [x] Infrastructure graph engine (SPOF, capacity risk, dependency analysis)
-- [x] Cron scheduler with visual cron builder
-- [x] Dual alert intake (webhook + IM bot)
-- [x] Notification system (email, Slack, Feishu, webhook)
-- [x] Report generation (daily, inventory, network health)
-- [x] Per-agent model configuration (Opus/Sonnet/Haiku tiers)
-- [x] Prompt caching on all agents
-- [x] Agent memory system (file-based behavioral constraints)
-- [x] MCP server integration
+---
 
-### Planned (v1.0.1)
+## Regenerating this file
 
-- [ ] **Large file refactoring**: Split `app.py` (6.9K LOC) and `cli/main.py` (6.9K LOC) into routers/modules
-- [ ] **Azure/GCP provider implementations**: Full credential chain + scanner for Azure and GCP
-- [ ] **OpenTelemetry integration**: Distributed tracing for agent calls and pipeline execution
-- [ ] **Knowledge base RAG**: Vector search over past incidents for smarter RCA
-- [ ] **FixPlan approval workflow UI**: Visual approval/rejection with comments in web dashboard
-- [ ] **Persistent chat sessions**: Resume previous chat conversations with full context
-
-### Future (v1.1+)
-
-- [ ] Multi-tenant support (team/org isolation)
-- [ ] Custom skill authoring via web UI
-- [ ] Alert correlation engine (group related alerts into incidents)
-- [ ] Cost optimization agent (RI/SP recommendations, unused resource detection)
-- [ ] Compliance scanning (CIS benchmarks, custom policies)
-- [ ] Mobile notifications (push via APNs/FCM)
-- [ ] Plugin marketplace for community skills
+```bash
+# from the repo root, project .venv active
+python - <<'PY'
+import subprocess, collections
+files = subprocess.check_output(["git","ls-files"], text=True).split()
+loc = lambda ps: sum(sum(1 for _ in open(p, encoding="utf-8", errors="ignore")) for p in ps)
+be = [f for f in files if f.startswith("src/agenticops/") and f.endswith(".py") and "/frontend/" not in f]
+fe = [f for f in files if f.startswith("src/agenticops/web/frontend/src/") and f.endswith((".ts",".tsx"))]
+te = [f for f in files if f.startswith("tests/") and f.endswith(".py")]
+print("backend", len(be), loc(be)); print("frontend", len(fe), loc(fe)); print("tests", len(te), loc(te))
+mods = collections.defaultdict(lambda: [0, 0])
+for f in be:
+    k = f[len("src/agenticops/"):].split("/")[0]; mods[k][0] += 1; mods[k][1] += loc([f])
+for k, (n, l) in sorted(mods.items(), key=lambda x: -x[1][1]): print(f"{k:<16}{n:>4}{l:>8}")
+PY
+PYTHONPATH=src python -c "
+from agenticops.web.app import app
+s={(m,r.path) for r in app.routes for m in (getattr(r,'methods',None) or []) if m!='HEAD'}
+print('routes', len(s), 'api', sum(p.startswith('/api/') for _,p in s))"
+git ls-files skills | cut -d/ -f2 | grep -vE 'ADDING_SKILLS.md|^draft$' | sort -u | wc -l   # skills
+pytest tests/ -q 2>&1 | tail -1                                                              # tests
+```

@@ -133,3 +133,42 @@ All 8 acceptance dimensions pass on **two real AWS accounts (including a China-p
 regression green · deterministic reproducible scoring · NACL-aware three-state reachability (all three states observed) · fail-soft collectors · evidence-grounded advisor with critic + fail-closed persist · cursor-based incremental poll · Signal Gate 78% dedup · full web/API/report/frontend.
 
 **Push:** owner confirmed on 2026-08-31 → `git push --no-verify origin MVP-2.5.0` executed; branch published (77 commits ahead of `main`).
+
+---
+
+## Addendum — Skills-page importer, live E2E (2026-09-08)
+
+Scope: the «URL / Git repo» importer added to the Skills page (see the 2.5.0 release note's
+追加交付 section). Run against an **isolated instance** on `:8011` — temporary SQLite, temporary
+draft directory, IM/WS/notifications off, scheduler lock left to the owner's running process — so
+nothing touched the live `:8000` server or the repository's `skills/draft/`. Driven with Playwright
+(accessibility snapshots + screenshots), zero network: the source was a local directory.
+
+| # | Step | Observed |
+|---|------|----------|
+| 1 | Open Skills → Import | Dialog opens on the «URL / Git repo» tab; source field focused; Import disabled while empty |
+| 2 | Type `/tmp/pkg` | Leading slot switches to «Server path» with a one-line note that the path is read on the server, not the user's machine |
+| 3 | Type `git+https://github.com/org/repo.git@main#skills/foo` | Slot switches to «Git repo» (branch icon) |
+| 4 | Type `s3://bucket/skills.zip` | Slot switches to «Unsupported scheme» with an amber border and the note that the server accepts http(s), git and local paths only — a client-side hint mirroring `sources._is_git → http → path` |
+| 5 | Import `/tmp/pkg` | Result manifest: source + `ref local-dir`; one row `hello-probe · 2 files, 127 B · Installed as draft` with a «Review and publish» button. Draft landed in the isolated dir with `created_by: imported`, `source_uri`, `source_ref`, `imported_at` stamped |
+| 6 | Import `/tmp/pkg` again | Row shows `Skipped` and the server's reason verbatim: *draft already exists — reject the old draft first* |
+| 7 | Import `ftp://example.invalid/x` | Error note «Import failed» + the server's 400 detail verbatim (*unsupported skill source: ftp://…*) |
+| 8 | Esc | Dialog closes (house rule) |
+| 9 | Open `/app/skills/hello-probe` | Header shows the *Imported* badge and `Source: /tmp/pkg @local-dir · imported <time>` |
+| 10 | Back to the list, search `hello` | Card carries the *Imported* badge; hovering shows the source |
+| 11 | «Upload file» tab | Original drag-and-drop pane intact |
+| 12 | Dark mode | Border-only design holds; status colours remain readable with the theme's green primary |
+
+API-level checks on the same instance: `GET /api/skills` includes `created_by` / `source_uri`;
+`GET /api/skills/hello-probe` includes `source_ref` / `imported_at`.
+
+Screenshots: `docs/images/skills-import/import-dialog-empty.png`,
+`import-result-manifest.png`, `import-result-dark.png`.
+
+**Defect found during this run and fixed the same day:** a URL ending in `.md` was accepted as a
+SKILL.md regardless of content type — a GitHub `/blob/` page (text/html) had been installed live as a
+290 KB draft named after the URL. `_fetch_http` now requires frontmatter with `name` + `description`
+before writing anything and tells GitHub users to paste the raw URL (`tests/test_skill_sources.py`,
+two new cases).
+
+Regression after the addendum work and the merge with `main`: **4333 passed / 85 skipped**.
