@@ -501,6 +501,44 @@ flowchart LR
 - `skills_post_resolution_review` — enable post-resolution trigger
 - `skills_improvement_notify` — send notifications on improvement
 
+### 技能广域加载 + 脚本沙箱 (MVP-2.5.0)
+
+技能不再只能手写在 `skills/` 里：可以从 URL / git 仓库 / zip 归档 / 本地目录导入，且技能包可以自带 `*.py` / `*.sh`，
+由受限沙箱执行。
+
+```mermaid
+flowchart LR
+    U["人类: aiops skills import URI"] --> F["fetch: URL / git / zip / 本地"]
+    F --> T["临时目录"]
+    T --> D["递归发现所有 SKILL.md"]
+    D --> V{"逐包校验<br/>名字·穿越·符号链接·体积·后缀"}
+    V -- 拒绝 --> R["rejected + 原因"]
+    V -- 已存在 --> S["skipped + 原因"]
+    V -- 通过 --> ST["staging → 原子 rename"]
+    ST --> DR[("skills/draft/&lt;name&gt;<br/>created_by=imported")]
+    DR --> RV["人类 review"]
+    RV --> P{"promote<br/>scan_skill_bundle"}
+    P -- unsafe --> DR
+    P -- safe --> PUB[("skills/&lt;name&gt; 生效")]
+    PUB --> AS["agent activate_skill"]
+    PUB --> RS["run_skill_script"]
+    RS --> SB["沙箱: 无凭证 · 无网络<br/>一次性目录 · 超时 · 按字节截断"]
+```
+
+**要点：**
+- **导入只落 draft，不执行包内任何代码**（没有 `install.sh` 钩子）。导入是人类动作，agent 没有导入工具。
+- 一个仓库/归档可装多个技能：递归找出所有含 `SKILL.md` 的目录；命中后不再下钻，所以技能自己的
+  `references/SKILL.md` 不会被当成第二个包。`--name` 可按名过滤。
+- **promote 是唯一的生效门**，且会扫整包（SKILL.md 正文 + 所有 `.sh`/`.py`）。两半是同一道门的两种精度：`.py` 走
+  `ast` 解析绑定（不再误杀 `model.eval()`／`df.eval()`），`.sh` 仍逐行匹配。这是人工审批前的确定性预过滤器，
+  **不是对刻意混淆的抵抗**。
+- 沙箱是与 `run_on_host` / `run_kubectl` 正交的新通道，**默认关闭**（`skills_sandbox_enabled: false`），
+  关着时 executor 工具表里不出现 `run_skill_script`；拿不到隔离器（`unshare -n` / `sandbox-exec`）就**拒跑**，
+  绝不假装无网络。沙箱**不限制文件系统写入**——所以整包扫描里的破坏性文件操作规则是真实边界。
+
+**入口：** `aiops skills import <uri> [--name N] [--json]` · `POST /api/skills/import-source`
+（旧 `POST /api/skills/import` 仍是 multipart 上传那条路）。
+
 ### Schedule & Task Management via Chat
 
 Agents can create and manage schedules/tasks through natural language:

@@ -32,7 +32,7 @@ class TestSkillImportSandboxConfig:
         assert settings.skills_sandbox_enabled is False
         assert settings.skills_sandbox_require_isolation is True
         assert settings.skills_sandbox_timeout_seconds == 60
-        assert settings.skills_sandbox_max_output_chars == 20000
+        assert settings.skills_sandbox_max_output_bytes == 20000
         assert settings.skills_sandbox_interpreters[".py"] == "python"
         assert settings.skills_sandbox_interpreters[".sh"] == "/bin/bash"
 
@@ -49,8 +49,14 @@ class TestSkillImportSandboxConfig:
             "skills_import_timeout_seconds",
             "skills_sandbox_enabled",
             "skills_sandbox_timeout_seconds",
-            "skills_sandbox_max_output_chars",
+            "skills_sandbox_max_output_bytes",
             "skills_sandbox_require_isolation",
             "skills_sandbox_interpreters",
         ):
             assert key in data, f"{key} missing from config/settings.yaml"
+            # Presence alone would pass with a WRONG value in the YAML — the point of the
+            # rule is that the YAML is the source of truth, so pin the value too.
+            assert data[key] == getattr(settings, key), (
+                f"{key}: settings.yaml has {data[key]!r} but settings resolves to "
+                f"{getattr(settings, key)!r}"
+            )

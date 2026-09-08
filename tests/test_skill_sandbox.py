@@ -501,7 +501,7 @@ class TestSandboxExecution:
         assert res.exit_code == -1
         assert res.truncated is True
         from agenticops.config import settings
-        assert len(res.stdout) <= settings.skills_sandbox_max_output_chars
+        assert len(res.stdout) <= settings.skills_sandbox_max_output_bytes
 
     def test_output_survives_pipe_fds_above_fd_setsize(self, sandbox_env, spare_fds):
         """The third ship-blocker: `select.select` raises ValueError for any fd >= 1024
@@ -568,7 +568,7 @@ class TestSandboxExecution:
         from agenticops.skills.sandbox import run_script
 
         cap = 2000
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", cap, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", cap, raising=False)
         monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 2, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {
@@ -640,7 +640,7 @@ class TestSandboxExecution:
         from agenticops.skills.sandbox import run_script
 
         cap = 1000
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", cap, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", cap, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {
             "exact.py": f"import sys\nsys.stdout.write('x' * {cap})\n",
@@ -659,7 +659,7 @@ class TestSandboxExecution:
         """
         from agenticops.skills.sandbox import run_script
 
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 200, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", 200, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {
             "cjk.py": "import sys\nsys.stdout.write('\\u4e2d' * 100)\n",
@@ -699,7 +699,7 @@ class TestSandboxExecution:
         so it takes several select/read rounds to collect."""
         from agenticops.skills.sandbox import run_script
 
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 200_000, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", 200_000, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {"chatty.py": "import sys\nsys.stdout.write('x' * 150000)\n"})
 
@@ -717,7 +717,7 @@ class TestSandboxExecution:
         """
         from agenticops.skills.sandbox import run_script
 
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 2_000_000, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", 2_000_000, raising=False)
         monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 20, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {
@@ -737,7 +737,7 @@ class TestSandboxExecution:
     def test_output_truncated(self, sandbox_env, monkeypatch):
         from agenticops.skills.sandbox import run_script
 
-        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 500, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_bytes", 500, raising=False)
         sdir, _ddir = sandbox_env
         _publish(sdir, "alpha-skill", {"loud.py": "print('x' * 100000)\n"})
 

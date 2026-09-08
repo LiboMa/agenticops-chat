@@ -126,6 +126,67 @@ print(f'\nTotal: {len(skills)} skills')
 "
 ```
 
+## 从外部源导入技能（URL / git 仓库 / zip）
+
+导入是**人类动作**，agent 没有导入工具。导入的技能一律落 draft——不注入提示词、不自动生效、包内脚本在导入过程中绝不被执行（没有 `install.sh` 之类的钩子）。
+
+```bash
+aiops skills import https://example.com/skill-pack.zip
+aiops skills import git+https://github.com/org/repo.git@main#skills
+aiops skills import ./bundle.tar.gz --name log-triage --name cost-digest
+aiops skills import /path/to/local/skill-dir --json
+```
+
+一个仓库/归档里可以装多个技能：递归找出所有含 `SKILL.md` 的目录，每个视作一个包（命中后不再下钻，所以技能自己的
+`references/SKILL.md` 不会被误当成第二个包）。`--name` 可按名过滤。
+
+逐包硬约束（违反即该包被拒，其余包不受影响）：kebab-case 技能名、无符号链接、归档条目不得为绝对路径/含 `..`/为链接、
+文件后缀在白名单内（**没有后缀的文件会导致整包被拒**——校验会逐个比对 `skills_import_allowed_extensions`）、
+文件数 ≤ `skills_import_max_files`、总字节 ≤ `skills_import_max_package_bytes`。安装用 staging + 原子 rename，
+所以不存在"装了一半"的技能。
+
+Web 入口是 `POST /api/skills/import-source`（`{"uri": ..., "names": [...]}`）；旧的 `POST /api/skills/import`
+仍是 multipart 文件上传那条路，两者不冲突。
+
+导入后走既有审批链：
+
+```
+/skill review <name>     # 看 diff
+/skill promote <name>    # 过整包安全扫描后才发布
+/skill reject <name>     # 丢弃
+```
+
+`promote` 会扫整包（SKILL.md 正文 + 所有 `.sh`/`.py`）。两半是**同一道门的两种精度**，不是同一形状：`.py` 走 `ast`
+并解析绑定（规则命中的是名字实际解析到的东西，所以 `model.eval()`／`df.eval()`／`session.exec()` 不再被误杀——这是
+有意的取舍，代价是通过**无法解析**的接收者拿到的 `eval`/`exec` 也算干净）；`.sh` 仍是逐行匹配，所以散文里引用一条
+blocked 命令也会被标出来。目录不存在、`.py` 解析失败都**fail-closed**。发现 blocked 级命令、读凭证文件、
+`os.system`、`shell=True` 等即拒绝发布；旧版本自动进 `skills/.archive/`，可 `rollback`。
+
+**诚实的说法**：这道门是人工 promote 前面的确定性预过滤器，不是对刻意混淆的抵抗。已知局限同源一处：`_py_prepass`
+用 `ast.walk` 扫全树收集绑定，因此**不看可达性、不看作用域**——一条永远执行不到的语句仍会贡献绑定。
+
+## 技能自带脚本与沙箱
+
+技能包可以带 `*.py` / `*.sh`。它们**只能**被 `run_skill_script` 在受限沙箱里跑，且必须先 promote 成 published
+（draft 直接拒跑）。
+
+沙箱边界：
+- **无凭证**——env 从空 dict 起建，只有 `PATH`/`HOME`/`LANG`，任何 `AWS_*` 结构上不可能出现；
+- **无网络**——Linux 走 `unshare -n`，macOS 走 `sandbox-exec`；两者都拿不到时**直接拒跑**（默认），绝不假装隔离；
+- **一次性工作目录**——脚本在临时目录里跑，跑完删除，写不回技能包；只有目标脚本本身被复制进去，所以包内同级文件
+  在运行时**不存在**（`source`/`open()` 兄弟文件会失败）；
+- **显式解释器**——按后缀查白名单，不看 shebang、不依赖可执行位、不起 shell（`.sh` 里放 python 代码就是喂给
+  `/bin/bash`，反之亦然，这是有意的）；
+- 超时 kill 进程组；stdout/stderr 各自截断到 `skills_sandbox_max_output_bytes`（**字节**，不是字符，CJK 输出要按
+  字节预算算）。
+
+**沙箱不限制文件系统写入**——脚本拥有服务账号的正常文件访问权。这正是整包安全扫描里那些"破坏性文件系统操作"规则
+属于真实边界、而不只是纵深防御的原因。
+
+因此脚本只适合**纯本地计算**：解析日志/JSON、统计、生成报表片段。需要云 API 的动作仍走
+`run_aws_cli` / `run_on_host` / `run_kubectl` 的既有三级门。沙箱默认关闭，需在 `config/settings.yaml` 把
+`skills_sandbox_enabled` 设为 `true`——关着的时候 executor agent 的工具表里根本不会出现 `run_skill_script`。
+
 ## YAML Frontmatter Reference
 
 | Field | Required | Description |

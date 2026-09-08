@@ -231,7 +231,7 @@ skills_import_timeout_seconds: 60
 # ── Skill script sandbox (no credentials, no network) ──────────
 skills_sandbox_enabled: false               # 新执行通道，默认关
 skills_sandbox_timeout_seconds: 60
-skills_sandbox_max_output_chars: 20000
+skills_sandbox_max_output_bytes: 20000        # 字节，不是字符：CJK 输出按字节记账
 skills_sandbox_require_isolation: true      # 拿不到隔离器就拒跑，绝不假装无网络
 skills_sandbox_interpreters:
   ".py": python

@@ -56,16 +56,16 @@ Three properties are deliberate and must not be "improved" away:
   the returned stderr says so instead of claiming a clean kill. Do not read the
   timeout as "every descendant is dead".
 
-* **`skills_sandbox_max_output_chars` bounds what we STORE — in BYTES, not
+* **`skills_sandbox_max_output_bytes` bounds what we STORE — in BYTES, not
   characters — and the two deadlines bound how long we read.** Output is captured by
   `_Capture`, a `selectors` loop over both pipes (and the stdin feed) that keeps
   *reading* past the cap — so the child can never deadlock us on a pipe it has filled
   — while *storing* at most `cap` bytes per stream. Memory is therefore O(cap) rather
   than O(what the child wrote), and the wall clock is bounded by
   `timeout + _KILL_GRACE_SECONDS` for every payload shape. The unit is bytes because
-  bytes are what bounds memory, while the setting is still *named* `..._chars`: 100 CJK
-  characters at `cap=200` come back as 67 with `truncated=True`, not as 100. An operator
-  sizing this for non-ASCII output needs to read it as a byte budget.
+  bytes are what bounds memory, and the setting is named for it: 100 CJK characters at
+  `cap=200` come back as 67 with `truncated=True`, not as 100. An operator sizing this for
+  non-ASCII output must read it as a byte budget.
   This replaced `communicate()`, which delivered neither bound: a plain
   `while True: sys.stdout.write('A' * 65536)` — no fork, no evasion primitive, on no
   bundle-scan rule, so the promoting human sees nothing — measured **7.4s against a
@@ -509,7 +509,7 @@ def run_script(
             # Fail closed as a refusal, not as an unhandled exception in Task 8's @tool.
             raise RuntimeError(f"could not start the sandboxed script: {cmd[0]!r} ({exc})") from exc
 
-        cap = settings.skills_sandbox_max_output_chars
+        cap = settings.skills_sandbox_max_output_bytes
         capture = _Capture(proc, stdin_bytes, cap)
         notes: list[str] = []           # OUR lines; appended outside the child's cap
         try:

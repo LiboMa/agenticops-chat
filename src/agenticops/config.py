@@ -464,9 +464,9 @@ class Settings(BaseSettings):
         default=60,
         description="Per-run timeout for a sandboxed skill script (AIOPS_SKILLS_SANDBOX_TIMEOUT_SECONDS)",
     )
-    skills_sandbox_max_output_chars: int = Field(
+    skills_sandbox_max_output_bytes: int = Field(
         default=20000,
-        description="Truncation cap applied to sandbox stdout and stderr each (AIOPS_SKILLS_SANDBOX_MAX_OUTPUT_CHARS)",
+        description="Truncation cap applied to sandbox stdout and stderr each, in BYTES (AIOPS_SKILLS_SANDBOX_MAX_OUTPUT_BYTES)",
     )
     skills_sandbox_require_isolation: bool = Field(
         default=True,
