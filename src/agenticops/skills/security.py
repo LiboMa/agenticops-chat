@@ -288,6 +288,29 @@ def scan_skill_safety(body: str) -> dict:
 #     script that reaches the network some other way will not. FAIL-OPEN at the edges.
 #   * `shutil.rmtree` on a target that does not fold to a literal is not flagged;
 #     flagging every rmtree would reject legitimate cleanup. FAIL-OPEN.
+#   * A DEAD REASSIGNMENT un-folds a constant, and no reader would extract that from the
+#     bullet above: `_py_const_strings` drops a name assigned twice anywhere in the file,
+#     so a never-executed `target = 'build'` makes `shutil.rmtree(target)` with
+#     `target = '/'` scan clean. Measured for rmtree, for destructive subprocess argv, and
+#     for a folded credential path whose leaf comes from a constant. FAIL-OPEN — and note
+#     the polarity, because the same word means opposite things in the two maps: dropping
+#     an ambiguous IMPORT binding is fail-CLOSED (_py_resolve falls back to the source
+#     spelling, so the rule tables still match), while dropping an ambiguous CONSTANT
+#     loses the value and the rule with it. NOT a regression (the pre-`ast` scan did not
+#     fold at all). Deliberately NOT detected: closing it means keeping every candidate
+#     value and flagging if ANY is dangerous, which changes fold semantics for every path
+#     rule; parked with the `_py_const_strings` scope-awareness item.
+#   * A DEAD CONFLICTING IMPORT is the same class in the import map, and there the drop is
+#     fail-CLOSED for most rules (see _scan_py_file) — but not all. Where a rule needs the
+#     BINDING rather than the spelling, dropping loses the match and a dead
+#     `import json as <name>` still disarms it: the import-based network capability
+#     (`_py_imports_network` scans `bindings.values()`, so a dead `import json as requests`
+#     hides the secret-material rule), the flat `from os import system` form (bare
+#     `system(...)` is a 1-tuple no rule table contains), and an ALIASED module
+#     (`import os as o` then `o.system(...)` resolves to ('o','system')). FAIL-OPEN,
+#     measured, and pinned as-is by test_ambiguous_import_residuals_stay_documented.
+#     Closing them means multi-valued bindings — keep every candidate target and flag if
+#     ANY matches — which is the same parked change as the constant bullet above.
 #   * `shell=<variable>` (`subprocess.run(cmd, shell=use_shell)`) is not flagged — the
 #     pre-`ast` regex missed it too, so it is a standing gap, NOT a regression. Only a
 #     constant `True`, or an expression containing one (`True if … else False`), counts;
@@ -319,16 +342,29 @@ def scan_skill_safety(body: str) -> dict:
 #         (`a = builtins; a = None`), tuple unpacking (`a, b = builtins, None`), the SAME
 #         value assigned in two branches (`if …: h = builtins` / `else: h = builtins`),
 #         and one attribute name bound differently on two classes.
+#       - a key bound only ONCE by a dead import, so there is no ambiguity to drop:
+#         `import json as eval` in an uncalled function still hides a bare `eval(...)`
+#         (see the import-ambiguity bullet above).
 #   * The same module-wide keying is FAIL-CLOSED in the other direction, so the bullet
 #     above must NOT be read as "a `dynamic code execution` finding means the receiver
-#     really is the builtin". Keys are module-wide and not scope-aware: an innocent
-#     receiver IS flagged when any name, parameter, class attribute or `self.<attr>`
-#     anywhere in the file is spelled `eval`/`exec`/`builtins`/`__builtins__`, or is
-#     assigned one of those spellings. A constructor PARAMETER named `eval` stored as
-#     `self.eval` flags, and so does `b = builtins` in one function while an unrelated
-#     `b.eval(ctx)` in another calls an Expr. ACCEPTED false positives — the pre-`ast`
-#     scan rejected both too, so they cost nothing new, and none of the 16 shipped
-#     packages hits them.
+#     really is the builtin". Keys are module-wide and not scope-aware. What flags an
+#     innocent receiver is NARROWER than "spelled like a builtin" — measured, not
+#     symmetrical:
+#       - a BARE NAME or parameter spelled `eval`/`exec`/`builtins`/`__builtins__` flags,
+#         because the call resolves to a table entry: `def run(eval, x): return eval(x)`,
+#         or a local `builtins = Cfg()` then `builtins.eval('x')`;
+#       - an ATTRIBUTE merely SPELLED that way does NOT flag. `self.eval = cb` (an
+#         innocent callback) then `self.eval(s)` resolves to ('self','eval') — a 2-tuple
+#         that is not in the table and is too short for the trailing-two branch. Same for
+#         `self.exec` and for a class attribute `eval = staticmethod(...)` reached as
+#         `r.eval(x)`. An attribute flags only when it is ASSIGNED one of those spellings,
+#         which is the alias-pass case; that is why a constructor PARAMETER named `eval`
+#         stored as `self.eval = eval` DOES flag — the value resolves to `eval`, not the
+#         attribute name;
+#       - a key bound in ANOTHER scope flags: `b = builtins` in one function while an
+#         unrelated `b.eval(ctx)` in another calls an Expr.
+#     ACCEPTED false positives — the pre-`ast` scan rejected all of them too, so they cost
+#     nothing new, and none of the 16 shipped packages hits them.
 #   * Conversely, an object whose attribute pair spells a rule pair IS flagged
 #     (`self.os = OsShim()` then `self.os.system(c)`): telling it from the real module
 #     needs type inference, and `self.os = importlib.import_module('os')` is one edit
@@ -517,21 +553,53 @@ def _py_import_bindings(nodes: list[ast.AST]) -> dict[str, tuple[str, ...]]:
     This is what makes the call rules resolve by BINDING rather than by `os.`/
     `subprocess.` prefix text, so `import os as o`, `from os import system` and
     `from subprocess import run` all land on the same target.
+
+    AMBIGUITY-DROP, and it is load-bearing for every rule in this module: the nodes
+    come from _py_prepass, which walks the WHOLE tree with no scope or reachability
+    filter, so one never-executed `import json as os` (an uncalled function, an
+    `if False:` block, a class body, a `try/except ImportError` shim) is in this list
+    beside the real module-level `import os`. Last-write-wins therefore let a single
+    dead line REWRITE the `os` key to a target no rule table contains and silently
+    disarm os.system, os.popen, subprocess, shutil.rmtree, the `~/.aws/credentials`
+    fold and the import-based network capability — a detection regression against the
+    pre-`ast` scan (fix round 5, the re-review's F-A). A key bound to two DIFFERENT
+    targets anywhere in the file is dropped instead, and never re-added; _py_resolve
+    then falls back to the SOURCE SPELLING, so `os.system(...)` still resolves to
+    ('os','system') and the rule tables still match. Dropping here is FAIL-CLOSED,
+    which is the whole reason it works — the opposite of _py_const_strings, where
+    dropping loses the fold and is fail-open (see KNOWN LIMITATIONS).
+
+    Targets are compared, not write counts: plain `import os` legitimately writes the
+    `os` key twice (its own name and its root), and a repeated identical import is not
+    ambiguous. Pinned in both directions by
+    test_dead_import_cannot_disarm_other_rules and test_consistent_import_aliases_resolve.
     """
     bindings: dict[str, tuple[str, ...]] = {}
+    dropped: set[str] = set()
+
+    def _bind(key: str, target: tuple[str, ...]) -> None:
+        if key in dropped:
+            return
+        current = bindings.get(key)
+        if current is None:
+            bindings[key] = target
+        elif current != target:
+            del bindings[key]
+            dropped.add(key)
+
     for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 target = tuple(alias.name.split("."))
                 if alias.asname:
-                    bindings[alias.asname] = target
+                    _bind(alias.asname, target)
                 else:
-                    bindings[alias.name] = target
-                    bindings[target[0]] = (target[0],)
+                    _bind(alias.name, target)
+                    _bind(target[0], (target[0],))
         elif isinstance(node, ast.ImportFrom):
             base = tuple(node.module.split(".")) if node.module else ()
             for alias in node.names:
-                bindings[alias.asname or alias.name] = base + (alias.name,)
+                _bind(alias.asname or alias.name, base + (alias.name,))
     return bindings
 
 
@@ -843,15 +911,31 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
     lines = _text_lines(text)
     imports, assigns = _py_prepass(tree)
     bindings = _py_import_bindings(imports)
-    # Alias assignments live in their OWN map and are consulted only by the dynamic-exec
-    # arm below. They must NEVER be merged into `bindings`: alias keys are module-wide
-    # dotted names, so a colliding key would OVERWRITE an import binding that the other
-    # rules resolve through, and a single dead assignment (`os = __builtins__` inside an
-    # uncalled function) would silently disarm os.system, os.popen, subprocess,
-    # shutil.rmtree, the credential-path fold, the network-capability check and the
-    # dynamic-exec rule itself. That was fix round 3's regression, closed in round 4; the
-    # invariant is that an assignment must never be able to REMOVE a binding another rule
-    # depends on. Pinned by test_dead_alias_assignment_cannot_disarm_other_rules.
+    # THREE maps, three write disciplines. Every one of them is keyed module-wide over a
+    # whole-tree walk, so a never-executed line writes them; what matters per map is
+    # which way a CONFLICTING write degrades. Stated per map, because there is no blanket
+    # invariant here — asserting one is what let the import path sit unexamined for two
+    # rounds:
+    #   * `bindings` (imports) — FAIL-CLOSED since fix round 5. A key bound to two
+    #     different targets is DROPPED and stays dropped (_py_import_bindings), so
+    #     _py_resolve falls back to the source spelling and `os.system(...)` still
+    #     matches. Before that the last write won, and one dead `import json as os`
+    #     disarmed os.system, os.popen, subprocess, shutil.rmtree, the
+    #     `~/.aws/credentials` fold and the import-based network capability. Dropping is
+    #     fail-closed only where the source spelling matches a rule table; the residual
+    #     (aliased modules, the flat `from os import system` form, the network scan over
+    #     `bindings.values()`) is a FAIL-OPEN member of KNOWN LIMITATIONS. Pinned by
+    #     test_dead_import_cannot_disarm_other_rules.
+    #   * the alias map (`exec_bindings`) — closed in fix round 4 by keeping it OUT of
+    #     `bindings`: alias keys are module-wide dotted names, so a colliding key would
+    #     OVERWRITE an import binding every other rule resolves through. It is consulted
+    #     by the dynamic-exec arm alone, so its own ambiguity drop (fail-OPEN) can lose
+    #     that one match and no other rule's. Pinned by
+    #     test_dead_alias_assignment_cannot_disarm_other_rules.
+    #   * `consts` (_py_const_strings) — STILL FAIL-OPEN. A name written twice is dropped
+    #     and the fold then fails, so a dead `target = 'build'` turns off
+    #     `shutil.rmtree(target)`. Documented in KNOWN LIMITATIONS, deliberately not
+    #     detected: closing it needs multi-valued constants, not a write discipline.
     exec_bindings = {**bindings, **_py_alias_bindings(assigns, bindings)}
     consts = _py_const_strings(assigns, bindings)
     # Import half now; the call half (shell escape / subprocess) is set in the walk

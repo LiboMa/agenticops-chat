@@ -795,6 +795,202 @@ class TestScanSkillBundleAliasBinding:
             assert any("shell escape" in f["reason"] for f in scan["findings"]), \
                 (name, scan["findings"])
 
+    def test_dead_import_cannot_disarm_other_rules(self, tmp_path):
+        """A dead IMPORT must never REMOVE a binding another rule depends on.
+
+        The second write path into the shared `bindings` dict, and the older one:
+        _py_prepass collects imports with `ast.walk` over the whole tree, so a
+        never-executed `import json as os` is in the list beside the real
+        module-level `import os`. Last-write-wins let that one line rewrite the `os`
+        key to a target no rule table contains and turn off os.system, os.popen,
+        subprocess, shutil.rmtree, the `~/.aws/credentials` fold and the
+        import-based network capability — measured as a regression against the
+        pre-`ast` scan (fix round 5, F-A). _py_import_bindings now DROPS a key bound
+        to two different targets, and _py_resolve falls back to the source spelling,
+        so the rules still match. Every payload below flags without its poison line
+        and must still flag for the SAME reason with it. Reintroducing either
+        `bindings[key] = target` (last write wins) or `bindings.setdefault(...)`
+        (first write wins) fails this test or its poison-shape sibling.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        dead = "\n\ndef _unused():\n    {stmt}\n    return 0\n"
+        for name, payload, stmt in [
+            ("poison-import-os-system", "import os\nos.system('id')\n",
+             "import json as os"),
+            # A real module as the poison target, so nothing about the shape depends
+            # on the value being `builtins` (that was the round-3/4 alias path).
+            ("poison-import-os-system-builtins", "import os\nos.system('id')\n",
+             "import builtins as os"),
+            ("poison-import-os-popen", "import os\nos.popen('id').read()\n",
+             "import json as os"),
+            ("poison-import-subprocess-shell",
+             "import subprocess\nsubprocess.run('id', shell=True)\n",
+             "import json as subprocess"),
+            ("poison-import-subprocess-argv",
+             "import subprocess\nsubprocess.run(['rm', '-rf', '/'])\n",
+             "import json as subprocess"),
+            ("poison-import-rmtree", "import shutil\nshutil.rmtree('/')\n",
+             "import json as shutil"),
+            # The folded credential path: ('json','path','join') is not a join call,
+            # so the fold returned None and the rule never saw the path.
+            ("poison-import-credential-fold",
+             "import os\n"
+             "open(os.path.join(os.path.expanduser('~'), '.aws', 'credentials'))\n",
+             "import json as os"),
+            # An ImportFrom as the poison, not just an Import.
+            ("poison-fromimport-os", "import os\nos.system('id')\n",
+             "from os import path as os"),
+            # The secret-material rule needs network capability. The import half is
+            # still disarmable (documented residual, see the residuals test below),
+            # so this pair pins the shell-out half that arms it.
+            ("poison-import-secret-material",
+             "import os\nimport requests\nos.system('id')\n"
+             "print('AWS_SECRET_ACCESS_KEY')\n",
+             "import json as requests"),
+        ]:
+            control = _pkg(tmp_path, name + "-control", {"x.py": payload})
+            clean = scan_skill_bundle(control)
+            assert clean["safe"] is False, name
+            expected = {f["reason"] for f in clean["findings"]}
+            poisoned = _pkg(tmp_path, name, {"x.py": payload + dead.format(stmt=stmt)})
+            scan = scan_skill_bundle(poisoned)
+            assert scan["safe"] is False, (name, stmt, scan["findings"])
+            assert expected <= {f["reason"] for f in scan["findings"]}, \
+                (name, stmt, sorted(expected), scan["findings"])
+
+    def test_dead_import_poison_shapes_cannot_disarm(self, tmp_path):
+        """The poison import needs no evasion primitive, so pin its cheap shapes.
+
+        `try/except ImportError` is ordinary code, not an evasion primitive. The
+        module-level cases also pin the DIRECTION of the discipline: `ast.walk` is
+        breadth-first, so a nested poison is always collected last and would be
+        caught by last-write-wins alone — a poison import placed BEFORE the real one
+        at module level is what additionally rules out first-write-wins
+        (`bindings.setdefault(...)`), which drops the key under neither ordering.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        payload = "import os\nos.system('id')\n"
+        for name, src in [
+            ("dead-function", payload + "\ndef _unused():\n    import json as os\n"),
+            ("dead-branch", payload + "if False:\n    import json as os\n"),
+            ("class-body", payload + "class _C:\n    import json as os\n"),
+            ("try-except-importerror",
+             payload + "try:\n    import json as os\nexcept ImportError:\n    pass\n"),
+            ("module-level-poison-first", "import json as os\n" + payload),
+            ("module-level-poison-last", payload + "import json as os\n"),
+            # A dropped key must STAY dropped: without the `dropped` set, the second
+            # poison line finds the key absent and re-binds it, so writing the same
+            # dead import twice defeats the drop. Measured: SAFE without the set.
+            ("repeated-poison",
+             payload + "\ndef _u():\n    import json as os\n"
+                       "\ndef _v():\n    import json as os\n"),
+            ("repeated-poison-two-targets",
+             payload + "\ndef _u():\n    import json as os\n"
+                       "\ndef _v():\n    import builtins as os\n"),
+        ]:
+            d = _pkg(tmp_path, "poison-import-shape-" + name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any("shell escape" in f["reason"] for f in scan["findings"]), \
+                (name, scan["findings"])
+
+    def test_consistent_import_aliases_resolve(self, tmp_path):
+        """A key bound CONSISTENTLY is not ambiguous and must not be dropped.
+
+        The ambiguity discipline compares targets, not write counts: plain
+        `import os` legitimately writes the `os` key twice (its own name, then its
+        root), so a rule that dropped on any repeat would disarm every import in the
+        module. Each case below only flags while the binding survives — an aliased
+        `o.system` resolves to ('os','system') through the binding and to nothing
+        without it.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src, reason in [
+            ("alias-os-as-o", "import os as o\no.system('id')\n", "shell escape"),
+            ("repeated-identical-import",
+             "import os\nimport os\nos.system('id')\n", "shell escape"),
+            ("submodule-plus-root",
+             "import os.path\nimport os\nos.system('id')\n", "shell escape"),
+            ("fromimport-run",
+             "from subprocess import run\nrun('id', shell=True)\n", "shell=True"),
+            ("alias-shutil-as-sh",
+             "import shutil as sh\nsh.rmtree('/')\n", "rmtree"),
+        ]:
+            d = _pkg(tmp_path, "consistent-" + name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any(reason in f["reason"] for f in scan["findings"]), \
+                (name, scan["findings"])
+
+    def test_ordinary_import_aliasing_is_not_a_finding(self, tmp_path):
+        """The false-positive direction: dropping must not invent findings.
+
+        Dropping an ambiguous key falls back to the SOURCE SPELLING, which is
+        fail-closed — so the risk it carries is rejecting legitimate packages. The
+        `try/except ImportError` accelerator idiom binds one name to two different
+        modules and is the shape most likely to be hit by real code.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src in [
+            ("aliases", "import os.path as p\nimport json as j\n"
+                        "from pathlib import Path as P\n"
+                        "print(p.sep, j.dumps({}), P('/tmp'))\n"),
+            ("tryexcept-accelerator",
+             "try:\n    import ujson as json\nexcept ImportError:\n    import json\n"
+             "print(json.dumps({}))\n"),
+            ("repeated-identical-alias",
+             "import json as j\nimport json as j\nprint(j.dumps({}))\n"),
+            ("star-import", "from os.path import *\nprint(sep)\n"),
+        ]:
+            d = _pkg(tmp_path, "clean-imports-" + name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is True, (name, scan["findings"])
+
+    def test_ambiguous_import_residuals_stay_documented(self, tmp_path):
+        """The shapes ambiguity-drop does NOT close, pinned as measured.
+
+        Dropping is fail-closed only where the source spelling still matches a rule
+        table. Where a rule needs the BINDING itself — the import-only network
+        capability (`bindings.values()`), the flat `from os import system` form, and
+        an aliased module (`import os as o`) — dropping loses the match, and a key
+        bound only once (`import json as eval`) is not ambiguous at all. All five are
+        FAIL-OPEN members of the KNOWN LIMITATIONS class and are documented there;
+        closing one means multi-valued bindings, which is a separate change. If a
+        future change closes any of these, this test fails — update KNOWN LIMITATIONS
+        in the same commit rather than deleting the case.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        dead = "\n\ndef _unused():\n    {stmt}\n    return 0\n"
+        for name, src in [
+            # Only one import binds `eval`, so there is no ambiguity to detect.
+            ("bare-eval", "print(eval('1+1'))\n" + dead.format(stmt="import json as eval")),
+            # Dropping `requests` also removes it from the import-based network scan.
+            ("secret-material-import-only",
+             "import requests\nrequests.get('https://example.invalid',\n"
+             "             params={'k': 'AWS_SECRET_ACCESS_KEY'})\n"
+             + dead.format(stmt="import json as requests")),
+            # The flat form needs the binding: bare `system(...)` resolves to a
+            # 1-tuple that no rule table contains.
+            ("flat-fromimport",
+             "from os import system\nsystem('id')\n"
+             + dead.format(stmt="from json import loads as system")),
+            # Same mechanism for an aliased module: ('o','system') matches nothing.
+            ("aliased-module",
+             "import os as o\no.system('id')\n" + dead.format(stmt="import json as o")),
+            # Ordering makes no difference to the drop, which is why the two
+            # module-level orders below behave the same as the nested one.
+            ("aliased-module-poison-first",
+             "import json as o\nimport os as o\no.system('id')\n"),
+        ]:
+            d = _pkg(tmp_path, "residual-" + name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is True, (name, scan["findings"])
+
     def test_attribute_pair_spelling_os_system_stays_flagged(self, tmp_path):
         """Ruled ACCEPTED false positive, pinned so it is never silently suppressed.
 
