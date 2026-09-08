@@ -56,26 +56,43 @@ Three properties are deliberate and must not be "improved" away:
   the returned stderr says so instead of claiming a clean kill. Do not read the
   timeout as "every descendant is dead".
 
-* **`skills_sandbox_max_output_chars` bounds what we STORE, and the two deadlines
-  bound how long we read.** Output is captured by `_Capture`, a `select` loop over
-  both pipes (and the stdin feed) that keeps *reading* past the cap — so the child
-  can never deadlock us on a pipe it has filled — while *storing* at most `cap`
-  bytes per stream. Memory is therefore O(cap) rather than O(what the child wrote),
-  and the wall clock is bounded by `timeout + _KILL_GRACE_SECONDS` for every payload
-  shape. This replaced `communicate()`, which delivered neither bound: a plain
+* **`skills_sandbox_max_output_chars` bounds what we STORE — in BYTES, not
+  characters — and the two deadlines bound how long we read.** Output is captured by
+  `_Capture`, a `selectors` loop over both pipes (and the stdin feed) that keeps
+  *reading* past the cap — so the child can never deadlock us on a pipe it has filled
+  — while *storing* at most `cap` bytes per stream. Memory is therefore O(cap) rather
+  than O(what the child wrote), and the wall clock is bounded by
+  `timeout + _KILL_GRACE_SECONDS` for every payload shape. The unit is bytes because
+  bytes are what bounds memory, while the setting is still *named* `..._chars`: 100 CJK
+  characters at `cap=200` come back as 67 with `truncated=True`, not as 100. An operator
+  sizing this for non-ASCII output needs to read it as a byte budget.
+  This replaced `communicate()`, which delivered neither bound: a plain
   `while True: sys.stdout.write('A' * 65536)` — no fork, no evasion primitive, on no
   bundle-scan rule, so the promoting human sees nothing — measured **7.4s against a
   1s timeout and 2.99 GB of resident memory in the service process**, because
   `TimeoutExpired`'s constructor joins every chunk buffered so far. That is a denial
   of service on the AgenticOps process, not on the sandboxed child. Do not
   "simplify" this back into `communicate()`.
+
+* **The readiness wait is `selectors`, and must never go back to `select.select`.**
+  `select.select` raises `ValueError: filedescriptor out of range` for any fd ≥
+  `FD_SETSIZE` (1024) — a compile-time constant with nothing to do with
+  `RLIMIT_NOFILE` (1 048 576 on this host), so there is no limit being exceeded and
+  nothing warns. Measured with 1200 spare fds held open in the CALLING process: a
+  script printing `REAL-OUTPUT-HERE` came back as
+  `exit=0 stdout='' stderr='' truncated=False` — total silent output loss, asserted
+  as a complete run. For an ops agent that is worse than a crash, since "the script
+  ran fine and produced nothing" is a conclusion it will act on. A long-lived uvicorn
+  process with a DB pool, MCP subprocesses and per-session agents crosses 1024 fds as
+  a matter of course. `selectors.DefaultSelector` (kqueue/epoll) has no such limit,
+  which is why the stdlib drives `communicate()` with it.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import select
+import selectors
 import shutil
 import signal
 import subprocess
@@ -178,9 +195,17 @@ class _Capture:
       timeout took **7.4s** to return. Nothing on `pump`'s deadline path is proportional to
       what arrived: the check is a clock comparison and the join is over ≤ `cap` bytes.
 
-    Both pipes AND stdin are driven by one `select` loop over non-blocking fds. Reading one
-    pipe to EOF while the child fills the other is the classic deadlock `communicate()`
-    exists to avoid, and so is writing stdin to a child that never reads it.
+    Both pipes AND stdin are driven by one `selectors` loop over non-blocking fds. Reading
+    one pipe to EOF while the child fills the other is the classic deadlock `communicate()`
+    exists to avoid, and so is writing stdin to a child that never reads it. The stdin half
+    is a WRITE-readiness wait, which is why the primitive has to handle both directions.
+
+    `selectors`, not `select.select`: the latter raises `ValueError` for any fd ≥ 1024
+    (`FD_SETSIZE`), which cost the entire output of every run in a process holding that many
+    fds — see the module docstring. Not threads: `select`-style readiness needs no
+    synchronisation to make the cap and the deadline observable from the calling thread, and
+    two extra threads per run would add a shutdown path to the component whose whole job is
+    bounding things.
 
     This is an object rather than a function because the state must survive ACROSS the two
     deadlines `run_script` uses — the timeout, then the post-kill grace. The second `pump`
@@ -196,6 +221,11 @@ class _Capture:
         # fd -> {"sink": list, "stored": bytes kept, "produced": bytes the child wrote}
         self._tracked: dict[int, dict] = {}
         self._active: set[int] = set()
+        self._closed = False
+        # Set when the capture loop fails for a reason that is NOT end-of-pipe. Never
+        # swallowed: run_script turns it into truncated=True plus a visible stderr note.
+        self.failed: BaseException | None = None
+        self._sel = selectors.DefaultSelector()
         for pipe, sink in ((proc.stdout, self._out), (proc.stderr, self._err)):
             if pipe is None:
                 continue
@@ -203,13 +233,18 @@ class _Capture:
             os.set_blocking(fd, False)
             self._tracked[fd] = {"sink": sink, "stored": 0, "produced": 0}
             self._active.add(fd)
+            self._sel.register(fd, selectors.EVENT_READ)
 
         self._stdin = proc.stdin
+        self._stdin_fd = -1
         self._view = memoryview(stdin_bytes)
         self._sent = 0
         if self._stdin is not None:
-            os.set_blocking(self._stdin.fileno(), False)
-            if not stdin_bytes:
+            self._stdin_fd = self._stdin.fileno()
+            os.set_blocking(self._stdin_fd, False)
+            if stdin_bytes:
+                self._sel.register(self._stdin_fd, selectors.EVENT_WRITE)
+            else:
                 self._close_stdin()
 
     @property
@@ -242,19 +277,42 @@ class _Capture:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return True
-            wlist = [self._stdin.fileno()] if self._stdin is not None else []
             try:
-                readable, writable, _ = select.select(
-                    list(self._active), wlist, [], remaining
-                )
-            except (OSError, ValueError):
-                # A pipe was closed underneath us; there is nothing left to read.
+                events = self._wait(remaining)
+            except OSError:
+                # The one legitimate quiet exit: a pipe was closed underneath us (EBADF).
+                # There is nothing left to read, and nothing to report — this is EOF under
+                # another name.
                 break
-            for fd in readable:
-                self._read(fd)
-            if writable:
-                self._write()
+            except ValueError as exc:
+                # NOT end-of-pipe: a fault in our own readiness bookkeeping. Reporting this
+                # as a clean EOF is precisely how select.select's FD_SETSIZE ValueError
+                # turned total output loss into `exit=0 stdout='' truncated=False`. A control
+                # that fails silently is worse than one that fails loudly.
+                self.failed = exc
+                logger.exception(
+                    "Sandbox output capture failed; the captured output is INCOMPLETE"
+                )
+                break
+            for key, mask in events:
+                if mask & selectors.EVENT_READ:
+                    self._read(key.fd)
+                if mask & selectors.EVENT_WRITE:
+                    self._write()
         return False
+
+    def _wait(self, timeout: float) -> list:
+        """The readiness wait itself, isolated so a test can inject a failure into it."""
+        return self._sel.select(timeout)
+
+    def _drop(self, fd: int) -> None:
+        """Stop waiting on an fd. Unregister BEFORE closing it: a selector still holding a
+        closed fd raises on the next select() instead of reporting EOF."""
+        self._active.discard(fd)
+        try:
+            self._sel.unregister(fd)
+        except (KeyError, ValueError, OSError):
+            pass
 
     def _read(self, fd: int) -> None:
         try:
@@ -262,10 +320,10 @@ class _Capture:
         except BlockingIOError:
             return
         except OSError:
-            self._active.discard(fd)
+            self._drop(fd)
             return
         if not data:
-            self._active.discard(fd)          # EOF
+            self._drop(fd)                    # EOF
             return
         rec = self._tracked[fd]
         rec["produced"] += len(data)
@@ -281,7 +339,7 @@ class _Capture:
         if self._stdin is None:
             return
         try:
-            self._sent += os.write(self._stdin.fileno(), self._view[self._sent:])
+            self._sent += os.write(self._stdin_fd, self._view[self._sent:])
         except BlockingIOError:
             return
         except OSError:
@@ -293,12 +351,23 @@ class _Capture:
 
     def _close_stdin(self) -> None:
         pipe, self._stdin = self._stdin, None
+        if pipe is not None:
+            self._drop(self._stdin_fd)
         _close_quietly(pipe)
 
     def close(self) -> None:
-        """Release our ends of all three pipes. Idempotent."""
+        """Release our ends of all three pipes and the selector's own fd. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
         self._close_stdin()
+        for fd in list(self._active):
+            self._drop(fd)
         self._active.clear()
+        try:
+            self._sel.close()
+        except OSError:
+            pass
         for pipe in (self._proc.stdout, self._proc.stderr):
             _close_quietly(pipe)
 
@@ -359,9 +428,10 @@ def run_script(
 ) -> SandboxResult:
     """Run a PUBLISHED skill's script in the restricted sandbox.
 
-    Raises RuntimeError for EVERY refusal — disabled, draft, bad path, unusable
-    path, bad suffix, no isolator, an unreadable packaged script, stdin_text that
-    is not UTF-8-encodable, and an interpreter/isolator that will not start.
+    Raises RuntimeError for EVERY refusal — disabled, an argument of the wrong type,
+    draft, bad path, unusable path, bad suffix, no isolator, an unreadable packaged
+    script, stdin_text that is not UTF-8-encodable, and an interpreter/isolator that
+    will not start.
     Task 8's @tool catches RuntimeError to render a refusal, so a refusal must
     never surface as some other exception type. A script that runs and fails
     returns a SandboxResult with its exit code — a refusal is never reported as a
@@ -370,6 +440,23 @@ def run_script(
     """
     if not settings.skills_sandbox_enabled:
         raise RuntimeError("skill script sandbox is disabled (skills_sandbox_enabled=false)")
+
+    # Contract hygiene, not a boundary: Task 8's @tool is pydantic-validated against four
+    # concrete `str` annotations, so none of these shapes can arrive from a model. A
+    # non-agent caller (REST handler, CLI, scheduler passing parsed JSON) has no such gate,
+    # and without this the shapes escape as TypeError/AttributeError — or worse, silently:
+    # `args="abc"` used to splat into three single-character arguments.
+    if not isinstance(skill_name, str) or not isinstance(script, str):
+        raise RuntimeError(
+            f"skill_name and script must be strings (got "
+            f"{type(skill_name).__name__}/{type(script).__name__})"
+        )
+    if stdin_text is not None and not isinstance(stdin_text, str):
+        raise RuntimeError(f"stdin_text must be a string (got {type(stdin_text).__name__})")
+    if args is not None and (
+        not isinstance(args, (list, tuple)) or not all(isinstance(a, str) for a in args)
+    ):
+        raise RuntimeError(f"args must be a list of strings (got {type(args).__name__})")
 
     target = _resolve_script(skill_name, script)
 
@@ -424,6 +511,7 @@ def run_script(
 
         cap = settings.skills_sandbox_max_output_chars
         capture = _Capture(proc, stdin_bytes, cap)
+        notes: list[str] = []           # OUR lines; appended outside the child's cap
         try:
             timed_out = capture.pump(started + timeout)
             if not timed_out:
@@ -456,7 +544,8 @@ def run_script(
                     # still holding a write end open. We DO hold a capped prefix at this point
                     # (pump bounds it) — it is dropped because it is a fragment of a run that
                     # may still be producing, not because it is unretrievable.
-                    out, err = "", (
+                    out, err = "", ""
+                    notes.append(
                         f"[sandbox] {timeout}s timeout expired and SIGKILL was sent to the "
                         f"process group, but the output was ABANDONED after a further "
                         f"{_KILL_GRACE_SECONDS}s: a descendant escaped the process group and "
@@ -468,8 +557,9 @@ def run_script(
                     except subprocess.TimeoutExpired:
                         pass
                     out, err = capture.text()
-                    err = err + f"\n[sandbox] killed after {timeout}s timeout"
+                    notes.append(f"[sandbox] killed after {timeout}s timeout")
             over_cap = capture.over_cap
+            capture_failed = capture.failed
         finally:
             capture.close()
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -477,17 +567,28 @@ def run_script(
         # The cap is enforced while READING now, so what we kept can never exceed it —
         # comparing len(out) to cap (which is how this was computed when communicate()
         # buffered everything) would report truncated=False for a child that wrote GBs.
-        # The produced-byte counters are the only honest source.
-        truncated = over_cap
+        # The produced-byte counters are the only honest source. A capture that FAILED is
+        # truncated by definition: we do not know what we did not read.
+        truncated = over_cap or capture_failed is not None
+        if capture_failed is not None:
+            notes.append(
+                f"[sandbox] output capture FAILED ({capture_failed!r}) — the output above is "
+                f"INCOMPLETE and may be empty. This is a sandbox defect, not a script failure"
+            )
         logger.info(
             "Sandbox ran %s/%s: exit=%s isolation=%s duration_ms=%s%s",
             skill_name, script, exit_code, isolation, duration_ms,
             " (UNISOLATED)" if isolation == "none" else "",
         )
+        # OUR notes are not the child's output and must not compete for the child's budget:
+        # clip the child's text to the cap FIRST, then append. Appending first and clipping
+        # after (which is what this did) let a child write cap-1 bytes to stderr and hang —
+        # the note was clipped down to a bare newline, so the result carried no record that a
+        # timeout had killed anything while still reporting truncated=False.
         return SandboxResult(
             exit_code=exit_code,
             stdout=out[:cap],
-            stderr=err[:cap],
+            stderr="\n".join(p for p in (err[:cap], *notes) if p),
             truncated=truncated,
             duration_ms=duration_ms,
             isolation=isolation,

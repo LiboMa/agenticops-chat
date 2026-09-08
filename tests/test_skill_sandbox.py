@@ -44,6 +44,40 @@ ESCAPING_SCRIPT = (
 FLOODING_SCRIPT = "import sys\nwhile True:\n    sys.stdout.write('A' * 65536)\n"
 
 
+@pytest.fixture
+def spare_fds():
+    """Hold ~1200 spare fds open so a child's pipe fds land above FD_SETSIZE (1024).
+
+    Closes every fd it opened, always: a leaked fd table would corrupt every later test in
+    this file, and this file is the only suite that can be run scoped.
+    """
+    import os
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    restore = None
+    if soft < 2048:
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (min(4096, hard), hard))
+            restore = (soft, hard)
+        except (ValueError, OSError):
+            pytest.skip(f"cannot raise RLIMIT_NOFILE above {soft} to reach FD_SETSIZE")
+
+    held: list[int] = []
+    try:
+        while len(held) < 1200:
+            held.append(os.open(os.devnull, os.O_RDONLY))
+        yield max(held)
+    finally:
+        for fd in held:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if restore is not None:
+            resource.setrlimit(resource.RLIMIT_NOFILE, restore)
+
+
 def _peak_rss_mb() -> float:
     """High-water RSS of the test process in MB (darwin reports bytes, Linux KB)."""
     import resource
@@ -212,6 +246,32 @@ class TestSandboxGates:
         with pytest.raises(RuntimeError, match="not encodable as UTF-8"):
             run_script("alpha-skill", "cat.py", stdin_text="\ud800")
 
+    @pytest.mark.parametrize("kwargs, expect", [
+        ({"script": None}, "must be strings"),
+        ({"script": 123}, "must be strings"),
+        ({"script": ["hi.sh"]}, "must be strings"),
+        ({"skill_name": 123}, "must be strings"),
+        ({"stdin_text": 123}, "stdin_text must be a string"),
+        ({"args": 5}, "args must be a list of strings"),
+        ({"args": [1, 2]}, "args must be a list of strings"),
+        ({"args": "abc"}, "args must be a list of strings"),
+    ])
+    def test_wrong_argument_types_are_refusals(self, sandbox_env, kwargs, expect):
+        """Contract hygiene rather than a boundary: Task 8's @tool is pydantic-validated
+        against four concrete `str` annotations, so a model cannot send these. A non-agent
+        caller (REST, CLI, scheduler with parsed JSON) has no such gate, and each of these
+        escaped as a bare TypeError/AttributeError — or, for `args='abc'`, silently splatted
+        into three single-character arguments instead of refusing.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+        call = {"skill_name": "alpha-skill", "script": "hi.sh", **kwargs}
+
+        with pytest.raises(RuntimeError, match=expect):
+            run_script(**call)
+
     def test_non_allowlisted_suffix_refused(self, sandbox_env):
         from agenticops.skills.sandbox import run_script
 
@@ -339,7 +399,12 @@ class TestSandboxExecution:
         res = sandbox.run_script("alpha-skill", "escape.py", args=[str(pidfile)])
         elapsed = time.monotonic() - started
         try:
-            bound = 2 + sandbox._KILL_GRACE_SECONDS + 8      # generous headroom, still << 30s
+            # HARD-CODED on purpose. Deriving this from _KILL_GRACE_SECONDS made the pin a
+            # tautology: raising the constant moved the ceiling with it, so the mutant died
+            # only on the ABANDONED assertion below — after blocking for the payload's whole
+            # lifetime (30s here, a day for `sleep 86400`). A bound must not be computed from
+            # the thing it bounds.
+            bound = 15                                       # 2s timeout + 5s grace + slack
             assert elapsed < bound, f"run_script blocked {elapsed:.1f}s against a 2s timeout"
             assert res.exit_code == -1
             # The note must not claim a clean kill when the read itself was cut short.
@@ -437,6 +502,175 @@ class TestSandboxExecution:
         assert res.truncated is True
         from agenticops.config import settings
         assert len(res.stdout) <= settings.skills_sandbox_max_output_chars
+
+    def test_output_survives_pipe_fds_above_fd_setsize(self, sandbox_env, spare_fds):
+        """The third ship-blocker: `select.select` raises ValueError for any fd >= 1024
+        (FD_SETSIZE — a compile-time constant, unrelated to RLIMIT_NOFILE, which is
+        1 048 576 here, so nothing warns and no limit is exceeded). That ValueError was
+        caught and turned into `break`, making pump() return False — the value that means
+        'both pipes reached EOF cleanly'. Measured on the pristine code with these same
+        1200 spare fds: `exit=0 stdout='' stderr='' truncated=False`, i.e. TOTAL silent
+        output loss asserted as a complete run. A long-lived uvicorn process with a DB pool,
+        MCP subprocesses and per-session agents crosses 1024 fds as a matter of course.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        assert spare_fds >= 1024, "fixture did not push fds past FD_SETSIZE"
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "say.py": (
+                "import sys\n"
+                "sys.stdout.write('REAL-OUTPUT-HERE')\n"
+                "sys.stderr.write('REAL-ERR')\n"
+            ),
+        })
+
+        res = run_script("alpha-skill", "say.py")
+        assert res.exit_code == 0, res.stderr
+        assert res.stdout == "REAL-OUTPUT-HERE"
+        assert res.stderr == "REAL-ERR"
+        assert res.truncated is False
+
+    def test_capture_failure_surfaces_instead_of_a_clean_empty_run(
+        self, sandbox_env, monkeypatch
+    ):
+        """An unexpected failure in OUR capture loop must never be indistinguishable from a
+        quiet script. EOF-by-another-name (OSError/EBADF: the pipe was closed underneath us)
+        stays a silent exit; anything else is a sandbox defect and must be visible in the
+        result, because 'the script ran fine and produced nothing' is a conclusion an agent
+        acts on. This is the half of G1 that made the ValueError invisible.
+        """
+        from agenticops.skills import sandbox
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"say.py": "print('REAL-OUTPUT-HERE')\n"})
+
+        def boom(self, timeout):
+            raise ValueError("filedescriptor out of range in select()")
+
+        monkeypatch.setattr(sandbox._Capture, "_wait", boom)
+
+        res = sandbox.run_script("alpha-skill", "say.py")
+        assert res.stdout == ""                  # nothing was read — unavoidable
+        assert res.truncated is True             # ... but it must NOT claim completeness
+        assert "capture FAILED" in res.stderr
+        assert "INCOMPLETE" in res.stderr
+
+    def test_timeout_note_survives_a_stderr_flood_to_the_cap(self, sandbox_env, monkeypatch):
+        """Our own note is not the child's output and must not compete for its budget. The
+        note used to be appended BEFORE the cap was applied, so clipping began at
+        `cap - len(note)`: a child writing cap-1 bytes to stderr and then hanging returned
+        the cap in attacker-chosen text ending in a bare newline — no record that a timeout
+        had killed anything, and `truncated=False` claiming nothing was dropped.
+        """
+        import time
+
+        from agenticops.skills.sandbox import run_script
+
+        cap = 2000
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", cap, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 2, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "loud_hang.py": (
+                "import sys, time\n"
+                f"sys.stderr.write('q' * {cap - 1})\n"
+                "sys.stderr.flush()\n"
+                "time.sleep(30)\n"
+            ),
+        })
+
+        started = time.monotonic()
+        res = run_script("alpha-skill", "loud_hang.py")
+        assert time.monotonic() - started < 15
+        assert res.exit_code == -1
+        assert "killed after 2s timeout" in res.stderr
+        # The child's cap-1 bytes are all there AND the note is intact: the note lives
+        # outside the cap, so neither one displaces the other.
+        assert res.stderr.startswith("q" * (cap - 1))
+        assert res.truncated is False, "nothing of the child's output was dropped"
+
+    def test_capture_stores_at_most_the_cap(self):
+        """White-box companion to the RSS assertion in the flooding test, which is the only
+        end-to-end evidence for 'stop accumulating past the cap' but rests on ru_maxrss — a
+        whole-process high-water mark that silently goes vacuous if anything earlier in the
+        process peaks higher. This one is deterministic and host-independent: drive _Capture
+        over a real pipe, write far more than the cap, and assert on the STORED bytes. No
+        black-box assertion can replace it — the returned lengths are <= cap either way.
+        """
+        import os
+        import time
+        from types import SimpleNamespace
+
+        from agenticops.skills import sandbox
+
+        cap = 1000
+        r, w = os.pipe()
+        os.set_blocking(w, False)
+        reader = os.fdopen(r, "rb", buffering=0)
+        capture = sandbox._Capture(
+            SimpleNamespace(stdout=reader, stderr=None, stdin=None), b"", cap
+        )
+        produced = 0
+        try:
+            for _ in range(8):
+                try:
+                    produced += os.write(w, b"A" * 65536)
+                except BlockingIOError:
+                    pass
+                capture.pump(time.monotonic() + 0.05)      # keeps draining the pipe
+            os.close(w)
+            w = -1
+            capture.pump(time.monotonic() + 2)             # to EOF
+        finally:
+            capture.close()
+            if w != -1:
+                os.close(w)
+
+        stored = sum(len(chunk) for chunk in capture._out)
+        assert produced > 10 * cap, f"probe only wrote {produced} bytes"
+        assert stored <= cap, f"stored {stored} bytes for a cap of {cap}"
+        assert capture.over_cap is True
+
+    def test_output_exactly_at_the_cap_is_not_truncated(self, sandbox_env, monkeypatch):
+        """The truncation boundary is `produced > cap`, not `>=`: output of exactly cap bytes
+        had nothing dropped, so claiming truncated would be a false alarm on a complete run.
+        Unpinned, `>` and `>=` were indistinguishable across the whole suite.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        cap = 1000
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", cap, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "exact.py": f"import sys\nsys.stdout.write('x' * {cap})\n",
+        })
+
+        res = run_script("alpha-skill", "exact.py")
+        assert res.exit_code == 0, res.stderr
+        assert len(res.stdout) == cap
+        assert res.truncated is False
+
+    def test_cap_counts_bytes_not_characters(self, sandbox_env, monkeypatch):
+        """The cap is a BYTE budget while the setting is named `..._chars`. Bytes are what
+        bounds memory, so this is correct — but it is a behaviour change worth pinning
+        before the setting is ever renamed: 100 CJK characters (300 bytes) at cap=200 come
+        back as 66 whole characters plus one replacement char, not as 100.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 200, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "cjk.py": "import sys\nsys.stdout.write('\\u4e2d' * 100)\n",
+        })
+
+        res = run_script("alpha-skill", "cjk.py")
+        assert res.exit_code == 0, res.stderr
+        assert res.stdout[:66] == "中" * 66
+        assert len(res.stdout) == 67          # 198 bytes of chars + 2 bytes -> one U+FFFD
+        assert res.stdout[66] == "�"
+        assert res.truncated is True
 
     def test_non_utf8_output_succeeds_with_replacement(self, sandbox_env):
         """A run that SUCCEEDS must never raise. text=True decoded strictly, so a single
