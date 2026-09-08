@@ -12,7 +12,7 @@ created_by: user
 status: active
 skill_version: '1.0'
 created_at: '2026-05-31'
-last_used: '2026-07-30'
+last_used: '2026-08-13'
 ---
 
 # Linux Admin Skill

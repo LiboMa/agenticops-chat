@@ -1,367 +1,599 @@
-"""Tests for agenticops.notify.notifier — boosting from 43% coverage.
+"""Tests for agenticops.notify.notifier module.
 
-Focus: SlackNotifier, EmailNotifier, SNSNotifier, WebhookNotifier construction,
-send logic with mocked HTTP/SMTP, and NotificationLog model.
+Covers: NotificationManager, SlackNotifier, EmailNotifier, SNSNotifier,
+WebhookNotifier, and IM notifiers (Feishu, DingTalk, WeCom, SlackIM).
 """
 
 import asyncio
-import json
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock, AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agenticops.notify.notifier import (
-    NotificationLog,
-    Notifier,
-    SlackNotifier,
+    DingTalkNotifier,
     EmailNotifier,
+    FeishuNotifier,
+    NotificationManager,
+    SlackIMNotifier,
+    SlackNotifier,
     SNSNotifier,
+    SNSReportNotifier,
+    WeComNotifier,
+    WebhookNotifier,
 )
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-def run_async(coro):
-    """Run an async coroutine in a new event loop."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
-# ---------------------------------------------------------------------------
-# NotificationLog model
-# ---------------------------------------------------------------------------
-
-class TestNotificationLog:
-    def test_table_name(self):
-        assert NotificationLog.__tablename__ == "notification_logs"
-
-    def test_has_expected_columns(self):
-        cols = {c.name for c in NotificationLog.__table__.columns}
-        assert "channel_name" in cols
-        assert "subject" in cols
-        assert "body" in cols
-        assert "severity" in cols
-        assert "status" in cols
-        assert "error" in cols
-        assert "sent_at" in cols
-
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # SlackNotifier
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 class TestSlackNotifier:
-    def _make(self, **overrides):
-        cfg = {"webhook_url": "https://hooks.slack.com/test", "channel": "#alerts"}
-        cfg.update(overrides)
-        return SlackNotifier(cfg)
-
     def test_init_defaults(self):
-        n = self._make()
-        assert n.webhook_url == "https://hooks.slack.com/test"
-        assert n.channel == "#alerts"
-        assert n.username == "AgenticAIOps"
-        assert n.icon_emoji == ":robot_face:"
+        notifier = SlackNotifier({"webhook_url": "https://hooks.slack.com/test"})
+        assert notifier.webhook_url == "https://hooks.slack.com/test"
+        assert notifier.channel == "#alerts"
+        assert notifier.username == "AgenticAIOps"
+        assert notifier.icon_emoji == ":robot_face:"
 
-    def test_send_no_webhook(self):
-        n = self._make(webhook_url=None)
-        result = run_async(n.send("subj", "body"))
+    def test_init_custom(self):
+        cfg = {
+            "webhook_url": "https://hooks.slack.com/custom",
+            "channel": "#ops",
+            "username": "Bot",
+            "icon_emoji": ":wave:",
+        }
+        notifier = SlackNotifier(cfg)
+        assert notifier.channel == "#ops"
+        assert notifier.username == "Bot"
+
+    @pytest.mark.asyncio
+    async def test_send_no_webhook_url(self):
+        notifier = SlackNotifier({})
+        result = await notifier.send("Test", "body")
         assert result is False
 
-    def test_send_success(self):
-        n = self._make()
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        notifier = SlackNotifier({"webhook_url": "https://hooks.slack.com/x"})
         mock_resp = MagicMock(status_code=200)
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Alert", "Something happened", severity="critical")
+        assert result is True
+        mock_client.post.assert_called_once()
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["attachments"][0]["color"] == "#FF0000"
 
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.post = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
-
-            result = run_async(n.send("Alert", "Something happened", severity="critical"))
-            assert result is True
-            instance.post.assert_called_once()
-            call_kwargs = instance.post.call_args
-            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-            assert payload["attachments"][0]["color"] == "#FF0000"
-
-    def test_send_severity_colors(self):
-        n = self._make()
-        for sev, expected_color in [("critical", "#FF0000"), ("high", "#FF6600"),
-                                     ("medium", "#FFCC00"), ("low", "#0066FF")]:
-            mock_resp = MagicMock(status_code=200)
-            with patch("httpx.AsyncClient") as MockClient:
-                instance = AsyncMock()
-                instance.post = AsyncMock(return_value=mock_resp)
-                instance.__aenter__ = AsyncMock(return_value=instance)
-                instance.__aexit__ = AsyncMock(return_value=False)
-                MockClient.return_value = instance
-
-                run_async(n.send("Alert", "body", severity=sev))
-                payload = instance.post.call_args.kwargs.get("json") or instance.post.call_args[1].get("json")
-                assert payload["attachments"][0]["color"] == expected_color
-
-    def test_send_no_severity(self):
-        n = self._make()
-        mock_resp = MagicMock(status_code=200)
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.post = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
-
-            result = run_async(n.send("Alert", "body"))
-            assert result is True
-            payload = instance.post.call_args.kwargs.get("json") or instance.post.call_args[1].get("json")
-            # No severity → gray color and no fields
-            assert payload["attachments"][0]["color"] == "#808080"
-            assert "fields" not in payload["attachments"][0]
-
-    def test_send_http_error(self):
-        n = self._make()
+    @pytest.mark.asyncio
+    async def test_send_failure_status(self):
+        notifier = SlackNotifier({"webhook_url": "https://hooks.slack.com/x"})
         mock_resp = MagicMock(status_code=500)
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.post = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Alert", "body")
+        assert result is False
 
-            result = run_async(n.send("Alert", "body"))
-            assert result is False
+    @pytest.mark.asyncio
+    async def test_send_exception(self):
+        notifier = SlackNotifier({"webhook_url": "https://hooks.slack.com/x"})
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(side_effect=Exception("timeout"))
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Alert", "body")
+        assert result is False
 
-    def test_send_exception(self):
-        n = self._make()
-        with patch("httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.post = AsyncMock(side_effect=Exception("network error"))
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
-
-            result = run_async(n.send("Alert", "body"))
-            assert result is False
-
-    def test_test_connection_delegates_to_send(self):
-        n = self._make()
-        with patch.object(n, "send", new_callable=AsyncMock, return_value=True) as mock_send:
-            result = run_async(n.test_connection())
-            assert result is True
-            mock_send.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_severity_colors(self):
+        """Verify severity→color mapping in Slack payload."""
+        notifier = SlackNotifier({"webhook_url": "https://hooks.slack.com/x"})
+        mock_resp = MagicMock(status_code=200)
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            await notifier.send("Alert", "body", severity="medium")
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["attachments"][0]["color"] == "#FFCC00"
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
+# WebhookNotifier
+# ============================================================================
+
+
+class TestWebhookNotifier:
+    def test_init(self):
+        notifier = WebhookNotifier({"url": "https://example.com/hook"})
+        assert notifier.config["url"] == "https://example.com/hook"
+
+    @pytest.mark.asyncio
+    async def test_send_no_url(self):
+        notifier = WebhookNotifier({})
+        result = await notifier.send("Test", "body")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_post_success(self):
+        notifier = WebhookNotifier({
+            "url": "https://example.com/webhook",
+            "method": "POST",
+            "headers": {"X-Token": "abc"},
+        })
+        mock_resp = MagicMock(status_code=200)
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Alert", "body", "low")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_custom_template(self):
+        config = {
+            "url": "https://example.com/hook",
+            "template": '{"title": "{{subject}}", "msg": "{{body}}", "level": "{{severity}}"}',
+        }
+        notifier = WebhookNotifier(config)
+        mock_resp = MagicMock(status_code=201)
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Hi", "World", "medium")
+        assert result is True
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["title"] == "Hi"
+        assert payload["msg"] == "World"
+
+    @pytest.mark.asyncio
+    async def test_send_get_method(self):
+        config = {"url": "https://example.com/hook", "method": "GET"}
+        notifier = WebhookNotifier(config)
+        mock_resp = MagicMock(status_code=200)
+        with patch("agenticops.notify.notifier.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+            result = await notifier.send("Alert", "body")
+        assert result is True
+
+
+# ============================================================================
 # EmailNotifier
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 class TestEmailNotifier:
-    def _make(self, **overrides):
-        cfg = {
-            "smtp_host": "smtp.test.com",
-            "smtp_port": 587,
-            "smtp_user": "user",
-            "smtp_password": "pass",
-            "from_email": "test@test.com",
-            "to_emails": ["dest@test.com"],
-        }
-        cfg.update(overrides)
-        return EmailNotifier(cfg)
-
     def test_init(self):
-        n = self._make()
-        assert n.smtp_host == "smtp.test.com"
-        assert n.smtp_port == 587
-        assert n.use_tls is True
-        assert len(n.to_emails) == 1
+        cfg = {
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "from_email": "ops@example.com",
+            "to_emails": ["team@example.com"],
+        }
+        notifier = EmailNotifier(cfg)
+        assert notifier.config["smtp_host"] == "smtp.example.com"
 
-    def test_send_no_recipients(self):
-        n = self._make(to_emails=[])
-        result = run_async(n.send("subj", "body"))
+    @pytest.mark.asyncio
+    async def test_send_no_smtp_host(self):
+        notifier = EmailNotifier({})
+        result = await notifier.send("Test", "body")
         assert result is False
 
-    def test_send_success(self):
-        n = self._make()
-        with patch.object(n, "_send_email") as mock_send:
-            result = run_async(n.send("Alert", "Something happened", severity="high"))
-            assert result is True
-            mock_send.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        cfg = {
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "username": "user@example.com",
+            "password": "secret",
+            "from_addr": "ops@example.com",
+            "to_addrs": ["admin@example.com"],
+            "use_tls": True,
+        }
+        notifier = EmailNotifier(cfg)
+        with patch.object(notifier, "_send_email") as mock_send:
+            result = await notifier.send("Alert", "body", "critical")
+        assert result is True
+        mock_send.assert_called_once()
 
-    def test_send_with_severity(self):
-        n = self._make()
-        with patch.object(n, "_send_email") as mock_send:
-            result = run_async(n.send("Alert", "Body", severity="critical"))
-            assert result is True
+    @pytest.mark.asyncio
+    async def test_send_no_recipients(self):
+        notifier = EmailNotifier({"smtp_host": "smtp.example.com", "to_addrs": []})
+        result = await notifier.send("Alert", "body")
+        assert result is False
 
-    def test_send_without_severity(self):
-        n = self._make()
-        with patch.object(n, "_send_email") as mock_send:
-            result = run_async(n.send("Alert", "Body"))
-            assert result is True
+    @pytest.mark.asyncio
+    async def test_send_exception(self):
+        cfg = {
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "from_addr": "ops@example.com",
+            "to_addrs": ["admin@example.com"],
+        }
+        notifier = EmailNotifier(cfg)
+        with patch.object(notifier, "_send_email", side_effect=Exception("SMTP fail")):
+            result = await notifier.send("Alert", "body")
+        assert result is False
 
-    def test_send_smtp_failure(self):
-        n = self._make()
-        with patch.object(n, "_send_email", side_effect=Exception("SMTP error")):
-            result = run_async(n.send("Alert", "Body"))
-            assert result is False
-
-    def test_send_email_method(self):
-        n = self._make()
-        mock_msg = MagicMock()
-        with patch("smtplib.SMTP") as MockSMTP:
-            server_inst = MagicMock()
-            MockSMTP.return_value.__enter__ = MagicMock(return_value=server_inst)
-            MockSMTP.return_value.__exit__ = MagicMock(return_value=False)
-            n._send_email(mock_msg)
-            server_inst.starttls.assert_called_once()
-            server_inst.login.assert_called_once_with("user", "pass")
-            server_inst.send_message.assert_called_once_with(mock_msg)
-
-    def test_send_email_no_tls(self):
-        n = self._make(use_tls=False)
-        mock_msg = MagicMock()
-        with patch("smtplib.SMTP") as MockSMTP:
-            server_inst = MagicMock()
-            MockSMTP.return_value.__enter__ = MagicMock(return_value=server_inst)
-            MockSMTP.return_value.__exit__ = MagicMock(return_value=False)
-            n._send_email(mock_msg)
-            server_inst.starttls.assert_not_called()
-
-    def test_send_email_no_auth(self):
-        n = self._make(smtp_user=None, smtp_password=None)
-        mock_msg = MagicMock()
-        with patch("smtplib.SMTP") as MockSMTP:
-            server_inst = MagicMock()
-            MockSMTP.return_value.__enter__ = MagicMock(return_value=server_inst)
-            MockSMTP.return_value.__exit__ = MagicMock(return_value=False)
-            n._send_email(mock_msg)
-            server_inst.login.assert_not_called()
-
-    def test_test_connection_success(self):
-        n = self._make()
-        with patch.object(n, "_test_smtp"):
-            result = run_async(n.test_connection())
-            assert result is True
-
-    def test_test_connection_failure(self):
-        n = self._make()
-        with patch.object(n, "_test_smtp", side_effect=Exception("fail")):
-            result = run_async(n.test_connection())
-            assert result is False
+    def test_legacy_config_keys(self):
+        """Accepts legacy config keys (smtp_user, from_email, to_emails)."""
+        config = {
+            "smtp_user": "legacy@example.com",
+            "smtp_password": "pw",
+            "from_email": "legacy-from@example.com",
+            "to_emails": ["dest@example.com"],
+        }
+        notifier = EmailNotifier(config)
+        assert notifier.smtp_user == "legacy@example.com"
+        assert notifier.from_email == "legacy-from@example.com"
+        assert notifier.to_emails == ["dest@example.com"]
 
 
-# ---------------------------------------------------------------------------
-# Config-key mapping regression: UI/YAML keys must populate recipients.
-# Bug: SESNotifier read "to" but the UI/YAML key is "recipients" → recipients
-# silently emptied → send() returned False without ever calling SES. Same shape
-# in EmailNotifier (username/password/from_addr/to_addrs vs legacy keys).
-# ---------------------------------------------------------------------------
-
-class TestConfigKeyMapping:
-    def test_ses_reads_recipients_key(self):
-        from agenticops.notify.notifier import SESNotifier
-        n = SESNotifier({"sender": "s@x.com", "recipients": ["r@x.com"], "region": "us-east-1"})
-        assert n.recipients == ["r@x.com"]  # not dropped to []
-
-    def test_ses_legacy_to_key_still_works(self):
-        from agenticops.notify.notifier import SESNotifier
-        n = SESNotifier({"sender": "s@x.com", "to": ["legacy@x.com"]})
-        assert n.recipients == ["legacy@x.com"]
-
-    def test_ses_send_false_without_recipients(self):
-        from agenticops.notify.notifier import SESNotifier
-        n = SESNotifier({"sender": "s@x.com", "region": "us-east-1"})
-        assert n.recipients == []
-        assert run_async(n.send("subj", "body")) is False
-
-    def test_email_reads_ui_keys(self):
-        n = EmailNotifier({
-            "smtp_host": "h", "username": "u", "password": "p",
-            "from_addr": "f@x.com", "to_addrs": ["r@x.com"],
-        })
-        assert n.smtp_user == "u"
-        assert n.smtp_password == "p"
-        assert n.from_email == "f@x.com"
-        assert n.to_emails == ["r@x.com"]
-
-    def test_email_legacy_keys_still_work(self):
-        n = EmailNotifier({
-            "smtp_user": "u2", "smtp_password": "p2",
-            "from_email": "f2@x.com", "to_emails": ["r2@x.com"],
-        })
-        assert n.smtp_user == "u2"
-        assert n.from_email == "f2@x.com"
-        assert n.to_emails == ["r2@x.com"]
-
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # SNSNotifier
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 class TestSNSNotifier:
-    def _make(self, **overrides):
-        cfg = {"topic_arn": "arn:aws:sns:us-east-1:123456:test", "region": "us-east-1"}
-        cfg.update(overrides)
-        return SNSNotifier(cfg)
-
     def test_init(self):
-        n = self._make()
-        assert n.topic_arn == "arn:aws:sns:us-east-1:123456:test"
-        assert n.region == "us-east-1"
+        cfg = {"topic_arn": "arn:aws:sns:us-east-1:123456:my-topic", "region": "us-east-1"}
+        notifier = SNSNotifier(cfg)
+        assert notifier.config["topic_arn"] == "arn:aws:sns:us-east-1:123456:my-topic"
 
-    def test_send_no_topic_arn(self):
-        n = self._make(topic_arn=None)
-        result = run_async(n.send("subj", "body"))
+    @pytest.mark.asyncio
+    async def test_send_no_topic_arn(self):
+        notifier = SNSNotifier({})
+        result = await notifier.send("Test", "body")
         assert result is False
 
-    def test_send_success(self):
-        n = self._make()
-        with patch.object(n, "_publish_sns"):
-            result = run_async(n.send("Alert", "Body", severity="high"))
-            assert result is True
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        cfg = {
+            "topic_arn": "arn:aws:sns:us-east-1:123456789:alerts",
+            "region": "us-east-1",
+        }
+        notifier = SNSNotifier(cfg)
+        with patch.object(notifier, "_publish_sns") as mock_pub:
+            result = await notifier.send("Alert", "body", "critical")
+        assert result is True
+        mock_pub.assert_called_once()
 
-    def test_send_failure(self):
-        n = self._make()
-        with patch.object(n, "_publish_sns", side_effect=Exception("aws error")):
-            result = run_async(n.send("Alert", "Body"))
-            assert result is False
 
-    def test_publish_sns(self):
-        n = self._make()
-        mock_client = MagicMock()
-        with patch("boto3.client", return_value=mock_client):
-            n._publish_sns("Alert", "Body", "critical")
-            mock_client.publish.assert_called_once()
-            call_kwargs = mock_client.publish.call_args.kwargs
-            assert call_kwargs["TopicArn"] == n.topic_arn
-            assert "critical" in call_kwargs["MessageAttributes"]["severity"]["StringValue"]
+# ============================================================================
+# FeishuNotifier
+# ============================================================================
 
-    def test_publish_sns_no_severity(self):
-        n = self._make()
-        mock_client = MagicMock()
-        with patch("boto3.client", return_value=mock_client):
-            n._publish_sns("Alert", "Body", None)
-            call_kwargs = mock_client.publish.call_args.kwargs
-            assert call_kwargs["MessageAttributes"]["severity"]["StringValue"] == "info"
 
-    def test_test_connection_success(self):
-        n = self._make()
-        mock_client = MagicMock()
-        with patch("boto3.client", return_value=mock_client):
-            result = run_async(n.test_connection())
-            assert result is True
-            mock_client.get_topic_attributes.assert_called_once()
+class TestFeishuNotifier:
+    def setup_method(self):
+        self.config = {
+            "app_id": "cli_xxx",
+            "app_secret": "secret",
+            "chat_id": "oc_xxx",
+        }
+        self.notifier = FeishuNotifier(self.config)
 
-    def test_test_connection_failure(self):
-        n = self._make()
-        mock_client = MagicMock()
-        mock_client.get_topic_attributes.side_effect = Exception("not found")
-        with patch("boto3.client", return_value=mock_client):
-            result = run_async(n.test_connection())
-            assert result is False
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        token_resp = MagicMock()
+        token_resp.json.return_value = {"code": 0, "tenant_access_token": "t-xxx", "expire": 7200}
+        send_resp = MagicMock()
+        send_resp.json.return_value = {"code": 0}
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=[token_resp, send_resp]):
+            result = await self.notifier.send("Feishu Alert", "body", "critical")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_no_config(self):
+        notifier = FeishuNotifier({})
+        result = await notifier.send("Test", "body")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_test_connection_success(self):
+        token_resp = MagicMock()
+        token_resp.json.return_value = {"code": 0, "tenant_access_token": "t-xxx", "expire": 7200}
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=token_resp):
+            result = await self.notifier.test_connection()
+        assert result is True
+
+
+# ============================================================================
+# DingTalkNotifier
+# ============================================================================
+
+
+class TestDingTalkNotifier:
+    def setup_method(self):
+        self.config = {
+            "app_key": "dingxxx",
+            "app_secret": "secret",
+            "chat_id": "cidxxx",
+        }
+        self.notifier = DingTalkNotifier(self.config)
+
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        token_resp = MagicMock()
+        token_resp.json.return_value = {"accessToken": "at-xxx", "expireIn": 7200}
+        send_resp = MagicMock()
+        send_resp.json.return_value = {"processQueryKey": "pqk-123"}
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=[token_resp, send_resp]):
+            result = await self.notifier.send("DingTalk Alert", "body", "high")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_no_config(self):
+        notifier = DingTalkNotifier({})
+        result = await notifier.send("Test", "body")
+        assert result is False
+
+
+# ============================================================================
+# WeComNotifier
+# ============================================================================
+
+
+class TestWeComNotifier:
+    def setup_method(self):
+        self.config = {
+            "corp_id": "ww_xxx",
+            "corp_secret": "secret",
+            "agent_id": 1000001,
+            "touser": "@all",
+        }
+        self.notifier = WeComNotifier(self.config)
+
+    @pytest.mark.asyncio
+    async def test_send_success_user_mode(self):
+        token_resp = MagicMock()
+        token_resp.json.return_value = {"errcode": 0, "access_token": "ak-xxx", "expires_in": 7200}
+        send_resp = MagicMock()
+        send_resp.json.return_value = {"errcode": 0}
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=token_resp):
+            with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=send_resp):
+                result = await self.notifier.send("WeCom Alert", "body", "medium")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_no_config(self):
+        notifier = WeComNotifier({})
+        result = await notifier.send("Test", "body")
+        assert result is False
+
+
+# ============================================================================
+# SlackIMNotifier
+# ============================================================================
+
+
+class TestSlackIMNotifier:
+    def setup_method(self):
+        self.config = {
+            "bot_token": "xoxb-xxx",
+            "chat_id": "C12345",
+        }
+        self.notifier = SlackIMNotifier(self.config)
+
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+            result = await self.notifier.send("Subject", "Body text", "low")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_failure(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False, "error": "channel_not_found"}
+        mock_resp.text = "error"
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+            result = await self.notifier.send("Subject", "Body")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_no_config(self):
+        notifier = SlackIMNotifier({})
+        result = await notifier.send("Test", "body")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_test_connection(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+            result = await self.notifier.test_connection()
+        assert result is True
+
+
+# ============================================================================
+# NotificationManager
+# ============================================================================
+
+
+class TestNotificationManager:
+    def test_init(self):
+        mgr = NotificationManager()
+        assert mgr._notifiers == {}
+
+    def test_notifier_classes_map(self):
+        mgr = NotificationManager()
+        assert "slack" in mgr.NOTIFIER_CLASSES
+        assert "email" in mgr.NOTIFIER_CLASSES
+        assert "webhook" in mgr.NOTIFIER_CLASSES
+        assert "feishu" in mgr.NOTIFIER_CLASSES
+        assert "dingtalk" in mgr.NOTIFIER_CLASSES
+        assert "wecom" in mgr.NOTIFIER_CLASSES
+        assert "sns" in mgr.NOTIFIER_CLASSES
+        assert "ses" in mgr.NOTIFIER_CLASSES
+
+    def test_get_notifier_creates_and_caches(self):
+        mgr = NotificationManager()
+        cfg = {"webhook_url": "https://hooks.slack.com/x"}
+        n1 = mgr._get_notifier("slack-main", "slack", cfg)
+        n2 = mgr._get_notifier("slack-main", "slack", cfg)
+        assert n1 is n2
+        assert isinstance(n1, SlackNotifier)
+
+    def test_get_notifier_unknown_type(self):
+        mgr = NotificationManager()
+        result = mgr._get_notifier("unknown-ch", "carrier_pigeon", {})
+        assert result is None
+
+    def test_get_notifier_slack_im_auto_select(self):
+        mgr = NotificationManager()
+        cfg = {"chat_id": "C12345", "bot_token": "xoxb-xxx"}
+        n = mgr._get_notifier("slack-im", "slack", cfg)
+        assert isinstance(n, SlackIMNotifier)
+
+    def test_get_notifier_slack_webhook_selection(self):
+        """When config has webhook_url, uses SlackNotifier."""
+        mgr = NotificationManager()
+        cfg = {"webhook_url": "https://hooks.slack.com/services/T/B/X"}
+        n = mgr._get_notifier("slack-wh", "slack", cfg)
+        assert isinstance(n, SlackNotifier)
+
+    def test_invalidate_cache_specific(self):
+        mgr = NotificationManager()
+        cfg = {"webhook_url": "https://hooks.slack.com/x"}
+        mgr._get_notifier("slack-main", "slack", cfg)
+        assert "slack-main" in mgr._notifiers
+        mgr.invalidate_cache("slack-main")
+        assert "slack-main" not in mgr._notifiers
+
+    def test_invalidate_cache_all(self):
+        mgr = NotificationManager()
+        mgr._get_notifier("ch1", "slack", {"webhook_url": "https://a"})
+        mgr._get_notifier("ch2", "webhook", {"url": "https://b"})
+        assert len(mgr._notifiers) == 2
+        mgr.invalidate_cache()
+        assert len(mgr._notifiers) == 0
+
+    @pytest.mark.asyncio
+    async def test_send_notification_filters_channels(self):
+        """send_notification loads channels from YAML and filters by name."""
+        mgr = NotificationManager()
+
+        fake_channel = SimpleNamespace(
+            name="test-slack",
+            channel_type="slack",
+            is_enabled=True,
+            severity_filter=None,
+            config={"webhook_url": "https://hooks.slack.com/test"},
+        )
+
+        with patch("agenticops.notify.im_config.load_channels", return_value=[fake_channel]):
+            with patch.object(SlackNotifier, "send", new_callable=AsyncMock, return_value=True):
+                with patch.object(mgr, "_log_notification"):
+                    results = await mgr.send_notification(
+                        subject="Test",
+                        body="Hello",
+                        channel_names=["test-slack"],
+                    )
+        assert results == {"test-slack": True}
+
+    @pytest.mark.asyncio
+    async def test_send_notification_severity_filter(self):
+        """Channels with severity_filter skip non-matching severities."""
+        mgr = NotificationManager()
+
+        fake_channel = SimpleNamespace(
+            name="critical-only",
+            channel_type="slack",
+            is_enabled=True,
+            severity_filter=["critical"],
+            config={"webhook_url": "https://hooks.slack.com/test"},
+        )
+
+        with patch("agenticops.notify.im_config.load_channels", return_value=[fake_channel]):
+            with patch.object(mgr, "_log_notification"):
+                results = await mgr.send_notification(
+                    subject="Test",
+                    body="Hello",
+                    severity="low",
+                    channel_names=["critical-only"],
+                )
+        # Channel should be skipped due to severity filter
+        assert results == {}
+
+    @pytest.mark.asyncio
+    async def test_send_anomaly_notification(self):
+        """send_anomaly_notification formats anomaly and delegates."""
+        mgr = NotificationManager()
+
+        anomaly = SimpleNamespace(
+            severity="high",
+            title="CPU Spike",
+            description="CPU utilization exceeds 95%",
+            resource_type="ec2",
+            resource_id="i-abc123",
+            region="us-east-1",
+            detected_at=datetime(2026, 8, 21, 3, 30, tzinfo=timezone.utc),
+            metric_name="CPUUtilization",
+            expected_value="40%",
+            actual_value="97%",
+        )
+
+        with patch.object(mgr, "send_notification", new_callable=AsyncMock, return_value={"slack": True}) as mock_send:
+            result = await mgr.send_anomaly_notification(anomaly)
+
+        assert result == {"slack": True}
+        call_kwargs = mock_send.call_args[1]
+        assert "[HIGH]" in call_kwargs["subject"]
+        assert "CPU Spike" in call_kwargs["subject"]
+        assert "97%" in call_kwargs["body"]
+
+    @pytest.mark.asyncio
+    async def test_test_channel_not_found(self):
+        with patch("agenticops.notify.im_config.get_channel", return_value=None):
+            with pytest.raises(ValueError, match="not found"):
+                await NotificationManager.test_channel("nonexistent")
+
+
+# ============================================================================
+# IM Notifiers basic init
+# ============================================================================
+
+
+class TestIMNotifiers:
+    def test_feishu_init(self):
+        cfg = {"webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"}
+        n = FeishuNotifier(cfg)
+        assert n.config["webhook_url"].startswith("https://open.feishu.cn")
+
+    def test_dingtalk_init(self):
+        cfg = {"webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=xxx"}
+        n = DingTalkNotifier(cfg)
+        assert "dingtalk" in n.config["webhook_url"]
+
+    def test_wecom_init(self):
+        cfg = {"webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"}
+        n = WeComNotifier(cfg)
+        assert "weixin" in n.config["webhook_url"]

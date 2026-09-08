@@ -1,6 +1,24 @@
 """Root conftest: registers --run-integration CLI flag and skips integration tests by default."""
 
+import subprocess
+import warnings
+
 import pytest
+
+
+def pytest_configure(config):
+    """Warn if untracked test files exist — they inflate test counts."""
+    result = subprocess.run(
+        ["git", "status", "--short", "tests/"],
+        capture_output=True, text=True, timeout=5
+    )
+    untracked = [l for l in result.stdout.splitlines() if l.startswith("??")]
+    if untracked:
+        warnings.warn(
+            f"⚠️ {len(untracked)} untracked file(s) in tests/ — counts may be inflated:\n"
+            + "\n".join(untracked[:5]),
+            stacklevel=1,
+        )
 
 
 def pytest_addoption(parser):
