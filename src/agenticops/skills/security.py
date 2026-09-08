@@ -296,18 +296,39 @@ def scan_skill_safety(body: str) -> dict:
 #     collapses the whole file to one `unreadable script: maximum recursion depth`
 #     finding, hiding any real payload in the same file behind a generic reason.
 #     FAIL-CLOSED (the package is still rejected).
-#   * The dynamic-exec rule needs the receiver to RESOLVE to the builtin (directly, via
-#     an import, or via an alias assignment — see _py_alias_bindings). `eval`/`exec`
-#     reached through anything else is not flagged. That is a deliberate trade: the
-#     pre-`ast` regex matched the text `eval(` anywhere, which flagged `model.eval()`
-#     (PyTorch), `df.eval(...)` (pandas) and `session.exec(...)` (SQLModel), and with
-#     `safe == len(findings) == 0` there is no severity dial or override — those packages
-#     could never be promoted. Three forms are therefore REGRESSIONS against the
-#     pre-`ast` scan, not never-covered ground, and must not be re-filed as new findings:
-#     `os.sys.modules['builtins'].eval(...)` and `globals()['__builtins__'].eval(...)`
-#     (both reach the target through a SUBSCRIPT — same class as the parked `getattr`
-#     obfuscation, and neither is an idiom written for any purpose but evasion), and an
-#     alias chain longer than _PY_ALIAS_PASSES. FAIL-OPEN, deliberate.
+#   * The dynamic-exec rule needs the receiver to RESOLVE to the builtin — directly, via
+#     an import, or via an alias ASSIGNMENT (see _py_alias_bindings; its map is kept OUT
+#     of the shared `bindings` on purpose, see _scan_py_file). The residual is therefore a
+#     CLASS, not a list: ANY receiver that does not statically resolve to the builtin is
+#     not flagged. Deliberate trade — the pre-`ast` regex matched the text `eval(`
+#     anywhere, which flagged `model.eval()` (PyTorch), `df.eval(...)` (pandas) and
+#     `session.exec(...)` (SQLModel), and with `safe == len(findings) == 0` there is no
+#     severity dial or override, so those packages could never be promoted. Every member
+#     is FAIL-OPEN and deliberate; several are REGRESSIONS against the pre-`ast` scan
+#     rather than never-covered ground, and none may be re-filed as a new finding.
+#     Measured examples, NOT an exhaustive list — the class is the claim:
+#       - a SUBSCRIPT hop — `os.sys.modules['builtins'].eval(...)`,
+#         `globals()['__builtins__'].eval(...)` (same class as the parked `getattr`
+#         obfuscation; neither is an idiom written for any purpose but evasion);
+#       - an alias chain longer than _PY_ALIAS_PASSES;
+#       - a binding the assignment prepass never sees: a function DEFAULT,
+#         `def render(s, _eval=eval)` — defaults are not Assign nodes;
+#       - a key the call does not resolve through: `class R: ev = eval` then `self.ev(s)`
+#         binds `ev`, while the call resolves to `('self','ev')`;
+#       - anything the single-assignment discipline drops as ambiguous: rebinding
+#         (`a = builtins; a = None`), tuple unpacking (`a, b = builtins, None`), the SAME
+#         value assigned in two branches (`if …: h = builtins` / `else: h = builtins`),
+#         and one attribute name bound differently on two classes.
+#   * The same module-wide keying is FAIL-CLOSED in the other direction, so the bullet
+#     above must NOT be read as "a `dynamic code execution` finding means the receiver
+#     really is the builtin". Keys are module-wide and not scope-aware: an innocent
+#     receiver IS flagged when any name, parameter, class attribute or `self.<attr>`
+#     anywhere in the file is spelled `eval`/`exec`/`builtins`/`__builtins__`, or is
+#     assigned one of those spellings. A constructor PARAMETER named `eval` stored as
+#     `self.eval` flags, and so does `b = builtins` in one function while an unrelated
+#     `b.eval(ctx)` in another calls an Expr. ACCEPTED false positives — the pre-`ast`
+#     scan rejected both too, so they cost nothing new, and none of the 16 shipped
+#     packages hits them.
 #   * Conversely, an object whose attribute pair spells a rule pair IS flagged
 #     (`self.os = OsShim()` then `self.os.system(c)`): telling it from the real module
 #     needs type inference, and `self.os = importlib.import_module('os')` is one edit
@@ -554,7 +575,12 @@ def _py_alias_bindings(nodes: list[ast.AST],
     Only values resolving to a dynamic-exec name or to the builtins module are
     recorded. Single assignment only, same discipline as _py_const_strings: a name
     written twice is ambiguous and dropped. NOT scope-aware, so `self.<attr>` is keyed
-    module-wide — deliberate, and consistent with the constant pass.
+    module-wide — deliberate, and consistent with the constant pass; both directions of
+    what that costs are in the dynamic-exec bullets of KNOWN LIMITATIONS.
+
+    The returned map is for the dynamic-exec rule ONLY and must never be merged into the
+    caller's import `bindings`: its keys are module-wide dotted names, so a collision
+    would overwrite an import that other rules resolve through (see _scan_py_file).
     """
     values: dict[str, ast.expr] = {}
     rebound: set[str] = set()
@@ -817,9 +843,16 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
     lines = _text_lines(text)
     imports, assigns = _py_prepass(tree)
     bindings = _py_import_bindings(imports)
-    # Alias assignments extend the import bindings, so an aliased builtin resolves to an
-    # exact table entry instead of needing a bare trailing-name match.
-    bindings.update(_py_alias_bindings(assigns, bindings))
+    # Alias assignments live in their OWN map and are consulted only by the dynamic-exec
+    # arm below. They must NEVER be merged into `bindings`: alias keys are module-wide
+    # dotted names, so a colliding key would OVERWRITE an import binding that the other
+    # rules resolve through, and a single dead assignment (`os = __builtins__` inside an
+    # uncalled function) would silently disarm os.system, os.popen, subprocess,
+    # shutil.rmtree, the credential-path fold, the network-capability check and the
+    # dynamic-exec rule itself. That was fix round 3's regression, closed in round 4; the
+    # invariant is that an assignment must never be able to REMOVE a binding another rule
+    # depends on. Pinned by test_dead_alias_assignment_cannot_disarm_other_rules.
+    exec_bindings = {**bindings, **_py_alias_bindings(assigns, bindings)}
     consts = _py_const_strings(assigns, bindings)
     # Import half now; the call half (shell escape / subprocess) is set in the walk
     # below, so the tree is walked once instead of twice.
@@ -843,7 +876,13 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
             if escape is not None:
                 add(node, _PY_SHELL_ESCAPE_CALLS[escape])
                 has_net = True
-            elif _py_match_call(target, _PY_DYNAMIC_EXEC_CALLS):
+            # Either resolution counts, and the `or` is load-bearing in both directions:
+            # the alias map is what reaches `bi = __builtins__` then `bi.eval(...)`, while
+            # the plain resolution is what still reaches a bare `eval(...)` in a file whose
+            # alias pass rebound the `eval` key itself.
+            elif (_py_match_call(target, _PY_DYNAMIC_EXEC_CALLS)
+                  or _py_match_call(_py_resolve(node.func, exec_bindings),
+                                    _PY_DYNAMIC_EXEC_CALLS)):
                 add(node, "dynamic code execution")
             elif _py_match_call(target, _PY_RMTREE_CALLS):
                 folded = _py_fold(node.args[0], consts, bindings) if node.args else None

