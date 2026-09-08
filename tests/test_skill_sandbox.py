@@ -36,6 +36,22 @@ ESCAPING_SCRIPT = (
     "time.sleep(30)\n"
 )
 
+# No fork, no setsid, nothing scan_skill_bundle has a rule for — an honest
+# `while True: print(...)` bug does this by accident. Under communicate() this was bounded
+# by neither time nor memory: 7.4s against a 1s timeout and 2.99 GB of resident memory in
+# the SERVICE process (an OOM here takes down the platform, not the skill), because
+# TimeoutExpired's constructor joins every buffered chunk.
+FLOODING_SCRIPT = "import sys\nwhile True:\n    sys.stdout.write('A' * 65536)\n"
+
+
+def _peak_rss_mb() -> float:
+    """High-water RSS of the test process in MB (darwin reports bytes, Linux KB)."""
+    import resource
+    import sys
+
+    raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024
+
 
 @pytest.fixture
 def sandbox_env(tmp_path, monkeypatch):
@@ -153,6 +169,48 @@ class TestSandboxGates:
 
         with pytest.raises(RuntimeError, match="could not start"):
             run_script("alpha-skill", "hi.sh")
+
+    def test_unreadable_script_is_a_runtime_error(self, sandbox_env):
+        """Contract: a packaged script we cannot read (a zip/URL import can carry mode 000)
+        is a refusal — shutil.copy2's PermissionError must not escape as itself."""
+        import os
+
+        from agenticops.skills.sandbox import run_script
+
+        if os.geteuid() == 0:
+            pytest.skip("root bypasses file permissions, so mode 000 is readable")
+
+        sdir, _ddir = sandbox_env
+        skill = _publish(sdir, "alpha-skill", {"noread.py": "print('hi')\n"})
+        os.chmod(skill / "noread.py", 0o000)
+        try:
+            with pytest.raises(RuntimeError, match="could not stage"):
+                run_script("alpha-skill", "noread.py")
+        finally:
+            os.chmod(skill / "noread.py", 0o644)     # so tmp_path cleanup can remove it
+
+    def test_overlong_script_name_is_a_runtime_error(self, sandbox_env):
+        """Contract: a path component the OS refuses (ENAMETOOLONG) is a refusal. resolve()
+        tolerates it, so the OSError comes from the is_file() stat — which is why that call
+        belongs INSIDE the same try block, not one line outside it."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+
+        with pytest.raises(RuntimeError, match="not a usable path"):
+            run_script("alpha-skill", "z" * 5000 + ".py")
+
+    def test_lone_surrogate_stdin_is_a_runtime_error(self, sandbox_env):
+        """Contract: stdin_text that will not encode is a refusal of the CALL. Task 8 feeds
+        this from model-generated text, so a lone surrogate is not theoretical."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"cat.py": "import sys\nsys.stdin.read()\n"})
+
+        with pytest.raises(RuntimeError, match="not encodable as UTF-8"):
+            run_script("alpha-skill", "cat.py", stdin_text="\ud800")
 
     def test_non_allowlisted_suffix_refused(self, sandbox_env):
         from agenticops.skills.sandbox import run_script
@@ -343,6 +401,104 @@ class TestSandboxExecution:
 
         res = run_script("alpha-skill", "list.py")
         assert res.stdout.strip() == "['list.py']", res.stdout
+
+    def test_flooding_output_is_bounded_in_time_and_memory(self, sandbox_env, monkeypatch):
+        """The second ship-blocker: a payload that WRITES without stopping was bounded by
+        neither the timeout nor the cap. communicate() buffers everything before the cap is
+        applied, and TimeoutExpired's constructor then joins all of it — measured 7.4s
+        against a 1s timeout and +2938 MB of peak RSS *in the service process*. Both
+        assertions below fail on that code; the memory one by a factor of ~6.
+
+        Assert on wall clock AND on peak RSS: either bound alone would let the other
+        regress. The RSS bound is what pins "stop accumulating past the cap".
+        """
+        import time
+
+        from agenticops.skills import sandbox
+
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 1, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"flood.py": FLOODING_SCRIPT})
+
+        rss_before = _peak_rss_mb()
+        started = time.monotonic()
+        res = sandbox.run_script("alpha-skill", "flood.py")
+        elapsed = time.monotonic() - started
+        grew = _peak_rss_mb() - rss_before
+
+        # The documented contract, verbatim: timeout + grace, for EVERY payload shape.
+        # This shape needs no grace at all (killpg lands, both pipes hit EOF at once), so
+        # the measured value is ~1.0s — the bound is generous, and 7.4s still crosses it.
+        assert elapsed < 1 + sandbox._KILL_GRACE_SECONDS, (
+            f"flooding payload ran {elapsed:.1f}s against a 1s timeout"
+        )
+        assert grew < 512, f"flooding payload grew the process by {grew:.0f} MB (want O(cap))"
+        assert res.exit_code == -1
+        assert res.truncated is True
+        from agenticops.config import settings
+        assert len(res.stdout) <= settings.skills_sandbox_max_output_chars
+
+    def test_non_utf8_output_succeeds_with_replacement(self, sandbox_env):
+        """A run that SUCCEEDS must never raise. text=True decoded strictly, so a single
+        non-UTF-8 byte on stdout raised UnicodeDecodeError (a ValueError, not a
+        RuntimeError) out of run_script — a completed run reported as a crash. Honest
+        scripts hit this by accident whenever they re-emit raw log bytes or a latin-1 line.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "raw.py": (
+                "import sys\n"
+                "sys.stdout.buffer.write(b'ok-\\xff-out')\n"
+                "sys.stderr.buffer.write(b'ok-\\xfe-err')\n"
+            ),
+        })
+
+        res = run_script("alpha-skill", "raw.py")
+        assert res.exit_code == 0, res.stderr
+        assert res.stdout == "ok-�-out"          # the bad byte is REPLACED, not fatal
+        assert res.stderr == "ok-�-err"
+
+    def test_large_output_under_the_cap_is_returned_whole(self, sandbox_env, monkeypatch):
+        """The bounded reader must not truncate early: 150 KB crosses the 64 KB pipe buffer,
+        so it takes several select/read rounds to collect."""
+        from agenticops.skills.sandbox import run_script
+
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 200_000, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"chatty.py": "import sys\nsys.stdout.write('x' * 150000)\n"})
+
+        res = run_script("alpha-skill", "chatty.py")
+        assert res.exit_code == 0, res.stderr
+        assert len(res.stdout) == 150000
+        assert res.truncated is False
+
+    def test_large_stdin_while_the_child_floods_stdout_does_not_deadlock(
+        self, sandbox_env, monkeypatch
+    ):
+        """Both pipes and stdin are driven by ONE select loop. This payload writes 256 KB to
+        stdout BEFORE reading stdin, so a reader that writes all of stdin first (or reads one
+        pipe to EOF first) deadlocks: both directions exceed the 64 KB pipe buffer.
+        """
+        from agenticops.skills.sandbox import run_script
+
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_max_output_chars", 2_000_000, raising=False)
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 20, raising=False)
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "both.py": (
+                "import sys\n"
+                "sys.stdout.write('z' * 262144)\n"
+                "sys.stdout.flush()\n"
+                "sys.stdout.write('|IN=' + str(len(sys.stdin.read())))\n"
+            ),
+        })
+
+        res = run_script("alpha-skill", "both.py", stdin_text="y" * 262144)
+        assert res.exit_code == 0, res.stderr
+        assert res.stdout.endswith("|IN=262144"), res.stdout[-40:]
+        assert len(res.stdout) == 262144 + len("|IN=262144")
 
     def test_output_truncated(self, sandbox_env, monkeypatch):
         from agenticops.skills.sandbox import run_script

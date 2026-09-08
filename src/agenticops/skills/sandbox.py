@@ -56,19 +56,26 @@ Three properties are deliberate and must not be "improved" away:
   the returned stderr says so instead of claiming a clean kill. Do not read the
   timeout as "every descendant is dead".
 
-* **`skills_sandbox_max_output_chars` bounds what we RETURN, not what we READ.**
-  `communicate()` buffers the child's entire output before the cap is applied, so
-  a runaway script is a memory-exhaustion risk in the service process rather than
-  a truncated result. The mitigation is the timeout above — the window is
-  `timeout × output rate`, and that is only bounded *because* the timeout now
-  bounds the run. The real fix (a deadlock-safe incremental read of both pipes)
-  is a recorded follow-up.
+* **`skills_sandbox_max_output_chars` bounds what we STORE, and the two deadlines
+  bound how long we read.** Output is captured by `_Capture`, a `select` loop over
+  both pipes (and the stdin feed) that keeps *reading* past the cap — so the child
+  can never deadlock us on a pipe it has filled — while *storing* at most `cap`
+  bytes per stream. Memory is therefore O(cap) rather than O(what the child wrote),
+  and the wall clock is bounded by `timeout + _KILL_GRACE_SECONDS` for every payload
+  shape. This replaced `communicate()`, which delivered neither bound: a plain
+  `while True: sys.stdout.write('A' * 65536)` — no fork, no evasion primitive, on no
+  bundle-scan rule, so the promoting human sees nothing — measured **7.4s against a
+  1s timeout and 2.99 GB of resident memory in the service process**, because
+  `TimeoutExpired`'s constructor joins every chunk buffered so far. That is a denial
+  of service on the AgenticOps process, not on the sandboxed child. Do not
+  "simplify" this back into `communicate()`.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -92,6 +99,8 @@ _ISOLATION_CACHE: str | None = None
 # still holds the inherited pipes, so an unbounded read would let the child decide how
 # long run_script blocks; past this we abandon the output instead of waiting.
 _KILL_GRACE_SECONDS = 5
+
+_READ_CHUNK = 65536
 
 
 @dataclass
@@ -153,6 +162,155 @@ def _build_env(workdir: Path) -> dict[str, str]:
     return {"PATH": "/usr/bin:/bin", "HOME": str(workdir), "LANG": "C.UTF-8"}
 
 
+class _Capture:
+    """Deadline-driven, memory-bounded capture of a child's stdout/stderr + stdin feed.
+
+    Replaces `communicate()`, which is wrong here in two *measured* ways:
+
+    * **Memory.** `communicate()` buffers everything the child writes before any cap is
+      applied. `while True: sys.stdout.write('A' * 65536)` — no fork, no evasion, matched
+      by no bundle-scan rule — cost **2.99 GB** of resident memory in the service process
+      at a 1s timeout. Here we stop STORING at `cap` bytes per stream but keep READING, so
+      memory is O(cap) while the child still cannot deadlock on a pipe it has filled.
+    * **Time.** `communicate(timeout=…)` raises `TimeoutExpired`, whose constructor joins
+      every chunk buffered so far (`subprocess.py:1255`) and allocates a second copy — work
+      proportional to what the child wrote. That join, not the reading, is why the same 1s
+      timeout took **7.4s** to return. Nothing on `pump`'s deadline path is proportional to
+      what arrived: the check is a clock comparison and the join is over ≤ `cap` bytes.
+
+    Both pipes AND stdin are driven by one `select` loop over non-blocking fds. Reading one
+    pipe to EOF while the child fills the other is the classic deadlock `communicate()`
+    exists to avoid, and so is writing stdin to a child that never reads it.
+
+    This is an object rather than a function because the state must survive ACROSS the two
+    deadlines `run_script` uses — the timeout, then the post-kill grace. The second `pump`
+    continues the first one's buffers instead of restarting them, which is what
+    `communicate()`-after-`TimeoutExpired` did.
+    """
+
+    def __init__(self, proc: subprocess.Popen, stdin_bytes: bytes, cap: int) -> None:
+        self._proc = proc
+        self._cap = max(0, cap)
+        self._out: list[bytes] = []
+        self._err: list[bytes] = []
+        # fd -> {"sink": list, "stored": bytes kept, "produced": bytes the child wrote}
+        self._tracked: dict[int, dict] = {}
+        self._active: set[int] = set()
+        for pipe, sink in ((proc.stdout, self._out), (proc.stderr, self._err)):
+            if pipe is None:
+                continue
+            fd = pipe.fileno()
+            os.set_blocking(fd, False)
+            self._tracked[fd] = {"sink": sink, "stored": 0, "produced": 0}
+            self._active.add(fd)
+
+        self._stdin = proc.stdin
+        self._view = memoryview(stdin_bytes)
+        self._sent = 0
+        if self._stdin is not None:
+            os.set_blocking(self._stdin.fileno(), False)
+            if not stdin_bytes:
+                self._close_stdin()
+
+    @property
+    def over_cap(self) -> bool:
+        """True when the child PRODUCED more than the cap — whether or not we stored it."""
+        return any(t["produced"] > self._cap for t in self._tracked.values())
+
+    def text(self) -> tuple[str, str]:
+        """Decode the stored bytes once, replacing anything that is not UTF-8.
+
+        A child is free to emit bytes that are not UTF-8: `sys.stdout.buffer.write(b'\\xff')`
+        matches no bundle-scan rule, and any honest script that re-emits raw log bytes or a
+        latin-1 line does it by accident. `text=True` on `Popen` decoded strictly, so such a
+        SUCCESSFUL run raised `UnicodeDecodeError` (a `ValueError`, not a `RuntimeError`) out
+        of `run_script` — a completed run reported as a crash, which is the worst way to break
+        the refusals-are-RuntimeError contract.
+        """
+        return (
+            b"".join(self._out).decode("utf-8", errors="replace"),
+            b"".join(self._err).decode("utf-8", errors="replace"),
+        )
+
+    def pump(self, deadline: float) -> bool:
+        """Drive both pipes and the stdin feed until EOF on both, or until `deadline`.
+
+        Returns True if the deadline was reached with a pipe still open (i.e. someone is
+        still holding a write end), False if both pipes reached EOF in time.
+        """
+        while self._active or self._stdin is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            wlist = [self._stdin.fileno()] if self._stdin is not None else []
+            try:
+                readable, writable, _ = select.select(
+                    list(self._active), wlist, [], remaining
+                )
+            except (OSError, ValueError):
+                # A pipe was closed underneath us; there is nothing left to read.
+                break
+            for fd in readable:
+                self._read(fd)
+            if writable:
+                self._write()
+        return False
+
+    def _read(self, fd: int) -> None:
+        try:
+            data = os.read(fd, _READ_CHUNK)
+        except BlockingIOError:
+            return
+        except OSError:
+            self._active.discard(fd)
+            return
+        if not data:
+            self._active.discard(fd)          # EOF
+            return
+        rec = self._tracked[fd]
+        rec["produced"] += len(data)
+        room = self._cap - rec["stored"]
+        if room > 0:
+            kept = data[:room]
+            rec["sink"].append(kept)
+            rec["stored"] += len(kept)
+        # Past the cap the bytes are read (above) and dropped. Reading is what keeps the
+        # child from blocking on a full pipe; dropping is what keeps memory at O(cap).
+
+    def _write(self) -> None:
+        if self._stdin is None:
+            return
+        try:
+            self._sent += os.write(self._stdin.fileno(), self._view[self._sent:])
+        except BlockingIOError:
+            return
+        except OSError:
+            # EPIPE and friends: the child closed stdin or exited without reading it.
+            self._close_stdin()
+            return
+        if self._sent >= len(self._view):
+            self._close_stdin()
+
+    def _close_stdin(self) -> None:
+        pipe, self._stdin = self._stdin, None
+        _close_quietly(pipe)
+
+    def close(self) -> None:
+        """Release our ends of all three pipes. Idempotent."""
+        self._close_stdin()
+        self._active.clear()
+        for pipe in (self._proc.stdout, self._proc.stderr):
+            _close_quietly(pipe)
+
+
+def _close_quietly(pipe) -> None:
+    try:
+        if pipe is not None:
+            pipe.close()
+    except OSError:
+        pass
+
+
 def _resolve_script(skill_name: str, script: str) -> Path:
     """Published-skill + path-traversal + suffix-allowlist resolution."""
     name = (skill_name or "").strip()
@@ -169,16 +327,20 @@ def _resolve_script(skill_name: str, script: str) -> Path:
 
     # resolve() both sides: a symlink inside the package that points outside it
     # resolves to its target and is then caught by the escape check below.
-    # resolve() raises ValueError on an embedded NUL and OSError on a hostile path;
-    # both are refusals, and the contract is that every refusal is a RuntimeError.
+    # Every syscall on a caller-supplied path is inside this ONE block: resolve() raises
+    # ValueError on an embedded NUL, and is_file() raises OSError (ENAMETOOLONG) on a path
+    # component the OS will not accept. Both are refusals, and the contract is that every
+    # refusal is a RuntimeError. The escape check stays between them — it must run before
+    # we stat, and its RuntimeError passes straight through this except clause.
     try:
         root = skill_dir.resolve()
         target = (skill_dir / script).resolve()
+        if not str(target).startswith(str(root) + os.sep):
+            raise RuntimeError(f"script path escapes the skill package: {script}")
+        exists = target.is_file()
     except (ValueError, OSError) as exc:
         raise RuntimeError(f"script path is not a usable path: {script!r} ({exc})") from exc
-    if not str(target).startswith(str(root) + os.sep):
-        raise RuntimeError(f"script path escapes the skill package: {script}")
-    if not target.is_file():
+    if not exists:
         raise RuntimeError(f"script does not exist: {script}")
 
     interpreters = settings.skills_sandbox_interpreters
@@ -198,11 +360,13 @@ def run_script(
     """Run a PUBLISHED skill's script in the restricted sandbox.
 
     Raises RuntimeError for EVERY refusal — disabled, draft, bad path, unusable
-    path, bad suffix, no isolator, and an interpreter/isolator that will not
-    start. Task 8's @tool catches RuntimeError to render a refusal, so a refusal
-    must never surface as some other exception type. A script that runs and
-    fails returns a SandboxResult with its exit code — a refusal is never
-    reported as a failed run.
+    path, bad suffix, no isolator, an unreadable packaged script, stdin_text that
+    is not UTF-8-encodable, and an interpreter/isolator that will not start.
+    Task 8's @tool catches RuntimeError to render a refusal, so a refusal must
+    never surface as some other exception type. A script that runs and fails
+    returns a SandboxResult with its exit code — a refusal is never reported as a
+    failed run, and conversely a run that SUCCEEDS never raises: output that is
+    not valid UTF-8 is decoded with replacement, not rejected.
     """
     if not settings.skills_sandbox_enabled:
         raise RuntimeError("skill script sandbox is disabled (skills_sandbox_enabled=false)")
@@ -220,13 +384,27 @@ def run_script(
     if interpreter == "python":
         interpreter = sys.executable
 
+    # Encode here, not inside the capture loop: a lone surrogate (which model-generated text
+    # can carry) is a refusal of the CALL, and must not surface as a bare UnicodeEncodeError.
+    try:
+        stdin_bytes = (stdin_text or "").encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(f"stdin_text is not encodable as UTF-8: {exc}") from exc
+
     workdir = Path(tempfile.mkdtemp(prefix="aiops-skill-sandbox-"))
     timeout = settings.skills_sandbox_timeout_seconds
     try:
         # copy2 copies exactly ONE file: packaged siblings stay out of the cwd.
         local = workdir / target.name
-        shutil.copy2(target, local)
-        os.chmod(local, 0o600)                       # no exec bit — we name the interpreter
+        try:
+            shutil.copy2(target, local)
+            os.chmod(local, 0o600)                   # no exec bit — we name the interpreter
+        except (OSError, shutil.Error) as exc:
+            # An unreadable packaged script (a zip/URL import can carry mode 000) is a
+            # refusal, not a crash: nothing ran.
+            raise RuntimeError(
+                f"could not stage the skill script in the sandbox: {script} ({exc})"
+            ) from exc
 
         env = _build_env(workdir)
         cmd = _wrap([interpreter, str(local), *(args or [])], isolation)
@@ -234,7 +412,7 @@ def run_script(
         started = time.monotonic()
         try:
             proc = subprocess.Popen(
-                cmd, cwd=str(workdir), env=env, shell=False, text=True,
+                cmd, cwd=str(workdir), env=env, shell=False,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 start_new_session=True,              # own process group, so we can kill it whole
             )
@@ -243,43 +421,64 @@ def run_script(
             # PATH (Popen resolves via os.get_exec_path(env), not the ambient PATH).
             # Fail closed as a refusal, not as an unhandled exception in Task 8's @tool.
             raise RuntimeError(f"could not start the sandboxed script: {cmd[0]!r} ({exc})") from exc
-        try:
-            out, err = proc.communicate(input=stdin_text or "", timeout=timeout)
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                proc.kill()
-            try:
-                # BOUNDED read. An unbounded communicate() waits for EOF on both pipes,
-                # and a descendant that left our process group (fork+setsid) still holds
-                # them — so the script, not the timeout, would decide when we return.
-                out, err = proc.communicate(timeout=_KILL_GRACE_SECONDS)
-                err = (err or "") + f"\n[sandbox] killed after {timeout}s timeout"
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                for pipe in (proc.stdin, proc.stdout, proc.stderr):
-                    try:
-                        if pipe is not None:
-                            pipe.close()
-                    except OSError:
-                        pass
-                proc.poll()          # reap the direct child; escaped descendants survive
-                # Never claim a clean kill here: the read was cut short, so the output is
-                # incomplete and something is still holding the pipes open.
-                out, err = "", (
-                    f"[sandbox] {timeout}s timeout expired and SIGKILL was sent to the "
-                    f"process group, but the output was ABANDONED after a further "
-                    f"{_KILL_GRACE_SECONDS}s: a descendant escaped the process group and "
-                    f"still holds the pipes, so it MAY STILL BE RUNNING"
-                )
-            exit_code = -1
-        duration_ms = int((time.monotonic() - started) * 1000)
 
         cap = settings.skills_sandbox_max_output_chars
-        out, err = out or "", err or ""
-        truncated = len(out) > cap or len(err) > cap
+        capture = _Capture(proc, stdin_bytes, cap)
+        try:
+            timed_out = capture.pump(started + timeout)
+            if not timed_out:
+                # Both pipes hit EOF in time, so the child is normally already gone. wait()
+                # is bounded by the SAME deadline, and its TimeoutExpired carries no output —
+                # O(1), unlike communicate()'s, whose join is what F1 measured.
+                try:
+                    proc.wait(timeout=max(0.0, (started + timeout) - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+
+            if not timed_out:
+                out, err = capture.text()
+                exit_code = proc.returncode
+            else:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    proc.kill()
+                exit_code = -1
+                # BOUNDED second read. Waiting for EOF on both pipes is unbounded: a
+                # descendant that left our process group (fork+setsid) still holds them, so
+                # the script, not the timeout, would decide when we return.
+                grace_deadline = time.monotonic() + _KILL_GRACE_SECONDS
+                if capture.pump(grace_deadline):
+                    capture.close()
+                    proc.kill()
+                    proc.poll()      # reap the direct child; escaped descendants survive
+                    # Never claim a clean kill here: the read was cut short, so something is
+                    # still holding a write end open. We DO hold a capped prefix at this point
+                    # (pump bounds it) — it is dropped because it is a fragment of a run that
+                    # may still be producing, not because it is unretrievable.
+                    out, err = "", (
+                        f"[sandbox] {timeout}s timeout expired and SIGKILL was sent to the "
+                        f"process group, but the output was ABANDONED after a further "
+                        f"{_KILL_GRACE_SECONDS}s: a descendant escaped the process group and "
+                        f"still holds the pipes, so it MAY STILL BE RUNNING"
+                    )
+                else:
+                    try:
+                        proc.wait(timeout=max(0.0, grace_deadline - time.monotonic()))
+                    except subprocess.TimeoutExpired:
+                        pass
+                    out, err = capture.text()
+                    err = err + f"\n[sandbox] killed after {timeout}s timeout"
+            over_cap = capture.over_cap
+        finally:
+            capture.close()
+        duration_ms = int((time.monotonic() - started) * 1000)
+
+        # The cap is enforced while READING now, so what we kept can never exceed it —
+        # comparing len(out) to cap (which is how this was computed when communicate()
+        # buffered everything) would report truncated=False for a child that wrote GBs.
+        # The produced-byte counters are the only honest source.
+        truncated = over_cap
         logger.info(
             "Sandbox ran %s/%s: exit=%s isolation=%s duration_ms=%s%s",
             skill_name, script, exit_code, isolation, duration_ms,
