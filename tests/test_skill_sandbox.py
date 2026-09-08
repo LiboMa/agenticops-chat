@@ -906,6 +906,37 @@ class TestRunSkillScriptTool:
         assert out.startswith("Sandbox refused")
         assert "no isolation available" in out
 
+    def test_a_capture_failure_stays_distinguishable_from_a_cap_hit(
+        self, sandbox_env, monkeypatch
+    ):
+        """`truncated=True` carries two meanings — "hit the output cap" and "our capture
+        broke" — so the header line alone is ambiguous. The disambiguation is the sandbox's
+        note in stderr, which only reaches the agent because this tool renders a stderr
+        section whenever `res.stderr` is non-empty. Dropping that section (or reporting only
+        the header) would turn a sandbox defect back into "the script ran fine and produced
+        nothing", which is the exact G1 conclusion an agent acts on.
+        """
+        from agenticops.skills import sandbox
+        from agenticops.skills.tools import run_skill_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"say.py": "print('REAL-OUTPUT-HERE')\n"})
+
+        def boom(self, timeout):
+            raise ValueError("filedescriptor out of range in select()")
+
+        monkeypatch.setattr(sandbox._Capture, "_wait", boom)
+
+        out = run_skill_script("alpha-skill", "say.py")
+        # Not a refusal and not an internal error of THIS tool — the run happened.
+        assert not out.startswith("Sandbox refused")
+        assert "internal error" not in out.lower()
+        assert "(output truncated)" in out
+        # ... and the reason the output is incomplete must be readable in the text.
+        assert "--- stderr ---" in out
+        assert "capture FAILED" in out
+        assert "INCOMPLETE" in out
+
     def test_tool_params_stay_concretely_typed(self):
         """Strands validates against a pydantic model built from this signature BEFORE the
         body runs — that validation is the only thing keeping `run_script`'s remaining
