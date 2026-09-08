@@ -435,6 +435,35 @@ class TestFetchAndImport:
         with pytest.raises(ValueError, match="unsupported skill source"):
             import_skills("ftp://example.invalid/x.tar")
 
+    @pytest.mark.parametrize("uri", ["a" * 300, "/".join(["c"] * 3000)])
+    def test_overlong_local_path_raises_valueerror_not_oserror(self, uri, skill_dirs):
+        """fetch()'s local-path probes re-raise ENAMETOOLONG — must not escape as OSError."""
+        from agenticops.skills.sources import import_skills
+
+        with pytest.raises(ValueError, match="unsupported skill source"):
+            import_skills(uri)
+
+    def test_invalid_url_raises_valueerror_not_httpexception(self, skill_dirs):
+        """http.client.InvalidURL is neither OSError nor ValueError; it must not reach Task 9 as a 500.
+
+        Hermetic: the nonnumeric-port check happens while the connection object is
+        built, before any DNS lookup or socket.
+        """
+        from agenticops.skills.sources import import_skills
+
+        with pytest.raises(ValueError, match="download failed"):
+            import_skills("http://example.invalid:notaport/skill.md")
+
+    @pytest.mark.parametrize("uri", ["", "   "])
+    def test_empty_source_uri_rejected(self, uri, skill_dirs):
+        """An empty uri must never make the process cwd the import root."""
+        from agenticops.skills.sources import import_skills
+
+        _sdir, ddir = skill_dirs
+        with pytest.raises(ValueError, match="empty skill source"):
+            import_skills(uri)
+        assert list(ddir.iterdir()) == []
+
     def test_no_skill_md_in_source_raises(self, tmp_path, skill_dirs):
         from agenticops.skills.sources import import_skills
 

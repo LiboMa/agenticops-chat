@@ -9,6 +9,7 @@ path. Nothing inside an imported package is ever run during import.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import logging
 import os
 import re
@@ -317,6 +318,11 @@ def _download(url: str) -> tuple[bytes, str]:
     *source*, so URLError/HTTPError/TimeoutError (all OSError subclasses) become
     ValueError -> HTTP 400. The cap's own ValueError is not an OSError, so it is
     never swallowed here.
+
+    http.client.HTTPException is caught too: it descends from Exception, not OSError,
+    and InvalidURL ("nonnumeric port", "URL can't contain control characters") is
+    raised while the connection object is built — outside urllib's own
+    `except OSError -> URLError` guard, so it would otherwise escape as a 500.
     """
     cap = settings.skills_import_max_package_bytes
     req = urllib.request.Request(url, headers={"User-Agent": "aiops-skill-import"})
@@ -333,8 +339,8 @@ def _download(url: str) -> tuple[bytes, str]:
                 if total > cap:
                     raise ValueError(f"download exceeds {cap} bytes")
                 chunks.append(buf)
-    except OSError as e:
-        raise ValueError(f"download failed: {e}") from e
+    except (OSError, http.client.HTTPException) as e:
+        raise ValueError(f"download failed: {type(e).__name__}: {e}") from e
     return b"".join(chunks), ctype
 
 
@@ -475,10 +481,18 @@ def fetch(uri: str, workdir: Path) -> tuple[Path, str]:
     if uri.startswith(("http://", "https://")):
         return _fetch_http(uri, workdir)
 
-    p = Path(uri).expanduser()
-    if p.is_dir():
-        return p, "local-dir"
-    if p.is_file() and p.name.lower().endswith(_ARCHIVE_SUFFIXES):
+    # Path.is_dir()/is_file() swallow ENOENT/ENOTDIR/EBADF/ELOOP but RE-RAISE
+    # ENAMETOOLONG, so an over-long uri would escape as OSError (a 500) instead of
+    # the named ValueError below. An unprobeable path is simply not a supported source.
+    is_archive = False
+    try:
+        p = Path(uri).expanduser()
+        if p.is_dir():
+            return p, "local-dir"
+        is_archive = p.is_file() and p.name.lower().endswith(_ARCHIVE_SUFFIXES)
+    except OSError:
+        is_archive = False
+    if is_archive:
         dest = workdir / "unpacked"
         _unpack(p, dest)
         return dest, _sha256_file(p)
@@ -494,6 +508,11 @@ def import_skills(uri: str, names: list[str] | None = None) -> ImportResult:
     """
     if not settings.skills_import_enabled:
         raise RuntimeError("skill import is disabled (skills_import_enabled=false)")
+    # Path("").is_dir() is True, so an empty uri would make the SERVER'S OWN cwd the
+    # import root and walk it for SKILL.md files. Rejected here rather than in fetch()
+    # so fetch()'s contract is unchanged.
+    if not uri or not uri.strip():
+        raise ValueError("empty skill source")
 
     workdir = Path(tempfile.mkdtemp(prefix="aiops-skill-import-"))
     try:
