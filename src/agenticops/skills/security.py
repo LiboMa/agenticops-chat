@@ -296,9 +296,23 @@ def scan_skill_safety(body: str) -> dict:
 #     collapses the whole file to one `unreadable script: maximum recursion depth`
 #     finding, hiding any real payload in the same file behind a generic reason.
 #     FAIL-CLOSED (the package is still rejected).
-#   * The dynamic-exec rule matches a bare trailing `eval`/`exec`, so a method of that
-#     name reached through a plain name (`c.eval(x)`) is flagged. FAIL-CLOSED, and the
-#     same breadth the pre-`ast` regex had.
+#   * The dynamic-exec rule needs the receiver to RESOLVE to the builtin (directly, via
+#     an import, or via an alias assignment — see _py_alias_bindings). `eval`/`exec`
+#     reached through anything else is not flagged. That is a deliberate trade: the
+#     pre-`ast` regex matched the text `eval(` anywhere, which flagged `model.eval()`
+#     (PyTorch), `df.eval(...)` (pandas) and `session.exec(...)` (SQLModel), and with
+#     `safe == len(findings) == 0` there is no severity dial or override — those packages
+#     could never be promoted. Three forms are therefore REGRESSIONS against the
+#     pre-`ast` scan, not never-covered ground, and must not be re-filed as new findings:
+#     `os.sys.modules['builtins'].eval(...)` and `globals()['__builtins__'].eval(...)`
+#     (both reach the target through a SUBSCRIPT — same class as the parked `getattr`
+#     obfuscation, and neither is an idiom written for any purpose but evasion), and an
+#     alias chain longer than _PY_ALIAS_PASSES. FAIL-OPEN, deliberate.
+#   * Conversely, an object whose attribute pair spells a rule pair IS flagged
+#     (`self.os = OsShim()` then `self.os.system(c)`): telling it from the real module
+#     needs type inference, and `self.os = importlib.import_module('os')` is one edit
+#     away. An ACCEPTED false positive, FAIL-CLOSED, pinned by its own test — the alias
+#     pass must not be extended to suppress it.
 #   * Every finding emitted today carries `tier == "blocked"`, so `safe` is exactly
 #     `len(findings) == 0`. If a lower tier is ever emitted, `safe` MUST be redefined
 #     to `not any(f["tier"] == "blocked" ...)` IN THE SAME COMMIT, or the gate
@@ -363,7 +377,16 @@ _PY_SUBPROCESS_CALLS = frozenset({
 })
 _PY_DYNAMIC_EXEC_CALLS = frozenset({
     ("eval",), ("exec",), ("builtins", "eval"), ("builtins", "exec"),
+    ("__builtins__", "eval"), ("__builtins__", "exec"),
 })
+# Module references an assignment may alias its way to, for the dynamic-exec rule.
+# Deliberately just the builtins module: every other module the call rules care about
+# is already reached by the trailing-two match, so widening this buys nothing.
+_PY_ALIASABLE_ROOTS = frozenset({("builtins",), ("__builtins__",)})
+# Alias-resolution rounds, so one alias can resolve through another (`a = builtins;
+# b = a`). Bounded rather than a true fixed point: each round only re-resolves
+# assignment values, and a chain longer than this is obfuscation, not an idiom.
+_PY_ALIAS_PASSES = 3
 _PY_RMTREE_CALLS = frozenset({("shutil", "rmtree")})
 _PY_JOIN_CALLS = frozenset({("os", "path", "join"), ("posixpath", "join")})
 _PY_EXPANDUSER_CALLS = frozenset({("os", "path", "expanduser"), ("Path", "expanduser")})
@@ -516,8 +539,77 @@ def _py_resolve(node: ast.AST, bindings: dict[str, tuple[str, ...]]) -> tuple[st
     return parts
 
 
-def _py_match_call(target: tuple[str, ...] | None,
-                   table, allow_bare: bool = False) -> tuple[str, ...] | None:
+def _py_alias_bindings(nodes: list[ast.AST],
+                       bindings: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    """Extend the import bindings with alias ASSIGNMENTS of the dynamic-exec names.
+
+    `self.eval = eval`, `bi = __builtins__` and `alias = builtins` are the
+    alias-of-`eval` mirror of the dependency-injection idiom the call rules already
+    handle — the attribute just holds `eval` instead of `os`. They used to be caught by
+    accident, by matching a bare trailing `eval`/`exec`, which also hard-blocked
+    `model.eval()` / `df.eval(...)` / `session.exec(...)`. Resolving them by BINDING is
+    how the rest of this module works and it keeps the accept side clean: nothing
+    assigned to `model` resolves to a builtin, so `model` never lands here.
+
+    Only values resolving to a dynamic-exec name or to the builtins module are
+    recorded. Single assignment only, same discipline as _py_const_strings: a name
+    written twice is ambiguous and dropped. NOT scope-aware, so `self.<attr>` is keyed
+    module-wide — deliberate, and consistent with the constant pass.
+    """
+    values: dict[str, ast.expr] = {}
+    rebound: set[str] = set()
+
+    def _key(node: ast.AST) -> str | None:
+        dotted = _py_dotted(node)
+        return ".".join(dotted) if dotted is not None else None
+
+    def _record(node: ast.AST, value: ast.expr) -> None:
+        key = _key(node)
+        if key is None:
+            _kill(node)
+            return
+        if key in values or key in rebound:
+            rebound.add(key)
+            values.pop(key, None)
+            return
+        values[key] = value
+
+    def _kill(node: ast.AST) -> None:
+        for sub in ast.walk(node):
+            key = _key(sub)
+            if key is not None:
+                rebound.add(key)
+                values.pop(key, None)
+
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                _record(target, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            _record(node.target, node.value)
+        elif isinstance(node, (ast.AugAssign, ast.For, ast.comprehension)):
+            target = getattr(node, "target", None)
+            if target is not None:
+                _kill(target)
+
+    alias: dict[str, tuple[str, ...]] = {}
+    for _ in range(_PY_ALIAS_PASSES):
+        merged = {**bindings, **alias}
+        changed = False
+        for key, value in values.items():
+            if key in alias:
+                continue
+            resolved = _py_resolve(value, merged)
+            if resolved is not None and (resolved in _PY_DYNAMIC_EXEC_CALLS
+                                         or resolved in _PY_ALIASABLE_ROOTS):
+                alias[key] = resolved
+                changed = True
+        if not changed:
+            break
+    return alias
+
+
+def _py_match_call(target: tuple[str, ...] | None, table) -> tuple[str, ...] | None:
     """Match a resolved call target against `table`, exact tuple first.
 
     Exact membership alone let an attribute chain through a re-exporting module walk
@@ -527,10 +619,12 @@ def _py_match_call(target: tuple[str, ...] | None,
     Matching the trailing TWO segments closes all of them while still requiring the
     module name, so a method merely called `system` cannot match.
 
-    `allow_bare` additionally matches a trailing SINGLE segment, and is used only for
-    the dynamic-exec names, where the pre-ast scan was equally broad (`\\b(eval|exec)\\s*\\(`
-    matched `obj.eval(...)` too). The cost is that a method named `eval`/`exec` reached
-    through a plain name is flagged — fail-closed, and identical to the old behaviour.
+    There is deliberately NO bare trailing-single-segment match. It used to exist for
+    the dynamic-exec names, matching the pre-`ast` regex's breadth, but it flagged every
+    `X.eval(...)` call — including `model.eval()` (PyTorch), `df.eval(...)` (pandas) and
+    `session.exec(...)` (SQLModel). With `safe == len(findings) == 0` and no override
+    path, that made any package touching those libraries unpromotable. The alias forms
+    it caught by accident are reached by binding now (_py_alias_bindings).
     """
     if target is None:
         return None
@@ -538,8 +632,6 @@ def _py_match_call(target: tuple[str, ...] | None,
         return target
     if len(target) > 2 and target[-2:] in table:
         return target[-2:]
-    if allow_bare and len(target) > 1 and target[-1:] in table:
-        return target[-1:]
     return None
 
 
@@ -725,6 +817,9 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
     lines = _text_lines(text)
     imports, assigns = _py_prepass(tree)
     bindings = _py_import_bindings(imports)
+    # Alias assignments extend the import bindings, so an aliased builtin resolves to an
+    # exact table entry instead of needing a bare trailing-name match.
+    bindings.update(_py_alias_bindings(assigns, bindings))
     consts = _py_const_strings(assigns, bindings)
     # Import half now; the call half (shell escape / subprocess) is set in the walk
     # below, so the tree is walked once instead of twice.
@@ -748,7 +843,7 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
             if escape is not None:
                 add(node, _PY_SHELL_ESCAPE_CALLS[escape])
                 has_net = True
-            elif _py_match_call(target, _PY_DYNAMIC_EXEC_CALLS, allow_bare=True):
+            elif _py_match_call(target, _PY_DYNAMIC_EXEC_CALLS):
                 add(node, "dynamic code execution")
             elif _py_match_call(target, _PY_RMTREE_CALLS):
                 folded = _py_fold(node.args[0], consts, bindings) if node.args else None

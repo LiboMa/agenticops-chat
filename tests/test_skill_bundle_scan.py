@@ -477,19 +477,32 @@ class TestScanSkillBundleReplacementRegressions:
                    for f in scan["findings"]), scan["findings"]
 
     def test_bare_system_method_is_not_flagged(self, tmp_path):
-        """R2's false-positive edge: the match needs the module segment, not just `system`."""
+        """R2's false-positive edge: the match needs the module segment, not just `system`.
+
+        The 3-segment case is the one that actually reaches the trailing-TWO branch
+        (`len(target) > 2`); the 2-segment case never gets that far, so on its own this
+        test did not guard the branch it is named for.
+        """
         from agenticops.skills.security import scan_skill_bundle
 
-        d = _pkg(tmp_path, "own-system", {
-            "x.py": (
-                "class Box:\n"
-                "    def system(self, c):\n"
-                "        return c\n"
-                "b = Box()\n"
-                "b.system('echo hi')\n"
-            ),
-        })
-        assert scan_skill_bundle(d)["safe"] is True, scan_skill_bundle(d)["findings"]
+        for name, src in [
+            ("own-system", "class Box:\n"
+                           "    def system(self, c):\n"
+                           "        return c\n"
+                           "b = Box()\n"
+                           "b.system('echo hi')\n"),
+            ("nested-system", "class Inner:\n"
+                              "    def system(self, c):\n"
+                              "        return c\n"
+                              "class Outer:\n"
+                              "    def __init__(self):\n"
+                              "        self.inner = Inner()\n"
+                              "app = Outer()\n"
+                              "app.inner.system('echo hi')\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is True, (name, scan["findings"])
 
     def test_shell_true_in_conditional_expression_flagged(self, tmp_path):
         """R3: the old regex matched the literal text `shell=True` anywhere on the line."""
@@ -603,3 +616,110 @@ class TestScanSkillBundleReplacementRegressions:
         scan = security.scan_skill_bundle(d)
         assert scan["safe"] is False, scan["findings"]
         assert any("unreadable directory" in f["reason"] for f in scan["findings"]), scan["findings"]
+
+
+class TestScanSkillBundleAliasBinding:
+    """The dynamic-exec rule resolves aliases by BINDING, not by a bare trailing name.
+
+    Matching a bare trailing `eval`/`exec` hard-blocked every `X.eval(...)` call, and
+    `safe = len(findings) == 0` has no severity dial and no override path — so a package
+    calling `model.eval()` (PyTorch), `df.eval(...)` (pandas) or `session.exec(...)`
+    (SQLModel) could never be promoted. Those calls are the false-positive side; the
+    alias-of-builtin forms below are what the bare match used to catch by accident, and
+    they must keep flagging through the alias-assignment binding pass instead.
+    """
+
+    def test_library_eval_methods_are_not_flagged(self, tmp_path):
+        """The whole point of the change: ordinary library idioms must promote."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src in [
+            ("torch-eval", "model = build_model()\nmodel.eval()\n"),
+            ("pandas-eval", "df = read_frame()\ndf.eval('a + b')\n"),
+            ("sqlmodel-exec", "session = make_session()\nsession.exec(statement)\n"),
+            ("own-eval", "class Expr:\n"
+                         "    def eval(self, ctx):\n"
+                         "        return ctx\n"
+                         "e = Expr()\n"
+                         "e.eval({'x': 1})\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is True, (name, scan["findings"])
+
+    def test_builtin_alias_forms_flagged(self, tmp_path):
+        """The three forms a length rule would have dropped — all of them run."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src, line in [
+            ("attr-alias", "class R:\n"
+                           "    def __init__(self):\n"
+                           "        self.eval = eval\n"
+                           "    def run(self, s):\n"
+                           "        return self.eval(s)\n", 5),
+            ("dunder-alias", "bi = __builtins__\nbi.eval('1+1')\n", 2),
+            ("module-alias", "import builtins\nalias = builtins\nalias.eval('1+1')\n", 3),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any(f["line"] == line and "dynamic code execution" in f["reason"]
+                       for f in scan["findings"]), (name, scan["findings"])
+
+    def test_builtins_module_table_entries_flagged(self, tmp_path):
+        """Pins the table entries themselves, independently of the alias pass."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src in [
+            ("builtins-eval", "import builtins\nbuiltins.eval('1+1')\n"),
+            ("builtins-exec", "import builtins\nbuiltins.exec('x = 1')\n"),
+            ("dunder-exec", "__builtins__.exec('x = 1')\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any("dynamic code execution" in f["reason"]
+                       for f in scan["findings"]), (name, scan["findings"])
+
+    def test_chained_builtins_alias_flagged(self, tmp_path):
+        """One alias through another: the binding pass runs to a bounded fixed point."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "chained-alias", {
+            "x.py": "import builtins\na = builtins\nb = a\nb.eval('1+1')\n",
+        })
+        scan = scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert any(f["line"] == 4 and "dynamic code execution" in f["reason"]
+                   for f in scan["findings"]), scan["findings"]
+
+    def test_rebound_alias_is_dropped(self, tmp_path):
+        """Single assignment only, same discipline as the constant pass."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "rebound-alias", {
+            "x.py": "import builtins\nhandle = builtins\nhandle = object()\nhandle.eval('1+1')\n",
+        })
+        assert scan_skill_bundle(d)["safe"] is True, scan_skill_bundle(d)["findings"]
+
+    def test_attribute_pair_spelling_os_system_stays_flagged(self, tmp_path):
+        """Ruled ACCEPTED false positive, pinned so it is never silently suppressed.
+
+        A user object whose attribute pair spells `os.system` is indistinguishable from
+        the real module without type inference, and `self.os = import_module('os')` is
+        one edit away — so the alias pass must not suppress a trailing-two match just
+        because the assigned value was not a module.
+        """
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "os-shim", {
+            "x.py": ("class OsShim:\n"
+                     "    def system(self, c):\n"
+                     "        return c\n"
+                     "class F:\n"
+                     "    def __init__(self):\n"
+                     "        self.os = OsShim()\n"
+                     "    def run(self, c):\n"
+                     "        self.os.system(c)\n"),
+        })
+        assert scan_skill_bundle(d)["safe"] is False, scan_skill_bundle(d)["findings"]
