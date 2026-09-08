@@ -288,6 +288,17 @@ def scan_skill_safety(body: str) -> dict:
 #     script that reaches the network some other way will not. FAIL-OPEN at the edges.
 #   * `shutil.rmtree` on a target that does not fold to a literal is not flagged;
 #     flagging every rmtree would reject legitimate cleanup. FAIL-OPEN.
+#   * `shell=<variable>` (`subprocess.run(cmd, shell=use_shell)`) is not flagged — the
+#     pre-`ast` regex missed it too, so it is a standing gap, NOT a regression. Only a
+#     constant `True`, or an expression containing one (`True if … else False`), counts;
+#     "any value that is not False" would reject legitimate code. FAIL-OPEN.
+#   * A deep left-nested `BinOp` chain (~1500+ terms) exhausts `_py_fold`'s recursion and
+#     collapses the whole file to one `unreadable script: maximum recursion depth`
+#     finding, hiding any real payload in the same file behind a generic reason.
+#     FAIL-CLOSED (the package is still rejected).
+#   * The dynamic-exec rule matches a bare trailing `eval`/`exec`, so a method of that
+#     name reached through a plain name (`c.eval(x)`) is flagged. FAIL-CLOSED, and the
+#     same breadth the pre-`ast` regex had.
 #   * Every finding emitted today carries `tier == "blocked"`, so `safe` is exactly
 #     `len(findings) == 0`. If a lower tier is ever emitted, `safe` MUST be redefined
 #     to `not any(f["tier"] == "blocked" ...)` IN THE SAME COMMIT, or the gate
@@ -297,10 +308,13 @@ _SECRET_MATERIAL_REASON = "references cloud secret material"
 _PY_SECRET_PATTERN = r"AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN"
 
 # Path rules — matched against constant-folded strings on the `.py` side and against
-# raw lines on the `.sh` side. `~/.aws/config` is a legitimate region/profile read,
-# so the reason says "touches", not "is credential material" (fail-closed on purpose).
+# raw lines on the `.sh` side. `~/.aws/config` is deliberately NOT here: it holds
+# region/profile/role_arn, not credential material, and once these rules were mirrored
+# onto `.sh` the ordinary `export AWS_CONFIG_FILE="$HOME/.aws/config"` idiom became a
+# false positive. A gate that rejects normal ops scripts teaches operators to click
+# through it. `~/.aws/credentials` still flags, as do the secret-material env names.
 _PY_PATH_PATTERNS: list[tuple[str, str]] = [
-    (r"\.aws[/\\](credentials|config)", "touches the cloud credential/config directory"),
+    (r"\.aws[/\\]credentials", "reads a cloud credential file"),
     (r"\.ssh[/\\]id_[a-z0-9_]+", "reads an SSH private key"),
     (r"/etc/(shadow|sudoers)", "reads a privileged system file"),
 ]
@@ -350,6 +364,7 @@ _PY_SUBPROCESS_CALLS = frozenset({
 _PY_DYNAMIC_EXEC_CALLS = frozenset({
     ("eval",), ("exec",), ("builtins", "eval"), ("builtins", "exec"),
 })
+_PY_RMTREE_CALLS = frozenset({("shutil", "rmtree")})
 _PY_JOIN_CALLS = frozenset({("os", "path", "join"), ("posixpath", "join")})
 _PY_EXPANDUSER_CALLS = frozenset({("os", "path", "expanduser"), ("Path", "expanduser")})
 _PY_HOME_CALLS = frozenset({("pathlib", "Path", "home"), ("Path", "home")})
@@ -501,6 +516,46 @@ def _py_resolve(node: ast.AST, bindings: dict[str, tuple[str, ...]]) -> tuple[st
     return parts
 
 
+def _py_match_call(target: tuple[str, ...] | None,
+                   table, allow_bare: bool = False) -> tuple[str, ...] | None:
+    """Match a resolved call target against `table`, exact tuple first.
+
+    Exact membership alone let an attribute chain through a re-exporting module walk
+    around every call rule: `shutil.os.system`, `os.path.os.system`,
+    `subprocess.os.popen` all resolve to a 3-tuple, and the dependency-injection idiom
+    (`self.os = os` then `self.os.system(c)`) resolves to `("self","os","system")`.
+    Matching the trailing TWO segments closes all of them while still requiring the
+    module name, so a method merely called `system` cannot match.
+
+    `allow_bare` additionally matches a trailing SINGLE segment, and is used only for
+    the dynamic-exec names, where the pre-ast scan was equally broad (`\\b(eval|exec)\\s*\\(`
+    matched `obj.eval(...)` too). The cost is that a method named `eval`/`exec` reached
+    through a plain name is flagged — fail-closed, and identical to the old behaviour.
+    """
+    if target is None:
+        return None
+    if target in table:
+        return target
+    if len(target) > 2 and target[-2:] in table:
+        return target[-2:]
+    if allow_bare and len(target) > 1 and target[-1:] in table:
+        return target[-1:]
+    return None
+
+
+def _py_shell_true(value: ast.AST) -> bool:
+    """Whether a ``shell=`` keyword value is, or contains, a constant ``True``.
+
+    A constant decides itself; any other expression counts only if a constant `True`
+    appears in its subtree, which closes `shell=True if sys.platform else False`.
+    Deliberately NOT "anything that is not False" — `shell=use_shell` is legitimate
+    code and stays parked (see KNOWN LIMITATIONS).
+    """
+    if isinstance(value, ast.Constant):
+        return value.value is True
+    return any(isinstance(n, ast.Constant) and n.value is True for n in ast.walk(value))
+
+
 def _py_const_strings(nodes: list[ast.AST],
                       bindings: dict[str, tuple[str, ...]]) -> dict[str, str]:
     """Names assigned a foldable string exactly once, anywhere in the module.
@@ -559,7 +614,13 @@ def _py_fold(node: ast.AST, consts: dict[str, str],
     that the equivalent literal triggers.
     """
     if isinstance(node, ast.Constant):
-        return node.value if isinstance(node.value, str) else None
+        if isinstance(node.value, str):
+            return node.value
+        if isinstance(node.value, bytes):
+            # open() accepts bytes paths, so b'/etc/shadow' is ordinary Python and the
+            # path rules must see its text (fix round 2, R1).
+            return node.value.decode("utf-8", "replace")
+        return None
     if isinstance(node, ast.Name):
         return consts.get(node.id)
     if isinstance(node, ast.JoinedStr):
@@ -683,19 +744,20 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             target = _py_resolve(node.func, bindings)
-            if target in _PY_SHELL_ESCAPE_CALLS:
-                add(node, _PY_SHELL_ESCAPE_CALLS[target])
+            escape = _py_match_call(target, _PY_SHELL_ESCAPE_CALLS)
+            if escape is not None:
+                add(node, _PY_SHELL_ESCAPE_CALLS[escape])
                 has_net = True
-            elif target in _PY_DYNAMIC_EXEC_CALLS:
+            elif _py_match_call(target, _PY_DYNAMIC_EXEC_CALLS, allow_bare=True):
                 add(node, "dynamic code execution")
-            elif target == ("shutil", "rmtree"):
+            elif _py_match_call(target, _PY_RMTREE_CALLS):
                 folded = _py_fold(node.args[0], consts, bindings) if node.args else None
                 if folded is not None and folded.strip() in _DESTRUCTIVE_PATH_TARGETS:
                     add(node, "rmtree on filesystem root or home")
-            elif target in _PY_SUBPROCESS_CALLS:
+            elif _py_match_call(target, _PY_SUBPROCESS_CALLS):
                 has_net = True
-                if any(kw.arg == "shell" and isinstance(kw.value, ast.Constant)
-                       and kw.value.value is True for kw in node.keywords):
+                if any(kw.arg == "shell" and _py_shell_true(kw.value)
+                       for kw in node.keywords):
                     add(node, "subprocess with shell=True")
                 argv = _py_fold_argv(node.args[0] if node.args else None, consts, bindings)
                 if argv:
@@ -735,17 +797,34 @@ def _scan_py_file(path: Path, rel: str) -> list[dict]:
 # ── Bundle entry point ────────────────────────────────────────────
 
 
+def _fenced_line_numbers(body_lines: list[str]) -> set[int]:
+    """1-based body line numbers that sit inside a ``` fenced block."""
+    inside = False
+    fenced: set[int] = set()
+    for i, raw in enumerate(body_lines, 1):
+        if raw.lstrip().startswith("```"):
+            inside = not inside
+            continue
+        if inside:
+            fenced.add(i)
+    return fenced
+
+
 def _scan_skill_md(pkg_dir: Path) -> list[dict]:
     """Scan pkg_dir/SKILL.md's prose, recovering a real file line per finding."""
     from agenticops.skills.loader import parse_frontmatter
 
     skill_md = pkg_dir / "SKILL.md"
-    if not skill_md.is_file():
-        return []
     try:
+        # is_file() belongs INSIDE the try: it only swallows ENOENT/ENOTDIR/EBADF/ELOOP,
+        # so a pkg_dir that is not searchable raises EACCES here — and scan_skill_bundle
+        # promises never to raise (fix round 2, Q3a).
+        if not skill_md.is_file():
+            return []
         content = skill_md.read_text(encoding="utf-8", errors="replace")
         _, body = parse_frontmatter(content)
         body_lines = _text_lines(body)
+        fenced = _fenced_line_numbers(body_lines)
         # SKILL.md line numbers must be FILE-relative, so add back the frontmatter.
         offset = content[: len(content) - len(body)].count("\n")
         findings: list[dict] = []
@@ -754,7 +833,10 @@ def _scan_skill_md(pkg_dir: Path) -> list[dict]:
                             if text.startswith(p)), "")
             line = 0
             if command:
-                line = next((i for i, raw in enumerate(body_lines, 1) if command in raw), 0)
+                hits = [i for i, raw in enumerate(body_lines, 1) if command in raw]
+                # Prose quoting the command must not win the line number over the fence
+                # that actually runs it (fix round 2, R-F).
+                line = next((i for i in hits if i in fenced), hits[0] if hits else 0)
             findings.append(_finding("SKILL.md", offset + line if line else 0,
                                      command, text))
         return findings

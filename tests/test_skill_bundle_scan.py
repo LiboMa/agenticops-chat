@@ -1,5 +1,6 @@
 """Bundle-level security scan + promote gate + Curator aging for imported skills."""
 
+import errno
 import os
 from pathlib import Path
 
@@ -406,3 +407,199 @@ class TestScanSkillBundleFailOpenRegressions:
         hit = [f for f in scan_skill_bundle(d)["findings"] if f["file"] == "danger.sh"]
         assert hit, "expected a finding"
         assert "rm" in hit[0]["reason"], hit
+
+
+class TestScanSkillBundleReplacementRegressions:
+    """Payloads the pre-`ast` scan (2b5bf1e) rejected and the rewrite let through.
+
+    Found by running both implementations over the same inputs in one process. Every
+    payload here is working Python, not obfuscation.
+    """
+
+    def test_bytes_path_literals_flagged(self, tmp_path):
+        """R1: open() accepts bytes paths, so a bytes literal must fold like a str."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src in [
+            ("bytes-shadow", "open(b'/etc/shadow').read()\n"),
+            ("bytes-creds", "open(b'/root/.aws/credentials').read()\n"),
+            ("bytes-sshkey", "open(b'/root/.ssh/id_ed25519').read()\n"),
+            ("bytes-decode", "open(b'/etc/shadow'.decode()).read()\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any(f["file"] == "x.py" and f["line"] == 1
+                       for f in scan["findings"]), (name, scan["findings"])
+
+    def test_attribute_chain_shell_escape_flagged(self, tmp_path):
+        """R2: a re-exporting module walked around every call rule (exact-tuple match)."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        for name, src in [
+            ("chain-shutil", "import shutil\nshutil.os.system('echo hi')\n"),
+            ("chain-ospath", "import os.path\nos.path.os.system('echo hi')\n"),
+            ("chain-subproc", "import subprocess\nsubprocess.os.popen('echo hi')\n"),
+        ]:
+            d = _pkg(tmp_path, name, {"x.py": src})
+            scan = scan_skill_bundle(d)
+            assert scan["safe"] is False, (name, scan["findings"])
+            assert any(f["line"] == 2 and "shell escape" in f["reason"]
+                       for f in scan["findings"]), (name, scan["findings"])
+
+    def test_dependency_injection_shell_escape_flagged(self, tmp_path):
+        """R2, the form that matters most: `self.os = os` is how ordinary code is written."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "di-skill", {
+            "x.py": (
+                "import os\n"
+                "class R:\n"
+                "    def __init__(self):\n"
+                "        self.os = os\n"
+                "    def run(self, c):\n"
+                "        self.os.system(c)\n"
+            ),
+        })
+        scan = scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert any(f["line"] == 6 and "shell escape" in f["reason"]
+                   for f in scan["findings"]), scan["findings"]
+
+    def test_dunder_builtins_eval_flagged(self, tmp_path):
+        """R2: ('__builtins__','eval') missed the exact-tuple table."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "dunder-eval", {"x.py": "__builtins__.eval('1+1')\n"})
+        scan = scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert any("dynamic code execution" in f["reason"]
+                   for f in scan["findings"]), scan["findings"]
+
+    def test_bare_system_method_is_not_flagged(self, tmp_path):
+        """R2's false-positive edge: the match needs the module segment, not just `system`."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "own-system", {
+            "x.py": (
+                "class Box:\n"
+                "    def system(self, c):\n"
+                "        return c\n"
+                "b = Box()\n"
+                "b.system('echo hi')\n"
+            ),
+        })
+        assert scan_skill_bundle(d)["safe"] is True, scan_skill_bundle(d)["findings"]
+
+    def test_shell_true_in_conditional_expression_flagged(self, tmp_path):
+        """R3: the old regex matched the literal text `shell=True` anywhere on the line."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "shell-cond", {
+            "x.py": "import subprocess, sys\nsubprocess.run('id', shell=True if sys.platform else False)\n",
+        })
+        scan = scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert any("shell=True" in f["reason"] for f in scan["findings"]), scan["findings"]
+
+    def test_shell_variable_stays_parked(self, tmp_path):
+        """The narrow side of R3: `shell=<variable>` is a standing gap, not a regression."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "shell-var", {
+            "x.py": "import subprocess\nuse_shell = False\nsubprocess.run('echo hi', shell=use_shell)\n",
+        })
+        assert scan_skill_bundle(d)["safe"] is True
+
+    def test_shell_true_rule_is_pinned_on_its_own(self, tmp_path):
+        """Q4: with a harmless command string, only the shell= rule can produce a finding."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "shell-only", {
+            "x.py": "import subprocess\nsubprocess.run('echo hello', shell=True)\n",
+        })
+        scan = scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert [f["reason"] for f in scan["findings"]] == ["subprocess with shell=True"], scan["findings"]
+        assert scan["findings"][0]["line"] == 2, scan["findings"]
+
+    def test_aws_config_path_is_not_flagged(self, tmp_path):
+        """Ruling reversal: ~/.aws/config holds region/profile, not credential material."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "aws-config", {
+            "s.sh": '#!/bin/bash\nexport AWS_CONFIG_FILE="$HOME/.aws/config"\naws sts get-caller-identity\n',
+        })
+        assert scan_skill_bundle(d)["safe"] is True, scan_skill_bundle(d)["findings"]
+
+        # …while the credential file itself still flags, on both payload types.
+        d2 = _pkg(tmp_path, "aws-creds-sh", {"s.sh": '#!/bin/bash\ncat "$HOME/.aws/credentials"\n'})
+        assert scan_skill_bundle(d2)["safe"] is False
+
+    def test_skill_md_prefers_fenced_occurrence_over_prose(self, tmp_path):
+        """R-F follow-up: prose quoting the command must not win the line number."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = tmp_path / "md-fence-skill"
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            "---\nname: md-fence-skill\ndescription: probe\n---\n\n"
+            "Never run mkfs.ext4 /dev/sda1 by hand.\n\n"
+            "```bash\nmkfs.ext4 /dev/sda1\n```\n",
+            encoding="utf-8",
+        )
+        hit = [f for f in scan_skill_bundle(d)["findings"] if f["file"] == "SKILL.md"]
+        assert hit, "expected a finding"
+        # file line 9 is the fenced command; line 6 is the prose mentioning it
+        assert hit[0]["line"] == 9, hit
+
+    def test_skill_md_stat_eacces_is_a_finding_not_a_raise(self, tmp_path, monkeypatch):
+        """Q3a: is_file() only swallows ENOENT/ENOTDIR/EBADF/ELOOP, so EACCES escaped.
+
+        Unit-level so it runs everywhere; the chmod case below is the integration form.
+        """
+        from agenticops.skills import security
+
+        d = _pkg(tmp_path, "eacces-pkg", {})
+        real_is_file = Path.is_file
+
+        def fake_is_file(self):
+            if self.name == "SKILL.md":
+                raise PermissionError(errno.EACCES, "Permission denied", str(self))
+            return real_is_file(self)
+
+        monkeypatch.setattr(Path, "is_file", fake_is_file)
+        findings = security._scan_skill_md(d)
+        assert findings, "an EACCES stat must produce a finding"
+        assert findings[0]["file"] == "SKILL.md"
+        assert "unreadable" in findings[0]["reason"].lower(), findings
+
+    @skip_if_root
+    def test_unsearchable_pkg_dir_returns_dict(self, tmp_path):
+        """Q3a end to end: a mode-000 pkg_dir raised PermissionError out of the gate."""
+        from agenticops.skills.security import scan_skill_bundle
+
+        d = _pkg(tmp_path, "mode000-pkg", {})
+        d.chmod(0o000)
+        try:
+            scan = scan_skill_bundle(d)          # must not raise
+            assert scan["safe"] is False, scan["findings"]
+            assert any("unreadable" in f["reason"].lower()
+                       for f in scan["findings"]), scan["findings"]
+        finally:
+            d.chmod(0o755)
+
+    def test_unreadable_directory_is_flagged_via_onerror(self, tmp_path, monkeypatch):
+        """The deterministic companion to the chmod test — survives a root runner."""
+        from agenticops.skills import security
+
+        d = _pkg(tmp_path, "onerror-pkg", {})
+
+        def fake_walk(top, onerror=None, followlinks=False):
+            onerror(PermissionError(errno.EACCES, "Permission denied", str(Path(top) / "sub")))
+            return iter(())
+
+        monkeypatch.setattr(security.os, "walk", fake_walk)
+        scan = security.scan_skill_bundle(d)
+        assert scan["safe"] is False, scan["findings"]
+        assert any("unreadable directory" in f["reason"] for f in scan["findings"]), scan["findings"]
