@@ -810,3 +810,131 @@ class TestFetchAndImport:
         assert created, "expected import to use a temp workdir"
         for d in created:
             assert not Path(d).exists(), f"temp workdir leaked: {d}"
+
+
+class TestImportEntrypoints:
+    """Task 9 — the two human/API entrypoints in front of `import_skills`.
+
+    Both call `import_skills` and NEVER `fetch` directly: the empty-URI guard lives in
+    `import_skills` only, so an entrypoint that reached for `fetch` would accept `""`
+    and resolve it to the current directory.
+    """
+
+    def test_cli_import_reports_three_buckets(self, tmp_path, skill_dirs):
+        from typer.testing import CliRunner
+
+        from agenticops.cli.main import app
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+        bad = _make_pkg(src, "bad-skill")
+        (bad / "payload.so").write_bytes(b"\x00")
+
+        result = CliRunner().invoke(app, ["skills", "import", str(src)])
+        assert result.exit_code == 0, result.output
+        assert "alpha-skill" in result.output
+        assert "bad-skill" in result.output
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_cli_import_exit_1_when_nothing_installed(self, tmp_path, skill_dirs):
+        from typer.testing import CliRunner
+
+        from agenticops.cli.main import app
+
+        result = CliRunner().invoke(app, ["skills", "import", str(tmp_path / "nope")])
+        assert result.exit_code == 1
+        assert "failed" in result.output.lower() or "unsupported" in result.output.lower()
+
+    def test_cli_name_filter(self, tmp_path, skill_dirs):
+        from typer.testing import CliRunner
+
+        from agenticops.cli.main import app
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        for n in ("alpha-skill", "beta-skill"):
+            _make_pkg(src, n)
+
+        result = CliRunner().invoke(app, ["skills", "import", str(src), "--name", "beta-skill"])
+        assert result.exit_code == 0, result.output
+        assert (ddir / "beta-skill").is_dir()
+        assert not (ddir / "alpha-skill").exists()
+
+    def test_api_import_source(self, tmp_path, skill_dirs):
+        from fastapi.testclient import TestClient
+
+        from agenticops.web.app import app as web_app
+
+        _sdir, ddir = skill_dirs
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+
+        # Plain TestClient (no `with`) — matches tests/test_skills_api.py:311 and
+        # avoids firing app startup events for a pure request-level assertion.
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": str(src)})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [s["name"] for s in body["installed"]] == ["alpha-skill"]
+        assert body["source_ref"] == "local-dir"
+        assert body["skipped"] == [] and body["rejected"] == []
+        assert (ddir / "alpha-skill" / "SKILL.md").is_file()
+
+    def test_api_import_source_bad_uri_is_400(self, skill_dirs):
+        from fastapi.testclient import TestClient
+
+        from agenticops.web.app import app as web_app
+
+        resp = TestClient(web_app).post(
+            "/api/skills/import-source", json={"uri": "ftp://example.invalid/x"}
+        )
+        assert resp.status_code == 400
+        assert "unsupported" in resp.json()["detail"].lower()
+
+    def test_api_empty_uri_is_400_not_a_local_dir_import(self, skill_dirs):
+        """Regression: `fetch("")` returns `(Path('.'), 'local-dir')`.
+
+        The empty-URI guard lives in `import_skills`, so this pins that the endpoint goes
+        through `import_skills` and never reaches for `fetch` itself — otherwise an empty
+        body would walk the server's current working directory.
+        """
+        from fastapi.testclient import TestClient
+
+        from agenticops.web.app import app as web_app
+
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": ""})
+        assert resp.status_code == 400, resp.text
+
+    def test_api_import_source_disabled_is_403(self, tmp_path, skill_dirs, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from agenticops.web.app import app as web_app
+
+        monkeypatch.setattr(
+            "agenticops.config.settings.skills_import_enabled", False, raising=False
+        )
+        src = tmp_path / "src"
+        _make_pkg(src, "alpha-skill")
+
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": str(src)})
+        assert resp.status_code == 403
+
+    def test_api_disabled_beats_bad_uri(self, skill_dirs, monkeypatch):
+        """403 wins over 400: the enable check fires before the URI is ever looked at."""
+        from fastapi.testclient import TestClient
+
+        from agenticops.web.app import app as web_app
+
+        monkeypatch.setattr(
+            "agenticops.config.settings.skills_import_enabled", False, raising=False
+        )
+        resp = TestClient(web_app).post("/api/skills/import-source", json={"uri": ""})
+        assert resp.status_code == 403, resp.text
+
+    def test_legacy_upload_endpoint_still_exists(self):
+        """The existing multipart /api/skills/import must not be broken (frontend useSkills.ts uses it)."""
+        from agenticops.web.app import app as web_app
+
+        paths = {r.path for r in web_app.routes}
+        assert "/api/skills/import" in paths
+        assert "/api/skills/import-source" in paths

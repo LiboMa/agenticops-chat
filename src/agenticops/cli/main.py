@@ -232,6 +232,7 @@ update_app = typer.Typer(help="Update a resource")
 run_app = typer.Typer(help="Run operations (scan, detect, analyze)")
 logs_app = typer.Typer(help="View logs and audit trail")
 service_app = typer.Typer(help="Manage background services (web dashboard + IM WebSocket)")
+skills_app = typer.Typer(help="Manage Agent Skills (import from URL / git repo / zip)")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -241,6 +242,7 @@ app.add_typer(update_app, name="update")
 app.add_typer(run_app, name="run")
 app.add_typer(logs_app, name="logs")
 app.add_typer(service_app, name="service")
+app.add_typer(skills_app, name="skills")
 
 
 # ============================================================================
@@ -4925,6 +4927,69 @@ def test_account(name: str = typer.Argument(..., help="Account name to test")):
 
     except Exception as e:
         console.print(f"[red]Credential test failed: {e}[/red]")
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Agent Skills — wide-source import
+# ============================================================================
+
+
+@skills_app.command("import")
+def skills_import(
+    uri: str = typer.Argument(
+        ...,
+        help="URL, git repo (git+https://…[@ref][#subdir]), zip/tar.gz, or local path",
+    ),
+    name: list[str] = typer.Option(
+        None, "--name", "-n", help="Only import these skill names (repeatable)"
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw result as JSON"),
+):
+    """Import skills from a wide source. Everything lands as a DRAFT — review and promote it before use."""
+    from agenticops.skills.sources import import_skills
+
+    try:
+        res = import_skills(uri, list(name) if name else None)
+    except Exception as e:
+        console.print(f"[red]Import failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    payload = {
+        "source_uri": res.source_uri,
+        "source_ref": res.source_ref,
+        "installed": [
+            {"name": s.name, "path": str(s.path), "files": s.files, "bytes": s.bytes}
+            for s in res.installed
+        ],
+        "skipped": [{"name": n, "reason": r} for n, r in res.skipped],
+        "rejected": [{"name": n, "reason": r} for n, r in res.rejected],
+    }
+    if as_json:
+        console.print_json(data=payload)
+    else:
+        console.print(
+            f"[bold]Source:[/bold] {res.source_uri}  [dim]ref={res.source_ref[:12]}[/dim]"
+        )
+        if res.installed:
+            console.print(f"[green]Installed as draft ({len(res.installed)}):[/green]")
+            for s in res.installed:
+                console.print(f"  • {s.name}  [dim]{s.files} files, {s.bytes} bytes → {s.path}[/dim]")
+        if res.skipped:
+            console.print(f"[yellow]Skipped ({len(res.skipped)}):[/yellow]")
+            for n, r in res.skipped:
+                console.print(f"  • {n}: {r}")
+        if res.rejected:
+            console.print(f"[red]Rejected ({len(res.rejected)}):[/red]")
+            for n, r in res.rejected:
+                console.print(f"  • {n}: {r}")
+        if res.installed:
+            console.print(
+                "\n[dim]Drafts are not active yet. Review, then promote:[/dim] "
+                "[cyan]aiops chat[/cyan] → [cyan]/skill promote <name>[/cyan]"
+            )
+
+    if not res.installed:
         raise typer.Exit(1)
 
 

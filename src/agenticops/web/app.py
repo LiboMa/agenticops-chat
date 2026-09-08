@@ -3922,6 +3922,43 @@ async def api_import_skill(file: UploadFile = File(...)):
         )
 
 
+class SkillImportSourceRequest(BaseModel):
+    uri: str
+    names: list[str] | None = None
+
+
+@app.post("/api/skills/import-source")
+async def api_import_skill_source(req: SkillImportSourceRequest):
+    """Import skills from a URL / git repo / zip archive. Everything lands as a DRAFT.
+
+    Distinct from POST /api/skills/import, which takes a multipart file upload.
+
+    Goes through `import_skills` and never `fetch` directly: the empty-URI guard lives in
+    `import_skills`, and `fetch("")` would resolve to the server's current directory.
+    An unexpected exception is deliberately NOT mapped to 400 — a server-side bug reported
+    as a client error sends the caller looking for a mistake it did not make.
+    """
+    from agenticops.skills.sources import import_skills
+
+    try:
+        res = await asyncio.to_thread(import_skills, req.uri, req.names)
+    except RuntimeError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "source_uri": res.source_uri,
+        "source_ref": res.source_ref,
+        "installed": [
+            {"name": s.name, "path": str(s.path), "files": s.files, "bytes": s.bytes}
+            for s in res.installed
+        ],
+        "skipped": [{"name": n, "reason": r} for n, r in res.skipped],
+        "rejected": [{"name": n, "reason": r} for n, r in res.rejected],
+    }
+
+
 @app.delete("/api/skills/{name}")
 async def api_delete_skill(name: str):
     """Delete a draft skill. Published skills cannot be deleted via API."""
