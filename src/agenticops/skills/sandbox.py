@@ -46,6 +46,23 @@ Three properties are deliberate and must not be "improved" away:
   behaviour is therefore blocked by the bundle scan at promote time and by
   nothing at run time — those scan rules are a real boundary, not
   defence-in-depth behind a filesystem jail.
+
+* **The timeout bounds OUR wait, not the life of every descendant.** A script
+  that calls `os.fork()` + `os.setsid()` puts its child in a new session, so the
+  SIGKILL we send to our own process group never reaches it, and there is no
+  cgroup and no PID namespace here to catch it — a non-container sandbox cannot
+  reap it. What the bounded grace after the kill guarantees is that `run_script`
+  RETURNS; an escaped grandchild keeps running afterwards, and when that happens
+  the returned stderr says so instead of claiming a clean kill. Do not read the
+  timeout as "every descendant is dead".
+
+* **`skills_sandbox_max_output_chars` bounds what we RETURN, not what we READ.**
+  `communicate()` buffers the child's entire output before the cap is applied, so
+  a runaway script is a memory-exhaustion risk in the service process rather than
+  a truncated result. The mitigation is the timeout above — the window is
+  `timeout × output rate`, and that is only bounded *because* the timeout now
+  bounds the run. The real fix (a deadlock-safe incremental read of both pipes)
+  is a recorded follow-up.
 """
 
 from __future__ import annotations
@@ -70,6 +87,11 @@ logger = logging.getLogger(__name__)
 _SANDBOX_PROFILE = "(version 1)(allow default)(deny network*)"
 
 _ISOLATION_CACHE: str | None = None
+
+# Grace given to the post-kill output read. A descendant that left our process group
+# still holds the inherited pipes, so an unbounded read would let the child decide how
+# long run_script blocks; past this we abandon the output instead of waiting.
+_KILL_GRACE_SECONDS = 5
 
 
 @dataclass
@@ -147,8 +169,13 @@ def _resolve_script(skill_name: str, script: str) -> Path:
 
     # resolve() both sides: a symlink inside the package that points outside it
     # resolves to its target and is then caught by the escape check below.
-    root = skill_dir.resolve()
-    target = (skill_dir / script).resolve()
+    # resolve() raises ValueError on an embedded NUL and OSError on a hostile path;
+    # both are refusals, and the contract is that every refusal is a RuntimeError.
+    try:
+        root = skill_dir.resolve()
+        target = (skill_dir / script).resolve()
+    except (ValueError, OSError) as exc:
+        raise RuntimeError(f"script path is not a usable path: {script!r} ({exc})") from exc
     if not str(target).startswith(str(root) + os.sep):
         raise RuntimeError(f"script path escapes the skill package: {script}")
     if not target.is_file():
@@ -170,9 +197,12 @@ def run_script(
 ) -> SandboxResult:
     """Run a PUBLISHED skill's script in the restricted sandbox.
 
-    Raises RuntimeError for every refusal (disabled, draft, bad path, bad
-    suffix, no isolator). A script that runs and fails returns a SandboxResult
-    with its exit code — a refusal is never reported as a failed run.
+    Raises RuntimeError for EVERY refusal — disabled, draft, bad path, unusable
+    path, bad suffix, no isolator, and an interpreter/isolator that will not
+    start. Task 8's @tool catches RuntimeError to render a refusal, so a refusal
+    must never surface as some other exception type. A script that runs and
+    fails returns a SandboxResult with its exit code — a refusal is never
+    reported as a failed run.
     """
     if not settings.skills_sandbox_enabled:
         raise RuntimeError("skill script sandbox is disabled (skills_sandbox_enabled=false)")
@@ -202,11 +232,17 @@ def run_script(
         cmd = _wrap([interpreter, str(local), *(args or [])], isolation)
 
         started = time.monotonic()
-        proc = subprocess.Popen(
-            cmd, cwd=str(workdir), env=env, shell=False, text=True,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True,                  # own process group, so we can kill it whole
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(workdir), env=env, shell=False, text=True,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True,              # own process group, so we can kill it whole
+            )
+        except (OSError, ValueError) as exc:
+            # Nothing ran: the interpreter or the isolator is not on the child's minimal
+            # PATH (Popen resolves via os.get_exec_path(env), not the ambient PATH).
+            # Fail closed as a refusal, not as an unhandled exception in Task 8's @tool.
+            raise RuntimeError(f"could not start the sandboxed script: {cmd[0]!r} ({exc})") from exc
         try:
             out, err = proc.communicate(input=stdin_text or "", timeout=timeout)
             exit_code = proc.returncode
@@ -215,9 +251,30 @@ def run_script(
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 proc.kill()
-            out, err = proc.communicate()
+            try:
+                # BOUNDED read. An unbounded communicate() waits for EOF on both pipes,
+                # and a descendant that left our process group (fork+setsid) still holds
+                # them — so the script, not the timeout, would decide when we return.
+                out, err = proc.communicate(timeout=_KILL_GRACE_SECONDS)
+                err = (err or "") + f"\n[sandbox] killed after {timeout}s timeout"
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                    try:
+                        if pipe is not None:
+                            pipe.close()
+                    except OSError:
+                        pass
+                proc.poll()          # reap the direct child; escaped descendants survive
+                # Never claim a clean kill here: the read was cut short, so the output is
+                # incomplete and something is still holding the pipes open.
+                out, err = "", (
+                    f"[sandbox] {timeout}s timeout expired and SIGKILL was sent to the "
+                    f"process group, but the output was ABANDONED after a further "
+                    f"{_KILL_GRACE_SECONDS}s: a descendant escaped the process group and "
+                    f"still holds the pipes, so it MAY STILL BE RUNNING"
+                )
             exit_code = -1
-            err = (err or "") + f"\n[sandbox] killed after {timeout}s timeout"
         duration_ms = int((time.monotonic() - started) * 1000)
 
         cap = settings.skills_sandbox_max_output_chars

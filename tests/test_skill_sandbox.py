@@ -20,6 +20,22 @@ SKILL_MD = "---\nname: {name}\ndescription: sandbox probe\n---\n\nbody\n"
 # check — it is never relaxed into a prefix/startswith check.
 _PLATFORM_INJECTED = {"__CF_USER_TEXT_ENCODING"}
 
+# fork()+setsid() moves the child into a NEW session, so the SIGKILL the sandbox sends to
+# its own process group never reaches it — while it still holds the inherited stdout/stderr
+# write ends open. An unbounded post-kill read then blocks for as long as this script cares
+# to live (30s here; 86400 for an attacker). scan_skill_bundle passes this payload clean:
+# os.fork / os.setsid / time.sleep are on no rule, so the promoting human sees nothing.
+ESCAPING_SCRIPT = (
+    "import os, sys, time\n"
+    "pid = os.fork()\n"
+    "if pid == 0:\n"
+    "    os.setsid()\n"
+    "    time.sleep(30)\n"
+    "    os._exit(0)\n"
+    "open(sys.argv[1], 'w').write(str(pid))\n"
+    "time.sleep(30)\n"
+)
+
 
 @pytest.fixture
 def sandbox_env(tmp_path, monkeypatch):
@@ -68,7 +84,10 @@ class TestSandboxGates:
         _sdir, ddir = sandbox_env
         _publish(ddir, "draft-skill", {"hi.sh": "echo hi\n"})
 
-        with pytest.raises(RuntimeError, match="draft"):
+        # Must match text unique to the DRAFT branch: a bare "draft" also matches the
+        # skill name in the generic "published skill not found: draft-skill" fallback,
+        # so deleting the draft branch would leave this test green.
+        with pytest.raises(RuntimeError, match="still a draft"):
             run_script("draft-skill", "hi.sh")
 
     def test_unknown_skill_refuses(self, sandbox_env):
@@ -86,6 +105,54 @@ class TestSandboxGates:
 
         with pytest.raises(RuntimeError, match="escapes|does not exist"):
             run_script("alpha-skill", bad)
+
+    @pytest.mark.parametrize("bad", [
+        "../../outside/evil.sh",        # real file, relative traversal out of skills_dir
+        "../draft/draft-skill/hi.sh",   # real DRAFT script — must not defeat the draft gate
+        "../alpha-skill-evil/x.sh",     # real sibling whose dir name PREFIXES the package
+    ])
+    def test_existing_file_outside_package_refused_as_escape(self, sandbox_env, bad):
+        """Every target here EXISTS with an allowed suffix, so the refusal can only come
+        from the escape check — never from the 'does not exist' branch. Weakening the
+        check to 'absolute paths only', or to an unanchored substring test (which the
+        prefix-sibling case defeats), lets one of these RUN."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+        outside = sdir.parent / "outside"
+        outside.mkdir(exist_ok=True)
+        (outside / "evil.sh").write_text("echo OUTSIDE-RAN\n", encoding="utf-8")
+        _publish(ddir, "draft-skill", {"hi.sh": "echo DRAFT-RAN\n"})
+        _publish(sdir, "alpha-skill-evil", {"x.sh": "echo SIBLING-RAN\n"})
+
+        with pytest.raises(RuntimeError, match="escapes"):
+            run_script("alpha-skill", bad)
+
+    def test_nul_in_script_path_is_a_runtime_error(self, sandbox_env):
+        """Contract: EVERY refusal is a RuntimeError — Path.resolve raises ValueError."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+
+        with pytest.raises(RuntimeError, match="not a usable path"):
+            run_script("alpha-skill", "hi.sh\x00")
+
+    def test_unstartable_interpreter_is_a_runtime_error(self, sandbox_env, monkeypatch):
+        """Contract: an interpreter/isolator missing from the child's minimal PATH makes
+        Popen raise FileNotFoundError; it must surface as a RuntimeError refusal."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {"hi.sh": "echo hi\n"})
+        monkeypatch.setattr(
+            "agenticops.config.settings.skills_sandbox_interpreters",
+            {".sh": "aiops-no-such-interpreter"}, raising=False,
+        )
+
+        with pytest.raises(RuntimeError, match="could not start"):
+            run_script("alpha-skill", "hi.sh")
 
     def test_non_allowlisted_suffix_refused(self, sandbox_env):
         from agenticops.skills.sandbox import run_script
@@ -191,6 +258,91 @@ class TestSandboxExecution:
         assert res.exit_code == -1
         assert "timeout" in res.stderr.lower()
         assert elapsed < 20, f"timeout did not kill promptly ({elapsed:.1f}s)"
+
+    def test_timeout_bounds_the_run_when_a_descendant_escapes(self, sandbox_env, monkeypatch):
+        """The ship-blocker: a fork+setsid descendant keeps the pipes open, so an
+        unbounded post-kill read lets the SCRIPT choose how long run_script blocks
+        (measured 30.1s against a 2s timeout). Assert on WALL CLOCK, not the exit code —
+        the exit code was already -1 while the call hung. The escaped grandchild survives
+        by design (no cgroup, no PID namespace), so this test reaps it itself.
+        """
+        import os
+        import signal
+        import time
+
+        from agenticops.skills import sandbox
+
+        monkeypatch.setattr("agenticops.config.settings.skills_sandbox_timeout_seconds", 2, raising=False)
+        sdir, _ddir = sandbox_env
+        pidfile = sdir.parent / "escaped.pid"
+        _publish(sdir, "alpha-skill", {"escape.py": ESCAPING_SCRIPT})
+
+        started = time.monotonic()
+        res = sandbox.run_script("alpha-skill", "escape.py", args=[str(pidfile)])
+        elapsed = time.monotonic() - started
+        try:
+            bound = 2 + sandbox._KILL_GRACE_SECONDS + 8      # generous headroom, still << 30s
+            assert elapsed < bound, f"run_script blocked {elapsed:.1f}s against a 2s timeout"
+            assert res.exit_code == -1
+            # The note must not claim a clean kill when the read itself was cut short.
+            assert "ABANDONED" in res.stderr and "MAY STILL BE RUNNING" in res.stderr
+        finally:
+            try:
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+            except (OSError, ValueError):
+                pass
+
+    def test_interpreter_keyed_on_suffix_not_shebang(self, sandbox_env):
+        """A `#!` line must NEVER pick the interpreter: that is what makes a mismatch a
+        syntax error instead of an escape. Honouring the shebang would run a file the
+        bundle scan parsed with Python rules under a shell, and vice versa."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "py_in_sh.sh": "#!/usr/bin/env python3\nimport sys\nprint('RAN AS PYTHON')\n",
+            "sh_in_py.py": "#!/bin/bash\necho RAN AS BASH\n",
+        })
+
+        res = run_script("alpha-skill", "py_in_sh.sh")
+        assert res.exit_code != 0, res.stdout
+        assert "RAN AS PYTHON" not in res.stdout
+
+        res = run_script("alpha-skill", "sh_in_py.py")
+        assert res.exit_code != 0, res.stdout
+        assert "RAN AS BASH" not in res.stdout
+
+    def test_copied_script_is_not_executable(self, sandbox_env):
+        """copy2 preserves the source mode, so the chmod is the only thing stopping an
+        executable copy landing in the cwd."""
+        import os
+
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        skill = _publish(sdir, "alpha-skill", {
+            "mode.py": "import os\nprint(oct(os.stat(__file__).st_mode & 0o777))\n",
+        })
+        os.chmod(skill / "mode.py", 0o755)          # source ships executable
+
+        res = run_script("alpha-skill", "mode.py")
+        assert res.stdout.strip() == "0o600", res.stdout
+
+    def test_only_the_target_script_reaches_the_cwd(self, sandbox_env):
+        """Packaged siblings must be absent at run time. Load-bearing: scan_skill_bundle
+        does not scan .txt/.json/.yaml, so a sibling in the cwd re-opens the
+        compile(open('payload.txt').read()) path."""
+        from agenticops.skills.sandbox import run_script
+
+        sdir, _ddir = sandbox_env
+        _publish(sdir, "alpha-skill", {
+            "list.py": "import os\nprint(sorted(os.listdir('.')))\n",
+            "helper.txt": "unscanned payload\n",
+            "other.py": "print('other')\n",
+        })
+
+        res = run_script("alpha-skill", "list.py")
+        assert res.stdout.strip() == "['list.py']", res.stdout
 
     def test_output_truncated(self, sandbox_env, monkeypatch):
         from agenticops.skills.sandbox import run_script
