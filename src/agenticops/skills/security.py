@@ -11,6 +11,7 @@ Unknown commands default to 'write' (require confirmation).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # ── Shell Command Classification ─────────────────────────────────────
 
@@ -258,4 +259,108 @@ def scan_skill_safety(body: str) -> dict:
                 continue
             if tier == "blocked":
                 findings.append(f"blocked command: {cmd[:80]}")
+    return {"safe": len(findings) == 0, "findings": findings}
+
+
+# ── Bundle Scanning (SKILL.md + packaged scripts) ─────────────────
+
+# Deterministic, zero-LLM patterns for packaged Python. Auxiliary gate only —
+# the real boundary is the sandbox (no credentials, no network) plus human
+# approval. Obfuscated code is explicitly out of scope.
+_PY_DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
+    (r"shutil\.rmtree\s*\(\s*[\"']/[\"']", "rmtree on filesystem root"),
+    (r"\bos\.(system|popen)\s*\(", "shell escape via os.system/os.popen"),
+    (r"subprocess\.(run|call|Popen|check_output)\s*\(.*shell\s*=\s*True", "subprocess with shell=True"),
+    (r"\.aws[/\\](credentials|config)", "reads a cloud credential file"),
+    (r"\.ssh[/\\]id_[a-z0-9_]+", "reads an SSH private key"),
+    (r"/etc/(shadow|sudoers)", "reads a privileged system file"),
+    (r"AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN", "references cloud secret material"),
+    (r"\b(eval|exec)\s*\(", "dynamic code execution"),
+]
+_PY_NET_PATTERN = r"\b(requests|urllib|urllib3|httpx|aiohttp|socket|boto3|botocore)\b"
+_SECRET_MATERIAL_REASON = "references cloud secret material"
+
+
+def _scan_sh_file(path: Path, rel: str) -> list[dict]:
+    findings: list[dict] = []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        cmd = raw.strip()
+        if not cmd or cmd.startswith("#"):
+            continue
+        low = cmd.lower()
+        hit = next((p for p in _SKILL_DESTRUCTIVE_PATTERNS if re.search(p, low)), None)
+        if hit:
+            findings.append({"file": rel, "line": lineno, "snippet": cmd[:120],
+                             "tier": "blocked", "reason": "destructive command"})
+            continue
+        try:
+            tier = classify_shell_command(cmd)
+        except Exception:
+            continue
+        if tier == "blocked":
+            findings.append({"file": rel, "line": lineno, "snippet": cmd[:120],
+                             "tier": "blocked", "reason": "blocked command"})
+    return findings
+
+
+def _scan_py_file(path: Path, rel: str) -> list[dict]:
+    findings: list[dict] = []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    has_net = re.search(_PY_NET_PATTERN, text) is not None
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        for pattern, reason in _PY_DESTRUCTIVE_PATTERNS:
+            if not re.search(pattern, line):
+                continue
+            # Secret-material mentions only matter when the file can also reach the network.
+            if reason == _SECRET_MATERIAL_REASON and not has_net:
+                continue
+            findings.append({"file": rel, "line": lineno, "snippet": line[:120],
+                             "tier": "blocked", "reason": reason})
+            break
+    return findings
+
+
+def scan_skill_bundle(pkg_dir: Path) -> dict:
+    """Scan a whole skill package — SKILL.md body plus every packaged .sh/.py.
+
+    Returns {"safe": bool, "findings": [{"file","line","snippet","tier","reason"}]}.
+    Non-executable payloads (.md/.txt/.json/.yaml/.csv other than SKILL.md) are
+    not scanned. Unreadable files are reported as findings, never silently passed.
+    """
+    from agenticops.skills.loader import parse_frontmatter
+
+    findings: list[dict] = []
+    skill_md = pkg_dir / "SKILL.md"
+    if skill_md.is_file():
+        try:
+            _, body = parse_frontmatter(skill_md.read_text(encoding="utf-8", errors="replace"))
+            for text in scan_skill_safety(body)["findings"]:
+                findings.append({"file": "SKILL.md", "line": 0, "snippet": text[:120],
+                                 "tier": "blocked", "reason": text})
+        except Exception as e:
+            findings.append({"file": "SKILL.md", "line": 0, "snippet": "",
+                             "tier": "blocked", "reason": f"unreadable SKILL.md: {e}"})
+
+    for path in sorted(pkg_dir.rglob("*")):
+        if path.is_symlink():
+            findings.append({"file": str(path.relative_to(pkg_dir)), "line": 0, "snippet": "",
+                             "tier": "blocked", "reason": "symlink in package"})
+            continue
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(pkg_dir))
+        suffix = path.suffix.lower()
+        try:
+            if suffix == ".sh":
+                findings.extend(_scan_sh_file(path, rel))
+            elif suffix == ".py":
+                findings.extend(_scan_py_file(path, rel))
+        except Exception as e:
+            findings.append({"file": rel, "line": 0, "snippet": "",
+                             "tier": "blocked", "reason": f"unreadable script: {e}"})
+
     return {"safe": len(findings) == 0, "findings": findings}
