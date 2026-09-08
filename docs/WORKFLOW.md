@@ -542,7 +542,9 @@ flowchart LR
 - **Web UI**：Skills → Import → 「URL / Git 仓库」标签页。粘贴地址后，输入框下方实时提示服务端会把它当成什么
   （Git 仓库 / 压缩包链接 / 单个 SKILL.md / 服务器本地路径——与后端 `_is_git` → http → 路径 的判定顺序一致，仅作提示，
   后端是唯一裁判）；可折叠的「只导入指定技能」对应 `--name`。导入完成后弹窗切到**结果面板**：`installed / skipped /
-  rejected` 三组逐条带后端原因，已安装行有「查看并发布 →」直达草稿详情页（那里是既有的 Review / Promote）。
+  rejected` 汇成一张清单：一行总计 + 每个包一行（状态记号、名称、状态词、后端原因），已安装行有「查看并发布」直达草稿详情页
+  （那里是既有的 Review / Promote）。输入框左侧槽位实时显示识别出的来源类型（Git 仓库 / 压缩包 / SKILL.md / 链接 /
+  服务器路径 / 不支持的协议）。
   「上传文件」标签页保留原有拖拽上传。导入来的技能在列表卡片上带 **Imported** 徽标（悬停见来源），详情页多一行
   `来源: <uri> @<ref> · 导入于 <时间>`——这些溯源字段写在 SKILL.md frontmatter 顶层，由 `GET /api/skills`
   （`created_by`/`source_uri`）与 `GET /api/skills/{name}`（另加 `source_ref`/`imported_at`）显式暴露。
