@@ -416,6 +416,36 @@ class TestFetchAndImport:
         assert [s.name for s in res.installed] == ["url-skill"]
         assert (ddir / "url-skill" / "SKILL.md").is_file()
 
+    def test_http_md_url_returning_html_is_rejected(self, tmp_path, skill_dirs, monkeypatch):
+        """A GitHub /blob/ page is text/html but its URL ends in .md. The suffix alone used to
+        admit it, and a 290 KB web page landed as a draft named after the URL (live, 2026-09-08).
+        Frontmatter with name + description is the evidence; nothing may be written without it,
+        and the error must tell a GitHub user which URL to paste instead."""
+        from agenticops.skills import sources
+
+        _sdir, ddir = skill_dirs
+        html = (
+            b"<!DOCTYPE html><html><head><title>skills/find-skills/SKILL.md at main</title></head>"
+            b"<body><div id='repo-content'>...</div></body></html>"
+        )
+        monkeypatch.setattr(sources, "_download", lambda url: (html, "text/html"))
+
+        with pytest.raises(ValueError, match=r"not a SKILL\.md.*raw\.githubusercontent\.com"):
+            sources.import_skills("https://github.com/vercel-labs/skills/blob/main/skills/find-skills/SKILL.md")
+        assert not any(ddir.iterdir()), "a rejected download must leave no draft behind"
+
+    def test_http_markdown_without_frontmatter_is_rejected(self, tmp_path, skill_dirs, monkeypatch):
+        """Same gate, non-GitHub shape: a plain markdown file that is not a SKILL.md."""
+        from agenticops.skills import sources
+
+        _sdir, ddir = skill_dirs
+        monkeypatch.setattr(sources, "_download", lambda url: (b"# Just a README\n\nHello.\n", "text/markdown"))
+
+        with pytest.raises(ValueError, match=r"not a SKILL\.md") as ei:
+            sources.import_skills("https://example.invalid/README.md")
+        assert "raw.githubusercontent.com" not in str(ei.value)  # hint only when the URL is a /blob/ page
+        assert not any(ddir.iterdir())
+
     def test_http_zip_archive(self, tmp_path, skill_dirs, monkeypatch):
         from agenticops.skills import sources
 

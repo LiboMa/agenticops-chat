@@ -140,6 +140,9 @@ aiops skills import /path/to/local/skill-dir --json
 一个仓库/归档里可以装多个技能：递归找出所有含 `SKILL.md` 的目录，每个视作一个包（命中后不再下钻，所以技能自己的
 `references/SKILL.md` 不会被误当成第二个包）。`--name` 可按名过滤。
 
+单个 SKILL.md 链接必须返回**文件本身**：GitHub 请用 `raw.githubusercontent.com` 链接，`/blob/` 页面是 HTML 网页，
+会被拒绝（`not a SKILL.md: no frontmatter with name and description`）——`.md` 后缀不算证据，frontmatter 才算。
+
 逐包硬约束（违反即该包被拒，其余包不受影响）：kebab-case 技能名、无符号链接、归档条目不得为绝对路径/含 `..`/为链接、
 文件后缀在白名单内（**没有后缀的文件会导致整包被拒**——校验会逐个比对 `skills_import_allowed_extensions`）、
 文件数 ≤ `skills_import_max_files`、总字节 ≤ `skills_import_max_package_bytes`。安装用 staging + 原子 rename，
@@ -149,8 +152,8 @@ Web 有两个入口：
 
 - **页面**：Skills → Import → 「URL / Git 仓库」标签页，粘贴地址 → 导入。输入框下方会实时提示服务端将把它当成
   Git 仓库 / 压缩包链接 / 单个 SKILL.md / 服务器本地路径（与后端判定顺序一致，仅作提示）；展开「只导入指定技能」
-  等价于 `--name`。导入后弹窗显示结果面板：已安装 / 已跳过 / 已拒绝三组，每条带后端给出的原因；已安装行点
-  「查看并发布 →」进入草稿详情页做 Review / Promote。导入来的技能卡片上带 **Imported** 徽标，详情页显示来源、
+  等价于 `--name`。导入后弹窗显示结果清单：一行总计，然后每个包一行——状态记号（已落为草稿 / 已跳过 / 已拒绝）、
+  名称与后端给出的原因；已安装行点「查看并发布」进入草稿详情页做 Review / Promote。导入来的技能卡片上带 **Imported** 徽标，详情页显示来源、
   ref 与导入时间。「上传文件」标签页是原有的 `.md` / `.zip` 拖拽上传。
 - **API**：`POST /api/skills/import-source`（`{"uri": ..., "names": [...]}`）；旧的 `POST /api/skills/import`
   仍是 multipart 文件上传那条路，两者不冲突。

@@ -462,7 +462,17 @@ def _fetch_http(uri: str, workdir: Path) -> tuple[Path, str]:
     if path_part.endswith(".md") or ctype in _MARKDOWN_CTYPES:
         text = data.decode("utf-8", errors="replace")
         fm, _ = parse_frontmatter(text)
-        raw = (fm.get("name") if isinstance(fm, dict) else None) or Path(urlparse(uri).path).stem
+        # The `.md` suffix is not evidence of a markdown file: a GitHub `/blob/` page is
+        # text/html, and one was installed here as a 290 KB "SKILL.md" named after the URL
+        # (live, 2026-09-08). Every SKILL.md carries frontmatter with name + description —
+        # demand it before writing anything, and point at the raw URL when the shape says GitHub.
+        if not (isinstance(fm, dict) and fm.get("name") and fm.get("description")):
+            hint = " — for GitHub use the raw.githubusercontent.com URL" if "/blob/" in uri else ""
+            raise ValueError(
+                "not a SKILL.md: no frontmatter with name and description "
+                f"(content-type={ctype or 'unknown'}){hint}"
+            )
+        raw = fm["name"]
         # Sanitize only the DIRECTORY name; the frontmatter name still faces full validation later.
         dirname = re.sub(r"[^a-z0-9-]", "-", str(raw).lower())[:64].strip("-") or "imported-skill"
         root = workdir / "single"
