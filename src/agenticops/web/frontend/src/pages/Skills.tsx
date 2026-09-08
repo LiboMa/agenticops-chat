@@ -1,19 +1,27 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   useSkills,
   useGenerateSkill,
   useSaveDraft,
   useImportSkill,
+  useImportSkillSource,
   useSkillImprovements,
   useSkillImprovementHistory,
   useBatchDismissImprovements,
 } from "@/hooks/useSkills";
+import { ApiError } from "@/api/client";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { useLocale } from "@/i18n/LocaleContext";
-import type { Skill, SkillGenerateResponse, SkillImprovementRecord } from "@/api/types";
+import { detectSkillSource, parseSkillNames, type SkillSourceKind } from "@/lib/skillSource";
+import type {
+  Skill,
+  SkillGenerateResponse,
+  SkillImprovementRecord,
+  SkillImportSourceResult,
+} from "@/api/types";
 
 type Filter = "all" | "published" | "draft";
 
@@ -33,6 +41,19 @@ function DomainBadge({ domain }: { domain: string }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground">
       {domain}
+    </span>
+  );
+}
+
+/** Marks a skill that arrived via URL / git / zip; hover shows where it came from. */
+function ImportedBadge({ sourceUri }: { sourceUri: string | null }) {
+  const { t } = useLocale();
+  return (
+    <span
+      title={sourceUri ?? undefined}
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700"
+    >
+      {t("skills.imported")}
     </span>
   );
 }
@@ -155,8 +176,26 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
 
 /* -- Import Dialog ------------------------------------------------- */
 
-function ImportDialog({ onClose }: { onClose: () => void }) {
-  const { t } = useLocale();
+type ImportTab = "source" | "file";
+
+// i18n key per detected source kind ("empty" renders no chip).
+const SOURCE_KIND_KEY: Record<Exclude<SkillSourceKind, "empty">, string> = {
+  git: "skills.importKind.git",
+  "archive-url": "skills.importKind.archive-url",
+  "skill-md-url": "skills.importKind.skill-md-url",
+  url: "skills.importKind.url",
+  "unsupported-scheme": "skills.importKind.unsupported-scheme",
+  path: "skills.importKind.path",
+};
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Existing multipart upload path (.md / .zip) — behaviour unchanged: success closes the dialog. */
+function FileImportPane({ onClose }: { onClose: () => void }) {
   const importMut = useImportSkill();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -179,47 +218,315 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
   );
 
   return (
+    <div className="px-6 py-6">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileRef.current?.click()}
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          dragOver ? "border-primary-400 bg-primary-50" : "border-border hover:border-muted-foreground"
+        }`}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".md,.zip"
+          className="hidden"
+          onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFile(file); }}
+        />
+        {importMut.isPending ? (
+          <Spinner label="Importing..." />
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Drop a <code>.md</code> or <code>.zip</code> file here, or click to browse
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              ZIP must contain SKILL.md + optional references/*.md
+            </p>
+          </>
+        )}
+      </div>
+      {importMut.isError && (
+        <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded mt-3">{importMut.error.message}</div>
+      )}
+    </div>
+  );
+}
+
+/** URL / git / archive import. The result is handed up so the dialog can show what landed. */
+function SourceImportForm({ onImported }: { onImported: (r: SkillImportSourceResult) => void }) {
+  const { t } = useLocale();
+  const importMut = useImportSkillSource();
+  const [uri, setUri] = useState("");
+  const [showNames, setShowNames] = useState(false);
+  const [namesText, setNamesText] = useState("");
+  const kind = detectSkillSource(uri);
+
+  const submit = () => {
+    const trimmed = uri.trim();
+    if (!trimmed || importMut.isPending) return;
+    const names = parseSkillNames(namesText);
+    importMut.mutate(
+      { uri: trimmed, names: names.length ? names : undefined },
+      { onSuccess: onImported },
+    );
+  };
+
+  // 403 is the one status with a meaning of its own (import switched off server-side);
+  // everything else shows the backend's own `detail` verbatim — it is the truth.
+  const errorText = importMut.isError
+    ? importMut.error instanceof ApiError && importMut.error.status === 403
+      ? t("skills.importDisabled")
+      : importMut.error.message
+    : null;
+
+  return (
+    <div className="px-6 py-5 space-y-4">
+      <div>
+        <label className="text-sm font-medium text-foreground block mb-1">{t("skills.importSourceLabel")}</label>
+        <input
+          autoFocus
+          type="text"
+          value={uri}
+          onChange={(e) => setUri(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={t("skills.importSourcePlaceholder")}
+          spellCheck={false}
+          className="w-full border border-border rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+        />
+        <p className="text-xs text-muted-foreground mt-1">{t("skills.importSourceHelp")}</p>
+        {kind !== "empty" && (
+          <span className="inline-flex items-center mt-2 px-2 py-0.5 rounded-full text-xs bg-secondary text-muted-foreground">
+            {t(SOURCE_KIND_KEY[kind])}
+          </span>
+        )}
+      </div>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowNames((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          {showNames ? "▾" : "▸"} {t("skills.importNamesToggle")}
+        </button>
+        {showNames && (
+          <div className="mt-2">
+            <input
+              type="text"
+              value={namesText}
+              onChange={(e) => setNamesText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              placeholder={t("skills.importNamesPlaceholder")}
+              spellCheck={false}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+            />
+            <p className="text-xs text-muted-foreground mt-1">{t("skills.importNamesHelp")}</p>
+          </div>
+        )}
+      </div>
+
+      {errorText && (
+        <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded break-all">{errorText}</div>
+      )}
+
+      <div className="flex items-center justify-end pt-1">
+        {importMut.isPending ? (
+          <Spinner label={t("skills.importRunning")} />
+        ) : (
+          <button
+            onClick={submit}
+            disabled={!uri.trim()}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
+          >
+            {t("skills.importRun")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultGroup({
+  tone,
+  title,
+  count,
+  children,
+}: {
+  tone: "emerald" | "amber" | "red";
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  if (count === 0) return null;
+  const tones = {
+    emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
+    amber: "bg-amber-50 border-amber-200 text-amber-800",
+    red: "bg-red-50 border-red-200 text-red-800",
+  };
+  return (
+    <div className={`rounded-lg border ${tones[tone]}`}>
+      <div className="px-3 py-1.5 text-xs font-semibold border-b border-inherit">
+        {title} ({count})
+      </div>
+      <ul className="px-3 divide-y divide-border/60">{children}</ul>
+    </div>
+  );
+}
+
+/** What the import did, per skill and with the backend's own reasons — the part worth reading. */
+function ImportResultPanel({
+  result,
+  onAgain,
+  onClose,
+}: {
+  result: SkillImportSourceResult;
+  onAgain: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useLocale();
+  const navigate = useNavigate();
+  const ref = result.source_ref.slice(0, 12);
+  const nothingInstalled = result.installed.length === 0;
+  const nothingFound =
+    nothingInstalled && result.skipped.length === 0 && result.rejected.length === 0;
+
+  return (
+    <>
+      <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+        <div className="text-xs text-muted-foreground break-all">
+          <span className="font-mono">{result.source_uri}</span>
+          {ref && <span className="ml-2 px-1.5 py-0.5 rounded bg-secondary font-mono">ref={ref}</span>}
+        </div>
+
+        {nothingInstalled && (
+          <p className="text-sm font-medium text-foreground">
+            {t("skills.importNothing")}
+            {nothingFound && (
+              <span className="block text-xs font-normal text-muted-foreground mt-1">
+                {t("skills.importNoneFound")}
+              </span>
+            )}
+          </p>
+        )}
+
+        <ResultGroup tone="emerald" title={t("skills.importInstalled")} count={result.installed.length}>
+          {result.installed.map((s) => (
+            <li key={s.name} className="flex items-center justify-between gap-3 py-1.5">
+              <div className="min-w-0">
+                <span className="font-medium text-sm text-foreground">{s.name}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {s.files} {t("skills.importFiles")} · {formatBytes(s.bytes)}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  onClose();
+                  navigate(`/app/skills/${encodeURIComponent(s.name)}`);
+                }}
+                className="shrink-0 text-xs font-medium text-emerald-700 hover:underline"
+              >
+                {t("skills.importViewPromote")}
+              </button>
+            </li>
+          ))}
+        </ResultGroup>
+
+        <ResultGroup tone="amber" title={t("skills.importSkipped")} count={result.skipped.length}>
+          {result.skipped.map((s) => (
+            <li key={s.name} className="py-1.5 text-sm">
+              <span className="font-medium text-foreground">{s.name}</span>
+              <span className="text-muted-foreground"> — {s.reason}</span>
+            </li>
+          ))}
+        </ResultGroup>
+
+        <ResultGroup tone="red" title={t("skills.importRejected")} count={result.rejected.length}>
+          {result.rejected.map((s) => (
+            <li key={s.name} className="py-1.5 text-sm">
+              <span className="font-medium text-foreground">{s.name}</span>
+              <span className="text-muted-foreground"> — {s.reason}</span>
+            </li>
+          ))}
+        </ResultGroup>
+
+        <p className="text-xs text-muted-foreground bg-secondary rounded px-3 py-2">
+          {t("skills.importDraftNote")}
+        </p>
+      </div>
+      <div className="px-6 py-4 border-t border-border flex justify-end gap-2">
+        <button
+          onClick={onAgain}
+          className="px-4 py-2 text-sm font-medium text-muted-foreground bg-secondary rounded-lg hover:bg-muted"
+        >
+          {t("skills.importAgain")}
+        </button>
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"
+        >
+          {t("skills.importDone")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function ImportDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLocale();
+  const [tab, setTab] = useState<ImportTab>("source");
+  const [result, setResult] = useState<SkillImportSourceResult | null>(null);
+
+  // House rule: popups close on ESC. Closing mid-import is allowed on purpose — the
+  // request keeps running server-side and the skills list is invalidated on success.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-background rounded-xl shadow-xl w-full max-w-md mx-4">
+      <div className="relative bg-background rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col animate-[slideInRight_0.2s_ease-out]">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">{t("skills.import")}</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            {result ? t("skills.importResultTitle") : t("skills.import")}
+          </h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none">&times;</button>
         </div>
-        <div className="px-6 py-6">
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              dragOver ? "border-primary-400 bg-primary-50" : "border-border hover:border-muted-foreground"
-            }`}
-          >
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".md,.zip"
-              className="hidden"
-              onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFile(file); }}
-            />
-            {importMut.isPending ? (
-              <Spinner label="Importing..." />
+        {result ? (
+          <ImportResultPanel result={result} onAgain={() => setResult(null)} onClose={onClose} />
+        ) : (
+          <>
+            <div className="px-6 pt-4">
+              <div className="inline-flex gap-1 bg-secondary rounded-lg p-0.5">
+                {(["source", "file"] as ImportTab[]).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setTab(k)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      tab === k
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {t(k === "source" ? "skills.importTabSource" : "skills.importTabFile")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {tab === "source" ? (
+              <SourceImportForm onImported={setResult} />
             ) : (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Drop a <code>.md</code> or <code>.zip</code> file here, or click to browse
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  ZIP must contain SKILL.md + optional references/*.md
-                </p>
-              </>
+              <FileImportPane onClose={onClose} />
             )}
-          </div>
-          {importMut.isError && (
-            <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded mt-3">{importMut.error.message}</div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -236,6 +543,7 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
             <span className="font-medium text-foreground">{skill.name}</span>
             <SkillStatusBadge isDraft={skill.is_draft} />
             <DomainBadge domain={skill.domain} />
+            {skill.created_by === "imported" && <ImportedBadge sourceUri={skill.source_uri} />}
           </div>
           <span className="text-xs text-muted-foreground">
             {skill.ref_count} ref{skill.ref_count !== 1 ? "s" : ""}

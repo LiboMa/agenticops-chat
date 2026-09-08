@@ -3733,6 +3733,8 @@ async def api_list_skills():
             "domain": domain,
             "tools": s.tools,
             "ref_count": ref_count,
+            "created_by": s.created_by,
+            "source_uri": s.source_uri,
         })
     return result
 
@@ -3803,6 +3805,10 @@ async def api_get_skill(name: str):
         "references": references,
         "body_markdown": body,
         "metadata": skill.metadata,
+        "created_by": skill.created_by,
+        "source_uri": skill.source_uri,
+        "source_ref": skill.source_ref,
+        "imported_at": skill.imported_at,
     }
 
 

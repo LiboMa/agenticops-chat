@@ -105,6 +105,31 @@ class TestScanDirectory:
         skills = _scan_directory(tmp_path)
         assert len(skills) == 0
 
+    def test_import_provenance_lifted_from_top_level_frontmatter(self, tmp_path):
+        """skills/sources._stamp_provenance writes source_uri/source_ref/imported_at at the
+        frontmatter TOP LEVEL (not under `metadata`), so the loader must lift them onto
+        SkillMetadata explicitly; a skill without them reads back as None."""
+        _make_skill_dir(
+            tmp_path, "hello-probe",
+            "name: hello-probe\ndescription: Probe\ncreated_by: imported\n"
+            "source_uri: git+https://github.com/org/skills.git#hello-probe\n"
+            "source_ref: 0123456789abcdef\n"
+            "imported_at: '2026-09-08T10:00:00+00:00'\n",
+        )
+        _make_skill_dir(tmp_path, "plain-skill", "name: plain-skill\ndescription: Plain\n")
+
+        by_name = {s.name: s for s in _scan_directory(tmp_path, is_draft=True)}
+        probe, plain = by_name["hello-probe"], by_name["plain-skill"]
+
+        assert probe.created_by == "imported"
+        assert probe.source_uri == "git+https://github.com/org/skills.git#hello-probe"
+        assert probe.source_ref == "0123456789abcdef"
+        assert probe.imported_at == "2026-09-08T10:00:00+00:00"
+        assert "source_uri" not in probe.metadata  # top level is where it lives, not metadata
+
+        assert plain.created_by == "user"
+        assert (plain.source_uri, plain.source_ref, plain.imported_at) == (None, None, None)
+
 
 # ── discover_skills: skills_enabled=False ───────────────────────────
 

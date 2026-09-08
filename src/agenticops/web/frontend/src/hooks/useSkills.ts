@@ -9,6 +9,8 @@ import type {
   SkillReviewData,
   SkillImproveResponse,
   SkillImprovementRecord,
+  SkillImportSourceRequest,
+  SkillImportSourceResult,
 } from "@/api/types";
 
 export function useSkills() {
@@ -70,6 +72,19 @@ export function useImportSkill() {
       }
       return res.json() as Promise<{ name: string; path: string }>;
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
+  });
+}
+
+/** URL / git repo / zip import (distinct from the multipart upload in useImportSkill). */
+export function useImportSkillSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: SkillImportSourceRequest) =>
+      apiFetch<SkillImportSourceResult>("/skills/import-source", {
+        method: "POST",
+        body: JSON.stringify(req),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
   });
 }

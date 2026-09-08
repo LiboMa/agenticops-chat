@@ -145,8 +145,15 @@ aiops skills import /path/to/local/skill-dir --json
 文件数 ≤ `skills_import_max_files`、总字节 ≤ `skills_import_max_package_bytes`。安装用 staging + 原子 rename，
 所以不存在"装了一半"的技能。
 
-Web 入口是 `POST /api/skills/import-source`（`{"uri": ..., "names": [...]}`）；旧的 `POST /api/skills/import`
-仍是 multipart 文件上传那条路，两者不冲突。
+Web 有两个入口：
+
+- **页面**：Skills → Import → 「URL / Git 仓库」标签页，粘贴地址 → 导入。输入框下方会实时提示服务端将把它当成
+  Git 仓库 / 压缩包链接 / 单个 SKILL.md / 服务器本地路径（与后端判定顺序一致，仅作提示）；展开「只导入指定技能」
+  等价于 `--name`。导入后弹窗显示结果面板：已安装 / 已跳过 / 已拒绝三组，每条带后端给出的原因；已安装行点
+  「查看并发布 →」进入草稿详情页做 Review / Promote。导入来的技能卡片上带 **Imported** 徽标，详情页显示来源、
+  ref 与导入时间。「上传文件」标签页是原有的 `.md` / `.zip` 拖拽上传。
+- **API**：`POST /api/skills/import-source`（`{"uri": ..., "names": [...]}`）；旧的 `POST /api/skills/import`
+  仍是 multipart 文件上传那条路，两者不冲突。
 
 导入后走既有审批链：
 

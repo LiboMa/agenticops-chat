@@ -288,8 +288,23 @@ export default function SkillDetail() {
                   <Badge className="bg-emerald-100 text-emerald-700">Published</Badge>
                 )}
                 <Badge className="bg-secondary text-muted-foreground">{skill.domain}</Badge>
+                {skill.created_by === "imported" && (
+                  <Badge className="bg-violet-100 text-violet-700">{t("skills.imported")}</Badge>
+                )}
               </div>
               <p className="text-sm text-muted-foreground mt-1">{skill.description}</p>
+              {skill.created_by === "imported" && skill.source_uri && (
+                <p className="text-xs text-muted-foreground mt-1 break-all">
+                  <span className="font-medium">{t("skills.sourceLabel")}:</span>{" "}
+                  <span className="font-mono">{skill.source_uri}</span>
+                  {skill.source_ref && (
+                    <span className="font-mono"> @{skill.source_ref.slice(0, 12)}</span>
+                  )}
+                  {skill.imported_at && (
+                    <> · {t("skills.importedAt")} {new Date(skill.imported_at).toLocaleString()}</>
+                  )}
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               <button

@@ -89,6 +89,12 @@ class SkillMetadata:
     tools: list[str] = field(default_factory=list)  # dotted paths to @tool functions
     is_draft: bool = False
     created_by: str = "user"
+    # Import provenance (created_by=imported). Stamped at the frontmatter TOP LEVEL by
+    # skills/sources._stamp_provenance, so it never lands in `metadata` — surfaced here
+    # so the web API can show where a skill came from. None for non-imported skills.
+    source_uri: Optional[str] = None
+    source_ref: Optional[str] = None
+    imported_at: Optional[str] = None
 
 
 # ── YAML Frontmatter Parsing ────────────────────────────────────────
@@ -217,6 +223,9 @@ def _scan_directory(directory: Path, is_draft: bool = False) -> list[SkillMetada
                     tools=fm.get("tools", []),
                     is_draft=is_draft,
                     created_by=fm.get("created_by", "user"),
+                    source_uri=fm.get("source_uri"),
+                    source_ref=fm.get("source_ref"),
+                    imported_at=fm.get("imported_at"),
                 )
             )
         except Exception as e:

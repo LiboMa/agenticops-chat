@@ -536,8 +536,16 @@ flowchart LR
   关着时 executor 工具表里不出现 `run_skill_script`；拿不到隔离器（`unshare -n` / `sandbox-exec`）就**拒跑**，
   绝不假装无网络。沙箱**不限制文件系统写入**——所以整包扫描里的破坏性文件操作规则是真实边界。
 
-**入口：** `aiops skills import <uri> [--name N] [--json]` · `POST /api/skills/import-source`
-（旧 `POST /api/skills/import` 仍是 multipart 上传那条路）。
+**入口（三个面）：**
+- CLI：`aiops skills import <uri> [--name N] [--json]`
+- API：`POST /api/skills/import-source`（旧 `POST /api/skills/import` 仍是 multipart 上传那条路）
+- **Web UI**：Skills → Import → 「URL / Git 仓库」标签页。粘贴地址后，输入框下方实时提示服务端会把它当成什么
+  （Git 仓库 / 压缩包链接 / 单个 SKILL.md / 服务器本地路径——与后端 `_is_git` → http → 路径 的判定顺序一致，仅作提示，
+  后端是唯一裁判）；可折叠的「只导入指定技能」对应 `--name`。导入完成后弹窗切到**结果面板**：`installed / skipped /
+  rejected` 三组逐条带后端原因，已安装行有「查看并发布 →」直达草稿详情页（那里是既有的 Review / Promote）。
+  「上传文件」标签页保留原有拖拽上传。导入来的技能在列表卡片上带 **Imported** 徽标（悬停见来源），详情页多一行
+  `来源: <uri> @<ref> · 导入于 <时间>`——这些溯源字段写在 SKILL.md frontmatter 顶层，由 `GET /api/skills`
+  （`created_by`/`source_uri`）与 `GET /api/skills/{name}`（另加 `source_ref`/`imported_at`）显式暴露。
 
 ### Schedule & Task Management via Chat
 

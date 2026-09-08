@@ -288,12 +288,33 @@ export interface Skill {
   domain: string;
   tools: string[];
   ref_count: number;
+  /** "user" (hand-written, pinned) | "agent" (self-created draft) | "imported" (URL/git/zip). */
+  created_by: string;
+  /** Where an imported skill came from; null unless created_by === "imported". */
+  source_uri: string | null;
 }
 
 export interface SkillDetail extends Skill {
   references: string[];
   body_markdown: string;
   metadata: Record<string, unknown>;
+  /** git commit sha / archive sha256 / url — provenance only, never a pin. */
+  source_ref: string | null;
+  imported_at: string | null;
+}
+
+/** POST /api/skills/import-source — import from URL / git repo / zip. Everything lands as a draft. */
+export interface SkillImportSourceRequest {
+  uri: string;
+  names?: string[];
+}
+
+export interface SkillImportSourceResult {
+  source_uri: string;
+  source_ref: string;
+  installed: { name: string; path: string; files: number; bytes: number }[];
+  skipped: { name: string; reason: string }[];
+  rejected: { name: string; reason: string }[];
 }
 
 export interface SkillGenerateRequest {

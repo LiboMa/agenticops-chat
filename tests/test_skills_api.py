@@ -313,7 +313,10 @@ def client():
     return TestClient(app)
 
 
-def _make_skill_meta(name, description, is_draft=False, domain="general", tools=None, path=None):
+def _make_skill_meta(
+    name, description, is_draft=False, domain="general", tools=None, path=None,
+    created_by="user", source_uri=None, source_ref=None, imported_at=None,
+):
     """Create a SkillMetadata-like object for mocking."""
     from agenticops.skills.loader import SkillMetadata
 
@@ -330,6 +333,10 @@ def _make_skill_meta(name, description, is_draft=False, domain="general", tools=
         metadata={"domain": domain},
         tools=tools or [],
         is_draft=is_draft,
+        created_by=created_by,
+        source_uri=source_uri,
+        source_ref=source_ref,
+        imported_at=imported_at,
     )
 
 
@@ -361,7 +368,21 @@ def mock_skills(tmp_path):
         is_draft=True, domain="data", path=redis_dir,
     )
 
-    return [linux, redis]
+    # hello-probe (draft imported from a git repo — carries provenance)
+    probe_dir = tmp_path / "hello-probe"
+    probe_dir.mkdir()
+    (probe_dir / "SKILL.md").write_text("---\nname: hello-probe\ndescription: Probe\n---\n# Probe", encoding="utf-8")
+
+    probe = _make_skill_meta(
+        "hello-probe", "Imported probe skill",
+        is_draft=True, path=probe_dir,
+        created_by="imported",
+        source_uri="git+https://github.com/org/skills.git#hello-probe",
+        source_ref="0123456789abcdef0123456789abcdef01234567",
+        imported_at="2026-09-08T10:00:00+00:00",
+    )
+
+    return [linux, redis, probe]
 
 
 class TestListSkillsAPI:
@@ -393,6 +414,21 @@ class TestListSkillsAPI:
         assert redis["domain"] == "data"
         assert redis["ref_count"] == 0
 
+    def test_list_exposes_import_provenance(self, client, mock_skills):
+        """The Skills page tells an imported draft apart from an agent/user one by
+        `created_by`, and shows where it came from via `source_uri`. Provenance is stamped
+        at the frontmatter top level (not under `metadata`), so it must be surfaced
+        explicitly — a user-authored skill carries no source."""
+        with patch("agenticops.skills.loader.discover_skills", return_value=mock_skills):
+            resp = client.get("/api/skills")
+        data = resp.json()
+        probe = next(s for s in data if s["name"] == "hello-probe")
+        assert probe["created_by"] == "imported"
+        assert probe["source_uri"] == "git+https://github.com/org/skills.git#hello-probe"
+        linux = next(s for s in data if s["name"] == "linux-admin")
+        assert linux["created_by"] == "user"
+        assert linux["source_uri"] is None
+
 
 class TestGetSkillAPI:
     def test_get_existing_skill(self, client, mock_skills):
@@ -408,6 +444,22 @@ class TestGetSkillAPI:
         assert "references" in data
         assert "process-management.md" in data["references"]
         assert data["ref_count"] == 2
+        # Non-imported skill: provenance keys present, all empty.
+        assert data["created_by"] == "user"
+        assert data["source_uri"] is None
+        assert data["source_ref"] is None
+        assert data["imported_at"] is None
+
+    def test_get_imported_skill_carries_full_provenance(self, client, mock_skills):
+        with patch("agenticops.skills.loader.discover_skills", return_value=mock_skills), \
+             patch("agenticops.skills.loader.load_skill_body", return_value="# Probe"):
+            resp = client.get("/api/skills/hello-probe")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created_by"] == "imported"
+        assert data["source_uri"] == "git+https://github.com/org/skills.git#hello-probe"
+        assert data["source_ref"] == "0123456789abcdef0123456789abcdef01234567"
+        assert data["imported_at"] == "2026-09-08T10:00:00+00:00"
 
     def test_get_nonexistent_skill_404(self, client):
         with patch("agenticops.skills.loader.discover_skills", return_value=[]):
