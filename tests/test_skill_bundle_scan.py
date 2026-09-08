@@ -1053,6 +1053,37 @@ class TestPromoteGate:
         archived = list((sdir / ".archive").glob("clean-skill__*"))
         assert archived and (archived[0] / "SKILL.md").read_text(encoding="utf-8") == "OLD VERSION"
 
+    def test_rejected_promote_does_not_archive_the_published_version(self, skill_dirs):
+        """The crossing cell: a published version EXISTS *and* the draft fails the scan.
+
+        Neither sibling test covers it — the reject case above has no published version
+        (so the archive block is a no-op either way) and the accept case ships a clean
+        bundle (so the gate never fires). With the cell untested, moving the archive
+        block above the security gate left 584/584 skills tests green, while a REJECTED
+        promote silently moved the published skill into .archive/ and returned False —
+        which promote's caller then reports to the operator as a 404 "draft not found"
+        (follow-up 9). This pins the gate-before-archive ORDER, which is a data-loss
+        property, not a cosmetic one.
+
+        The content marker matters: a moved-then-recreated SKILL.md would satisfy a bare
+        is_file(), so the assertion has to read the bytes back.
+        """
+        from agenticops.skills.review import promote_skill
+
+        sdir, ddir = skill_dirs
+        (sdir / "demo-skill").mkdir(parents=True)
+        (sdir / "demo-skill" / "SKILL.md").write_text("PUBLISHED V1", encoding="utf-8")
+        _pkg(ddir, "demo-skill", {"danger.sh": "#!/bin/bash\nrm -rf /\n"})
+
+        assert promote_skill("demo-skill") is False
+        published = sdir / "demo-skill" / "SKILL.md"
+        assert published.is_file(), "a rejected promote must not move the published skill"
+        assert published.read_text(encoding="utf-8") == "PUBLISHED V1", \
+            "the published version must be untouched, not replaced"
+        assert list((sdir / ".archive").glob("demo-skill__*")) == [], \
+            "a rejected promote must not archive anything"
+        assert (ddir / "demo-skill" / "SKILL.md").is_file(), "draft must stay put"
+
     def test_promote_scan_can_be_disabled(self, skill_dirs, monkeypatch):
         from agenticops.skills.review import promote_skill
 
