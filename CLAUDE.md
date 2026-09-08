@@ -276,3 +276,12 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
 6. Each Time, 请从Plan Mode 开始
 7. each time when after finsh the development phase, auto-update the docs/ workflows, and readme or related documentation, keep it updated.
 8. use .venv as default python env, source it as needed.
+9. **可达面必须逐行列清**：新增任何用户可达能力时，spec/plan 里必须把 CLI / Web API /
+   **Web UI**(`web/frontend/src/pages/*.tsx`) / Agent tool / Schedule / Notification
+   六个面逐行列出，每行显式写「做」或「非目标」——留空视为遗漏，不是默认不做。
+   **`Web API` 与 `Web UI` 永远是两行**，写成一个「Web」就是这条规则要防的那个 bug
+   (2026-09-07 技能广域加载: spec §7 三行 CLI/Web/Agent 看着完备,「Web」实际只指端点,
+   结果 26 个 commit 前端零改动,而 `pages/Skills.tsx` 早有一个只收文件上传的 Import 按钮)。
+   任何点名了 actor 的决定(「人类动作」/「只给 agent」),下一个问题必须是「该 actor 从哪个面到达它」。
+   汇报完成前自查一次:新增 `/api/` 端点而 `web/frontend/` 零改动时,要么指出对应 UI 改动,
+   要么明确声明「无 UI,理由是 X」,不许沉默通过(提示,非硬闸门——agent/调度专用端点无 UI 是对的)。
