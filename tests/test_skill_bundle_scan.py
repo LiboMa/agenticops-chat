@@ -27,6 +27,20 @@ kubectl get pods
 """
 
 
+@pytest.fixture
+def skill_dirs(tmp_path, monkeypatch):
+    from agenticops.skills.loader import _invalidate_skills_cache
+
+    sdir = tmp_path / "skills"
+    ddir = sdir / "draft"
+    ddir.mkdir(parents=True)
+    monkeypatch.setattr("agenticops.config.settings.skills_dir", sdir, raising=False)
+    monkeypatch.setattr("agenticops.config.settings.skills_draft_dir", ddir, raising=False)
+    _invalidate_skills_cache()
+    yield sdir, ddir
+    _invalidate_skills_cache()
+
+
 def _pkg(root: Path, name: str, files: dict[str, str] | None = None) -> Path:
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
@@ -1012,3 +1026,69 @@ class TestScanSkillBundleAliasBinding:
                      "        self.os.system(c)\n"),
         })
         assert scan_skill_bundle(d)["safe"] is False, scan_skill_bundle(d)["findings"]
+
+
+class TestPromoteGate:
+    def test_promote_rejects_draft_with_blocked_script(self, skill_dirs):
+        from agenticops.skills.review import promote_skill
+
+        sdir, ddir = skill_dirs
+        _pkg(ddir, "wipe-skill", {"danger.sh": "#!/bin/bash\nrm -rf /\n"})
+
+        assert promote_skill("wipe-skill") is False
+        assert (ddir / "wipe-skill" / "SKILL.md").is_file(), "draft must stay put"
+        assert not (sdir / "wipe-skill").exists()
+
+    def test_promote_accepts_clean_bundle_and_archives_previous(self, skill_dirs):
+        from agenticops.skills.review import promote_skill
+
+        sdir, ddir = skill_dirs
+        (sdir / "clean-skill").mkdir(parents=True)
+        (sdir / "clean-skill" / "SKILL.md").write_text("OLD VERSION", encoding="utf-8")
+        _pkg(ddir, "clean-skill", {"check.sh": "#!/bin/bash\nkubectl get pods\n"})
+
+        assert promote_skill("clean-skill") is True
+        assert (sdir / "clean-skill" / "check.sh").is_file()
+        assert not (ddir / "clean-skill").exists()
+        archived = list((sdir / ".archive").glob("clean-skill__*"))
+        assert archived and (archived[0] / "SKILL.md").read_text(encoding="utf-8") == "OLD VERSION"
+
+    def test_promote_scan_can_be_disabled(self, skill_dirs, monkeypatch):
+        from agenticops.skills.review import promote_skill
+
+        monkeypatch.setattr("agenticops.config.settings.skills_security_scan_on_promote", False, raising=False)
+        sdir, ddir = skill_dirs
+        _pkg(ddir, "wipe-skill", {"danger.sh": "#!/bin/bash\nrm -rf /\n"})
+        assert promote_skill("wipe-skill") is True
+
+
+class TestCuratorHandlesImported:
+    def _write(self, d: Path, name: str, created_by: str, last_used: str) -> None:
+        p = d / name
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: aging probe\ncreated_by: {created_by}\n"
+            f"status: active\nlast_used: '{last_used}'\n---\n\nbody\n",
+            encoding="utf-8",
+        )
+
+    def test_imported_ages_like_agent_and_user_is_pinned(self, skill_dirs):
+        from datetime import date
+
+        from agenticops.skills.curator import run_skills_curator
+        from agenticops.skills.loader import parse_frontmatter
+
+        _sdir, ddir = skill_dirs
+        self._write(ddir, "imported-skill", "imported", "2026-01-01")
+        self._write(ddir, "agent-skill", "agent", "2026-01-01")
+        self._write(ddir, "human-skill", "user", "2026-01-01")
+
+        run_skills_curator(stale_days=30, archive_days=60, today=date(2026, 3, 1))
+
+        def status(name: str) -> str:
+            fm, _ = parse_frontmatter((ddir / name / "SKILL.md").read_text(encoding="utf-8"))
+            return fm.get("status")
+
+        assert status("imported-skill") == "stale"
+        assert status("agent-skill") == "stale"
+        assert status("human-skill") == "active", "human skills are pinned"

@@ -1,10 +1,10 @@
 """Skills Curator — agent-draft lifecycle (pure file metadata, zero LLM).
 
-Mirrors memory/curator.py. Ages UNUSED created_by=agent skills:
+Mirrors memory/curator.py. Ages UNUSED created_by=agent|imported skills:
   active --(>stale_days)--> stale --(>stale_days+archive_days)--> archived
 Rules:
-  - Only created_by=agent skills are managed. Human skills (created_by=user)
-    are PINNED — never staled, never archived.
+  - Only created_by=agent and created_by=imported skills are managed. Human
+    skills (created_by=user) are PINNED — never staled, never archived.
   - Never delete; archived skill dirs move to skills/.archive/ (recoverable).
   - Reactivate-on-use handled at read time (touch_skill_used), not here.
 """
@@ -120,7 +120,9 @@ def run_skills_curator(stale_days: int = 30, archive_days: int = 60, today: date
         fm = normalize_skill_frontmatter(fm)
         summary["scanned"] += 1
 
-        if fm.get("created_by") != "agent":
+        # Only non-human skills age. created_by=user is pinned; agent drafts and
+        # imported packages both age because neither was written by the owner.
+        if fm.get("created_by") not in ("agent", "imported"):
             summary["pinned_skipped"] += 1
             continue
 

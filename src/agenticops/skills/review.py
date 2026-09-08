@@ -78,10 +78,11 @@ def review_draft_skill(name: str) -> dict | None:
 def promote_skill(name: str) -> bool:
     """Promote a draft skill to published.
 
-    Security-scans the draft first (skills are executable); a blocked-tier
-    command in its body aborts promotion. Any existing published version is
-    archived to skills/.archive/<name>__<timestamp>/ (multi-generation,
-    recoverable via rollback_skill) instead of a single lossy .bak.
+    Security-scans the draft first (skills are executable); a finding anywhere
+    in the package — SKILL.md body or any bundled .sh/.py script — aborts
+    promotion. Any existing published version is archived to
+    skills/.archive/<name>__<timestamp>/ (multi-generation, recoverable via
+    rollback_skill) instead of a single lossy .bak.
 
     Args:
         name: Name of the draft skill to promote.
@@ -95,13 +96,15 @@ def promote_skill(name: str) -> bool:
         logger.warning("Draft skill '%s' not found at %s", name, draft_dir)
         return False
 
-    # Security gate — skills are executable (run_on_host/run_kubectl)
+    # Security gate — skills are executable (run_on_host/run_kubectl/sandbox)
     if getattr(settings, "skills_security_scan_on_promote", True):
-        from agenticops.skills.security import scan_skill_safety
-        _, body = parse_frontmatter(draft_md.read_text(encoding="utf-8"))
-        scan = scan_skill_safety(body)
+        from agenticops.skills.security import scan_skill_bundle
+        scan = scan_skill_bundle(draft_dir)
         if not scan["safe"]:
-            logger.warning("Skill '%s' failed security scan, NOT promoted: %s", name, scan["findings"])
+            logger.warning(
+                "Skill '%s' failed bundle security scan, NOT promoted: %s",
+                name, scan["findings"],
+            )
             return False
 
     target_dir = settings.skills_dir / name
