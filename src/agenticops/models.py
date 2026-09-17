@@ -463,6 +463,62 @@ class HealthIssue(Base):
 
 
 # ============================================================================
+# Change Requests (MVP-2.6.0 Change Management)
+# ============================================================================
+
+
+class ChangeRequest(Base):
+    """ITSM change ticket: who wants what changed, reviewed by SRE, approved, executed via a Plan."""
+
+    __tablename__ = "change_requests"
+    __table_args__ = (
+        Index("idx_change_request_status", "status"),
+        Index("idx_change_request_requested_by", "requested_by"),
+        Index("idx_change_request_account", "account_id"),
+        Index("idx_change_request_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text)
+    justification: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(20), default="api")  # chat|web|cli|im|webhook|api
+    requested_by: Mapped[str] = mapped_column(String(100), index=True)  # actor key, e.g. user:admin
+    requester_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cloud_accounts.id"), nullable=True)
+    target_hints: Mapped[list] = mapped_column(JSON, default=list)  # raw strings the requester typed (ids/ARNs/names)
+    target_resources: Mapped[list] = mapped_column(JSON, default=list)  # GROUNDED only: [{resource_id, resource_type, db_id, region, evidence}]
+    requested_change_type: Mapped[str] = mapped_column(String(20), default="normal")  # normal|emergency
+    effective_change_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # standard|normal|emergency
+    risk_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # L0-L3
+    action_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # tag|scale|config|network|iam|delete|other
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    review_verdict: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    review_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    policy_rule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    policy_action: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    approver_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approval_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    chat_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships: `plans` (back_populates="change_request") is added in Task 2
+    # together with FixPlan.change_request — a one-sided back_populates breaks
+    # mapper configuration until both ends exist.
+
+
+# ============================================================================
 # Fix Plans (SRE Agent)
 # ============================================================================
 
@@ -499,6 +555,95 @@ class FixPlan(Base):
 FIXPLAN_TERMINAL_STATUSES = {"executed", "failed", "rejected"}
 FIXPLAN_REPLACEABLE_STATUSES = {"draft"}
 FIXPLAN_LOCKED_STATUSES = {"pending_approval", "approved", "executing"}
+
+
+# ── FixPlan state machine (MVP-2.6.0) ─────────────────────────────────
+# Applies to BOTH plan kinds (fix | change). Replaces the direct status
+# assignments that used to live in metadata_tools / pipeline_service /
+# app.py / cli. Terminal: executed, failed, rejected.
+
+VALID_PLAN_STATUSES = {
+    "draft", "pending_approval", "approved", "executing", "executed", "failed", "rejected",
+}
+
+PLAN_TRANSITIONS: dict[str, set[str]] = {
+    "draft":            {"pending_approval", "approved", "rejected"},
+    "pending_approval": {"approved", "rejected"},
+    "approved":         {"executing", "rejected"},   # rejected from approved = withdrawn before execution
+    "executing":        {"executed", "failed"},
+    "executed":         set(),
+    "failed":           set(),
+    "rejected":         set(),
+}
+
+
+def validate_plan_transition(current: str, new: str) -> None:
+    """Validate a FixPlan status transition (raises InvalidStatusTransition / ValueError)."""
+    if new not in VALID_PLAN_STATUSES:
+        raise ValueError(f"Invalid plan status '{new}'. Valid: {', '.join(sorted(VALID_PLAN_STATUSES))}")
+    if current == new:
+        return
+    allowed = PLAN_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidStatusTransition(
+            f"Cannot transition plan from '{current}' to '{new}'. "
+            f"Allowed from '{current}': {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
+def transition_plan(plan, new_status: str) -> None:
+    """Validate and apply a FixPlan status change; stamps updated_at."""
+    validate_plan_transition(plan.status, new_status)
+    plan.status = new_status
+    plan.updated_at = datetime.now(timezone.utc)
+
+
+# ── ChangeRequest (MVP-2.6.0 Change Management) ───────────────────────
+
+VALID_CHANGE_STATUSES = {
+    "draft", "under_review", "needs_clarification", "planned", "approved",
+    "executing", "needs_review", "completed", "failed", "rolled_back", "rejected", "cancelled",
+}
+CHANGE_TERMINAL_STATUSES = {"completed", "failed", "rolled_back", "rejected", "cancelled"}
+
+CHANGE_TRANSITIONS: dict[str, set[str]] = {
+    "draft":               {"under_review", "cancelled"},
+    "under_review":        {"planned", "needs_clarification", "rejected", "draft"},  # draft = watchdog rollback
+    "needs_clarification": {"under_review", "cancelled"},
+    "planned":             {"approved", "rejected", "cancelled"},
+    "approved":            {"executing", "cancelled"},
+    "executing":           {"completed", "failed", "rolled_back", "needs_review"},
+    "needs_review":        {"completed", "failed"},  # human verdict; a redo is a NEW change request
+    "completed":           set(),
+    "failed":              set(),
+    "rolled_back":         set(),
+    "rejected":            set(),
+    "cancelled":           set(),
+}
+
+
+def validate_change_transition(current: str, new: str) -> None:
+    """Validate a ChangeRequest status transition (raises InvalidStatusTransition / ValueError)."""
+    if new not in VALID_CHANGE_STATUSES:
+        raise ValueError(f"Invalid change status '{new}'. Valid: {', '.join(sorted(VALID_CHANGE_STATUSES))}")
+    if current == new:
+        return
+    allowed = CHANGE_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidStatusTransition(
+            f"Cannot transition change from '{current}' to '{new}'. "
+            f"Allowed from '{current}': {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
+def transition_change(cr, new_status: str) -> None:
+    """Validate and apply a ChangeRequest status change; stamps updated_at / closed_at."""
+    validate_change_transition(cr.status, new_status)
+    cr.status = new_status
+    now = datetime.now(timezone.utc)
+    cr.updated_at = now
+    if new_status in CHANGE_TERMINAL_STATUSES:
+        cr.closed_at = now
 
 
 # ============================================================================
