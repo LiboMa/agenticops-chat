@@ -39,7 +39,7 @@ RCA → FixPlan → Executor 的**事件修复流**；(b) 在 Chat 里让 `sre_q
 ## 1. 目标与非目标
 
 **目标**（P1 交付 6 件事）：
-1. `ChangeRequest` 工单 + 泛化的 Plan（`plan_kind` fix|change），两个代码级状态机校验器；Executor 门 `get_approved_fix_plan` 一行不改。
+1. `ChangeRequest` 工单 + 泛化的 Plan（`plan_kind` fix|change），两个代码级状态机校验器；Executor 门 `get_approved_fix_plan` 只做一处等价放宽——同时接受 `executing`（队列路线入队时已把计划标为 executing，而 executing 只能从 approved 经校验器到达；顺带修掉今天队列路线里 Executor 第一步被自己的门拒绝的既有 bug）。
 2. SRE 新增「变更审核」模式：目标资源 grounding（fail-closed）→ 风险定级 → 策略判定 → 出计划（rollback 必填）→ 提交结论；仍然只读。
 3. 身份与授权：Actor 解析 + Run Context + `authz.check` 影子模式 + `config/rbac.yaml` + SoD；审批人绑定认证身份。
 4. 两本账：`audit_logs` 真正写入（所有人工/自动决策，与状态变更同事务）+ 新表 `command_audits`（工具层写级命令，覆盖 fix / change / Chat 直接写三条路）。
@@ -327,7 +327,8 @@ rejection_reason, updated_at`。`FixExecutionResponse.health_issue_id` 改 Optio
 | requester_user_id | Integer nullable | `users.id`（无 FK，与 `api_keys.user_id` 同法） |
 | requested_at | DateTime | |
 | account_id | Integer FK accounts.id nullable | |
-| target_resources | JSON list | `[{resource_id, resource_type, db_id?, evidence}]`，仅 grounding 通过的 |
+| target_hints | JSON list | 申请人给出的原始资源标识字符串（ID / ARN / 名称），供 grounding 匹配 |
+| target_resources | JSON list | `[{resource_id, resource_type, db_id?, region?, evidence}]`，仅 grounding 通过的 |
 | requested_change_type | String(20) | normal / emergency |
 | effective_change_type | String(20) nullable | standard / normal / emergency（策略决定） |
 | risk_level | String(20) nullable | L0-L3 |
