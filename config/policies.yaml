@@ -77,10 +77,12 @@ rules:
 # every -/-- option dropped, option values kept, lower-cased) and a pattern hits
 # when its words appear in that order — not necessarily adjacent. Bare words
 # match whole tokens; hyphenated entries match as prefixes. `aws rds modify-`
-# hits `aws --profile p rds modify-db-instance`; `reboot` hits `sudo reboot` but
-# NOT `aws ec2 reboot-instances` (add `aws ec2 reboot-` for that) nor
-# `--tags Key=x,Value=reboot-test`; `kubectl delete` does NOT hit
-# `kubectl label pod delete-me`.
+# hits `aws --profile p rds modify-db-instance`; the bare `reboot` hits
+# `sudo reboot` but not `--tags Key=x,Value=reboot-test`, and it is the
+# `aws ec2 reboot-` entry (not `reboot`) that catches `aws ec2 reboot-instances`;
+# `kubectl delete` does NOT hit `kubectl label pod delete-me`. EC2 reboot/stop are
+# service-affecting (L2/L3 in the SRE rubric); `aws ec2 start-` is deliberately
+# not listed.
 # Deliberately conservative — L1-class writes such as tagging or a
 # single-workload `kubectl scale` are NOT here (the SRE risk rubric says L1).
 # Tune here, not in code.
@@ -90,6 +92,8 @@ change_required:
   - aws ec2 authorize-
   - aws rds modify-
   - aws rds reboot-
+  - aws ec2 reboot-
+  - aws ec2 stop-
   - aws autoscaling update-
   - aws autoscaling set-
   - aws lambda update-

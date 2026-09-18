@@ -425,7 +425,11 @@ class TestChangeRequiredNormalization:
         assert eng.change_required_match("aws rds modify-db-instance --x") == "aws rds modify-"
         assert eng.change_required_match("sudo reboot") == "reboot"
         assert eng.change_required_match("systemctl restart-all-the-things") is None
-        assert eng.change_required_match("aws ec2 reboot-instances --instance-ids i-1") is None   # bare `reboot` no longer prefix-hits (see report §11)
+        # Policy ruling (round 3): EC2 reboot/stop are service-affecting and have their own hyphenated entries;
+        # the bare `reboot` word no longer prefix-hits, and `start-` is deliberately NOT gated.
+        assert eng.change_required_match("aws ec2 reboot-instances --instance-ids i-1") == "aws ec2 reboot-"
+        assert eng.change_required_match("aws ec2 stop-instances --instance-ids i-1") == "aws ec2 stop-"
+        assert eng.change_required_match("aws ec2 start-instances --instance-ids i-1") is None
 
 
 class TestGuardedRun:
