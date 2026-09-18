@@ -7,7 +7,7 @@ kinds: user (authenticated web user, id=email) | web (anonymous) | cli (os user)
 from __future__ import annotations
 
 import getpass
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 
@@ -36,10 +36,18 @@ def actor_from_user(user: Any) -> Actor:
 
 
 def actor_from_request(request: Any) -> Actor:
-    user = getattr(getattr(request, "state", None), "user", None)
+    state = getattr(request, "state", None)
+    user = getattr(state, "user", None)
     if user is None:
         return web_anonymous_actor()
-    return actor_from_user(user)
+    actor = actor_from_user(user)
+    api_key = getattr(state, "api_key", None)
+    if api_key is not None:
+        # API-key auth (APIAuthMiddleware leaves the key on request.state): the key's scoped permissions CAP
+        # the owner's — owner ∩ key, never a grant (spec §3.3 row 1; mirrors auth/service.require_auth).
+        key_perms = set(getattr(api_key, "permissions", None) or ())
+        actor = replace(actor, permissions=tuple(sorted(set(actor.permissions) & key_perms)))
+    return actor
 
 
 def cli_actor() -> Actor:

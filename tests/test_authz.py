@@ -46,6 +46,23 @@ class TestActor:
         assert parse_actor(":x") == Actor("web", ":x")
         assert parse_actor("") == Actor("web", "anonymous")
 
+    def test_from_request_intersects_api_key_permissions(self):
+        """I-5 (spec §3.3 row 1): on API-key auth the middleware leaves the key on request.state and the actor's
+        flags are the OWNER's ∩ the KEY's — a read-only key never carries its owner's write/admin."""
+        user = SimpleNamespace(id=5, email="admin", permissions=["read", "write", "admin"])
+        req = SimpleNamespace(state=SimpleNamespace(user=user, api_key=SimpleNamespace(permissions=["read"])))
+        a = actor_from_request(req)
+        assert (a.kind, a.id, a.user_id, a.permissions) == ("user", "admin", 5, ("read",))
+        # a key can never GRANT a flag its owner lacks
+        owner_rw = SimpleNamespace(id=6, email="rw", permissions=["read", "write"])
+        req = SimpleNamespace(state=SimpleNamespace(user=owner_rw, api_key=SimpleNamespace(permissions=["read", "admin"])))
+        assert actor_from_request(req).permissions == ("read",)
+        # a key without permissions (default create_api_key → ["read"] happens upstream; None here) grants nothing
+        req = SimpleNamespace(state=SimpleNamespace(user=user, api_key=SimpleNamespace(permissions=None)))
+        assert actor_from_request(req).permissions == ()
+        # session auth (no api_key on state) is unchanged
+        assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=user))).permissions == ("read", "write", "admin")
+
     def test_actor_from_run_context_rebuilds_user_with_permissions(self):
         # Task 9 agent tools rebuild the actor from the Run Context; without the permission flags every
         # authenticated user would fail the rbac matrix (shadow-denied) — the flags must round-trip.
@@ -226,6 +243,39 @@ class TestCheck:
              patch("agenticops.audit.service.AuditService.log"):
             with pytest.raises(AuthzDenied):
                 check(agent_actor("sre"), "plan.approve", subject=plan)
+
+    def test_read_only_api_key_cannot_approve_under_enforce(self, policy):
+        """I-5: user [read, write, admin] + key [read] → plan.approve is denied under rbac_enforce; the same user
+        through session auth is allowed."""
+        from agenticops.config import settings
+        user = SimpleNamespace(id=5, email="admin", permissions=["read", "write", "admin"])
+        plan = SimpleNamespace(id=1, risk_level="L1", requested_by=None)
+        via_key = actor_from_request(SimpleNamespace(state=SimpleNamespace(user=user, api_key=SimpleNamespace(permissions=["read"]))))
+        via_session = actor_from_request(SimpleNamespace(state=SimpleNamespace(user=user)))
+        with patch.object(settings, "rbac_enforce", True), \
+             patch("agenticops.audit.service.AuditService.log") as log:
+            with pytest.raises(AuthzDenied) as ei:
+                check(via_key, "plan.approve", subject=plan)
+            check(via_session, "plan.approve", subject=plan)  # unchanged
+        assert "write" in ei.value.reason and ei.value.actor == "user:admin"
+        assert log.call_count == 1 and log.call_args.kwargs["action"] == "authz.denied"
+
+    def test_current_actor_stamps_intersected_permissions_on_run_context(self):
+        """The web dependency carries the intersected flags onto the Run Context, so agent tools rebuilding the
+        actor from it (approve_fix_plan) see the key's ceiling too."""
+        import asyncio
+        from agenticops.run_context import get_run_context, run_context
+        from agenticops.web.deps import current_actor
+        user = SimpleNamespace(id=5, email="admin", permissions=["read", "write"])
+        req = SimpleNamespace(state=SimpleNamespace(user=user, api_key=SimpleNamespace(permissions=["read"])))
+
+        async def go():
+            actor = await current_actor(req)
+            return actor, get_run_context()
+
+        with run_context():
+            actor, ctx = asyncio.run(go())
+        assert actor.permissions == ("read",) and ctx.actor_permissions == ("read",) and ctx.actor == "user:admin"
 
     def test_allowed_is_silent(self, policy):
         with patch("agenticops.audit.service.AuditService.log") as log:

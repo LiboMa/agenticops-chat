@@ -4192,7 +4192,9 @@ if settings.api_auth_enabled:
             if token.startswith("aiops_"):
                 result = AuthService.validate_api_key(token)
                 if result:
-                    user, _ = result
+                    user, api_key = result
+                    # The key's scoped permissions cap the owner's: actor_from_request intersects them.
+                    request.state.api_key = api_key
             else:
                 user = AuthService.validate_session(token)
 
