@@ -155,7 +155,34 @@ class ExecutorService:
         watchdog.start()
 
     def _run_executor(self, execution_id: int, fix_plan_id: int):
-        """Invoke executor_agent for a specific fix plan."""
+        """Invoke executor_agent for a specific fix plan (worker thread — sets its own Run Context).
+
+        The context carries the plan (so ``approved_plan_in_context()`` lets change_required
+        commands run), the approver as ``on_behalf_of`` and the issue's trace id. It is set even
+        when the lookup fails, so audit rows are never attributed to ``system``.
+        """
+        from agenticops.config import set_trace_id
+        from agenticops.run_context import RunContext, reset_run_context, set_run_context
+        approved_by = trace_id = None
+        change_request_id = None
+        try:
+            from agenticops.models import FixPlan, HealthIssue, get_db_session
+            with get_db_session() as db:
+                plan = db.query(FixPlan).filter_by(id=fix_plan_id).first()
+                if plan:
+                    approved_by = plan.approved_by
+                    change_request_id = plan.change_request_id
+                    if plan.health_issue_id:
+                        trace_id = db.query(HealthIssue.trace_id).filter_by(id=plan.health_issue_id).scalar()
+                    elif plan.change_request:
+                        trace_id = plan.change_request.trace_id
+        except Exception:
+            logger.debug("executor run-context lookup failed for FixPlan #%d", fix_plan_id, exc_info=True)
+        if trace_id:
+            set_trace_id(trace_id)
+        _rc_token = set_run_context(RunContext(actor="agent:executor", on_behalf_of=approved_by, trace_id=trace_id,
+                                               agent_name="executor", fix_plan_id=fix_plan_id,
+                                               change_request_id=change_request_id))
         try:
             from agenticops.agents.executor_agent import executor_agent
 
@@ -170,6 +197,7 @@ class ExecutorService:
             logger.exception("Executor agent crashed for FixPlan #%d", fix_plan_id)
             self._mark_crashed(execution_id, fix_plan_id, str(e))
         finally:
+            reset_run_context(_rc_token)  # self-contained: never leaves the plan context behind
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 

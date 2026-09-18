@@ -75,8 +75,11 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
 
 
 def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
-    """Run sre_agent for the given issue to generate a fix plan."""
+    """Run sre_agent for the given issue to generate a fix plan (daemon thread — sets its own Run Context)."""
     _restore_trace_id(trace_id)
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="sre"))
     try:
         from agenticops.agents.sre_agent import sre_agent
 
@@ -87,6 +90,8 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         )
     except Exception:
         logger.exception("Auto-SRE failed for HealthIssue #%d", health_issue_id)
+    finally:
+        reset_run_context(_rc_token)
 
 
 # ── Stage 2: Auto-Approve (after fix plan saved) ─────────────────────
@@ -304,6 +309,13 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
     except Exception:
         pass
 
+    # Daemon thread — sets its own Run Context; fix_plan_id is what lets
+    # approved_plan_in_context() admit change_required commands for this plan.
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=trace_id or get_trace_id(),
+                                           agent_name="executor", fix_plan_id=fix_plan_id))
+
     if _issue_id:
         from agenticops.services.pipeline_events import log_event
         log_event(_issue_id, "execution_started", "execution", "started",
@@ -325,6 +337,7 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
                       detail={"plan_id": fix_plan_id}, trace_id=trace_id)
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)
     finally:
+        reset_run_context(_rc_token)
         # Safety net: flush any consolidated notifications for this issue
         if _issue_id:
             try:

@@ -3910,6 +3910,14 @@ async def api_send_chat_message(session_id: str, request: Request):
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
         set_trace_id(_chat_trace_id)
+        # Run Context for this chat turn — tools/services read it for audit attribution
+        # (the REST dependency current_actor does not run for this SSE handler).
+        from agenticops.auth.actor import actor_from_request
+        from agenticops.run_context import RunContext, set_run_context
+        _actor = actor_from_request(request)
+        set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
+                                   actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
+                                   agent_name="main", chat_session_id=session_id))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []

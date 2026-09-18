@@ -3852,6 +3852,11 @@ def _run_headless(query: str, account: Optional[str] = None):
     from agenticops.config import generate_trace_id, set_trace_id
     from agenticops.services.agent_log_service import track_agent
     set_trace_id(generate_trace_id())
+    # Run Context for this headless turn (audit attribution: cli:<os user>)
+    from agenticops.auth.actor import cli_actor as _cli_actor
+    from agenticops.run_context import RunContext as _RC, set_run_context as _set_rc
+    from agenticops.config import get_trace_id as _get_tid
+    _set_rc(_RC(actor=_cli_actor().key, trace_id=_get_tid(), agent_name="main"))
 
     is_tty = sys.stdout.isatty()
 
@@ -4279,6 +4284,11 @@ def chat(
             # Set trace_id for this REPL turn
             from agenticops.config import generate_trace_id as _gen_tid, set_trace_id as _set_tid
             _set_tid(_gen_tid())
+            # Run Context for this REPL turn (audit attribution: cli:<os user>)
+            from agenticops.auth.actor import cli_actor as _cli_actor
+            from agenticops.run_context import RunContext as _RC, set_run_context as _set_rc
+            from agenticops.config import get_trace_id as _get_tid
+            _set_rc(_RC(actor=_cli_actor().key, trace_id=_get_tid(), agent_name="main"))
 
             # Call agent with streaming output + animated spinner
             try:
