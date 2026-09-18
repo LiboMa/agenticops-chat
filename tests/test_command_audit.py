@@ -365,6 +365,9 @@ class TestChangeRequiredNormalization:
     must equal the whole command token, a hyphenated one (`modify-`, `modify-security-group`) matches as a prefix
     (round 3). No raw-substring fallback. A kept token that still contains whitespace is a QUOTED PAYLOAD
     (`bash -c "…"`, `ssh host '…'`) and is re-split the same way, so its words face the gate too (round 4).
+    Each token carries an `eligible_for_prefix` flag — False when the ORIGINAL token before it is a value-taking
+    option (`-`-prefixed, not `-`/`--`, no `=`); only HYPHENATED pattern tokens consult it, so an option value such as
+    `--function-name update-inventory` never hits `aws lambda update-` while bare verbs keep no adjacency rule.
     """
 
     @pytest.mark.parametrize("command", [
@@ -398,19 +401,30 @@ class TestChangeRequiredNormalization:
         from agenticops.services.policy_engine import get_policy_engine
         assert get_policy_engine(reload=True).change_required_match(command) is None
 
-    def test_normalize_for_policy_returns_tokens(self):
+    def test_normalize_for_policy_returns_tokens_with_prefix_eligibility(self):
+        """(token, eligible_for_prefix): a token right after a value-taking option is NOT eligible; `--opt=value`
+        is self-contained so the next token stays eligible; sudo/env and `-` tokens are dropped."""
         from agenticops.services.policy_engine import _normalize_for_policy
-        assert _normalize_for_policy("kubectl -n prod delete pod x") == ["kubectl", "prod", "delete", "pod", "x"]
-        assert _normalize_for_policy("sudo -u postgres systemctl restart pg") == ["postgres", "systemctl", "restart", "pg"]
-        assert _normalize_for_policy("env FOO=1 aws --profile=p EC2 modify-x --group-id sg-1") == ["foo=1", "aws", "ec2", "modify-x", "sg-1"]
-        assert _normalize_for_policy("systemctl restart 'nginx") == ["systemctl", "restart", "'nginx"]  # unbalanced quote → str.split
+        assert _normalize_for_policy("kubectl -n prod delete pod x") == \
+               [("kubectl", True), ("prod", False), ("delete", True), ("pod", True), ("x", True)]
+        assert _normalize_for_policy("sudo -u postgres systemctl restart pg") == \
+               [("postgres", False), ("systemctl", True), ("restart", True), ("pg", True)]
+        assert _normalize_for_policy("env FOO=1 aws --profile=p EC2 modify-x --group-id sg-1") == \
+               [("foo=1", True), ("aws", True), ("ec2", True), ("modify-x", True), ("sg-1", False)]
+        assert _normalize_for_policy("systemctl restart 'nginx") == \
+               [("systemctl", True), ("restart", True), ("'nginx", True)]                 # unbalanced quote → str.split
+        assert _normalize_for_policy("kubectl exec pod -- rm-rf-ish arg") == \
+               [("kubectl", True), ("exec", True), ("pod", True), ("rm-rf-ish", True), ("arg", True)]  # `--` is a marker, not an option
         assert _normalize_for_policy("") == []
 
     def test_pattern_tokens_are_ordered_prefixes(self):
         from agenticops.services.policy_engine import PolicyEngine
         eng = PolicyEngine({"rules": [], "change_required": ["aws rds modify-", "kubectl delete"]})
         assert eng.change_required_match("aws rds modify-db-instance") == "aws rds modify-"
-        assert eng.change_required_match("aws rds --x modify-db-instance") == "aws rds modify-"   # not adjacent
+        assert eng.change_required_match("aws --profile p rds modify-db-instance") == "aws rds modify-"   # not adjacent (`p` between)
+        # Round-4 addendum: an option directly BEFORE a hyphenated token makes it an option VALUE (`--x` might take
+        # one), so the round-2 "not adjacent" shape is now a documented pass — see test_option_values_are_not_eligible…
+        assert eng.change_required_match("aws rds --x modify-db-instance") is None
         assert eng.change_required_match("rds aws modify-db-instance") is None                     # order matters
         assert eng.change_required_match("aws rds modif") is None                                  # prefix runs pattern→command only
         assert eng.change_required_match("aws rds") is None                                        # every pattern token must be consumed
@@ -472,12 +486,41 @@ class TestChangeRequiredNormalization:
         assert get_policy_engine(reload=True).change_required_match(command) == pattern
 
     def test_normalize_for_policy_resplits_quoted_payloads(self):
+        """A re-split payload is a command in its own right: eligibility is judged INSIDE it (its first word has no
+        predecessor), so `bash -c "aws ec2 modify-…"` keeps the hyphenated gate — see 12.7 for the deviation."""
         from agenticops.services.policy_engine import _normalize_for_policy
-        assert _normalize_for_policy('bash -c "systemctl restart nginx"') == ["bash", "systemctl", "restart", "nginx"]
-        assert _normalize_for_policy('ssh host "sudo systemctl restart nginx"') == ["ssh", "host", "systemctl", "restart", "nginx"]
-        assert _normalize_for_policy('bash -c "kubectl -n prod delete pod x"') == ["bash", "kubectl", "prod", "delete", "pod", "x"]
-        assert _normalize_for_policy('bash -c "echo \'oops"') == ["bash", "echo", "'oops"]   # inner unbalanced quote → str.split
-        assert _normalize_for_policy('bash -c " "') == ["bash"]                              # whitespace-only payload adds nothing
+        assert _normalize_for_policy('bash -c "systemctl restart nginx"') == \
+               [("bash", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy('ssh host "sudo systemctl restart nginx"') == \
+               [("ssh", True), ("host", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy('bash -c "kubectl -n prod delete pod x"') == \
+               [("bash", True), ("kubectl", True), ("prod", False), ("delete", True), ("pod", True), ("x", True)]
+        assert _normalize_for_policy('bash -c "echo \'oops"') == [("bash", True), ("echo", True), ("'oops", True)]  # inner unbalanced quote → str.split
+        assert _normalize_for_policy('bash -c " "') == [("bash", True)]                                             # whitespace-only payload adds nothing
+
+    @pytest.mark.parametrize("command,pattern", [
+        # Round-4 addendum (lead ruling): a verb-shaped RESOURCE NAME in an option value is not an operation.
+        ("aws lambda invoke --function-name update-inventory", None),
+        ("aws rds create-db-instance --db-instance-identifier modify-test", None),
+        ("aws ec2 run-instances --key-name stop-key", None),
+        # …while the operation token itself (preceded by the service, a positional or a self-contained --opt=value) still hits.
+        ("aws --profile p rds modify-db-instance --x", "aws rds modify-"),
+        ("aws --region=us-east-1 ec2 modify-security-group-rules", "aws ec2 modify-security-group"),
+        ("aws ec2 --region=us-east-1 modify-security-group-rules --group-id sg-1", "aws ec2 modify-security-group"),
+        ("aws ec2 stop-instances --instance-ids i-1", "aws ec2 stop-"),
+        # Bare pattern words keep NO adjacency rule (the value after `--user` / `--as` is irrelevant to them).
+        ("systemctl --user restart myapp", "systemctl restart"),
+        ("kubectl --as admin delete pod x", "kubectl delete"),
+        # Deviation from the literal addendum: a `-c` payload is a command in its own right, not prose — taking its
+        # tokens as ineligible would re-open the round-4 hole for every hyphenated (AWS-style) pattern.
+        ('bash -c "aws ec2 modify-security-group-rules --group-id sg-1"', "aws ec2 modify-security-group"),
+        # Bound of the ruling, pinned so it is visible: a boolean flag directly before the operation reads as
+        # value-taking (no per-CLI option table — round-2 ruling), so this shape is a pass, not a refusal.
+        ("aws ec2 --no-cli-pager modify-security-group-rules --group-id sg-1", None),
+    ])
+    def test_option_values_are_not_eligible_for_hyphenated_patterns(self, command, pattern):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
 
     def test_normalize_for_policy_recursion_is_bounded(self):
         """Depth ≤ 3 recursive re-splits, then a flat str.split: four nested shells still resolve, five do not

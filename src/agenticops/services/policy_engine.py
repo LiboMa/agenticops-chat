@@ -90,55 +90,76 @@ def _bump_risk(risk_level: str) -> str:
 # `kubectl scale deployment/shutdown-handler` and `--tags Key=x,Value=reboot-test` do not.
 # A QUOTED PAYLOAD (`bash -c "systemctl restart nginx"`, `sh -c '…'`, `ssh host '…'`, `su -c '…'`) survives shlex
 # as ONE token; it is re-split the same way (depth-bounded) so its words face the gate like any other tokens.
+# OPTION VALUES are not operations: a token whose ORIGINAL predecessor is a value-taking option (`-`-prefixed, not
+# the bare `-`/`--` markers, no `=`) is ineligible for HYPHENATED pattern tokens, so `--function-name update-inventory`
+# does not hit `aws lambda update-`; bare pattern words keep no adjacency rule (`kubectl --as admin delete pod x`).
 _POLICY_WRAPPERS = ("sudo", "env")
 _POLICY_RESPLIT_MAX_DEPTH = 3
 
 
-def _normalize_for_policy(command: str, _depth: int = 0) -> list[str]:
-    """Lower-cased token list with wrappers and option tokens removed; option values stay as ordinary tokens.
+def _is_value_taking_option(token: str) -> bool:
+    """An option that MAY consume the next token as its value: `-n`, `--profile`; not `-`/`--` (POSIX markers,
+    positionals follow them) and not `--opt=value` (self-contained). Whether it really takes a value is
+    CLI-specific, so the next token is treated as a value — the direction the lead ruled for hyphenated patterns."""
+    return token.startswith("-") and token not in ("-", "--") and "=" not in token
+
+
+def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
+    """Lower-cased `(token, eligible_for_prefix)` pairs with wrappers and option tokens removed.
 
     shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token starting
-    with '-' dropped. Option values are kept on purpose: deciding which options take a value is CLI-specific
-    guesswork, and a kept value can only add a token the ordered match must skip over.
+    with '-' dropped. Option VALUES are kept as ordinary tokens — a kept value can only add a token the ordered
+    match must skip over — but they are flagged: `eligible_for_prefix` is False when the ORIGINAL predecessor is
+    a value-taking option (_is_value_taking_option), and only hyphenated pattern tokens consult the flag.
 
     A kept token that still contains whitespace was a quoted payload (`bash -c "systemctl restart nginx"`,
     `ssh host "sudo …"`); it is normalised recursively with the same rules and spliced in place, so the words
-    inside face the gate too. The wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at
-    _POLICY_RESPLIT_MAX_DEPTH (deeper payloads get a flat str.split), and nothing here raises on odd input.
+    inside face the gate too. The wrapper's own `-c`/`-lc` went with the option drop. A payload is scored as a
+    command in its own right (its first word has no predecessor), so `bash -c "aws ec2 modify-…"` keeps the
+    hyphenated gate. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper payloads get a flat str.split),
+    and nothing here raises on odd input.
     """
     try:
         tokens = shlex.split(command or "")
     except ValueError:
         tokens = (command or "").split()
-    while tokens and tokens[0].lower() in _POLICY_WRAPPERS:
-        tokens.pop(0)
-    out: list[str] = []
-    for token in tokens:
+    return _policy_tokens(tokens, _depth)
+
+
+def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
+    start = 0
+    while start < len(tokens) and tokens[start].lower() in _POLICY_WRAPPERS:
+        start += 1
+    out: list[tuple[str, bool]] = []
+    for i in range(start, len(tokens)):
+        token = tokens[i]
         if token.startswith("-"):
             continue
         if any(ch.isspace() for ch in token):
-            if _depth < _POLICY_RESPLIT_MAX_DEPTH:
-                out.extend(_normalize_for_policy(token, _depth + 1))
+            if depth < _POLICY_RESPLIT_MAX_DEPTH:
+                out.extend(_normalize_for_policy(token, depth + 1))
             else:
-                out.extend(t.lower() for t in token.split() if not t.startswith("-"))
+                out.extend(_policy_tokens(token.split(), depth))  # str.split yields no whitespace tokens: no recursion
             continue
-        out.append(token.lower())
+        eligible = i == 0 or not _is_value_taking_option(tokens[i - 1])
+        out.append((token.lower(), eligible))
     return out
 
 
-def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[str]) -> bool:
+def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[tuple[str, bool]]) -> bool:
     """True when every pattern token is matched, in order, by a command token.
 
     A bare pattern word matches only an identical token; a hyphenated pattern token matches as a prefix (the
-    hyphen marks the AWS-style `service verb-…` forms). Bare-word prefixing was a false positive on legitimate
-    L1 writes such as `kubectl label pod delete-me`.
+    hyphen marks the AWS-style `service verb-…` forms) and only against a token that is eligible — i.e. not an
+    option value (`--function-name update-inventory` is a resource name, not an operation). Bare-word prefixing
+    was a false positive on legitimate L1 writes such as `kubectl label pod delete-me`.
     """
     if not pattern_tokens:
         return False
     i = 0
-    for token in command_tokens:
+    for token, eligible in command_tokens:
         wanted = pattern_tokens[i]
-        if token == wanted or ("-" in wanted and token.startswith(wanted)):
+        if (eligible and token.startswith(wanted)) if "-" in wanted else token == wanted:
             i += 1
             if i == len(pattern_tokens):
                 return True
@@ -351,7 +372,8 @@ class PolicyEngine:
         fallback — a pattern word inside a token (`deployment/shutdown-handler`, `Value=reboot-test`,
         `delete-me`) is not a match. Quoted payloads are re-split first, so `bash -c "systemctl restart nginx"`
         and `ssh host "sudo systemctl restart nginx"` match `systemctl restart` (and so does a pattern word
-        inside quoted prose — a deliberate false refusal, tunable in the yaml, never a false pass).
+        inside quoted prose — a deliberate false refusal, tunable in the yaml, never a false pass). A hyphenated
+        pattern token never matches an option VALUE: `aws lambda invoke --function-name update-inventory` is None.
         """
         command_tokens = _normalize_for_policy(command)
         for pattern in self.change_required:
