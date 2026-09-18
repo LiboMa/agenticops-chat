@@ -328,24 +328,28 @@ class AuditService:
 
     @staticmethod
     def maybe_prune_daily() -> None:
-        """Once per process-day: delete audit_logs + command_audits older than audit_retention_days."""
+        """Once per process-day: delete audit_logs + command_audits older than audit_retention_days.
+
+        The day marker is set only after a SUCCESSFUL prune: a failed attempt (DB outage) is logged at
+        WARNING and retried on the next call instead of silently skipping retention for a day."""
         global _last_prune_date
         from agenticops.config import settings
         days = int(getattr(settings, "audit_retention_days", 0) or 0)
         today = datetime.now(timezone.utc).date()
         if days <= 0 or _last_prune_date == today:
             return
-        _last_prune_date = today
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         try:
             from agenticops.models import CommandAudit
             with get_db_session() as db:
                 a = db.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete(synchronize_session=False)
                 c = db.query(CommandAudit).filter(CommandAudit.created_at < cutoff).delete(synchronize_session=False)
-            if a or c:
-                logger.info("audit: pruned %d audit_logs + %d command_audits older than %dd", a, c, days)
         except Exception:
-            logger.debug("audit prune failed", exc_info=True)
+            logger.warning("audit prune failed — will retry on the next call", exc_info=True)
+            return
+        _last_prune_date = today
+        if a or c:
+            logger.info("audit: pruned %d audit_logs + %d command_audits older than %dd", a, c, days)
 
 
 # ============================================================================

@@ -2445,10 +2445,11 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        # An already-decided plan is a state conflict (409, as reject reports it), not a bad request.
         if plan.status == "approved":
-            raise HTTPException(status_code=400, detail="Fix plan is already approved")
+            raise HTTPException(status_code=409, detail="Fix plan is already approved")
         if plan.status == "rejected":
-            raise HTTPException(status_code=400, detail="Fix plan was rejected. Create a new plan instead")
+            raise HTTPException(status_code=409, detail="Fix plan was rejected. Create a new plan instead")
         try:
             authz.check(actor, "plan.approve", subject=plan)
         except authz.AuthzDenied as e:

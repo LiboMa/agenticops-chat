@@ -81,6 +81,22 @@ def test_reject_endpoint_requires_reason(client):
     assert len(_audit_rows("plan.rejected")) == 1
 
 
+def test_approve_already_decided_plan_is_409(client):
+    """M-13: approving an already-approved or rejected plan is a state conflict (409, like reject), not a bad
+    request; nothing is re-approved, nothing chains, no audit row."""
+    from unittest.mock import patch
+    approved = _plan(status="approved", approved_by="user:alice")
+    rejected = _plan(status="rejected", rejected_by="user:alice", rejection_reason="no")
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+        assert client.put(f"/api/fix-plans/{approved}/approve", json={}).status_code == 409
+        assert client.put(f"/api/fix-plans/{rejected}/approve", json={}).status_code == 409
+    trigger.assert_not_called()
+    row = client.get(f"/api/fix-plans/{rejected}").json()
+    assert row["status"] == "rejected" and row["rejected_by"] == "user:alice" and row["approved_by"] is None
+    assert client.get(f"/api/fix-plans/{approved}").json()["approved_by"] == "user:alice"
+    assert _audit_rows("plan.approved") == []
+
+
 def test_reject_terminal_plan_is_409(client):
     pid = _plan(status="executed")
     r = client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "late"})

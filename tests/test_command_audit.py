@@ -302,17 +302,31 @@ class TestProviderCliLedger:
     def test_provider_blocked_is_recorded(self, db, monkeypatch):
         tool, run, _ = self._tool(monkeypatch)
         out = tool("aws ec2 terminate-instances --instance-ids i-1")
-        assert out == "Error: Blocked dangerous pattern 'ec2 terminate-instances' in command." and not run.called
+        assert out == "Error: Blocked dangerous pattern 'aws ec2 terminate-instances' in command." and not run.called
         (row,) = _rows(db)
         assert (row.tool, row.tier, row.outcome, row.account) == ("provider_aws_cli", "blocked", "blocked", "dev")
 
-    def test_classifier_blocked_but_provider_allowed_leaves_a_trace(self, db, monkeypatch):
-        # Pre-existing gap (not fixed here): the provider's BLOCKED_PATTERNS lack the secret-revealing reads
-        # that aws_cli_tool blocks, so this executes. The ledger must say so honestly: tier=blocked, executed.
+    @pytest.mark.parametrize("command,pattern", [
+        ("aws secretsmanager get-secret-value --secret-id x", "get-secret-value"),
+        ("aws ssm get-parameter --name /prod/db --with-decryption", "--with-decryption"),
+        ("aws ecr get-login-password --region us-east-1", "ecr get-login-password"),
+        ("aws sts get-session-token", "sts get-session-token"),
+        ("aws s3 rm --recursive s3://b/", "s3 rm --recursive"),   # the provider's own extra (substring, as before): not confirmation-gated here
+    ])
+    def test_provider_blocks_secret_revealing_reads_like_the_main_tool(self, db, monkeypatch, command, pattern):
+        """Fix wave: the provider reuses aws_cli_tool.BLOCKED_PATTERNS (single source of truth), so the
+        secret-revealing reads the main path blocks are blocked for sub-agent provider tools too."""
         tool, run, _ = self._tool(monkeypatch)
-        assert tool("aws secretsmanager get-secret-value --secret-id s") == "{}" and run.called
+        out = tool(command)
+        assert out == f"Error: Blocked dangerous pattern '{pattern}' in command." and not run.called
         (row,) = _rows(db)
-        assert (row.tier, row.outcome) == ("blocked", "executed")
+        assert (row.tool, row.tier, row.outcome, row.reason) == ("provider_aws_cli", "blocked", "blocked", None)
+
+    def test_provider_blocklist_is_a_superset_of_the_shared_one(self):
+        from agenticops.providers import aws as provider_aws
+        from agenticops.tools import aws_cli_tool
+        assert set(aws_cli_tool.BLOCKED_PATTERNS) <= set(provider_aws.BLOCKED_PATTERNS)
+        assert set(provider_aws.BLOCKED_PATTERNS) - set(aws_cli_tool.BLOCKED_PATTERNS) == {"s3 rm --recursive"}
 
     @pytest.mark.parametrize("fault,reason,text", [
         ("no_session", "no_session", "no resolved session for account 'dev'"),

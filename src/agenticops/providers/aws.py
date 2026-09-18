@@ -14,6 +14,7 @@ from agenticops.providers.base import (
     get_cached_session,
     set_cached_session,
 )
+from agenticops.tools.aws_cli_tool import BLOCKED_PATTERNS as _SHARED_BLOCKED_PATTERNS
 
 try:
     import boto3
@@ -22,12 +23,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-BLOCKED_PATTERNS = [
-    "iam create-user", "iam delete-user", "iam create-access-key",
-    "iam attach-", "s3 rm --recursive", "ec2 terminate-instances",
-    "organizations create-", "organizations delete-",
-    "--force",
-]
+# Single source of truth is aws_cli_tool.BLOCKED_PATTERNS (secret-revealing reads such as get-secret-value /
+# --with-decryption / get-login-password, plus the destructive operations), so sub-agent provider tools block
+# exactly what the main path blocks. This tool is NOT confirmation-gated, so the bulk S3 delete the main tool
+# only confirmation-gates as a write stays hard-blocked here as before.
+BLOCKED_PATTERNS = [*_SHARED_BLOCKED_PATTERNS, "s3 rm --recursive"]
 
 TIMEOUT_SECONDS = 30
 LEDGER_TOOL = "provider_aws_cli"  # command_audits.tool

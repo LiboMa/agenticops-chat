@@ -81,3 +81,28 @@ def test_prune_disabled_when_retention_zero(db):
     with patch.object(settings, "audit_retention_days", 0):
         svc.AuditService.maybe_prune_daily()
     assert db.query(AuditLog).count() == 1
+
+
+def test_prune_failure_warns_and_retries_on_the_next_call(db, caplog):
+    """M-14: a failed prune (DB outage) must not burn the day marker — it logs at WARNING and the next call
+    prunes; the marker is set only after a successful prune."""
+    import logging
+    from agenticops.audit import service as svc
+    from agenticops.audit.models import AuditLog
+    from agenticops.config import settings
+    old = datetime.now(timezone.utc) - timedelta(days=400)
+    db.add(AuditLog(action="x", entity_type="t", entity_id="1", timestamp=old)); db.commit()
+    svc._last_prune_date = None
+    with patch.object(settings, "audit_retention_days", 365), \
+         patch.object(svc, "get_db_session", side_effect=RuntimeError("db down")), \
+         caplog.at_level(logging.WARNING, logger="agenticops.audit.service"):
+        svc.AuditService.maybe_prune_daily()
+    assert svc._last_prune_date is None
+    assert any(r.levelno == logging.WARNING and "audit prune failed" in r.getMessage() for r in caplog.records)
+    db.expire_all()
+    assert db.query(AuditLog).count() == 1  # nothing pruned yet
+    with patch.object(settings, "audit_retention_days", 365):
+        svc.AuditService.maybe_prune_daily()  # retried on the very next call
+    db.expire_all()
+    assert db.query(AuditLog).count() == 0
+    assert svc._last_prune_date == datetime.now(timezone.utc).date()
