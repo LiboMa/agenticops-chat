@@ -232,3 +232,100 @@ class TestRunSkillScriptLedger:
         assert out.startswith("Sandbox refused")
         (row,) = _rows(db)
         assert (row.outcome, row.reason) == ("refused", "sandbox")
+
+
+class TestProviderCliLedger:
+    """AWSProvider.cli_tool() is what executor / SRE / RCA receive once an account is resolved
+    (executor_agent → get_cli_tool_for_issue). It is NOT confirmation-gated, so the ledger and
+    the change_required gate are its only write-tier controls. Everything the shared classifier
+    does not call readonly is recorded — including a command the provider's own (narrower) block
+    list lets through while `_classify_command` says blocked."""
+
+    @staticmethod
+    def _tool(monkeypatch, *, returncode=0, session=True):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agenticops.providers.aws import AWSProvider
+        acct = SimpleNamespace(id=1, name="dev", provider="aws", credentials={}, regions=["ap-southeast-1"], labels={})
+        provider = AWSProvider(acct)
+        sess = Mock()
+        sess.get_credentials.return_value.get_frozen_credentials.return_value = SimpleNamespace(
+            access_key="AKIAIOSFODNN7EXAMPLE", secret_key="x", token=None)  # AWS's documented EXAMPLE key, never real
+        if session:
+            provider._session = sess
+        run = Mock(return_value=SimpleNamespace(returncode=returncode, stdout="{}", stderr="boom"))
+        monkeypatch.setattr("agenticops.providers.aws.subprocess.run", run)
+        return provider.cli_tool(), run, sess
+
+    def test_executed_write_is_recorded(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool("aws ec2 create-tags --resources i-1 --tags Key=a,Value=b")
+        assert out == "{}" and run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.account, row.exit_code, row.fix_plan_id) == \
+               ("run_aws_cli", "write", "executed", "dev", 0, None)
+        assert row.command == "aws ec2 create-tags --resources i-1 --tags Key=a,Value=b"  # as asked, no --output json
+
+    def test_change_required_refused_outside_approved_plan(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool("aws ec2 modify-security-group-rules --group-id sg-1")
+        assert "/change" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.outcome, row.reason, row.tier, row.account) == ("refused", "change_required", "write", "dev")
+
+    def test_change_required_allowed_inside_approved_plan(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        pid = _approved_plan(db)
+        with run_context(actor="agent:executor", fix_plan_id=pid):
+            out = tool("aws ec2 modify-security-group-rules --group-id sg-1")
+        assert out == "{}" and run.called
+        (row,) = _rows(db)
+        assert (row.outcome, row.fix_plan_id, row.actor) == ("executed", pid, "agent:executor")
+
+    def test_readonly_is_not_recorded(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        assert tool("aws ec2 describe-instances") == "{}" and run.called
+        assert _rows(db) == []
+
+    def test_nonzero_exit_records_error_with_exit_code(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch, returncode=254)
+        out = tool("aws ec2 create-tags --resources i-1 --tags Key=a,Value=b")
+        assert out == "Error (exit 254): boom"
+        (row,) = _rows(db)
+        assert (row.outcome, row.exit_code) == ("error", 254) and "boom" in row.output_excerpt
+
+    def test_provider_blocked_is_recorded(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool("aws ec2 terminate-instances --instance-ids i-1")
+        assert out == "Error: Blocked dangerous pattern 'ec2 terminate-instances' in command." and not run.called
+        (row,) = _rows(db)
+        assert (row.tier, row.outcome, row.account) == ("blocked", "blocked", "dev")
+
+    def test_classifier_blocked_but_provider_allowed_leaves_a_trace(self, db, monkeypatch):
+        # Pre-existing gap (not fixed here): the provider's BLOCKED_PATTERNS lack the secret-revealing reads
+        # that aws_cli_tool blocks, so this executes. The ledger must say so honestly: tier=blocked, executed.
+        tool, run, _ = self._tool(monkeypatch)
+        assert tool("aws secretsmanager get-secret-value --secret-id s") == "{}" and run.called
+        (row,) = _rows(db)
+        assert (row.tier, row.outcome) == ("blocked", "executed")
+
+    @pytest.mark.parametrize("fault,reason,text", [
+        ("no_session", "no_session", "no resolved session for account 'dev'"),
+        ("credentials", "credentials", "failed to resolve credentials for account 'dev'"),
+        ("timeout", "timeout", "Command timed out after 30s."),
+        ("aws_cli_missing", "aws_cli_missing", "AWS CLI ('aws') not found on PATH."),
+    ])
+    def test_transport_failures_are_recorded_as_error(self, db, monkeypatch, fault, reason, text):
+        import subprocess
+        tool, run, sess = self._tool(monkeypatch, session=(fault != "no_session"))
+        if fault == "credentials":
+            sess.get_credentials.return_value.get_frozen_credentials.side_effect = RuntimeError("boom")
+        elif fault == "timeout":
+            run.side_effect = subprocess.TimeoutExpired(cmd="aws", timeout=30)
+        elif fault == "aws_cli_missing":
+            run.side_effect = FileNotFoundError("aws")
+        out = tool("aws ec2 create-tags --resources i-1 --tags Key=a,Value=b")
+        assert text in out
+        (row,) = _rows(db)
+        assert (row.outcome, row.reason, row.exit_code, row.tier) == ("error", reason, None, "write")
+        assert text in row.output_excerpt

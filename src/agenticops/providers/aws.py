@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import time
 from typing import Any, Callable
 
 from agenticops.providers.base import (
@@ -199,6 +200,8 @@ class AWSProvider(CloudProvider):
         - Auto-appends --output json
         - Sets credential env vars from session
         - 30s timeout, 4000 char output limit
+        - Ledgers every non-readonly attempt (command_audits) and refuses
+          change_required commands unless an approved plan is in the Run Context
         """
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
@@ -221,11 +224,45 @@ class AWSProvider(CloudProvider):
                 if dangerous in command:
                     return f"Error: Shell operator '{dangerous}' is not allowed."
 
+            # Command ledger (command_audits): this tool is what executor/SRE/RCA get for a
+            # resolved account and it is NOT confirmation-gated, so every non-readonly attempt
+            # is recorded and change_required commands need an approved plan in the Run Context.
+            from agenticops.services.command_audit import (
+                approved_plan_in_context,
+                change_required_refusal,
+                record_command,
+            )
+            from agenticops.tools.aws_cli_tool import _classify_command
+
             # Blocked pattern check
             cmd_lower = command.lower()
             for pattern in BLOCKED_PATTERNS:
                 if pattern.lower() in cmd_lower:
+                    record_command(tool="run_aws_cli", tier="blocked", command=command, outcome="blocked",
+                                   account=account_name)
                     return f"Error: Blocked dangerous pattern '{pattern}' in command."
+
+            # Tier comes from the shared classifier. Anything it does not call readonly is
+            # ledgered — including a "blocked" verdict our narrower BLOCKED_PATTERNS let through.
+            asked = command
+            tier = _classify_command(command)
+
+            def _ledger(outcome: str, text: str, *, exit_code: int | None = None,
+                        reason: str = "", duration_ms: int = 0) -> str:
+                """Record the attempt (readonly excluded) and hand the reply back unchanged."""
+                if tier != "readonly":
+                    record_command(tool="run_aws_cli", tier=tier, command=asked, outcome=outcome,
+                                   account=account_name, exit_code=exit_code, output_excerpt=text,
+                                   duration_ms=duration_ms, reason=reason)
+                return text
+
+            if tier != "readonly":
+                from agenticops.services.policy_engine import get_policy_engine
+                cr_pattern = get_policy_engine().change_required_match(command)
+                if cr_pattern and approved_plan_in_context() is None:
+                    record_command(tool="run_aws_cli", tier=tier, command=asked, outcome="refused",
+                                   reason="change_required", account=account_name)
+                    return change_required_refusal(command, cr_pattern)
 
             # Auto-append --output json
             if "--output" not in command:
@@ -234,7 +271,7 @@ class AWSProvider(CloudProvider):
             try:
                 args = shlex.split(command)
             except ValueError as e:
-                return f"Error: Invalid command syntax: {e}"
+                return _ledger("error", f"Error: Invalid command syntax: {e}", reason="syntax")
 
             # Build a CLEAN env: strip all ambient AWS_* so a host profile/token
             # can never leak into this account's command, then inject ONLY this
@@ -242,14 +279,17 @@ class AWSProvider(CloudProvider):
             # (NEVER fall back to ambient — that runs on the WRONG account).
             env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
             if not session:
-                return (
+                return _ledger(
+                    "error",
                     f"Error: no resolved session for account '{account_name}'; "
-                    "cannot run AWS CLI safely (refusing to use ambient credentials)."
+                    "cannot run AWS CLI safely (refusing to use ambient credentials).",
+                    reason="no_session",
                 )
             try:
                 frozen = session.get_credentials().get_frozen_credentials()
             except Exception as e:
-                return f"Error: failed to resolve credentials for account '{account_name}': {e}"
+                return _ledger("error", f"Error: failed to resolve credentials for account '{account_name}': {e}",
+                               reason="credentials")
             env["AWS_ACCESS_KEY_ID"] = frozen.access_key
             env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
             if frozen.token:
@@ -259,6 +299,7 @@ class AWSProvider(CloudProvider):
             if default_region and "--region" not in command:
                 env["AWS_DEFAULT_REGION"] = default_region
 
+            t0 = time.monotonic()
             try:
                 result = subprocess.run(
                     args,
@@ -269,20 +310,23 @@ class AWSProvider(CloudProvider):
                     env=env,
                 )
             except subprocess.TimeoutExpired:
-                return f"Error: Command timed out after {TIMEOUT_SECONDS}s."
+                return _ledger("error", f"Error: Command timed out after {TIMEOUT_SECONDS}s.", reason="timeout",
+                               duration_ms=int((time.monotonic() - t0) * 1000))
             except FileNotFoundError:
-                return "Error: AWS CLI ('aws') not found on PATH."
+                return _ledger("error", "Error: AWS CLI ('aws') not found on PATH.", reason="aws_cli_missing")
+            duration_ms = int((time.monotonic() - t0) * 1000)
 
             if result.returncode != 0:
                 stderr = result.stderr.strip()
-                return f"Error (exit {result.returncode}): {stderr}"
+                return _ledger("error", f"Error (exit {result.returncode}): {stderr}",
+                               exit_code=result.returncode, duration_ms=duration_ms)
 
             output = result.stdout.strip()
             from agenticops.config import settings
             limit = settings.cli_max_output_chars
             if limit > 0 and len(output) > limit:
                 output = output[:limit] + "\n... (truncated)"
-            return output if output else "(no output)"
+            return _ledger("executed", output if output else "(no output)", exit_code=0, duration_ms=duration_ms)
 
         _run_aws_cli.__name__ = f"run_aws_cli_{safe_name}"
         _run_aws_cli.__doc__ = (
