@@ -2276,6 +2276,10 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.models import InvalidStatusTransition, transition_plan
+    if plan.status == "rejected":
+        # validate_plan_transition treats current == new as a no-op, so without this guard a second reject
+        # would silently overwrite rejected_by / rejected_at / rejection_reason. rejected is terminal → 409.
+        raise HTTPException(status_code=409, detail="Fix plan is already rejected")
     try:
         authz.check(actor, "plan.reject", subject=plan)
     except authz.AuthzDenied as e:

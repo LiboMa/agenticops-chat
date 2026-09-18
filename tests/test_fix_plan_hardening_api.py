@@ -18,14 +18,15 @@ def client(tmp_path):
     models_mod._engine = None
 
 
-def _plan(status="pending_approval", risk="L1") -> int:
+def _plan(status="pending_approval", risk="L1", **fields) -> int:
     s = get_session()
     try:
         issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned", resource_id="r")
         s.add(issue); s.flush()
         rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
         s.add(rca); s.flush()
-        plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level=risk, title="p", summary="s", status=status)
+        plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level=risk, title="p", summary="s",
+                       status=status, **fields)
         s.add(plan); s.commit()
         return plan.id
     finally:
@@ -84,6 +85,29 @@ def test_reject_terminal_plan_is_409(client):
     pid = _plan(status="executed")
     r = client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "late"})
     assert r.status_code == 409
+
+
+def test_reject_already_rejected_plan_is_409_and_preserves_original(client):
+    # validate_plan_transition short-circuits on current == new, so without an explicit guard a second
+    # reject would silently overwrite rejected_by / rejected_at / rejection_reason (rejected is terminal)
+    pid = _plan(status="rejected", rejected_by="user:alice", rejection_reason="original")
+    r = client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "again"})
+    assert r.status_code == 409
+    r = client.put(f"/api/fix-plans/{pid}", json={"status": "rejected"})
+    assert r.status_code == 409
+    row = client.get(f"/api/fix-plans/{pid}").json()
+    assert row["status"] == "rejected" and row["rejected_by"] == "user:alice" and row["rejection_reason"] == "original"
+    assert _audit_rows("plan.rejected") == []
+
+
+def test_second_reject_does_not_overwrite_the_first(client):
+    pid = _plan()
+    assert client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "first"}).status_code == 200
+    assert client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "second"}).status_code == 409
+    assert client.put(f"/api/fix-plans/{pid}", json={"status": "rejected"}).status_code == 409
+    row = client.get(f"/api/fix-plans/{pid}").json()
+    assert row["rejection_reason"] == "first" and row["rejected_by"] == "web:anonymous"
+    assert len(_audit_rows("plan.rejected")) == 1
 
 
 def test_put_no_longer_accepts_status_or_approver(client):
