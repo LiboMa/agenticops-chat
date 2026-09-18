@@ -81,12 +81,13 @@ def _bump_risk(risk_level: str) -> str:
     return RISK_ORDER[min(idx + 1, len(RISK_ORDER) - 1)]
 
 
-# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match, prefix per token. The command is
-# tokenised (sudo/env wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern
-# hits when its whitespace-split tokens appear in that order — not necessarily adjacent — each equal to or a
-# prefix of a command token. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x`
-# and `sudo -n systemctl restart nginx` all hit, while `kubectl scale deployment/shutdown-handler` and
-# `--tags Key=x,Value=reboot-test` do not (a pattern word buried inside a token is not a token prefix).
+# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match. The command is tokenised (sudo/env
+# wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern hits when its
+# whitespace-split tokens appear in that order — not necessarily adjacent. A BARE pattern word (`delete`,
+# `restart`, `reboot`) must equal the whole command token; a HYPHENATED one (`modify-`, `modify-security-group`)
+# matches as a prefix. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x` and
+# `sudo -n systemctl restart nginx` all hit, while `kubectl label pod delete-me`, `systemctl restart-all-the-things`,
+# `kubectl scale deployment/shutdown-handler` and `--tags Key=x,Value=reboot-test` do not.
 _POLICY_WRAPPERS = ("sudo", "env")
 
 
@@ -107,12 +108,18 @@ def _normalize_for_policy(command: str) -> list[str]:
 
 
 def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[str]) -> bool:
-    """True when every pattern token is matched, in order, by a command token equal to it or starting with it."""
+    """True when every pattern token is matched, in order, by a command token.
+
+    A bare pattern word matches only an identical token; a hyphenated pattern token matches as a prefix (the
+    hyphen marks the AWS-style `service verb-…` forms). Bare-word prefixing was a false positive on legitimate
+    L1 writes such as `kubectl label pod delete-me`.
+    """
     if not pattern_tokens:
         return False
     i = 0
     for token in command_tokens:
-        if token == pattern_tokens[i] or token.startswith(pattern_tokens[i]):
+        wanted = pattern_tokens[i]
+        if token == wanted or ("-" in wanted and token.startswith(wanted)):
             i += 1
             if i == len(pattern_tokens):
                 return True
@@ -320,9 +327,10 @@ class PolicyEngine:
         """Return the change_required pattern the command matches, or None.
 
         Ordered token-subsequence match: the pattern's whitespace-split tokens must appear in order (not
-        necessarily adjacent) in _normalize_for_policy(command), each equal to or a prefix of the command token.
-        There is no raw-substring fallback — a pattern word inside a token (`deployment/shutdown-handler`,
-        `Value=reboot-test`) is not a match.
+        necessarily adjacent) in _normalize_for_policy(command); a bare pattern word must equal the command
+        token, a hyphenated one matches as a prefix (_tokens_match_in_order). There is no raw-substring
+        fallback — a pattern word inside a token (`deployment/shutdown-handler`, `Value=reboot-test`,
+        `delete-me`) is not a match.
         """
         command_tokens = _normalize_for_policy(command)
         for pattern in self.change_required:

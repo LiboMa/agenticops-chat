@@ -361,8 +361,9 @@ class TestChangeRequiredNormalization:
     """Round 2: ordered token-subsequence match (prefix per token) replaces the round-1 substring test.
 
     Tokens = shlex split, sudo/env wrappers dropped, every `-`/`--` token dropped, option VALUES kept, lower-cased.
-    A pattern hits when its whitespace-split tokens appear in order (not necessarily adjacent), each equal to or a
-    prefix of a command token. No raw-substring fallback.
+    A pattern hits when its whitespace-split tokens appear in order (not necessarily adjacent); a bare pattern word
+    must equal the whole command token, a hyphenated one (`modify-`, `modify-security-group`) matches as a prefix
+    (round 3). No raw-substring fallback.
     """
 
     @pytest.mark.parametrize("command", [
@@ -389,6 +390,8 @@ class TestChangeRequiredNormalization:
         "kubectl scale deployment/x --replicas=2",
         "kubectl scale deployment/shutdown-handler --replicas=2",                # pattern word inside a positional, not a token prefix
         "aws ec2 create-tags --resources i-1 --tags Key=x,Value=reboot-test",   # pattern word inside an option value
+        "kubectl label pod delete-me tier=web",                                 # round 3: bare `delete` needs the whole token
+        "systemctl restart-all-the-things",                                     # round 3: bare `restart` needs the whole token
     ])
     def test_non_matching_commands_stay_unmatched(self, command):
         from agenticops.services.policy_engine import get_policy_engine
@@ -410,8 +413,19 @@ class TestChangeRequiredNormalization:
         assert eng.change_required_match("rds aws modify-db-instance") is None                     # order matters
         assert eng.change_required_match("aws rds modif") is None                                  # prefix runs pattern→command only
         assert eng.change_required_match("aws rds") is None                                        # every pattern token must be consumed
-        # Conservative by design: a prefix hit on ANY later token matches (readonly tiers never reach the gate).
-        assert eng.change_required_match("kubectl label pod delete-me tier=web") == "kubectl delete"
+        assert eng.change_required_match("kubectl delete pod x") == "kubectl delete"
+
+    def test_bare_words_match_whole_tokens_hyphenated_match_prefixes(self):
+        """Round 3: `kubectl label pod delete-me` is a legitimate L1 write and must not be refused as `kubectl delete`."""
+        from agenticops.services.policy_engine import get_policy_engine
+        eng = get_policy_engine(reload=True)
+        assert eng.change_required_match("kubectl label pod delete-me") is None
+        assert eng.change_required_match("kubectl delete pod x") == "kubectl delete"
+        assert eng.change_required_match("aws ec2 modify-security-group-rules --group-id sg-1") == "aws ec2 modify-security-group"
+        assert eng.change_required_match("aws rds modify-db-instance --x") == "aws rds modify-"
+        assert eng.change_required_match("sudo reboot") == "reboot"
+        assert eng.change_required_match("systemctl restart-all-the-things") is None
+        assert eng.change_required_match("aws ec2 reboot-instances --instance-ids i-1") is None   # bare `reboot` no longer prefix-hits (see report §11)
 
 
 class TestGuardedRun:
