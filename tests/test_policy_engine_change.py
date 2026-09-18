@@ -63,3 +63,7 @@ def test_shipped_policy_file_valid_and_has_change_rules():
     d = eng.evaluate(risk_level="L1", plan_kind="change", action_type="tag")
     assert d.action == "auto_approve" and d.itsm_change_type == "standard"
     assert eng.evaluate(risk_level="L3", plan_kind="change").action == "require_human"
+    # An emergency change is never a standard change (ITIL): even a low-risk tag needs a human approver.
+    # The effective type becomes "emergency" later in change_service, not here.
+    e = eng.evaluate(risk_level="L1", plan_kind="change", action_type="tag", emergency=True)
+    assert e.action == "require_human" and e.rule_name == "change-normal-human" and e.itsm_change_type == "normal"

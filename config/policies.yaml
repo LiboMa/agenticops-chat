@@ -58,9 +58,10 @@ rules:
   # ── Change Management (MVP-2.6.0) ──
   # Standard change: low-risk tagging/config on a change request. auto_approve here is
   # NECESSARY but not sufficient — settings.change_auto_approve_standard (default false)
-  # must also be on, otherwise the plan waits for a human approver.
+  # must also be on, otherwise the plan waits for a human approver. An emergency
+  # change is never a standard change (ITIL), so it falls through to the human rule.
   - name: change-standard-low-risk
-    match: { plan_kind: [change], risk_level: [L0, L1], action_type: [tag, config, scale] }
+    match: { plan_kind: [change], risk_level: [L0, L1], action_type: [tag, config, scale], emergency: false }
     action: auto_approve
     itsm_change_type: standard
 
