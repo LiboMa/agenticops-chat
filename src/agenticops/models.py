@@ -1,6 +1,8 @@
 """SQLAlchemy models for AgenticOps."""
 
 import json
+import logging
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -12,6 +14,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 from sqlalchemy.pool import NullPool, StaticPool
 
 from agenticops.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -1117,6 +1121,138 @@ class AgentMemory(Base):
 # ============================================================================
 
 
+# ── MVP-2.6.0 migration helpers ───────────────────────────────────────
+
+_NULLABLE_ORIGIN_COLUMNS: dict[str, tuple[str, ...]] = {
+    "fix_plans": ("health_issue_id", "rca_result_id"),
+    "fix_executions": ("health_issue_id",),
+    "pipeline_events": ("health_issue_id",),
+}
+
+_ADD_COLUMNS_2_6_0: dict[str, dict[str, str]] = {
+    "fix_plans": {
+        "plan_kind": "VARCHAR(10) DEFAULT 'fix'",
+        "change_request_id": "INTEGER",
+        "rejected_by": "VARCHAR(100)",
+        "rejected_at": "DATETIME",
+        "rejection_reason": "TEXT",
+        "updated_at": "DATETIME",
+    },
+    "pipeline_events": {"change_request_id": "INTEGER"},
+    "audit_logs": {"actor": "VARCHAR(100)"},
+}
+
+
+def _sqlite_notnull_columns(engine, table_name: str) -> set[str]:
+    with engine.connect() as conn:
+        rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+    return {r[1] for r in rows if r[3]}
+
+
+def _backup_sqlite_file(engine) -> Optional[str]:
+    """Copy the SQLite file to <db>.bak-pre-2.6.0 once (before the first table rebuild)."""
+    import shutil
+    db_path = engine.url.database
+    if not db_path or db_path == ":memory:":
+        return None
+    bak = f"{db_path}.bak-pre-2.6.0"
+    if not os.path.exists(bak) and os.path.exists(db_path):
+        shutil.copy2(db_path, bak)
+        logger.info("Pre-2.6.0 database backup written to %s", bak)
+    return bak
+
+
+def _sqlite_rebuild_table(engine, table) -> None:
+    """sqlite.org 'other kinds of ALTER': create <t>__new from the ORM metadata (no indexes),
+    copy the common columns, drop the old table (drops its indexes), rename new → old name
+    (this direction leaves other tables' FK references pointing at the surviving name), then
+    recreate the indexes. FK enforcement is off in this project, so no PRAGMA dance is needed."""
+    from sqlalchemy import MetaData
+
+    tmp_name = f"{table.name}__new"
+    tmp_meta = MetaData()
+    tmp_table = table.to_metadata(tmp_meta, name=tmp_name)
+    for idx in list(tmp_table.indexes):
+        tmp_table.indexes.discard(idx)
+    # The CREATE TABLE DDL resolves each FK target through tmp_meta, so the referenced
+    # tables must exist there as metadata copies (nothing is emitted for them).
+    for fk in table.foreign_keys:
+        if fk.column.table.name not in tmp_meta.tables:
+            fk.column.table.to_metadata(tmp_meta)
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS {tmp_name}"))
+        tmp_table.create(conn)
+        old_cols = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table.name})")).fetchall()}
+        common = [c.name for c in table.columns if c.name in old_cols]
+        cols_sql = ", ".join(common)
+        conn.execute(text(f"INSERT INTO {tmp_name} ({cols_sql}) SELECT {cols_sql} FROM {table.name}"))
+        conn.execute(text(f"DROP TABLE {table.name}"))
+        conn.execute(text(f"ALTER TABLE {tmp_name} RENAME TO {table.name}"))
+        for idx in table.indexes:
+            idx.create(conn)
+    logger.info("Rebuilt table %s with relaxed NOT NULL constraints (MVP-2.6.0)", table.name)
+
+
+def _migrate_2_6_0(engine) -> None:
+    """Idempotent MVP-2.6.0 schema migration (runs after create_all)."""
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    if dialect == "sqlite":
+        tables = {"fix_plans": FixPlan.__table__, "fix_executions": FixExecution.__table__,
+                  "pipeline_events": PipelineEvent.__table__}
+        needs_rebuild = [
+            name for name, cols in _NULLABLE_ORIGIN_COLUMNS.items()
+            if insp.has_table(name) and any(c in _sqlite_notnull_columns(engine, name) for c in cols)
+        ]
+        if needs_rebuild:
+            _backup_sqlite_file(engine)
+            for name in needs_rebuild:
+                _sqlite_rebuild_table(engine, tables[name])
+            insp = inspect(engine)
+        # Any column still missing (e.g. table rebuilt by an older run) → plain ADD COLUMN
+        for tbl, cols in _ADD_COLUMNS_2_6_0.items():
+            if not insp.has_table(tbl):
+                continue
+            existing = {c["name"] for c in insp.get_columns(tbl)}
+            with engine.begin() as conn:
+                for col, ddl in cols.items():
+                    if col not in existing:
+                        conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {ddl}"))
+                if tbl == "fix_plans":
+                    conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fix_plan_change_request ON fix_plans(change_request_id)"))
+                if tbl == "pipeline_events":
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pipeline_event_change ON pipeline_events(change_request_id)"))
+                if tbl == "audit_logs":
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)"))
+    elif dialect == "postgresql":
+        with engine.begin() as conn:
+            for tbl, cols in _NULLABLE_ORIGIN_COLUMNS.items():
+                for col in cols:
+                    conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} DROP NOT NULL"))
+            for tbl, cols in _ADD_COLUMNS_2_6_0.items():
+                for col, ddl in cols.items():
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+            conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
+            has_ck = conn.execute(text(
+                "SELECT 1 FROM pg_constraint WHERE conname = 'ck_fix_plans_origin'"
+            )).scalar()
+            if not has_ck:
+                conn.execute(text(
+                    "ALTER TABLE fix_plans ADD CONSTRAINT ck_fix_plans_origin CHECK ("
+                    "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL AND change_request_id IS NULL) OR "
+                    "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL AND rca_result_id IS NULL))"
+                ))
+            for stmt in (
+                "CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)",
+                "CREATE INDEX IF NOT EXISTS idx_fix_plan_change_request ON fix_plans(change_request_id)",
+                "CREATE INDEX IF NOT EXISTS idx_pipeline_event_change ON pipeline_events(change_request_id)",
+                "CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)",
+            ):
+                conn.execute(text(stmt))
+
+
 def init_db(engine=None):
     """Initialize database and create all tables.
 
@@ -1456,6 +1592,9 @@ def init_db(engine=None):
     import agenticops.galaxy.models  # noqa: F401 — register galaxy_* tables in Base metadata
 
     Base.metadata.create_all(engine)
+    # MVP-2.6.0: relax plan-lineage NOT NULLs (table rebuild on SQLite), add change columns.
+    # Raises on failure on purpose — never start on a half-migrated schema.
+    _migrate_2_6_0(engine)
 
     # Migration: migrate AWSAccount rows → CloudAccount (if aws_accounts exists and cloud_accounts is empty)
     # Re-inspect after create_all to see newly created tables
