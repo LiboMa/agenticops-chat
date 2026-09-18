@@ -634,6 +634,16 @@ class Settings(BaseSettings):
         default="aiops2026",
         description="Default admin password for initial seed",
     )
+    # ── RBAC seam (MVP-2.6.0) ─────────────────────────────────────────
+    rbac_enforce: bool = Field(
+        default=False,
+        description="Enforce config/rbac.yaml (403 + separation of duties). False = shadow mode: "
+        "decisions are evaluated and denials audited as authz.denied_shadow, but allowed (AIOPS_RBAC_ENFORCE)",
+    )
+    rbac_file: str = Field(
+        default="config/rbac.yaml",
+        description="Path to the RBAC permission matrix (AIOPS_RBAC_FILE)",
+    )
     audit_retention_days: int = Field(
         default=365,
         description="Days of audit_logs + command_audits rows retained; 0 disables pruning (AIOPS_AUDIT_RETENTION_DAYS)",
