@@ -1031,7 +1031,8 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     its name only for a known agent name, anything else is recorded as agent:unattributed) —
     a human name passed here never approves anything. Approval is checked against rbac (agents
     cannot approve L2/L3), and a self-declared "agent:<name>" is a privilege CEILING: it is
-    held to the agent rules too, so it can only lower authority, never grant it.
+    held to the agent rules too (as the vetted identity — a known agent name, else agent:unattributed),
+    so it can only lower authority, never grant it.
 
     Args:
         fix_plan_id: The FixPlan ID to approve
@@ -1047,20 +1048,23 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
     ctx = get_run_context()
     claim = parse_actor(approved_by)  # the LLM-supplied string, never an identity by itself
+    # An "agent:<name>" claim keeps its name only for a KNOWN agent (M-6); any other name is agent:unattributed.
+    # Both the context-less actor and the ceiling below are built from this VETTED identity, never from the raw
+    # string — an invented name cannot reach an audit row's actor column (it is recorded as details.claimed_name).
+    claimed_agent = (Actor("agent", claim.id if claim.id in _KNOWN_AGENT_IDS else "unattributed")
+                     if claim.kind == "agent" else None)
     if ctx.actor != "system":
         actor = actor_from_run_context(ctx)  # carries the user's permission flags
     else:
         # No Run Context (stray thread, direct call): a context-less tool call is an agent
-        # acting, never a human. The LLM-supplied string cannot grant itself an identity,
-        # and only a KNOWN agent name is kept as attribution (M-6).
-        agent_id = claim.id if claim.kind == "agent" and claim.id in _KNOWN_AGENT_IDS else "unattributed"
-        actor = Actor("agent", agent_id)
+        # acting, never a human. The LLM-supplied string cannot grant itself an identity.
+        actor = claimed_agent or Actor("agent", "unattributed")
     # The claimed name is audit-only: recorded when it differs from the identity that actually approved.
     claimed = approved_by if approved_by and approved_by != actor.key else None
     # Ceiling-as-claim (I-1): inside a human context an "agent:<name>" self-declaration is ALSO checked as
-    # that agent — the claim can only REDUCE privilege (L2/L3 park), never grant it. With an agent actor the
-    # rbac check below already is the agent check, so no second evaluation (and no duplicate audit row).
-    ceiling = Actor("agent", claim.id) if claim.kind == "agent" and claim.id and actor.kind != "agent" else None
+    # that (vetted) agent — the claim can only REDUCE privilege (L2/L3 park), never grant it. With an agent
+    # actor the rbac check below already is the agent check, so no second evaluation (and no duplicate audit row).
+    ceiling = claimed_agent if claimed_agent is not None and actor.kind != "agent" else None
     denial_details = {"via": "agent_tool", **({"claimed_name": claimed, "context_actor": actor.key} if claimed else {})}
 
     session = get_session()

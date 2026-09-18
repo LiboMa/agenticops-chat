@@ -104,7 +104,9 @@ def _bump_risk(risk_level: str) -> str:
 # (`bash -c`, `sh -lc`, `su -c`) and a positional payload, which are commands in their own right and keep their own
 # flags (the round-4 deviation: taking `-c` payloads as ineligible would re-open the hole for every AWS-style pattern).
 # A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
-# modify-security-group-rules` is still gated. The allowlist only ever ADDS refusals (an eligible token is a
+# modify-security-group-rules` is still gated; a wrapper's OWN boolean switches (`sudo -n`, `sudo -E`, …:
+# _WRAPPER_BOOLEAN_FLAGS) count the same way inside that wrapper's option region, so `sudo -n /usr/bin/systemctl`
+# still has its command word basenamed. The allowlist only ever ADDS refusals (an eligible token is a
 # superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
 _POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice")
 _POLICY_RESPLIT_MAX_DEPTH = 3
@@ -115,6 +117,14 @@ _POLICY_BOOLEAN_FLAGS = frozenset({
     "--no-cli-auto-prompt", "--cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f",
     "--user", "--now", "--all", "-A",
 })
+# A WRAPPER's own boolean switches (exact tokens), consulted only in that wrapper's option region — the tokens
+# between the wrapper and the command word: in `sudo -n /usr/bin/systemctl restart nginx` sudo's `-n`
+# (non-interactive) takes no value, so the path after it IS the command position and is basenamed. Per wrapper on
+# purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`), and past the command word
+# `-n` is generic again.
+_WRAPPER_BOOLEAN_FLAGS: dict[str, frozenset[str]] = {
+    "sudo": frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"}),
+}
 # env-style `NAME=value` assignments precede the program (`env FOO=1 aws …`, `FOO=1 aws …`): never the command word.
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # `name="cmd …"` payload: only the VALUE part is re-split (`commands="systemctl restart nginx"`).
@@ -142,10 +152,11 @@ def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool
     """Lower-cased `(token, eligible_for_prefix)` pairs with wrappers and option tokens removed.
 
     shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped; every token
-    starting with '-' dropped. Option VALUES are kept as ordinary tokens — a kept value can only add a token the
-    ordered match must skip over — but they are flagged: `eligible_for_prefix` is False when the ORIGINAL predecessor
-    is a value-taking option (_is_value_taking_option — a known boolean flag such as `--no-cli-pager` is not one),
-    and only hyphenated pattern tokens consult the flag.
+    starting with '-' dropped (sudo's own boolean switches — `-n`, `-E`, …, _WRAPPER_BOOLEAN_FLAGS — take no value,
+    so `sudo -n /usr/bin/systemctl` keeps its command position). Option VALUES are kept as ordinary tokens — a kept
+    value can only add a token the ordered match must skip over — but they are flagged: `eligible_for_prefix` is
+    False when the ORIGINAL predecessor is a value-taking option (_is_value_taking_option — a known boolean flag such
+    as `--no-cli-pager` is not one), and only hyphenated pattern tokens consult the flag.
 
     The COMMAND POSITION — the first kept token that is neither an option value nor an env-style `K=V` assignment —
     is reduced to its basename when it contains `/` (`/bin/systemctl` → `systemctl`); paths elsewhere stay as they
@@ -173,6 +184,8 @@ def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
     start = 0
     while start < len(tokens) and tokens[start].lower() in _POLICY_WRAPPERS:
         start += 1
+    # The last leading wrapper's own boolean switches (sudo -n/-E/…) apply until the command word is found.
+    wrapper_booleans = _WRAPPER_BOOLEAN_FLAGS.get(tokens[start - 1].lower(), frozenset()) if start else frozenset()
     out: list[tuple[str, bool]] = []
     command_seen = False
     for i in range(start, len(tokens)):
@@ -180,7 +193,8 @@ def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
         if token.startswith("-"):
             continue
         prev = tokens[i - 1] if i > 0 else None
-        eligible = prev is None or not _is_value_taking_option(prev)
+        eligible = (prev is None or not _is_value_taking_option(prev)
+                    or (not command_seen and prev in wrapper_booleans))
         if any(ch.isspace() for ch in token):
             command_seen = True  # a quoted payload holds its own command word (found at its own level)
             out.extend(_payload_tokens(token, depth, prev, positional=eligible))

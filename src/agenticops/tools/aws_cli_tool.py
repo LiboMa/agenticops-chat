@@ -156,18 +156,22 @@ BLOCKED_PATTERNS = [
     "ecr get-login-password",      # returns a usable registry password
     "ecr get-authorization-token", # returns base64 registry credentials
     "--with-decryption",           # SSM SecureString → plaintext secret value
-    # ── Destructive operations
-    "aws iam create-user", "aws iam delete-user",
-    "aws iam create-access-key", "aws iam attach-",
+    # ── Destructive operations. Entries are `<service> <verb>` WITHOUT the `aws ` prefix: the check is a
+    # plain substring test on the lowered command, and a global option placed before the service
+    # (`aws --region us-east-1 ec2 terminate-instances`, `aws --output json iam create-user`,
+    # `aws --profile p organizations delete-organization`) would slip past an `aws <service> …` entry.
+    # Read verbs (describe-/list-/get-) share no substring with these, so they classify as before.
+    "iam create-user", "iam delete-user",
+    "iam create-access-key", "iam attach-",
     # Organizations — block destructive subcommands, allow read-only (describe/list)
-    "aws organizations create-", "aws organizations delete-",
-    "aws organizations move-", "aws organizations invite-",
-    "aws organizations leave-", "aws organizations remove-",
+    "organizations create-", "organizations delete-",
+    "organizations move-", "organizations invite-",
+    "organizations leave-", "organizations remove-",
     # Account — block destructive subcommands
-    "aws account close-", "aws account delete-",
+    "account close-", "account delete-",
     "--force",
     "| rm", "; rm", "&& rm",
-    "aws ec2 terminate-instances",
+    "ec2 terminate-instances",
 ]
 
 TIMEOUT_SECONDS = 30

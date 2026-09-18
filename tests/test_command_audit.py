@@ -106,6 +106,36 @@ class TestRunAwsCliLedger:
         (row,) = _rows(db)
         assert row.outcome == "blocked"
 
+    @pytest.mark.parametrize("command", [
+        "aws --region us-east-1 ec2 terminate-instances --instance-ids i-1",
+        "aws --output json iam create-user --user-name x",
+        "aws --region us-east-1 iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+        "aws --region us-east-1 iam create-access-key --user-name x",
+        "aws --profile p organizations delete-organization",
+        "aws ec2 terminate-instances --instance-ids i-1",
+        "aws iam create-user --user-name x",
+        "aws iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+        "aws iam create-access-key --user-name x",
+        "aws organizations delete-organization",
+    ])
+    def test_destructive_is_blocked_even_with_global_options_before_the_service(self, db, command):
+        """Fix round 2 (A): the destructive block entries are `<service> <verb>` without the `aws ` prefix, so a
+        global option placed before the service (`aws --region … ec2 terminate-instances`) is still hard-blocked —
+        confirmation or not — and never reaches execution."""
+        from agenticops.tools.aws_cli_tool import run_aws_cli
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli") as ex:
+            out = run_aws_cli(command=command, require_confirmation=True)
+        assert "blocked" in out.lower() and not ex.called
+        (row,) = _rows(db)
+        assert (row.tier, row.outcome) == ("blocked", "blocked")
+
+    @pytest.mark.parametrize("command", ["aws ec2 describe-instances", "aws --region us-east-1 iam list-users"])
+    def test_reads_with_global_options_are_not_blocked(self, db, command):
+        from agenticops.tools.aws_cli_tool import run_aws_cli
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value="{}") as ex:
+            assert run_aws_cli(command=command, require_confirmation=True) == "{}"
+        assert ex.called
+
     def test_readonly_is_not_recorded(self, db):
         from agenticops.tools.aws_cli_tool import run_aws_cli
         with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value="{}"):
@@ -302,7 +332,7 @@ class TestProviderCliLedger:
     def test_provider_blocked_is_recorded(self, db, monkeypatch):
         tool, run, _ = self._tool(monkeypatch)
         out = tool("aws ec2 terminate-instances --instance-ids i-1")
-        assert out == "Error: Blocked dangerous pattern 'aws ec2 terminate-instances' in command." and not run.called
+        assert out == "Error: Blocked dangerous pattern 'ec2 terminate-instances' in command." and not run.called
         (row,) = _rows(db)
         assert (row.tool, row.tier, row.outcome, row.account) == ("provider_aws_cli", "blocked", "blocked", "dev")
 
@@ -322,11 +352,33 @@ class TestProviderCliLedger:
         (row,) = _rows(db)
         assert (row.tool, row.tier, row.outcome, row.reason) == ("provider_aws_cli", "blocked", "blocked", None)
 
-    def test_provider_blocklist_is_a_superset_of_the_shared_one(self):
-        from agenticops.providers import aws as provider_aws
-        from agenticops.tools import aws_cli_tool
-        assert set(aws_cli_tool.BLOCKED_PATTERNS) <= set(provider_aws.BLOCKED_PATTERNS)
-        assert set(provider_aws.BLOCKED_PATTERNS) - set(aws_cli_tool.BLOCKED_PATTERNS) == {"s3 rm --recursive"}
+    @pytest.mark.parametrize("command,pattern", [
+        ("aws --region us-east-1 ec2 terminate-instances --instance-ids i-1", "ec2 terminate-instances"),
+        ("aws --output json iam create-user --user-name x", "iam create-user"),
+        ("aws --region us-east-1 iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+         "iam attach-"),
+        ("aws --region us-east-1 iam create-access-key --user-name x", "iam create-access-key"),
+        ("aws --profile p organizations delete-organization", "organizations delete-"),
+        ("aws ec2 terminate-instances --instance-ids i-1", "ec2 terminate-instances"),
+        ("aws iam create-user --user-name x", "iam create-user"),
+        ("aws iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess", "iam attach-"),
+        ("aws iam create-access-key --user-name x", "iam create-access-key"),
+        ("aws organizations delete-organization", "organizations delete-"),
+    ])
+    def test_provider_blocks_destructive_commands_with_global_options_before_the_service(self, db, monkeypatch,
+                                                                                         command, pattern):
+        """Fix round 2 (A): 2.5.0 hard-blocked these on the provider path — which has NO confirmation gate — and the
+        Group-7 switch to the shared list must not lose them when a global option precedes the service."""
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool(command)
+        assert out == f"Error: Blocked dangerous pattern '{pattern}' in command." and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.account) == ("provider_aws_cli", "blocked", "blocked", "dev")
+
+    @pytest.mark.parametrize("command", ["aws ec2 describe-instances", "aws --region us-east-1 iam list-users"])
+    def test_provider_reads_with_global_options_are_not_blocked(self, db, monkeypatch, command):
+        tool, run, _ = self._tool(monkeypatch)
+        assert tool(command) == "{}" and run.called
 
     @pytest.mark.parametrize("fault,reason,text", [
         ("no_session", "no_session", "no resolved session for account 'dev'"),
@@ -599,13 +651,17 @@ class TestChangeRequiredFixWave:
     post-shlex token that still contains whitespace is a payload: `name="cmd …"` re-splits its VALUE part, a
     JSON body's structure (`{}[]":`) separates words, and tokens from an option's value keep the option-value
     flag (a `-c` shell payload is still a command in its own right — pinned above). (3) Edge punctuation
-    `[{("'` / `]})"',` is stripped before comparison. (4) `--cli-auto-prompt` is a boolean AWS global."""
+    `[{("'` / `]})"',` is stripped before comparison. (4) `--cli-auto-prompt` is a boolean AWS global. (5) Fix round 2:
+    sudo's own boolean switches (`-n`, `-E`, …) take no value, so `sudo -n /usr/bin/systemctl` keeps the command position."""
 
     @pytest.mark.parametrize("command,pattern", [
         ("/bin/systemctl restart nginx", "systemctl restart"),
         ("/usr/bin/systemctl restart nginx", "systemctl restart"),
         ("sudo /usr/bin/systemctl restart nginx", "systemctl restart"),
         ("sudo -u root /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -u deploy /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -n /usr/bin/systemctl restart nginx", "systemctl restart"),           # fix round 2: sudo's own boolean switch
+        ("sudo -E /bin/systemctl restart nginx", "systemctl restart"),
         ("nice -n 10 /usr/bin/systemctl restart nginx", "systemctl restart"),
         ("env FOO=1 /usr/bin/systemctl restart nginx", "systemctl restart"),
         ('bash -c "/bin/systemctl restart nginx"', "systemctl restart"),
@@ -686,6 +742,29 @@ class TestChangeRequiredFixWave:
         assert "--cli-auto-prompt" in _POLICY_BOOLEAN_FLAGS and _is_value_taking_option("--cli-auto-prompt") is False
         assert _normalize_for_policy("aws ec2 --cli-auto-prompt modify-security-group-rules --group-id sg-1") == \
                [("aws", True), ("ec2", True), ("modify-security-group-rules", True), ("sg-1", False)]
+
+    def test_sudo_boolean_switches_leave_the_command_position_in_place(self):
+        """Fix round 2 (B): sudo's own boolean switches (`-n -E -i -H -b -k -K -s -S -v`) take no value, so the path
+        after them IS the command position and is basenamed. Per wrapper on purpose: the generic `-n` stays
+        value-taking (`nice -n 10` shields `10`), `sudo -u deploy` still shields `deploy`, and the table applies only
+        in sudo's own option region — a `-n` after the command word is generic again."""
+        from agenticops.services.policy_engine import (
+            _WRAPPER_BOOLEAN_FLAGS, _is_value_taking_option, _normalize_for_policy,
+        )
+        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] == frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"})
+        assert set(_WRAPPER_BOOLEAN_FLAGS) == {"sudo"}
+        assert _is_value_taking_option("-n") is True and _is_value_taking_option("-E") is True   # generic rule unchanged
+        for flag in sorted(_WRAPPER_BOOLEAN_FLAGS["sudo"]):
+            assert _normalize_for_policy(f"sudo {flag} /usr/bin/systemctl restart nginx") == \
+                   [("systemctl", True), ("restart", True), ("nginx", True)], flag
+        assert _normalize_for_policy("sudo -u deploy -n /usr/bin/systemctl restart nginx") == \
+               [("deploy", False), ("systemctl", True), ("restart", True), ("nginx", True)]     # `-u x` then `-n`
+        assert _normalize_for_policy("sudo -u deploy /usr/bin/systemctl restart nginx") == \
+               [("deploy", False), ("systemctl", True), ("restart", True), ("nginx", True)]     # value-taking `-u` still works
+        assert _normalize_for_policy("nice -n 10 /usr/bin/systemctl restart nginx") == \
+               [("10", False), ("systemctl", True), ("restart", True), ("nginx", True)]         # nice's `-n` takes a value
+        assert _normalize_for_policy("sudo /usr/bin/foo -n /usr/bin/systemctl restart nginx") == \
+               [("foo", True), ("/usr/bin/systemctl", False), ("restart", True), ("nginx", True)]  # past the command word: generic
 
     @pytest.mark.parametrize("command", ["/", "//", "sudo /", "bash -c '/'", "a/ b", '{"x": [1, 2]}', "name=", "FOO= bar"])
     def test_odd_paths_and_payloads_never_raise(self, command):

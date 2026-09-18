@@ -152,9 +152,31 @@ def test_agent_claim_inside_human_context_parks_l3_and_does_not_chain(db):
     assert _audits(db, "plan.approved") == []
     rows = _audits(db, "authz.denied")
     assert len(rows) == 1
+    assert rows[0].actor == "agent:sre"                       # a KNOWN agent name is kept as the ceiling identity
     assert rows[0].details["claimed_name"] == "agent:sre"
     assert rows[0].details["context_actor"] == "web:anonymous"
     assert rows[0].details["rule"] == "no-agent-approval-above-l1"
+
+
+def test_agent_claim_with_unknown_name_is_audited_as_the_unattributed_ceiling(db):
+    """Fix round 2 (C): the ceiling actor is built from the VETTED agent id (known set, else agent:unattributed),
+    never from the raw LLM string — an invented `agent:<name>` cannot reach the denial row's actor column; it is
+    recorded as the claim."""
+    from agenticops.tools.metadata_tools import approve_fix_plan
+    plan = _plan(db, risk="L3")
+    with run_context(actor="web:anonymous"), \
+         patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger, \
+         patch("agenticops.services.notification_service.notify_fix_approved"):
+        out = approve_fix_plan(fix_plan_id=plan.id, approved_by="agent:bogus")
+    assert "requires human approval" in out and "pending_approval" in out
+    trigger.assert_not_called()
+    db.refresh(plan)
+    assert plan.status == "pending_approval" and plan.approved_by is None
+    (row,) = _audits(db, "authz.denied")
+    assert row.actor == "agent:unattributed"
+    assert row.details["claimed_name"] == "agent:bogus"
+    assert row.details["context_actor"] == "web:anonymous"
+    assert row.details["rule"] == "no-agent-approval-above-l1"
 
 
 def test_agent_claim_inside_human_context_still_approves_l1(db):
