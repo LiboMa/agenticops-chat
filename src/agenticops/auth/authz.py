@@ -4,6 +4,9 @@ check(actor, permission, subject) evaluates config/rbac.yaml:
   1. matrix: required flags ⊆ actor flags (users.permissions for user actors, `subjects` for others)
   2. rules:  structured deny rules (SoD, agent risk ceiling). SoD (actor_must_differ_from_field)
              needs identities, so it is skipped for the anonymous `web` actor (api_auth_enabled=false).
+             EVERY rule bearing on the permission is evaluated and an `enforce: always` deny wins over
+             a shadow deny. A rule cannot be evaluated without its subject, so a permission that has a
+             matching rule is denied (fail-closed) when `subject is None`.
 Denials raise AuthzDenied when settings.rbac_enforce is true OR the matching rule says
 `enforce: always`; otherwise (shadow mode) the denial is written to audit_logs as
 `authz.denied_shadow` and the call is allowed — i.e. behavior is exactly today's.
@@ -12,6 +15,7 @@ Denials raise AuthzDenied when settings.rbac_enforce is true OR the matching rul
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +31,8 @@ PERMISSIONS = (
 )
 
 _RULE_TYPES = {"actor_must_differ_from_field", "deny_actor_kind_when_risk_in"}
+_TOP_LEVEL_KEYS = {"version", "permissions", "subjects", "rules"}
+_RULE_KEYS = {"name", "type", "permission", "field", "actor_kind", "risk_levels", "enforce"}
 
 DEFAULT_POLICY: dict = {
     "version": 1,
@@ -103,44 +109,103 @@ class RbacPolicy:
         return set(self.subjects.get(_SUBJECT_KEY.get(actor.kind, actor.kind), []))
 
     def decide(self, actor: Actor, permission: str, subject: Any) -> tuple[bool, str, Optional[str], bool]:
-        """Returns (allowed, reason, rule_name, always_enforce)."""
+        """Returns (allowed, reason, rule_name, always_enforce).
+
+        Every rule whose `permission` covers the request is evaluated. If any denying rule is
+        `enforce: always`, THAT deny is returned (a shadow-only deny listed earlier must never mask
+        it); otherwise the first deny; otherwise allowed. A rule needs its subject to be evaluated,
+        so `subject is None` denies (fail-closed) with that rule's own enforce flag.
+        """
         required = set(self.permissions.get(permission, ["admin"]))
         have = self.effective_permissions(actor)
         if not required.issubset(have):
             missing = ", ".join(sorted(required - have))
             return False, f"missing permission flag(s): {missing}", None, False
+        denies: list[tuple[str, Optional[str], bool]] = []  # (reason, rule_name, always)
         for rule in self.rules:
             perms = rule.get("permission")
             perms = [perms] if isinstance(perms, str) else list(perms or [])
             if permission not in perms:
                 continue
-            always = str(rule.get("enforce", "")).lower() == "always"
+            name = rule.get("name")
+            always = rule.get("enforce") == "always"
             rtype = rule.get("type")
-            if rtype == "actor_must_differ_from_field" and subject is not None:
-                if actor.kind == "web":
-                    # SoD is only evaluable between IDENTIFIED actors; the anonymous web actor
-                    # (api_auth_enabled=false) has no identity — enable auth to enforce it on the web.
-                    continue
+            if rtype == "actor_must_differ_from_field" and actor.kind == "web":
+                # SoD is only evaluable between IDENTIFIED actors; the anonymous web actor
+                # (api_auth_enabled=false) has no identity — enable auth to enforce it on the web.
+                continue
+            if subject is None:
+                denies.append((f"subject required to evaluate rule {name}", name, always))
+                continue
+            if rtype == "actor_must_differ_from_field":
                 other = getattr(subject, rule.get("field", ""), None)
                 if other and str(other) == actor.key:
-                    return False, f"separation of duties: actor equals {rule.get('field')}", rule.get("name"), always
-            elif rtype == "deny_actor_kind_when_risk_in" and subject is not None:
+                    denies.append((f"separation of duties: actor equals {rule.get('field')}", name, always))
+            elif rtype == "deny_actor_kind_when_risk_in":
                 risk = getattr(subject, "risk_level", None)
                 if actor.kind == rule.get("actor_kind") and risk in (rule.get("risk_levels") or []):
-                    return False, f"{actor.kind} actors may not {permission} at risk {risk}", rule.get("name"), always
+                    denies.append((f"{actor.kind} actors may not {permission} at risk {risk}", name, always))
+        if denies:
+            reason, name, always = next((d for d in denies if d[2]), denies[0])
+            return False, reason, name, always
         return True, "allowed", None, False
 
 
-def validate_rbac(data: dict) -> list[str]:
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
+def validate_rbac(data: Any) -> list[str]:
+    """Strict schema check. ANY error rejects the whole file (load() then uses DEFAULT_POLICY):
+    a file that is partly misread — an inert rule, a typo'd key, a YAML boolean where the string
+    "always" was meant — must not half-apply."""
+    if not isinstance(data, dict):
+        return ["rbac file must be a mapping"]
     errors: list[str] = []
-    if not isinstance(data.get("permissions", {}), dict):
-        errors.append("'permissions' must be a mapping")
-    for i, rule in enumerate(data.get("rules") or []):
-        label = rule.get("name") or f"rules[{i}]"
-        if rule.get("type") not in _RULE_TYPES:
-            errors.append(f"{label}: unknown rule type {rule.get('type')!r}")
-        if not rule.get("permission"):
-            errors.append(f"{label}: 'permission' is required")
+    errors.extend(f"unknown top-level key {key!r}" for key in data if key not in _TOP_LEVEL_KEYS)
+    for section in ("permissions", "subjects"):
+        mapping = data.get(section)
+        if not isinstance(mapping, dict) or not mapping:
+            errors.append(f"'{section}' must be a non-empty mapping")
+            continue
+        for key, flags in mapping.items():
+            if not _is_str_list(flags):
+                errors.append(f"{section}.{key}: must be a list of strings, got {flags!r}")
+            if section == "permissions" and key not in PERMISSIONS:
+                errors.append(f"permissions.{key}: unknown permission")
+    rules = data.get("rules")
+    if rules is None:
+        rules = []
+    if not isinstance(rules, list):
+        errors.append("'rules' must be a list")
+        rules = []
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            errors.append(f"rules[{i}]: must be a mapping")
+            continue
+        name = rule.get("name")
+        label = name if isinstance(name, str) and name else f"rules[{i}]"
+        if not (isinstance(name, str) and name):
+            errors.append(f"{label}: 'name' is required")
+        errors.extend(f"{label}: unknown key {key!r}" for key in rule if key not in _RULE_KEYS)
+        rtype = rule.get("type")
+        if rtype not in _RULE_TYPES:
+            errors.append(f"{label}: unknown rule type {rtype!r}")
+        perms = rule.get("permission")
+        perms = [perms] if isinstance(perms, str) else perms
+        if not perms or not _is_str_list(perms):
+            errors.append(f"{label}: 'permission' must be a string or a non-empty list of strings")
+        else:
+            errors.extend(f"{label}: unknown permission {p!r}" for p in perms if p not in PERMISSIONS)
+        if rtype == "actor_must_differ_from_field" and not (isinstance(rule.get("field"), str) and rule.get("field")):
+            errors.append(f"{label}: 'field' (string) is required")
+        if rtype == "deny_actor_kind_when_risk_in":
+            if not (isinstance(rule.get("actor_kind"), str) and rule.get("actor_kind")):
+                errors.append(f"{label}: 'actor_kind' (string) is required")
+            if not rule.get("risk_levels") or not _is_str_list(rule.get("risk_levels")):
+                errors.append(f"{label}: 'risk_levels' (non-empty list of strings) is required")
+        if "enforce" in rule and rule["enforce"] != "always":
+            errors.append(f"{label}: 'enforce' must be the string \"always\" (got {rule['enforce']!r}; a YAML boolean is not accepted)")
     return errors
 
 
@@ -156,18 +221,33 @@ def get_rbac_policy(reload: bool = False) -> RbacPolicy:
         return _policy
 
 
-def _audit_shadow_denial(actor: Actor, permission: str, reason: str, rule: Optional[str], subject: Any, enforced: bool) -> None:
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _entity_type_for(subject: Any) -> str:
+    """Audit entity_type in the EntityTypes vocabulary: FixPlan → fix_plan, ChangeRequest → change_request,
+    any other class → snake_case of its name, no subject → system."""
+    from agenticops.audit.service import EntityTypes
+    if subject is None:
+        return EntityTypes.SYSTEM
+    name = type(subject).__name__
+    by_class = {"FixPlan": EntityTypes.FIX_PLAN, "ChangeRequest": EntityTypes.CHANGE_REQUEST}
+    return by_class.get(name) or _CAMEL_BOUNDARY.sub("_", name).lower()
+
+
+def _audit_denial(actor: Actor, permission: str, reason: str, rule: Optional[str], subject: Any, enforced: bool) -> None:
+    """Write the denial to audit_logs — in shadow mode this row is the ONLY artefact of the decision."""
     try:
         from agenticops.audit.service import AuditService
-        entity_type = type(subject).__name__.lower() if subject is not None else "system"
-        entity_id = str(getattr(subject, "id", "") or "-")
         AuditService.log(
             action="authz.denied" if enforced else "authz.denied_shadow",
-            entity_type=entity_type, entity_id=entity_id, actor=actor.key, user_id=actor.user_id,
+            entity_type=_entity_type_for(subject), entity_id=str(getattr(subject, "id", "") or "-"),
+            actor=actor.key, user_id=actor.user_id,
             details={"permission": permission, "reason": reason, "rule": rule},
         )
     except Exception:
-        logger.debug("authz audit write failed", exc_info=True)
+        logger.warning("authz audit write failed: %s denied %s (%s, rule=%s)",
+                       actor.key, permission, reason, rule, exc_info=True)
 
 
 def check(actor: Actor, permission: str, subject: Any = None) -> None:
@@ -179,7 +259,7 @@ def check(actor: Actor, permission: str, subject: Any = None) -> None:
     if allowed:
         return
     enforced = bool(settings.rbac_enforce) or always
-    _audit_shadow_denial(actor, permission, reason, rule, subject, enforced)
+    _audit_denial(actor, permission, reason, rule, subject, enforced)
     if enforced:
         raise AuthzDenied(actor.key, permission, reason, rule)
     logger.info("authz shadow: %s would be denied %s (%s)", actor.key, permission, reason)

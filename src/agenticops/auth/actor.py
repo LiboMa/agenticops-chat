@@ -62,9 +62,10 @@ def webhook_actor(source: str) -> Actor:
 
 
 def parse_actor(text: str) -> Actor:
-    """Reconstruct an Actor from its key. Legacy free-text names (no colon) become web:<text>."""
+    """Reconstruct an Actor from its key. Legacy free-text names become web:<text> — that is any text
+    without a colon, and also "cli:" / ":x" (an empty kind or an empty id is not a valid key)."""
     text = (text or "").strip()
-    if ":" not in text:
+    kind, sep, rest = text.partition(":")
+    if not sep or not kind or not rest:
         return Actor("web", text or "anonymous")
-    kind, _, rest = text.partition(":")
     return Actor(kind, rest)

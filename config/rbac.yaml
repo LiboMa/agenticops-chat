@@ -9,6 +9,9 @@
 #                actor_must_differ_from_field  — str(actor) != getattr(subject, field)      (SoD)
 #                deny_actor_kind_when_risk_in  — actor.kind == actor_kind and subject.risk_level in risk_levels
 #              `enforce: always` makes a rule bite even in shadow mode (rbac_enforce=false).
+#              Every rule bearing on a permission is evaluated and an `enforce: always` deny wins over a
+#              shadow deny; such a permission REQUIRES a subject — without one the call is denied (fail-closed).
+#              This file is validated strictly: any error rejects the WHOLE file and the built-in defaults apply.
 version: 1
 
 permissions:
