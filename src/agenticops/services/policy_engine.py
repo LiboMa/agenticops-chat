@@ -36,6 +36,11 @@ RISK_ORDER = ["L0", "L1", "L2", "L3", "L4"]
 
 VALID_ACTIONS = {"auto_approve", "require_human", "require_itsm_change", "block", "escalate"}
 
+# Change Management (MVP-2.6.0): what a rule's `match` may name for `plan_kind` / `action_type`. A fix plan
+# evaluates as plan_kind="fix" (the default), so rules carrying `plan_kind: [change]` never touch the fix flow.
+PLAN_KINDS = ("fix", "change")
+CHANGE_ACTION_TYPES = ("tag", "scale", "config", "network", "iam", "delete", "other")
+
 # Replicates pre-2.0 hardcoded behavior: L0/L1 auto, everything else human.
 DEFAULT_POLICY: dict = {
     "version": 1,
@@ -106,7 +111,9 @@ def _bump_risk(risk_level: str) -> str:
 # A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
 # modify-security-group-rules` is still gated; a wrapper's OWN boolean switches (`sudo -n`, `sudo -E`, …:
 # _WRAPPER_BOOLEAN_FLAGS) count the same way inside that wrapper's option region, so `sudo -n /usr/bin/systemctl`
-# still has its command word basenamed. The allowlist only ever ADDS refusals (an eligible token is a
+# still has its command word basenamed. A wrapper word arriving in COMMAND POSITION (`sudo -n nice -n 10 /usr/bin/…`,
+# `sudo -E sudo …`, `sudo -n env FOO=1 …`) is itself a wrapper and swaps in its own table; only a non-wrapper word is
+# the command. The allowlist only ever ADDS refusals (an eligible token is a
 # superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
 _POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice")
 _POLICY_RESPLIT_MAX_DEPTH = 3
@@ -118,10 +125,10 @@ _POLICY_BOOLEAN_FLAGS = frozenset({
     "--user", "--now", "--all", "-A",
 })
 # A WRAPPER's own boolean switches (exact tokens), consulted only in that wrapper's option region — the tokens
-# between the wrapper and the command word: in `sudo -n /usr/bin/systemctl restart nginx` sudo's `-n`
-# (non-interactive) takes no value, so the path after it IS the command position and is basenamed. Per wrapper on
-# purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`), and past the command word
-# `-n` is generic again.
+# between the wrapper and the next wrapper word or the command word: in `sudo -n /usr/bin/systemctl restart nginx`
+# sudo's `-n` (non-interactive) takes no value, so the path after it IS the command position and is basenamed. Per
+# wrapper on purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`, also when nice is
+# chained after `sudo -n` — each wrapper word brings its own table), and past the command word `-n` is generic again.
 _WRAPPER_BOOLEAN_FLAGS: dict[str, frozenset[str]] = {
     "sudo": frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"}),
 }
@@ -151,9 +158,11 @@ def _is_value_taking_option(token: str) -> bool:
 def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
     """Lower-cased `(token, eligible_for_prefix)` pairs with wrappers and option tokens removed.
 
-    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped; every token
-    starting with '-' dropped (sudo's own boolean switches — `-n`, `-E`, …, _WRAPPER_BOOLEAN_FLAGS — take no value,
-    so `sudo -n /usr/bin/systemctl` keeps its command position). Option VALUES are kept as ordinary tokens — a kept
+    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped — chained too:
+    a wrapper word in command position after another wrapper's switches (`sudo -n nice -n 10 …`, `sudo -E sudo …`)
+    is dropped as a wrapper with its own table; every token starting with '-' dropped (sudo's own boolean switches —
+    `-n`, `-E`, …, _WRAPPER_BOOLEAN_FLAGS — take no value, so `sudo -n /usr/bin/systemctl` keeps its command
+    position). Option VALUES are kept as ordinary tokens — a kept
     value can only add a token the ordered match must skip over — but they are flagged: `eligible_for_prefix` is
     False when the ORIGINAL predecessor is a value-taking option (_is_value_taking_option — a known boolean flag such
     as `--no-cli-pager` is not one), and only hyphenated pattern tokens consult the flag.
@@ -181,15 +190,13 @@ def _basename(token: str) -> str:
 
 
 def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
-    start = 0
-    while start < len(tokens) and tokens[start].lower() in _POLICY_WRAPPERS:
-        start += 1
-    # The last leading wrapper's own boolean switches (sudo -n/-E/…) apply until the command word is found.
-    wrapper_booleans = _WRAPPER_BOOLEAN_FLAGS.get(tokens[start - 1].lower(), frozenset()) if start else frozenset()
     out: list[tuple[str, bool]] = []
+    # The current wrapper's own boolean switches (sudo -n/-E/…) apply until the next wrapper word or the command
+    # word. A wrapper word that arrives in command position (`sudo -n nice …`, `sudo -E sudo …`) is consumed as a
+    # wrapper and swaps in ITS table — never taken as the command — so the real program path is still basenamed.
+    wrapper_booleans: frozenset[str] = frozenset()
     command_seen = False
-    for i in range(start, len(tokens)):
-        token = tokens[i]
+    for i, token in enumerate(tokens):
         if token.startswith("-"):
             continue
         prev = tokens[i - 1] if i > 0 else None
@@ -200,6 +207,9 @@ def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
             out.extend(_payload_tokens(token, depth, prev, positional=eligible))
             continue
         if not command_seen and eligible and not _ENV_ASSIGNMENT.match(token):
+            if token.lower() in _POLICY_WRAPPERS:
+                wrapper_booleans = _WRAPPER_BOOLEAN_FLAGS.get(token.lower(), frozenset())
+                continue  # chained wrapper: its option region follows, the command word is still ahead
             command_seen = True
             if "/" in token:
                 token = _basename(token)  # command position only: /usr/sbin/reboot → reboot
@@ -320,8 +330,15 @@ class PolicyEngine:
         blast_radius: Optional[int] = None,
         impact_severity: Optional[str] = None,
         now: Optional[datetime] = None,
+        plan_kind: str = "fix",
+        emergency: bool = False,
+        action_type: Optional[str] = None,
     ) -> PolicyDecision:
-        """Evaluate rules in order; first match wins. 'escalate' re-runs one tier up."""
+        """Evaluate rules in order; first match wins. 'escalate' re-runs one tier up.
+
+        `plan_kind` / `action_type` / `emergency` (MVP-2.6.0 change requests) are matched like the other fields;
+        an emergency change never matches `in_change_freeze`, so it crosses a freeze window (other rules still gate it).
+        """
         now = now or datetime.now(timezone.utc)
         original_risk = risk_level
         seen_levels: set[str] = set()
@@ -341,6 +358,9 @@ class PolicyEngine:
                     blast_radius=blast_radius,
                     impact_severity=impact_severity,
                     now=now,
+                    plan_kind=plan_kind,
+                    emergency=emergency,
+                    action_type=action_type,
                 )
                 if not matched:
                     continue
@@ -389,6 +409,9 @@ class PolicyEngine:
         blast_radius: Optional[int],
         impact_severity: Optional[str] = None,
         now: datetime,
+        plan_kind: str = "fix",
+        emergency: bool = False,
+        action_type: Optional[str] = None,
     ) -> tuple[bool, list[str]]:
         reasons: list[str] = []
 
@@ -428,7 +451,27 @@ class PolicyEngine:
                 return False, []
             reasons.append(f"simulated impact_severity={impact_severity}")
 
+        kinds = match.get("plan_kind")
+        if kinds is not None:
+            if plan_kind not in kinds:
+                return False, []
+            reasons.append(f"plan_kind={plan_kind}")
+
+        action_types = match.get("action_type")
+        if action_types is not None:
+            if action_type not in action_types:
+                return False, []
+            reasons.append(f"action_type={action_type}")
+
+        want_emergency = match.get("emergency")
+        if want_emergency is not None:
+            if bool(want_emergency) != bool(emergency):
+                return False, []
+            reasons.append(f"emergency={bool(emergency)}")
+
         if match.get("in_change_freeze"):
+            if emergency:
+                return False, []  # emergency changes are allowed to cross a freeze window (still human-gated by other rules)
             window = self._active_freeze_window(now)
             if window is None:
                 return False, []
@@ -488,6 +531,13 @@ def validate_policy(data: dict) -> list[str]:
                 re.compile(pattern)
             except re.error as e:
                 errors.append(f"{label}: bad resource_pattern: {e}")
+        m = match or {}
+        if "plan_kind" in m and (not isinstance(m["plan_kind"], list) or any(k not in PLAN_KINDS for k in m["plan_kind"])):
+            errors.append(f"{label}: plan_kind must be a list from {list(PLAN_KINDS)}")
+        if "action_type" in m and (not isinstance(m["action_type"], list) or any(a not in CHANGE_ACTION_TYPES for a in m["action_type"])):
+            errors.append(f"{label}: action_type must be a list from {list(CHANGE_ACTION_TYPES)}")
+        if "emergency" in m and not isinstance(m["emergency"], bool):
+            errors.append(f"{label}: emergency must be true/false")
     defaults = data.get("defaults") or {}
     if defaults.get("action") and defaults["action"] not in VALID_ACTIONS:
         errors.append(f"defaults.action invalid: {defaults['action']!r}")

@@ -652,7 +652,9 @@ class TestChangeRequiredFixWave:
     JSON body's structure (`{}[]":`) separates words, and tokens from an option's value keep the option-value
     flag (a `-c` shell payload is still a command in its own right — pinned above). (3) Edge punctuation
     `[{("'` / `]})"',` is stripped before comparison. (4) `--cli-auto-prompt` is a boolean AWS global. (5) Fix round 2:
-    sudo's own boolean switches (`-n`, `-E`, …) take no value, so `sudo -n /usr/bin/systemctl` keeps the command position."""
+    sudo's own boolean switches (`-n`, `-E`, …) take no value, so `sudo -n /usr/bin/systemctl` keeps the command position.
+    (6) Plan A final review carry-over: a wrapper word that follows a sudo boolean switch (`sudo -n nice -n 10 /usr/bin/…`,
+    `sudo -E sudo …`) continues wrapper processing with its own table instead of being taken as the command word."""
 
     @pytest.mark.parametrize("command,pattern", [
         ("/bin/systemctl restart nginx", "systemctl restart"),
@@ -765,6 +767,44 @@ class TestChangeRequiredFixWave:
                [("10", False), ("systemctl", True), ("restart", True), ("nginx", True)]         # nice's `-n` takes a value
         assert _normalize_for_policy("sudo /usr/bin/foo -n /usr/bin/systemctl restart nginx") == \
                [("foo", True), ("/usr/bin/systemctl", False), ("restart", True), ("nginx", True)]  # past the command word: generic
+
+    @pytest.mark.parametrize("command", [
+        "sudo -n nice -n 10 /usr/bin/systemctl restart nginx",    # sudo switch, then nice with ITS OWN table (`-n 10` shields `10`)
+        "sudo -n env FOO=1 /usr/bin/systemctl restart nginx",     # …then env (`FOO=1` is never the command word)
+        "sudo -n nohup /usr/bin/systemctl restart nginx",
+        "sudo -E sudo /usr/bin/systemctl restart nginx",          # sudo chained on sudo
+        "sudo -n /usr/bin/systemctl restart nginx",               # kept from fix round 2
+        "nice -n 10 /usr/bin/systemctl restart nginx",
+        "sudo -u deploy /usr/bin/systemctl restart nginx",
+    ])
+    def test_chained_wrappers_after_a_sudo_boolean_switch_are_seen_through(self, command):
+        """Plan A final review carry-over: a wrapper word (`sudo`, `env`, `nice`, `nohup`, `time`) that follows a sudo
+        boolean switch continues wrapper processing — with its own boolean/value-taking table — instead of being taken
+        as the command word, so the real program path is still basenamed and `systemctl restart` is refused."""
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == "systemctl restart"
+
+    @pytest.mark.parametrize("command", [
+        "kubectl apply -f /tmp/delete-me.yaml",
+        "aws lambda invoke --function-name update-inventory",
+    ])
+    def test_chained_wrapper_handling_adds_no_refusal_elsewhere(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    def test_chained_wrapper_tokens(self):
+        """The wrapper table swaps per wrapper word: after `sudo -n nice`, nice's generic `-n` is value-taking again
+        (`10` shielded, ineligible) and the first non-wrapper word is the command position (basenamed). A wrapper
+        word that is itself an option VALUE (`sudo -u nice …`) is not a wrapper."""
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy("sudo -n nice -n 10 /usr/bin/systemctl restart nginx") == \
+               [("10", False), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("sudo -n env FOO=1 /usr/bin/systemctl restart nginx") == \
+               [("foo=1", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("sudo -E sudo /usr/bin/systemctl restart nginx") == \
+               [("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("sudo -u nice /usr/bin/systemctl restart nginx") == \
+               [("nice", False), ("systemctl", True), ("restart", True), ("nginx", True)]
 
     @pytest.mark.parametrize("command", ["/", "//", "sudo /", "bash -c '/'", "a/ b", '{"x": [1, 2]}', "name=", "FOO= bar"])
     def test_odd_paths_and_payloads_never_raise(self, command):

@@ -19,6 +19,9 @@
 #   resource_pattern: <regex matched against the issue's resource_id>
 #   blast_radius_gte: <int — downstream nodes affected per the infra graph>
 #   in_change_freeze: true — matches inside any freeze_windows entry below
+#   plan_kind: [fix, change] — fix plan (default) or change request (MVP-2.6.0)
+#   action_type: [tag, scale, config, network, iam, delete, other] — change request's action
+#   emergency: true|false — requested_change_type=emergency (also lets the change cross freeze windows)
 
 version: 1
 
@@ -32,6 +35,8 @@ freeze_windows: []
 
 rules:
   # Hard stop during declared change freezes, regardless of risk.
+  # An EMERGENCY change (emergency: true) never matches in_change_freeze, so it
+  # crosses the freeze — the change-* rules below still put a human in front of it.
   - name: freeze-window-block
     match: { in_change_freeze: true }
     action: block
@@ -49,6 +54,21 @@ rules:
   - name: impact-severity-escalation
     match: { impact_severity: [critical, high] }
     action: escalate
+
+  # ── Change Management (MVP-2.6.0) ──
+  # Standard change: low-risk tagging/config on a change request. auto_approve here is
+  # NECESSARY but not sufficient — settings.change_auto_approve_standard (default false)
+  # must also be on, otherwise the plan waits for a human approver.
+  - name: change-standard-low-risk
+    match: { plan_kind: [change], risk_level: [L0, L1], action_type: [tag, config, scale] }
+    action: auto_approve
+    itsm_change_type: standard
+
+  # Any other change (L2/L3, network/iam/delete, emergency) needs a human approver.
+  - name: change-normal-human
+    match: { plan_kind: [change] }
+    action: require_human
+    itsm_change_type: normal
 
   # The historical default: L0/L1 auto-approve. As an ITIL *standard change*
   # this rule is the one-time human pre-authorization of the pattern.
@@ -80,7 +100,10 @@ rules:
 # in COMMAND POSITION (first after the wrappers, first of a quoted payload) is
 # reduced to its basename, so `/bin/systemctl restart nginx` and `sudo
 # /usr/sbin/reboot` hit like the bare names; a path anywhere else is untouched
-# (`kubectl apply -f /tmp/delete-me.yaml` is not gated). `aws rds modify-`
+# (`kubectl apply -f /tmp/delete-me.yaml` is not gated); sudo's boolean switches
+# (`-n -E -i -H -b -k -K -s -S -v`) and chained wrappers (`sudo -n nice -n 10
+# /usr/bin/…`) are seen through, so the program path after them is still the
+# command word. `aws rds modify-`
 # hits `aws --profile p rds modify-db-instance`; the bare `reboot` hits
 # `sudo reboot` but not `--tags Key=x,Value=reboot-test`, and it is the
 # `aws ec2 reboot-` entry (not `reboot`) that catches `aws ec2 reboot-instances`;
