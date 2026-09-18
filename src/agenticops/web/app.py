@@ -2154,12 +2154,44 @@ async def api_list_health_issue_fix_plans(issue_id: int):
         return [FixPlanResponse.model_validate(p) for p in plans]
 
 
+_ISSUE_AGENT_LABELS = {
+    "rca": ("RCA triggered", "RCA trigger failed"),
+    "sre": ("Fix plan generated", "Fix plan generation failed"),
+}
+
+
+def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on_behalf_of: str) -> None:
+    """Thread target for the manual RCA / fix-plan triggers (POST /api/health-issues/{id}/rca and
+    /generate-fix-plan). ContextVars do not cross threading.Thread, so THIS thread sets the issue's trace
+    and a Run Context — agent:rca | agent:sre acting on behalf of the requesting web actor — and resets
+    both in finally (the pipeline-thread pattern of rca_service / pipeline_service). Failures are logged,
+    never raised out of the thread."""
+    from agenticops.config import set_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _tid_token = set_trace_id(trace_id)
+    _rc_token = set_run_context(RunContext(actor=f"agent:{agent_name}", on_behalf_of=on_behalf_of,
+                                           trace_id=trace_id, agent_name=agent_name))
+    done_label, failed_label = _ISSUE_AGENT_LABELS[agent_name]
+    try:
+        if agent_name == "rca":
+            from agenticops.agents.rca_agent import rca_agent as agent
+        else:
+            from agenticops.agents.sre_agent import sre_agent as agent
+        result = agent(issue_id=issue_id)
+        logger.info("%s for issue #%d: %s", done_label, issue_id, str(result)[:200])
+    except Exception:
+        logger.exception("%s for issue #%d", failed_label, issue_id)
+    finally:
+        reset_run_context(_rc_token)
+        _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
+
+
 @app.post("/api/health-issues/{issue_id}/rca", response_model=RCAResponse, status_code=202)
-async def api_trigger_rca(issue_id: int):
+async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA analysis for a health issue via the rca_agent.
 
-    Runs the rca_agent as a tool call and stores the result.
-    Returns the new RCA result.
+    Runs the rca_agent in a background thread (agent:rca on behalf of the requesting actor,
+    under the issue's trace) and returns immediately.
     """
     import threading
 
@@ -2167,21 +2199,10 @@ async def api_trigger_rca(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
+        issue_trace_id = issue.trace_id
 
-        # Run RCA agent in background thread and return immediately
-        issue_title = issue.title
-        issue_desc = issue.description
-        issue_resource = issue.resource_id
-
-    def _run_rca():
-        try:
-            from agenticops.agents.rca_agent import rca_agent
-            result = rca_agent(issue_id=issue_id)
-            logger.info("RCA triggered for issue #%d: %s", issue_id, str(result)[:200])
-        except Exception:
-            logger.exception("RCA trigger failed for issue #%d", issue_id)
-
-    thread = threading.Thread(target=_run_rca, daemon=True, name=f"rca-trigger-{issue_id}")
+    thread = threading.Thread(target=_run_issue_agent, args=("rca", issue_id, issue_trace_id, actor.key),
+                              daemon=True, name=f"rca-trigger-{issue_id}")
     thread.start()
 
     # Return a placeholder — the RCA will be available after the agent completes
@@ -2195,10 +2216,11 @@ async def api_trigger_rca(issue_id: int):
 
 
 @app.post("/api/health-issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_fix_plan(issue_id: int):
+async def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for a health issue via the sre_agent.
 
-    Requires an existing RCA result. Runs sre_agent in background.
+    Requires an existing RCA result. Runs sre_agent in a background thread (agent:sre on behalf
+    of the requesting actor, under the issue's trace).
     """
     import threading
 
@@ -2206,6 +2228,7 @@ async def api_trigger_fix_plan(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
+        issue_trace_id = issue.trace_id
 
         rca = (
             session.query(RCAResult)
@@ -2231,15 +2254,8 @@ async def api_trigger_fix_plan(issue_id: int):
                        f"Wait for it to complete or reject it first.",
             )
 
-    def _run_fix_plan():
-        try:
-            from agenticops.agents.sre_agent import sre_agent
-            result = sre_agent(issue_id=issue_id)
-            logger.info("Fix plan generated for issue #%d: %s", issue_id, str(result)[:200])
-        except Exception:
-            logger.exception("Fix plan generation failed for issue #%d", issue_id)
-
-    thread = threading.Thread(target=_run_fix_plan, daemon=True, name=f"fixplan-trigger-{issue_id}")
+    thread = threading.Thread(target=_run_issue_agent, args=("sre", issue_id, issue_trace_id, actor.key),
+                              daemon=True, name=f"fixplan-trigger-{issue_id}")
     thread.start()
 
     return JSONResponse(

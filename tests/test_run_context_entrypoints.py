@@ -349,3 +349,97 @@ def test_im_gateway_resets_context_when_agent_raises(platform):
     assert get_run_context() == before, "context must be reset even when the agent raises"
     assert get_trace_id() is None and get_im_origin() is None
     svc._send_reply.assert_called_once()
+
+
+# ── web manual RCA / fix-plan triggers + post-resolution thread (fix wave, I-4 + M-10) ──────────
+
+
+@pytest.mark.parametrize("agent_name,target", [
+    ("rca", "agenticops.agents.rca_agent.rca_agent"),
+    ("sre", "agenticops.agents.sre_agent.sre_agent"),
+])
+def test_web_issue_agent_thread_sets_and_resets_context(db, agent_name, target):
+    """The thread target behind POST /api/health-issues/{id}/rca and /generate-fix-plan sets this thread's trace
+    (the issue's) and a Run Context — agent:<name> acting on behalf of the requesting web actor — and resets
+    BOTH in finally."""
+    import agenticops.web.app as webapp
+    from agenticops.config import get_trace_id
+    seen = {}
+
+    def fake(issue_id):
+        seen.update(get_run_context().__dict__)
+        seen["trace_var"] = get_trace_id()
+        return "ok"
+
+    before, before_tid = get_run_context(), get_trace_id()
+    with patch(target, side_effect=fake):
+        webapp._run_issue_agent(agent_name, 1, "TRC-issue1", "web:anonymous")
+    assert seen["actor"] == f"agent:{agent_name}" and seen["on_behalf_of"] == "web:anonymous"
+    assert seen["agent_name"] == agent_name and seen["trace_id"] == "TRC-issue1" == seen["trace_var"]
+    assert get_run_context() == before and get_trace_id() == before_tid, "both must be reset in finally"
+
+
+def test_web_issue_agent_thread_resets_context_when_agent_raises(db):
+    import agenticops.web.app as webapp
+    from agenticops.config import get_trace_id
+    before, before_tid = get_run_context(), get_trace_id()
+    with patch("agenticops.agents.rca_agent.rca_agent", side_effect=RuntimeError("boom")):
+        webapp._run_issue_agent("rca", 1, "TRC-issue1", "web:anonymous")  # logged, never raised out of the thread
+    assert get_run_context() == before and get_trace_id() == before_tid
+
+
+@pytest.mark.parametrize("route,target,agent_name", [
+    ("/api/health-issues/{id}/rca", "agenticops.agents.rca_agent.rca_agent", "rca"),
+    ("/api/health-issues/{id}/generate-fix-plan", "agenticops.agents.sre_agent.sre_agent", "sre"),
+])
+def test_web_issue_routes_pass_requesting_actor_and_issue_trace(db, route, target, agent_name):
+    """Wiring: the route resolves the requesting actor (current_actor) and the issue's trace_id and hands both to
+    the thread; the agent observes agent:<name> on behalf of that actor under that trace."""
+    from starlette.testclient import TestClient
+    import agenticops.web.app as webapp
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="root_cause_identified",
+                        resource_id="r", trace_id="TRC-route1")
+    db.add(issue); db.flush()
+    db.add(RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9))  # generate-fix-plan needs an RCA
+    db.commit()
+    seen, done = {}, threading.Event()
+
+    def fake(issue_id):
+        from agenticops.config import get_trace_id
+        seen.update(get_run_context().__dict__)
+        seen["trace_var"] = get_trace_id()
+        done.set()
+        return "ok"
+
+    with patch(target, side_effect=fake):
+        resp = TestClient(webapp.app).post(route.format(id=issue.id))
+        assert resp.status_code == 202, resp.text
+        assert done.wait(10), "agent thread did not run"
+    assert seen["actor"] == f"agent:{agent_name}" and seen["on_behalf_of"] == "web:anonymous"
+    assert seen["trace_id"] == "TRC-route1" == seen["trace_var"] and seen["agent_name"] == agent_name
+
+
+def test_post_resolution_thread_sets_and_resets_context(db, monkeypatch):
+    """M-10: the post-resolution thread runs as agent:auto-pipeline (nobody to act on behalf of) under the
+    issue's trace, and resets both afterwards."""
+    from types import SimpleNamespace
+    from agenticops.config import get_trace_id, settings
+    from agenticops.services import resolution_service
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="resolved",
+                        resource_id="r", trace_id="TRC-res1")
+    db.add(issue); db.commit()
+    monkeypatch.setattr(settings, "skills_auto_improve_enabled", False)
+    seen = {}
+
+    def fake_rag(issue_id):
+        seen.update(get_run_context().__dict__)
+        seen["trace_var"] = get_trace_id()
+        return SimpleNamespace(action="skip", success=True, sop_filename=None)
+
+    before, before_tid = get_run_context(), get_trace_id()
+    with patch("agenticops.pipeline.rag_pipeline.run_rag_pipeline", side_effect=fake_rag), \
+         patch("agenticops.tools.kb_tools.distill_case_study", return_value="distilled"):
+        resolution_service._run_post_resolution(issue.id)
+    assert seen["actor"] == "agent:auto-pipeline" and seen["on_behalf_of"] is None
+    assert seen["agent_name"] == "resolution" and seen["trace_id"] == "TRC-res1" == seen["trace_var"]
+    assert get_run_context() == before and get_trace_id() == before_tid
