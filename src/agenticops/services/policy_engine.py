@@ -81,22 +81,21 @@ def _bump_risk(risk_level: str) -> str:
     return RISK_ORDER[min(idx + 1, len(RISK_ORDER) - 1)]
 
 
-# change_required matching (MVP-2.6.0): patterns are tested against a NORMALISED command as well as the
-# raw one, so a global option (`aws --profile p ec2 modify-…`, `kubectl --context prod delete …`),
-# doubled whitespace or a sudo/env wrapper cannot slip a high-risk command past a plain substring test.
+# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match, prefix per token. The command is
+# tokenised (sudo/env wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern
+# hits when its whitespace-split tokens appear in that order — not necessarily adjacent — each equal to or a
+# prefix of a command token. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x`
+# and `sudo -n systemctl restart nginx` all hit, while `kubectl scale deployment/shutdown-handler` and
+# `--tags Key=x,Value=reboot-test` do not (a pattern word buried inside a token is not a token prefix).
 _POLICY_WRAPPERS = ("sudo", "env")
-_POLICY_VALUE_OPTIONS = frozenset({
-    "--profile", "--region", "--output", "--endpoint-url", "--context", "--namespace", "-n",
-    "--kubeconfig", "--cluster", "--user", "-u", "--subscription", "--project",
-})
 
 
-def _normalize_for_policy(command: str) -> str:
-    """Lower-cased, single-spaced command with wrappers, options and known option values removed.
+def _normalize_for_policy(command: str) -> list[str]:
+    """Lower-cased token list with wrappers and option tokens removed; option values stay as ordinary tokens.
 
-    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token
-    starting with '-' dropped, plus the following token when the option is one of the known
-    value-taking global options (`--opt=value` is a single token and is simply dropped).
+    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token starting
+    with '-' dropped — nothing else. Option values are kept on purpose: deciding which options take a value
+    is CLI-specific guesswork, and a kept value can only add a token the ordered match must skip over.
     """
     try:
         tokens = shlex.split(command or "")
@@ -104,17 +103,20 @@ def _normalize_for_policy(command: str) -> str:
         tokens = (command or "").split()
     while tokens and tokens[0].lower() in _POLICY_WRAPPERS:
         tokens.pop(0)
-    kept: list[str] = []
-    skip_next = False
-    for token in tokens:
-        if skip_next:
-            skip_next = False
-            continue
-        if token.startswith("-"):
-            skip_next = token in _POLICY_VALUE_OPTIONS
-            continue
-        kept.append(token)
-    return " ".join(kept).lower()
+    return [token.lower() for token in tokens if not token.startswith("-")]
+
+
+def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[str]) -> bool:
+    """True when every pattern token is matched, in order, by a command token equal to it or starting with it."""
+    if not pattern_tokens:
+        return False
+    i = 0
+    for token in command_tokens:
+        if token == pattern_tokens[i] or token.startswith(pattern_tokens[i]):
+            i += 1
+            if i == len(pattern_tokens):
+                return True
+    return False
 
 
 class PolicyEngine:
@@ -131,9 +133,10 @@ class PolicyEngine:
                 self.default_action,
             )
             self.default_action = "require_human"
-        # Change Management (MVP-2.6.0): write commands matching one of these substrings are
-        # refused outside an approved plan. A non-list would iterate characters and match
-        # everything, so it is ignored (from_yaml already rejects it via validate_policy).
+        # Change Management (MVP-2.6.0): write commands matching one of these patterns (ordered token
+        # match, prefix per token — see _tokens_match_in_order) are refused outside an approved plan.
+        # A non-list would iterate characters and match everything, so it is ignored (from_yaml
+        # already rejects it via validate_policy).
         raw = self.policy.get("change_required") or []
         if not isinstance(raw, (list, tuple)):
             logger.warning("policy change_required must be a list — ignoring %r", raw)
@@ -316,13 +319,14 @@ class PolicyEngine:
     def change_required_match(self, command: str) -> Optional[str]:
         """Return the change_required pattern the command matches, or None.
 
-        A pattern hits when it is a substring of the normalised form (_normalize_for_policy) OR of the
-        whitespace-collapsed lower-cased raw form — normalisation can only widen the match.
+        Ordered token-subsequence match: the pattern's whitespace-split tokens must appear in order (not
+        necessarily adjacent) in _normalize_for_policy(command), each equal to or a prefix of the command token.
+        There is no raw-substring fallback — a pattern word inside a token (`deployment/shutdown-handler`,
+        `Value=reboot-test`) is not a match.
         """
-        raw = " ".join((command or "").split()).lower()
-        normalized = _normalize_for_policy(command)
+        command_tokens = _normalize_for_policy(command)
         for pattern in self.change_required:
-            if pattern in normalized or pattern in raw:
+            if _tokens_match_in_order(pattern.lower().split(), command_tokens):
                 return pattern
         return None
 

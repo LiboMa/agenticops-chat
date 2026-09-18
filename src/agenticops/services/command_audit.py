@@ -174,24 +174,41 @@ def cli_outcome(text: str) -> tuple[str, Optional[int], str]:
 
 
 _GENERIC_READ_VERBS = ("list", "show", "get", "describe")
+_GENERIC_WRITE_VERBS = (
+    "delete", "create", "update", "set", "add", "remove", "start", "stop", "restart", "reset", "deallocate",
+    "purge", "run", "exec", "apply", "scale", "attach", "detach", "revoke", "assign", "invoke", "deploy", "patch",
+    "replace", "restore",
+)
 _GENERIC_READ_PREFIXES = tuple(f"{v}-" for v in _GENERIC_READ_VERBS)
+_GENERIC_WRITE_PREFIXES = tuple(f"{v}-" for v in _GENERIC_WRITE_VERBS)
 
 
 def generic_cli_tier(command: str) -> str:
     """'readonly' | 'unknown' for CLIs without a dedicated classifier (az / gcloud / aliyun).
 
-    readonly when any subcommand token — the tokens after the program name up to the first option — is
-    list / show / get / describe or starts with one of them followed by '-'. Everything else is unknown
-    (recorded and gated), never 'write' or 'blocked': those verdicts belong to a real classifier.
+    First verb wins: the positional tokens after the program name are walked in order and the FIRST one that
+    is a verb decides — a read verb (list / show / get / describe, or `<verb>-…`) → readonly, a mutating verb
+    (delete / create / update / set / start / stop / … , or `<verb>-…`) → unknown. Tokens after that verb are
+    never consulted, so a resource NAMED `list` or `describe-me` behind a `delete` cannot flip a mutation to
+    readonly. Option tokens are skipped; a `--opt value` option also skips its value (a value is never read as
+    a verb), a `--opt=value` token is skipped alone. No verb → unknown. Never 'write' or 'blocked': those
+    verdicts belong to a real classifier.
     """
     try:
         tokens = shlex.split(command or "")
     except ValueError:
         tokens = (command or "").split()
+    skip_next = False
     for token in tokens[1:]:
+        if skip_next:
+            skip_next = False
+            continue
         if token.startswith("-"):
-            break
+            skip_next = "=" not in token
+            continue
         word = token.lower()
         if word in _GENERIC_READ_VERBS or word.startswith(_GENERIC_READ_PREFIXES):
             return "readonly"
+        if word in _GENERIC_WRITE_VERBS or word.startswith(_GENERIC_WRITE_PREFIXES):
+            return "unknown"
     return "unknown"

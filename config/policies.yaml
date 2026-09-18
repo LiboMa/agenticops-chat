@@ -71,10 +71,16 @@ rules:
     itsm_change_type: emergency
 
 # ── Change Management (MVP-2.6.0) ────────────────────────────────────────
-# Write commands matching any of these (case-insensitive substring) are REFUSED
-# outside an approved plan (fix or change) and the agent is told to open a change
-# request (/change). Deliberately conservative — L1-class writes such as tagging
-# or a single-workload `kubectl scale` are NOT here (the SRE risk rubric says L1).
+# Write commands matching any of these are REFUSED outside an approved plan (fix
+# or change) and the agent is told to open a change request (/change). Matching
+# is an ordered token match, prefix per token: the command is tokenised (sudo/env
+# wrappers and every -/-- option dropped, option values kept, lower-cased) and a
+# pattern hits when its words appear in that order — not necessarily adjacent —
+# each equal to or a prefix of a command token. `aws rds modify-` hits
+# `aws --profile p rds modify-db-instance`; `reboot` hits `sudo reboot` and
+# `aws ec2 reboot-instances` but NOT `--tags Key=x,Value=reboot-test`.
+# Deliberately conservative — L1-class writes such as tagging or a
+# single-workload `kubectl scale` are NOT here (the SRE risk rubric says L1).
 # Tune here, not in code.
 change_required:
   - aws ec2 modify-security-group

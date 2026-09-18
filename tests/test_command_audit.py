@@ -358,29 +358,60 @@ class TestRecordCommandHardening:
 
 
 class TestChangeRequiredNormalization:
-    """Plain substring matching was bypassable by a global option, doubled whitespace or a wrapper."""
+    """Round 2: ordered token-subsequence match (prefix per token) replaces the round-1 substring test.
+
+    Tokens = shlex split, sudo/env wrappers dropped, every `-`/`--` token dropped, option VALUES kept, lower-cased.
+    A pattern hits when its whitespace-split tokens appear in order (not necessarily adjacent), each equal to or a
+    prefix of a command token. No raw-substring fallback.
+    """
 
     @pytest.mark.parametrize("command", [
-        "aws --profile p ec2 modify-security-group-rules --group-id sg-1",   # global option before the service
-        "systemctl  restart nginx",                                          # doubled whitespace
-        "kubectl --context prod delete pod x",                               # value-taking global option
-        "sudo systemctl restart nginx",                                      # privilege wrapper (run_on_host)
+        "aws --profile p ec2 modify-security-group-rules --group-id sg-1",   # global option + value before the service
+        "aws --query . ec2 modify-security-group-rules --group-id sg-1",     # option value that is not a known token
+        "aws --cli-read-timeout 60 rds modify-db-instance",                  # numeric option value
         "aws --region=us-east-1 rds modify-db-instance --x",                 # --opt=value is a single token
+        "kubectl --context prod delete pod x",                               # value-taking global option
+        "kubectl --as admin delete pod x",
+        "kubectl -v 6 delete pod x",
+        "kubectl -n prod delete pod x",                                      # -n no longer ambiguous: value kept, flag dropped
+        "systemctl  restart nginx",                                          # doubled whitespace
+        "systemctl --user restart myapp",
+        "sudo systemctl restart nginx",                                      # privilege wrapper (run_on_host)
+        "sudo -n systemctl restart nginx",                                   # wrapper + boolean flag
+        "sudo reboot",
     ])
-    def test_bypass_probes_now_match(self, command):
+    def test_high_risk_commands_match(self, command):
         from agenticops.services.policy_engine import get_policy_engine
         assert get_policy_engine(reload=True).change_required_match(command) is not None
 
-    def test_readonly_with_options_stays_unmatched(self):
+    @pytest.mark.parametrize("command", [
+        "aws ec2 describe-instances --region x",
+        "kubectl scale deployment/x --replicas=2",
+        "kubectl scale deployment/shutdown-handler --replicas=2",                # pattern word inside a positional, not a token prefix
+        "aws ec2 create-tags --resources i-1 --tags Key=x,Value=reboot-test",   # pattern word inside an option value
+    ])
+    def test_non_matching_commands_stay_unmatched(self, command):
         from agenticops.services.policy_engine import get_policy_engine
-        assert get_policy_engine(reload=True).change_required_match("aws ec2 describe-instances --region x") is None
+        assert get_policy_engine(reload=True).change_required_match(command) is None
 
-    def test_normalize_for_policy(self):
+    def test_normalize_for_policy_returns_tokens(self):
         from agenticops.services.policy_engine import _normalize_for_policy
-        assert _normalize_for_policy("kubectl -n prod delete pod x") == "kubectl delete pod x"
-        assert _normalize_for_policy("sudo -u postgres systemctl restart pg") == "systemctl restart pg"
-        assert _normalize_for_policy("aws --profile=p ec2 modify-x --group-id sg-1") == "aws ec2 modify-x sg-1"
-        assert _normalize_for_policy("systemctl restart 'nginx") == "systemctl restart 'nginx"  # unbalanced quote → str.split
+        assert _normalize_for_policy("kubectl -n prod delete pod x") == ["kubectl", "prod", "delete", "pod", "x"]
+        assert _normalize_for_policy("sudo -u postgres systemctl restart pg") == ["postgres", "systemctl", "restart", "pg"]
+        assert _normalize_for_policy("env FOO=1 aws --profile=p EC2 modify-x --group-id sg-1") == ["foo=1", "aws", "ec2", "modify-x", "sg-1"]
+        assert _normalize_for_policy("systemctl restart 'nginx") == ["systemctl", "restart", "'nginx"]  # unbalanced quote → str.split
+        assert _normalize_for_policy("") == []
+
+    def test_pattern_tokens_are_ordered_prefixes(self):
+        from agenticops.services.policy_engine import PolicyEngine
+        eng = PolicyEngine({"rules": [], "change_required": ["aws rds modify-", "kubectl delete"]})
+        assert eng.change_required_match("aws rds modify-db-instance") == "aws rds modify-"
+        assert eng.change_required_match("aws rds --x modify-db-instance") == "aws rds modify-"   # not adjacent
+        assert eng.change_required_match("rds aws modify-db-instance") is None                     # order matters
+        assert eng.change_required_match("aws rds modif") is None                                  # prefix runs pattern→command only
+        assert eng.change_required_match("aws rds") is None                                        # every pattern token must be consumed
+        # Conservative by design: a prefix hit on ANY later token matches (readonly tiers never reach the gate).
+        assert eng.change_required_match("kubectl label pod delete-me tier=web") == "kubectl delete"
 
 
 class TestGuardedRun:
@@ -455,6 +486,19 @@ class TestGenericCliTier:
         ("gcloud compute instances delete vm-1", "unknown"),
         ("aliyun ecs DescribeInstances --RegionId cn-hangzhou", "unknown"),  # CamelCase verb is not on the list → conservative
         ("aliyun ecs StopInstance --InstanceId i-1", "unknown"),
+        # Round 2: first verb wins — a read verb AFTER a mutating verb is a positional (resource name), not a verb.
+        ("gcloud compute instances delete list --zone z", "unknown"),
+        ("gcloud compute instances delete get-started-vm --zone z", "unknown"),
+        ("gcloud container clusters delete describe-me", "unknown"),
+        ("gcloud compute instances list --zone z", "readonly"),
+        ("az group delete -n x", "unknown"),
+        ("az vm run-command invoke --command-id RunShellScript", "unknown"),    # run- prefix
+        ("gcloud iam service-accounts set-iam-policy sa pol.json", "unknown"),  # set- prefix
+        # Leading global options: `--opt value` drops both tokens, `--opt=value` drops one; a value is never a verb.
+        ("gcloud --project p compute instances list", "readonly"),
+        ("az --output=json vm list", "readonly"),
+        ("gcloud --project get-started compute instances delete x", "unknown"),
+        ("gcloud compute ssh vm-1 --zone z", "unknown"),                        # no verb at all → unknown
     ])
     def test_samples(self, command, tier):
         from agenticops.services.command_audit import generic_cli_tier
