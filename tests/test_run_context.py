@@ -57,3 +57,12 @@ def test_frozen():
     import pytest
     with pytest.raises(dataclasses.FrozenInstanceError):
         get_run_context().actor = "x"  # type: ignore[misc]
+
+
+def test_actor_permissions_default_and_roundtrip():
+    assert get_run_context().actor_permissions == ()
+    with run_context(actor="user:alice", actor_user_id=3):
+        tok = update_run_context(actor_permissions=("read", "write"))
+        assert get_run_context().actor_permissions == ("read", "write")
+        reset_run_context(tok)
+        assert get_run_context().actor_permissions == ()

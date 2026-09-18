@@ -23,6 +23,7 @@ from typing import Iterator, Optional
 class RunContext:
     actor: str = "system"                     # actor key: user:<email> | web:anonymous | cli:<os user> | agent:<name> | im:<platform>:<id> | webhook:<source>
     actor_user_id: Optional[int] = None
+    actor_permissions: tuple[str, ...] = ()   # the user's rbac flags (user actors); () for every other kind
     on_behalf_of: Optional[str] = None        # e.g. executor runs on behalf of the approver
     trace_id: Optional[str] = None
     agent_name: Optional[str] = None

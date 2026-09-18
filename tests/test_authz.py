@@ -7,9 +7,11 @@ import pytest
 import yaml
 
 from agenticops.auth.actor import (
-    Actor, actor_from_request, agent_actor, cli_actor, im_actor, parse_actor, web_anonymous_actor,
+    Actor, actor_from_request, actor_from_run_context, agent_actor, cli_actor, im_actor, parse_actor,
+    web_anonymous_actor,
 )
 from agenticops.auth.authz import DEFAULT_POLICY, AuthzDenied, RbacPolicy, check, get_rbac_policy, validate_rbac
+from agenticops.run_context import RunContext
 
 
 class TestActor:
@@ -43,6 +45,14 @@ class TestActor:
         assert parse_actor("cli:") == Actor("web", "cli:")
         assert parse_actor(":x") == Actor("web", ":x")
         assert parse_actor("") == Actor("web", "anonymous")
+
+    def test_actor_from_run_context_rebuilds_user_with_permissions(self):
+        # Task 9 agent tools rebuild the actor from the Run Context; without the permission flags every
+        # authenticated user would fail the rbac matrix (shadow-denied) — the flags must round-trip.
+        ctx = RunContext(actor="user:alice", actor_user_id=3, actor_permissions=("read", "write"))
+        a = actor_from_run_context(ctx)
+        assert (a.kind, a.id, a.user_id) == ("user", "alice", 3)
+        assert "read" in a.permissions and "write" in a.permissions
 
 
 @pytest.fixture

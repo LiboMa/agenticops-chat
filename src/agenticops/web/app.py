@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
 
-from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -62,6 +62,8 @@ from agenticops.web.helpers import (  # cross-router helpers (extracted)
     _infra_ref_key, _guess_type, _build_account_name_map,
     _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report,
 )
+from agenticops.auth.actor import Actor
+from agenticops.web.deps import current_actor
 
 
 
@@ -2261,19 +2263,52 @@ async def api_list_providers():
 # ============================================================================
 
 
+def _fix_plan_response(session, plan) -> FixPlanResponse:
+    resp = FixPlanResponse.model_validate(plan)
+    if plan.health_issue_id:
+        resp.account_id = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
+    return resp
+
+
+def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
+    """Shared by POST /reject and the deprecated PUT status alias. Raises HTTPException 403 / 409.
+    The audit row is added to the caller's session — decision and state commit together."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import InvalidStatusTransition, transition_plan
+    try:
+        authz.check(actor, "plan.reject", subject=plan)
+    except authz.AuthzDenied as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    old = plan.status
+    try:
+        transition_plan(plan, "rejected")
+    except InvalidStatusTransition as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    plan.rejected_by = actor.key
+    plan.rejected_at = datetime.now(timezone.utc)
+    plan.rejection_reason = reason
+    AuditService.log(Actions.PLAN_REJECTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                     user_id=actor.user_id, details={"reason": reason, "risk_level": plan.risk_level},
+                     old_values={"status": old}, new_values={"status": "rejected"}, session=session)
+
+
 @app.get("/api/fix-plans", response_model=List[FixPlanResponse])
 async def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
     account_id: Optional[int] = Query(None),
+    kind: Optional[str] = Query(None, pattern="^(fix|change)$"),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
-    """List fix plans with filtering."""
+    """List fix plans with filtering (`kind` = fix | change)."""
     with get_db_session() as session:
         query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
 
+        if kind:
+            query = query.filter_by(plan_kind=kind)
         if status:
             query = query.filter_by(status=status)
         if risk_level:
@@ -2284,8 +2319,8 @@ async def api_list_fix_plans(
             query = query.join(HealthIssue).filter(HealthIssue.account_id == account_id)
 
         plans = query.offset(offset).limit(limit).all()
-        # Resolve account_id from related HealthIssue
-        issue_ids = {p.health_issue_id for p in plans}
+        # Resolve account_id from the related HealthIssue (change plans have none)
+        issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
         issue_accounts: dict[int, Optional[int]] = {}
         if issue_ids:
             rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
@@ -2293,7 +2328,7 @@ async def api_list_fix_plans(
         results = []
         for p in plans:
             resp = FixPlanResponse.model_validate(p)
-            resp.account_id = issue_accounts.get(p.health_issue_id)
+            resp.account_id = issue_accounts.get(p.health_issue_id) if p.health_issue_id else None
             results.append(resp)
         return results
 
@@ -2305,10 +2340,7 @@ async def api_get_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        resp = FixPlanResponse.model_validate(plan)
-        issue = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
-        resp.account_id = issue
-        return resp
+        return _fix_plan_response(session, plan)
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
@@ -2360,63 +2392,68 @@ async def api_create_fix_plan(data: FixPlanCreate):
 
 
 @app.put("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
-async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate):
-    """Update a fix plan."""
+async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = Depends(current_actor)):
+    """Update plan CONTENT. Status changes must use /approve, /reject, /execute
+    (status="rejected" is kept as a deprecated alias for the pre-2.6 UI)."""
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-
         update_data = data.model_dump(exclude_unset=True)
+        status_alias = update_data.pop("status", None)
+        if status_alias is not None and status_alias != "rejected":
+            raise HTTPException(status_code=400, detail="Status changes must use /approve, /reject or /execute")
         for key, value in update_data.items():
             setattr(plan, key, value)
-
+        if status_alias == "rejected":
+            _reject_plan(session, plan, actor, "(rejected via deprecated PUT status)")
+        plan.updated_at = datetime.now(timezone.utc)
         session.flush()
-        return FixPlanResponse.model_validate(plan)
+        return _fix_plan_response(session, plan)
 
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
-async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=True)):
-    """Approve a fix plan with risk-level enforcement.
-
-    L2/L3 plans require human approval — agent: prefixed approvers are rejected.
-    Already approved or rejected plans return 400.
-    """
+async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(default=FixPlanApproveBody()),
+                               actor: Actor = Depends(current_actor)):
+    """Approve a plan as the authenticated actor. The body's approved_by is a legacy claimed name:
+    it is audited (details.claimed_name) but never stored as the approver. The L2/L3 agent ceiling
+    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import InvalidStatusTransition, transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-
         if plan.status == "approved":
             raise HTTPException(status_code=400, detail="Fix plan is already approved")
         if plan.status == "rejected":
             raise HTTPException(status_code=400, detail="Fix plan was rejected. Create a new plan instead")
-
-        # L2/L3 risk gate: reject agent-initiated approvals
-        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
-            raise HTTPException(
-                status_code=403,
-                detail=f"L2/L3 fix plans require human approval. Agent '{approved_by}' cannot approve risk level {plan.risk_level}",
-            )
-
-        from agenticops.models import InvalidStatusTransition, transition_plan
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        old = plan.status
         try:
             transition_plan(plan, "approved")
         except InvalidStatusTransition as e:
             raise HTTPException(status_code=409, detail=str(e))
-        plan.approved_by = approved_by
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
-
-        # Sync HealthIssue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
-
+        details = {"reason": data.reason, "risk_level": plan.risk_level, "plan_kind": plan.plan_kind}
+        if data.approved_by and actor.kind == "web":
+            details["claimed_name"] = data.approved_by
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details=details,
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
         # Capture plan_id before session closes
         approved_plan_id = plan.id
-
         session.flush()
-        response = FixPlanResponse.model_validate(plan)
+        response = _fix_plan_response(session, plan)
 
     # Chain to auto-execute (outside DB session)
     try:
@@ -2426,6 +2463,18 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
         logger.warning("Failed to trigger auto-execute for plan #%d", approved_plan_id, exc_info=True)
 
     return response
+
+
+@app.post("/api/fix-plans/{plan_id}/reject", response_model=FixPlanResponse)
+async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Actor = Depends(current_actor)):
+    """Reject a draft / pending / approved (withdraw) plan with a mandatory reason."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        _reject_plan(session, plan, actor, data.reason)
+        session.flush()
+        return _fix_plan_response(session, plan)
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)
@@ -2444,12 +2493,15 @@ async def api_delete_fix_plan(plan_id: int):
 
 
 @app.post("/api/fix-plans/{plan_id}/execute", response_model=FixExecutionResponse, status_code=202)
-async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="api_user", embed=True)):
-    """Trigger execution of an approved fix plan.
+async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger execution of an approved fix plan as the authenticated actor (no body is read).
 
     Creates a FixExecution record in 'pending' status. The actual execution
     is handled asynchronously by the executor agent.
     """
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
@@ -2467,18 +2519,24 @@ async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="ap
                 detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
             )
 
+        try:
+            authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
         # Mark plan as executing (status verified 'approved' above — cannot raise)
-        from agenticops.models import transition_plan
         transition_plan(plan, "executing")
 
         execution = FixExecution(
             fix_plan_id=plan_id,
             health_issue_id=plan.health_issue_id,
             status="pending",
-            executed_by=executed_by,
+            executed_by=actor.key,
         )
         session.add(execution)
         session.flush()
+        AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details={"execution_id": execution.id}, session=session)
         return FixExecutionResponse.model_validate(execution)
 
 

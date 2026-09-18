@@ -332,7 +332,10 @@ class FixPlanCreate(BaseModel):
 
 
 class FixPlanUpdate(BaseModel):
-    """Schema for updating a fix plan."""
+    """Content-only update. Status changes go through /approve, /reject, /execute.
+    `status: "rejected"` is still accepted as a DEPRECATED alias for POST /reject (old UI);
+    the handler answers 400 for any other status value. Identity is never read from the body."""
+    model_config = ConfigDict(extra="forbid")
     risk_level: Optional[str] = Field(None, pattern="^(L0|L1|L2|L3)$")
     title: Optional[str] = Field(None, max_length=300)
     summary: Optional[str] = None
@@ -341,15 +344,25 @@ class FixPlanUpdate(BaseModel):
     estimated_impact: Optional[str] = None
     pre_checks: Optional[List] = None
     post_checks: Optional[List] = None
-    status: Optional[str] = Field(None, pattern="^(draft|pending_approval|approved|executing|executed|failed|rejected)$")
-    approved_by: Optional[str] = Field(None, max_length=100)
+    status: Optional[str] = Field(None, description="DEPRECATED alias for POST /reject (only 'rejected' is accepted)")
+
+
+class FixPlanApproveBody(BaseModel):
+    approved_by: Optional[str] = Field(None, max_length=100, description="Legacy claimed name; audited, never trusted")
+    reason: Optional[str] = Field(None, max_length=2000)
+
+
+class FixPlanRejectBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 class FixPlanResponse(BaseModel):
     """Schema for fix plan response."""
     id: int
-    health_issue_id: int
-    rca_result_id: int
+    plan_kind: str = "fix"
+    health_issue_id: Optional[int] = None
+    rca_result_id: Optional[int] = None
+    change_request_id: Optional[int] = None
     risk_level: str
     title: str
     summary: str
@@ -361,7 +374,11 @@ class FixPlanResponse(BaseModel):
     status: str
     approved_by: Optional[str]
     approved_at: Optional[datetime]
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     account_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -371,7 +388,7 @@ class FixExecutionResponse(BaseModel):
     """Schema for fix execution response."""
     id: int
     fix_plan_id: int
-    health_issue_id: int
+    health_issue_id: Optional[int] = None
     status: str
     started_at: Optional[datetime]
     completed_at: Optional[datetime]

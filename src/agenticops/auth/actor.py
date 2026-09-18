@@ -69,3 +69,10 @@ def parse_actor(text: str) -> Actor:
     if not sep or not kind or not rest:
         return Actor("web", text or "anonymous")
     return Actor(kind, rest)
+
+
+def actor_from_run_context(ctx: Any) -> Actor:
+    """Rebuild the acting identity from a RunContext (agent tools, executor worker). The permission
+    flags travel with it — without them a user: actor would fail the rbac matrix on every check."""
+    base = parse_actor(ctx.actor)
+    return Actor(base.kind, base.id, ctx.actor_user_id, tuple(ctx.actor_permissions or ()))
