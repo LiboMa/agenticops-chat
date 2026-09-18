@@ -1129,18 +1129,27 @@ _NULLABLE_ORIGIN_COLUMNS: dict[str, tuple[str, ...]] = {
     "pipeline_events": ("health_issue_id",),
 }
 
-_ADD_COLUMNS_2_6_0: dict[str, dict[str, str]] = {
+# table → {column: extra DDL clause or None}. The column TYPE is deliberately not spelled
+# here: it is compiled from the ORM column for the engine's dialect (SQLite DATETIME vs
+# PostgreSQL TIMESTAMP WITHOUT TIME ZONE), so both paths share one source of truth.
+_ADD_COLUMNS_2_6_0: dict[str, dict[str, Optional[str]]] = {
     "fix_plans": {
-        "plan_kind": "VARCHAR(10) DEFAULT 'fix'",
-        "change_request_id": "INTEGER",
-        "rejected_by": "VARCHAR(100)",
-        "rejected_at": "DATETIME",
-        "rejection_reason": "TEXT",
-        "updated_at": "DATETIME",
+        "plan_kind": "DEFAULT 'fix'",
+        "change_request_id": None,
+        "rejected_by": None,
+        "rejected_at": None,
+        "rejection_reason": None,
+        "updated_at": None,
     },
-    "pipeline_events": {"change_request_id": "INTEGER"},
-    "audit_logs": {"actor": "VARCHAR(100)"},
+    "pipeline_events": {"change_request_id": None},
+    "audit_logs": {"actor": None},
 }
+
+
+def _add_column_ddl(dialect, table_name: str, col: str, extra: Optional[str]) -> str:
+    """`<col> <type>[ <extra>]` for ADD COLUMN, type compiled from the ORM column for `dialect`."""
+    col_type = Base.metadata.tables[table_name].c[col].type.compile(dialect=dialect)
+    return f"{col} {col_type}" + (f" {extra}" if extra else "")
 
 
 def _sqlite_notnull_columns(engine, table_name: str) -> set[str]:
@@ -1195,6 +1204,8 @@ def _sqlite_rebuild_table(engine, table) -> None:
 
 def _migrate_2_6_0(engine) -> None:
     """Idempotent MVP-2.6.0 schema migration (runs after create_all)."""
+    import agenticops.audit.models  # noqa: F401 — registers audit_logs in Base.metadata (lazy: import cycle)
+
     insp = inspect(engine)
     dialect = engine.dialect.name
     if dialect == "sqlite":
@@ -1215,9 +1226,11 @@ def _migrate_2_6_0(engine) -> None:
                 continue
             existing = {c["name"] for c in insp.get_columns(tbl)}
             with engine.begin() as conn:
-                for col, ddl in cols.items():
+                for col, extra in cols.items():
                     if col not in existing:
-                        conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {ddl}"))
+                        conn.execute(text(
+                            f"ALTER TABLE {tbl} ADD COLUMN {_add_column_ddl(engine.dialect, tbl, col, extra)}"
+                        ))
                 if tbl == "fix_plans":
                     conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
                     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)"))
@@ -1232,8 +1245,10 @@ def _migrate_2_6_0(engine) -> None:
                 for col in cols:
                     conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} DROP NOT NULL"))
             for tbl, cols in _ADD_COLUMNS_2_6_0.items():
-                for col, ddl in cols.items():
-                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+                for col, extra in cols.items():
+                    conn.execute(text(
+                        f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {_add_column_ddl(engine.dialect, tbl, col, extra)}"
+                    ))
             conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
             has_ck = conn.execute(text(
                 "SELECT 1 FROM pg_constraint WHERE conname = 'ck_fix_plans_origin'"

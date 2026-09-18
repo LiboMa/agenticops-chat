@@ -133,3 +133,19 @@ def test_fresh_database_needs_no_rebuild(tmp_path):
     engine = _run_init_db(tmp_path / "fresh.db")
     assert not Path(str(tmp_path / "fresh.db") + ".bak-pre-2.6.0").exists()
     assert _notnull(engine, "fix_plans")["health_issue_id"] is False
+
+
+def test_add_column_ddl_types_follow_dialect():
+    """ADD COLUMN types come from the ORM column compiled for the target dialect — never a
+    hard-coded DATETIME, which PostgreSQL rejects (type "datetime" does not exist)."""
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    import agenticops.audit.models  # noqa: F401 — registers audit_logs
+    from agenticops.models import _ADD_COLUMNS_2_6_0, _add_column_ddl
+
+    assert _add_column_ddl(sqlite.dialect(), "fix_plans", "updated_at", None) == "updated_at DATETIME"
+    assert _add_column_ddl(postgresql.dialect(), "fix_plans", "updated_at", None) == "updated_at TIMESTAMP WITHOUT TIME ZONE"
+    assert _add_column_ddl(postgresql.dialect(), "fix_plans", "plan_kind", "DEFAULT 'fix'") == "plan_kind VARCHAR(10) DEFAULT 'fix'"
+    for tbl, cols in _ADD_COLUMNS_2_6_0.items():
+        for col, extra in cols.items():
+            assert "DATETIME" not in _add_column_ddl(postgresql.dialect(), tbl, col, extra)
