@@ -149,6 +149,16 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
 
+            # Audit row in the SAME transaction as the status change (decision + state together)
+            from agenticops.audit.service import Actions, AuditService, EntityTypes
+            AuditService.log(
+                Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor="agent:auto-pipeline",
+                details={"risk_level": plan.risk_level, "plan_kind": plan.plan_kind,
+                         "policy_rule": decision.rule_name if decision else "legacy-l0-l1",
+                         "policy_action": decision.action if decision else "auto_approve"},
+                old_values={"status": "draft"}, new_values={"status": "approved"}, session=session,
+            )
+
             # Capture values before session closes
             risk_level = plan.risk_level
             health_issue_id = plan.health_issue_id

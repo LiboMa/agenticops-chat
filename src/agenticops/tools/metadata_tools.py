@@ -1021,13 +1021,34 @@ def get_fix_plan(health_issue_id: int) -> str:
 def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     """Approve a fix plan. L0/L1 can be auto-approved; L2/L3 require human approval.
 
+    The real approver is the Run Context actor; approved_by is a claimed name when a context
+    exists. Without a Run Context the call is an agent acting (an "agent:<name>" value keeps
+    its name, anything else is recorded as agent:unattributed) — a human name passed here
+    never approves anything. Approval is checked against rbac (agents cannot approve L2/L3).
+
     Args:
         fix_plan_id: The FixPlan ID to approve
-        approved_by: Name/identifier of the approver
+        approved_by: Claimed name/identifier of the approver (audited, never the stored approver)
 
     Returns:
         Confirmation of approval or rejection reason.
     """
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import Actor, actor_from_run_context, parse_actor
+    from agenticops.run_context import get_run_context
+
+    ctx = get_run_context()
+    if ctx.actor != "system":
+        actor = actor_from_run_context(ctx)  # carries the user's permission flags
+    else:
+        # No Run Context (stray thread, direct call): a context-less tool call is an agent
+        # acting, never a human. The LLM-supplied string cannot grant itself an identity.
+        base = parse_actor(approved_by)
+        actor = Actor("agent", base.id) if base.kind == "agent" and base.id else Actor("agent", "unattributed")
+    # The claimed name is audit-only: recorded when it differs from the identity that actually approved.
+    claimed = approved_by if approved_by and approved_by != actor.key else None
+
     session = get_session()
     try:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
@@ -1040,31 +1061,43 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         if plan.status == "rejected":
             return f"FixPlan #{fix_plan_id} was rejected. Create a new plan instead."
 
-        # L2/L3 require human approval — flag it but still record
-        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            # Agent on L2/L3 (always-enforced rule) or an enforced RBAC denial:
+            # park the plan for a human instead of approving.
             try:
                 transition_plan(plan, "pending_approval")
-            except InvalidStatusTransition as e:
-                return str(e)
-            session.commit()
+                session.commit()
+                status_note = "Status set to 'pending_approval'."
+            except InvalidStatusTransition:
+                session.rollback()
+                status_note = f"Status remains '{plan.status}'."
             return (
-                f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval. "
-                f"Status set to 'pending_approval'. A human operator must approve L2/L3 plans."
+                f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval: {e.reason}. "
+                f"{status_note} A human operator must approve it."
             )
 
+        old = plan.status
         try:
             transition_plan(plan, "approved")
         except InvalidStatusTransition as e:
             return str(e)
-        plan.approved_by = approved_by
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
-        session.commit()
 
-        # Update health issue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
-            session.commit()
+
+        details = {"risk_level": plan.risk_level, "plan_kind": plan.plan_kind, "via": "agent_tool"}
+        if claimed:
+            details["claimed_name"] = claimed
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details=details,
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
+        session.commit()  # decision + state + audit row in one transaction
 
         # Auto-trigger execution for approved plans
         try:
@@ -1076,12 +1109,12 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         # Auto-notify
         try:
             from agenticops.services.notification_service import notify_fix_approved
-            notify_fix_approved(fix_plan_id, approved_by, plan.risk_level)
+            notify_fix_approved(fix_plan_id, actor.key, plan.risk_level)
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
         return (
-            f"FixPlan #{fix_plan_id} approved by {approved_by}. "
+            f"FixPlan #{fix_plan_id} approved by {actor.key}. "
             f"Risk: {plan.risk_level}. HealthIssue status updated to 'fix_approved'."
         )
     except Exception as e:

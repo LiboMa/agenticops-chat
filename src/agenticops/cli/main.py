@@ -1626,7 +1626,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Fix Plans:[/cyan]
   /fix list [issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
-  /approve <plan_id>               Approve a fix plan (L2/L3 human gate)
+  /approve <plan_id> [reason...]   Approve a fix plan as cli:<user> (L2/L3 human gate)
   /execute <plan_id>               Execute an approved fix plan
 
 [cyan]Workflows:[/cyan]  [dim](/help workflow for details)[/dim]
@@ -2258,17 +2258,27 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_approve(ctx: ChatContext, args: list) -> str:
-    """Handle /approve <plan_id> command — approve a fix plan."""
-    from rich.prompt import Prompt, Confirm
+    """Handle /approve <plan_id> [reason...] — approve a fix plan as the CLI user.
+
+    The approver is the OS user (cli:<user>), never a typed name; the optional reason is audited.
+    """
+    from rich.prompt import Confirm
 
     if not args:
-        return "[yellow]Usage: /approve <plan_id>[/yellow]"
+        return "[yellow]Usage: /approve <plan_id> [reason...][/yellow]"
 
     try:
         plan_id = int(args[0])
     except ValueError:
         return "[red]Invalid plan ID.[/red]"
+    reason = " ".join(args[1:]).strip()
 
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import cli_actor
+    from agenticops.models import InvalidStatusTransition, transition_plan
+
+    actor = cli_actor()
     init_db()
     session = get_session()
 
@@ -2284,6 +2294,11 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if plan.status not in ("draft", "pending_approval"):
             return f"[yellow]Fix plan status is '{plan.status}', cannot approve.[/yellow]"
 
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            return f"[red]{e}[/red]"
+
         # L2/L3 warning
         if plan.risk_level in ("L2", "L3"):
             console.print(
@@ -2295,32 +2310,39 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             if not Confirm.ask("Proceed with approval?"):
                 return "[dim]Approval cancelled.[/dim]"
 
-        approver = Prompt.ask("Your name (approver)")
-        if not approver.strip():
-            return "[red]Approver name is required.[/red]"
-
-        from agenticops.models import InvalidStatusTransition, transition_plan
+        old = plan.status
         try:
             transition_plan(plan, "approved")
         except InvalidStatusTransition as e:
             return f"[red]{e}[/red]"
-        plan.approved_by = approver.strip()
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
 
-        # Sync HealthIssue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
 
-        session.commit()
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         details={"reason": reason or None, "risk_level": plan.risk_level,
+                                  "plan_kind": plan.plan_kind, "via": "cli"},
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
+        session.commit()  # decision + state + audit row in one transaction
 
-        return f"[green]Fix plan #{plan_id} approved by {approver.strip()}.[/green]"
+        # Chain to auto-execute (same as the web approve path)
+        try:
+            from agenticops.services.pipeline_service import trigger_auto_execute
+            trigger_auto_execute(plan_id)
+        except Exception:
+            logger.warning("Failed to trigger auto-execute for plan #%d", plan_id, exc_info=True)
+
+        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green]"
     finally:
         session.close()
 
 
 def _slash_execute(ctx: ChatContext, args: list) -> str:
-    """Handle /execute <plan_id> command — execute an approved fix plan."""
+    """Handle /execute <plan_id> command — execute an approved fix plan as the CLI user."""
     from rich.prompt import Confirm
 
     if not args:
@@ -2331,6 +2353,12 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
     except ValueError:
         return "[red]Invalid plan ID.[/red]"
 
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import cli_actor
+    from agenticops.models import transition_plan
+
+    actor = cli_actor()
     init_db()
     session = get_session()
 
@@ -2345,6 +2373,11 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not settings.executor_enabled:
             return "[red]Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable.[/red]"
 
+        try:
+            authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            return f"[red]{e}[/red]"
+
         console.print(
             f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
             f"  Title: {plan.title}\n"
@@ -2354,18 +2387,20 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
 
-        # Create FixExecution record
+        # Create FixExecution record (status verified 'approved' above — transition cannot raise)
         execution = FixExecution(
             fix_plan_id=plan.id,
             health_issue_id=plan.health_issue_id,
             status="pending",
-            executed_by="cli_user",
+            executed_by=actor.key,
             started_at=datetime.now(timezone.utc),
         )
-        from agenticops.models import transition_plan
         transition_plan(plan, "executing")
         session.add(execution)
-        session.commit()
+        session.flush()
+        AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         details={"execution_id": execution.id, "via": "cli"}, session=session)
+        session.commit()  # execution row + status + audit row in one transaction
 
         return (
             f"[green]Execution #{execution.id} created for fix plan #{plan_id}.[/green]\n"
