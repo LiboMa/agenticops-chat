@@ -88,15 +88,23 @@ def _bump_risk(risk_level: str) -> str:
 # matches as a prefix. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x` and
 # `sudo -n systemctl restart nginx` all hit, while `kubectl label pod delete-me`, `systemctl restart-all-the-things`,
 # `kubectl scale deployment/shutdown-handler` and `--tags Key=x,Value=reboot-test` do not.
+# A QUOTED PAYLOAD (`bash -c "systemctl restart nginx"`, `sh -c '…'`, `ssh host '…'`, `su -c '…'`) survives shlex
+# as ONE token; it is re-split the same way (depth-bounded) so its words face the gate like any other tokens.
 _POLICY_WRAPPERS = ("sudo", "env")
+_POLICY_RESPLIT_MAX_DEPTH = 3
 
 
-def _normalize_for_policy(command: str) -> list[str]:
+def _normalize_for_policy(command: str, _depth: int = 0) -> list[str]:
     """Lower-cased token list with wrappers and option tokens removed; option values stay as ordinary tokens.
 
     shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token starting
-    with '-' dropped — nothing else. Option values are kept on purpose: deciding which options take a value
-    is CLI-specific guesswork, and a kept value can only add a token the ordered match must skip over.
+    with '-' dropped. Option values are kept on purpose: deciding which options take a value is CLI-specific
+    guesswork, and a kept value can only add a token the ordered match must skip over.
+
+    A kept token that still contains whitespace was a quoted payload (`bash -c "systemctl restart nginx"`,
+    `ssh host "sudo …"`); it is normalised recursively with the same rules and spliced in place, so the words
+    inside face the gate too. The wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at
+    _POLICY_RESPLIT_MAX_DEPTH (deeper payloads get a flat str.split), and nothing here raises on odd input.
     """
     try:
         tokens = shlex.split(command or "")
@@ -104,7 +112,18 @@ def _normalize_for_policy(command: str) -> list[str]:
         tokens = (command or "").split()
     while tokens and tokens[0].lower() in _POLICY_WRAPPERS:
         tokens.pop(0)
-    return [token.lower() for token in tokens if not token.startswith("-")]
+    out: list[str] = []
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        if any(ch.isspace() for ch in token):
+            if _depth < _POLICY_RESPLIT_MAX_DEPTH:
+                out.extend(_normalize_for_policy(token, _depth + 1))
+            else:
+                out.extend(t.lower() for t in token.split() if not t.startswith("-"))
+            continue
+        out.append(token.lower())
+    return out
 
 
 def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[str]) -> bool:
@@ -330,7 +349,9 @@ class PolicyEngine:
         necessarily adjacent) in _normalize_for_policy(command); a bare pattern word must equal the command
         token, a hyphenated one matches as a prefix (_tokens_match_in_order). There is no raw-substring
         fallback — a pattern word inside a token (`deployment/shutdown-handler`, `Value=reboot-test`,
-        `delete-me`) is not a match.
+        `delete-me`) is not a match. Quoted payloads are re-split first, so `bash -c "systemctl restart nginx"`
+        and `ssh host "sudo systemctl restart nginx"` match `systemctl restart` (and so does a pattern word
+        inside quoted prose — a deliberate false refusal, tunable in the yaml, never a false pass).
         """
         command_tokens = _normalize_for_policy(command)
         for pattern in self.change_required:

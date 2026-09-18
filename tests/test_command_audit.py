@@ -363,7 +363,8 @@ class TestChangeRequiredNormalization:
     Tokens = shlex split, sudo/env wrappers dropped, every `-`/`--` token dropped, option VALUES kept, lower-cased.
     A pattern hits when its whitespace-split tokens appear in order (not necessarily adjacent); a bare pattern word
     must equal the whole command token, a hyphenated one (`modify-`, `modify-security-group`) matches as a prefix
-    (round 3). No raw-substring fallback.
+    (round 3). No raw-substring fallback. A kept token that still contains whitespace is a QUOTED PAYLOAD
+    (`bash -c "…"`, `ssh host '…'`) and is re-split the same way, so its words face the gate too (round 4).
     """
 
     @pytest.mark.parametrize("command", [
@@ -430,6 +431,75 @@ class TestChangeRequiredNormalization:
         assert eng.change_required_match("aws ec2 reboot-instances --instance-ids i-1") == "aws ec2 reboot-"
         assert eng.change_required_match("aws ec2 stop-instances --instance-ids i-1") == "aws ec2 stop-"
         assert eng.change_required_match("aws ec2 start-instances --instance-ids i-1") is None
+
+    @pytest.mark.parametrize("command,pattern", [
+        ('bash -c "systemctl restart nginx"', "systemctl restart"),
+        ('bash -lc "kubectl delete pod x"', "kubectl delete"),
+        ('sh -c "systemctl restart nginx"', "systemctl restart"),
+        ("bash -c 'systemctl stop nginx'", "systemctl stop"),
+        ('ssh host "sudo systemctl restart nginx"', "systemctl restart"),      # inner sudo dropped like an outer one
+        ('su -c "systemctl restart nginx"', "systemctl restart"),
+        ("nohup systemctl restart nginx &", "systemctl restart"),
+        ("timeout 30 systemctl restart nginx", "systemctl restart"),
+        ('bash -c "cd /srv && systemctl restart nginx"', "systemctl restart"),  # payload with shell operators
+        ("bash -c \"sh -c 'systemctl restart nginx'\"", "systemctl restart"),   # two shells deep
+    ])
+    def test_quoted_shell_payloads_are_inspected(self, command, pattern):
+        """Round 4: a quoted payload survived shlex as ONE token and nothing looked inside it — `bash -c
+        "systemctl restart nginx"` (tier unknown) walked through the run_on_host gate. Re-splitting closes it."""
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    @pytest.mark.parametrize("command", [
+        'bash -c "systemctl status nginx"',                                          # read inside a wrapper stays clean
+        'aws ec2 create-tags --resources i-1 --tags Key=x,Value="reboot test"',     # re-splits to `key=x,value=reboot` + `test`:
+        'aws ec2 create-tags --resources i-1 --tags "Key=x,Value=reboot test"',     #   the value stays glued to its key, so the
+        "aws ec2 create-tags --resources i-1 --tags Key=x,Value=reboot-test",       #   bare `reboot` still has no exact token
+    ])
+    def test_quoted_payload_negatives_stay_unmatched(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    @pytest.mark.parametrize("command,pattern", [
+        ('echo "kubectl delete pod x"', "kubectl delete"),
+        ('aws ec2 create-snapshot --volume-id vol-1 --description "reboot test"', "reboot"),
+    ])
+    def test_free_text_payload_matches_are_deliberate(self, command, pattern):
+        """Pinned ON PURPOSE (ruling: the gate prefers a false refusal over a false pass). The normaliser cannot
+        tell a quoted script from quoted prose, so a pattern word inside free text (an echo, a --description) is
+        refused too. Tune with a more specific yaml entry, not by weakening the payload inspection."""
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    def test_normalize_for_policy_resplits_quoted_payloads(self):
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy('bash -c "systemctl restart nginx"') == ["bash", "systemctl", "restart", "nginx"]
+        assert _normalize_for_policy('ssh host "sudo systemctl restart nginx"') == ["ssh", "host", "systemctl", "restart", "nginx"]
+        assert _normalize_for_policy('bash -c "kubectl -n prod delete pod x"') == ["bash", "kubectl", "prod", "delete", "pod", "x"]
+        assert _normalize_for_policy('bash -c "echo \'oops"') == ["bash", "echo", "'oops"]   # inner unbalanced quote → str.split
+        assert _normalize_for_policy('bash -c " "') == ["bash"]                              # whitespace-only payload adds nothing
+
+    def test_normalize_for_policy_recursion_is_bounded(self):
+        """Depth ≤ 3 recursive re-splits, then a flat str.split: four nested shells still resolve, five do not
+        (pinned so the bound is visible; no operator command is five shells deep) — and nothing ever raises."""
+        import shlex
+        from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
+        eng = get_policy_engine(reload=True)
+        four = "systemctl restart nginx"
+        for _ in range(4):
+            four = f"bash -c {shlex.quote(four)}"
+        five = f"bash -c {shlex.quote(four)}"
+        assert eng.change_required_match(four) == "systemctl restart"
+        assert eng.change_required_match(five) is None
+        assert isinstance(_normalize_for_policy(five), list)
+
+    @pytest.mark.parametrize("command", ["", "   ", "--", "-", "sudo", "sudo env", None, "systemctl restart 'nginx"])
+    def test_odd_inputs_never_raise(self, command):
+        from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
+        tokens = _normalize_for_policy(command)
+        assert isinstance(tokens, list)
+        match = get_policy_engine(reload=True).change_required_match(command)
+        assert match == ("systemctl restart" if command == "systemctl restart 'nginx" else None)
 
 
 class TestGuardedRun:

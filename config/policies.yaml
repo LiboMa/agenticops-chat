@@ -80,7 +80,9 @@ rules:
 # hits `aws --profile p rds modify-db-instance`; the bare `reboot` hits
 # `sudo reboot` but not `--tags Key=x,Value=reboot-test`, and it is the
 # `aws ec2 reboot-` entry (not `reboot`) that catches `aws ec2 reboot-instances`;
-# `kubectl delete` does NOT hit `kubectl label pod delete-me`. EC2 reboot/stop are
+# `kubectl delete` does NOT hit `kubectl label pod delete-me`. A quoted payload is
+# inspected too: `bash -c "systemctl restart nginx"`, `sh -c '…'`, `ssh host '…'`
+# hit `systemctl restart`. EC2 reboot/stop are
 # service-affecting (L2/L3 in the SRE rubric); `aws ec2 start-` is deliberately
 # not listed.
 # Deliberately conservative — L1-class writes such as tagging or a
