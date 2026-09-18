@@ -263,7 +263,7 @@ class TestProviderCliLedger:
         assert out == "{}" and run.called
         (row,) = _rows(db)
         assert (row.tool, row.tier, row.outcome, row.account, row.exit_code, row.fix_plan_id) == \
-               ("run_aws_cli", "write", "executed", "dev", 0, None)
+               ("provider_aws_cli", "write", "executed", "dev", 0, None)
         assert row.command == "aws ec2 create-tags --resources i-1 --tags Key=a,Value=b"  # as asked, no --output json
 
     def test_change_required_refused_outside_approved_plan(self, db, monkeypatch):
@@ -299,7 +299,7 @@ class TestProviderCliLedger:
         out = tool("aws ec2 terminate-instances --instance-ids i-1")
         assert out == "Error: Blocked dangerous pattern 'ec2 terminate-instances' in command." and not run.called
         (row,) = _rows(db)
-        assert (row.tier, row.outcome, row.account) == ("blocked", "blocked", "dev")
+        assert (row.tool, row.tier, row.outcome, row.account) == ("provider_aws_cli", "blocked", "blocked", "dev")
 
     def test_classifier_blocked_but_provider_allowed_leaves_a_trace(self, db, monkeypatch):
         # Pre-existing gap (not fixed here): the provider's BLOCKED_PATTERNS lack the secret-revealing reads
@@ -313,7 +313,7 @@ class TestProviderCliLedger:
         ("no_session", "no_session", "no resolved session for account 'dev'"),
         ("credentials", "credentials", "failed to resolve credentials for account 'dev'"),
         ("timeout", "timeout", "Command timed out after 30s."),
-        ("aws_cli_missing", "aws_cli_missing", "AWS CLI ('aws') not found on PATH."),
+        ("aws_cli_missing", "cli_missing", "AWS CLI ('aws') not found on PATH."),
     ])
     def test_transport_failures_are_recorded_as_error(self, db, monkeypatch, fault, reason, text):
         import subprocess
@@ -329,3 +329,273 @@ class TestProviderCliLedger:
         (row,) = _rows(db)
         assert (row.outcome, row.reason, row.exit_code, row.tier) == ("error", reason, None, "write")
         assert text in row.output_excerpt
+
+
+class TestRecordCommandHardening:
+    def test_truncates_string_columns_to_their_widths(self, db):
+        # PostgreSQL raises DataError on overflow (SQLite does not); fail-soft would swallow it and the
+        # command would run with NO row. Widths are those of models.CommandAudit.
+        from agenticops.services.command_audit import record_command
+        with run_context(actor="a" * 120, trace_id="T" * 30, agent_name="g" * 60, on_behalf_of="b" * 120):
+            record_command(tool="t" * 40, tier="write-tier-x", command="aws x", outcome="executed",
+                           account="c" * 150, region="x" * 40, target="d" * 250, reason="r" * 60)
+        (row,) = _rows(db)
+        assert (len(row.actor), len(row.trace_id), len(row.agent_name), len(row.on_behalf_of)) == (100, 20, 50, 100)
+        assert (len(row.tool), len(row.tier), len(row.account), len(row.region), len(row.target), len(row.reason)) == \
+               (30, 10, 100, 30, 200, 50)
+        assert row.region == "x" * 30
+
+    def test_broken_ledger_warns_once_then_debug(self, db, caplog, monkeypatch):
+        import logging
+        from agenticops.services import command_audit
+        monkeypatch.setattr(command_audit, "_warned_once", False, raising=False)
+        with patch.object(command_audit, "get_db_session", side_effect=RuntimeError("db down")), \
+             caplog.at_level(logging.DEBUG, logger="agenticops.services.command_audit"):
+            command_audit.record_command(tool="run_aws_cli", tier="write", command="aws x", outcome="executed")
+            command_audit.record_command(tool="run_aws_cli", tier="write", command="aws y", outcome="executed")
+        levels = [r.levelno for r in caplog.records if "command audit write failed" in r.getMessage()]
+        assert levels == [logging.WARNING, logging.DEBUG]
+
+
+class TestChangeRequiredNormalization:
+    """Plain substring matching was bypassable by a global option, doubled whitespace or a wrapper."""
+
+    @pytest.mark.parametrize("command", [
+        "aws --profile p ec2 modify-security-group-rules --group-id sg-1",   # global option before the service
+        "systemctl  restart nginx",                                          # doubled whitespace
+        "kubectl --context prod delete pod x",                               # value-taking global option
+        "sudo systemctl restart nginx",                                      # privilege wrapper (run_on_host)
+        "aws --region=us-east-1 rds modify-db-instance --x",                 # --opt=value is a single token
+    ])
+    def test_bypass_probes_now_match(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is not None
+
+    def test_readonly_with_options_stays_unmatched(self):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match("aws ec2 describe-instances --region x") is None
+
+    def test_normalize_for_policy(self):
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy("kubectl -n prod delete pod x") == "kubectl delete pod x"
+        assert _normalize_for_policy("sudo -u postgres systemctl restart pg") == "systemctl restart pg"
+        assert _normalize_for_policy("aws --profile=p ec2 modify-x --group-id sg-1") == "aws ec2 modify-x sg-1"
+        assert _normalize_for_policy("systemctl restart 'nginx") == "systemctl restart 'nginx"  # unbalanced quote → str.split
+
+
+class TestGuardedRun:
+    @staticmethod
+    def _run(text="ok"):
+        from unittest.mock import Mock
+        return Mock(return_value=text)
+
+    def test_readonly_runs_without_a_row(self, db):
+        from agenticops.services.command_audit import guarded_run
+        run = self._run()
+        assert guarded_run(tool="provider_x", tier="readonly", command="x get", run=run,
+                           outcome_of=lambda t: ("executed", 0)) == "ok"
+        assert run.called and _rows(db) == []
+
+    def test_change_required_refuses_before_running(self, db):
+        from agenticops.services.command_audit import guarded_run
+        run = self._run()
+        out = guarded_run(tool="provider_x", tier="unknown", command="aws rds reboot-db-instance --x", run=run,
+                          outcome_of=lambda t: ("executed", 0), account="acc", target="tgt")
+        assert "/change" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.reason, row.account, row.target) == \
+               ("provider_x", "unknown", "refused", "change_required", "acc", "tgt")
+
+    def test_change_required_runs_inside_approved_plan(self, db):
+        from agenticops.services.command_audit import guarded_run
+        pid = _approved_plan(db)
+        run = self._run()
+        with run_context(actor="agent:executor", fix_plan_id=pid):
+            assert guarded_run(tool="provider_x", tier="unknown", command="aws rds reboot-db-instance --x", run=run,
+                               outcome_of=lambda t: ("executed", 0)) == "ok"
+        (row,) = _rows(db)
+        assert (row.outcome, row.fix_plan_id) == ("executed", pid) and run.called
+
+    def test_records_outcome_from_two_or_three_tuple(self, db):
+        from agenticops.services.command_audit import guarded_run
+        guarded_run(tool="provider_x", tier="write", command="x set a", run=self._run("done"),
+                    outcome_of=lambda t: ("executed", 0), region="r1")
+        guarded_run(tool="provider_x", tier="write", command="x set b", run=self._run("Error: Command timed out after 30s."),
+                    outcome_of=lambda t: ("error", None, "timeout"))
+        a, b = _rows(db)
+        assert (a.outcome, a.exit_code, a.output_excerpt, a.region, a.reason) == ("executed", 0, "done", "r1", None)
+        assert (b.outcome, b.exit_code, b.reason) == ("error", None, "timeout")
+
+
+class TestCliOutcome:
+    @pytest.mark.parametrize("text,expected", [
+        ('{"ok": true}', ("executed", 0, "")),
+        ("(no output)", ("executed", 0, "")),
+        ("Error (exit 254): boom", ("error", 254, "")),
+        ("Error (exit -1): Timed out after 60s", ("error", -1, "")),
+        ("Error: Command timed out after 30s.", ("error", None, "timeout")),
+        ("Error: Invalid command syntax: No closing quotation", ("error", None, "syntax")),
+        ("Error: Azure CLI ('az') not found on PATH.", ("error", None, "cli_missing")),
+        ("Error: no resolved session for account 'dev'; cannot run AWS CLI safely (refusing to use ambient credentials).",
+         ("error", None, "no_session")),
+        ("Error: failed to resolve credentials for account 'dev': boom", ("error", None, "credentials")),
+    ])
+    def test_shapes(self, text, expected):
+        from agenticops.services.command_audit import cli_outcome
+        assert cli_outcome(text) == expected
+
+
+class TestGenericCliTier:
+    @pytest.mark.parametrize("command,tier", [
+        ("az vm list --resource-group rg", "readonly"),
+        ("az network nsg rule show --name r", "readonly"),
+        ("az storage account show-connection-string -n x", "readonly"),
+        ("az vm start --name x", "unknown"),
+        ("gcloud compute instances describe vm-1 --zone z", "readonly"),
+        ("gcloud compute instances delete vm-1", "unknown"),
+        ("aliyun ecs DescribeInstances --RegionId cn-hangzhou", "unknown"),  # CamelCase verb is not on the list → conservative
+        ("aliyun ecs StopInstance --InstanceId i-1", "unknown"),
+    ])
+    def test_samples(self, command, tier):
+        from agenticops.services.command_audit import generic_cli_tier
+        assert generic_cli_tier(command) == tier
+
+
+class TestSshProviderLedger:
+    @staticmethod
+    def _tool(monkeypatch, returncode=0):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agenticops.providers.ssh import SSHProvider
+        creds = {"host": "10.0.0.5", "username": "ops"}
+        provider = SSHProvider(SimpleNamespace(id=1, name="idc-1", provider="ssh", credentials=creds, regions=[], labels={}))
+        provider._cfg = dict(creds)
+        run = Mock(return_value=SimpleNamespace(returncode=returncode, stdout="ok\n", stderr=""))
+        monkeypatch.setattr("agenticops.providers.ssh.subprocess.run", run)
+        return provider.cli_tool(), run
+
+    def test_write_is_recorded(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        assert tool("systemctl reload nginx") == "ok\n" and run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.account, row.target, row.exit_code) == \
+               ("provider_ssh", "write", "executed", "idc-1", "10.0.0.5", 0)
+
+    def test_change_required_refused(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        out = tool("systemctl restart nginx")
+        assert "/change" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.outcome, row.reason) == ("provider_ssh", "refused", "change_required")
+
+    def test_readonly_not_recorded(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        assert tool("df -h") == "ok\n" and run.called
+        assert _rows(db) == []
+
+    def test_blocked_is_recorded_with_unchanged_reply(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        out = tool("mkfs.ext4 /dev/sdb")
+        assert out == "Error (exit -1): Command blocked by security policy: 'mkfs.ext4 /dev/sdb'" and not run.called
+        (row,) = _rows(db)
+        assert (row.tier, row.outcome, row.target) == ("blocked", "blocked", "10.0.0.5")
+
+
+class TestKubernetesProviderLedger:
+    @staticmethod
+    def _tool(monkeypatch, returncode=0):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agenticops.providers.kubernetes import KubernetesProvider
+        creds = {"context": "prod"}
+        provider = KubernetesProvider(SimpleNamespace(id=1, name="c1", provider="kubernetes", credentials=creds, regions=[], labels={}))
+        provider._cfg = {**creds, "kubeconfig_path": "/dev/null"}
+        run = Mock(return_value=SimpleNamespace(returncode=returncode, stdout="deployment.apps/x scaled\n", stderr=""))
+        monkeypatch.setattr("agenticops.providers.kubernetes.subprocess.run", run)
+        return provider.cli_tool(), run
+
+    def test_write_is_recorded_fully_qualified(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        assert tool("scale deployment/x --replicas=2").startswith("deployment.apps/x scaled") and run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.target, row.command) == \
+               ("provider_kubectl", "write", "executed", "prod", "kubectl scale deployment/x --replicas=2")
+
+    @pytest.mark.parametrize("command,tier", [
+        ("delete pod x", "write"),
+        ("kubectl --context prod delete pod x", "unknown"),   # the classifier sees `--context …` first; the gate still matches
+    ])
+    def test_change_required_refused(self, db, monkeypatch, command, tier):
+        tool, run = self._tool(monkeypatch)
+        out = tool(command)
+        assert "/change" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.outcome, row.reason, row.tier) == ("provider_kubectl", "refused", "change_required", tier)
+
+    def test_readonly_not_recorded(self, db, monkeypatch):
+        tool, run = self._tool(monkeypatch)
+        tool("get pods -A")
+        assert run.called and _rows(db) == []
+
+
+class TestGenericProviderLedger:
+    """azure / gcp / alicloud share one shape: tier from generic_cli_tier, one tool name per provider."""
+
+    PROVIDERS = {
+        # module: (class, ledger tool, credentials, readonly cmd, write cmd, change_required pattern for the test)
+        "azure": ("AzureProvider", "provider_azure_cli", {"subscription_id": "sub-1"},
+                  "az vm list", "az vm start --name x", "az vm start"),
+        "gcp": ("GCPProvider", "provider_gcp_cli", {"project_id": "p1"},
+                "gcloud compute instances list", "gcloud compute instances stop vm-1", "gcloud compute instances stop"),
+        "alicloud": ("AlicloudProvider", "provider_alicloud_cli", {},
+                     None, "aliyun ecs StopInstance --InstanceId i-1", "aliyun ecs stopinstance"),
+    }
+
+    @classmethod
+    def _tool(cls, monkeypatch, module, returncode=0):
+        import importlib
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        cls_name, _tool_name, creds, *_ = cls.PROVIDERS[module]
+        mod = importlib.import_module(f"agenticops.providers.{module}")
+        provider = getattr(mod, cls_name)(SimpleNamespace(id=1, name=f"{module}-acct", provider=module,
+                                                          credentials=creds, regions=["r1"], labels={}))
+        run = Mock(return_value=SimpleNamespace(returncode=returncode, stdout="{}", stderr=""))
+        monkeypatch.setattr(f"agenticops.providers.{module}.subprocess.run", run)
+        return provider.cli_tool(), run
+
+    @pytest.mark.parametrize("module", ["azure", "gcp", "alicloud"])
+    def test_write_is_recorded_with_provider_tool_name(self, db, monkeypatch, module):
+        _c, tool_name, _creds, _ro, write_cmd, _pat = self.PROVIDERS[module]
+        tool, run = self._tool(monkeypatch, module)
+        assert tool(write_cmd) == "{}" and run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.account, row.exit_code, row.command) == \
+               (tool_name, "unknown", "executed", f"{module}-acct", 0, write_cmd)
+
+    @pytest.mark.parametrize("module", ["azure", "gcp", "alicloud"])
+    def test_change_required_refused_without_subprocess(self, db, monkeypatch, module):
+        from agenticops.services.policy_engine import PolicyEngine
+        _c, tool_name, _creds, _ro, write_cmd, pattern = self.PROVIDERS[module]
+        monkeypatch.setattr("agenticops.services.policy_engine._engine",
+                            PolicyEngine({"rules": [], "change_required": [pattern]}))
+        tool, run = self._tool(monkeypatch, module)
+        out = tool(write_cmd)
+        assert "/change" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.outcome, row.reason) == (tool_name, "refused", "change_required")
+
+    @pytest.mark.parametrize("module", ["azure", "gcp"])
+    def test_readonly_not_recorded(self, db, monkeypatch, module):
+        _c, _t, _creds, ro_cmd, *_ = self.PROVIDERS[module]
+        tool, run = self._tool(monkeypatch, module)
+        assert tool(ro_cmd) == "{}" and run.called
+        assert _rows(db) == []
+
+    def test_alicloud_camelcase_read_is_ledgered_as_unknown(self, db, monkeypatch):
+        # generic_cli_tier knows list/show/get/describe(-…) only; aliyun's CamelCase Describe* is not on the
+        # list, so it is unknown — recorded and gated (conservative direction), never silently skipped.
+        tool, run = self._tool(monkeypatch, "alicloud")
+        assert tool("aliyun ecs DescribeInstances") == "{}" and run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome) == ("provider_alicloud_cli", "unknown", "executed")

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -78,6 +79,42 @@ def _bump_risk(risk_level: str) -> str:
     except ValueError:
         return risk_level
     return RISK_ORDER[min(idx + 1, len(RISK_ORDER) - 1)]
+
+
+# change_required matching (MVP-2.6.0): patterns are tested against a NORMALISED command as well as the
+# raw one, so a global option (`aws --profile p ec2 modify-…`, `kubectl --context prod delete …`),
+# doubled whitespace or a sudo/env wrapper cannot slip a high-risk command past a plain substring test.
+_POLICY_WRAPPERS = ("sudo", "env")
+_POLICY_VALUE_OPTIONS = frozenset({
+    "--profile", "--region", "--output", "--endpoint-url", "--context", "--namespace", "-n",
+    "--kubeconfig", "--cluster", "--user", "-u", "--subscription", "--project",
+})
+
+
+def _normalize_for_policy(command: str) -> str:
+    """Lower-cased, single-spaced command with wrappers, options and known option values removed.
+
+    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token
+    starting with '-' dropped, plus the following token when the option is one of the known
+    value-taking global options (`--opt=value` is a single token and is simply dropped).
+    """
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        tokens = (command or "").split()
+    while tokens and tokens[0].lower() in _POLICY_WRAPPERS:
+        tokens.pop(0)
+    kept: list[str] = []
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if token.startswith("-"):
+            skip_next = token in _POLICY_VALUE_OPTIONS
+            continue
+        kept.append(token)
+    return " ".join(kept).lower()
 
 
 class PolicyEngine:
@@ -277,10 +314,15 @@ class PolicyEngine:
         return None
 
     def change_required_match(self, command: str) -> Optional[str]:
-        """Return the change_required pattern the command matches, or None."""
-        cmd = (command or "").lower()
+        """Return the change_required pattern the command matches, or None.
+
+        A pattern hits when it is a substring of the normalised form (_normalize_for_policy) OR of the
+        whitespace-collapsed lower-cased raw form — normalisation can only widen the match.
+        """
+        raw = " ".join((command or "").split()).lower()
+        normalized = _normalize_for_policy(command)
         for pattern in self.change_required:
-            if pattern in cmd:
+            if pattern in normalized or pattern in raw:
                 return pattern
         return None
 
