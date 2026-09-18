@@ -1210,14 +1210,13 @@ def save_execution_result(
         )
         session.add(execution)
 
-        # Update FixPlan status through the state machine (approved → executing → terminal)
-        if plan.status == "approved":
-            transition_plan(plan, "executing")
-        if status == "succeeded":
-            transition_plan(plan, "executed")
-        elif status in ("failed", "rolled_back"):
-            transition_plan(plan, "failed")
-        # aborted -> stays executing (operator may retry / a new execution row will follow)
+        # Update FixPlan status through the state machine (approved → executing → terminal).
+        # aborted: plan status untouched — retry allowed (an approved plan stays approved).
+        terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
+        if terminal:
+            if plan.status == "approved":
+                transition_plan(plan, "executing")
+            transition_plan(plan, terminal)
 
         # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
         # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,

@@ -76,3 +76,14 @@ def test_executor_service_mark_crashed_uses_validator(db):
     ExecutorService()._mark_crashed(ex.id, plan.id, "boom")
     db.expire_all()
     assert db.get(FixPlan, plan.id).status == "failed"
+
+
+def test_tool_save_execution_result_aborted_leaves_approved_plan_approved(db):
+    from agenticops.tools.metadata_tools import save_execution_result
+    plan = _plan(db, status="approved")
+    with patch("agenticops.services.notification_service.notify_execution_result"), \
+         patch("agenticops.services.notification_service.notify_im_origin"):
+        out = save_execution_result(fix_plan_id=plan.id, health_issue_id=plan.health_issue_id, status="aborted")
+    assert "FixExecution #" in out
+    db.refresh(plan)
+    assert plan.status == "approved"
