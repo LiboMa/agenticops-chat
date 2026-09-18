@@ -148,6 +148,17 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            # Trust-Kernel ceiling (M-5): the always-enforced agent rule (no-agent-approval-above-l1) holds
+            # regardless of policies.yaml — a rule granting auto_approve to L2/L3 cannot make
+            # agent:auto-pipeline approve them. The check writes its own authz.denied audit row.
+            from agenticops.auth import authz
+            from agenticops.auth.actor import agent_actor
+            try:
+                authz.check(agent_actor("auto-pipeline"), "plan.approve", subject=plan)
+            except authz.AuthzDenied as e:
+                logger.info("Auto-approve: FixPlan #%d (%s) left as is — %s", fix_plan_id, plan.risk_level, e.reason)
+                return
+
             # Approve plan (policy auto_approve, or legacy L0/L1)
             from agenticops.models import transition_plan
             transition_plan(plan, "approved")

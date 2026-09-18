@@ -218,3 +218,29 @@ def test_context_less_known_agent_name_is_kept(db, name):
     assert plan.approved_by == f"agent:{name}"
     (row,) = _audits(db, "plan.approved")
     assert row.actor == f"agent:{name}" and "claimed_name" not in row.details
+
+
+# ── Final fix wave, group 6 (M-5): the Trust-Kernel ceiling holds inside trigger_auto_approve ───────
+
+
+def test_auto_approve_agent_ceiling_holds_even_if_policy_grants_l2(db):
+    """M-5: the always-enforced agent rule does not depend on policies.yaml content — a rule granting
+    auto_approve to an L2 plan cannot make agent:auto-pipeline approve it. Plan untouched, no chain, one
+    authz.denied row written by the check itself."""
+    from agenticops.config import settings
+    from agenticops.services import pipeline_service
+    from agenticops.services.policy_engine import PolicyDecision
+    plan = _plan(db, risk="L2")
+    with patch.object(settings, "auto_fix_enabled", True), patch.object(settings, "executor_auto_approve_l0_l1", True), \
+         patch.object(settings, "policy_engine_enabled", True), \
+         patch.object(pipeline_service, "_evaluate_policy_for_plan",
+                      return_value=PolicyDecision(action="auto_approve", rule_name="yaml-grants-l2")), \
+         patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+        pipeline_service.trigger_auto_approve(plan.id)
+    trigger.assert_not_called()
+    db.refresh(plan)
+    assert plan.status == "draft" and plan.approved_by is None
+    assert _audits(db, "plan.approved") == []
+    rows = _audits(db, "authz.denied")
+    assert len(rows) == 1 and rows[0].actor == "agent:auto-pipeline"
+    assert rows[0].details["rule"] == "no-agent-approval-above-l1" and rows[0].details["permission"] == "plan.approve"
