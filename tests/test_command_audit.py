@@ -753,10 +753,10 @@ class TestChangeRequiredFixWave:
         from agenticops.services.policy_engine import (
             _WRAPPER_BOOLEAN_FLAGS, _is_value_taking_option, _normalize_for_policy,
         )
-        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] == frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"})
-        assert set(_WRAPPER_BOOLEAN_FLAGS) == {"sudo"}
+        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] >= frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"})
+        assert set(_WRAPPER_BOOLEAN_FLAGS) == {"sudo", "env", "time", "docker exec"}   # follow-up 2: full tables pinned below
         assert _is_value_taking_option("-n") is True and _is_value_taking_option("-E") is True   # generic rule unchanged
-        for flag in sorted(_WRAPPER_BOOLEAN_FLAGS["sudo"]):
+        for flag in sorted(_WRAPPER_BOOLEAN_FLAGS["sudo"]):                                       # short AND long forms
             assert _normalize_for_policy(f"sudo {flag} /usr/bin/systemctl restart nginx") == \
                    [("systemctl", True), ("restart", True), ("nginx", True)], flag
         assert _normalize_for_policy("sudo -u deploy -n /usr/bin/systemctl restart nginx") == \
@@ -805,6 +805,121 @@ class TestChangeRequiredFixWave:
                [("systemctl", True), ("restart", True), ("nginx", True)]
         assert _normalize_for_policy("sudo -u nice /usr/bin/systemctl restart nginx") == \
                [("nice", False), ("systemctl", True), ("restart", True), ("nginx", True)]
+
+    @pytest.mark.parametrize("command", [
+        "env -i /usr/bin/systemctl restart nginx",                        # env's own boolean switches
+        "env --ignore-environment /usr/bin/systemctl restart nginx",
+        "sudo --non-interactive /usr/bin/systemctl restart nginx",        # sudo long forms
+        "sudo --preserve-env /usr/bin/systemctl restart nginx",
+        "sudo --login /usr/bin/systemctl restart nginx",
+        "sudo -En /usr/bin/systemctl restart nginx",                      # all-boolean short clusters
+        "sudo -nE /usr/bin/systemctl restart nginx",
+        "sudo -Hn /usr/bin/systemctl restart nginx",
+        "sudo -P /usr/bin/systemctl restart nginx",
+        "nice -n -5 /usr/bin/systemctl restart nginx",                    # a purely numeric token is never an option
+        "nice -5 /usr/bin/systemctl restart nginx",
+        "time -p /bin/systemctl restart nginx",                           # time's own boolean switch
+        "sudo -n env -i /usr/bin/systemctl restart nginx",                # chained, each wrapper with its own table
+        "sudo -n nice -n 10 env -i /usr/bin/systemctl restart nginx",
+    ])
+    def test_wrapper_option_tables_refused(self, command):
+        """Follow-up 2: sudo long forms and all-boolean short clusters, the env/time tables and numeric tokens all
+        leave the program path in command position, so it is basenamed and `systemctl restart` is refused."""
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == "systemctl restart"
+
+    @pytest.mark.parametrize("command", [
+        "sudo -nu deploy /usr/bin/ls -la",                                # `u` takes a value: the cluster is not boolean
+        "env -u HOME /usr/bin/ls",                                        # env -u NAME / -C DIR take a value
+        "env -C /tmp /usr/bin/ls",
+        "time -o /tmp/t /usr/bin/ls",                                     # time -o FILE takes a value
+        "nice -n 10 kubectl scale deploy web --replicas=3",               # an L1 write stays ungated
+        "aws ec2 create-tags --resources i-1 --tags Key=Owner,Value=sudo",
+    ])
+    def test_wrapper_option_tables_not_refused(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    def test_wrapper_option_tables(self):
+        """The tables themselves, and the token shapes they produce: an exact entry or an all-boolean cluster is
+        boolean inside its region; a cluster holding a value-taking letter (`-nu`) is not; a numeric token is kept,
+        is never value-taking and never the command word."""
+        from agenticops.services.policy_engine import (
+            _WRAPPER_BOOLEAN_CLUSTERS, _WRAPPER_BOOLEAN_FLAGS, _is_value_taking_option, _is_wrapper_boolean,
+            _normalize_for_policy,
+        )
+        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] == frozenset({
+            "-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v", "-P", "-B", "-N",
+            "--non-interactive", "--preserve-env", "--login", "--set-home", "--background", "--reset-timestamp",
+            "--remove-timestamp", "--shell", "--stdin", "--validate", "--askpass", "--bell", "--no-update",
+        })
+        assert _WRAPPER_BOOLEAN_FLAGS["env"] == frozenset({"-i", "-0", "--ignore-environment", "--null"})
+        assert _WRAPPER_BOOLEAN_FLAGS["time"] == frozenset({
+            "-p", "-v", "-a", "-q", "--portability", "--verbose", "--append", "--quiet",
+        })
+        assert _WRAPPER_BOOLEAN_FLAGS["docker exec"] == frozenset({
+            "-i", "-t", "-d", "--interactive", "--tty", "--detach", "--privileged",
+        })
+        assert set(_WRAPPER_BOOLEAN_CLUSTERS) == {"sudo", "docker exec"}
+        for cluster in ("-En", "-nE", "-Hn", "-EHn", "-A"):
+            assert _is_wrapper_boolean("sudo", cluster) is True, cluster
+        for not_boolean in ("-nu", "-u", "-g", "-nEu", "--user", "-"):
+            assert _is_wrapper_boolean("sudo", not_boolean) is False, not_boolean
+        assert _is_wrapper_boolean("docker exec", "-it") is True and _is_wrapper_boolean("docker exec", "-u") is False
+        assert _is_wrapper_boolean("nice", "-n") is False                                  # no table: generic, value-taking
+        assert _is_value_taking_option("-5") is False and _is_value_taking_option("-n") is True
+        assert _normalize_for_policy("sudo -En /usr/bin/systemctl restart nginx") == \
+               [("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("sudo -nu deploy /usr/bin/ls -la") == [("deploy", False), ("ls", True)]
+        assert _normalize_for_policy("nice -n -5 /usr/bin/systemctl restart nginx") == \
+               [("-5", False), ("systemctl", True), ("restart", True), ("nginx", True)]      # numeric: kept, not an option
+        assert _normalize_for_policy("nice -5 /usr/bin/systemctl restart nginx") == \
+               [("-5", True), ("systemctl", True), ("restart", True), ("nginx", True)]       # …and never the command word
+        assert _normalize_for_policy("env -u HOME /usr/bin/ls") == [("home", False), ("ls", True)]
+        assert _normalize_for_policy("time -o /tmp/t /usr/bin/ls") == [("/tmp/t", False), ("ls", True)]
+
+    @pytest.mark.parametrize("command,pattern", [
+        ("kubectl exec pod -- /sbin/reboot", "reboot"),                                    # nested command after kubectl's `--`
+        ("kubectl exec -n prod pod -- sudo /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("kubectl exec pod -- reboot", "reboot"),                                          # kept
+        ("docker exec -it web /sbin/reboot", "reboot"),                                    # docker exec [OPTIONS] CONTAINER COMMAND
+        ("docker exec -u root web /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo docker exec web /sbin/reboot", "reboot"),
+    ])
+    def test_nested_exec_commands_refused(self, command, pattern):
+        """Follow-up 2: `kubectl … -- COMMAND` and `docker exec [OPTIONS] CONTAINER COMMAND` carry a NESTED command whose
+        first word is a command position of its own (basename applies); the outer tokens are kept as they are."""
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    @pytest.mark.parametrize("command", [
+        "kubectl exec pod -- ls /sbin",                                                    # a path after the nested command word
+        "kubectl exec pod -- cat /etc/hosts",
+        "docker exec web cat /etc/hosts",
+        "docker exec web ls /sbin",
+        "docker exec -it web",                                                             # no command: nothing to gate
+        "docker ps -a",
+        "ls -- /sbin/reboot",                                                              # `--` is only nested for kubectl
+    ])
+    def test_nested_exec_commands_not_refused(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    def test_nested_exec_tokens(self):
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy("kubectl exec pod -- /sbin/reboot") == \
+               [("kubectl", True), ("exec", True), ("pod", True), ("reboot", True)]
+        assert _normalize_for_policy("kubectl exec -n prod pod -- sudo /usr/bin/systemctl restart nginx") == \
+               [("kubectl", True), ("exec", True), ("prod", False), ("pod", True),
+                ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("kubectl exec pod -- ls /sbin") == \
+               [("kubectl", True), ("exec", True), ("pod", True), ("ls", True), ("/sbin", True)]
+        assert _normalize_for_policy("docker exec -it web /sbin/reboot") == \
+               [("docker", True), ("exec", True), ("web", True), ("reboot", True)]
+        assert _normalize_for_policy("docker exec -u root web /usr/bin/systemctl restart nginx") == \
+               [("docker", True), ("exec", True), ("root", False), ("web", True),
+                ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("ls -- /sbin/reboot") == [("ls", True), ("/sbin/reboot", True)]
 
     @pytest.mark.parametrize("command", ["/", "//", "sudo /", "bash -c '/'", "a/ b", '{"x": [1, 2]}', "name=", "FOO= bar"])
     def test_odd_paths_and_payloads_never_raise(self, command):

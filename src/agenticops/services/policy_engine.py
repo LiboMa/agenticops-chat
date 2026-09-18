@@ -109,11 +109,15 @@ def _bump_risk(risk_level: str) -> str:
 # (`bash -c`, `sh -lc`, `su -c`) and a positional payload, which are commands in their own right and keep their own
 # flags (the round-4 deviation: taking `-c` payloads as ineligible would re-open the hole for every AWS-style pattern).
 # A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
-# modify-security-group-rules` is still gated; a wrapper's OWN boolean switches (`sudo -n`, `sudo -E`, …:
-# _WRAPPER_BOOLEAN_FLAGS) count the same way inside that wrapper's option region, so `sudo -n /usr/bin/systemctl`
+# modify-security-group-rules` is still gated; a wrapper's OWN boolean switches — short, long or an all-boolean short
+# CLUSTER (`sudo -n`, `sudo --non-interactive`, `sudo -En`, `env -i`, `time -p`: _WRAPPER_BOOLEAN_FLAGS /
+# _WRAPPER_BOOLEAN_CLUSTERS) — count the same way inside that wrapper's option region, so `sudo -n /usr/bin/systemctl`
 # still has its command word basenamed. A wrapper word arriving in COMMAND POSITION (`sudo -n nice -n 10 /usr/bin/…`,
 # `sudo -E sudo …`, `sudo -n env FOO=1 …`) is itself a wrapper and swaps in its own table; only a non-wrapper word is
-# the command. The allowlist only ever ADDS refusals (an eligible token is a
+# the command. A purely NUMERIC token (`nice -n -5`, `nice -5`, `10`) is never an option: kept, never value-taking,
+# never the command word. NESTED COMMANDS: what follows kubectl's `--` (`kubectl exec pod -- /sbin/reboot`) and the
+# CONTAINER of `docker exec [OPTIONS] CONTAINER COMMAND` is tokenised as a command of its own, so its first word is a
+# command position too (`reboot`). The allowlist only ever ADDS refusals (an eligible token is a
 # superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
 _POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice")
 _POLICY_RESPLIT_MAX_DEPTH = 3
@@ -124,14 +128,31 @@ _POLICY_BOOLEAN_FLAGS = frozenset({
     "--no-cli-auto-prompt", "--cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f",
     "--user", "--now", "--all", "-A",
 })
-# A WRAPPER's own boolean switches (exact tokens), consulted only in that wrapper's option region — the tokens
-# between the wrapper and the next wrapper word or the command word: in `sudo -n /usr/bin/systemctl restart nginx`
-# sudo's `-n` (non-interactive) takes no value, so the path after it IS the command position and is basenamed. Per
-# wrapper on purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`, also when nice is
-# chained after `sudo -n` — each wrapper word brings its own table), and past the command word `-n` is generic again.
+# A WRAPPER's own boolean switches (exact tokens, short and long), consulted only in that wrapper's option region —
+# the tokens between the wrapper and the next wrapper word or the command word: in `sudo -n /usr/bin/systemctl
+# restart nginx` sudo's `-n` (non-interactive) takes no value, so the path after it IS the command position and is
+# basenamed. Per wrapper on purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`,
+# also when nice is chained after `sudo -n` — each wrapper word brings its own table), and past the command word `-n`
+# is generic again. `env -u NAME` / `env -C DIR` and `time -o FILE` / `time -f FORMAT` take a value, so they are not
+# listed. "docker exec" is the one non-wrapper region: its switches sit between the sub-command and the CONTAINER.
 _WRAPPER_BOOLEAN_FLAGS: dict[str, frozenset[str]] = {
-    "sudo": frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"}),
+    "sudo": frozenset({
+        "-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v", "-P", "-B", "-N",
+        "--non-interactive", "--preserve-env", "--login", "--set-home", "--background", "--reset-timestamp",
+        "--remove-timestamp", "--shell", "--stdin", "--validate", "--askpass", "--bell", "--no-update",
+    }),
+    "env": frozenset({"-i", "-0", "--ignore-environment", "--null"}),
+    "time": frozenset({"-p", "-v", "-a", "-q", "--portability", "--verbose", "--append", "--quiet"}),
+    "docker exec": frozenset({"-i", "-t", "-d", "--interactive", "--tty", "--detach", "--privileged"}),
 }
+# Short-switch CLUSTERS that are still all-boolean (`sudo -En`, `sudo -Hn`, `docker exec -it`). A letter that takes a
+# value (`sudo -nu deploy`: `u`) makes the whole token value-taking, as before.
+_WRAPPER_BOOLEAN_CLUSTERS: dict[str, re.Pattern[str]] = {
+    "sudo": re.compile(r"^-[nEiHbkKsSvABNP]+$"),
+    "docker exec": re.compile(r"^-[itd]+$"),
+}
+# A purely numeric token (`-5`, `+5`, `10`) is never an option: `nice -n -5 …` and `nice -5 …` keep the program path.
+_NUMERIC_TOKEN = re.compile(r"^[+-]?\d+$")
 # env-style `NAME=value` assignments precede the program (`env FOO=1 aws …`, `FOO=1 aws …`): never the command word.
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # `name="cmd …"` payload: only the VALUE part is re-split (`commands="systemctl restart nginx"`).
@@ -148,11 +169,21 @@ _EDGE_LEAD, _EDGE_TRAIL = "[{(\"'", "]})\"',"
 def _is_value_taking_option(token: str) -> bool:
     """An option that MAY consume the next token as its value: `-n`, `--profile`; not `-`/`--` (POSIX markers,
     positionals follow them), not `--opt=value` (self-contained) and not a known boolean flag
-    (_POLICY_BOOLEAN_FLAGS: `--no-cli-pager`, `--dry-run`, `-q`, …). Whether any OTHER flag really takes a
-    value is CLI-specific, so its next token is treated as a value — the direction the lead ruled for
-    hyphenated patterns."""
+    (_POLICY_BOOLEAN_FLAGS: `--no-cli-pager`, `--dry-run`, `-q`, …), not a purely numeric token (`-5` is a value,
+    _NUMERIC_TOKEN). Whether any OTHER flag really takes a value is CLI-specific, so its next token is treated as
+    a value — the direction the lead ruled for hyphenated patterns."""
     return (token.startswith("-") and token not in ("-", "--") and "=" not in token
-            and token not in _POLICY_BOOLEAN_FLAGS)
+            and token not in _POLICY_BOOLEAN_FLAGS and not _NUMERIC_TOKEN.match(token))
+
+
+def _is_wrapper_boolean(region: str, token: str) -> bool:
+    """True when `token` is a boolean switch of the option region `region` — an exact table entry (`sudo -n`,
+    `sudo --non-interactive`, `env -i`, `time -p`) or an all-boolean short cluster (`sudo -En`, `docker exec -it`).
+    A region without a table (`nice`, `nohup`) has no booleans: its switches stay generic (value-taking)."""
+    if token in _WRAPPER_BOOLEAN_FLAGS.get(region, frozenset()):
+        return True
+    cluster = _WRAPPER_BOOLEAN_CLUSTERS.get(region)
+    return cluster is not None and cluster.match(token) is not None
 
 
 def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
@@ -160,9 +191,10 @@ def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool
 
     shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped — chained too:
     a wrapper word in command position after another wrapper's switches (`sudo -n nice -n 10 …`, `sudo -E sudo …`)
-    is dropped as a wrapper with its own table; every token starting with '-' dropped (sudo's own boolean switches —
-    `-n`, `-E`, …, _WRAPPER_BOOLEAN_FLAGS — take no value, so `sudo -n /usr/bin/systemctl` keeps its command
-    position). Option VALUES are kept as ordinary tokens — a kept
+    is dropped as a wrapper with its own table; every non-numeric token starting with '-' dropped (a wrapper's own
+    boolean switches — `sudo -n`, `sudo --login`, `sudo -En`, `env -i`, `time -p`: _WRAPPER_BOOLEAN_FLAGS /
+    _WRAPPER_BOOLEAN_CLUSTERS — take no value, so `sudo -n /usr/bin/systemctl` keeps its command position; a purely
+    numeric `-5` is kept and is never an option). Option VALUES are kept as ordinary tokens — a kept
     value can only add a token the ordered match must skip over — but they are flagged: `eligible_for_prefix` is
     False when the ORIGINAL predecessor is a value-taking option (_is_value_taking_option — a known boolean flag such
     as `--no-cli-pager` is not one), and only hyphenated pattern tokens consult the flag.
@@ -176,6 +208,11 @@ def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool
     same rules and spliced in place, so the words inside face the gate too, with their own command position. The
     wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper
     payloads get a flat str.split), and nothing here raises on odd input.
+
+    NESTED COMMANDS are tokenised the same way in place: everything after kubectl's `--` (`kubectl exec pod --
+    /sbin/reboot`) and everything after the CONTAINER of `docker exec [OPTIONS] CONTAINER …` has its own command
+    position, so `/sbin/reboot` there is `reboot`; under any other command `--` is just the POSIX marker
+    (`ls -- /sbin/reboot` is untouched).
     """
     try:
         tokens = shlex.split(command or "")
@@ -191,29 +228,48 @@ def _basename(token: str) -> str:
 
 def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
     out: list[tuple[str, bool]] = []
-    # The current wrapper's own boolean switches (sudo -n/-E/…) apply until the next wrapper word or the command
-    # word. A wrapper word that arrives in command position (`sudo -n nice …`, `sudo -E sudo …`) is consumed as a
-    # wrapper and swaps in ITS table — never taken as the command — so the real program path is still basenamed.
-    wrapper_booleans: frozenset[str] = frozenset()
+    # `region` names the option region whose boolean table applies (_is_wrapper_boolean): the wrapper word before the
+    # command word — a wrapper word arriving in command position (`sudo -n nice …`, `sudo -E sudo …`) is consumed as a
+    # wrapper and swaps in ITS region, never taken as the command — or "docker exec" between that sub-command and its
+    # CONTAINER. None otherwise, so past the command word a generic `-n` is value-taking again.
+    region: Optional[str] = None
     command_seen = False
+    command_word: Optional[str] = None
+    docker_stage: Optional[str] = None  # "subcommand" right after `docker`; "container" inside `docker exec [OPTIONS] …`
     for i, token in enumerate(tokens):
-        if token.startswith("-"):
+        if token == "--" and command_word == "kubectl":
+            # `kubectl exec|run|debug … -- COMMAND`: the remainder is a NESTED command with its own command position.
+            out.extend(_policy_tokens(tokens[i + 1:], depth))
+            break
+        if token.startswith("-") and not _NUMERIC_TOKEN.match(token):
             continue
         prev = tokens[i - 1] if i > 0 else None
         eligible = (prev is None or not _is_value_taking_option(prev)
-                    or (not command_seen and prev in wrapper_booleans))
+                    or (region is not None and _is_wrapper_boolean(region, prev)))
         if any(ch.isspace() for ch in token):
-            command_seen = True  # a quoted payload holds its own command word (found at its own level)
+            if not command_seen:
+                command_seen, region = True, None  # a quoted payload holds its own command word (found at its own level)
             out.extend(_payload_tokens(token, depth, prev, positional=eligible))
             continue
-        if not command_seen and eligible and not _ENV_ASSIGNMENT.match(token):
-            if token.lower() in _POLICY_WRAPPERS:
-                wrapper_booleans = _WRAPPER_BOOLEAN_FLAGS.get(token.lower(), frozenset())
-                continue  # chained wrapper: its option region follows, the command word is still ahead
-            command_seen = True
-            if "/" in token:
-                token = _basename(token)  # command position only: /usr/sbin/reboot → reboot
-        out.append((token.lower(), eligible))
+        word = token.lower()
+        if not command_seen and eligible and not _ENV_ASSIGNMENT.match(token) and not _NUMERIC_TOKEN.match(token):
+            if word in _POLICY_WRAPPERS:
+                region = word  # chained wrapper: its option region follows, the command word is still ahead
+                continue
+            command_seen, region = True, None
+            if "/" in word:
+                word = _basename(word)  # command position only: /usr/sbin/reboot → reboot
+            command_word = word
+            docker_stage = "subcommand" if word == "docker" else None
+        elif docker_stage is not None and eligible:
+            if docker_stage == "subcommand":
+                # `docker exec [OPTIONS] CONTAINER COMMAND…`: the sub-command's own switches (-i/-t/-d, -it) are boolean.
+                docker_stage, region = ("container", "docker exec") if word == "exec" else (None, None)
+            else:
+                out.append((word, eligible))  # the CONTAINER; what follows is a NESTED command with its own command position
+                out.extend(_policy_tokens(tokens[i + 1:], depth))
+                break
+        out.append((word, eligible))
     return out
 
 
@@ -337,7 +393,8 @@ class PolicyEngine:
         """Evaluate rules in order; first match wins. 'escalate' re-runs one tier up.
 
         `plan_kind` / `action_type` / `emergency` (MVP-2.6.0 change requests) are matched like the other fields;
-        an emergency change never matches `in_change_freeze`, so it crosses a freeze window (other rules still gate it).
+        an emergency CHANGE never matches `in_change_freeze`, so it crosses a freeze window (other rules still gate
+        it). `emergency` is only meaningful for `plan_kind="change"`: a fix plan inside a freeze stays blocked.
         """
         now = now or datetime.now(timezone.utc)
         original_risk = risk_level
@@ -470,8 +527,8 @@ class PolicyEngine:
             reasons.append(f"emergency={bool(emergency)}")
 
         if match.get("in_change_freeze"):
-            if emergency:
-                return False, []  # emergency changes are allowed to cross a freeze window (still human-gated by other rules)
+            if emergency and plan_kind == "change":
+                return False, []  # `emergency` is only meaningful for change plans: they cross the freeze (still human-gated)
             window = self._active_freeze_window(now)
             if window is None:
                 return False, []

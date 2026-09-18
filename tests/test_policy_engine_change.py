@@ -35,6 +35,18 @@ def test_emergency_bypasses_freeze_window():
     assert d.action == "require_human" and d.rule_name == "human"
 
 
+def test_emergency_does_not_lift_freeze_for_fix_plans():
+    # `emergency` is a change-plan concept: on the fix flow (plan_kind defaults to "fix") a freeze still blocks.
+    now = datetime.now(timezone.utc)
+    freeze = [{"name": "cny", "start": (now - timedelta(hours=1)).isoformat(), "end": (now + timedelta(hours=1)).isoformat()}]
+    eng = _engine([
+        {"name": "freeze-window-block", "match": {"in_change_freeze": True}, "action": "block"},
+        {"name": "human", "match": {}, "action": "require_human"},
+    ], freeze)
+    d = eng.evaluate(risk_level="L1", emergency=True)
+    assert d.action == "block" and d.rule_name == "freeze-window-block"
+
+
 def test_emergency_match_field():
     eng = _engine([{"name": "emergency-human", "match": {"emergency": True}, "action": "require_human", "itsm_change_type": "emergency"},
                    {"name": "rest", "match": {}, "action": "auto_approve"}])
