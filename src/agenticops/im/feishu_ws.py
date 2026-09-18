@@ -296,10 +296,12 @@ class FeishuWSService:
                 # Reset afterwards: this runs on a pooled worker thread that outlives the turn.
                 _rc_token = set_run_context(RunContext(actor=im_actor("feishu", chat_id).key,
                                                        trace_id=get_trace_id(), agent_name="main"))
-                result = agent(agent_input)
-                set_im_origin(None)  # clear after agent completes
-                set_trace_id(None)
-                reset_run_context(_rc_token)
+                try:
+                    result = agent(agent_input)
+                finally:
+                    set_im_origin(None)  # clear after the turn — even when the agent raises
+                    set_trace_id(None)
+                    reset_run_context(_rc_token)
                 response_text = str(result)
                 from agenticops.chat.suggestions import extract_suggestions
                 response_text, _ = extract_suggestions(response_text)

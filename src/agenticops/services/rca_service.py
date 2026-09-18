@@ -4,6 +4,7 @@ Non-blocking: RCA runs in a daemon thread so the caller returns immediately.
 Controlled by settings.auto_rca_enabled (AIOPS_AUTO_RCA_ENABLED).
 """
 
+import contextvars
 import logging
 import threading
 from typing import Optional
@@ -45,7 +46,7 @@ def trigger_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> No
 
 
 def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
-    """Run rca_agent for the given issue, with a wall-clock watchdog.
+    """Run rca_agent for the given issue, with a wall-clock watchdog (daemon thread — sets its own Run Context).
 
     Threads can't be force-killed, so on timeout we log rca failed + flag
     needs_review; the abandoned run can still finish but is observable as
@@ -72,6 +73,11 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
               detail={"model_id": rca_model_id, "thinking_budget": thinking_budget,
                       "escalate_reason": escalate_reason},
               trace_id=trace_id)
+    # Run Context for this pipeline thread — reset in finally so a direct call from a reused
+    # thread never leaks it. Read by the tools rca_agent calls (audit attribution), not by log_event.
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="rca"))
     try:
         from agenticops.agents.rca_agent import rca_agent
 
@@ -88,7 +94,9 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
                 except BaseException as e:  # propagate to the outer handler
                     error_box.append(e)
 
-            worker = threading.Thread(target=_invoke, daemon=True,
+            # ContextVars do not cross threading.Thread: carry this thread's context (Run Context,
+            # trace id) onto the watchdog thread so the agent's tools attribute correctly there too.
+            worker = threading.Thread(target=contextvars.copy_context().run, args=(_invoke,), daemon=True,
                                       name=f"auto-rca-run-{health_issue_id}")
             worker.start()
             worker.join(timeout)
@@ -111,6 +119,8 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     except Exception:
         log_event(health_issue_id, "rca_completed", "rca", "failed", trace_id=trace_id)
         logger.exception("Auto-RCA failed for HealthIssue #%d", health_issue_id)
+    finally:
+        reset_run_context(_rc_token)
 
 
 def _flag_needs_review(health_issue_id: int, reason: str) -> None:

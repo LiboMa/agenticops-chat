@@ -105,6 +105,23 @@ def test_pipeline_auto_sre_thread_sets_context(db):
     assert seen["actor"] == "agent:auto-pipeline" and seen["agent_name"] == "sre"
 
 
+@pytest.mark.parametrize("timeout", [0, 30])
+def test_pipeline_auto_rca_thread_sets_context(db, monkeypatch, timeout):
+    """With rca_timeout_seconds > 0 (the default) rca_agent runs on a nested watchdog thread, so the
+    Run Context must reach that thread too; either way it is reset once the pipeline thread is done."""
+    from agenticops.config import set_trace_id, settings
+    from agenticops.services import rca_service
+    monkeypatch.setattr(settings, "rca_timeout_seconds", timeout)
+    set_trace_id(None)  # start clean so the restored trace is observable (autouse fixture puts it back)
+    seen = {}
+    before = get_run_context()
+    with patch("agenticops.agents.rca_agent.rca_agent", side_effect=lambda issue_id: seen.update(get_run_context().__dict__) or "ok"):
+        rca_service._run_auto_rca(1, trace_id="TRC-z")
+    assert seen["actor"] == "agent:auto-pipeline" and seen["agent_name"] == "rca"
+    assert seen["trace_id"] == "TRC-z"
+    assert get_run_context() == before, "context must be reset in finally"
+
+
 # ── scheduler AgentChain ─────────────────────────────────────────────────────
 
 
@@ -210,3 +227,28 @@ def test_im_gateway_sets_and_resets_context(platform):
     assert seen["actor"] == f"im:{platform}:C_OPS" and seen["agent_name"] == "main"
     assert seen["trace_id"] and seen["trace_id"].startswith("TRC-")
     assert get_run_context() == before, "context must be reset after the turn (pooled worker thread)"
+
+
+@pytest.mark.parametrize("platform", ["feishu", "slack"])
+def test_im_gateway_resets_context_when_agent_raises(platform):
+    """The clears (im_origin / trace id / Run Context) run in finally — a crashing turn must not leave
+    its identity behind on the pooled worker thread for the next chat's turn."""
+    from agenticops.config import get_im_origin, get_trace_id
+    if platform == "feishu":
+        from agenticops.im.feishu_ws import FeishuWSService as cls
+    else:
+        from agenticops.im.slack_ws import SlackWSService as cls
+    svc = _im_service(cls)
+
+    def _boom(_input):
+        raise RuntimeError("agent crashed mid-turn")
+
+    svc._im_sessions.get_or_create.return_value = _boom
+    before = get_run_context()
+
+    with patch("agenticops.notify.im_config.load_channels", return_value=[]):
+        svc._process_and_reply("C_OPS", "hi", "1.0", "U_USER")  # outer handler swallows + sends the error reply
+
+    assert get_run_context() == before, "context must be reset even when the agent raises"
+    assert get_trace_id() is None and get_im_origin() is None
+    svc._send_reply.assert_called_once()
