@@ -368,6 +368,9 @@ class TestChangeRequiredNormalization:
     Each token carries an `eligible_for_prefix` flag — False when the ORIGINAL token before it is a value-taking
     option (`-`-prefixed, not `-`/`--`, no `=`); only HYPHENATED pattern tokens consult it, so an option value such as
     `--function-name update-inventory` never hits `aws lambda update-` while bare verbs keep no adjacency rule.
+    A known BOOLEAN flag (`--no-cli-pager`, `--debug`, `--dry-run`, `-q`, `--user`, `-A`, …: `_POLICY_BOOLEAN_FLAGS`)
+    takes no value, so the token after it stays eligible and `aws ec2 --no-cli-pager modify-security-group-rules`
+    is still gated.
     """
 
     @pytest.mark.parametrize("command", [
@@ -514,13 +517,31 @@ class TestChangeRequiredNormalization:
         # Deviation from the literal addendum: a `-c` payload is a command in its own right, not prose — taking its
         # tokens as ineligible would re-open the round-4 hole for every hyphenated (AWS-style) pattern.
         ('bash -c "aws ec2 modify-security-group-rules --group-id sg-1"', "aws ec2 modify-security-group"),
-        # Bound of the ruling, pinned so it is visible: a boolean flag directly before the operation reads as
-        # value-taking (no per-CLI option table — round-2 ruling), so this shape is a pass, not a refusal.
-        ("aws ec2 --no-cli-pager modify-security-group-rules --group-id sg-1", None),
+        # A known BOOLEAN flag directly before the operation does not claim it as a value (allowlist ruling): the
+        # operation stays eligible, so these AWS global-flag placements are refusals, not passes.
+        ("aws ec2 --no-cli-pager modify-security-group-rules --group-id sg-1", "aws ec2 modify-security-group"),
+        ("aws --debug ec2 modify-security-group-rules", "aws ec2 modify-security-group"),
+        ("aws ec2 --no-paginate --no-cli-pager stop-instances --instance-ids i-1", "aws ec2 stop-"),
+        # …while an UNKNOWN flag right before the operation still reads as value-taking (bound, pinned visible).
+        ("aws ec2 --some-new-flag modify-security-group-rules --group-id sg-1", None),
     ])
     def test_option_values_are_not_eligible_for_hyphenated_patterns(self, command, pattern):
         from agenticops.services.policy_engine import get_policy_engine
         assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    @pytest.mark.parametrize("flag", [
+        "--debug", "--no-cli-pager", "--no-paginate", "--no-verify-ssl", "--no-sign-request", "--no-cli-auto-prompt",
+        "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f", "--user", "--now", "--all", "-A",
+    ])
+    def test_boolean_flags_do_not_claim_the_next_token(self, flag):
+        """Every allowlisted boolean flag leaves its successor eligible for hyphenated patterns; the check is exact
+        and case-sensitive (`-a` is not `-A`), and a genuinely value-taking option still shields its value."""
+        from agenticops.services.policy_engine import _is_value_taking_option, _normalize_for_policy
+        assert _is_value_taking_option(flag) is False
+        assert _normalize_for_policy(f"aws ec2 {flag} modify-security-group-rules --group-id sg-1") == \
+               [("aws", True), ("ec2", True), ("modify-security-group-rules", True), ("sg-1", False)]
+        for value_taking in ("-n", "--profile", "--function-name", "-a", "--User", flag + "x"):
+            assert _is_value_taking_option(value_taking) is True, value_taking
 
     def test_normalize_for_policy_recursion_is_bounded(self):
         """Depth ≤ 3 recursive re-splits, then a flat str.split: four nested shells still resolve, five do not

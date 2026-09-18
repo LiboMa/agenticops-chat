@@ -93,15 +93,28 @@ def _bump_risk(risk_level: str) -> str:
 # OPTION VALUES are not operations: a token whose ORIGINAL predecessor is a value-taking option (`-`-prefixed, not
 # the bare `-`/`--` markers, no `=`) is ineligible for HYPHENATED pattern tokens, so `--function-name update-inventory`
 # does not hit `aws lambda update-`; bare pattern words keep no adjacency rule (`kubectl --as admin delete pod x`).
+# A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
+# modify-security-group-rules` is still gated. The allowlist only ever ADDS refusals (an eligible token is a
+# superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
 _POLICY_WRAPPERS = ("sudo", "env")
 _POLICY_RESPLIT_MAX_DEPTH = 3
+# Boolean flags that never consume the next token (exact, case-sensitive: `-a` is not `-A`, `-qy` is not listed).
+# AWS CLI globals first, then the systemctl/kubectl/az/apt-style switches an operator puts before the verb.
+_POLICY_BOOLEAN_FLAGS = frozenset({
+    "--debug", "--no-cli-pager", "--no-paginate", "--no-verify-ssl", "--no-sign-request",
+    "--no-cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f", "--user",
+    "--now", "--all", "-A",
+})
 
 
 def _is_value_taking_option(token: str) -> bool:
     """An option that MAY consume the next token as its value: `-n`, `--profile`; not `-`/`--` (POSIX markers,
-    positionals follow them) and not `--opt=value` (self-contained). Whether it really takes a value is
-    CLI-specific, so the next token is treated as a value — the direction the lead ruled for hyphenated patterns."""
-    return token.startswith("-") and token not in ("-", "--") and "=" not in token
+    positionals follow them), not `--opt=value` (self-contained) and not a known boolean flag
+    (_POLICY_BOOLEAN_FLAGS: `--no-cli-pager`, `--dry-run`, `-q`, …). Whether any OTHER flag really takes a
+    value is CLI-specific, so its next token is treated as a value — the direction the lead ruled for
+    hyphenated patterns."""
+    return (token.startswith("-") and token not in ("-", "--") and "=" not in token
+            and token not in _POLICY_BOOLEAN_FLAGS)
 
 
 def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
@@ -110,7 +123,8 @@ def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool
     shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token starting
     with '-' dropped. Option VALUES are kept as ordinary tokens — a kept value can only add a token the ordered
     match must skip over — but they are flagged: `eligible_for_prefix` is False when the ORIGINAL predecessor is
-    a value-taking option (_is_value_taking_option), and only hyphenated pattern tokens consult the flag.
+    a value-taking option (_is_value_taking_option — a known boolean flag such as `--no-cli-pager` is not one),
+    and only hyphenated pattern tokens consult the flag.
 
     A kept token that still contains whitespace was a quoted payload (`bash -c "systemctl restart nginx"`,
     `ssh host "sudo …"`); it is normalised recursively with the same rules and spliced in place, so the words
