@@ -154,21 +154,22 @@ def _run_notify(
                     "Notification [%s]: sent=%d failed=%d channels=%s",
                     event_type, ok, fail, list(results.keys()),
                 )
-                # Log pipeline event for issue-related notifications
-                if event_type in ("issue_created", "rca_completed", "fix_planned",
-                                   "fix_approved", "execution_result"):
+                # Log pipeline event for issue- and change-related notifications
+                _ISSUE_EVENTS = ("issue_created", "rca_completed", "fix_planned", "fix_approved", "execution_result")
+                if event_type in _ISSUE_EVENTS or event_type.startswith("change_"):
                     try:
-                        from agenticops.services.pipeline_events import log_event as _log_pe
-                        # Extract issue_id from subject (pattern: "Issue #NNN")
                         import re
-                        m = re.search(r"Issue #(\d+)", subject)
-                        if not m:
-                            m = re.search(r"#(\d+)", subject)
-                        if m:
-                            _log_pe(
-                                int(m.group(1)), "notification_sent", "notification",
-                                detail={"channels": list(results.keys()), "sent": ok, "failed": fail},
-                            )
+                        from agenticops.services.pipeline_events import log_event as _log_pe
+                        detail = {"channels": list(results.keys()), "sent": ok, "failed": fail}
+                        if event_type.startswith("change_"):
+                            m = re.search(r"Change #(\d+)", subject)
+                            if m:
+                                _log_pe(None, "notification_sent", "notification", detail=detail,
+                                        change_request_id=int(m.group(1)))
+                        else:
+                            m = re.search(r"Issue #(\d+)", subject) or re.search(r"#(\d+)", subject)
+                            if m:
+                                _log_pe(int(m.group(1)), "notification_sent", "notification", detail=detail)
                     except Exception:
                         pass
         finally:
