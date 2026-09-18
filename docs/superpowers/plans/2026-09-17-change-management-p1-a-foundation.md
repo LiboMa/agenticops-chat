@@ -3398,3 +3398,10 @@ git commit -m "docs(plan): Plan A execution record"
 ## 执行记录
 
 （执行时追加：日期 · 全量测试结果 · 迁移演练结果）
+
+### 2026-09-18 · Task 12 收尾（全量回归 · 提示词预算 · 迁移演练）
+
+- **全量测试**（`AIOPS_NOTIFICATIONS_ENABLED=false python -m pytest tests/ -q`）：`1 failed, 4793 passed, 85 skipped, 3 warnings in 136.37s (0:02:16)`。唯一失败 `tests/test_prompt_budget.py::TestPromptHygiene::test_no_cjk_in_base_prompts` —— pre-existing env failure（工作区里**未提交**的 `src/agenticops/agents/reporter_agent.py` 多了一行中文 `让操作者准确知道…`，HEAD 版本无此字符），not Plan A。`tests/test_web_tools.py` 本次未出现 DNS 假失败。
+- **提示词预算**（`python -m pytest tests/test_prompt_budget.py -q`）：`1 failed, 25 passed in 1.57s`，失败项同上（同一 env failure）；其余 25 项（skills-XML 预算、各 agent 预算等）全部通过 —— Plan A 未改提示词。
+- **迁移演练 + 服务启动**（拷贝 `data/agenticops.db` → `/tmp/planA-smoke.db`；`AIOPS_DATABASE_URL=sqlite:////tmp/planA-smoke.db uvicorn agenticops.web.app:app --port 8099`，20 秒后 kill）：fresh migration 走通。`logs/backend.log`：`Pre-2.6.0 database backup written to /tmp/planA-smoke.db.bak-pre-2.6.0`、`Rebuilt table fix_plans / fix_executions / pipeline_events with relaxed NOT NULL constraints (MVP-2.6.0)`；stdout `Application startup complete.`，无 Traceback。迁移后校验：`fix_plans` 含 `plan_kind` / `change_request_id` / `rejected_by` / `rejected_at` / `rejection_reason` + CHECK 约束，104 行与备份一致；`change_requests`、`command_audits`、`audit_logs.actor` 就位；`PRAGMA integrity_check` = ok。备注：迁移日志经 `agenticops.*` logger 落 `logs/backend.log`，不进 uvicorn stdout，所以 brief 里对 stdout 的 grep 只见 startup 行；macOS 无 `timeout`，以后台启动 + `sleep 20` + `kill` 代替，SIGTERM 后 3 秒未退出补了 `kill -9`（graceful shutdown 已开始：`Shutting down` / `Waiting for application shutdown.`）。
+- **提交范围**：`c031f60..674a066`（Task 1–11，27 个 commit）；本执行记录以单独 docs commit 追加。
