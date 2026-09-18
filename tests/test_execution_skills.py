@@ -78,15 +78,17 @@ class TestRunOnHost:
         assert "5 days" in result
 
     @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
-    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "nginx restarted", ""))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "nginx reloaded", ""))
     @patch("agenticops.skills.execution.classify_shell_command")
     def test_write_with_confirmation(self, mock_classify, mock_ssm, mock_resolve):
         mock_classify.return_value = "write"
+        # `systemctl restart` is a policies.yaml change_required pattern (refused outside an
+        # approved plan — see tests/test_command_audit.py); `reload` is a plain confirmed write.
         result = self._call(
-            host_id="i-0123456789abcdef0", command="systemctl restart nginx",
+            host_id="i-0123456789abcdef0", command="systemctl reload nginx",
             method="ssm", require_confirmation=True
         )
-        assert "restarted" in result
+        assert "reloaded" in result
 
     @patch("agenticops.skills.execution.classify_shell_command")
     def test_invalid_method(self, mock_classify):
@@ -245,12 +247,14 @@ class TestRunKubectl:
     @patch("agenticops.skills.execution.classify_kubectl_command")
     def test_write_with_confirmation(self, mock_classify, mock_exec):
         mock_classify.return_value = "write"
-        mock_exec.return_value = 'pod "my-pod" deleted'
+        mock_exec.return_value = "deployment.apps/my-app scaled"
+        # `kubectl delete` is a policies.yaml change_required pattern (refused outside an
+        # approved plan — see tests/test_command_audit.py); `scale` is deliberately L1.
         result = self._call(
-            command="delete pod my-pod", cluster_name="c1",
+            command="scale deployment/my-app --replicas=2", cluster_name="c1",
             region="us-east-1", require_confirmation=True
         )
-        assert "deleted" in result
+        assert "scaled" in result
 
 
 # ── _execute_kubectl tests ───────────────────────────────────────────

@@ -94,6 +94,14 @@ class PolicyEngine:
                 self.default_action,
             )
             self.default_action = "require_human"
+        # Change Management (MVP-2.6.0): write commands matching one of these substrings are
+        # refused outside an approved plan. A non-list would iterate characters and match
+        # everything, so it is ignored (from_yaml already rejects it via validate_policy).
+        raw = self.policy.get("change_required") or []
+        if not isinstance(raw, (list, tuple)):
+            logger.warning("policy change_required must be a list — ignoring %r", raw)
+            raw = []
+        self.change_required: list[str] = [str(p).lower() for p in raw if str(p).strip()]
 
     # ── Loading ──────────────────────────────────────────────────────
 
@@ -268,6 +276,14 @@ class PolicyEngine:
                 return window.get("name", f"{start.isoformat()}..{end.isoformat()}")
         return None
 
+    def change_required_match(self, command: str) -> Optional[str]:
+        """Return the change_required pattern the command matches, or None."""
+        cmd = (command or "").lower()
+        for pattern in self.change_required:
+            if pattern in cmd:
+                return pattern
+        return None
+
 
 def validate_policy(data: dict) -> list[str]:
     """Static validation of a policy document. Returns a list of error strings."""
@@ -289,6 +305,9 @@ def validate_policy(data: dict) -> list[str]:
     defaults = data.get("defaults") or {}
     if defaults.get("action") and defaults["action"] not in VALID_ACTIONS:
         errors.append(f"defaults.action invalid: {defaults['action']!r}")
+    cr = data.get("change_required")
+    if cr is not None and not isinstance(cr, list):
+        errors.append("'change_required' must be a list of strings")
     return errors
 
 

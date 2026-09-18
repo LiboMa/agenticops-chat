@@ -69,3 +69,26 @@ rules:
     match: { risk_level: [L4] }
     action: require_human
     itsm_change_type: emergency
+
+# ── Change Management (MVP-2.6.0) ────────────────────────────────────────
+# Write commands matching any of these (case-insensitive substring) are REFUSED
+# outside an approved plan (fix or change) and the agent is told to open a change
+# request (/change). Deliberately conservative — L1-class writes such as tagging
+# or a single-workload `kubectl scale` are NOT here (the SRE risk rubric says L1).
+# Tune here, not in code.
+change_required:
+  - aws ec2 modify-security-group
+  - aws ec2 revoke-
+  - aws ec2 authorize-
+  - aws rds modify-
+  - aws rds reboot-
+  - aws autoscaling update-
+  - aws autoscaling set-
+  - aws lambda update-
+  - aws eks update-
+  - kubectl delete
+  - kubectl drain
+  - systemctl stop
+  - systemctl restart
+  - reboot
+  - shutdown

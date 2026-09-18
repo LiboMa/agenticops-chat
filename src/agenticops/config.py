@@ -648,6 +648,11 @@ class Settings(BaseSettings):
         default=365,
         description="Days of audit_logs + command_audits rows retained; 0 disables pruning (AIOPS_AUDIT_RETENTION_DAYS)",
     )
+    command_audit_enabled: bool = Field(
+        default=True,
+        description="Record every write/unknown/blocked command attempt from run_aws_cli / run_on_host / "
+        "run_kubectl / run_skill_script into command_audits (AIOPS_COMMAND_AUDIT_ENABLED)",
+    )
 
     # Issue exclude patterns — regex patterns to suppress issue creation
     issue_exclude_patterns: list[str] = Field(default_factory=list)

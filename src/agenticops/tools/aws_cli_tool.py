@@ -11,8 +11,10 @@ and blocked (dangerous operations rejected outright).
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 import subprocess
+from typing import Optional
 
 from strands import tool
 
@@ -249,6 +251,19 @@ def _execute_aws_cli(command: str, account: str = "") -> str:
     return output if output else "(no output)"
 
 
+_EXIT_RE = re.compile(r"^Error \(exit code (\d+)\)")
+
+
+def _parse_exit(result: str) -> tuple[Optional[int], str]:
+    """Map _execute_aws_cli's text result to (exit_code, outcome)."""
+    m = _EXIT_RE.match(result or "")
+    if m:
+        return int(m.group(1)), "error"
+    if (result or "").startswith("Error:"):
+        return None, "error"
+    return 0, "executed"
+
+
 @tool
 def run_aws_cli(command: str, require_confirmation: bool = False, account: str = "") -> str:
     """Execute an AWS CLI command and return the output.
@@ -289,10 +304,12 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
         if dangerous in command:
             return f"Error: Shell operators ({dangerous}) are not allowed in AWS CLI commands for security reasons."
 
-    # 3. Classify and enforce security tier
+    # 3. Classify and enforce security tier — write-tier attempts are ledgered (command_audits)
     tier = _classify_command(command)
+    from agenticops.services.command_audit import approved_plan_in_context, change_required_refusal, record_command
 
     if tier == "blocked":
+        record_command(tool="run_aws_cli", tier=tier, command=command, outcome="blocked", account=account)
         return (
             f"Error: This command is blocked for safety. Destructive operations "
             f"(IAM user management, instance termination) and secret-revealing reads "
@@ -302,6 +319,8 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
         )
 
     if tier in ("write", "unknown") and not require_confirmation:
+        record_command(tool="run_aws_cli", tier=tier, command=command, outcome="refused", reason="confirmation",
+                       account=account)
         return (
             f"This is a write operation that requires confirmation. "
             f"Please present the command to the user, explain what it will do, "
@@ -309,7 +328,23 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
             f"Command: {command}"
         )
 
+    if tier in ("write", "unknown"):
+        from agenticops.services.policy_engine import get_policy_engine
+        pattern = get_policy_engine().change_required_match(command)
+        if pattern and approved_plan_in_context() is None:
+            record_command(tool="run_aws_cli", tier=tier, command=command, outcome="refused",
+                           reason="change_required", account=account)
+            return change_required_refusal(command, pattern)
+
     # 4. Execute
+    if tier in ("write", "unknown"):
+        import time as _time
+        t0 = _time.monotonic()
+        result = _execute_aws_cli(command, account)
+        exit_code, outcome = _parse_exit(result)
+        record_command(tool="run_aws_cli", tier=tier, command=command, outcome=outcome, account=account,
+                       exit_code=exit_code, output_excerpt=result, duration_ms=int((_time.monotonic() - t0) * 1000))
+        return result
     return _execute_aws_cli(command, account)
 
 

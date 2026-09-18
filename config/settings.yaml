@@ -193,6 +193,7 @@ api_auth_enabled: false
 rbac_enforce: false          # shadow mode by default — see config/rbac.yaml
 rbac_file: config/rbac.yaml
 audit_retention_days: 365
+command_audit_enabled: true
 session_ttl_minutes: 30
 session_history_depth: 20
 default_regions:
