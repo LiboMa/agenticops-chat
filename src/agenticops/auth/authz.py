@@ -235,23 +235,26 @@ def _entity_type_for(subject: Any) -> str:
     return by_class.get(name) or _CAMEL_BOUNDARY.sub("_", name).lower()
 
 
-def _audit_denial(actor: Actor, permission: str, reason: str, rule: Optional[str], subject: Any, enforced: bool) -> None:
-    """Write the denial to audit_logs — in shadow mode this row is the ONLY artefact of the decision."""
+def _audit_denial(actor: Actor, permission: str, reason: str, rule: Optional[str], subject: Any, enforced: bool,
+                  details: Optional[dict] = None) -> None:
+    """Write the denial to audit_logs — in shadow mode this row is the ONLY artefact of the decision.
+    `details` (caller context such as claimed_name / context_actor) is merged in; the decision keys win."""
     try:
         from agenticops.audit.service import AuditService
         AuditService.log(
             action="authz.denied" if enforced else "authz.denied_shadow",
             entity_type=_entity_type_for(subject), entity_id=str(getattr(subject, "id", "") or "-"),
             actor=actor.key, user_id=actor.user_id,
-            details={"permission": permission, "reason": reason, "rule": rule},
+            details={**(details or {}), "permission": permission, "reason": reason, "rule": rule},
         )
     except Exception:
         logger.warning("authz audit write failed: %s denied %s (%s, rule=%s)",
                        actor.key, permission, reason, rule, exc_info=True)
 
 
-def check(actor: Actor, permission: str, subject: Any = None) -> None:
-    """Raise AuthzDenied when denied under enforce (or an always-enforced rule); shadow otherwise."""
+def check(actor: Actor, permission: str, subject: Any = None, *, details: Optional[dict] = None) -> None:
+    """Raise AuthzDenied when denied under enforce (or an always-enforced rule); shadow otherwise.
+    `details` is extra context recorded on the denial audit row (e.g. the claimed name behind a check)."""
     from agenticops.config import settings
     if permission not in PERMISSIONS:
         raise ValueError(f"unknown permission {permission!r}")
@@ -259,7 +262,7 @@ def check(actor: Actor, permission: str, subject: Any = None) -> None:
     if allowed:
         return
     enforced = bool(settings.rbac_enforce) or always
-    _audit_denial(actor, permission, reason, rule, subject, enforced)
+    _audit_denial(actor, permission, reason, rule, subject, enforced, details)
     if enforced:
         raise AuthzDenied(actor.key, permission, reason, rule)
     logger.info("authz shadow: %s would be denied %s (%s)", actor.key, permission, reason)

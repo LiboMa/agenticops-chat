@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from strands import tool
 
-from agenticops.config import settings
+from agenticops.config import AGENT_NAMES, settings
 from agenticops.models import (
     CloudAccount,
     CloudResource,
@@ -1017,14 +1017,21 @@ def get_fix_plan(health_issue_id: int) -> str:
         session.close()
 
 
+# Agent identities a context-less approve_fix_plan call may record as the approver (M-6). Any other
+# "agent:<name>" the LLM supplies is stored as agent:unattributed — attribution among agents is not LLM-chosen.
+_KNOWN_AGENT_IDS = frozenset(AGENT_NAMES) | {"auto-pipeline"}
+
+
 @tool
 def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     """Approve a fix plan. L0/L1 can be auto-approved; L2/L3 require human approval.
 
     The real approver is the Run Context actor; approved_by is a claimed name when a context
     exists. Without a Run Context the call is an agent acting (an "agent:<name>" value keeps
-    its name, anything else is recorded as agent:unattributed) — a human name passed here
-    never approves anything. Approval is checked against rbac (agents cannot approve L2/L3).
+    its name only for a known agent name, anything else is recorded as agent:unattributed) —
+    a human name passed here never approves anything. Approval is checked against rbac (agents
+    cannot approve L2/L3), and a self-declared "agent:<name>" is a privilege CEILING: it is
+    held to the agent rules too, so it can only lower authority, never grant it.
 
     Args:
         fix_plan_id: The FixPlan ID to approve
@@ -1039,15 +1046,22 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     from agenticops.run_context import get_run_context
 
     ctx = get_run_context()
+    claim = parse_actor(approved_by)  # the LLM-supplied string, never an identity by itself
     if ctx.actor != "system":
         actor = actor_from_run_context(ctx)  # carries the user's permission flags
     else:
         # No Run Context (stray thread, direct call): a context-less tool call is an agent
-        # acting, never a human. The LLM-supplied string cannot grant itself an identity.
-        base = parse_actor(approved_by)
-        actor = Actor("agent", base.id) if base.kind == "agent" and base.id else Actor("agent", "unattributed")
+        # acting, never a human. The LLM-supplied string cannot grant itself an identity,
+        # and only a KNOWN agent name is kept as attribution (M-6).
+        agent_id = claim.id if claim.kind == "agent" and claim.id in _KNOWN_AGENT_IDS else "unattributed"
+        actor = Actor("agent", agent_id)
     # The claimed name is audit-only: recorded when it differs from the identity that actually approved.
     claimed = approved_by if approved_by and approved_by != actor.key else None
+    # Ceiling-as-claim (I-1): inside a human context an "agent:<name>" self-declaration is ALSO checked as
+    # that agent — the claim can only REDUCE privilege (L2/L3 park), never grant it. With an agent actor the
+    # rbac check below already is the agent check, so no second evaluation (and no duplicate audit row).
+    ceiling = Actor("agent", claim.id) if claim.kind == "agent" and claim.id and actor.kind != "agent" else None
+    denial_details = {"via": "agent_tool", **({"claimed_name": claimed, "context_actor": actor.key} if claimed else {})}
 
     session = get_session()
     try:
@@ -1062,10 +1076,12 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
             return f"FixPlan #{fix_plan_id} was rejected. Create a new plan instead."
 
         try:
-            authz.check(actor, "plan.approve", subject=plan)
+            authz.check(actor, "plan.approve", subject=plan, details=denial_details)
+            if ceiling is not None:
+                authz.check(ceiling, "plan.approve", subject=plan, details=denial_details)
         except authz.AuthzDenied as e:
-            # Agent on L2/L3 (always-enforced rule) or an enforced RBAC denial:
-            # park the plan for a human instead of approving.
+            # Agent on L2/L3 (always-enforced rule — as the actor or as the claimed ceiling) or an
+            # enforced RBAC denial: park the plan for a human instead of approving. Nothing chains.
             try:
                 transition_plan(plan, "pending_approval")
                 session.commit()

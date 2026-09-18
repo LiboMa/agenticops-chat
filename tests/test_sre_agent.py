@@ -264,12 +264,14 @@ class TestApproveFixPlan:
 
         from agenticops.tools.metadata_tools import approve_fix_plan
 
+        # Context-less call = an agent acting. `sre_agent` is not one of the known agent ids (M-6), so the
+        # stored approver is agent:unattributed; the LLM-chosen name is only audited as the claim.
         result = approve_fix_plan(fix_plan_id=plan.id, approved_by="agent:sre_agent")
         assert "approved" in result.lower()
 
         db_session.refresh(plan)
         assert plan.status == "approved"
-        assert plan.approved_by == "agent:sre_agent"
+        assert plan.approved_by == "agent:unattributed"
         assert plan.approved_at is not None
 
     def test_l3_requires_human_approval(self, db_session, health_issue, rca_result):
