@@ -1,7 +1,7 @@
 """Audit logging service for AgenticOps."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
@@ -9,6 +9,9 @@ from agenticops.models import get_db_session, init_db
 from agenticops.audit.models import AuditLog
 
 logger = logging.getLogger(__name__)
+
+# Process-local marker for AuditService.maybe_prune_daily (one prune per process-day).
+_last_prune_date: Optional[date] = None
 
 
 # ============================================================================
@@ -53,6 +56,24 @@ class Actions:
     # Notification operations
     NOTIFY_SEND = "notify_send"
 
+    # ── Change Management (MVP-2.6.0) — dotted names, one per decision ──
+    CHANGE_REQUESTED = "change.requested"
+    CHANGE_REVIEWED = "change.reviewed"
+    CHANGE_CLARIFIED = "change.clarified"
+    CHANGE_APPROVED = "change.approved"
+    CHANGE_REJECTED = "change.rejected"
+    CHANGE_CANCELLED = "change.cancelled"
+    CHANGE_EXECUTION_STARTED = "change.execution_started"
+    CHANGE_COMPLETED = "change.completed"
+    CHANGE_FAILED = "change.failed"
+    CHANGE_ROLLED_BACK = "change.rolled_back"
+    CHANGE_NEEDS_REVIEW = "change.needs_review"
+    PLAN_APPROVED = "plan.approved"
+    PLAN_REJECTED = "plan.rejected"
+    PLAN_EXECUTE_REQUESTED = "plan.execute_requested"
+    AUTHZ_DENIED = "authz.denied"
+    AUTHZ_DENIED_SHADOW = "authz.denied_shadow"
+
 
 # ============================================================================
 # Entity Types
@@ -73,6 +94,8 @@ class EntityTypes:
     SCHEDULE = "schedule"
     NOTIFICATION = "notification"
     SYSTEM = "system"
+    CHANGE_REQUEST = "change_request"
+    FIX_PLAN = "fix_plan"
 
 
 # ============================================================================
@@ -97,8 +120,15 @@ class AuditService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[str] = None,
+        actor: Optional[str] = None,
+        session=None,
     ) -> AuditLog:
         """Create an audit log entry.
+
+        `actor` is the actor key (user:x / cli:x / agent:x / im:p:x). When `session` is given the
+        row is added to THAT session and NOT committed — the caller commits it together with the
+        state change it audits (decision + state in one transaction). Without `session` the row is
+        written in its own transaction (legacy behavior).
 
         Args:
             action: The action performed (create, update, delete, etc.)
@@ -113,34 +143,27 @@ class AuditService:
             ip_address: Client IP address
             user_agent: Client user agent string
             request_id: Request correlation ID
+            actor: Actor key (user:x / cli:x / agent:x / im:p:x)
+            session: Caller's SQLAlchemy session — the row is flushed into it, never committed here
 
         Returns:
             Created AuditLog instance
         """
-        init_db()
-
-        with get_db_session() as session:
-            audit_log = AuditLog(
-                action=action,
-                entity_type=entity_type,
-                entity_id=str(entity_id),
-                entity_name=entity_name,
-                user_id=user_id,
-                user_email=user_email,
-                details=details or {},
-                old_values=old_values,
-                new_values=new_values,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                request_id=request_id,
-            )
+        audit_log = AuditLog(
+            action=action, entity_type=entity_type, entity_id=str(entity_id), entity_name=entity_name,
+            user_id=user_id, user_email=user_email, actor=actor, details=details or {},
+            old_values=old_values, new_values=new_values, ip_address=ip_address,
+            user_agent=user_agent, request_id=request_id,
+        )
+        if session is not None:
             session.add(audit_log)
             session.flush()
-
-            logger.info(
-                f"Audit: {action} {entity_type}/{entity_id} by user {user_email or user_id or 'system'}"
-            )
-
+            return audit_log
+        init_db()
+        with get_db_session() as db:
+            db.add(audit_log)
+            db.flush()
+            logger.info("Audit: %s %s/%s by %s", action, entity_type, entity_id, actor or user_email or user_id or "system")
             return audit_log
 
     @staticmethod
@@ -302,6 +325,27 @@ class AuditService:
         with get_db_session() as session:
             count = session.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete()
             return count
+
+    @staticmethod
+    def maybe_prune_daily() -> None:
+        """Once per process-day: delete audit_logs + command_audits older than audit_retention_days."""
+        global _last_prune_date
+        from agenticops.config import settings
+        days = int(getattr(settings, "audit_retention_days", 0) or 0)
+        today = datetime.now(timezone.utc).date()
+        if days <= 0 or _last_prune_date == today:
+            return
+        _last_prune_date = today
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        try:
+            from agenticops.models import CommandAudit
+            with get_db_session() as db:
+                a = db.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete(synchronize_session=False)
+                c = db.query(CommandAudit).filter(CommandAudit.created_at < cutoff).delete(synchronize_session=False)
+            if a or c:
+                logger.info("audit: pruned %d audit_logs + %d command_audits older than %dd", a, c, days)
+        except Exception:
+            logger.debug("audit prune failed", exc_info=True)
 
 
 # ============================================================================

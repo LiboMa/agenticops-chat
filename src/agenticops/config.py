@@ -634,6 +634,10 @@ class Settings(BaseSettings):
         default="aiops2026",
         description="Default admin password for initial seed",
     )
+    audit_retention_days: int = Field(
+        default=365,
+        description="Days of audit_logs + command_audits rows retained; 0 disables pruning (AIOPS_AUDIT_RETENTION_DAYS)",
+    )
 
     # Issue exclude patterns — regex patterns to suppress issue creation
     issue_exclude_patterns: list[str] = Field(default_factory=list)

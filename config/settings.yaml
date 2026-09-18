@@ -190,6 +190,7 @@ skills_auto_improve_enabled: true
 skills_post_resolution_review: true
 skills_improvement_notify: true
 api_auth_enabled: false
+audit_retention_days: 365
 session_ttl_minutes: 30
 session_history_depth: 20
 default_regions:

@@ -767,6 +767,7 @@ class AuditLogResponse(BaseModel):
     timestamp: datetime
     user_id: Optional[int]
     user_email: Optional[str]
+    actor: Optional[str] = None
     action: str
     entity_type: str
     entity_id: str

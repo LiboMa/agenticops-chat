@@ -229,6 +229,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `security_advisor_critic_enabled` | `true` | Adversarial critic over each recommendation; refuted → dropped (fail-closed) |
 | `security_snapshot_retention_days` | `90` | Days of `SecuritySnapshot` rows retained before pruning |
 | `security_model_id` | `""` | Override model for the security advisor; empty = `bedrock_model_id_cheap` |
+| `audit_retention_days` | `365` | Retention for `audit_logs` + `command_audits` (daily prune; 0 = keep forever) |
 
 ## HealthIssue State Machine
 
