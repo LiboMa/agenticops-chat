@@ -149,3 +149,233 @@ def test_add_column_ddl_types_follow_dialect():
     for tbl, cols in _ADD_COLUMNS_2_6_0.items():
         for col, extra in cols.items():
             assert "DATETIME" not in _add_column_ddl(postgresql.dialect(), tbl, col, extra)
+
+
+# ── Final fix wave, group 2 (I-2 + M-2 + M-3 + M-8 + M-12) ────────────────────────────────────────────
+
+import re
+
+_MIGRATION_DDL = re.compile(
+    r"ALTER TABLE|__new|UPDATE fix_plans|idx_fix_plan_kind|idx_fix_plan_change_request|idx_pipeline_event_change"
+    r"|ix_audit_logs_actor|ck_fix_plans_origin",
+    re.I,
+)
+
+
+def _spy_statements(engine, fn):
+    from sqlalchemy import event
+    seen: list[str] = []
+
+    def spy(conn, cursor, statement, parameters, context, executemany):
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", spy)
+    try:
+        fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", spy)
+    return seen
+
+
+def test_migration_runs_once_per_process_per_database(old_db):
+    """I-2: init_db() is a runtime hot path (audit writes, scheduler, ~47 CLI sites). The 2.6.0 pass must run
+    once per process per database URL — a second init_db() on the same URL issues none of its DDL/DML."""
+    import agenticops.models as models_mod
+    engine = _run_init_db(old_db)
+    assert _notnull(engine, "fix_plans")["health_issue_id"] is False  # the first call did migrate
+    second = _spy_statements(engine, lambda: models_mod.init_db(engine))
+    assert [s for s in second if _MIGRATION_DDL.search(s)] == []
+
+
+def test_migration_still_runs_for_a_second_database_in_the_same_process(tmp_path):
+    """The once-per-process guard is keyed by URL: two pre-2.6.0 files migrate independently."""
+    a, b = tmp_path / "a" / "agenticops.db", tmp_path / "b" / "agenticops.db"
+    for path in (a, b):
+        path.parent.mkdir()
+        con = sqlite3.connect(path)
+        con.executescript(OLD_SCHEMA)
+        con.commit()
+        con.close()
+    for path in (a, b):
+        engine = _run_init_db(path)
+        assert _notnull(engine, "fix_plans")["health_issue_id"] is False
+        assert Path(str(path) + ".bak-pre-2.6.0").exists()
+
+
+def test_backup_is_a_pre_migration_snapshot_published_atomically(old_db):
+    """M-8: the backup is an online sqlite3 backup (consistent snapshot) of the PRE-rebuild file, written to a
+    temp name in the same directory and published with os.replace — no torn copy, no temp leftovers."""
+    _run_init_db(old_db)
+    bak = Path(str(old_db) + ".bak-pre-2.6.0")
+    assert bak.exists()
+    con = sqlite3.connect(bak)
+    try:
+        assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        cols = {r[1]: bool(r[3]) for r in con.execute("PRAGMA table_info(fix_plans)")}
+        assert cols["health_issue_id"] is True and "plan_kind" not in cols  # the old schema: taken before the rebuild
+        assert con.execute("SELECT COUNT(*) FROM fix_plans").fetchone()[0] == 1
+    finally:
+        con.close()
+    assert [p.name for p in old_db.parent.iterdir() if p.name.startswith(".bak-pre-2.6.0")] == []
+
+
+def test_backup_helper_skips_when_backup_exists(old_db):
+    import agenticops.models as models_mod
+    bak = Path(str(old_db) + ".bak-pre-2.6.0")
+    bak.write_bytes(b"keep me")
+    engine = create_engine(f"sqlite:///{old_db}")
+    assert models_mod._backup_sqlite_file(engine) == str(bak)
+    assert bak.read_bytes() == b"keep me"
+
+
+class _StubInspector:
+    """Stand-in for sqlalchemy.inspect(engine): {table: [{"name","nullable","type"}]} plus FKs and indexes."""
+
+    def __init__(self, columns, foreign_keys, indexes):
+        self.columns, self.foreign_keys, self.indexes = columns, foreign_keys, indexes
+
+    def has_table(self, name):
+        return name in self.columns
+
+    def get_columns(self, name):
+        return self.columns[name]
+
+    def get_foreign_keys(self, name):
+        return self.foreign_keys.get(name, [])
+
+    def get_indexes(self, name):
+        return self.indexes.get(name, [])
+
+
+_PG_TABLES = ("fix_plans", "fix_executions", "pipeline_events", "audit_logs", "change_requests", "command_audits")
+
+
+def _orm_shaped_stub():
+    """A catalog that looks exactly like create_all on the current ORM (i.e. fully migrated)."""
+    import agenticops.audit.models  # noqa: F401
+    from agenticops.models import Base
+    cols, fks, idxs = {}, {}, {}
+    for name in _PG_TABLES:
+        t = Base.metadata.tables[name]
+        cols[name] = [{"name": c.name, "nullable": c.nullable, "type": c.type} for c in t.columns]
+        fks[name] = [{"constrained_columns": [fk.parent.name]} for fk in t.foreign_keys]
+        idxs[name] = [{"name": ix.name} for ix in t.indexes]
+    return cols, fks, idxs
+
+
+def _drop_column(cols, table, name):
+    cols[table] = [c for c in cols[table] if c["name"] != name]
+
+
+def _set_column(cols, table, name, **fields):
+    for c in cols[table]:
+        if c["name"] == name:
+            c.update(fields)
+
+
+def _pre_2_6_0_stub():
+    """What a 2.5.0 PostgreSQL database looks like after create_all added the NEW tables (change_requests,
+    command_audits) but before any 2.6.0 ALTER: NOT NULL lineage columns, no new columns, VARCHAR(100) actors."""
+    from sqlalchemy import String
+    cols, fks, idxs = _orm_shaped_stub()
+    for table, names in (("fix_plans", ("health_issue_id", "rca_result_id")), ("fix_executions", ("health_issue_id",)),
+                         ("pipeline_events", ("health_issue_id",))):
+        for n in names:
+            _set_column(cols, table, n, nullable=False)
+    for n in ("plan_kind", "change_request_id", "rejected_by", "rejected_at", "rejection_reason", "updated_at"):
+        _drop_column(cols, "fix_plans", n)
+    _drop_column(cols, "pipeline_events", "change_request_id")
+    _drop_column(cols, "audit_logs", "actor")
+    _set_column(cols, "fix_plans", "approved_by", type=String(100))
+    _set_column(cols, "fix_executions", "executed_by", type=String(100))
+    fks["fix_plans"] = [fk for fk in fks["fix_plans"] if fk["constrained_columns"] != ["change_request_id"]]
+    gone = {"idx_fix_plan_kind", "idx_fix_plan_change_request", "idx_pipeline_event_change", "ix_audit_logs_actor"}
+    idxs = {t: [ix for ix in lst if ix["name"] not in gone] for t, lst in idxs.items()}
+    return cols, fks, idxs
+
+
+def test_pg_statements_for_a_pre_2_6_0_catalog():
+    from sqlalchemy.dialects import postgresql
+    from agenticops.models import _add_column_ddl, _pg_migration_statements
+    pg = postgresql.dialect()
+    stmts = _pg_migration_statements(_StubInspector(*_pre_2_6_0_stub()), pg, existing_constraints=set())
+    add = lambda tbl, col, extra=None: f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {_add_column_ddl(pg, tbl, col, extra)}"
+    assert stmts == [
+        "ALTER TABLE fix_plans ALTER COLUMN health_issue_id DROP NOT NULL",
+        "ALTER TABLE fix_plans ALTER COLUMN rca_result_id DROP NOT NULL",
+        "ALTER TABLE fix_executions ALTER COLUMN health_issue_id DROP NOT NULL",
+        "ALTER TABLE pipeline_events ALTER COLUMN health_issue_id DROP NOT NULL",
+        add("fix_plans", "plan_kind", "DEFAULT 'fix'"),
+        add("fix_plans", "change_request_id"),
+        add("fix_plans", "rejected_by"),
+        add("fix_plans", "rejected_at"),
+        add("fix_plans", "rejection_reason"),
+        add("fix_plans", "updated_at"),
+        add("pipeline_events", "change_request_id"),
+        add("audit_logs", "actor"),
+        "UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL",
+        "ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL",
+        "ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "
+        "FOREIGN KEY (change_request_id) REFERENCES change_requests (id)",
+        "ALTER TABLE fix_plans ADD CONSTRAINT ck_fix_plans_origin CHECK ("
+        "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL AND change_request_id IS NULL) OR "
+        "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL AND rca_result_id IS NULL))",
+        "ALTER TABLE fix_plans ALTER COLUMN approved_by TYPE VARCHAR(255)",
+        "ALTER TABLE fix_executions ALTER COLUMN executed_by TYPE VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)",
+        "CREATE INDEX IF NOT EXISTS idx_fix_plan_change_request ON fix_plans(change_request_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pipeline_event_change ON pipeline_events(change_request_id)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)",
+    ]
+    assert not any("DATETIME" in s for s in stmts)
+    assert "rejected_by VARCHAR(255)" in add("fix_plans", "rejected_by")  # new columns are born 255 wide
+
+
+def test_pg_statements_for_a_fully_migrated_catalog_are_empty():
+    """A catalog identical to create_all on the current ORM gets NO statement — no ACCESS EXCLUSIVE locks."""
+    from sqlalchemy.dialects import postgresql
+    from agenticops.models import _pg_migration_statements
+    stmts = _pg_migration_statements(_StubInspector(*_orm_shaped_stub()), postgresql.dialect(),
+                                     existing_constraints={"ck_fix_plans_origin", "fix_plans_change_request_id_fkey"})
+    assert stmts == []
+
+
+def test_pg_statements_for_an_early_2_6_0_catalog_complete_it():
+    """M-2 / M-3: a database migrated by the earlier 2.6.0 build has nullable plan_kind, no FK on
+    change_request_id and VARCHAR(100) actor keys — exactly those are finished, nothing else is touched."""
+    from sqlalchemy import String
+    from sqlalchemy.dialects import postgresql
+    from agenticops.models import _ACTOR_KEY_COLUMNS_2_6_0, _pg_migration_statements
+    cols, fks, idxs = _orm_shaped_stub()
+    _set_column(cols, "fix_plans", "plan_kind", nullable=True)
+    fks["fix_plans"] = [fk for fk in fks["fix_plans"] if fk["constrained_columns"] != ["change_request_id"]]
+    for table, names in _ACTOR_KEY_COLUMNS_2_6_0.items():
+        for n in names:
+            _set_column(cols, table, n, type=String(100))
+    stmts = _pg_migration_statements(_StubInspector(cols, fks, idxs), postgresql.dialect(),
+                                     existing_constraints={"ck_fix_plans_origin"})
+    widen = [f"ALTER TABLE {t} ALTER COLUMN {c} TYPE VARCHAR(255)" for t, names in _ACTOR_KEY_COLUMNS_2_6_0.items() for c in names]
+    assert stmts == [
+        "UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL",
+        "ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL",
+        "ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "
+        "FOREIGN KEY (change_request_id) REFERENCES change_requests (id)",
+        *widen,
+    ]
+    assert len(widen) == 10
+
+
+def test_actor_key_columns_are_255_wide():
+    """M-2: actor keys are `user:<email>` and users.email is String(255); every actor-key column matches."""
+    import agenticops.audit.models  # noqa: F401
+    from agenticops.models import Base, _ACTOR_KEY_COLUMNS_2_6_0
+    assert _ACTOR_KEY_COLUMNS_2_6_0 == {
+        "fix_plans": ("approved_by", "rejected_by"),
+        "fix_executions": ("executed_by",),
+        "change_requests": ("requested_by", "reviewed_by", "approved_by", "rejected_by"),
+        "command_audits": ("actor", "on_behalf_of"),
+        "audit_logs": ("actor",),
+    }
+    for table, names in _ACTOR_KEY_COLUMNS_2_6_0.items():
+        for n in names:
+            assert Base.metadata.tables[table].c[n].type.length == 255, (table, n)

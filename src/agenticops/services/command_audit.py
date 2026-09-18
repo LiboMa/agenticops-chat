@@ -59,8 +59,8 @@ def record_command(
 
         ctx = get_run_context()
         row = CommandAudit(
-            actor=_cut(ctx.actor or "system", 100), actor_user_id=ctx.actor_user_id,
-            on_behalf_of=_cut(ctx.on_behalf_of, 100), agent_name=_cut(ctx.agent_name, 50),
+            actor=_cut(ctx.actor or "system", 255), actor_user_id=ctx.actor_user_id,
+            on_behalf_of=_cut(ctx.on_behalf_of, 255), agent_name=_cut(ctx.agent_name, 50),
             tool=_cut(tool, 30), tier=_cut(tier, 10), account=_cut(account or "", 100),
             region=_cut(region or "", 30), target=_cut(target or "", 200),
             command=redact_secrets(command or "")[:10000], outcome=outcome,

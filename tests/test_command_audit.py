@@ -336,11 +336,12 @@ class TestRecordCommandHardening:
         # PostgreSQL raises DataError on overflow (SQLite does not); fail-soft would swallow it and the
         # command would run with NO row. Widths are those of models.CommandAudit.
         from agenticops.services.command_audit import record_command
-        with run_context(actor="a" * 120, trace_id="T" * 30, agent_name="g" * 60, on_behalf_of="b" * 120):
+        with run_context(actor="a" * 300, trace_id="T" * 30, agent_name="g" * 60, on_behalf_of="b" * 300):
             record_command(tool="t" * 40, tier="write-tier-x", command="aws x", outcome="executed",
                            account="c" * 150, region="x" * 40, target="d" * 250, reason="r" * 60)
         (row,) = _rows(db)
-        assert (len(row.actor), len(row.trace_id), len(row.agent_name), len(row.on_behalf_of)) == (100, 20, 50, 100)
+        # actor keys are `user:<email>` (users.email is 255 wide) → actor / on_behalf_of are 255 (M-2)
+        assert (len(row.actor), len(row.trace_id), len(row.agent_name), len(row.on_behalf_of)) == (255, 20, 50, 255)
         assert (len(row.tool), len(row.tier), len(row.account), len(row.region), len(row.target), len(row.reason)) == \
                (30, 10, 100, 30, 200, 50)
         assert row.region == "x" * 30

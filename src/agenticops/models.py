@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -487,7 +488,7 @@ class ChangeRequest(Base):
     description: Mapped[str] = mapped_column(Text)
     justification: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(20), default="api")  # chat|web|cli|im|webhook|api
-    requested_by: Mapped[str] = mapped_column(String(100))  # actor key, e.g. user:admin
+    requested_by: Mapped[str] = mapped_column(String(255))  # actor key, e.g. user:<email> (users.email is 255)
     requester_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cloud_accounts.id"), nullable=True)
@@ -500,15 +501,15 @@ class ChangeRequest(Base):
     status: Mapped[str] = mapped_column(String(30), default="draft")
     review_verdict: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     review_reasons: Mapped[list] = mapped_column(JSON, default=list)
-    reviewed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     policy_rule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     policy_action: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     approver_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     approval_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    rejected_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -557,9 +558,9 @@ class FixPlan(Base):
     post_checks: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default="draft")
     # Lifecycle (validate_plan_transition): draft -> pending_approval -> approved -> executing -> executed | failed | rejected
-    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    rejected_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -688,7 +689,7 @@ class FixExecution(Base):
     # Lifecycle: pending -> running -> succeeded | failed | rolled_back | aborted
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    executed_by: Mapped[str] = mapped_column(String(100), default="executor_agent")
+    executed_by: Mapped[str] = mapped_column(String(255), default="executor_agent")
     pre_check_results: Mapped[list] = mapped_column(JSON, default=list)
     step_results: Mapped[list] = mapped_column(JSON, default=list)
     post_check_results: Mapped[list] = mapped_column(JSON, default=list)
@@ -751,9 +752,9 @@ class CommandAudit(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    actor: Mapped[str] = mapped_column(String(100), default="system")
+    actor: Mapped[str] = mapped_column(String(255), default="system")
     actor_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
-    on_behalf_of: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    on_behalf_of: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     agent_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     tool: Mapped[str] = mapped_column(String(30))  # run_aws_cli|run_on_host|run_kubectl|run_skill_script
     tier: Mapped[str] = mapped_column(String(10))  # write|unknown|blocked|script
@@ -1145,6 +1146,34 @@ _ADD_COLUMNS_2_6_0: dict[str, dict[str, Optional[str]]] = {
     "audit_logs": {"actor": None},
 }
 
+# Actor-key columns (`user:<email>`; users.email is String(255)) widened from VARCHAR(100) in the fix wave (M-2).
+# SQLite ignores VARCHAR lengths (no rebuild); PostgreSQL gets a metadata-only ALTER COLUMN TYPE per column.
+_ACTOR_KEY_COLUMNS_2_6_0: dict[str, tuple[str, ...]] = {
+    "fix_plans": ("approved_by", "rejected_by"),
+    "fix_executions": ("executed_by",),
+    "change_requests": ("requested_by", "reviewed_by", "approved_by", "rejected_by"),
+    "command_audits": ("actor", "on_behalf_of"),
+    "audit_logs": ("actor",),
+}
+_ACTOR_KEY_WIDTH = 255
+
+_INDEXES_2_6_0: tuple[tuple[str, str, str], ...] = (  # (table, index, column)
+    ("fix_plans", "idx_fix_plan_kind", "plan_kind"),
+    ("fix_plans", "idx_fix_plan_change_request", "change_request_id"),
+    ("pipeline_events", "idx_pipeline_event_change", "change_request_id"),
+    ("audit_logs", "ix_audit_logs_actor", "actor"),
+)
+
+_CK_FIX_PLANS_ORIGIN_SQL = (
+    "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL AND change_request_id IS NULL) OR "
+    "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL AND rca_result_id IS NULL)"
+)
+
+# Once per process per database URL (I-2): init_db() is a runtime hot path, so the 2.6.0 pass must not
+# re-issue its DDL/DML on every call. Marked only after a SUCCESSFUL pass — a failure retries next time.
+_migrated_2_6_0_urls: set[str] = set()
+_migrate_2_6_0_lock = threading.Lock()
+
 
 def _add_column_ddl(dialect, table_name: str, col: str, extra: Optional[str]) -> str:
     """`<col> <type>[ <extra>]` for ADD COLUMN, type compiled from the ORM column for `dialect`."""
@@ -1159,15 +1188,39 @@ def _sqlite_notnull_columns(engine, table_name: str) -> set[str]:
 
 
 def _backup_sqlite_file(engine) -> Optional[str]:
-    """Copy the SQLite file to <db>.bak-pre-2.6.0 once (before the first table rebuild)."""
+    """Snapshot the SQLite file to <db>.bak-pre-2.6.0 once (before the first table rebuild).
+
+    An online backup (sqlite3.Connection.backup — a consistent snapshot even while another process is
+    mid-write; a plain file copy can tear in rollback-journal mode) written to a temp name in the same
+    directory and published with os.replace, so the final name is never a half-written file.
+    Idempotent: an existing backup is kept as is."""
     import shutil
+    import sqlite3
+    import tempfile
     db_path = engine.url.database
     if not db_path or db_path == ":memory:":
         return None
     bak = f"{db_path}.bak-pre-2.6.0"
-    if not os.path.exists(bak) and os.path.exists(db_path):
-        shutil.copy2(db_path, bak)
-        logger.info("Pre-2.6.0 database backup written to %s", bak)
+    if os.path.exists(bak) or not os.path.exists(db_path):
+        return bak
+    fd, tmp = tempfile.mkstemp(prefix=".bak-pre-2.6.0.", dir=os.path.dirname(os.path.abspath(db_path)))
+    os.close(fd)
+    try:
+        src, dst = sqlite3.connect(db_path), sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        shutil.copymode(db_path, tmp)  # mkstemp gives 0600; keep the database file's own mode (as copy2 did)
+        os.replace(tmp, bak)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    logger.info("Pre-2.6.0 database backup written to %s", bak)
     return bak
 
 
@@ -1202,10 +1255,72 @@ def _sqlite_rebuild_table(engine, table) -> None:
     logger.info("Rebuilt table %s with relaxed NOT NULL constraints (MVP-2.6.0)", table.name)
 
 
-def _migrate_2_6_0(engine) -> None:
-    """Idempotent MVP-2.6.0 schema migration (runs after create_all)."""
-    import agenticops.audit.models  # noqa: F401 — registers audit_logs in Base.metadata (lazy: import cycle)
+def _pg_migration_statements(insp, dialect, existing_constraints: set[str]) -> list[str]:
+    """PostgreSQL DDL/DML for MVP-2.6.0, gated on the live catalog (`insp` = sqlalchemy.inspect(engine)):
+    only what is missing is emitted, so a migrated database gets an EMPTY list — no ACCESS EXCLUSIVE lock
+    is taken for work already done. `existing_constraints` are the constraint names on fix_plans
+    (pg_constraint scoped by conrelid). Pure: no connection, nothing executed."""
+    stmts: list[str] = []
 
+    def columns(table: str) -> dict[str, dict]:
+        return {c["name"]: c for c in insp.get_columns(table)}
+
+    # 1. plan-lineage columns become nullable (change plans have no issue / RCA)
+    for table, names in _NULLABLE_ORIGIN_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col in names:
+            if col in existing and not existing[col]["nullable"]:
+                stmts.append(f"ALTER TABLE {table} ALTER COLUMN {col} DROP NOT NULL")
+    # 2. new columns (types compiled from the ORM for this dialect)
+    for table, spec in _ADD_COLUMNS_2_6_0.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col, extra in spec.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {_add_column_ddl(dialect, table, col, extra)}")
+    # 3. fix_plans: plan_kind backfill + NOT NULL (M-3), FK to change_requests (M-3), origin CHECK
+    if insp.has_table("fix_plans"):
+        plan_kind = columns("fix_plans").get("plan_kind")
+        if plan_kind is None or plan_kind["nullable"]:  # just added above, or left nullable by an earlier 2.6.0 run
+            stmts.append("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL")
+            stmts.append("ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL")
+        fks = insp.get_foreign_keys("fix_plans")
+        if not any(fk.get("constrained_columns") == ["change_request_id"] for fk in fks):
+            stmts.append("ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "
+                         "FOREIGN KEY (change_request_id) REFERENCES change_requests (id)")
+        if "ck_fix_plans_origin" not in existing_constraints:
+            stmts.append(f"ALTER TABLE fix_plans ADD CONSTRAINT ck_fix_plans_origin CHECK ({_CK_FIX_PLANS_ORIGIN_SQL})")
+    # 4. actor-key columns → VARCHAR(255) (M-2; widening varchar is metadata-only on PostgreSQL)
+    for table, names in _ACTOR_KEY_COLUMNS_2_6_0.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col in names:
+            length = getattr(existing[col]["type"], "length", None) if col in existing else None
+            if length is not None and length < _ACTOR_KEY_WIDTH:
+                stmts.append(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE VARCHAR({_ACTOR_KEY_WIDTH})")
+    # 5. indexes
+    for table, index, col in _INDEXES_2_6_0:
+        if insp.has_table(table) and index not in {ix["name"] for ix in insp.get_indexes(table)}:
+            stmts.append(f"CREATE INDEX IF NOT EXISTS {index} ON {table}({col})")
+    return stmts
+
+
+def _migrate_2_6_0(engine) -> None:
+    """Idempotent MVP-2.6.0 schema migration (runs after create_all) — once per process per database URL.
+    Raises on failure (init_db never starts on a half-migrated schema) and then retries on the next call."""
+    key = str(engine.url)
+    with _migrate_2_6_0_lock:
+        if key in _migrated_2_6_0_urls:
+            return
+        _run_migrate_2_6_0(engine)
+        _migrated_2_6_0_urls.add(key)
+
+
+def _run_migrate_2_6_0(engine) -> None:
     insp = inspect(engine)
     dialect = engine.dialect.name
     if dialect == "sqlite":
@@ -1241,30 +1356,12 @@ def _migrate_2_6_0(engine) -> None:
                     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)"))
     elif dialect == "postgresql":
         with engine.begin() as conn:
-            for tbl, cols in _NULLABLE_ORIGIN_COLUMNS.items():
-                for col in cols:
-                    conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} DROP NOT NULL"))
-            for tbl, cols in _ADD_COLUMNS_2_6_0.items():
-                for col, extra in cols.items():
-                    conn.execute(text(
-                        f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {_add_column_ddl(engine.dialect, tbl, col, extra)}"
-                    ))
-            conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
-            has_ck = conn.execute(text(
-                "SELECT 1 FROM pg_constraint WHERE conname = 'ck_fix_plans_origin'"
-            )).scalar()
-            if not has_ck:
-                conn.execute(text(
-                    "ALTER TABLE fix_plans ADD CONSTRAINT ck_fix_plans_origin CHECK ("
-                    "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL AND change_request_id IS NULL) OR "
-                    "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL AND rca_result_id IS NULL))"
-                ))
-            for stmt in (
-                "CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)",
-                "CREATE INDEX IF NOT EXISTS idx_fix_plan_change_request ON fix_plans(change_request_id)",
-                "CREATE INDEX IF NOT EXISTS idx_pipeline_event_change ON pipeline_events(change_request_id)",
-                "CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)",
-            ):
+            existing_constraints: set[str] = set()
+            if insp.has_table("fix_plans"):
+                existing_constraints = {r[0] for r in conn.execute(text(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = 'fix_plans'::regclass"
+                )).fetchall()}
+            for stmt in _pg_migration_statements(insp, engine.dialect, existing_constraints):
                 conn.execute(text(stmt))
 
 
