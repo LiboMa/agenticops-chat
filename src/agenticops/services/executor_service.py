@@ -198,6 +198,7 @@ class ExecutorService:
             self._mark_crashed(execution_id, fix_plan_id, str(e))
         finally:
             reset_run_context(_rc_token)  # self-contained: never leaves the plan context behind
+            set_trace_id(None)  # symmetric with the IM sites: the worker's trace goes with it
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 

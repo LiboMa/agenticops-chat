@@ -80,6 +80,16 @@ def test_executor_service_worker_sets_context(db):
     assert seen["approved_plan"] == plan.id
 
 
+def test_executor_service_worker_clears_trace_after_run(db):
+    """Symmetric with the IM sites: the worker clears its trace id next to the RunContext reset."""
+    from agenticops.config import get_trace_id
+    from agenticops.services.executor_service import ExecutorService
+    plan, ex = _approved_plan(db)
+    with patch("agenticops.agents.executor_agent.executor_agent", return_value="done"):
+        ExecutorService()._run_executor(ex.id, plan.id)
+    assert get_trace_id() is None
+
+
 # ── pipeline threads ─────────────────────────────────────────────────────────
 
 
@@ -95,6 +105,18 @@ def test_pipeline_auto_execute_thread_sets_context(db):
     with patch("agenticops.agents.executor_agent.executor_agent", side_effect=fake_executor):
         pipeline_service._run_auto_execute(plan.id, trace_id="TRC-x")
     assert seen["actor"] == "agent:auto-pipeline" and seen["fix_plan_id"] == plan.id and seen["trace_id"] == "TRC-x"
+
+
+def test_pipeline_auto_execute_resets_context_when_started_event_raises(db):
+    """The RunContext is set immediately before the try, so the finally's reset always pairs with it —
+    a failure in the execution_started event must not leave the plan context on the thread."""
+    from agenticops.services import pipeline_service
+    plan, _ = _approved_plan(db)
+    before = get_run_context()
+    with patch("agenticops.services.pipeline_events.log_event", side_effect=RuntimeError("event sink down")), \
+         pytest.raises(RuntimeError):
+        pipeline_service._run_auto_execute(plan.id, trace_id="TRC-x")
+    assert get_run_context() == before
 
 
 def test_pipeline_auto_sre_thread_sets_context(db):
@@ -195,6 +217,81 @@ def test_cli_headless_sets_context(db, monkeypatch, capsys):
     assert seen["actor"] == f"cli:{getpass.getuser()}" and seen["agent_name"] == "main"
     assert seen["trace_id"] and seen["trace_id"].startswith("TRC-")
     assert "done" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv,module,tool_shaped,agent_name", [
+    pytest.param(["run", "scan"], "agenticops.agents.scan_agent", True, "scan", id="scan"),
+    pytest.param(["run", "detect"], "agenticops.agents.detect_agent", True, "detect", id="detect"),
+    pytest.param(["run", "analyze", "1"], "agenticops.agents.rca_agent", False, "rca", id="analyze"),
+    pytest.param(["run", "report"], "agenticops.agents.reporter_agent", False, "reporter", id="report"),
+])
+def test_cli_run_subcommand_sets_context(db, monkeypatch, argv, module, tool_shaped, agent_name):
+    """`aiops run …` subcommands are fresh processes that start an agent directly (scan/detect via
+    `_tool_func`, analyze/report by calling the agent tool) — each must set trace + cli:<user> context."""
+    import importlib
+    from types import SimpleNamespace
+    from typer.testing import CliRunner
+    from agenticops.cli import main as cli_main
+    if argv[1] == "analyze":  # run_analyze looks the issue up first
+        db.add(HealthIssue(title="t", description="d", severity="low", source="test", status="open", resource_id="r"))
+        db.commit()
+    seen = {}
+
+    def recorder(**_kw):
+        seen.update(get_run_context().__dict__)
+        return "agent-ok"
+
+    # patch the SUBMODULE attribute (`from agenticops.agents.<m> import <tool>` reads it); the package
+    # re-exports the tool under the same name, so a dotted-path target would resolve to the tool object
+    attr = module.rsplit(".", 1)[1]
+    monkeypatch.setattr(importlib.import_module(module), attr, SimpleNamespace(_tool_func=recorder) if tool_shaped else recorder)
+    res = CliRunner().invoke(cli_main.app, argv)
+    assert res.exit_code == 0, res.output
+    assert seen["actor"] == f"cli:{getpass.getuser()}" and seen["agent_name"] == agent_name
+    assert seen["trace_id"] and seen["trace_id"].startswith("TRC-")
+
+
+def test_cli_repl_slash_commands_run_under_fresh_context(db, monkeypatch, tmp_path):
+    """/scan is dispatched before the main-agent turn — the per-turn trace + Run Context must already
+    be set, and every turn (slash or agent) gets a fresh trace."""
+    import importlib
+    import logging
+    from types import SimpleNamespace
+    from typer.testing import CliRunner
+    from agenticops.cli import main as cli_main
+    from agenticops.config import get_trace_id
+
+    turns = []
+
+    def recorder(**_kw):
+        turns.append({**get_run_context().__dict__, "trace_var": get_trace_id()})
+        return "scan-ok"
+
+    monkeypatch.setattr(importlib.import_module("agenticops.agents.scan_agent"), "scan_agent", SimpleNamespace(_tool_func=recorder))
+    monkeypatch.setattr("agenticops.agents.create_main_agent", lambda: MagicMock(name="main_agent"))
+    monkeypatch.setenv("HOME", str(tmp_path))  # ~/.aiops/chat_history goes to tmp
+
+    inputs = iter(["/scan", "/scan", "exit"])
+
+    class _FakePromptSession:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def prompt(self, *_a, **_kw):
+            return next(inputs)
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", _FakePromptSession)
+    root_level = logging.getLogger().level  # chat() lowers log noise process-wide; put it back
+    try:
+        res = CliRunner().invoke(cli_main.app, ["chat"])
+    finally:
+        logging.getLogger().setLevel(root_level)
+    assert res.exit_code == 0, res.output
+    assert len(turns) == 2
+    for t in turns:
+        assert t["actor"] == f"cli:{getpass.getuser()}" and t["agent_name"] == "main"
+        assert t["trace_id"] and t["trace_id"].startswith("TRC-") and t["trace_var"] == t["trace_id"]
+    assert turns[0]["trace_id"] != turns[1]["trace_id"], "each REPL turn gets a fresh trace"
 
 
 # ── IM gateways ──────────────────────────────────────────────────────────────

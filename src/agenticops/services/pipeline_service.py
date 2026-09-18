@@ -309,19 +309,19 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
     except Exception:
         pass
 
-    # Daemon thread — sets its own Run Context; fix_plan_id is what lets
-    # approved_plan_in_context() admit change_required commands for this plan.
-    from agenticops.config import get_trace_id
-    from agenticops.run_context import RunContext, reset_run_context, set_run_context
-    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=trace_id or get_trace_id(),
-                                           agent_name="executor", fix_plan_id=fix_plan_id))
-
     if _issue_id:
         from agenticops.services.pipeline_events import log_event
         log_event(_issue_id, "execution_started", "execution", "started",
                   detail={"plan_id": fix_plan_id, "executor": "agent:executor"},
                   trace_id=trace_id)
 
+    # Daemon thread — sets its own Run Context; fix_plan_id is what lets
+    # approved_plan_in_context() admit change_required commands for this plan.
+    # Set immediately before the try so the finally's reset always pairs with it.
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=trace_id or get_trace_id(),
+                                           agent_name="executor", fix_plan_id=fix_plan_id))
     try:
         from agenticops.agents.executor_agent import executor_agent
 

@@ -1039,6 +1039,23 @@ def update_schedule(
 # ============================================================================
 
 
+def _begin_cli_turn(agent_name: str) -> None:
+    """Fresh trace id + Run Context for one CLI agent run (audit attribution: cli:<os user>).
+
+    Called first on every CLI path that starts an agent: the `aiops run …` subcommands (fresh
+    processes), the headless `aiops chat "…"`, and each REPL turn — BEFORE the slash dispatch,
+    since /scan and /detect run sub-agents that would otherwise execute under an empty or
+    stale context. ContextVars are per-thread; these paths run the agent on the calling thread.
+    """
+    from agenticops.auth.actor import cli_actor
+    from agenticops.config import generate_trace_id, set_trace_id
+    from agenticops.run_context import RunContext, set_run_context
+
+    trace_id = generate_trace_id()
+    set_trace_id(trace_id)
+    set_run_context(RunContext(actor=cli_actor().key, trace_id=trace_id, agent_name=agent_name))
+
+
 @run_app.command("scan")
 def run_scan(
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
@@ -1047,6 +1064,7 @@ def run_scan(
 ):
     """Scan AWS resources via the Scan Agent."""
     from agenticops.agents.scan_agent import scan_agent
+    _begin_cli_turn("scan")
 
     regions_str = regions if regions else "all"
 
@@ -1065,6 +1083,7 @@ def run_detect(
 ):
     """Run health detection via the Detect Agent."""
     from agenticops.agents.detect_agent import detect_agent
+    _begin_cli_turn("detect")
 
     console.print(f"[bold]Running detect agent (scope={scope})...[/bold]")
 
@@ -1091,6 +1110,7 @@ def run_analyze(
         session.close()
 
     from agenticops.agents.rca_agent import rca_agent
+    _begin_cli_turn("rca")
 
     console.print(f"[bold]Running RCA on HealthIssue #{issue_id}...[/bold]")
 
@@ -1109,6 +1129,7 @@ def run_report(
     init_db()
 
     from agenticops.agents.reporter_agent import reporter_agent
+    _begin_cli_turn("reporter")
 
     console.print(f"[bold]Generating {type} report (scope={scope})...[/bold]")
 
@@ -3848,15 +3869,9 @@ def _run_headless(query: str, account: Optional[str] = None):
     agent = create_main_agent()
     enriched, warnings = preprocess_message(query, resolve_file_refs=True)
 
-    # Set trace_id for this headless invocation
-    from agenticops.config import generate_trace_id, set_trace_id
     from agenticops.services.agent_log_service import track_agent
-    set_trace_id(generate_trace_id())
-    # Run Context for this headless turn (audit attribution: cli:<os user>)
-    from agenticops.auth.actor import cli_actor as _cli_actor
-    from agenticops.run_context import RunContext as _RC, set_run_context as _set_rc
-    from agenticops.config import get_trace_id as _get_tid
-    _set_rc(_RC(actor=_cli_actor().key, trace_id=_get_tid(), agent_name="main"))
+    # Trace id + Run Context for this headless turn (audit attribution: cli:<os user>)
+    _begin_cli_turn("main")
 
     is_tty = sys.stdout.isatty()
 
@@ -4241,6 +4256,10 @@ def chat(
             if not user_input:
                 continue
 
+            # Trace id + Run Context for this REPL turn — set BEFORE the slash dispatch so
+            # /scan, /detect (sub-agents) run under this turn's identity, not an empty/stale one.
+            _begin_cli_turn("main")
+
             # Check for slash commands
             if user_input.startswith("/"):
                 ctx.add_to_history("user", user_input)
@@ -4280,15 +4299,6 @@ def chat(
             # Set scan focus from context before each agent call
             from agenticops.config import set_scan_focus as _set_sf
             _set_sf(ctx.scan_focus)
-
-            # Set trace_id for this REPL turn
-            from agenticops.config import generate_trace_id as _gen_tid, set_trace_id as _set_tid
-            _set_tid(_gen_tid())
-            # Run Context for this REPL turn (audit attribution: cli:<os user>)
-            from agenticops.auth.actor import cli_actor as _cli_actor
-            from agenticops.run_context import RunContext as _RC, set_run_context as _set_rc
-            from agenticops.config import get_trace_id as _get_tid
-            _set_rc(_RC(actor=_cli_actor().key, trace_id=_get_tid(), agent_name="main"))
 
             # Call agent with streaming output + animated spinner
             try:
