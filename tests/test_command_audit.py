@@ -71,6 +71,11 @@ class TestChangeRequiredMatch:
         assert eng.change_required_match("aws rds modify-db-instance --x") is not None
         assert eng.change_required_match("aws ec2 create-tags --resources i-1") is None
         assert eng.change_required_match("kubectl scale deployment/x --replicas=2") is None
+        # SSM Run Command / Session Manager = arbitrary remote execution (fix wave, I-3)
+        assert eng.change_required_match("aws ssm send-command --instance-ids i-1 --document-name AWS-RunShellScript "
+                                         "--parameters commands=uptime") == "aws ssm send-command"
+        assert eng.change_required_match("aws ssm start-session --target i-1") == "aws ssm start-session"
+        assert eng.change_required_match("aws ssm describe-instance-information") is None
 
     def test_validate_rejects_non_list(self):
         from agenticops.services.policy_engine import validate_policy
@@ -532,7 +537,7 @@ class TestChangeRequiredNormalization:
 
     @pytest.mark.parametrize("flag", [
         "--debug", "--no-cli-pager", "--no-paginate", "--no-verify-ssl", "--no-sign-request", "--no-cli-auto-prompt",
-        "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f", "--user", "--now", "--all", "-A",
+        "--cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f", "--user", "--now", "--all", "-A",
     ])
     def test_boolean_flags_do_not_claim_the_next_token(self, flag):
         """Every allowlisted boolean flag leaves its successor eligible for hyphenated patterns; the check is exact
@@ -545,8 +550,10 @@ class TestChangeRequiredNormalization:
             assert _is_value_taking_option(value_taking) is True, value_taking
 
     def test_normalize_for_policy_recursion_is_bounded(self):
-        """Depth ≤ 3 recursive re-splits, then a flat str.split: four nested shells still resolve, five do not
-        (pinned so the bound is visible; no operator command is five shells deep) — and nothing ever raises."""
+        """Depth ≤ 3 recursive re-splits, then a flat str.split — the bound caps the shlex passes (cost), never
+        the matching: four nested shells resolve by re-splitting, five (and ten) by the flat split plus the
+        edge-punctuation strip at comparison time (fix wave: leading `'"` layers are not part of a word) — and
+        nothing ever raises."""
         import shlex
         from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
         eng = get_policy_engine(reload=True)
@@ -554,9 +561,13 @@ class TestChangeRequiredNormalization:
         for _ in range(4):
             four = f"bash -c {shlex.quote(four)}"
         five = f"bash -c {shlex.quote(four)}"
+        ten = five
+        for _ in range(5):
+            ten = f"bash -c {shlex.quote(ten)}"
         assert eng.change_required_match(four) == "systemctl restart"
-        assert eng.change_required_match(five) is None
-        assert isinstance(_normalize_for_policy(five), list)
+        assert eng.change_required_match(five) == "systemctl restart"
+        assert eng.change_required_match(ten) == "systemctl restart"
+        assert isinstance(_normalize_for_policy(ten), list)
 
     @pytest.mark.parametrize("command", ["", "   ", "--", "-", "sudo", "sudo env", None, "systemctl restart 'nginx"])
     def test_odd_inputs_never_raise(self, command):
@@ -565,6 +576,108 @@ class TestChangeRequiredNormalization:
         assert isinstance(tokens, list)
         match = get_policy_engine(reload=True).change_required_match(command)
         assert match == ("systemctl restart" if command == "systemctl restart 'nginx" else None)
+
+
+class TestChangeRequiredFixWave:
+    """Final fix wave (I-3 + M-1): (1) a token in COMMAND POSITION — the first word after the wrappers
+    `sudo [-u x]` / `env [K=V…]` / `nohup` / `time` / `nice`, and the first word of every re-split payload — is
+    reduced to its basename, so `/bin/systemctl` is `systemctl`; a path anywhere else is left alone. (2) Any
+    post-shlex token that still contains whitespace is a payload: `name="cmd …"` re-splits its VALUE part, a
+    JSON body's structure (`{}[]":`) separates words, and tokens from an option's value keep the option-value
+    flag (a `-c` shell payload is still a command in its own right — pinned above). (3) Edge punctuation
+    `[{("'` / `]})"',` is stripped before comparison. (4) `--cli-auto-prompt` is a boolean AWS global."""
+
+    @pytest.mark.parametrize("command,pattern", [
+        ("/bin/systemctl restart nginx", "systemctl restart"),
+        ("/usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -u root /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("nice -n 10 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("env FOO=1 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ('bash -c "/bin/systemctl restart nginx"', "systemctl restart"),
+        ("ssh host 'sudo /usr/sbin/reboot'", "reboot"),
+        ("/sbin/reboot", "reboot"),
+        ('aws ssm send-command --instance-ids i-1 --document-name AWS-RunShellScript '
+         '--parameters \'{"commands":["systemctl restart nginx"]}\'', "aws ssm send-command"),
+        ('aws ssm send-command --document-name AWS-RunShellScript --parameters commands="systemctl restart nginx" '
+         '--instance-ids i-1', "aws ssm send-command"),
+        ("aws ssm start-session --target i-1", "aws ssm start-session"),
+        ("aws ec2 --cli-auto-prompt modify-security-group-rules --group-id sg-1", "aws ec2 modify-security-group"),
+        ('echo "(systemctl restart nginx)"', "systemctl restart"),                      # edge punctuation stripped
+    ])
+    def test_refused(self, command, pattern):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    @pytest.mark.parametrize("command", [
+        "kubectl apply -f /tmp/delete-me.yaml",                                  # a path OUTSIDE command position
+        "aws s3 cp /tmp/reboot-notes.txt s3://b/",
+        "aws ec2 create-tags --resources i-1 --tags Key=Name,Value=web-restart",
+        "aws lambda invoke --function-name update-inventory",
+        "aws ssm describe-instance-information",
+        "aws ssm get-command-invocation --command-id c-1 --instance-id i-1",
+        "kubectl cp /tmp/reboot pod:/tmp/reboot",
+    ])
+    def test_not_refused(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    def test_basename_applies_only_in_command_position(self):
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy("/bin/systemctl restart nginx") == \
+               [("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("sudo -u postgres /usr/bin/systemctl restart pg") == \
+               [("postgres", False), ("systemctl", True), ("restart", True), ("pg", True)]     # `-u x` is not the command
+        assert _normalize_for_policy("env FOO=1 /usr/local/bin/aws ec2 modify-x") == \
+               [("foo=1", True), ("aws", True), ("ec2", True), ("modify-x", True)]             # K=V is not the command
+        assert _normalize_for_policy("kubectl apply -f /tmp/delete-me.yaml") == \
+               [("kubectl", True), ("apply", True), ("/tmp/delete-me.yaml", True)]             # positional path untouched
+        assert _normalize_for_policy('bash -c "/bin/systemctl restart nginx"') == \
+               [("bash", True), ("systemctl", True), ("restart", True), ("nginx", True)]       # payload's own command word
+        assert _normalize_for_policy("ssh host 'sudo /usr/sbin/reboot'") == \
+               [("ssh", True), ("host", True), ("reboot", True)]
+
+    def test_named_and_json_payloads_resplit_and_keep_the_option_value_flag(self):
+        """`name="cmd …"` re-splits its value; a JSON body's structure separates its words; both are the VALUE of
+        `--parameters`, so their tokens are ineligible for hyphenated patterns (bare words still match)."""
+        from agenticops.services.policy_engine import _normalize_for_policy
+        assert _normalize_for_policy('aws ssm send-command --parameters commands="systemctl restart nginx"') == \
+               [("aws", True), ("ssm", True), ("send-command", True), ("systemctl", False), ("restart", False), ("nginx", False)]
+        assert _normalize_for_policy('aws ssm send-command --parameters \'{"commands":["systemctl restart nginx"]}\'') == \
+               [("aws", True), ("ssm", True), ("send-command", True),
+                ("commands", False), ("systemctl", False), ("restart", False), ("nginx", False)]
+        # a positional name=payload is a command in its own right (no option-value flag to keep)
+        assert _normalize_for_policy('run commands="systemctl restart nginx"') == \
+               [("run", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        # a `-c` payload stays a command in its own right (round-4 deviation, unchanged)
+        assert _normalize_for_policy('bash -c "aws ec2 modify-security-group-rules --group-id sg-1"') == \
+               [("bash", True), ("aws", True), ("ec2", True), ("modify-security-group-rules", True), ("sg-1", False)]
+        # …so a hyphenated pattern inside a NON-shell option value never hits, even re-split
+        from agenticops.services.policy_engine import PolicyEngine
+        eng = PolicyEngine({"rules": [], "change_required": ["aws ec2 modify-security-group"]})
+        assert eng.change_required_match('aws ssm send-command --parameters commands="aws ec2 modify-security-group-rules"') is None
+        assert eng.change_required_match('bash -c "aws ec2 modify-security-group-rules"') == "aws ec2 modify-security-group"
+
+    def test_edge_punctuation_is_stripped_only_for_comparison(self):
+        from agenticops.services.policy_engine import _normalize_for_policy, _tokens_match_in_order
+        assert _tokens_match_in_order(["reboot"], [("(reboot)", True)]) is True
+        assert _tokens_match_in_order(["reboot"], [("'reboot',", True)]) is True
+        assert _tokens_match_in_order(["kubectl", "delete"], [("kubectl", True), ("[delete]", True)]) is True
+        assert _tokens_match_in_order(["reboot"], [("reboot-test", True)]) is False
+        assert _normalize_for_policy("systemctl restart 'nginx") == \
+               [("systemctl", True), ("restart", True), ("'nginx", True)]                       # normalisation output unchanged
+
+    def test_cli_auto_prompt_is_a_boolean_flag(self):
+        from agenticops.services.policy_engine import _POLICY_BOOLEAN_FLAGS, _is_value_taking_option, _normalize_for_policy
+        assert "--cli-auto-prompt" in _POLICY_BOOLEAN_FLAGS and _is_value_taking_option("--cli-auto-prompt") is False
+        assert _normalize_for_policy("aws ec2 --cli-auto-prompt modify-security-group-rules --group-id sg-1") == \
+               [("aws", True), ("ec2", True), ("modify-security-group-rules", True), ("sg-1", False)]
+
+    @pytest.mark.parametrize("command", ["/", "//", "sudo /", "bash -c '/'", "a/ b", '{"x": [1, 2]}', "name=", "FOO= bar"])
+    def test_odd_paths_and_payloads_never_raise(self, command):
+        from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
+        assert isinstance(_normalize_for_policy(command), list)
+        assert get_policy_engine(reload=True).change_required_match(command) is None
 
 
 class TestGuardedRun:

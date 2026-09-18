@@ -81,30 +81,51 @@ def _bump_risk(risk_level: str) -> str:
     return RISK_ORDER[min(idx + 1, len(RISK_ORDER) - 1)]
 
 
-# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match. The command is tokenised (sudo/env
-# wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern hits when its
-# whitespace-split tokens appear in that order — not necessarily adjacent. A BARE pattern word (`delete`,
-# `restart`, `reboot`) must equal the whole command token; a HYPHENATED one (`modify-`, `modify-security-group`)
-# matches as a prefix. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x` and
+# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match. The command is tokenised (sudo/env/nohup/
+# time/nice wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern hits when its
+# whitespace-split tokens appear in that order — not necessarily adjacent. A BARE pattern word (`delete`, `restart`,
+# `reboot`) must equal the whole command token; a HYPHENATED one (`modify-`, `modify-security-group`) matches as a
+# prefix. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x` and
 # `sudo -n systemctl restart nginx` all hit, while `kubectl label pod delete-me`, `systemctl restart-all-the-things`,
 # `kubectl scale deployment/shutdown-handler` and `--tags Key=x,Value=reboot-test` do not.
-# A QUOTED PAYLOAD (`bash -c "systemctl restart nginx"`, `sh -c '…'`, `ssh host '…'`, `su -c '…'`) survives shlex
-# as ONE token; it is re-split the same way (depth-bounded) so its words face the gate like any other tokens.
+# COMMAND POSITION (fix wave): the first word after the wrappers (`sudo [-u x]`, `env [K=V…]`, `nohup`, `time`,
+# `nice`) and the first word of every re-split payload is the program; when it contains `/` it is reduced to its
+# basename (`/bin/systemctl` → `systemctl`, `/usr/sbin/reboot` → `reboot`). A path ANYWHERE ELSE is left alone
+# (`kubectl apply -f /tmp/delete-me.yaml`, `aws s3 cp /tmp/reboot-notes.txt s3://b/` are not refused).
+# A QUOTED PAYLOAD is any post-shlex token that still contains whitespace (`bash -c "systemctl restart nginx"`,
+# `ssh host '…'`, `--parameters commands="systemctl restart nginx"`, `--parameters '{"commands":["…"]}'`); it is
+# re-split the same way (depth-bounded) so its words face the gate like any other tokens. `name="cmd …"` contributes
+# only its VALUE part and JSON structure (`{}[]:,`) inside a payload separates words. Edge punctuation `[{("'` /
+# `]})"',` is stripped from a token before comparison (never from the normalised output).
 # OPTION VALUES are not operations: a token whose ORIGINAL predecessor is a value-taking option (`-`-prefixed, not
 # the bare `-`/`--` markers, no `=`) is ineligible for HYPHENATED pattern tokens, so `--function-name update-inventory`
 # does not hit `aws lambda update-`; bare pattern words keep no adjacency rule (`kubectl --as admin delete pod x`).
+# Tokens produced from an option's VALUE payload keep that flag (all ineligible) — EXCEPT a shell `-c`-family payload
+# (`bash -c`, `sh -lc`, `su -c`) and a positional payload, which are commands in their own right and keep their own
+# flags (the round-4 deviation: taking `-c` payloads as ineligible would re-open the hole for every AWS-style pattern).
 # A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
 # modify-security-group-rules` is still gated. The allowlist only ever ADDS refusals (an eligible token is a
 # superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
-_POLICY_WRAPPERS = ("sudo", "env")
+_POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice")
 _POLICY_RESPLIT_MAX_DEPTH = 3
 # Boolean flags that never consume the next token (exact, case-sensitive: `-a` is not `-A`, `-qy` is not listed).
 # AWS CLI globals first, then the systemctl/kubectl/az/apt-style switches an operator puts before the verb.
 _POLICY_BOOLEAN_FLAGS = frozenset({
     "--debug", "--no-cli-pager", "--no-paginate", "--no-verify-ssl", "--no-sign-request",
-    "--no-cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f", "--user",
-    "--now", "--all", "-A",
+    "--no-cli-auto-prompt", "--cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f",
+    "--user", "--now", "--all", "-A",
 })
+# env-style `NAME=value` assignments precede the program (`env FOO=1 aws …`, `FOO=1 aws …`): never the command word.
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# `name="cmd …"` payload: only the VALUE part is re-split (`commands="systemctl restart nginx"`).
+_NAMED_PAYLOAD = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*=(.*)$", re.S)
+# A shell's `-c` family (`bash -c`, `sh -lc`, `su -c`, `zsh -ic`): the option VALUE is a command in its own right.
+_SHELL_PAYLOAD_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+# JSON structure inside a payload separates words: '{"commands":["systemctl restart nginx"]}' → commands, systemctl, …
+# (quotes are left to shlex, which removes them as quoting; `,` so that '["reboot","now"]' cannot glue into one word).
+_PAYLOAD_JSON_PUNCT = re.compile(r"[{}\[\]:,]")
+# Edge punctuation stripped from a token before comparison (never from the normalised output).
+_EDGE_LEAD, _EDGE_TRAIL = "[{(\"'", "]})\"',"
 
 
 def _is_value_taking_option(token: str) -> bool:
@@ -120,18 +141,21 @@ def _is_value_taking_option(token: str) -> bool:
 def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
     """Lower-cased `(token, eligible_for_prefix)` pairs with wrappers and option tokens removed.
 
-    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env dropped; every token starting
-    with '-' dropped. Option VALUES are kept as ordinary tokens — a kept value can only add a token the ordered
-    match must skip over — but they are flagged: `eligible_for_prefix` is False when the ORIGINAL predecessor is
-    a value-taking option (_is_value_taking_option — a known boolean flag such as `--no-cli-pager` is not one),
+    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped; every token
+    starting with '-' dropped. Option VALUES are kept as ordinary tokens — a kept value can only add a token the
+    ordered match must skip over — but they are flagged: `eligible_for_prefix` is False when the ORIGINAL predecessor
+    is a value-taking option (_is_value_taking_option — a known boolean flag such as `--no-cli-pager` is not one),
     and only hyphenated pattern tokens consult the flag.
 
+    The COMMAND POSITION — the first kept token that is neither an option value nor an env-style `K=V` assignment —
+    is reduced to its basename when it contains `/` (`/bin/systemctl` → `systemctl`); paths elsewhere stay as they
+    are (`kubectl apply -f /tmp/delete-me.yaml`).
+
     A kept token that still contains whitespace was a quoted payload (`bash -c "systemctl restart nginx"`,
-    `ssh host "sudo …"`); it is normalised recursively with the same rules and spliced in place, so the words
-    inside face the gate too. The wrapper's own `-c`/`-lc` went with the option drop. A payload is scored as a
-    command in its own right (its first word has no predecessor), so `bash -c "aws ec2 modify-…"` keeps the
-    hyphenated gate. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper payloads get a flat str.split),
-    and nothing here raises on odd input.
+    `ssh host "sudo …"`, `--parameters commands="…"`); see _payload_tokens — it is normalised recursively with the
+    same rules and spliced in place, so the words inside face the gate too, with their own command position. The
+    wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper
+    payloads get a flat str.split), and nothing here raises on odd input.
     """
     try:
         tokens = shlex.split(command or "")
@@ -140,24 +164,59 @@ def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool
     return _policy_tokens(tokens, _depth)
 
 
+def _basename(token: str) -> str:
+    base = token.rsplit("/", 1)[-1]
+    return base or token
+
+
 def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
     start = 0
     while start < len(tokens) and tokens[start].lower() in _POLICY_WRAPPERS:
         start += 1
     out: list[tuple[str, bool]] = []
+    command_seen = False
     for i in range(start, len(tokens)):
         token = tokens[i]
         if token.startswith("-"):
             continue
+        prev = tokens[i - 1] if i > 0 else None
+        eligible = prev is None or not _is_value_taking_option(prev)
         if any(ch.isspace() for ch in token):
-            if depth < _POLICY_RESPLIT_MAX_DEPTH:
-                out.extend(_normalize_for_policy(token, depth + 1))
-            else:
-                out.extend(_policy_tokens(token.split(), depth))  # str.split yields no whitespace tokens: no recursion
+            command_seen = True  # a quoted payload holds its own command word (found at its own level)
+            out.extend(_payload_tokens(token, depth, prev, positional=eligible))
             continue
-        eligible = i == 0 or not _is_value_taking_option(tokens[i - 1])
+        if not command_seen and eligible and not _ENV_ASSIGNMENT.match(token):
+            command_seen = True
+            if "/" in token:
+                token = _basename(token)  # command position only: /usr/sbin/reboot → reboot
         out.append((token.lower(), eligible))
     return out
+
+
+def _payload_tokens(payload: str, depth: int, prev: Optional[str], positional: bool) -> list[tuple[str, bool]]:
+    """Tokens of a quoted payload — a post-shlex token that still contains whitespace.
+
+    `name="cmd …"` contributes only its value part; JSON structure (`{}[]:,`) inside the body separates words
+    (quotes are left to shlex). The body is normalised recursively (depth-bounded; a flat str.split past the bound),
+    so its words face the gate like any other tokens and its first word is a command position (basename applies).
+    Eligibility for HYPHENATED patterns: a positional payload (`ssh host '…'`) or a shell `-c`-family value
+    (`bash -c '…'`, `su -c '…'`) is a command in its own right and keeps its own flags; the value of any OTHER option
+    (`--parameters`, `--description`, `--tags`) keeps the option-value flag — every token it yields is ineligible
+    (bare pattern words still match, so `--description "reboot test"` stays a deliberate refusal).
+    """
+    as_command = positional or (prev is not None and _SHELL_PAYLOAD_FLAG.match(prev) is not None)
+    m = _NAMED_PAYLOAD.match(payload)
+    body = _PAYLOAD_JSON_PUNCT.sub(" ", m.group(1) if m else payload)
+    if depth < _POLICY_RESPLIT_MAX_DEPTH:
+        sub = _normalize_for_policy(body, depth + 1)
+    else:
+        sub = _policy_tokens(body.split(), depth)  # str.split yields no whitespace tokens: no recursion
+    return sub if as_command else [(token, False) for token, _ in sub]
+
+
+def _strip_edges(token: str) -> str:
+    stripped = token.lstrip(_EDGE_LEAD).rstrip(_EDGE_TRAIL)
+    return stripped or token
 
 
 def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[tuple[str, bool]]) -> bool:
@@ -165,13 +224,15 @@ def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[tuple
 
     A bare pattern word matches only an identical token; a hyphenated pattern token matches as a prefix (the
     hyphen marks the AWS-style `service verb-…` forms) and only against a token that is eligible — i.e. not an
-    option value (`--function-name update-inventory` is a resource name, not an operation). Bare-word prefixing
-    was a false positive on legitimate L1 writes such as `kubectl label pod delete-me`.
+    option value (`--function-name update-inventory` is a resource name, not an operation). Edge punctuation
+    (`(reboot)`, `'reboot',`, a quote layer left by a flat split) is stripped before the comparison. Bare-word
+    prefixing was a false positive on legitimate L1 writes such as `kubectl label pod delete-me`.
     """
     if not pattern_tokens:
         return False
     i = 0
-    for token, eligible in command_tokens:
+    for raw, eligible in command_tokens:
+        token = _strip_edges(raw)
         wanted = pattern_tokens[i]
         if (eligible and token.startswith(wanted)) if "-" in wanted else token == wanted:
             i += 1
