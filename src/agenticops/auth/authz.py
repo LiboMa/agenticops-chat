@@ -2,7 +2,8 @@
 
 check(actor, permission, subject) evaluates config/rbac.yaml:
   1. matrix: required flags ⊆ actor flags (users.permissions for user actors, `subjects` for others)
-  2. rules:  structured deny rules (SoD, agent risk ceiling)
+  2. rules:  structured deny rules (SoD, agent risk ceiling). SoD (actor_must_differ_from_field)
+             needs identities, so it is skipped for the anonymous `web` actor (api_auth_enabled=false).
 Denials raise AuthzDenied when settings.rbac_enforce is true OR the matching rule says
 `enforce: always`; otherwise (shadow mode) the denial is written to audit_logs as
 `authz.denied_shadow` and the call is allowed — i.e. behavior is exactly today's.
@@ -116,6 +117,10 @@ class RbacPolicy:
             always = str(rule.get("enforce", "")).lower() == "always"
             rtype = rule.get("type")
             if rtype == "actor_must_differ_from_field" and subject is not None:
+                if actor.kind == "web":
+                    # SoD is only evaluable between IDENTIFIED actors; the anonymous web actor
+                    # (api_auth_enabled=false) has no identity — enable auth to enforce it on the web.
+                    continue
                 other = getattr(subject, rule.get("field", ""), None)
                 if other and str(other) == actor.key:
                     return False, f"separation of duties: actor equals {rule.get('field')}", rule.get("name"), always

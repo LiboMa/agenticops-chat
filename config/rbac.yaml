@@ -35,6 +35,7 @@ rules:
     permission: change.approve
     type: actor_must_differ_from_field
     field: requested_by
+    # skipped for the anonymous web actor (api_auth_enabled=false): SoD needs identities — enable auth to enforce it on the web
 
   - name: no-agent-approval-above-l1
     permission: [plan.approve, change.approve]

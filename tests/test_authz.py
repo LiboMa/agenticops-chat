@@ -71,6 +71,17 @@ class TestMatrix:
         bob = Actor("user", "bob", permissions=("read", "write"))
         assert policy.decide(bob, "change.approve", cr)[0] is True
 
+    def test_sod_skipped_for_anonymous_web_actor(self, policy):
+        cr = SimpleNamespace(requested_by="web:anonymous", risk_level="L1")
+        allowed, _, rule, _ = policy.decide(web_anonymous_actor(), "change.approve", cr)
+        assert allowed is True and rule is None
+
+    def test_sod_still_applies_to_identified_actors(self, policy):
+        cr = SimpleNamespace(requested_by="cli:malibo", risk_level="L1")
+        with patch("getpass.getuser", return_value="malibo"):
+            allowed, _, rule, _ = policy.decide(cli_actor(), "change.approve", cr)
+        assert allowed is False and rule == "sod-change-approver-not-requester"
+
     def test_agent_cannot_approve_l2_l3_and_this_is_always_enforced(self, policy):
         plan = SimpleNamespace(risk_level="L2", requested_by=None)
         allowed, _, rule, always = policy.decide(agent_actor("sre"), "plan.approve", plan)

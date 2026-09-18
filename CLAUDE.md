@@ -230,7 +230,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `security_snapshot_retention_days` | `90` | Days of `SecuritySnapshot` rows retained before pruning |
 | `security_model_id` | `""` | Override model for the security advisor; empty = `bedrock_model_id_cheap` |
 | `audit_retention_days` | `365` | Retention for `audit_logs` + `command_audits` (daily prune; 0 = keep forever) |
-| `rbac_enforce` | `false` | Enforce `config/rbac.yaml` (403 + SoD). False = shadow mode: denials audited as `authz.denied_shadow`, request allowed |
+| `rbac_enforce` | `false` | Enforce `config/rbac.yaml` (403 + SoD). False = shadow mode: denials audited as `authz.denied_shadow`, request allowed. Meaningful only with `api_auth_enabled=true`; the anonymous web actor is exempt from SoD |
 | `rbac_file` | `config/rbac.yaml` | Permission matrix (permission → required `users.permissions` flags) + built-in subjects + structured SoD rules |
 
 ## HealthIssue State Machine
