@@ -2399,7 +2399,11 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
                 detail=f"L2/L3 fix plans require human approval. Agent '{approved_by}' cannot approve risk level {plan.risk_level}",
             )
 
-        plan.status = "approved"
+        from agenticops.models import InvalidStatusTransition, transition_plan
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
         plan.approved_by = approved_by
         plan.approved_at = datetime.now(timezone.utc)
 
@@ -2463,8 +2467,9 @@ async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="ap
                 detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
             )
 
-        # Mark plan as executing
-        plan.status = "executing"
+        # Mark plan as executing (status verified 'approved' above — cannot raise)
+        from agenticops.models import transition_plan
+        transition_plan(plan, "executing")
 
         execution = FixExecution(
             fix_plan_id=plan_id,

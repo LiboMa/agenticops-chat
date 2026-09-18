@@ -2299,7 +2299,11 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if not approver.strip():
             return "[red]Approver name is required.[/red]"
 
-        plan.status = "approved"
+        from agenticops.models import InvalidStatusTransition, transition_plan
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            return f"[red]{e}[/red]"
         plan.approved_by = approver.strip()
         plan.approved_at = datetime.now(timezone.utc)
 
@@ -2358,7 +2362,8 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             executed_by="cli_user",
             started_at=datetime.now(timezone.utc),
         )
-        plan.status = "executing"
+        from agenticops.models import transition_plan
+        transition_plan(plan, "executing")
         session.add(execution)
         session.commit()
 

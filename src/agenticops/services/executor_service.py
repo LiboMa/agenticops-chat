@@ -198,7 +198,11 @@ class ExecutorService:
                 execution.error_message = f"Agent crashed: {error[:500]}"
                 plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
                 if plan:
-                    plan.status = "failed"
+                    from agenticops.models import InvalidStatusTransition, transition_plan
+                    try:
+                        transition_plan(plan, "failed")
+                    except InvalidStatusTransition:
+                        logger.warning("Plan #%d in '%s' cannot move to failed after crash", fix_plan_id, plan.status)
                 session.commit()
 
     def _mark_timed_out(self, execution_id: int):

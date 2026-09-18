@@ -22,6 +22,7 @@ from agenticops.models import (
     InvalidStatusTransition,
     RCAResult,
     get_session,
+    transition_plan,
     validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
@@ -1041,14 +1042,20 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
         # L2/L3 require human approval — flag it but still record
         if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
-            plan.status = "pending_approval"
+            try:
+                transition_plan(plan, "pending_approval")
+            except InvalidStatusTransition as e:
+                return str(e)
             session.commit()
             return (
                 f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval. "
                 f"Status set to 'pending_approval'. A human operator must approve L2/L3 plans."
             )
 
-        plan.status = "approved"
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            return str(e)
         plan.approved_by = approved_by
         plan.approved_at = datetime.now(timezone.utc)
         session.commit()
@@ -1181,6 +1188,12 @@ def save_execution_result(
         if not plan:
             return f"FixPlan #{fix_plan_id} not found."
 
+        if plan.status not in ("approved", "executing"):
+            return (
+                f"FixPlan #{fix_plan_id} is '{plan.status}' — not executable. "
+                f"Only approved/executing plans can record an execution result."
+            )
+
         execution = FixExecution(
             fix_plan_id=fix_plan_id,
             health_issue_id=health_issue_id,
@@ -1197,12 +1210,14 @@ def save_execution_result(
         )
         session.add(execution)
 
-        # Update FixPlan status
+        # Update FixPlan status through the state machine (approved → executing → terminal)
+        if plan.status == "approved":
+            transition_plan(plan, "executing")
         if status == "succeeded":
-            plan.status = "executed"
+            transition_plan(plan, "executed")
         elif status in ("failed", "rolled_back"):
-            plan.status = "failed"
-        # aborted -> keep approved (allow retry)
+            transition_plan(plan, "failed")
+        # aborted -> stays executing (operator may retry / a new execution row will follow)
 
         # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
         # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,

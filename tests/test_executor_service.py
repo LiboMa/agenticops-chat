@@ -384,6 +384,7 @@ class TestMarkCrashed:
         mock_execution = MagicMock()
         mock_execution.status = "running"
         mock_plan = MagicMock()
+        mock_plan.status = "executing"  # real state machine: only executing -> failed is legal
 
         mock_session = MagicMock()
         mock_session.query.return_value.filter_by.return_value.first.side_effect = [

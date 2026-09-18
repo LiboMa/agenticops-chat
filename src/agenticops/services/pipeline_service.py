@@ -144,7 +144,8 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 return
 
             # Approve plan (policy auto_approve, or legacy L0/L1)
-            plan.status = "approved"
+            from agenticops.models import transition_plan
+            transition_plan(plan, "approved")
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
 
