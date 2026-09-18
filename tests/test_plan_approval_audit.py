@@ -119,9 +119,12 @@ def test_cli_approve_binds_cli_actor(db):
     plan = _plan(db)
     with patch("getpass.getuser", return_value="malibo"), \
          patch("agenticops.cli.main.init_db"), \
-         patch("agenticops.services.pipeline_service.trigger_auto_execute"):
+         patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
         out = _slash_approve(None, [str(plan.id), "looks", "good"])
     assert "approved by cli:malibo" in out
+    # CLI approve never chains into execution: the operator runs /execute explicitly
+    trigger.assert_not_called()
+    assert out.endswith(f"Execute with: /execute {plan.id}")
     db.refresh(plan)
     assert plan.approved_by == "cli:malibo"
     rows = _audits(db, "plan.approved")

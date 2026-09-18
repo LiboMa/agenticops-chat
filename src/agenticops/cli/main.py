@@ -2329,14 +2329,8 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
                          old_values={"status": old}, new_values={"status": "approved"}, session=session)
         session.commit()  # decision + state + audit row in one transaction
 
-        # Chain to auto-execute (same as the web approve path)
-        try:
-            from agenticops.services.pipeline_service import trigger_auto_execute
-            trigger_auto_execute(plan_id)
-        except Exception:
-            logger.warning("Failed to trigger auto-execute for plan #%d", plan_id, exc_info=True)
-
-        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green]"
+        # No auto-chain into execution from the CLI: the operator runs /execute explicitly
+        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green] Execute with: /execute {plan_id}"
     finally:
         session.close()
 
