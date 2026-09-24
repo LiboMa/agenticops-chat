@@ -233,6 +233,9 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `command_audit_enabled` | `true` | Tool-layer ledger of write-tier command attempts (command_audits); read-only commands are not recorded |
 | `rbac_enforce` | `false` | Enforce `config/rbac.yaml` (403 + SoD). False = shadow mode: denials audited as `authz.denied_shadow`, request allowed. Meaningful only with `api_auth_enabled=true`; the anonymous web actor is exempt from SoD |
 | `rbac_file` | `config/rbac.yaml` | Permission matrix (permission → required `users.permissions` flags) + built-in subjects + structured SoD rules |
+| `change_management_enabled` | `true` | Enable the ITSM change flow: change tools on the main agent, `/api/changes`, CLI `/change` |
+| `change_auto_approve_standard` | `false` | Let a policy `auto_approve` decision approve a change WITHOUT a human. Both the yaml rule and this flag must agree |
+| `change_review_timeout_seconds` | `600` | SRE change-review watchdog; on timeout the request returns to `draft` with a `review_failed` event |
 
 ## HealthIssue State Machine
 

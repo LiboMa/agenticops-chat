@@ -137,6 +137,9 @@ ssh_default_key_path: ''
 ssh_bastion_host: ''
 policy_engine_enabled: true
 policy_file: config/policies.yaml
+change_management_enabled: true
+change_auto_approve_standard: false   # standard changes still wait for a human until you flip this
+change_review_timeout_seconds: 600
 itsm_enabled: false
 itsm_dry_run: true
 itsm_servicenow_url: ''

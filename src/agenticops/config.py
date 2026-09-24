@@ -742,6 +742,20 @@ class Settings(BaseSettings):
         description="Path to the governed-autonomy policy file (AIOPS_POLICY_FILE)",
     )
 
+    # ── Change Management (MVP-2.6.0) ────────────────────────────────
+    change_management_enabled: bool = Field(
+        default=True,
+        description="Enable the ITSM change flow: change tools on the main agent, /api/changes, CLI /change (AIOPS_CHANGE_MANAGEMENT_ENABLED)",
+    )
+    change_auto_approve_standard: bool = Field(
+        default=False,
+        description="Let a policy 'auto_approve' decision approve a change WITHOUT a human. Both the yaml rule and this flag must agree (AIOPS_CHANGE_AUTO_APPROVE_STANDARD)",
+    )
+    change_review_timeout_seconds: int = Field(
+        default=600,
+        description="SRE change-review watchdog; on timeout the request returns to draft with a review_failed event (AIOPS_CHANGE_REVIEW_TIMEOUT_SECONDS)",
+    )
+
     # ── ITSM Bridge (MVP-2.0.0) ─────────────────────────────────────
     itsm_enabled: bool = Field(
         default=False,

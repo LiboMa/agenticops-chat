@@ -269,6 +269,27 @@ def notify_execution_result(
     flush_consolidated(issue_id)
 
 
+# ── Change Management (MVP-2.6.0) ───────────────────────────────────
+# Stubs: change_service calls these at every lifecycle point already; the real
+# bodies (subject/body/severity per event, approval links) land with the change
+# notification task. No-ops here so no half-written message goes out meanwhile.
+
+
+def notify_change_requested(cr: dict) -> None:
+    """Notify: a change request was filed (stub)."""
+    return None
+
+
+def notify_change_pending_approval(cr: dict) -> None:
+    """Notify: a reviewed change is waiting for a human approval (stub)."""
+    return None
+
+
+def notify_change_result(cr: dict, outcome: str) -> None:
+    """Notify: a change reached an outcome — review_failed, rejected, completed, failed (stub)."""
+    return None
+
+
 def notify_report_saved(
     report_id: int, report_type: str, title: str
 ) -> None:
