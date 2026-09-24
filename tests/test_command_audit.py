@@ -848,9 +848,10 @@ class TestChangeRequiredFixWave:
             _OPTION_TABLES, _is_value_taking_option, _normalize_for_policy, _option_consumes_next,
         )
         sudo, env, time_, docker_exec = (_OPTION_TABLES[region] for region in ("sudo", "env", "time", "docker exec"))
-        assert set(sudo.bool_letters) == set("nEiHbkKsSvABNP") and sudo.boolean == frozenset({
+        assert set(sudo.bool_letters) == set("nEiHbkKsSvABNPle") and sudo.boolean == frozenset({
             "--non-interactive", "--preserve-env", "--login", "--set-home", "--background", "--reset-timestamp",
             "--remove-timestamp", "--shell", "--stdin", "--validate", "--askpass", "--bell", "--no-update",
+            "--list", "--edit",
         })
         assert set(sudo.value_letters) == set("ugCDprtTURh") and sudo.value == frozenset({
             "-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-p", "--prompt", "-r", "--role",
@@ -961,6 +962,8 @@ class TestChangeRequiredWrapperEscapes:
         ("sudo -u root -n /usr/bin/systemctl restart nginx", "systemctl restart"),
         ("docker exec --user root c1 /usr/bin/systemctl restart nginx", "systemctl restart"),
         ("time -f %e /bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -l /sbin/reboot", "reboot"),                    # sudo's own booleans: `-l`/`--list` swallow nothing
+        ("sudo --list /sbin/reboot", "reboot"),
         # (2) wrappers by path
         ("/usr/bin/sudo -n /usr/bin/systemctl restart nginx", "systemctl restart"),
         ("/usr/bin/env -i /usr/bin/systemctl restart nginx", "systemctl restart"),
@@ -1015,6 +1018,9 @@ class TestChangeRequiredWrapperEscapes:
         ("nsenter -t 1 -m -u /sbin/reboot", "reboot"),
         ("nsenter -t 1 -m -w /usr/bin/systemctl restart nginx", "systemctl restart"),   # nsenter's -w[=dir]: optional value → boolean
         ("docker exec -it web sh -c /sbin/reboot", "reboot"),
+        # `ssh -- host CMD`: `--` with a positional still pending is the POSIX marker, `host` is then the HOST
+        # positional and the remainder a nested command (`ls -- /sbin/reboot` stays untouched: TestChangeRequiredNestedExec)
+        ("ssh -- host /sbin/reboot", "reboot"),
     ])
     def test_refused(self, command, pattern):
         from agenticops.services.policy_engine import get_policy_engine
@@ -1059,6 +1065,58 @@ class TestChangeRequiredWrapperEscapes:
         assert set(_POLICY_CARRIERS) == {"timeout", "chroot", "runuser", "ssh", "docker"}
         assert set(_OPTION_TABLES) == set(_POLICY_WRAPPERS) | set(_POLICY_CARRIERS) | {"docker exec"}
         assert _SHELL_COMMANDS == frozenset({"sh", "bash", "zsh", "dash", "ksh", "su", "runuser"})
+        # Every region's four option fields, exactly as hand-transcribed from each tool's getopt string: a letter in
+        # the wrong column decides whether the NEXT token is an option value, i.e. whether it can be the command
+        # word. `(value, value_letters, boolean, bool_letters)`, and the map must cover _OPTION_TABLES itself, so a
+        # new region cannot arrive unpinned.
+        expected_fields = {
+            "sudo": ("-u --user -g --group -C --close-from -D --chdir -p --prompt -r --role -t --type "
+                     "-T --command-timeout -U --other-user -R --chroot -h --host", "ugCDprtTURh",
+                     "--non-interactive --preserve-env --login --set-home --background --reset-timestamp "
+                     "--remove-timestamp --shell --stdin --validate --askpass --bell --no-update --list --edit",
+                     "nEiHbkKsSvABNPle"),
+            "env": ("-u --unset -C --chdir -S --split-string -a --argv0", "uCSa",
+                    "--ignore-environment --null --debug --default-signal --ignore-signal --block-signal "
+                    "--list-signal-handling", "iv0"),
+            "time": ("-o --output -f --format", "of", "--portability --verbose --append --quiet", "pvaq"),
+            "nice": ("-n --adjustment", "n", "", ""),
+            "nohup": ("", "", "", ""),
+            "setsid": ("", "", "--ctty --fork --wait", "cfw"),
+            "command": ("", "", "", "pvV"),
+            "exec": ("-a", "a", "", "cl"),
+            "doas": ("-u -C", "uC", "", "Lns"),
+            "stdbuf": ("-i -o -e --input --output --error", "ioe", "", ""),
+            "ionice": ("-c --class -n --classdata -p --pid -P --pgid -u --uid", "cnpPu", "--ignore", "t"),
+            "unshare": ("-S --setuid -G --setgid -R --root -w --wd -l --load-interp --map-user --map-users "
+                        "--map-group --map-groups --propagation --setgroups --monotonic --boottime", "SGRwl",
+                        "", "muinpUCTfrc"),
+            "nsenter": ("-t --target -S --setuid -G --setgid", "tSG", "", "amuinpUCTrwWeFckZ"),
+            "busybox": ("", "", "", ""),
+            "timeout": ("-k --kill-after -s --signal", "ks", "--preserve-status --foreground --verbose", "v"),
+            "chroot": ("--userspec --groups", "", "--skip-chdir", ""),
+            "runuser": ("-u --user -g --group -G --supp-group -c --command -s --shell -w --whitelist-environment",
+                        "ugGcsw", "--login --preserve-environment --pty --fast", "lmpPf"),
+            "ssh": ("-p -l -i -o -F -J -L -R -D -W -b -c -m -e -E -B -Q -S -w -I -O -P",
+                    "plioFJLRDWbcmeEBQSwIOP", "", "46AaCfGgKkMNnqsTtVvXxYy"),
+            "docker": ("-H --host -l --log-level -c --context --config --tlscacert --tlscert --tlskey", "Hlc",
+                       "--debug --tls --tlsverify", "D"),
+            "docker exec": ("-u --user -w --workdir -e --env --env-file --detach-keys", "uwe",
+                            "--interactive --tty --detach --privileged", "itd"),
+        }
+        assert set(expected_fields) == set(_OPTION_TABLES)
+        for region, (value, value_letters, boolean, bool_letters) in expected_fields.items():
+            table = _OPTION_TABLES[region]
+            assert table.value == frozenset(value.split()), region
+            assert set(table.value_letters) == set(value_letters), region
+            assert table.boolean == frozenset(boolean.split()), region
+            assert set(table.bool_letters) == set(bool_letters), region
+        # The two fields whose silent edit MOVES the command word: a carrier's kept positionals (every other region
+        # has none) and the open-ended option surfaces where an unlisted option is boolean rather than value-taking.
+        assert {region: table.positionals for region, table in _OPTION_TABLES.items() if table.positionals} == {
+            "timeout": 1, "chroot": 1, "runuser": 1, "ssh": 1, "docker": 1, "docker exec": 1,
+        }
+        assert {region for region, table in _OPTION_TABLES.items() if table.others_boolean} == \
+               {"ssh", "unshare", "nsenter"}
         # value-taking entries: the NEXT token is the value
         for region, flag in [("sudo", "-u"), ("sudo", "--user"), ("sudo", "-C"), ("sudo", "-h"), ("sudo", "-nu"),
                              ("time", "-f"), ("time", "-o"), ("env", "-S"), ("env", "--chdir"), ("nice", "-n"),
@@ -1138,7 +1196,7 @@ class TestChangeRequiredWrapperEscapes:
     @pytest.mark.parametrize("command", [
         "ssh", "ssh host", "timeout", "timeout 30", "chroot /mnt", "runuser", "runuser -u", "docker", "docker exec",
         "docker exec -it", "/usr/bin/sudo", "sudo --", "-- sudo", "sh -c", "env --split-string=", "nice --5", "nsenter -t",
-        "ssh -- host /sbin/reboot", "-u root", "-c '/sbin/reboot'",
+        "-u root", "-c '/sbin/reboot'",               # `ssh -- host /sbin/reboot` is pinned as refused in test_refused
     ])
     def test_odd_wrapper_shapes_never_raise(self, command):
         from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine

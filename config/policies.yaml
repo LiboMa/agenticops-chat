@@ -121,9 +121,12 @@ rules:
 # (`--parameters commands="systemctl restart nginx"`, `--parameters
 # '{"commands":["systemctl restart nginx"]}'`). A hyphenated entry never matches
 # an option VALUE: `aws lambda invoke --function-name update-inventory` does not
-# hit `aws lambda update-`, while a known boolean flag (`--no-cli-pager`,
-# `--cli-auto-prompt`, `--debug`, `--dry-run`, `-q`, `--user`, …) takes no value,
-# so `aws ec2 --no-cli-pager modify-security-group-rules` is still gated. EC2
+# hit `aws lambda update-`, while OUTSIDE a wrapper's option region a known
+# boolean flag (`--no-cli-pager`, `--cli-auto-prompt`, `--debug`, `--dry-run`,
+# `-q`, `--user`, …) takes no value, so `aws ec2 --no-cli-pager
+# modify-security-group-rules` is still gated. Inside a region only that
+# region's own table decides, so the same `--user` DOES take a value there
+# (`sudo --user root /sbin/reboot` still hits `reboot`). EC2
 # reboot/stop are service-affecting (L2/L3 in the SRE rubric); `aws ec2 start-`
 # is deliberately not listed.
 # Deliberately conservative — L1-class writes such as tagging or a

@@ -184,9 +184,11 @@ _OPTION_TABLES: dict[str, _OptionTable] = {
         value="-u --user -g --group -C --close-from -D --chdir -p --prompt -r --role -t --type -T --command-timeout "
               "-U --other-user -R --chroot -h --host",
         value_letters="ugCDprtTURh",
+        # `-l`/`--list` (list permissions) and `-e`/`--edit` (edit a file) are booleans: what follows them is a
+        # positional of sudo's own, not an option value, so `sudo -l /sbin/reboot` keeps its command word.
         boolean="--non-interactive --preserve-env --login --set-home --background --reset-timestamp --remove-timestamp "
-                "--shell --stdin --validate --askpass --bell --no-update",
-        bool_letters="nEiHbkKsSvABNP",
+                "--shell --stdin --validate --askpass --bell --no-update --list --edit",
+        bool_letters="nEiHbkKsSvABNPle",
     ),
     "env": _table(
         value="-u --unset -C --chdir -S --split-string -a --argv0", value_letters="uCSa",
