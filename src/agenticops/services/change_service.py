@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone  # noqa: F401  (timezone: later lifecycle stamps)
+from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 from agenticops.auth import authz
@@ -107,9 +107,23 @@ def _event(cr_id: int, event_type: str, stage: str, status: str = "completed", *
     log_event(None, event_type, stage, status, detail=detail, actor=actor, trace_id=trace_id, change_request_id=cr_id)
 
 
+def _as_utc(v: datetime) -> datetime:
+    """Stamp UTC on a naive datetime. Every timestamp this service writes is UTC, but SQLite's
+    DATETIME drops the offset, so the SAME field is aware on a fresh object and naive once re-read —
+    and a naive ISO string is read as local time by a JS consumer."""
+    return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
+
+
+def _age_seconds(v: Optional[datetime]) -> float:
+    """Seconds since a stored timestamp (0.0 when there is none)."""
+    if not isinstance(v, datetime):
+        return 0.0
+    return (datetime.now(timezone.utc) - _as_utc(v)).total_seconds()
+
+
 def to_dict(cr: ChangeRequest) -> dict:
     def _iso(v):
-        return v.isoformat() if isinstance(v, datetime) else v
+        return _as_utc(v).isoformat() if isinstance(v, datetime) else v
     return {
         "id": cr.id, "title": cr.title, "description": cr.description, "justification": cr.justification,
         "source": cr.source, "requested_by": cr.requested_by, "requester_user_id": cr.requester_user_id,
@@ -205,7 +219,13 @@ def create_change_request(
     except Exception:
         logger.debug("notify_change_requested failed", exc_info=True)
     if start_review:
-        globals()["start_review"](snap["id"], sync=False)  # the parameter shadows the function name
+        try:
+            globals()["start_review"](snap["id"], sync=False)  # the parameter shadows the function name
+        except Exception:
+            # The row is already committed: raising here would make a retrying client file duplicate
+            # drafts. The CR stays a draft and restart_review can (re)submit it — same shape as notify.
+            logger.warning("start_review failed for new ChangeRequest #%s — it stays a draft",
+                           snap["id"], exc_info=True)
     return snap
 
 
@@ -215,7 +235,7 @@ def start_review(cr_id: int, *, sync: bool) -> Optional[str]:
     """draft|needs_clarification → under_review, then run the SRE change review.
 
     sync=True  : run in this thread and return the SRE's text (Main agent's review_change tool).
-    sync=False : daemon thread + watchdog Timer(change_review_timeout_seconds) → returns None.
+    sync=False : daemon worker thread + a daemon watchdog that JOINS that worker → returns None.
     """
     with _session() as s:
         cr = _load(s, cr_id)
@@ -227,21 +247,44 @@ def start_review(cr_id: int, *, sync: bool) -> Optional[str]:
     _event(cr_id, "change_review_started", "review", "started", actor="agent:sre", trace_id=trace_id)
     if sync:
         return _run_review(cr_id, trace_id)
-    threading.Thread(target=_run_review, args=(cr_id, trace_id), daemon=True, name=f"change-review-{cr_id}").start()
-    t = threading.Timer(settings.change_review_timeout_seconds, _watchdog_fire, args=(cr_id,))
-    t.daemon = True
-    t.start()
+    try:
+        worker = threading.Thread(target=_run_review, args=(cr_id, trace_id), daemon=True,
+                                  name=f"change-review-{cr_id}")
+        worker.start()
+        threading.Thread(target=_watchdog_join, args=(cr_id, worker, settings.change_review_timeout_seconds),
+                         daemon=True, name=f"change-review-watchdog-{cr_id}").start()
+    except BaseException:
+        # Nothing is armed to finish the review, so it must not stay under_review. The rollback is
+        # conditional, so a worker that did start and reaches a verdict still wins.
+        _review_failed(cr_id, "review could not be started (thread spawn failed)")
+        raise
     return None
 
 
 def restart_review(cr_id: int, *, actor: Actor) -> dict:
-    """Human (re)start of a review for a draft (Main forgot to call review_change, or the watchdog rolled back)."""
+    """Human (re)start of a review (Main forgot to call review_change, or the watchdog rolled back).
+
+    A draft is the normal case. An `under_review` CR older than change_review_timeout_seconds is a
+    stale review — its watchdog died with its process — so it is rolled back first and then restarted;
+    a review still inside the timeout is refused so a live one is never cut short.
+    """
     _check(actor, "change.request")
+    stale: Optional[str] = None
     with _session() as s:
         cr = _load(s, cr_id)
-        if cr.status != "draft":
+        if cr.status == "under_review":
+            age = _age_seconds(cr.updated_at or cr.created_at)
+            if age < settings.change_review_timeout_seconds:
+                raise ChangeStateError(
+                    f"ChangeRequest #{cr_id} has been under review for {age:.0f}s "
+                    f"(< {settings.change_review_timeout_seconds}s) — wait for that review to finish"
+                )
+            stale = f"stale review recovered after {age:.0f}s (no live watchdog — process restart?)"
+        elif cr.status != "draft":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', only drafts can be (re)submitted for review")
-    start_review(cr_id, sync=False)
+    if stale:
+        _review_failed(cr_id, stale, phase="stale_recovery")
+    start_review(cr_id, sync=False)  # 409s by itself if a verdict landed in the meantime
     return get_change(cr_id)
 
 
@@ -265,6 +308,12 @@ def _run_review(cr_id: int, trace_id: Optional[str]) -> Optional[str]:
             logger.exception("Change review crashed for CR #%d", cr_id)
             _review_failed(cr_id, f"review crashed: {e}")
             return result
+        except BaseException as e:
+            # ^C in the CLI, a SystemExit, a killed worker: roll back so the CR is not stuck
+            # under_review, then let it through — a BaseException is not ours to swallow.
+            logger.warning("Change review aborted for CR #%d (%s)", cr_id, type(e).__name__)
+            _review_failed(cr_id, f"review aborted: {type(e).__name__}")
+            raise
         try:
             status = get_change(cr_id)["status"]
         except ChangeNotFound:
@@ -278,6 +327,17 @@ def _run_review(cr_id: int, trace_id: Optional[str]) -> Optional[str]:
             _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
 
 
+def _watchdog_join(cr_id: int, worker: threading.Thread, timeout: float) -> None:
+    """Guard ONE review attempt by joining its own thread (the executor_service watchdog pattern).
+
+    A watchdog that waits on the attempt's thread cannot outlive that attempt, so a failed attempt
+    can never time out the next one — no attempt bookkeeping and no cancel path needed.
+    """
+    worker.join(timeout=timeout)
+    if worker.is_alive():
+        _watchdog_fire(cr_id)
+
+
 def _watchdog_fire(cr_id: int) -> None:
     try:
         if get_change(cr_id)["status"] == "under_review":
@@ -288,18 +348,31 @@ def _watchdog_fire(cr_id: int) -> None:
         logger.debug("change review watchdog failed for CR #%d", cr_id, exc_info=True)
 
 
-def _review_failed(cr_id: int, error: str) -> None:
-    """under_review → draft (never stuck), review_failed event, notification."""
+def _review_failed(cr_id: int, error: str, *, phase: str = "failed") -> None:
+    """under_review → draft (never stuck), review_failed event, notification.
+
+    The rollback is a CONDITIONAL update (`WHERE status='under_review'`, the only legal source of this
+    edge): a verdict committed by the review's own session inside this window must win. 0 rows changed
+    means the review finished after all — then nothing at all is written: no audit row, no event, no
+    notification, and review_reasons is left as the reviewer wrote it.
+    """
+    reason = error[:500]
     with _session() as s:
-        cr = _load(s, cr_id)
-        if cr.status != "under_review":
+        changed = (
+            s.query(ChangeRequest)
+            .filter(ChangeRequest.id == cr_id, ChangeRequest.status == "under_review")
+            .update({"status": "draft", "updated_at": datetime.now(timezone.utc)},
+                    synchronize_session=False)
+        )
+        if not changed:
+            logger.info("review rollback for CR #%d skipped: it is no longer under_review", cr_id)
             return
-        _transition(cr, "draft")
-        cr.review_reasons = [error[:500]]
-        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"), details={"phase": "failed", "error": error[:500]},
+        cr = _load(s, cr_id)
+        cr.review_reasons = [reason]  # ORM write: goes through the flush-time secret redaction
+        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"), details={"phase": phase, "error": reason},
                old_status="under_review", new_status="draft")
         snap = to_dict(cr)
-    _event(cr_id, "review_failed", "review", "failed", detail={"error": error[:500]}, actor="agent:sre", trace_id=snap["trace_id"])
+    _event(cr_id, "review_failed", "review", "failed", detail={"error": reason}, actor="agent:sre", trace_id=snap["trace_id"])
     try:
         notify_change_result(snap, "review_failed")
     except Exception:
