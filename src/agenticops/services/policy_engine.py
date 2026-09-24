@@ -86,79 +86,164 @@ def _bump_risk(risk_level: str) -> str:
     return RISK_ORDER[min(idx + 1, len(RISK_ORDER) - 1)]
 
 
-# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match. The command is tokenised (sudo/env/nohup/
-# time/nice wrappers and every `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern hits when its
-# whitespace-split tokens appear in that order — not necessarily adjacent. A BARE pattern word (`delete`, `restart`,
-# `reboot`) must equal the whole command token; a HYPHENATED one (`modify-`, `modify-security-group`) matches as a
-# prefix. So `aws --profile p ec2 modify-security-group-rules`, `kubectl -v 6 delete pod x` and
-# `sudo -n systemctl restart nginx` all hit, while `kubectl label pod delete-me`, `systemctl restart-all-the-things`,
-# `kubectl scale deployment/shutdown-handler` and `--tags Key=x,Value=reboot-test` do not.
-# COMMAND POSITION (fix wave): the first word after the wrappers (`sudo [-u x]`, `env [K=V…]`, `nohup`, `time`,
-# `nice`) and the first word of every re-split payload is the program; when it contains `/` it is reduced to its
-# basename (`/bin/systemctl` → `systemctl`, `/usr/sbin/reboot` → `reboot`). A path ANYWHERE ELSE is left alone
-# (`kubectl apply -f /tmp/delete-me.yaml`, `aws s3 cp /tmp/reboot-notes.txt s3://b/` are not refused).
+# change_required matching (MVP-2.6.0): ORDERED TOKEN-SUBSEQUENCE match. The command is tokenised (wrappers and every
+# `-`/`--` option dropped, option VALUES kept, lower-cased) and a pattern hits when its whitespace-split tokens appear
+# in that order — not necessarily adjacent. A BARE pattern word (`delete`, `restart`, `reboot`) must equal the whole
+# command token; a HYPHENATED one (`modify-`, `modify-security-group`) matches as a prefix. So `aws --profile p ec2
+# modify-security-group-rules`, `kubectl -v 6 delete pod x` and `sudo -n systemctl restart nginx` all hit, while
+# `kubectl label pod delete-me`, `systemctl restart-all-the-things`, `kubectl scale deployment/shutdown-handler` and
+# `--tags Key=x,Value=reboot-test` do not.
+# COMMAND POSITION (fix wave): the first word after the wrappers and the first word of every re-split payload is the
+# program; when it contains `/` it is reduced to its basename (`/bin/systemctl` → `systemctl`, `/usr/sbin/reboot` →
+# `reboot`). A path ANYWHERE ELSE is left alone (`kubectl apply -f /tmp/delete-me.yaml`, `aws s3 cp
+# /tmp/reboot-notes.txt s3://b/` are not refused). The basename is taken BEFORE the wrapper check (follow-up 3), so
+# `/usr/bin/sudo -n /usr/bin/systemctl` and `/usr/bin/env -i …` are wrappers like the bare words.
+# WRAPPERS (_POLICY_WRAPPERS: sudo, env, nohup, time, nice, setsid, command, exec, doas, stdbuf, unshare, nsenter,
+# ionice, busybox) are DROPPED — their word, their options and their `K=V` assignments precede the program — and a
+# wrapper word in command position after another wrapper (`sudo -n nice -n 10 /usr/bin/…`, `sudo -E sudo …`) is itself
+# a wrapper. CARRIERS (_POLICY_CARRIERS: `timeout [opts] DURATION`, `chroot [opts] DIR`, `runuser [-u USER | USER |
+# --]`, `ssh [opts] HOST`, `docker [opts] exec [opts] CONTAINER`) are KEPT with their positionals, and what follows the
+# positionals is a NESTED command with a command position of its own (`ssh host sudo /usr/sbin/reboot`, `timeout 30
+# /sbin/reboot`, `docker exec -it web /sbin/reboot` all hit `reboot`); what follows kubectl's `--` (`kubectl exec pod
+# -- /sbin/reboot`) is the nested case that predates the carriers, and under any other command `--` is just the POSIX
+# marker (`ls -- /sbin/reboot` is untouched).
+# OPTION REGIONS: between a wrapper/carrier word and its command, ITS OWN table (_OPTION_TABLES) decides how each option
+# behaves, consulted before anything generic — the generic boolean list (`--user`, `-f`, `-q`) never applies there. A
+# VALUE-TAKING option (`sudo -u root`, `sudo --user root`, `time -f %e`, `nice -n 10`, `ssh -p 2222`) consumes the
+# next token, which is then an option value: never the command word, ineligible for hyphenated patterns. A GLUED
+# value (`sudo -uroot`, `sudo -nuroot`, `nice -n5`, `time -o/tmp/t`, any `--opt=value`) is self-contained and
+# consumes nothing. A BOOLEAN switch — exact (`sudo -n`, `sudo --login`, `env -i`, `time -p`) or an all-boolean
+# short CLUSTER (`sudo -En`, `env -i0`, `time -pq`, `docker exec -it`, `ssh -46`) — consumes nothing either. An
+# option in neither list is value-taking where the table is complete (sudo, env, time, …: only an invalid option
+# gets there) and boolean where the tool's option surface is open-ended (`others_boolean`: ssh, unshare, nsenter).
+# A purely NUMERIC token (`nice -n -5`, `nice -5`, the obsolete `nice --5` / `nice -+5`, `10`) is never an option:
+# kept, never value-taking, never the command word — unless the region's boolean letters spell it (`env -0`,
+# `ssh -46`) — but it does count as a carrier positional (`timeout 30 …`).
 # A QUOTED PAYLOAD is any post-shlex token that still contains whitespace (`bash -c "systemctl restart nginx"`,
-# `ssh host '…'`, `--parameters commands="systemctl restart nginx"`, `--parameters '{"commands":["…"]}'`); it is
-# re-split the same way (depth-bounded) so its words face the gate like any other tokens. `name="cmd …"` contributes
-# only its VALUE part and JSON structure (`{}[]:,`) inside a payload separates words. Edge punctuation `[{("'` /
-# `]})"',` is stripped from a token before comparison (never from the normalised output).
-# OPTION VALUES are not operations: a token whose ORIGINAL predecessor is a value-taking option (`-`-prefixed, not
-# the bare `-`/`--` markers, no `=`) is ineligible for HYPHENATED pattern tokens, so `--function-name update-inventory`
-# does not hit `aws lambda update-`; bare pattern words keep no adjacency rule (`kubectl --as admin delete pod x`).
-# Tokens produced from an option's VALUE payload keep that flag (all ineligible) — EXCEPT a shell `-c`-family payload
-# (`bash -c`, `sh -lc`, `su -c`) and a positional payload, which are commands in their own right and keep their own
-# flags (the round-4 deviation: taking `-c` payloads as ineligible would re-open the hole for every AWS-style pattern).
-# A KNOWN BOOLEAN flag takes no value, so the token after it stays eligible: `aws ec2 --no-cli-pager
-# modify-security-group-rules` is still gated; a wrapper's OWN boolean switches — short, long or an all-boolean short
-# CLUSTER (`sudo -n`, `sudo --non-interactive`, `sudo -En`, `env -i`, `time -p`: _WRAPPER_BOOLEAN_FLAGS /
-# _WRAPPER_BOOLEAN_CLUSTERS) — count the same way inside that wrapper's option region, so `sudo -n /usr/bin/systemctl`
-# still has its command word basenamed. A wrapper word arriving in COMMAND POSITION (`sudo -n nice -n 10 /usr/bin/…`,
-# `sudo -E sudo …`, `sudo -n env FOO=1 …`) is itself a wrapper and swaps in its own table; only a non-wrapper word is
-# the command. A purely NUMERIC token (`nice -n -5`, `nice -5`, `10`) is never an option: kept, never value-taking,
-# never the command word. NESTED COMMANDS: what follows kubectl's `--` (`kubectl exec pod -- /sbin/reboot`) and the
-# CONTAINER of `docker exec [OPTIONS] CONTAINER COMMAND` is tokenised as a command of its own, so its first word is a
-# command position too (`reboot`). The allowlist only ever ADDS refusals (an eligible token is a
-# superset), never removes one; an unknown flag directly before the operation still reads as value-taking.
-_POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice")
+# `ssh host '…'`, `--parameters commands="systemctl restart nginx"`, `--parameters '{"commands":["…"]}'`) — and so
+# is the value of a `--opt=value` that holds whitespace (`env --split-string='/usr/bin/systemctl restart nginx'`,
+# `--parameters=commands="…"`); it is re-split the same way (depth-bounded) so its words face the gate like any other
+# tokens, with their own command position. `name="cmd …"` contributes only its VALUE part and JSON structure
+# (`{}[]:,`) inside a payload separates words. Edge punctuation `[{("'` / `]})"',` is stripped from a token before
+# comparison (never from the normalised output).
+# OPTION VALUES are not operations: a token consumed by a value-taking option is ineligible for HYPHENATED pattern
+# tokens, so `--function-name update-inventory` does not hit `aws lambda update-`; bare pattern words keep no
+# adjacency rule (`kubectl --as admin delete pod x`). Tokens produced from an option's VALUE payload keep that flag
+# (all ineligible) — EXCEPT a QUOTED `-c`-family payload (`bash -c "…"`, `sh -lc '…'`, `su -c '…'` — after ANY command
+# word, `python -c '…'` included: the round-4 deviation, kept because a false refusal beats a lost one), `env -S`/
+# `--split-string` and su's/runuser's `--command`, and a positional payload, which are commands in their own right
+# and keep their own flags (taking `-c` payloads as ineligible would re-open the hole for every AWS-style pattern).
+# A ONE-WORD `-c` value is a command only when the level's command word or carrier IS a shell (_SHELL_COMMANDS):
+# `sh -c /sbin/reboot` and `kubectl exec pod -- sh -c '/sbin/reboot'` hit `reboot` (command position, basename), while
+# kubectl's `-c side` and ssh's `-c aes` stay plain option values.
+# A KNOWN BOOLEAN flag outside any region (_POLICY_BOOLEAN_FLAGS) takes no value, so the token after it stays
+# eligible: `aws ec2 --no-cli-pager modify-security-group-rules` is still gated. The allowlists only ever ADD
+# refusals (an eligible token is a superset), never remove one; an unknown flag directly before the operation still
+# reads as value-taking.
 _POLICY_RESPLIT_MAX_DEPTH = 3
 # Boolean flags that never consume the next token (exact, case-sensitive: `-a` is not `-A`, `-qy` is not listed).
 # AWS CLI globals first, then the systemctl/kubectl/az/apt-style switches an operator puts before the verb.
+# GENERIC: consulted only outside a wrapper's option region (inside one, the region's table decides).
 _POLICY_BOOLEAN_FLAGS = frozenset({
     "--debug", "--no-cli-pager", "--no-paginate", "--no-verify-ssl", "--no-sign-request",
     "--no-cli-auto-prompt", "--cli-auto-prompt", "--dry-run", "--quiet", "-q", "--yes", "-y", "--force", "-f",
     "--user", "--now", "--all", "-A",
 })
-# A WRAPPER's own boolean switches (exact tokens, short and long), consulted only in that wrapper's option region —
-# the tokens between the wrapper and the next wrapper word or the command word: in `sudo -n /usr/bin/systemctl
-# restart nginx` sudo's `-n` (non-interactive) takes no value, so the path after it IS the command position and is
-# basenamed. Per wrapper on purpose: the generic `-n` stays value-taking (`nice -n 10 …` must keep shielding `10`,
-# also when nice is chained after `sudo -n` — each wrapper word brings its own table), and past the command word `-n`
-# is generic again. `env -u NAME` / `env -C DIR` and `time -o FILE` / `time -f FORMAT` take a value, so they are not
-# listed. "docker exec" is the one non-wrapper region: its switches sit between the sub-command and the CONTAINER.
-_WRAPPER_BOOLEAN_FLAGS: dict[str, frozenset[str]] = {
-    "sudo": frozenset({
-        "-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v", "-P", "-B", "-N",
-        "--non-interactive", "--preserve-env", "--login", "--set-home", "--background", "--reset-timestamp",
-        "--remove-timestamp", "--shell", "--stdin", "--validate", "--askpass", "--bell", "--no-update",
-    }),
-    "env": frozenset({"-i", "-0", "--ignore-environment", "--null"}),
-    "time": frozenset({"-p", "-v", "-a", "-q", "--portability", "--verbose", "--append", "--quiet"}),
-    "docker exec": frozenset({"-i", "-t", "-d", "--interactive", "--tty", "--detach", "--privileged"}),
+
+
+@dataclass(frozen=True)
+class _OptionTable:
+    """How the options of one OPTION REGION behave — a wrapper's (`sudo …`), a carrier's (`ssh … HOST`) or the
+    `docker exec … CONTAINER` sub-command's. Consulted before anything generic while the region is open."""
+
+    value: frozenset[str] = frozenset()    # exact options that take the NEXT token as their value: `-u`, `--user`
+    value_letters: str = ""                # short letters that take a value — glued (`-uroot`) or as the next token (`-u root`)
+    boolean: frozenset[str] = frozenset()  # exact boolean options (the long forms): `--non-interactive`
+    bool_letters: str = ""                 # short letters that take no value, alone or clustered: `-n`, `-En`
+    others_boolean: bool = False           # an option in neither list: boolean (ssh, unshare, nsenter) or value-taking
+    positionals: int = 0                   # carrier positionals kept before the nested command: `timeout DURATION`, `ssh HOST`
+
+
+def _table(value: str = "", value_letters: str = "", boolean: str = "", bool_letters: str = "", *,
+           others_boolean: bool = False, positionals: int = 0) -> _OptionTable:
+    return _OptionTable(frozenset(value.split()), value_letters, frozenset(boolean.split()), bool_letters,
+                        others_boolean, positionals)
+
+
+# Wrappers are DROPPED (word, options and K=V assignments precede the program); carriers are KEPT with their positionals
+# and hand what follows to a nested command. Both are matched on the BASENAME of the command-position word.
+_POLICY_WRAPPERS = ("sudo", "env", "nohup", "time", "nice", "setsid", "command", "exec", "doas", "stdbuf", "unshare",
+                    "nsenter", "ionice", "busybox")
+_POLICY_CARRIERS = ("timeout", "chroot", "runuser", "ssh", "docker")
+# Per region: value-taking options FIRST (sudo's `--user` is a value here although the generic list has it as
+# systemctl's boolean), then the booleans; letters drive the short clusters and glued values. `-w` is a value for
+# unshare (`--wd dir`, required) but boolean for nsenter (`--wd[=dir]`, optional: as a separate token it takes
+# nothing) — the tables follow each tool's own getopt string, not a shared shape.
+_OPTION_TABLES: dict[str, _OptionTable] = {
+    "sudo": _table(
+        value="-u --user -g --group -C --close-from -D --chdir -p --prompt -r --role -t --type -T --command-timeout "
+              "-U --other-user -R --chroot -h --host",
+        value_letters="ugCDprtTURh",
+        boolean="--non-interactive --preserve-env --login --set-home --background --reset-timestamp --remove-timestamp "
+                "--shell --stdin --validate --askpass --bell --no-update",
+        bool_letters="nEiHbkKsSvABNP",
+    ),
+    "env": _table(
+        value="-u --unset -C --chdir -S --split-string -a --argv0", value_letters="uCSa",
+        boolean="--ignore-environment --null --debug --default-signal --ignore-signal --block-signal "
+                "--list-signal-handling",
+        bool_letters="iv0",
+    ),
+    "time": _table(value="-o --output -f --format", value_letters="of",
+                   boolean="--portability --verbose --append --quiet", bool_letters="pvaq"),
+    "nice": _table(value="-n --adjustment", value_letters="n"),
+    "nohup": _table(),
+    "setsid": _table(boolean="--ctty --fork --wait", bool_letters="cfw"),
+    "command": _table(bool_letters="pvV"),
+    "exec": _table(value="-a", value_letters="a", bool_letters="cl"),
+    "doas": _table(value="-u -C", value_letters="uC", bool_letters="Lns"),
+    "stdbuf": _table(value="-i -o -e --input --output --error", value_letters="ioe"),
+    "ionice": _table(value="-c --class -n --classdata -p --pid -P --pgid -u --uid", value_letters="cnpPu",
+                     boolean="--ignore", bool_letters="t"),
+    "unshare": _table(
+        value="-S --setuid -G --setgid -R --root -w --wd -l --load-interp --map-user --map-users --map-group "
+              "--map-groups --propagation --setgroups --monotonic --boottime",
+        value_letters="SGRwl", bool_letters="muinpUCTfrc", others_boolean=True,
+    ),
+    "nsenter": _table(value="-t --target -S --setuid -G --setgid", value_letters="tSG",
+                      bool_letters="amuinpUCTrwWeFckZ", others_boolean=True),
+    "busybox": _table(),
+    "timeout": _table(value="-k --kill-after -s --signal", value_letters="ks",
+                      boolean="--preserve-status --foreground --verbose", bool_letters="v", positionals=1),
+    "chroot": _table(value="--userspec --groups", boolean="--skip-chdir", positionals=1),
+    "runuser": _table(value="-u --user -g --group -G --supp-group -c --command -s --shell -w --whitelist-environment",
+                      value_letters="ugGcsw", boolean="--login --preserve-environment --pty --fast",
+                      bool_letters="lmpPf", positionals=1),
+    "ssh": _table(value="-p -l -i -o -F -J -L -R -D -W -b -c -m -e -E -B -Q -S -w -I -O -P",
+                  value_letters="plioFJLRDWbcmeEBQSwIOP", bool_letters="46AaCfGgKkMNnqsTtVvXxYy",
+                  others_boolean=True, positionals=1),
+    "docker": _table(value="-H --host -l --log-level -c --context --config --tlscacert --tlscert --tlskey",
+                     value_letters="Hlc", boolean="--debug --tls --tlsverify", bool_letters="D", positionals=1),
+    "docker exec": _table(value="-u --user -w --workdir -e --env --env-file --detach-keys", value_letters="uwe",
+                          boolean="--interactive --tty --detach --privileged", bool_letters="itd", positionals=1),
 }
-# Short-switch CLUSTERS that are still all-boolean (`sudo -En`, `sudo -Hn`, `docker exec -it`). A letter that takes a
-# value (`sudo -nu deploy`: `u`) makes the whole token value-taking, as before.
-_WRAPPER_BOOLEAN_CLUSTERS: dict[str, re.Pattern[str]] = {
-    "sudo": re.compile(r"^-[nEiHbkKsSvABNP]+$"),
-    "docker exec": re.compile(r"^-[itd]+$"),
-}
-# A purely numeric token (`-5`, `+5`, `10`) is never an option: `nice -n -5 …` and `nice -5 …` keep the program path.
-_NUMERIC_TOKEN = re.compile(r"^[+-]?\d+$")
+# A purely numeric token (`-5`, `+5`, `10`, nice's obsolete `--5` / `-+5`) is never an option: `nice -n -5 …`,
+# `nice -5 …` and `nice --5 …` keep the program path.
+_NUMERIC_TOKEN = re.compile(r"^-?[+-]?\d+$")
 # env-style `NAME=value` assignments precede the program (`env FOO=1 aws …`, `FOO=1 aws …`): never the command word.
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # `name="cmd …"` payload: only the VALUE part is re-split (`commands="systemctl restart nginx"`).
 _NAMED_PAYLOAD = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*=(.*)$", re.S)
-# A shell's `-c` family (`bash -c`, `sh -lc`, `su -c`, `zsh -ic`): the option VALUE is a command in its own right.
+# A shell's `-c` family (`bash -c`, `sh -lc`, `su -c`, `zsh -ic`): the option VALUE is a command in its own right. A
+# QUOTED value counts after any command word (round 4, kept); a ONE-WORD value only when the level's command word (or
+# carrier) IS a shell (_SHELL_COMMANDS) — kubectl's `-c side` is a container, ssh's `-c aes` a cipher.
 _SHELL_PAYLOAD_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+_SHELL_COMMANDS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "su", "runuser"})
+# Other options whose VALUE is a command: `env -S '…'` / `--split-string='…'` runs the split string; `--command` is
+# the long form of su's / runuser's `-c`.
+_COMMAND_PAYLOAD_FLAGS: dict[str, frozenset[str]] = {
+    "env": frozenset({"-S", "--split-string"}), "su": frozenset({"--command"}), "runuser": frozenset({"--command"}),
+}
 # JSON structure inside a payload separates words: '{"commands":["systemctl restart nginx"]}' → commands, systemctl, …
 # (quotes are left to shlex, which removes them as quoting; `,` so that '["reboot","now"]' cannot glue into one word).
 _PAYLOAD_JSON_PUNCT = re.compile(r"[{}\[\]:,]")
@@ -171,48 +256,98 @@ def _is_value_taking_option(token: str) -> bool:
     positionals follow them), not `--opt=value` (self-contained) and not a known boolean flag
     (_POLICY_BOOLEAN_FLAGS: `--no-cli-pager`, `--dry-run`, `-q`, …), not a purely numeric token (`-5` is a value,
     _NUMERIC_TOKEN). Whether any OTHER flag really takes a value is CLI-specific, so its next token is treated as
-    a value — the direction the lead ruled for hyphenated patterns."""
+    a value — the direction the lead ruled for hyphenated patterns. This is the GENERIC rule, i.e. the rule outside
+    any wrapper's option region; inside one, _option_consumes_next reads the region's table instead."""
     return (token.startswith("-") and token not in ("-", "--") and "=" not in token
             and token not in _POLICY_BOOLEAN_FLAGS and not _NUMERIC_TOKEN.match(token))
 
 
-def _is_wrapper_boolean(region: str, token: str) -> bool:
-    """True when `token` is a boolean switch of the option region `region` — an exact table entry (`sudo -n`,
-    `sudo --non-interactive`, `env -i`, `time -p`) or an all-boolean short cluster (`sudo -En`, `docker exec -it`).
-    A region without a table (`nice`, `nohup`) has no booleans: its switches stay generic (value-taking)."""
-    if token in _WRAPPER_BOOLEAN_FLAGS.get(region, frozenset()):
+def _option_consumes_next(region: Optional[str], token: str) -> bool:
+    """True when the option `token` takes the NEXT token as its value — that token is then an option value: never
+    the command word, ineligible for hyphenated patterns. Outside a region this is _is_value_taking_option. Inside
+    one the region's table decides, value-taking entries first: `sudo -u`/`--user`, `time -f`, `nice -n` consume;
+    `sudo -n`, `sudo -En`, `env -i0`, `ssh -46` are boolean; a glued value (`sudo -uroot`, `sudo -nuroot`, `nice -n5`,
+    `time -o/tmp/t`) is self-contained; a cluster ENDING in a value letter (`sudo -nu root`) consumes. An option in
+    neither list follows the region's default (value-taking, or boolean where `others_boolean`)."""
+    if not token.startswith("-") or token in ("-", "--") or "=" in token or _NUMERIC_TOKEN.match(token):
+        return False
+    table = _OPTION_TABLES.get(region) if region else None
+    if table is None:
+        return _is_value_taking_option(token)   # no region (or no table for it): the ONE generic rule, stated there
+    if token in table.value:
         return True
-    cluster = _WRAPPER_BOOLEAN_CLUSTERS.get(region)
-    return cluster is not None and cluster.match(token) is not None
+    if token in table.boolean:
+        return False
+    if token.startswith("--"):
+        return not table.others_boolean                      # an unlisted long option
+    letters = token[1:]
+    for idx, letter in enumerate(letters):
+        if letter in table.value_letters:
+            return idx == len(letters) - 1                   # `-u`, `-nu`: the next token is the value; `-uroot`: glued
+        if letter not in table.bool_letters:
+            return len(letters) == 1 and not table.others_boolean   # unknown letter: the default alone, self-contained in a cluster
+    return False                                             # all boolean: `-n`, `-En`, `-it`, `-46`
+
+
+def _is_numeric_value(region: Optional[str], token: str) -> bool:
+    """A purely numeric `-`-token is a VALUE to keep (`nice -5`, `nice --5`, `nice -+5`) unless the region's boolean
+    letters spell it (`env -0`, `ssh -46`), in which case it is an option like any other."""
+    if not _NUMERIC_TOKEN.match(token):
+        return False
+    table = _OPTION_TABLES.get(region) if region else None
+    letters = token[1:]
+    return not (table and letters and all(letter in table.bool_letters for letter in letters))
+
+
+def _is_command_payload_flag(context: Optional[str], flag: Optional[str], quoted: bool) -> bool:
+    """True when `flag` — the option right before a payload — makes that payload a COMMAND of its own. A `-c`-family
+    flag (`bash -c`, `sh -lc`, `su -c`, `runuser -c`) does so for a QUOTED payload after any command word (the round-4
+    deviation, kept: `python -c 'aws ec2 modify-…'` stays a refusal) and for a ONE-WORD payload only when `context`
+    — the level's command word or carrier — is a shell (`sh -c /sbin/reboot`; kubectl's `-c side` and ssh's `-c aes`
+    are plain values). `env -S`/`--split-string` and su's/runuser's `--command` do so either way. A positional
+    payload never comes through here (it is a command anyway)."""
+    if flag is None:
+        return False
+    if _SHELL_PAYLOAD_FLAG.match(flag):
+        return quoted or context in _SHELL_COMMANDS
+    return context is not None and flag in _COMMAND_PAYLOAD_FLAGS.get(context, frozenset())
 
 
 def _normalize_for_policy(command: str, _depth: int = 0) -> list[tuple[str, bool]]:
     """Lower-cased `(token, eligible_for_prefix)` pairs with wrappers and option tokens removed.
 
-    shlex tokens (str.split when the quoting is unbalanced); leading sudo/env/nohup/time/nice dropped — chained too:
-    a wrapper word in command position after another wrapper's switches (`sudo -n nice -n 10 …`, `sudo -E sudo …`)
-    is dropped as a wrapper with its own table; every non-numeric token starting with '-' dropped (a wrapper's own
-    boolean switches — `sudo -n`, `sudo --login`, `sudo -En`, `env -i`, `time -p`: _WRAPPER_BOOLEAN_FLAGS /
-    _WRAPPER_BOOLEAN_CLUSTERS — take no value, so `sudo -n /usr/bin/systemctl` keeps its command position; a purely
-    numeric `-5` is kept and is never an option). Option VALUES are kept as ordinary tokens — a kept
-    value can only add a token the ordered match must skip over — but they are flagged: `eligible_for_prefix` is
-    False when the ORIGINAL predecessor is a value-taking option (_is_value_taking_option — a known boolean flag such
-    as `--no-cli-pager` is not one), and only hyphenated pattern tokens consult the flag.
+    shlex tokens (str.split when the quoting is unbalanced). One LEVEL is one command: a WRAPPER at its head
+    (_POLICY_WRAPPERS — sudo/env/nohup/time/nice/setsid/command/exec/doas/stdbuf/unshare/nsenter/ionice/busybox, by
+    bare name or by path) is dropped with its options, and its command is a level of its own — so chained wrappers
+    (`sudo -n nice -n 10 …`, `sudo -E sudo …`) each bring their own option table; a CARRIER (_POLICY_CARRIERS —
+    `timeout DURATION`, `chroot DIR`, `runuser [-u USER | USER | --]`, `ssh [opts] HOST`, `docker [opts] exec [opts]
+    CONTAINER`) is kept with its positionals and what follows them is a nested command. Every non-numeric token
+    starting with '-' is dropped; inside a wrapper's/carrier's option region ITS table (_OPTION_TABLES) says which
+    options consume the next token (`sudo -u root`, `sudo --user root`, `time -f %e`, `nice -n 10`), which are
+    boolean (`sudo -n`, `sudo -En`, `env -i0`, `ssh -46`) and which carry a glued value (`sudo -uroot`, `nice -n5`);
+    a purely numeric `-5`/`--5`/`-+5` is kept and is never an option. Option VALUES are kept as ordinary tokens — a
+    kept value can only add a token the ordered match must skip over — but they are flagged: `eligible_for_prefix`
+    is False when the ORIGINAL predecessor consumed the token as its value (_option_consumes_next; outside a region
+    the generic _is_value_taking_option, where a known boolean flag such as `--no-cli-pager` is not one), and only
+    hyphenated pattern tokens consult the flag.
 
-    The COMMAND POSITION — the first kept token that is neither an option value nor an env-style `K=V` assignment —
-    is reduced to its basename when it contains `/` (`/bin/systemctl` → `systemctl`); paths elsewhere stay as they
-    are (`kubectl apply -f /tmp/delete-me.yaml`).
+    The COMMAND POSITION — the first kept token of a level that is neither an option value nor an env-style `K=V`
+    assignment nor a number — is reduced to its basename when it contains `/` (`/bin/systemctl` → `systemctl`,
+    `/usr/bin/sudo` → `sudo`, which is then the wrapper); paths elsewhere stay as they are (`kubectl apply -f
+    /tmp/delete-me.yaml`, `chroot /mnt …`'s DIR).
 
     A kept token that still contains whitespace was a quoted payload (`bash -c "systemctl restart nginx"`,
-    `ssh host "sudo …"`, `--parameters commands="…"`); see _payload_tokens — it is normalised recursively with the
-    same rules and spliced in place, so the words inside face the gate too, with their own command position. The
-    wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper
-    payloads get a flat str.split), and nothing here raises on odd input.
+    `ssh host "sudo …"`, `--parameters commands="…"`), and so is the value of a `--opt=value` holding whitespace
+    (`env --split-string='…'`); see _payload_tokens — it is normalised recursively with the same rules and spliced in
+    place, so the words inside face the gate too, with their own command position. A SHELL's `-c` value is a command
+    of its own even when it is one word (`sh -c /sbin/reboot`; a quoted `-c` value is one after any command word, as
+    before); the wrapper's own `-c`/`-lc` went with the option drop. Recursion is bounded at _POLICY_RESPLIT_MAX_DEPTH (deeper payloads get a flat str.split), and nothing here
+    raises on odd input.
 
     NESTED COMMANDS are tokenised the same way in place: everything after kubectl's `--` (`kubectl exec pod --
-    /sbin/reboot`) and everything after the CONTAINER of `docker exec [OPTIONS] CONTAINER …` has its own command
-    position, so `/sbin/reboot` there is `reboot`; under any other command `--` is just the POSIX marker
-    (`ls -- /sbin/reboot` is untouched).
+    /sbin/reboot`), after a carrier's positionals (`ssh host …`, `timeout 30 …`, `docker exec … CONTAINER …`) and
+    after `runuser … --` has its own command position, so `/sbin/reboot` there is `reboot`; under any other command
+    `--` is just the POSIX marker (`ls -- /sbin/reboot` is untouched).
     """
     try:
         tokens = shlex.split(command or "")
@@ -228,63 +363,102 @@ def _basename(token: str) -> str:
 
 def _policy_tokens(tokens: list[str], depth: int) -> list[tuple[str, bool]]:
     out: list[tuple[str, bool]] = []
-    # `region` names the option region whose boolean table applies (_is_wrapper_boolean): the wrapper word before the
-    # command word — a wrapper word arriving in command position (`sudo -n nice …`, `sudo -E sudo …`) is consumed as a
-    # wrapper and swaps in ITS region, never taken as the command — or "docker exec" between that sub-command and its
-    # CONTAINER. None otherwise, so past the command word a generic `-n` is value-taking again.
+    # One LEVEL = one command: [wrapper | carrier | program] [options…] … A wrapper or carrier at the head opens its
+    # option REGION (`region`: the _OPTION_TABLES key that decides how options behave); the region ends at the
+    # wrapper's command, which is a level of its own (recursion), so chained wrappers (`sudo -n nice -n 10 …`) and a
+    # carrier's payload (`ssh host sudo …`) each get a fresh command position. `positionals` counts a carrier's kept
+    # positionals still to come (timeout DURATION, ssh HOST, docker's sub-command, docker exec's CONTAINER);
+    # `command_word` is this level's program once seen (None inside a region: the program is still ahead).
     region: Optional[str] = None
-    command_seen = False
+    positionals = 0
+    head_done = False
     command_word: Optional[str] = None
-    docker_stage: Optional[str] = None  # "subcommand" right after `docker`; "container" inside `docker exec [OPTIONS] …`
     for i, token in enumerate(tokens):
-        if token == "--" and command_word == "kubectl":
-            # `kubectl exec|run|debug … -- COMMAND`: the remainder is a NESTED command with its own command position.
-            out.extend(_policy_tokens(tokens[i + 1:], depth))
-            break
-        if token.startswith("-") and not _NUMERIC_TOKEN.match(token):
-            continue
         prev = tokens[i - 1] if i > 0 else None
-        eligible = (prev is None or not _is_value_taking_option(prev)
-                    or (region is not None and _is_wrapper_boolean(region, prev)))
-        if any(ch.isspace() for ch in token):
-            if not command_seen:
-                command_seen, region = True, None  # a quoted payload holds its own command word (found at its own level)
-            out.extend(_payload_tokens(token, depth, prev, positional=eligible))
-            continue
-        word = token.lower()
-        if not command_seen and eligible and not _ENV_ASSIGNMENT.match(token) and not _NUMERIC_TOKEN.match(token):
-            if word in _POLICY_WRAPPERS:
-                region = word  # chained wrapper: its option region follows, the command word is still ahead
-                continue
-            command_seen, region = True, None
-            if "/" in word:
-                word = _basename(word)  # command position only: /usr/sbin/reboot → reboot
-            command_word = word
-            docker_stage = "subcommand" if word == "docker" else None
-        elif docker_stage is not None and eligible:
-            if docker_stage == "subcommand":
-                # `docker exec [OPTIONS] CONTAINER COMMAND…`: the sub-command's own switches (-i/-t/-d, -it) are boolean.
-                docker_stage, region = ("container", "docker exec") if word == "exec" else (None, None)
-            else:
-                out.append((word, eligible))  # the CONTAINER; what follows is a NESTED command with its own command position
+        eligible = prev is None or not _option_consumes_next(region, prev)
+        if token == "--":
+            if command_word == "kubectl" or (region is not None and positionals == 0):
+                # `kubectl exec|run|debug … -- COMMAND`, `runuser -u root -- COMMAND`, `sudo -- COMMAND`: the remainder
+                # is a NESTED command with its own command position.
                 out.extend(_policy_tokens(tokens[i + 1:], depth))
                 break
-        out.append((word, eligible))
+            continue  # POSIX end-of-options marker (`ls -- /sbin/reboot`, `ssh -- host …`): nothing to keep
+        if token.startswith("-") and not _is_numeric_value(region, token):
+            name, _, value = token.partition("=")
+            if any(ch.isspace() for ch in value):
+                # `--split-string='/usr/bin/systemctl restart nginx'`, `--parameters=commands="…"`: the value is a payload
+                out.extend(_payload_tokens(value, depth, _is_command_payload_flag(region or command_word, name, True)))
+            if region == "runuser" and (name == "--user" or (not name.startswith("--") and "u" in name)):
+                positionals = 0  # `runuser -u USER COMMAND`: the user is an option value, no positional precedes the command
+            continue
+        word = token.lower()
+        quoted = any(ch.isspace() for ch in token)
+        if not eligible:
+            # an option's VALUE: never the head, a positional or the command — kept, ineligible for hyphenated patterns;
+            # a SHELL's `-c` value (`sh -c "…"`, one-word `sh -c /sbin/reboot`) or `env -S '…'` is a command of its own
+            if _is_command_payload_flag(region or command_word, prev, quoted):
+                out.extend(_payload_tokens(token, depth, True))
+            elif quoted:
+                out.extend(_payload_tokens(token, depth, False))  # `--parameters commands="…"`, `-e "A B"`
+            else:
+                out.append((word, False))
+            continue
+        if region is not None and positionals > 0:
+            # a carrier positional (DURATION, DIR, USER, HOST, sub-command, CONTAINER): kept as it is — a path here is not a program
+            positionals -= 1
+            if quoted:
+                out.extend(_payload_tokens(token, depth, True))
+                continue
+            out.append((word, True))
+            if region == "docker":  # the sub-command: only `exec` carries a command (after its CONTAINER)
+                region, positionals = ("docker exec", 1) if word == "exec" else (None, 0)
+            continue
+        if region is not None or not head_done:
+            # a HEAD position: the wrapper's/carrier's command, or this level's own head
+            if _ENV_ASSIGNMENT.match(token):
+                out.extend(_payload_tokens(token, depth, True) if quoted else [(word, True)])  # `env FOO=1 …`, `FOO=1 aws …`
+                continue
+            if not quoted and _NUMERIC_TOKEN.match(token):
+                out.append((word, True))  # `nice -5 …`, `nice --5 …`: a number precedes the program
+                continue
+            if region is not None:
+                out.extend(_policy_tokens(tokens[i:], depth))  # the wrapper's / carrier's command: a level of its own
+                break
+            head_done = True
+            if quoted:
+                out.extend(_payload_tokens(token, depth, True))  # this level IS a quoted payload (`ssh host '…'`)
+                continue
+            if "/" in word:
+                word = _basename(word)  # command position only: /usr/sbin/reboot → reboot, /usr/bin/sudo → sudo
+            if word in _POLICY_WRAPPERS:
+                region = word  # dropped; its option region follows, the command is still ahead
+                continue
+            out.append((word, True))
+            if word in _POLICY_CARRIERS:
+                region, positionals = word, _OPTION_TABLES[word].positionals
+            else:
+                command_word = word
+            continue
+        if quoted:
+            out.extend(_payload_tokens(token, depth, True))  # a positional payload after the command word (`echo "…"`)
+        else:
+            out.append((word, True))
     return out
 
 
-def _payload_tokens(payload: str, depth: int, prev: Optional[str], positional: bool) -> list[tuple[str, bool]]:
-    """Tokens of a quoted payload — a post-shlex token that still contains whitespace.
+def _payload_tokens(payload: str, depth: int, as_command: bool) -> list[tuple[str, bool]]:
+    """Tokens of a quoted payload — a post-shlex token that still contains whitespace, the whitespace-holding value
+    of a `--opt=value`, or a shell's one-word `-c` value.
 
     `name="cmd …"` contributes only its value part; JSON structure (`{}[]:,`) inside the body separates words
     (quotes are left to shlex). The body is normalised recursively (depth-bounded; a flat str.split past the bound),
     so its words face the gate like any other tokens and its first word is a command position (basename applies).
-    Eligibility for HYPHENATED patterns: a positional payload (`ssh host '…'`) or a shell `-c`-family value
-    (`bash -c '…'`, `su -c '…'`) is a command in its own right and keeps its own flags; the value of any OTHER option
-    (`--parameters`, `--description`, `--tags`) keeps the option-value flag — every token it yields is ineligible
-    (bare pattern words still match, so `--description "reboot test"` stays a deliberate refusal).
+    Eligibility for HYPHENATED patterns: `as_command` — a positional payload (`ssh host '…'`), a `-c`-family value
+    (`bash -c '…'`, `su -c '…'`; one-word only for a shell, see _is_command_payload_flag) or `env -S '…'` is a command
+    in its own right and keeps its own flags; the value
+    of any OTHER option (`--parameters`, `--description`, `--tags`) keeps the option-value flag — every token it yields
+    is ineligible (bare pattern words still match, so `--description "reboot test"` stays a deliberate refusal).
     """
-    as_command = positional or (prev is not None and _SHELL_PAYLOAD_FLAG.match(prev) is not None)
     m = _NAMED_PAYLOAD.match(payload)
     body = _PAYLOAD_JSON_PUNCT.sub(" ", m.group(1) if m else payload)
     if depth < _POLICY_RESPLIT_MAX_DEPTH:

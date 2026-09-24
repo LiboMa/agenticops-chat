@@ -750,13 +750,13 @@ class TestChangeRequiredFixWave:
         after them IS the command position and is basenamed. Per wrapper on purpose: the generic `-n` stays
         value-taking (`nice -n 10` shields `10`), `sudo -u deploy` still shields `deploy`, and the table applies only
         in sudo's own option region — a `-n` after the command word is generic again."""
-        from agenticops.services.policy_engine import (
-            _WRAPPER_BOOLEAN_FLAGS, _is_value_taking_option, _normalize_for_policy,
-        )
-        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] >= frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"})
-        assert set(_WRAPPER_BOOLEAN_FLAGS) == {"sudo", "env", "time", "docker exec"}   # follow-up 2: full tables pinned below
+        from agenticops.services.policy_engine import _OPTION_TABLES, _is_value_taking_option, _normalize_for_policy
+        sudo = _OPTION_TABLES["sudo"]
+        sudo_booleans = sudo.boolean | {f"-{letter}" for letter in sudo.bool_letters}
+        assert sudo_booleans >= frozenset({"-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v"})
+        assert {"sudo", "env", "time", "docker exec"} <= set(_OPTION_TABLES)   # follow-up 2/3: full tables pinned below
         assert _is_value_taking_option("-n") is True and _is_value_taking_option("-E") is True   # generic rule unchanged
-        for flag in sorted(_WRAPPER_BOOLEAN_FLAGS["sudo"]):                                       # short AND long forms
+        for flag in sorted(sudo_booleans):                                                        # short AND long forms
             assert _normalize_for_policy(f"sudo {flag} /usr/bin/systemctl restart nginx") == \
                    [("systemctl", True), ("restart", True), ("nginx", True)], flag
         assert _normalize_for_policy("sudo -u deploy -n /usr/bin/systemctl restart nginx") == \
@@ -845,28 +845,42 @@ class TestChangeRequiredFixWave:
         boolean inside its region; a cluster holding a value-taking letter (`-nu`) is not; a numeric token is kept,
         is never value-taking and never the command word."""
         from agenticops.services.policy_engine import (
-            _WRAPPER_BOOLEAN_CLUSTERS, _WRAPPER_BOOLEAN_FLAGS, _is_value_taking_option, _is_wrapper_boolean,
-            _normalize_for_policy,
+            _OPTION_TABLES, _is_value_taking_option, _normalize_for_policy, _option_consumes_next,
         )
-        assert _WRAPPER_BOOLEAN_FLAGS["sudo"] == frozenset({
-            "-n", "-E", "-i", "-H", "-b", "-k", "-K", "-s", "-S", "-v", "-P", "-B", "-N",
+        sudo, env, time_, docker_exec = (_OPTION_TABLES[region] for region in ("sudo", "env", "time", "docker exec"))
+        assert set(sudo.bool_letters) == set("nEiHbkKsSvABNP") and sudo.boolean == frozenset({
             "--non-interactive", "--preserve-env", "--login", "--set-home", "--background", "--reset-timestamp",
             "--remove-timestamp", "--shell", "--stdin", "--validate", "--askpass", "--bell", "--no-update",
         })
-        assert _WRAPPER_BOOLEAN_FLAGS["env"] == frozenset({"-i", "-0", "--ignore-environment", "--null"})
-        assert _WRAPPER_BOOLEAN_FLAGS["time"] == frozenset({
-            "-p", "-v", "-a", "-q", "--portability", "--verbose", "--append", "--quiet",
+        assert set(sudo.value_letters) == set("ugCDprtTURh") and sudo.value == frozenset({
+            "-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-p", "--prompt", "-r", "--role",
+            "-t", "--type", "-T", "--command-timeout", "-U", "--other-user", "-R", "--chroot", "-h", "--host",
         })
-        assert _WRAPPER_BOOLEAN_FLAGS["docker exec"] == frozenset({
-            "-i", "-t", "-d", "--interactive", "--tty", "--detach", "--privileged",
+        assert set(env.bool_letters) == set("iv0") and env.boolean == frozenset({
+            "--ignore-environment", "--null", "--debug", "--default-signal", "--ignore-signal", "--block-signal",
+            "--list-signal-handling",
         })
-        assert set(_WRAPPER_BOOLEAN_CLUSTERS) == {"sudo", "docker exec"}
-        for cluster in ("-En", "-nE", "-Hn", "-EHn", "-A"):
-            assert _is_wrapper_boolean("sudo", cluster) is True, cluster
-        for not_boolean in ("-nu", "-u", "-g", "-nEu", "--user", "-"):
-            assert _is_wrapper_boolean("sudo", not_boolean) is False, not_boolean
-        assert _is_wrapper_boolean("docker exec", "-it") is True and _is_wrapper_boolean("docker exec", "-u") is False
-        assert _is_wrapper_boolean("nice", "-n") is False                                  # no table: generic, value-taking
+        assert set(env.value_letters) == set("uCSa") and env.value == frozenset({
+            "-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-a", "--argv0",
+        })
+        assert set(time_.bool_letters) == set("pvaq") and time_.boolean == frozenset({
+            "--portability", "--verbose", "--append", "--quiet",
+        })
+        assert set(time_.value_letters) == set("of") and time_.value == frozenset({"-o", "--output", "-f", "--format"})
+        assert set(docker_exec.bool_letters) == set("itd") and docker_exec.boolean == frozenset({
+            "--interactive", "--tty", "--detach", "--privileged",
+        })
+        assert set(docker_exec.value_letters) == set("uwe") and docker_exec.value == frozenset({
+            "-u", "--user", "-w", "--workdir", "-e", "--env", "--env-file", "--detach-keys",
+        })
+        assert _OPTION_TABLES["nice"].bool_letters == "" and set(_OPTION_TABLES["nice"].value_letters) == {"n"}
+        for boolean in ("-En", "-nE", "-Hn", "-EHn", "-A"):
+            assert _option_consumes_next("sudo", boolean) is False, boolean   # all-boolean cluster: consumes nothing
+        for value_taking in ("-nu", "-u", "-g", "-nEu", "--user"):
+            assert _option_consumes_next("sudo", value_taking) is True, value_taking  # ends in a value letter
+        assert _option_consumes_next("sudo", "-") is False                   # a POSIX marker is not an option
+        assert _option_consumes_next("docker exec", "-it") is False and _option_consumes_next("docker exec", "-u") is True
+        assert _option_consumes_next("nice", "-n") is True                   # value letters only: `nice -n 10` consumes
         assert _is_value_taking_option("-5") is False and _is_value_taking_option("-n") is True
         assert _normalize_for_policy("sudo -En /usr/bin/systemctl restart nginx") == \
                [("systemctl", True), ("restart", True), ("nginx", True)]
@@ -926,6 +940,210 @@ class TestChangeRequiredFixWave:
         from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
         assert isinstance(_normalize_for_policy(command), list)
         assert get_policy_engine(reload=True).change_required_match(command) is None
+
+
+class TestChangeRequiredWrapperEscapes:
+    """Follow-up 3 — the re-reviewer's remaining wrapper/option escapes, closed in `_policy_tokens` and its tables:
+    (1) inside a wrapper's option region ITS table is consulted first (value-taking entries, then booleans) and the
+    generic boolean list (`--user`, `-f`) never applies there; (2) the basename is taken BEFORE the wrapper check, so
+    `/usr/bin/sudo` is a wrapper; (3) a ONE-WORD `-c` payload of a shell (`sh -c /sbin/reboot`) is a command of its
+    own (command position, basename) — scoped to shell command words, while a QUOTED `-c` payload keeps the round-4
+    behaviour (a command after any command word: no refusal lost); (4) a GLUED short-option value
+    (`sudo -uroot`, `sudo -nuroot`, `nice -n5`, `time -o/tmp/t`) is self-contained and consumes nothing; (5) the
+    obsolete `nice --5` / `nice -+5` forms are numeric; (6) env/time/docker table gaps, and a `--opt="a b"` value is
+    inspected as a payload; (7) more wrappers (`setsid command exec doas stdbuf unshare nsenter ionice busybox`) and
+    the CARRIERS `timeout DURATION`, `chroot DIR`, `runuser [-u USER | USER | --]`, `ssh [opts] HOST`, whose remainder
+    is a nested command with its own command position (like `kubectl exec … --` / `docker exec … CONTAINER`)."""
+
+    @pytest.mark.parametrize("command,pattern", [
+        # (1) per-region value tables first — `--user` and `-f` are booleans in the GENERIC list, values here
+        ("sudo --user root /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -u root -n /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("docker exec --user root c1 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("time -f %e /bin/systemctl restart nginx", "systemctl restart"),
+        # (2) wrappers by path
+        ("/usr/bin/sudo -n /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("/usr/bin/env -i /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("/usr/bin/time -p /bin/systemctl restart nginx", "systemctl restart"),
+        ("/usr/bin/nice -n 5 /sbin/reboot", "reboot"),
+        # (3) one-word shell payloads
+        ("kubectl exec pod -- sh -c '/sbin/reboot'", "reboot"),
+        ("sh -c /sbin/reboot", "reboot"),
+        ("bash -c '/usr/sbin/reboot'", "reboot"),
+        ("sh -c 'systemctl restart nginx'", "systemctl restart"),                       # kept
+        ("python -c 'aws ec2 modify-security-group-rules'", "aws ec2 modify-security-group"),   # kept: a QUOTED -c payload after any command
+        ("su -c /sbin/reboot", "reboot"),
+        ("runuser root -c '/sbin/reboot'", "reboot"),
+        ("busybox sh -c '/sbin/reboot'", "reboot"),
+        # (4) glued short-option values
+        ("sudo -uroot /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("sudo -nuroot /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("env -uHOME /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("time -o/tmp/t /bin/systemctl restart nginx", "systemctl restart"),
+        ("nice -n5 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("docker exec -uroot c1 /sbin/reboot", "reboot"),
+        # (5) nice's obsolete forms
+        ("nice --5 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("nice -+5 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        # (6) table gaps and `--opt="a b"` payloads
+        ("env -v /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("env -i0 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("time -pq /bin/systemctl restart nginx", "systemctl restart"),
+        ("docker -D exec c1 /sbin/reboot", "reboot"),
+        ("env --split-string='/usr/bin/systemctl restart nginx'", "systemctl restart"),
+        ("env -S '/usr/bin/systemctl restart nginx'", "systemctl restart"),
+        # (7) wrappers and carriers
+        ("timeout 30 /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("timeout -k 5 30s /sbin/reboot", "reboot"),
+        ("setsid /sbin/reboot", "reboot"),
+        ("chroot /mnt /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("runuser -u root -- /sbin/reboot", "reboot"),
+        ("runuser -u root /sbin/reboot", "reboot"),
+        ("ssh host /sbin/reboot", "reboot"),
+        ("ssh -t host /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("ssh -p 2222 -l deploy host sudo /usr/sbin/reboot", "reboot"),
+        ("ssh -46 host /sbin/reboot", "reboot"),
+        ("kubectl exec pod -- timeout 30 /sbin/reboot", "reboot"),
+        ("sudo -n timeout 30 /sbin/reboot", "reboot"),
+        ("doas -u root /sbin/reboot", "reboot"),
+        ("exec /sbin/reboot", "reboot"),
+        ("command -p /sbin/reboot", "reboot"),
+        ("stdbuf -oL /sbin/reboot", "reboot"),
+        ("ionice -c3 /sbin/reboot", "reboot"),
+        ("unshare -n /sbin/reboot", "reboot"),
+        ("unshare --mount-proc -p -f /usr/bin/systemctl restart nginx", "systemctl restart"),
+        ("nsenter -t 1 -m -u /sbin/reboot", "reboot"),
+        ("nsenter -t 1 -m -w /usr/bin/systemctl restart nginx", "systemctl restart"),   # nsenter's -w[=dir]: optional value → boolean
+        ("docker exec -it web sh -c /sbin/reboot", "reboot"),
+    ])
+    def test_refused(self, command, pattern):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) == pattern
+
+    @pytest.mark.parametrize("command", [
+        "sudo --user root /usr/bin/ls",
+        "docker exec --user root c1 cat /etc/hosts",
+        "/usr/bin/sudo -n /usr/bin/ls",
+        "kubectl exec pod -c side -- ls",                        # kubectl's -c is a container, not a shell's payload
+        "sh -c ls",
+        "sudo -uroot /usr/bin/ls",
+        "docker exec -uroot c1 ls",
+        "nice --5 /usr/bin/ls",
+        "docker -D ps",
+        "docker -H tcp://x:2375 ps",
+        "env -v /usr/bin/ls",
+        "env -S '/usr/bin/ls -la'",
+        "timeout 30 /usr/bin/ls",
+        "timeout --signal=KILL 30 /usr/bin/ls",
+        "ssh host ls /sbin",
+        "ssh -p 2222 host cat /etc/hosts",
+        "ssh -o StrictHostKeyChecking=no host ls",
+        "chroot /mnt /usr/bin/ls",
+        "runuser -u root /usr/bin/ls",
+        "nsenter -t 1 -m ls",
+        "stdbuf -o L /usr/bin/ls",
+        "busybox ls",
+        "su -c ls",
+    ])
+    def test_not_refused(self, command):
+        from agenticops.services.policy_engine import get_policy_engine
+        assert get_policy_engine(reload=True).change_required_match(command) is None
+
+    def test_option_tables_and_predicates(self):
+        from agenticops.services.policy_engine import (
+            _OPTION_TABLES, _POLICY_CARRIERS, _POLICY_WRAPPERS, _SHELL_COMMANDS, _is_command_payload_flag,
+            _is_numeric_value, _option_consumes_next,
+        )
+        assert set(_POLICY_WRAPPERS) == {"sudo", "env", "nohup", "time", "nice", "setsid", "command", "exec", "doas",
+                                         "stdbuf", "unshare", "nsenter", "ionice", "busybox"}
+        assert set(_POLICY_CARRIERS) == {"timeout", "chroot", "runuser", "ssh", "docker"}
+        assert set(_OPTION_TABLES) == set(_POLICY_WRAPPERS) | set(_POLICY_CARRIERS) | {"docker exec"}
+        assert _SHELL_COMMANDS == frozenset({"sh", "bash", "zsh", "dash", "ksh", "su", "runuser"})
+        # value-taking entries: the NEXT token is the value
+        for region, flag in [("sudo", "-u"), ("sudo", "--user"), ("sudo", "-C"), ("sudo", "-h"), ("sudo", "-nu"),
+                             ("time", "-f"), ("time", "-o"), ("env", "-S"), ("env", "--chdir"), ("nice", "-n"),
+                             ("nice", "--adjustment"), ("docker exec", "--env-file"), ("docker exec", "-e"),
+                             ("timeout", "-k"), ("ssh", "-o"), ("ssh", "-J"), ("runuser", "-c"), ("stdbuf", "-o"),
+                             ("ionice", "-c"), ("unshare", "-w"), ("nsenter", "-t"), ("docker", "-H"),
+                             (None, "-n"), (None, "--profile"), (None, "-c")]:
+            assert _option_consumes_next(region, flag) is True, (region, flag)
+        # booleans, clusters, glued values, numerics and markers consume nothing
+        for region, flag in [("sudo", "-n"), ("sudo", "-En"), ("sudo", "--non-interactive"), ("sudo", "-uroot"),
+                             ("sudo", "-nuroot"), ("env", "-i0"), ("env", "-v"), ("env", "-uHOME"), ("time", "-pq"),
+                             ("time", "-o/tmp/t"), ("nice", "-n5"), ("nice", "--5"), ("nice", "-+5"),
+                             ("docker exec", "-it"), ("docker exec", "-uroot"), ("ssh", "-t"), ("ssh", "-46"),
+                             ("ssh", "-vvv"), ("nsenter", "-m"), ("nsenter", "-w"), ("unshare", "--mount-proc"),
+                             ("docker", "-D"), (None, "--no-cli-pager"), (None, "-f"), (None, "-5"), (None, "--"),
+                             (None, "-"), (None, "--opt=v"), ("sudo", "--user=root")]:
+            assert _option_consumes_next(region, flag) is False, (region, flag)
+        assert _option_consumes_next("time", "-f") is True and _option_consumes_next(None, "-f") is False   # region first
+        assert _option_consumes_next("sudo", "--user") is True and _option_consumes_next(None, "--user") is False
+        # the boolean side of the same tables (follow-up 2), now read through the one predicate: longer clusters and
+        # the long booleans consume nothing, and an unknown letter in a table WITHOUT `others_boolean` is value-taking
+        for boolean in ("-nE", "-Hn", "-EHn", "-A", "--login"):
+            assert _option_consumes_next("sudo", boolean) is False, boolean
+        for value_taking in ("-g", "-nEu"):
+            assert _option_consumes_next("sudo", value_taking) is True, value_taking
+        assert _option_consumes_next("nohup", "-x") is True                  # empty table, no others_boolean: value-taking
+        # a numeric token is an OPTION when the region's boolean letters spell it, else a kept VALUE
+        assert _is_numeric_value("env", "-0") is False and _is_numeric_value("ssh", "-46") is False
+        assert _is_numeric_value("nice", "-5") is True and _is_numeric_value("nohup", "-5") is True
+        assert _is_numeric_value(None, "-5") is True and _is_numeric_value("sudo", "-n") is False   # not numeric at all
+        # a ONE-WORD payload is a COMMAND after a shell's -c family (or env -S / --command), not after any other `-c`;
+        # a QUOTED -c payload is one after any command word (round 4, kept)
+        for context, flag, quoted in [("sh", "-c", False), ("bash", "-lc", False), ("su", "-c", False), ("runuser", "-c", False),
+                                      ("su", "--command", True), ("runuser", "--command", False), ("env", "-S", False),
+                                      ("env", "--split-string", True), ("kubectl", "-c", True), ("python", "-c", True),
+                                      (None, "-c", True)]:
+            assert _is_command_payload_flag(context, flag, quoted) is True, (context, flag, quoted)
+        for context, flag, quoted in [("kubectl", "-c", False), ("ssh", "-c", False), ("python", "-c", False), (None, "-c", False),
+                                      ("docker exec", "-e", True), ("sh", "-x", True), ("sh", "--parameters", True),
+                                      ("aws", "--parameters", True), ("sh", None, True), (None, "--command", True)]:
+            assert _is_command_payload_flag(context, flag, quoted) is False, (context, flag, quoted)
+
+    def test_token_shapes(self):
+        from agenticops.services.policy_engine import _normalize_for_policy
+        # carriers keep their word and positionals; the remainder is a nested command (basename applies)
+        assert _normalize_for_policy("ssh -p 2222 -l deploy host sudo /usr/sbin/reboot") == \
+               [("ssh", True), ("2222", False), ("deploy", False), ("host", True), ("reboot", True)]
+        assert _normalize_for_policy("timeout -k 5 30s /sbin/reboot") == \
+               [("timeout", True), ("5", False), ("30s", True), ("reboot", True)]
+        assert _normalize_for_policy("chroot /mnt /usr/bin/systemctl restart nginx") == \
+               [("chroot", True), ("/mnt", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("runuser -u root -- /sbin/reboot") == [("runuser", True), ("root", False), ("reboot", True)]
+        assert _normalize_for_policy("runuser root -c '/sbin/reboot'") == [("runuser", True), ("root", True), ("reboot", True)]
+        assert _normalize_for_policy("docker -D exec c1 /sbin/reboot") == \
+               [("docker", True), ("exec", True), ("c1", True), ("reboot", True)]
+        assert _normalize_for_policy("docker -D ps -a") == [("docker", True), ("ps", True)]
+        # wrappers by path, glued values, numerics
+        assert _normalize_for_policy("/usr/bin/sudo -n /usr/bin/ls") == [("ls", True)]
+        assert _normalize_for_policy("sudo -uroot /usr/bin/ls") == [("ls", True)]
+        assert _normalize_for_policy("sudo -nu deploy /usr/bin/ls -la") == [("deploy", False), ("ls", True)]       # kept from follow-up 2
+        assert _normalize_for_policy("nice --5 /usr/bin/systemctl restart nginx") == \
+               [("--5", True), ("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy("nsenter -t 1 -m -w /usr/bin/systemctl restart nginx") == \
+               [("1", False), ("systemctl", True), ("restart", True), ("nginx", True)]
+        # one-word shell payloads and `--opt="a b"` values
+        assert _normalize_for_policy("sh -c /sbin/reboot") == [("sh", True), ("reboot", True)]
+        assert _normalize_for_policy("kubectl exec pod -c side -- ls") == \
+               [("kubectl", True), ("exec", True), ("pod", True), ("side", False), ("ls", True)]
+        assert _normalize_for_policy("env --split-string='/usr/bin/systemctl restart nginx'") == \
+               [("systemctl", True), ("restart", True), ("nginx", True)]
+        assert _normalize_for_policy('aws ssm send-command --parameters=commands="systemctl restart nginx"') == \
+               [("aws", True), ("ssm", True), ("send-command", True), ("systemctl", False), ("restart", False), ("nginx", False)]
+        # an option VALUE with spaces before the command never claims the command position
+        assert _normalize_for_policy('sudo -u "a b" /usr/bin/systemctl restart nginx') == \
+               [("a", False), ("b", False), ("systemctl", True), ("restart", True), ("nginx", True)]
+
+    @pytest.mark.parametrize("command", [
+        "ssh", "ssh host", "timeout", "timeout 30", "chroot /mnt", "runuser", "runuser -u", "docker", "docker exec",
+        "docker exec -it", "/usr/bin/sudo", "sudo --", "-- sudo", "sh -c", "env --split-string=", "nice --5", "nsenter -t",
+        "ssh -- host /sbin/reboot", "-u root", "-c '/sbin/reboot'",
+    ])
+    def test_odd_wrapper_shapes_never_raise(self, command):
+        from agenticops.services.policy_engine import _normalize_for_policy, get_policy_engine
+        assert isinstance(_normalize_for_policy(command), list)
+        get_policy_engine(reload=True).change_required_match(command)
 
 
 class TestGuardedRun:

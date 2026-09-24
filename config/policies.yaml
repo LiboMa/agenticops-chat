@@ -94,20 +94,24 @@ rules:
 # ── Change Management (MVP-2.6.0) ────────────────────────────────────────
 # Write commands matching any of these are REFUSED outside an approved plan (fix
 # or change) and the agent is told to open a change request (/change). Matching
-# is an ordered token match: the command is tokenised (sudo/env/nohup/time/nice
-# wrappers and every -/-- option dropped, option values kept, lower-cased) and a
-# pattern hits when its words appear in that order — not necessarily adjacent.
-# Bare words match whole tokens; hyphenated entries match as prefixes. The word
-# in COMMAND POSITION (first after the wrappers, first of a quoted payload) is
-# reduced to its basename, so `/bin/systemctl restart nginx` and `sudo
-# /usr/sbin/reboot` hit like the bare names; a path anywhere else is untouched
-# (`kubectl apply -f /tmp/delete-me.yaml` is not gated); the wrappers' own boolean
-# switches — short, long and clustered (`sudo -n`, `sudo --non-interactive`,
-# `sudo -En`, `env -i`, `time -p`, a numeric `nice -5`) — and chained wrappers
-# (`sudo -n nice -n 10 /usr/bin/…`) are seen through, so the program path after
-# them is still the command word; so is the first word after `kubectl exec … --`
-# and after the container in `docker exec …` (`kubectl exec pod -- /sbin/reboot`
-# hits `reboot`). `aws rds modify-`
+# is an ordered token match: the command is tokenised (wrappers — sudo/env/nohup/
+# time/nice/setsid/doas/unshare/nsenter/… — and every -/-- option dropped, option
+# values kept, lower-cased) and a pattern hits when its words appear in that
+# order — not necessarily adjacent. Bare words match whole tokens; hyphenated
+# entries match as prefixes. The word in COMMAND POSITION (first after the
+# wrappers, first of a quoted payload) is reduced to its basename, so
+# `/bin/systemctl restart nginx` and `sudo /usr/sbin/reboot` hit like the bare
+# names; a path anywhere else is untouched (`kubectl apply -f /tmp/delete-me.yaml`
+# is not gated). Each wrapper's own options are read from its table (`sudo -n`,
+# `sudo --user root`, `sudo -uroot`, `sudo -En`, `env -i`, `time -f %e`, a numeric
+# `nice -5`), and chained wrappers (`sudo -n nice -n 10 /usr/bin/…`) as well as
+# wrappers reached by path (`/usr/bin/sudo -n /usr/bin/…`) are seen through, so
+# the program path after them is still the command word. So is the command
+# carried after `kubectl exec … --`, the container in `docker exec …`, `timeout
+# 30`, `chroot DIR`, `runuser -u USER`, an unquoted `ssh [opts] HOST …` (`kubectl
+# exec pod -- /sbin/reboot`, `ssh host /sbin/reboot`, `timeout 30 /sbin/reboot`
+# all hit `reboot`) and a shell's one-word `-c` payload (`sh -c /sbin/reboot`).
+# `aws rds modify-`
 # hits `aws --profile p rds modify-db-instance`; the bare `reboot` hits
 # `sudo reboot` but not `--tags Key=x,Value=reboot-test`, and it is the
 # `aws ec2 reboot-` entry (not `reboot`) that catches `aws ec2 reboot-instances`;
