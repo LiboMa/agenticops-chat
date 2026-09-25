@@ -122,15 +122,25 @@ def test_fix_plan_path_unchanged(db):
 
 
 def test_get_approved_fix_plan_reports_kind_and_accepts_executing(db):
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
     from agenticops.tools.metadata_tools import get_approved_fix_plan
     cr_id = _cr_under_review(db)
-    plan = FixPlan(plan_kind="change", change_request_id=cr_id, risk_level="L1", title="p", summary="s", status="approved",
+    cr = db.get(ChangeRequest, cr_id)
+    cr.status = "executing"
+    plan = FixPlan(plan_kind="change", change_request_id=cr_id, risk_level="L1", title="p", summary="s", status="executing",
                    rollback_plan={"x": 1}, post_checks=[{"check": "c"}])
     db.add(plan); db.commit()
-    data = json.loads(get_approved_fix_plan(plan.id))
+    token = set_run_context(RunContext(actor="agent:executor", agent_name="executor", fix_plan_id=plan.id,
+                                       change_request_id=cr_id))
+    try:
+        data = json.loads(get_approved_fix_plan(plan.id))  # the queued run: plan and CR both executing
+    finally:
+        reset_run_context(token)
     assert data["plan_kind"] == "change" and data["change_request_id"] == cr_id and data["health_issue_id"] is None
-    plan.status = "executing"; db.commit()
-    assert json.loads(get_approved_fix_plan(plan.id))["status"] == "executing"  # queued route: already claimed
+    assert data["status"] == "executing"
+    plan.status = "approved"; cr.status = "approved"; db.commit()
+    out = get_approved_fix_plan(plan.id)  # outside its queued run: no Run Context
+    assert out.startswith("REJECTED") and f"C#{cr_id}" in out
     plan.status = "draft"; db.commit()
     assert get_approved_fix_plan(plan.id).startswith("REJECTED")
 

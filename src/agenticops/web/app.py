@@ -2287,11 +2287,16 @@ def _fix_plan_response(session, plan) -> FixPlanResponse:
 
 
 def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
-    """Shared by POST /reject and the deprecated PUT status alias. Raises HTTPException 403 / 409.
+    """Shared by POST /reject and the deprecated PUT status alias. Raises HTTPException 403 / 409
+    (409 also for a change plan — it belongs to its change request).
     The audit row is added to the caller's session — decision and state commit together."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.change_service import fix_path_refusal
+    refusal = fix_path_refusal(plan, "rejected")
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     if plan.status == "rejected":
         # validate_plan_transition treats current == new as a no-op, so without this guard a second reject
         # would silently overwrite rejected_by / rejected_at / rejection_reason. rejected is terminal → 409.
@@ -2419,6 +2424,10 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "edited")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
         update_data = data.model_dump(exclude_unset=True)
         status_alias = update_data.pop("status", None)
         if status_alias is not None and status_alias != "rejected":
@@ -2445,6 +2454,10 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
         # An already-decided plan is a state conflict (409, as reject reports it), not a bad request.
         if plan.status == "approved":
             raise HTTPException(status_code=409, detail="Fix plan is already approved")
@@ -2505,6 +2518,10 @@ async def api_delete_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "deleted")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
         session.delete(plan)
 
 
@@ -2527,6 +2544,11 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "executed")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
 
         if plan.status != "approved":
             raise HTTPException(

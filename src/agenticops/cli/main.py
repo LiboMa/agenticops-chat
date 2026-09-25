@@ -2494,6 +2494,11 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if not plan:
             return f"[red]Fix plan #{plan_id} not found.[/red]"
 
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            return f"[yellow]{_safe_text(refusal)}[/yellow]"
+
         if plan.status == "approved":
             return "[yellow]Fix plan is already approved.[/yellow]"
         if plan.status == "rejected":
@@ -2591,6 +2596,11 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             return f"[red]Fix plan #{plan_id} not found.[/red]"
+
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "executed")
+        if refusal:
+            return f"[yellow]{_safe_text(refusal)}[/yellow]"
 
         if plan.status != "approved":
             return f"[yellow]Fix plan status is '{plan.status}', must be 'approved' to execute.[/yellow]"

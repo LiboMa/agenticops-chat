@@ -185,6 +185,11 @@ def executor_agent(fix_plan_id: int) -> str:
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_executor_interventions, get_bedrock_boto_session
         from agenticops.models import get_db_session, FixPlan, HealthIssue
+        from agenticops.services.change_service import change_execution_refusal
+        with get_db_session() as db:
+            refusal = change_execution_refusal(db.query(FixPlan).filter_by(id=fix_plan_id).first())
+        if refusal:
+            return f"REJECTED: {refusal}"
 
         # Resolve provider CLI tool from the plan's account: the issue's account for a fix
         # plan, the change request's account for a change plan (凭证安全铁律 #3 — account-addressed).

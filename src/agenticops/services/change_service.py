@@ -192,6 +192,43 @@ def active_plan_for(session, cr_id: int) -> Optional[FixPlan]:
     )
 
 
+# ── Fix-path guard: a change plan's lifecycle is owned by its change request ──
+
+def _change_route_hint(cr_id: Optional[int]) -> str:
+    if not settings.change_management_enabled:
+        return " Change management is disabled (change_management_enabled=false)."
+    return (f" Use the change request instead: Web /app/changes/{cr_id}, CLI /approve C{cr_id}, "
+            f"/reject C{cr_id}, /execute C{cr_id}.")
+
+
+def fix_path_refusal(plan: Optional[FixPlan], action: str) -> Optional[str]:
+    """None for a fix plan (or no plan). For a change plan, the refusal naming its change request:
+    approving, rejecting, executing, editing or deleting a change plan belongs to the change request,
+    never to a fix-plan path (agent tool, Web API, CLI)."""
+    if plan is None or plan.plan_kind != "change":
+        return None
+    return (f"FixPlan #{plan.id} belongs to change request C#{plan.change_request_id} — it cannot be {action} "
+            f"as a fix plan.{_change_route_hint(plan.change_request_id)}")
+
+
+def change_execution_refusal(plan: Optional[FixPlan]) -> Optional[str]:
+    """None unless plan is a change plan running OUTSIDE the execution request_execution queued.
+    Inside that execution, the plan and its change request are both 'executing' and the Run Context is
+    the queued run's (ExecutorService._run_executor sets fix_plan_id and change_request_id). Call it while
+    plan's session is open (it reads plan.change_request)."""
+    if plan is None or plan.plan_kind != "change":
+        return None
+    from agenticops.run_context import get_run_context
+    rc = get_run_context()
+    cr = plan.change_request
+    if (plan.status == "executing" and cr is not None and cr.status == "executing"
+            and rc.fix_plan_id == plan.id and rc.change_request_id == plan.change_request_id):
+        return None
+    return (f"FixPlan #{plan.id} belongs to change request C#{plan.change_request_id} — it runs only through "
+            f"that change request's queued execution (approve the change, then execute it)."
+            f"{_change_route_hint(plan.change_request_id)}")
+
+
 # ── Intake ────────────────────────────────────────────────────────────
 
 def create_change_request(

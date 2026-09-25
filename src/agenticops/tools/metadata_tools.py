@@ -1104,6 +1104,7 @@ _KNOWN_AGENT_IDS = frozenset(AGENT_NAMES) | {"auto-pipeline"}
 @tool
 def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     """Approve a fix plan. L0/L1 can be auto-approved; L2/L3 require human approval.
+    A plan that belongs to a change request is refused — change approval is a human action on the change request.
 
     The real approver is the Run Context actor; approved_by is a claimed name when a context
     exists. Without a Run Context the call is an agent acting (an "agent:<name>" value keeps
@@ -1151,6 +1152,11 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
         if not plan:
             return f"FixPlan #{fix_plan_id} not found."
+
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            return f"REJECTED: {refusal}"
 
         if plan.status == "approved":
             return f"FixPlan #{fix_plan_id} is already approved."
@@ -1231,6 +1237,8 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 @tool
 def get_approved_fix_plan(fix_plan_id: int) -> str:
     """Safety gate: retrieve a fix plan ONLY if its status is 'approved' or 'executing'.
+    A change plan is returned only inside the execution its change request queued
+    (change_service.change_execution_refusal).
 
     This is the mandatory first step before execution. Returns full plan
     details needed for execution, or rejects with an explanation. 'executing'
@@ -1249,6 +1257,11 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
         if not plan:
             return f"REJECTED: FixPlan #{fix_plan_id} not found."
+
+        from agenticops.services.change_service import change_execution_refusal
+        refusal = change_execution_refusal(plan)
+        if refusal:
+            return f"REJECTED: {refusal}"
 
         if plan.status not in ("approved", "executing"):
             return (
