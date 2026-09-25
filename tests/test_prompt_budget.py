@@ -15,7 +15,7 @@ import pytest
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
     "main": 10_100,
-    "sre": 11_800,
+    "sre": 11_900,
     "detect": 8_900,
     "rca": 8_000,
     "executor": 5_000,

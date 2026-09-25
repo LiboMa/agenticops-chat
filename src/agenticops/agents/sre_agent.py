@@ -185,12 +185,13 @@ AWS infrastructure investigator:
 MODE C — CHANGE REVIEW PROTOCOL (ChangeRequest C#N; you decide legitimacy, the platform decides state):
 1. READ: get_change_request(N) — intent, targets (target_hints), account, requested type (normal|emergency).
 2. GROUND: ground_change_targets(N). For every UNRESOLVED hint run a read-only describe yourself; if
-   the resource exists call attach_change_target(N, resource_id, resource_type, region) — the platform
-   re-verifies it. If any target cannot be verified, STOP and submit verdict needs_clarification listing
-   the unresolved targets. Never invent ids.
-3. ASSESS: risk L0-L3 with the Mode A rubric (a tag update is L1; SG rules / resize are L2; restart,
+   the resource exists call attach_change_target(N, resource_id, resource_type, region,
+   hint='<the unresolved hint, verbatim>') — the platform re-verifies it. If any target cannot be
+   verified, STOP and submit verdict needs_clarification listing the unresolved targets. Never invent ids.
+3. ASSESS: risk L0-L3 with the Mode A rubric (a tag update is L1; SG rules / resize are L2; restart service,
    failover, data migration, node drain are L3) and action_type tag|scale|config|network|iam|delete|other.
-4. POLICY: evaluate_change_policy(N, risk, action_type). Action 'block' → verdict rejected (quote the rule).
+4. POLICY: evaluate_change_policy(N, risk_level, action_type). Action 'block' → skip PLAN and submit
+   verdict rejected, quoting the rule.
 5. PLAN: save_fix_plan(plan_kind='change', change_request_id=N, risk_level, title, summary, steps,
    pre_checks, post_checks, rollback_plan, estimated_impact). MANDATORY: post_checks that PROVE the change
    took effect (e.g. describe-tags shows the tag) and a rollback_plan that undoes it exactly.
@@ -200,7 +201,7 @@ MODE C — CHANGE REVIEW PROTOCOL (ChangeRequest C#N; you decide legitimacy, the
    applies the policy and writes every state — you only recommend.
 
 RULES & GUARDRAILS (CRITICAL):
-- NEVER execute fixes. Only generate plans (Mode A) or query information (Mode B).
+- NEVER execute fixes. Only generate plans (Mode A/C) or query information (Mode B).
 - Only READ operations on AWS.
 - Always include rollback plans for L2+ fixes.
 - Reference SOP steps when available.
@@ -230,8 +231,22 @@ SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _SRE_SKILLS_BL
 SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
 
 
-def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
-    """Create a reusable SRE Agent instance."""
+# Mode C tools — only in the change-review build (least privilege): the Mode A (sre_agent) and Mode B
+# (sre_query) builds never carry them (the Main agent has its own read tools for change requests).
+_CHANGE_REVIEW_TOOLS = (
+    get_change_request,
+    ground_change_targets,
+    attach_change_target,
+    evaluate_change_policy,
+    submit_change_review,
+)
+
+
+def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_review: bool = False) -> Agent:
+    """Create a reusable SRE Agent instance.
+
+    change_review=True builds the Mode C (change review) agent: the only build that carries the change tools.
+    """
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("sre")
@@ -252,12 +267,8 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         search_sops,
         search_similar_cases,
         save_fix_plan,
-        # Change review (Mode C)
-        get_change_request,
-        ground_change_targets,
-        attach_change_target,
-        evaluate_change_policy,
-        submit_change_review,
+        # Change review (Mode C) — the change-review build only
+        *(_CHANGE_REVIEW_TOOLS if change_review else ()),
         # AWS describe tools (read-only)
         describe_ec2,
         describe_rds,
@@ -352,31 +363,50 @@ def sre_agent(issue_id: int) -> str:
         return f"SRE agent error: {e}"
 
 
-def sre_agent_review_change(change_request_id: int) -> str:
-    """Run the SRE agent in Mode C for one change request (called by change_service.start_review).
+def _account_name(account_id: int) -> str:
+    from agenticops.models import CloudAccount, get_db_session
+    with get_db_session() as db:
+        return db.query(CloudAccount.name).filter_by(id=account_id).scalar() or ""
 
-    State transitions, watchdog and 'a review must end with a verdict' are enforced by change_service —
-    this function only builds the agent (CLI tool resolved from the request's account) and runs it.
+
+def sre_agent_review_change(change_request_id: int) -> str:
+    """Run the SRE agent in Mode C for one change request (called by change_service._run_review).
+
+    State transitions and 'a review must end with a verdict' are enforced by change_service — this
+    function only builds the agent and runs it. The review watchdog guards only the async path
+    (start_review(sync=False)); with sync=True (Main's review_change) the review runs in the caller's
+    thread with no timeout, and the caller blocks until it returns.
+
+    A request bound to an account is reviewed with THAT account's CLI tool or not at all. Any exception
+    propagates on purpose: change_service._run_review logs it and rolls the request back to draft with
+    the reason (fail-closed).
     """
     from agenticops.agents.preamble import infer_parent_agent, invoke_with_retry
     from agenticops.services import change_service as cs
     from agenticops.services.agent_log_service import track_agent
 
+    cr = cs.get_change(change_request_id)
     cli_tool = None
-    try:
-        cr = cs.get_change(change_request_id)
-        if cr.get("account_id"):
-            cli_tool = get_cli_tool_for_issue(cr["account_id"])
-    except Exception:
-        pass
-    agent = _create_sre_agent(cli_tool=cli_tool)
+    account_hint = ""
+    if cr.get("account_id"):
+        # Credential rule: a CR bound to an account is reviewed on THAT account or not at all — never
+        # fall back to the default, auto-resolving CLI tool (it may resolve to another account).
+        cli_tool = get_cli_tool_for_issue(cr["account_id"])
+        if cli_tool is None:
+            raise RuntimeError(
+                f"credentials for account #{cr['account_id']} of ChangeRequest #{change_request_id} could not "
+                "be resolved — refusing to review it on any other account")
+        name = _account_name(cr["account_id"])
+        if name:
+            account_hint = f" Target account: '{name}' — pass account='{name}' to every tool that takes an account."
+    agent = _create_sre_agent(cli_tool=cli_tool, change_review=True)
+    prompt = (
+        f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
+        "read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
+        "with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict."
+    ) + account_hint
     with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
-        result = invoke_with_retry(
-            agent,
-            f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
-            f"read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
-            f"with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict.",
-        )
+        result = invoke_with_retry(agent, prompt)
         tracker.set_result(result)
     return str(result)
 
@@ -398,9 +428,18 @@ def review_change(change_request_id: int) -> str:
     """
     from agenticops.services import change_service as cs
     try:
-        return cs.start_review(change_request_id, sync=True) or "Review finished."
+        text = cs.start_review(change_request_id, sync=True)
     except cs.ChangeError as e:
         return f"Change review not started: {e}"
+    try:
+        cr = cs.get_change(change_request_id)
+    except cs.ChangeError:
+        return text or "Review ended; the change request could not be re-read."
+    status = f"Platform status of C#{change_request_id}: {cr['status']}"
+    if cr["status"] == "draft":  # rolled back: crash, timeout or no verdict — the review did NOT complete
+        reason = "; ".join(cr.get("review_reasons") or []) or "no verdict was recorded"
+        status += f" — the review did not complete ({reason}). Nothing was approved."
+    return f"{text}\n\n{status}" if text else status
 
 
 @tool

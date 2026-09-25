@@ -28,14 +28,15 @@ def db(tmp_path):
     models_mod._engine = None
 
 
-def _cr(db, targets=("i-0abc",), change_type="normal"):
+def _cr(db, targets=("i-0abc",), change_type="normal", under_review=True):
     from agenticops.services import change_service as cs
     with patch.object(cs, "notify_change_requested"):
         cr = cs.create_change_request(source="cli", actor=cli_actor(), title="tag", description="add Env=prod",
                                       account_name="dev", targets=list(targets), requested_change_type=change_type,
                                       start_review=False)
-    with cs._session() as s:
-        cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
+    if under_review:
+        with cs._session() as s:
+            cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
     return cr["id"]
 
 
@@ -106,6 +107,38 @@ class TestGrounding:
             with pytest.raises(cs.ChangeValidationError):
                 cs.attach_target(cr_id, "i-0abc", "ec2:instance", actor=agent_actor("sre"), region="; rm -rf")
         assert not ex.called
+
+    # ── A requester hint resolves the same way in ground_targets and submit_review ──
+    def test_attach_with_hint_repairs_a_default_hint(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("web-2",))  # a name that is not in the inventory
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+            cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"))  # no hint: defaults to the id
+            assert cs.ground_targets(cr_id)["unresolved"] == ["web-2"]
+            cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")  # the retry repairs it
+            assert cs.ground_targets(cr_id)["unresolved"] == []
+            cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-3")  # a real hint is kept
+        items = cs.get_change(cr_id)["target_resources"]
+        assert [(t["resource_id"], t["hint"]) for t in items] == [("i-0def", "web-2")]
+
+    def test_hint_resolved_via_an_attached_items_hint_is_not_unresolved(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("web-2",))
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+            cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+        assert "web-2" not in cs.ground_targets(cr_id)["unresolved"]
+
+    def test_grounding_is_refused_outside_review(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("i-0abc", "web-2"), under_review=False)  # a draft: no review is running
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}') as ex:
+            with pytest.raises(cs.ChangeStateError, match="targets can only be grounded during review"):
+                cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+            with pytest.raises(cs.ChangeStateError, match="targets can only be grounded during review"):
+                cs.ground_targets(cr_id)
+        assert not ex.called  # a refused attach runs no command
+        c = cs.get_change(cr_id)
+        assert c["status"] == "draft" and c["target_resources"] == [] and c["target_hints"] == ["i-0abc", "web-2"]
 
 
 class TestPolicy:

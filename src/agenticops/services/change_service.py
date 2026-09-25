@@ -496,10 +496,22 @@ def _hint_matches(hint: str, r: CloudResource) -> bool:
     return str(tags.get("Name", "")).lower() == h
 
 
+def _hint_resolved(hint: str, target_resources) -> bool:
+    """A requester hint is resolved when some grounded target names it (its hint) or IS it (its id)."""
+    h = (hint or "").lower()
+    return any(h in (str(t.get("hint", "")).lower(), str(t.get("resource_id", "")).lower())
+               for t in (target_resources or []))
+
+
 def ground_targets(cr_id: int) -> dict:
-    """Deterministic: match target_hints against the inventory (account-scoped); write matches."""
+    """Deterministic: match target_hints against the inventory (account-scoped); write matches.
+    Only during review: target_resources must not change once a verdict (or approval) rests on them."""
     with _session() as s:
         cr = _load(s, cr_id)
+        if cr.status != "under_review":
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
+            )
         q = s.query(CloudResource)
         if cr.account_id:
             q = q.filter(CloudResource.account_id == cr.account_id)
@@ -509,7 +521,7 @@ def ground_targets(cr_id: int) -> dict:
         for hint in cr.target_hints or []:
             match = next((r for r in rows if _hint_matches(hint, r)), None)
             if match is None:
-                if not any(hint.lower() == str(t.get("resource_id", "")).lower() for t in (cr.target_resources or [])):
+                if not _hint_resolved(hint, cr.target_resources):
                     unresolved.append(hint)
                 continue
             item = {"resource_id": match.resource_id, "resource_type": match.resource_type, "db_id": match.id,
@@ -524,9 +536,10 @@ def ground_targets(cr_id: int) -> dict:
 
 def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Actor, region: str = "",
                   hint: str = "") -> dict:
-    """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds.
-    `hint` names the requester's original wording this target resolves (so submit_review stops treating
-    that hint as unresolved); defaults to the resource_id itself."""
+    """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds, and only
+    during review. `hint` names the requester's original wording this target resolves (so ground_targets and
+    submit_review stop treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an
+    already attached target with a hint repairs a DEFAULT hint; an existing non-default hint is never overwritten."""
     from agenticops.tools.aws_cli_tool import _execute_aws_cli
     resource_id = (resource_id or "").strip()
     if not resource_id:
@@ -546,6 +559,10 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
         raise ChangeValidationError(f"invalid region {region!r}")
     with _session() as s:
         cr = _load(s, cr_id)
+        if cr.status != "under_review":  # before the describe: a refused call must not run any command
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
+            )
         account = _account_name(s, cr)
     command = template.format(rid=resource_id) + (f" --region {region}" if region else "")
     result = _execute_aws_cli(command, account)
@@ -555,8 +572,14 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
             "evidence": {"command": command, "excerpt": result[:300]}, "hint": (hint or resource_id)}
     with _session() as s:
         cr = _load(s, cr_id)
-        if not any(t.get("resource_id") == resource_id for t in (cr.target_resources or [])):
-            cr.target_resources = list(cr.target_resources or []) + [item]
+        items = list(cr.target_resources or [])
+        current = next((t for t in items if t.get("resource_id") == resource_id), None)
+        if current is None:
+            cr.target_resources = items + [item]
+        elif hint and str(current.get("hint") or "") in ("", resource_id):
+            # Repair a DEFAULT hint (an earlier attach without one). A NEW list holding a NEW dict: this is a
+            # JSON column, so an in-place mutation is not tracked (and would compare equal → no UPDATE).
+            cr.target_resources = [{**t, "hint": hint} if t is current else t for t in items]
         if resource_id not in (cr.target_hints or []):
             cr.target_hints = list(cr.target_hints or []) + [resource_id]
         cr.updated_at = datetime.now(timezone.utc)
@@ -667,9 +690,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         cr = _load(s, cr_id)
         if cr.status != "under_review":  # fast, friendly fail
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not under_review")
-        unresolved = [h for h in (cr.target_hints or [])
-                      if not any(str(t.get("hint", "")).lower() == h.lower() or str(t.get("resource_id", "")).lower() == h.lower()
-                                 for t in (cr.target_resources or []))]
+        unresolved = [h for h in (cr.target_hints or []) if not _hint_resolved(h, cr.target_resources)]
         if not cr.target_resources or unresolved:
             raise ChangeStateError(f"all targets must be grounded before planning; unresolved: {unresolved or 'none grounded'}")
         plan = active_plan_for(s, cr_id)
