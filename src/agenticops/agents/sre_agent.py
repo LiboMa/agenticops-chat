@@ -42,6 +42,13 @@ from agenticops.tools.metadata_tools import (
     save_fix_plan,
 )
 from agenticops.tools.kb_tools import search_sops, search_similar_cases
+from agenticops.tools.change_tools import (
+    get_change_request,
+    ground_change_targets,
+    attach_change_target,
+    evaluate_change_policy,
+    submit_change_review,
+)
 from agenticops.graph.tools import (
     query_reachability,
     query_impact_radius,
@@ -75,10 +82,12 @@ _SRE_SKILLS_BLOCK = skills_activation_block(
 )
 
 SRE_SYSTEM_PROMPT = """You are the SRE Agent for AgenticOps.
-You have TWO modes of operation:
+You have THREE modes of operation:
   A) Fix Plan generation — structured plans from RCA results.
   B) General AWS investigation — answer any question about AWS resources and
      infrastructure using your tools and the AWS CLI.
+  C) Change review — review a human's CHANGE REQUEST (C#N) for legitimacy and
+     produce the change plan the Executor will run after approval.
 You are READ-ONLY — you NEVER execute fixes or modify AWS resources.
 
 MODE A — FIX PLAN PROTOCOL:
@@ -173,6 +182,23 @@ AWS infrastructure investigator:
      additional context during investigation.
 4. RESPOND: Present findings clearly with resource IDs, status, and key attributes.
 
+MODE C — CHANGE REVIEW PROTOCOL (ChangeRequest C#N; you decide legitimacy, the platform decides state):
+1. READ: get_change_request(N) — intent, targets (target_hints), account, requested type (normal|emergency).
+2. GROUND: ground_change_targets(N). For every UNRESOLVED hint run a read-only describe yourself; if
+   the resource exists call attach_change_target(N, resource_id, resource_type, region) — the platform
+   re-verifies it. If any target cannot be verified, STOP and submit verdict needs_clarification listing
+   the unresolved targets. Never invent ids.
+3. ASSESS: risk L0-L3 with the Mode A rubric (a tag update is L1; SG rules / resize are L2; restart,
+   failover, data migration, node drain are L3) and action_type tag|scale|config|network|iam|delete|other.
+4. POLICY: evaluate_change_policy(N, risk, action_type). Action 'block' → verdict rejected (quote the rule).
+5. PLAN: save_fix_plan(plan_kind='change', change_request_id=N, risk_level, title, summary, steps,
+   pre_checks, post_checks, rollback_plan, estimated_impact). MANDATORY: post_checks that PROVE the change
+   took effect (e.g. describe-tags shows the tag) and a rollback_plan that undoes it exactly.
+   Steps are exact CLI commands with real ids — the Executor runs them verbatim after approval.
+6. VERDICT: submit_change_review(N, verdict, risk_level, action_type, reasons). Verdicts:
+   approved_for_planning | needs_clarification | rejected. The platform (not you) routes approval,
+   applies the policy and writes every state — you only recommend.
+
 RULES & GUARDRAILS (CRITICAL):
 - NEVER execute fixes. Only generate plans (Mode A) or query information (Mode B).
 - Only READ operations on AWS.
@@ -226,6 +252,12 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None) -> Agent:
         search_sops,
         search_similar_cases,
         save_fix_plan,
+        # Change review (Mode C)
+        get_change_request,
+        ground_change_targets,
+        attach_change_target,
+        evaluate_change_policy,
+        submit_change_review,
         # AWS describe tools (read-only)
         describe_ec2,
         describe_rds,
@@ -318,6 +350,57 @@ def sre_agent(issue_id: int) -> str:
     except Exception as e:
         logger.exception("SRE agent failed")
         return f"SRE agent error: {e}"
+
+
+def sre_agent_review_change(change_request_id: int) -> str:
+    """Run the SRE agent in Mode C for one change request (called by change_service.start_review).
+
+    State transitions, watchdog and 'a review must end with a verdict' are enforced by change_service —
+    this function only builds the agent (CLI tool resolved from the request's account) and runs it.
+    """
+    from agenticops.agents.preamble import infer_parent_agent, invoke_with_retry
+    from agenticops.services import change_service as cs
+    from agenticops.services.agent_log_service import track_agent
+
+    cli_tool = None
+    try:
+        cr = cs.get_change(change_request_id)
+        if cr.get("account_id"):
+            cli_tool = get_cli_tool_for_issue(cr["account_id"])
+    except Exception:
+        pass
+    agent = _create_sre_agent(cli_tool=cli_tool)
+    with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
+        result = invoke_with_retry(
+            agent,
+            f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
+            f"read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
+            f"with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict.",
+        )
+        tracker.set_result(result)
+    return str(result)
+
+
+@tool
+def review_change(change_request_id: int) -> str:
+    """Review a CHANGE REQUEST (C#N) — legitimacy, risk, policy and the change plan.
+
+    USE FOR: right after request_change, or "review change", "review CR", "change request" + C#N.
+    READ-ONLY: never executes — the SRE grounds targets, classifies risk, evaluates policy and saves
+    the plan; approval is a separate human step (Web Plans & Changes, or /approve C<N> in the CLI).
+    NOT FOR: incident fix plans (sre_agent) or executing (execute_change).
+
+    Args:
+        change_request_id: The C# number returned by request_change.
+
+    Returns:
+        The SRE's review summary (verdict, risk, plan) or why the review could not start.
+    """
+    from agenticops.services import change_service as cs
+    try:
+        return cs.start_review(change_request_id, sync=True) or "Review finished."
+    except cs.ChangeError as e:
+        return f"Change review not started: {e}"
 
 
 @tool

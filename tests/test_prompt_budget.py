@@ -15,7 +15,7 @@ import pytest
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
     "main": 10_100,
-    "sre": 9_700,
+    "sre": 11_800,
     "detect": 8_900,
     "rca": 8_000,
     "executor": 5_000,
@@ -160,6 +160,7 @@ class TestRoutingDocstrings:
         "rca_agent": ("agenticops.agents.rca_agent", ["RCA", "root cause", "investigate"]),
         "sre_agent": ("agenticops.agents.sre_agent", ["fix", "remediate", "READ-ONLY"]),
         "sre_query": ("agenticops.agents.sre_agent", ["CATCH-ALL", "kubectl"]),
+        "review_change": ("agenticops.agents.sre_agent", ["change request", "READ-ONLY", "C#"]),
         "executor_agent": ("agenticops.agents.executor_agent", ["execute", "approved"]),
         "reporter_agent": ("agenticops.agents.reporter_agent", ["report", "summary"]),
     }
