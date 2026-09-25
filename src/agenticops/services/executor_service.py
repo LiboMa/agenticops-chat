@@ -67,10 +67,15 @@ class ExecutorService:
         """Request cancellation of a running execution.
 
         Note: This sets the DB status to 'aborted' but cannot forcibly kill the
-        executor agent thread. The agent will check status on next tool call.
+        executor agent thread. The plan (if executing) → failed and, for a change
+        plan, the change request → failed via on_execution_result("aborted"); the
+        still-running agent's later writes and change_required commands are refused
+        because its plan is no longer approved/executing.
         """
-        from agenticops.models import FixExecution, get_db_session
+        from agenticops.models import FixExecution, FixPlan, get_db_session
 
+        is_change = False
+        plan_id = None
         with get_db_session() as session:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
             if not execution or execution.status != "running":
@@ -78,11 +83,23 @@ class ExecutorService:
             execution.status = "aborted"
             execution.completed_at = datetime.now(timezone.utc)
             execution.error_message = "Cancelled by operator"
+            plan_id = execution.fix_plan_id
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            if plan is not None and plan.status == "executing":
+                is_change = plan.plan_kind == "change"
+                from agenticops.models import transition_plan
+                transition_plan(plan, "failed")
             session.commit()
             logger.info("Execution #%d marked as aborted (cancellation requested)", execution_id)
 
         with self._lock:
             self._active_executions.pop(execution_id, None)
+        if is_change:
+            try:
+                from agenticops.services.change_service import on_execution_result
+                on_execution_result(plan_id, "aborted", error="Cancelled by operator")
+            except Exception:
+                logger.warning("change on_execution_result failed for FixPlan #%s after cancel", plan_id, exc_info=True)
         return True
 
     def _poll_loop(self):
@@ -158,8 +175,11 @@ class ExecutorService:
         """Invoke executor_agent for a specific fix plan (worker thread — sets its own Run Context).
 
         The context carries the plan (so ``approved_plan_in_context()`` lets change_required
-        commands run), the approver as ``on_behalf_of`` and the issue's trace id. It is set even
-        when the lookup fails, so audit rows are never attributed to ``system``.
+        commands run), the queued ticket (``execution_id``, which save_execution_result closes in
+        place), the approver as ``on_behalf_of`` and the issue's trace id. It is set even when the
+        lookup fails, so audit rows are never attributed to ``system``. A run that returns without
+        recording its result is reconciled: the still-running ticket, its plan and a change plan's
+        request are failed (``_fail_execution``).
         """
         from agenticops.config import set_trace_id
         from agenticops.run_context import RunContext, reset_run_context, set_run_context
@@ -182,7 +202,7 @@ class ExecutorService:
             set_trace_id(trace_id)
         _rc_token = set_run_context(RunContext(actor="agent:executor", on_behalf_of=approved_by, trace_id=trace_id,
                                                agent_name="executor", fix_plan_id=fix_plan_id,
-                                               change_request_id=change_request_id))
+                                               change_request_id=change_request_id, execution_id=execution_id))
         try:
             from agenticops.agents.executor_agent import executor_agent
 
@@ -196,6 +216,14 @@ class ExecutorService:
         except Exception as e:
             logger.exception("Executor agent crashed for FixPlan #%d", fix_plan_id)
             self._mark_crashed(execution_id, fix_plan_id, str(e))
+        else:
+            # A run that returned without recording its result (a refusal, a model error the agent
+            # caught, the iteration cap) must not leave the ticket running and the plan/change executing.
+            # A no-op when save_execution_result already closed the ticket.
+            try:
+                self._fail_execution(execution_id, f"Executor ended without recording a result: {str(result)[:300]}")
+            except Exception:
+                logger.warning("post-run reconcile failed for Execution #%d", execution_id, exc_info=True)
         finally:
             reset_run_context(_rc_token)  # self-contained: never leaves the plan context behind
             set_trace_id(None)  # symmetric with the IM sites: the worker's trace goes with it
@@ -215,64 +243,47 @@ class ExecutorService:
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 
-    def _mark_crashed(self, execution_id: int, fix_plan_id: int, error: str):
-        """Mark a crashed execution in the DB."""
+    def _fail_execution(self, execution_id: int, message: str) -> bool:
+        """Close a still-running ticket as failed; its executing plan → failed; a change plan's request → failed.
+
+        False (and nothing written) when the ticket is missing or no longer running — it was already closed
+        by save_execution_result, a cancel, the watchdog or a crash. The plan is the TICKET's plan.
+        """
         from agenticops.models import FixExecution, FixPlan, get_db_session
 
-        crash_msg = f"Agent crashed: {error[:500]}"
-        is_change = False
-        with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if execution and execution.status == "running":
-                execution.status = "failed"
-                execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = crash_msg
-                plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
-                if plan:
-                    is_change = plan.plan_kind == "change"
-                    from agenticops.models import InvalidStatusTransition, transition_plan
-                    try:
-                        transition_plan(plan, "failed")
-                    except InvalidStatusTransition:
-                        logger.warning("Plan #%d in '%s' cannot move to failed after crash", fix_plan_id, plan.status)
-                session.commit()
-                # Change plan: feed the crash terminal to the change mapper (after commit, inside the guard).
-                # Best-effort: a post-commit side-effect must never crash the crash handler itself.
-                if is_change:
-                    try:
-                        from agenticops.services.change_service import on_execution_result
-                        on_execution_result(fix_plan_id, "failed", error=crash_msg)
-                    except Exception:
-                        logger.warning("change on_execution_result failed for FixPlan #%s after crash", fix_plan_id, exc_info=True)
-
-    def _mark_timed_out(self, execution_id: int):
-        """Mark a timed-out execution in the DB."""
-        from agenticops.models import FixExecution, FixPlan, get_db_session
-
-        timeout_msg = f"Execution timed out after {settings.executor_total_timeout}s"
         is_change = False
         plan_id = None
         with get_db_session() as session:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if execution and execution.status == "running":
-                execution.status = "failed"
-                execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = timeout_msg
-                plan_id = execution.fix_plan_id
-                plan = session.query(FixPlan).filter_by(id=plan_id).first()
-                if plan:
-                    is_change = plan.plan_kind == "change"
-                    from agenticops.models import InvalidStatusTransition, transition_plan
-                    try:
-                        transition_plan(plan, "failed")
-                    except InvalidStatusTransition:
-                        logger.warning("Plan #%s in '%s' cannot move to failed after timeout", plan_id, plan.status)
-                session.commit()
-                # Change plan: feed the timeout terminal to the change mapper (after commit, inside the guard).
-                # Best-effort: a post-commit side-effect must never crash the timeout handler itself.
-                if is_change:
-                    try:
-                        from agenticops.services.change_service import on_execution_result
-                        on_execution_result(plan_id, "failed", error=timeout_msg)
-                    except Exception:
-                        logger.warning("change on_execution_result failed for FixPlan #%s after timeout", plan_id, exc_info=True)
+            if not execution or execution.status != "running":
+                return False
+            execution.status = "failed"
+            execution.completed_at = datetime.now(timezone.utc)
+            execution.error_message = message
+            plan_id = execution.fix_plan_id
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            if plan:
+                is_change = plan.plan_kind == "change"
+                from agenticops.models import InvalidStatusTransition, transition_plan
+                try:
+                    transition_plan(plan, "failed")
+                except InvalidStatusTransition:
+                    logger.warning("Plan #%s in '%s' cannot move to failed (%s)", plan_id, plan.status, message[:80])
+            session.commit()
+        # Change plan: feed the terminal to the change mapper after commit. Best-effort: a post-commit
+        # side-effect must never crash the handler that closes the ticket.
+        if is_change:
+            try:
+                from agenticops.services.change_service import on_execution_result
+                on_execution_result(plan_id, "failed", error=message)
+            except Exception:
+                logger.warning("change on_execution_result failed for FixPlan #%s", plan_id, exc_info=True)
+        return True
+
+    def _mark_crashed(self, execution_id: int, fix_plan_id: int, error: str):
+        """Mark a crashed execution in the DB (fix_plan_id kept for the caller's signature; the ticket's plan is used)."""
+        self._fail_execution(execution_id, f"Agent crashed: {error[:500]}")
+
+    def _mark_timed_out(self, execution_id: int):
+        """Mark a timed-out execution in the DB."""
+        self._fail_execution(execution_id, f"Execution timed out after {settings.executor_total_timeout}s")

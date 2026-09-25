@@ -77,6 +77,7 @@ def test_executor_service_worker_sets_context(db):
         ExecutorService()._run_executor(ex.id, plan.id)
     assert seen["actor"] == "agent:executor" and seen["on_behalf_of"] == "user:alice"
     assert seen["fix_plan_id"] == plan.id and seen["trace_id"] == "TRC-issue1" and seen["agent_name"] == "executor"
+    assert seen["execution_id"] == ex.id
     assert seen["approved_plan"] == plan.id
 
 

@@ -30,6 +30,7 @@ class RunContext:
     fix_plan_id: Optional[int] = None
     change_request_id: Optional[int] = None
     chat_session_id: Optional[str] = None
+    execution_id: Optional[int] = None        # the queued FixExecution an ExecutorService run is closing
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

@@ -350,9 +350,13 @@ class TestRunExecutor:
         svc = ExecutorService()
         svc._active_executions[1] = MagicMock()
 
-        with patch("agenticops.agents.executor_agent.executor_agent", return_value="success"):
+        with patch("agenticops.agents.executor_agent.executor_agent", return_value="success"), \
+             patch.object(svc, "_fail_execution") as mock_reconcile:
             svc._run_executor(1, 5)
 
+        # The post-run reconcile is mocked: this test has no DB fixture, so a real one would write to the
+        # developer's database. A no-op there when the run recorded its result (tests/test_executor_reconcile.py).
+        mock_reconcile.assert_called_once_with(1, "Executor ended without recording a result: success")
         # Should be removed from active after completion
         assert 1 not in svc._active_executions
 

@@ -146,17 +146,22 @@ def test_get_approved_fix_plan_reports_kind_and_accepts_executing(db):
 
 
 def test_save_execution_result_for_change_calls_mapper(db):
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
     from agenticops.tools.metadata_tools import save_execution_result
     cr_id = _cr_under_review(db)
-    with get_session() as s:
-        pass
+    db.get(ChangeRequest, cr_id).status = "executing"; db.commit()
     plan = FixPlan(plan_kind="change", change_request_id=cr_id, risk_level="L1", title="p", summary="s", status="executing",
                    rollback_plan={"x": 1}, post_checks=[{"check": "c"}])
     db.add(plan); db.commit()
-    with patch("agenticops.services.change_service.on_execution_result", return_value={"status": "completed"}) as mapper, \
-         patch("agenticops.services.notification_service.notify_execution_result") as fix_notify:
-        out = save_execution_result(fix_plan_id=plan.id, health_issue_id=None, status="succeeded",
-                                    post_check_results=json.dumps([{"check": "c", "status": "pass"}]))
+    token = set_run_context(RunContext(actor="agent:executor", agent_name="executor", fix_plan_id=plan.id,
+                                       change_request_id=cr_id))  # the queued run: plan and CR both executing
+    try:
+        with patch("agenticops.services.change_service.on_execution_result", return_value={"status": "completed"}) as mapper, \
+             patch("agenticops.services.notification_service.notify_execution_result") as fix_notify:
+            out = save_execution_result(fix_plan_id=plan.id, health_issue_id=None, status="succeeded",
+                                        post_check_results=json.dumps([{"check": "c", "status": "pass"}]))
+    finally:
+        reset_run_context(token)
     assert "FixExecution #" in out
     mapper.assert_called_once()
     assert mapper.call_args.args == (plan.id, "succeeded")

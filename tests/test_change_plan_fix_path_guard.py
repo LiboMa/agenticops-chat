@@ -203,6 +203,28 @@ def test_executor_agent_runs_a_fix_plan_as_before(db):
     assert agent_cls.call_count == 1 and out == "done"
 
 
+@pytest.mark.parametrize("plan_status,cr_status,cr_offset", [
+    pytest.param("executing", "approved", 0, id="cr-not-executing"),  # a stale pre-9b row
+    pytest.param("approved", "executing", 0, id="plan-not-executing"),
+    pytest.param("executing", "executing", 1, id="context-names-another-cr"),
+])
+def test_each_change_execution_condition_alone_refuses_both_gates(db, plan_status, cr_status, cr_offset):
+    """Each condition of change_execution_refusal on its own: get_approved_fix_plan and the executor_agent
+    entry both refuse, and nothing changes."""
+    from agenticops.agents.executor_agent import executor_agent
+    from agenticops.tools.metadata_tools import get_approved_fix_plan
+    pid, cr_id = _change_plan(db, plan_status, cr_status)
+    before = _state(db, pid, cr_id)
+    with _queued_run(pid, cr_id + cr_offset):
+        gate = get_approved_fix_plan(pid)
+    with _executor_build() as (agent_cls, cli_tool), _queued_run(pid, cr_id + cr_offset):
+        entry = executor_agent(fix_plan_id=pid)
+    for out in (gate, entry):
+        assert out.startswith("REJECTED") and f"C#{cr_id}" in out
+    assert not agent_cls.called and not cli_tool.called
+    assert _state(db, pid, cr_id) == before
+
+
 # ── Web API ──────────────────────────────────────────────────────────────────
 
 _WEB_CALLS = {

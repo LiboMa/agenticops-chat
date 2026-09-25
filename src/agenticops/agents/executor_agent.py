@@ -194,6 +194,7 @@ def executor_agent(fix_plan_id: int) -> str:
         # Resolve provider CLI tool from the plan's account: the issue's account for a fix
         # plan, the change request's account for a change plan (凭证安全铁律 #3 — account-addressed).
         cli_tool = None
+        bound_change = None  # "C#<n>" while a change plan's account is (or may be) bound and unresolved
         try:
             with get_db_session() as db:
                 plan_for_acct = db.query(FixPlan).filter_by(id=fix_plan_id).first()
@@ -202,13 +203,21 @@ def executor_agent(fix_plan_id: int) -> str:
                     issue = db.query(HealthIssue).filter_by(id=plan_for_acct.health_issue_id).first()
                     account_id = issue.account_id if issue else None
                 elif plan_for_acct and plan_for_acct.change_request_id:
+                    # Fail closed: a change plan is presumed bound until its change request says otherwise.
+                    bound_change = f"C#{plan_for_acct.change_request_id}"
                     from agenticops.models import ChangeRequest
                     cr = db.get(ChangeRequest, plan_for_acct.change_request_id)
                     account_id = cr.account_id if cr else None
+                    if not account_id:
+                        bound_change = None  # no account on the request → the account-addressed tools below
                 if account_id:
                     cli_tool = get_cli_tool_for_issue(account_id)
         except Exception:
-            pass
+            logger.warning("Executor account resolution failed for FixPlan #%d", fix_plan_id, exc_info=True)
+        if bound_change and cli_tool is None:
+            # 凭证安全铁律 #2: a change bound to an account never runs on a fallback's credentials.
+            return (f"REJECTED: cannot resolve credentials for the account of change request {bound_change} — "
+                    f"a change runs only on its own account, never on a fallback.")
 
         # Query risk level BEFORE agent creation for smart model selection
         model_id, max_tokens = get_agent_model_config("executor")

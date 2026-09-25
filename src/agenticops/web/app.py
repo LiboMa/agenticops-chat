@@ -2700,7 +2700,7 @@ async def api_get_trace(trace_id: str):
 
 
 @app.post("/api/fix-executions/{execution_id}/cancel")
-async def api_cancel_execution(execution_id: int):
+async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
     """Cancel a running fix execution."""
     if _executor_service.cancel_execution(execution_id):
         return {"status": "cancelled", "execution_id": execution_id}

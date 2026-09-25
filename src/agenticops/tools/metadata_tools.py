@@ -1326,6 +1326,11 @@ def save_execution_result(
     valid_statuses = {"succeeded", "failed", "rolled_back", "aborted"}
     if status not in valid_statuses:
         return f"Invalid execution status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
+    from agenticops.run_context import get_run_context
+    rc = get_run_context()
+    if rc.fix_plan_id and rc.fix_plan_id != fix_plan_id:
+        return (f"REJECTED: this run executes FixPlan #{rc.fix_plan_id} — "
+                f"it cannot record a result for FixPlan #{fix_plan_id}.")
 
     def _parse_json(val, fallback):
         try:
@@ -1338,6 +1343,10 @@ def save_execution_result(
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
         if not plan:
             return f"FixPlan #{fix_plan_id} not found."
+        from agenticops.services.change_service import change_execution_refusal
+        refusal = change_execution_refusal(plan)
+        if refusal:
+            return f"REJECTED: {refusal}"
 
         if plan.status not in ("approved", "executing"):
             return (
@@ -1350,29 +1359,40 @@ def save_execution_result(
         is_change = plan.plan_kind == "change"
         change_request_id = plan.change_request_id
 
-        execution = FixExecution(
-            fix_plan_id=fix_plan_id,
-            health_issue_id=health_issue_id if not is_change else None,
-            status=status,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
-            executed_by=executed_by,
-            pre_check_results=_parse_json(pre_check_results, []),
-            step_results=_parse_json(step_results, []),
-            post_check_results=_parse_json(post_check_results, []),
-            rollback_results=_parse_json(rollback_results, []),
-            error_message=error_message or None,
-            duration_ms=duration_ms,
-        )
-        session.add(execution)
+        # The queued run's own ticket (ExecutorService claimed it pending→running and named it in the Run
+        # Context) is closed IN PLACE — one row per queued execution; it keeps executed_by (the requester),
+        # started_at (the claim) and health_issue_id. Chat / auto-pipeline runs have no ticket → a new row.
+        now = datetime.now(timezone.utc)
+        execution = None
+        if rc.execution_id:
+            execution = (session.query(FixExecution)
+                         .filter_by(id=rc.execution_id, fix_plan_id=fix_plan_id, status="running").first())
+        if execution is None:
+            execution = FixExecution(
+                fix_plan_id=fix_plan_id,
+                health_issue_id=health_issue_id if not is_change else None,
+                started_at=now,
+                executed_by=executed_by,
+            )
+            session.add(execution)
+        execution.status = status
+        execution.completed_at = now
+        execution.pre_check_results = _parse_json(pre_check_results, [])
+        execution.step_results = _parse_json(step_results, [])
+        execution.post_check_results = _parse_json(post_check_results, [])
+        execution.rollback_results = _parse_json(rollback_results, [])
+        execution.error_message = error_message or None
+        execution.duration_ms = duration_ms
 
         # Update FixPlan status through the state machine (approved → executing → terminal).
-        # aborted: plan status untouched — retry allowed (an approved plan stays approved).
+        # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
         terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
         if terminal:
             if plan.status == "approved":
                 transition_plan(plan, "executing")
             transition_plan(plan, terminal)
+        elif plan.status == "executing":
+            transition_plan(plan, "failed")  # aborted mid-run: an executing plan can never run again
 
         # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
         # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,
