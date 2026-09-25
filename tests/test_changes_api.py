@@ -1,0 +1,407 @@
+"""Change Management Web API (MVP-2.6.0, Plan B Task 11).
+
+/api/changes lifecycle + timeline, /api/command-audits, the audit read gate, the settings security
+toggles, change search, and change plans carrying their change request's account.
+"""
+
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+import pytest
+from starlette.testclient import TestClient
+
+from agenticops.auth.actor import Actor
+from agenticops.models import (
+    Base, ChangeRequest, CloudAccount, CloudResource, CommandAudit, FixPlan, HealthIssue, RCAResult, get_session,
+)
+
+ALICE = Actor("user", "alice", 1, ("read", "write"))
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    import agenticops.models as models_mod
+    import agenticops.audit.models  # noqa: F401
+    from agenticops.config import settings
+    from agenticops.web.app import app
+    monkeypatch.setattr(models_mod, "_engine", None)
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/capi.db")
+    monkeypatch.setattr(settings, "change_management_enabled", True)
+    monkeypatch.setattr(settings, "api_auth_enabled", False)
+    monkeypatch.setattr(settings, "rbac_enforce", False)
+    # _planned() must stop at 'planned' whatever the local settings.yaml says
+    monkeypatch.setattr(settings, "change_auto_approve_standard", False)
+    Base.metadata.create_all(models_mod.get_engine())
+    s = get_session()
+    acct = CloudAccount(name="dev", provider="aws", is_enabled=True, credentials={}, regions=["ap-southeast-1"]); s.add(acct); s.flush()
+    s.add(CloudResource(account_id=acct.id, provider="aws", region="ap-southeast-1", resource_type="EC2Instance", resource_id="i-0abc", name="web"))
+    s.commit(); s.close()
+    yield TestClient(app)   # bare — no `with`, so the lifespan (schedulers, executor service) never starts
+
+
+@pytest.fixture
+def settings_io():
+    """PATCH /api/settings must never write the real config/settings.yaml nor list Bedrock models."""
+    with patch("agenticops.config.save_to_yaml") as save, \
+         patch("agenticops.services.model_service.get_model_presets", return_value=[]):
+        yield save
+
+
+def _account_id(name):
+    s = get_session()
+    try:
+        return s.query(CloudAccount.id).filter_by(name=name).scalar()
+    finally:
+        s.close()
+
+
+def _token(email, *, admin):
+    """A real session token for a new user (AuthService.create_user returns a detached row — re-read the id)."""
+    from agenticops.auth.models import User
+    from agenticops.auth.service import AuthService
+    AuthService.create_user(email=email, password="pw-not-a-secret", name=email.split("@")[0], is_admin=admin)
+    s = get_session()
+    try:
+        uid = s.query(User.id).filter_by(email=email).scalar()
+    finally:
+        s.close()
+    return AuthService.create_session(uid)
+
+
+def _planned():
+    """Drive a CR to 'planned' through the service (SRE mocked away)."""
+    from agenticops.services import change_service as cs
+    with patch.object(cs, "notify_change_requested"):
+        cr = cs.create_change_request(source="web", actor=ALICE, title="Tag web",
+                                      description="add Env=prod", account_name="dev", targets=["i-0abc"], start_review=False)
+    with cs._session() as s:
+        cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
+    cs.ground_targets(cr["id"])
+    s = get_session()
+    s.add(FixPlan(plan_kind="change", change_request_id=cr["id"], risk_level="L1", title="p", summary="s",
+                  steps=[{"command": "aws ec2 create-tags"}], rollback_plan={"steps": ["aws ec2 delete-tags"]},
+                  post_checks=[{"check": "present", "command": "aws ec2 describe-tags"}], status="draft"))
+    s.commit(); s.close()
+    with patch.object(cs, "notify_change_pending_approval"):
+        cs.submit_review(cr["id"], verdict="approved_for_planning", risk_level="L1", action_type="tag", reasons=["ok"], actor=Actor("agent", "sre"))
+    return cr["id"]
+
+
+def _draft(title="t", description="d"):
+    from agenticops.services import change_service as cs
+    with patch.object(cs, "notify_change_requested"):
+        return cs.create_change_request(source="web", actor=ALICE, title=title, description=description, start_review=False)
+
+
+def _fix_plan_in(account_id, title="fix plan"):
+    """A fix plan whose HealthIssue lives in `account_id` → (plan id, issue id)."""
+    s = get_session()
+    try:
+        issue = HealthIssue(account_id=account_id, title="t", description="d", severity="low", source="test",
+                            status="fix_planned", resource_id="i-0abc")
+        s.add(issue); s.flush()
+        rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9); s.add(rca); s.flush()
+        plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title=title, summary="s", status="draft")
+        s.add(plan); s.commit()
+        return plan.id, issue.id
+    finally:
+        s.close()
+
+
+# ── /api/changes ──────────────────────────────────────────────────────
+
+def test_create_lists_and_detail(client):
+    with patch("agenticops.services.change_service.start_review") as sr, \
+         patch("agenticops.services.change_service.notify_change_requested"):
+        r = client.post("/api/changes", json={"title": "Tag web", "description": "add Env=prod", "account_name": "dev",
+                                              "targets": ["i-0abc"], "requested_change_type": "normal"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["status"] == "draft" and body["requested_by"] == "web:anonymous" and body["source"] == "web"
+    sr.assert_called_once_with(body["id"], sync=False)
+    assert client.get("/api/changes").json()[0]["id"] == body["id"]
+    assert client.get("/api/changes?status=planned").json() == []
+    d = client.get(f"/api/changes/{body['id']}").json()
+    assert d["plans"] == [] and d["executions"] == [] and d["target_hints"] == ["i-0abc"]
+    assert client.get("/api/changes/9999").status_code == 404
+
+
+def test_validation_errors(client):
+    assert client.post("/api/changes", json={"title": "", "description": "x"}).status_code == 422
+    assert client.post("/api/changes", json={"title": "t", "description": "d", "requested_change_type": "urgent"}).status_code == 422
+    with patch("agenticops.services.change_service.notify_change_requested"):
+        r = client.post("/api/changes", json={"title": "t", "description": "d", "account_name": "nope"})
+    assert r.status_code == 422 and "account" in r.json()["detail"]
+
+
+def test_list_inputs_are_validated(client):
+    r = client.get("/api/changes?status=bogus")
+    assert r.status_code == 422 and "invalid status 'bogus'" in r.json()["detail"]
+    assert client.get("/api/changes?status=").status_code == 200  # empty = no filter, as in change_service
+    assert client.get("/api/changes?period=1y").status_code == 422
+    assert client.get("/api/changes?limit=0").status_code == 422
+    assert client.get("/api/command-audits?limit=0").status_code == 422
+
+
+def test_disabled_returns_404(client):
+    from agenticops.config import settings
+    calls = [("get", "/api/changes", None), ("post", "/api/changes", {"title": "t", "description": "d"}),
+             ("get", "/api/changes/1", None), ("get", "/api/changes/1/timeline", None),
+             ("post", "/api/changes/1/approve", {"reason": "r"}), ("post", "/api/changes/1/reject", {"reason": "r"}),
+             ("post", "/api/changes/1/cancel", {"reason": "r"}), ("post", "/api/changes/1/clarify", {"message": "m"}),
+             ("post", "/api/changes/1/review", None), ("post", "/api/changes/1/execute", None),
+             ("post", "/api/changes/1/resolve-review", {"outcome": "completed", "reason": "r"})]
+    with patch.object(settings, "change_management_enabled", False):
+        for method, url, body in calls:
+            r = client.request(method.upper(), url, json=body)
+            assert r.status_code == 404 and "disabled" in r.json()["detail"], (method, url)
+
+
+def test_approve_requires_reason_and_binds_identity(client):
+    cr_id = _planned()
+    assert client.post(f"/api/changes/{cr_id}/approve", json={}).status_code == 422
+    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed"})
+    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "web:anonymous"
+    assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again"}).status_code == 409
+
+
+def test_sod_403_when_enforced(client):
+    """SoD needs identified actors (the anonymous web actor is exempt by ruling): request AND approve as the
+    same authenticated user by making current_actor resolve to that user."""
+    from agenticops.audit.models import AuditLog
+    from agenticops.config import settings
+    from agenticops.services import change_service as cs
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    cr2 = _draft()
+    with cs._session() as s:
+        row = s.get(ChangeRequest, cr2["id"]); cs.transition_change(row, "under_review"); cs.transition_change(row, "planned")
+        # approve() needs the active change plan a positive review leaves behind (else 409, not the SoD verdict)
+        s.add(FixPlan(plan_kind="change", change_request_id=cr2["id"], risk_level="L1", title="p", summary="s",
+                      steps=[{"command": "aws ec2 create-tags"}], rollback_plan={"steps": ["aws ec2 delete-tags"]},
+                      post_checks=[{"check": "present", "command": "aws ec2 describe-tags"}], status="pending_approval"))
+    app.dependency_overrides[deps.current_actor] = lambda: ALICE
+    try:
+        with patch.object(settings, "rbac_enforce", True):
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self"})
+        assert r.status_code == 403
+        with patch.object(settings, "rbac_enforce", False):
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)"})
+        assert r.status_code == 200 and r.json()["approved_by"] == "user:alice"  # shadow mode: allowed, audited
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    s = get_session()
+    try:
+        assert s.query(AuditLog).filter_by(action="authz.denied_shadow", entity_id=str(cr2["id"])).count() == 1
+    finally:
+        s.close()
+
+
+def test_reject_cancel_clarify_review(client):
+    from agenticops.services import change_service as cs
+    cr_id = _planned()
+    with patch.object(cs, "notify_change_result"):
+        r = client.post(f"/api/changes/{cr_id}/reject", json={"reason": "no"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    cr = _draft(description="vague")
+    assert client.post(f"/api/changes/{cr['id']}/cancel", json={"reason": "oops"}).status_code == 200
+    cr3 = _draft(description="vague")
+    with patch("agenticops.services.change_service.start_review") as sr:
+        assert client.post(f"/api/changes/{cr3['id']}/review").status_code == 202
+    sr.assert_called_once()
+    with cs._session() as s:
+        row = s.get(ChangeRequest, cr3["id"]); cs.transition_change(row, "under_review"); cs.transition_change(row, "needs_clarification")
+    with patch("agenticops.services.change_service.start_review") as sr2:
+        r = client.post(f"/api/changes/{cr3['id']}/clarify", json={"message": "it is i-0abc"})
+    assert r.status_code == 202 and sr2.called
+
+
+def test_execute_and_timeline(client):
+    from agenticops.config import settings
+    cr_id = _planned()
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
+    with patch.object(settings, "executor_enabled", True):
+        r = client.post(f"/api/changes/{cr_id}/execute")
+    assert r.status_code == 202 and r.json()["status"] == "pending" and r.json()["executed_by"] == "web:anonymous"
+    d = client.get(f"/api/changes/{cr_id}").json()
+    assert d["status"] == "executing" and d["plans"][0]["plan_kind"] == "change" and len(d["executions"]) == 1
+    assert d["plans"][0]["account_id"] == d["account_id"] == _account_id("dev")  # a plan carries its CR's account
+    tl = client.get(f"/api/changes/{cr_id}/timeline").json()
+    assert {e["kind"] for e in tl} == {"event", "audit"} and any(e["type"] == "change.approved" for e in tl)
+    assert client.get("/api/changes/9999/timeline").status_code == 404
+
+
+def test_detail_carries_the_last_policy_decision(client):
+    from agenticops.services.pipeline_events import log_event
+    cr_id = _planned()
+    pd = client.get(f"/api/changes/{cr_id}").json()["policy_decision"]
+    assert isinstance(pd["action"], str) and pd["action"]
+    log_event(None, "policy_decision", "approval", "block", detail={"policy_decision": {"action": "block"}},
+              change_request_id=cr_id)
+    assert client.get(f"/api/changes/{cr_id}").json()["policy_decision"] == {"action": "block"}
+    assert client.get(f"/api/changes/{_draft()['id']}").json()["policy_decision"] is None
+
+
+def test_resolve_review(client):
+    from agenticops.config import settings
+    from agenticops.services import change_service as cs
+    cr_id = _planned()
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
+    with patch.object(settings, "executor_enabled", True):
+        plan_id = client.post(f"/api/changes/{cr_id}/execute").json()["fix_plan_id"]
+    with patch.object(cs, "notify_change_result"):
+        cs.on_execution_result(plan_id, "succeeded", post_check_results=[])
+    assert client.post(f"/api/changes/{cr_id}/resolve-review", json={"outcome": "maybe", "reason": "x"}).status_code == 422
+    with patch.object(cs, "notify_change_result"):
+        r = client.post(f"/api/changes/{cr_id}/resolve-review", json={"outcome": "completed", "reason": "checked in console"})
+    assert r.status_code == 200 and r.json()["status"] == "completed"
+
+
+# ── /api/command-audits + the audit read gate ─────────────────────────
+
+def test_command_audits_endpoint(client):
+    s = get_session()
+    s.add(CommandAudit(actor="cli:m", tool="run_aws_cli", tier="write", command="aws ec2 create-tags", outcome="executed", change_request_id=3))
+    s.add(CommandAudit(actor="cli:m", tool="run_on_host", tier="write", command="systemctl restart x", outcome="refused", reason="change_required"))
+    s.commit(); s.close()
+    r = client.get("/api/command-audits")
+    assert r.status_code == 200 and len(r.json()) == 2
+    assert len(client.get("/api/command-audits?outcome=refused").json()) == 1
+    assert client.get("/api/command-audits?change_request_id=3").json()[0]["command"] == "aws ec2 create-tags"
+
+
+def test_audit_reads_open_when_auth_off(client):
+    for url in ("/api/audit", "/api/audit/stats", "/api/command-audits", "/api/audit/entity/change_request/1"):
+        assert client.get(url).status_code == 200, url
+
+
+def test_audit_reads_need_identity_when_auth_on(client, monkeypatch):
+    """Auth on → a HARD check independent of rbac_enforce: shadow mode must not widen who reads the audit trail."""
+    from agenticops.config import settings
+    user = {"Authorization": f"Bearer {_token('bob@example.com', admin=False)}"}
+    admin = {"Authorization": f"Bearer {_token('root@example.com', admin=True)}"}
+    monkeypatch.setattr(settings, "api_auth_enabled", True)
+    for url in ("/api/command-audits", "/api/audit", "/api/audit/stats"):
+        assert client.get(url).status_code == 401, url
+        assert client.get(url, headers={"Authorization": "Bearer not-a-token"}).status_code == 401, url
+        assert client.get(url, headers=user).status_code == 403, url
+        assert client.get(url, headers=admin).status_code == 200, url
+    assert client.get("/api/audit/entity/change_request/1").status_code == 401
+    assert client.get("/api/audit/entity/change_request/1", headers=user).status_code == 200
+
+
+def test_audit_query_rows_are_readable_after_its_session_closed(client):
+    from agenticops.audit.service import AuditService
+    AuditService.log("change.requested", "change_request", "9", actor="user:alice", details={"k": 1})
+    rows = AuditService.query(entity_type="change_request", entity_id="9")
+    assert [(r.action, r.actor, r.details) for r in rows] == [("change.requested", "user:alice", {"k": 1})]
+
+
+def test_entity_audit_history_pages(client):
+    from agenticops.audit.models import AuditLog
+    now = datetime.now(timezone.utc)
+    s = get_session()
+    s.add(AuditLog(timestamp=now - timedelta(minutes=5), action="change.requested", entity_type="change_request", entity_id="7", details={}))
+    s.add(AuditLog(timestamp=now - timedelta(minutes=1), action="change.approved", entity_type="change_request", entity_id="7", details={}))
+    s.commit(); s.close()
+    newer = client.get("/api/audit/entity/change_request/7?limit=1")
+    older = client.get("/api/audit/entity/change_request/7?limit=1&offset=1")
+    assert newer.status_code == 200 and [e["action"] for e in newer.json()] == ["change.approved"]
+    assert older.status_code == 200 and [e["action"] for e in older.json()] == ["change.requested"]
+
+
+def test_audit_ledger_reaches_90_days(client):
+    for url in ("/api/audit", "/api/audit/stats"):
+        assert client.get(f"{url}?hours=2160").status_code == 200, url
+        assert client.get(f"{url}?hours=2161").status_code == 422, url
+
+
+# ── PATCH /api/settings security toggles ──────────────────────────────
+
+def _settings_audits():
+    from agenticops.audit.models import AuditLog
+    s = get_session()
+    try:
+        return [(a.action, a.entity_id, a.actor, a.old_values, a.new_values)
+                for a in s.query(AuditLog).filter_by(entity_type="system", entity_name="settings").all()]
+    finally:
+        s.close()
+
+
+def test_settings_security_toggle_applies_persists_and_audits(client, settings_io):
+    from agenticops.config import settings
+    r = client.patch("/api/settings", json={"rbac_enforce": True})
+    assert r.status_code == 200 and settings.rbac_enforce is True
+    body = r.json()
+    assert body["rbac_enforce"] is True and body["change_auto_approve_standard"] is False
+    assert body["change_management_enabled"] is True
+    settings_io.assert_called_once_with({"rbac_enforce": True})
+    assert _settings_audits() == [("update", "rbac_enforce", "web:anonymous", {"rbac_enforce": False}, {"rbac_enforce": True})]
+
+
+def test_settings_unchanged_toggle_writes_nothing(client, settings_io):
+    assert client.patch("/api/settings", json={"rbac_enforce": False}).status_code == 200
+    settings_io.assert_not_called()
+    assert _settings_audits() == []
+
+
+def test_settings_security_toggle_must_be_boolean(client, settings_io, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "auto_rca_enabled", True)
+    r = client.patch("/api/settings", json={"rbac_enforce": "yes"})
+    assert r.status_code == 400 and r.json()["detail"] == "rbac_enforce must be a boolean"
+    r = client.patch("/api/settings", json={"auto_rca_enabled": False, "change_auto_approve_standard": 1})
+    assert r.status_code == 400 and settings.auto_rca_enabled is True  # a refused body applies nothing
+    assert settings.rbac_enforce is False and settings.change_auto_approve_standard is False
+    settings_io.assert_not_called()
+
+
+def test_settings_security_toggle_needs_admin_when_auth_on(client, settings_io, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "auto_rca_enabled", True)
+    user = {"Authorization": f"Bearer {_token('bob@example.com', admin=False)}"}
+    admin = {"Authorization": f"Bearer {_token('root@example.com', admin=True)}"}
+    monkeypatch.setattr(settings, "api_auth_enabled", True)
+    body = {"auto_rca_enabled": False, "rbac_enforce": True}
+    assert client.patch("/api/settings", json=body).status_code == 401
+    assert client.patch("/api/settings", json=body, headers=user).status_code == 403
+    assert settings.auto_rca_enabled is True and settings.rbac_enforce is False  # BOTH unchanged
+    settings_io.assert_not_called()
+    assert _settings_audits() == []
+    r = client.patch("/api/settings", json=body, headers=admin)
+    assert r.status_code == 200 and settings.auto_rca_enabled is False and settings.rbac_enforce is True
+
+
+# ── Change plans: search + account ────────────────────────────────────
+
+def test_search_labels_change_plans_and_finds_change_requests(client):
+    from agenticops.config import settings
+    fix_plan_id, issue_id = _fix_plan_in(_account_id("dev"), title="fix zeta")
+    cr = _draft(title="zeta rollout")
+    s = get_session()
+    cp = FixPlan(plan_kind="change", change_request_id=cr["id"], risk_level="L1", title="change zeta", summary="s", status="draft")
+    s.add(cp); s.commit(); change_plan_id = cp.id; s.close()
+    res = client.get("/api/search?q=zeta").json()["results"]
+    assert {i["id"]: (i["entity_type"], i["parent_id"]) for i in res["fix_plans"]} == {
+        fix_plan_id: ("fix_plan", issue_id), change_plan_id: ("change_plan", cr["id"])}
+    assert [(i["id"], i["entity_type"], i["parent_id"]) for i in res["change_requests"]] == [(cr["id"], "change_request", None)]
+    with patch.object(settings, "change_management_enabled", False):
+        res = client.get("/api/search?q=zeta").json()["results"]
+    assert "change_requests" not in res and len(res["fix_plans"]) == 2
+
+
+def test_fix_plan_lists_place_change_plans_in_their_request_account(client):
+    from agenticops.services import change_service as cs
+    s = get_session()
+    s.add(CloudAccount(name="prod", provider="aws", is_enabled=True, credentials={}, regions=["us-east-1"])); s.commit(); s.close()
+    dev, prod = _account_id("dev"), _account_id("prod")
+    cr_id = _planned()
+    with cs._session() as s:
+        change_plan_id = s.query(FixPlan.id).filter_by(change_request_id=cr_id).scalar()
+    fix_plan_id, _ = _fix_plan_in(dev)
+    assert {p["id"]: p["account_id"] for p in client.get("/api/fix-plans").json()} == {change_plan_id: dev, fix_plan_id: dev}
+    rows = client.get(f"/api/fix-plans?account_id={dev}").json()
+    assert {p["id"] for p in rows} == {change_plan_id, fix_plan_id} and all(p["account_id"] == dev for p in rows)
+    assert [p["id"] for p in client.get(f"/api/fix-plans?kind=change&account_id={dev}").json()] == [change_plan_id]
+    assert client.get(f"/api/fix-plans?account_id={prod}").json() == []
+    assert client.get(f"/api/fix-plans/{change_plan_id}").json()["account_id"] == dev

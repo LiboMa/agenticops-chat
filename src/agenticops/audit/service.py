@@ -208,13 +208,19 @@ class AuditService:
             if end_time:
                 query = query.filter(AuditLog.timestamp <= end_time)
 
-            return query.offset(offset).limit(limit).all()
+            rows = query.offset(offset).limit(limit).all()
+            for row in rows:
+                # detach while loaded — the commit on leaving the block would otherwise expire them
+                # (expire_on_commit) and every attribute read after return would raise DetachedInstanceError
+                session.expunge(row)
+            return rows
 
     @staticmethod
     def get_entity_history(
         entity_type: str,
         entity_id: str,
         limit: int = 50,
+        offset: int = 0,
     ) -> List[AuditLog]:
         """Get the audit history for a specific entity.
 
@@ -222,6 +228,7 @@ class AuditService:
             entity_type: Type of entity
             entity_id: ID of the entity
             limit: Maximum records to return
+            offset: Pagination offset
 
         Returns:
             List of AuditLog entries for the entity
@@ -230,6 +237,7 @@ class AuditService:
             entity_type=entity_type,
             entity_id=entity_id,
             limit=limit,
+            offset=offset,
         )
 
     @staticmethod

@@ -11,13 +11,14 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from sqlalchemy import case, func, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
     AgentMemory,
     AgentMemoryFact,
     AlertEvent,
+    ChangeRequest,
     CloudAccount,
     CloudResource,
     Anomaly,
@@ -63,7 +64,7 @@ from agenticops.web.helpers import (  # cross-router helpers (extracted)
     _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report,
 )
 from agenticops.auth.actor import Actor
-from agenticops.web.deps import current_actor
+from agenticops.web.deps import current_actor, require_authenticated_user
 
 
 
@@ -319,6 +320,8 @@ from agenticops.web.routers import signals as _signals_router
 app.include_router(_signals_router.router)
 from agenticops.web.routers import security as _security_router
 app.include_router(_security_router.router)
+from agenticops.web.routers import changes as _changes_router
+app.include_router(_changes_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -624,13 +627,22 @@ async def api_get_settings():
         "acp_enhanced_enabled": settings.acp_enhanced_enabled,
         "acp_enhanced_backend": settings.acp_enhanced_backend,
         "acp_available_backends": _acp_available_backends(),
+        # Change management (MVP-2.6.0) — the two security toggles persist to settings.yaml
+        "change_management_enabled": settings.change_management_enabled,
+        "change_auto_approve_standard": settings.change_auto_approve_standard,
+        "rbac_enforce": settings.rbac_enforce,
     }
 
 
 @app.patch("/api/settings")
-async def api_update_settings(body: dict = Body(...)):
+async def api_update_settings(request: Request, body: dict = Body(...), current: Actor = Depends(current_actor)):
     """Update runtime settings. Agent models + report config persist to settings.yaml;
-    boolean toggles and scan_focus are session-level (reset on restart)."""
+    boolean toggles and scan_focus are session-level (reset on restart).
+
+    The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
+    need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
+    refused request (400/401/403) applies nothing, not even the other keys of the same body."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
     BOOL_KEYS = {
@@ -647,10 +659,22 @@ async def api_update_settings(body: dict = Body(...)):
     # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
     ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
 
-    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models", "galaxy_model_id"}
+    # Change-management security toggles — persisted to settings.yaml (must survive a restart)
+    CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS
+                | {"scan_focus", "agent_models", "galaxy_model_id"})
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
+
+    # Security toggles are validated and authorized BEFORE anything is applied
+    change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
+    for key in sorted(change_updates):
+        if not isinstance(change_updates[key], bool):
+            raise HTTPException(400, f"{key} must be a boolean")
+    if change_updates and settings.api_auth_enabled:
+        await require_authenticated_user(request, admin=True)
 
     for key in BOOL_KEYS:
         if key in body:
@@ -738,6 +762,19 @@ async def api_update_settings(body: dict = Body(...)):
             raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
         settings.galaxy_model_id = val
         save_to_yaml({"galaxy_model_id": val})
+
+    # Security toggles — applied last, one audit row per changed value, then ONE yaml write
+    changed: dict[str, Any] = {}
+    for key in sorted(change_updates):
+        old, new = getattr(settings, key), change_updates[key]
+        if old == new:
+            continue
+        setattr(settings, key, new)
+        changed[key] = new
+        AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=current.key,
+                         user_id=current.user_id, old_values={key: old}, new_values={key: new})
+    if changed:
+        save_to_yaml(changed)
 
     return await api_get_settings()
 
@@ -2283,6 +2320,8 @@ def _fix_plan_response(session, plan) -> FixPlanResponse:
     resp = FixPlanResponse.model_validate(plan)
     if plan.health_issue_id:
         resp.account_id = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
+    elif plan.change_request_id:
+        resp.account_id = session.query(ChangeRequest.account_id).filter_by(id=plan.change_request_id).scalar()
     return resp
 
 
@@ -2341,19 +2380,28 @@ async def api_list_fix_plans(
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
         if account_id is not None:
-            query = query.join(HealthIssue).filter(HealthIssue.account_id == account_id)
+            # a fix plan's account is its HealthIssue's, a change plan's is its ChangeRequest's
+            query = (query.outerjoin(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
+                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id)
+                          .filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id)))
 
         plans = query.offset(offset).limit(limit).all()
-        # Resolve account_id from the related HealthIssue (change plans have none)
+        # Resolve account_id from the plan's parent: its HealthIssue (fix) or its ChangeRequest (change)
         issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
         issue_accounts: dict[int, Optional[int]] = {}
         if issue_ids:
             rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
             issue_accounts = {iid: aid for iid, aid in rows}
+        cr_ids = {p.change_request_id for p in plans if p.change_request_id}
+        cr_accounts: dict[int, Optional[int]] = {}
+        if cr_ids:
+            rows = session.query(ChangeRequest.id, ChangeRequest.account_id).filter(ChangeRequest.id.in_(cr_ids)).all()
+            cr_accounts = {cid: aid for cid, aid in rows}
         results = []
         for p in plans:
             resp = FixPlanResponse.model_validate(p)
-            resp.account_id = issue_accounts.get(p.health_issue_id) if p.health_issue_id else None
+            resp.account_id = (issue_accounts.get(p.health_issue_id) if p.health_issue_id
+                               else cr_accounts.get(p.change_request_id))
             results.append(resp)
         return results
 

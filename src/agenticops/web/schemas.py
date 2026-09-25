@@ -795,3 +795,109 @@ class AuditLogResponse(BaseModel):
     ip_address: Optional[str]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================================================
+# Change Management (MVP-2.6.0)
+# ============================================================================
+
+
+class ChangeRequestCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    description: str = Field(..., min_length=1)
+    account_name: Optional[str] = None
+    targets: List[str] = Field(default_factory=list)
+    requested_change_type: str = Field("normal", pattern="^(normal|emergency)$")
+    justification: str = ""
+
+
+class ChangeRequestResponse(BaseModel):
+    """Snapshot of a change request (from change_service.to_dict — timestamps are ISO strings)."""
+    id: int
+    title: str
+    description: str
+    justification: str = ""
+    source: str
+    requested_by: str
+    requester_user_id: Optional[int] = None
+    requested_at: Optional[str] = None
+    account_id: Optional[int] = None
+    target_hints: list = Field(default_factory=list)
+    target_resources: list = Field(default_factory=list)
+    requested_change_type: str = "normal"
+    effective_change_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    action_type: Optional[str] = None
+    status: str
+    review_verdict: Optional[str] = None
+    review_reasons: list = Field(default_factory=list)
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    policy_rule: Optional[str] = None
+    policy_action: Optional[str] = None
+    approved_by: Optional[str] = None
+    approver_user_id: Optional[int] = None
+    approved_at: Optional[str] = None
+    approval_reason: Optional[str] = None
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    closed_at: Optional[str] = None
+    trace_id: Optional[str] = None
+    chat_session_id: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ChangeRequestDetail(ChangeRequestResponse):
+    plans: List[FixPlanResponse] = Field(default_factory=list)
+    executions: List[FixExecutionResponse] = Field(default_factory=list)
+    # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)
+    policy_decision: Optional[dict] = None
+
+
+class ChangeReasonBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeClarifyBody(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChangeResolveReviewBody(BaseModel):
+    outcome: str = Field(..., pattern="^(completed|failed)$")
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeTimelineEntry(BaseModel):
+    ts: Optional[str] = None
+    kind: str  # event | audit
+    type: str
+    actor: Optional[str] = None
+    status: Optional[str] = None
+    stage: Optional[str] = None
+    detail: Optional[object] = None
+
+
+class CommandAuditResponse(BaseModel):
+    id: int
+    created_at: datetime
+    actor: str
+    on_behalf_of: Optional[str] = None
+    agent_name: Optional[str] = None
+    tool: str
+    tier: str
+    account: str = ""
+    region: str = ""
+    target: str = ""
+    command: str
+    outcome: str
+    reason: Optional[str] = None
+    exit_code: Optional[int] = None
+    output_excerpt: str = ""
+    duration_ms: int = 0
+    trace_id: Optional[str] = None
+    fix_plan_id: Optional[int] = None
+    change_request_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
