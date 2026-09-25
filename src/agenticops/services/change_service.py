@@ -101,6 +101,15 @@ def _transition(cr: ChangeRequest, new_status: str) -> None:
         raise ChangeStateError(str(e)) from e
 
 
+def _transition_plan(plan, new_status: str) -> None:
+    """Mirror of _transition for FixPlan: map the SDK's InvalidStatusTransition to ChangeStateError so an
+    unreachable concurrent plan-state race surfaces as a 409 at the router, not an unmapped 500."""
+    try:
+        transition_plan(plan, new_status)
+    except InvalidStatusTransition as e:
+        raise ChangeStateError(str(e)) from e
+
+
 def _audit(session, action: str, cr: ChangeRequest, actor: Actor, *, details: Optional[dict] = None,
            old_status: Optional[str] = None, new_status: Optional[str] = None) -> None:
     AuditService.log(
@@ -691,7 +700,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             if not _claim(s, cr_id, "under_review", "rejected", attempt=current_attempt):
                 raise ChangeStateError(stale)
             _transition(cr, "rejected")
-            transition_plan(plan, "rejected")
+            _transition_plan(plan, "rejected")
             plan.rejected_by, plan.rejected_at, plan.rejection_reason = "policy-engine", datetime.now(timezone.utc), decision.rule_name
             cr.rejected_by, cr.rejected_at = "policy-engine", datetime.now(timezone.utc)
             cr.rejection_reason = f"blocked by policy rule {decision.rule_name}: " + "; ".join(decision.reasons)
@@ -703,7 +712,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             if not _claim(s, cr_id, "under_review", "planned", attempt=current_attempt):
                 raise ChangeStateError(stale)
             _transition(cr, "planned")
-            transition_plan(plan, "pending_approval")
+            _transition_plan(plan, "pending_approval")
             _audit(s, Actions.CHANGE_REVIEWED, cr, actor,
                    details={"verdict": verdict, "risk_level": risk_level, "action_type": action_type,
                             "reasons": reasons, "policy_decision": decision.to_dict(), "plan_id": plan_id},
@@ -734,15 +743,256 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
     return snap
 
 
-# ── Approval + execution handoff (Task 5 implements the bodies) ────────
-# submit_review's auto-approve branch reaches these via globals()[...] (deferred lookup) and the Task-4
-# tests patch them. They must EXIST as module attributes now so patch.object(cs, "approve") can bind — a
-# missing attribute makes patch.object raise AttributeError at setup. Until Task 5 they fail loud; the
-# branch is reachable only when settings.change_auto_approve_standard is true (default false).
+# ── Approval + execution handoff ──────────────────────────────────────
+# submit_review's auto-approve branch reaches approve()/request_execution() via globals()[...] (deferred
+# lookup). Every HUMAN CR transition here is a conditional claim (_claim) then _transition, in ONE session,
+# exactly the submit_review pattern: a lost claim rolls back every field write so a concurrent transition
+# can never leave the row in a state neither transaction validated. Terminal states are written only by
+# on_execution_result() (executor callback) / resolve_review() (human verdict).
+
+# The one lost-claim message, shared by every human transition below.
+_LOST_CLAIM = "is no longer in the expected state (concurrent transition)"
+
+
+def _require_reason(reason: Optional[str]) -> str:
+    reason = (reason or "").strip()
+    if not reason:
+        raise ChangeValidationError("a reason is required")
+    return reason[:2000]
+
 
 def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
-    raise NotImplementedError("approve() is implemented in Task 5 (approval + execution handoff)")
+    """planned → approved (human gate). The claim + every field write share one transaction, so a
+    concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak."""
+    reason = _require_reason(reason)
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.approve", subject=cr)
+        if cr.status != "planned":
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', only planned requests can be approved")
+        plan = active_plan_for(s, cr_id)
+        if plan is None:
+            raise ChangeStateError("no active change plan to approve")
+        if not _claim(s, cr_id, "planned", "approved"):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, "approved")
+        now = datetime.now(timezone.utc)
+        cr.approved_by, cr.approver_user_id, cr.approved_at, cr.approval_reason = actor.key, actor.user_id, now, reason
+        _transition_plan(plan, "approved")
+        plan.approved_by, plan.approved_at = actor.key, now
+        _audit(s, Actions.CHANGE_APPROVED, cr, actor,
+               details={"reason": reason, "risk_level": cr.risk_level, "policy_rule": cr.policy_rule, "plan_id": plan.id},
+               old_status="planned", new_status="approved")
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key, user_id=actor.user_id,
+                         details={"reason": reason, "plan_kind": "change", "change_request_id": cr_id},
+                         old_values={"status": "pending_approval"}, new_values={"status": "approved"}, session=s)
+        snap = to_dict(cr)
+    _event(cr_id, "change_approved", "approval", detail={"reason": reason, "approved_by": actor.key}, actor=actor.key, trace_id=snap["trace_id"])
+    return snap
+
+
+def reject(cr_id: int, *, actor: Actor, reason: str) -> dict:
+    """planned → rejected (human declines a planned change; use cancel for any other state)."""
+    reason = _require_reason(reason)
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.reject", subject=cr)
+        if cr.status != "planned":
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', only planned requests can be rejected (use cancel otherwise)")
+        if not _claim(s, cr_id, "planned", "rejected"):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, "rejected")
+        cr.rejected_by, cr.rejected_at, cr.rejection_reason = actor.key, datetime.now(timezone.utc), reason
+        plan = active_plan_for(s, cr_id)
+        if plan is not None:
+            _transition_plan(plan, "rejected")
+            plan.rejected_by, plan.rejected_at, plan.rejection_reason = actor.key, datetime.now(timezone.utc), reason
+        _audit(s, Actions.CHANGE_REJECTED, cr, actor, details={"reason": reason}, old_status="planned", new_status="rejected")
+        snap = to_dict(cr)
+    _event(cr_id, "change_rejected", "approval", "rejected", detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])
+    try:
+        notify_change_result(snap, "rejected")
+    except Exception:
+        logger.debug("notify_change_result failed", exc_info=True)
+    return snap
+
+
+def cancel(cr_id: int, *, actor: Actor, reason: str) -> dict:
+    """Withdraw a change from any non-terminal, pre-execution state → cancelled. The claim on `old` is the
+    RACE gate (a concurrent move off `old` loses it); the following _transition is the VALIDITY gate — it
+    re-runs validate_change_transition(old, "cancelled") on the still-`old` in-memory row, so cancelling
+    from a non-cancellable state (e.g. executing) raises and rolls the claim's UPDATE back."""
+    reason = _require_reason(reason)
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.cancel", subject=cr)
+        old = cr.status
+        if not _claim(s, cr_id, old, "cancelled"):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, "cancelled")  # validity gate: raises (rolls the claim back) if old→cancelled is illegal
+        cr.rejected_by, cr.rejected_at, cr.rejection_reason = actor.key, datetime.now(timezone.utc), reason
+        plan = active_plan_for(s, cr_id)
+        if plan is not None and plan.status in ("draft", "pending_approval", "approved"):
+            _transition_plan(plan, "rejected")
+            plan.rejected_by, plan.rejected_at, plan.rejection_reason = actor.key, datetime.now(timezone.utc), f"withdrawn: {reason}"
+        _audit(s, Actions.CHANGE_CANCELLED, cr, actor, details={"reason": reason}, old_status=old, new_status="cancelled")
+        snap = to_dict(cr)
+    _event(cr_id, "change_cancelled", "approval", "cancelled", detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])
+    return snap
+
+
+def clarify(cr_id: int, *, actor: Actor, message: str) -> dict:
+    """Requester answers a needs_clarification review: append the answer to the description and restart the
+    review. clarify does NOT transition the CR itself — start_review's atomic claim owns needs_clarification
+    → under_review — so no _claim here; a double-clarify merely double-appends the description (additive)."""
+    message = (message or "").strip()
+    if not message:
+        raise ChangeValidationError("message is required")
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.request", subject=cr)
+        if cr.status != "needs_clarification":
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not awaiting clarification")
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        cr.description = f"{cr.description}\n\n--- Clarification ({stamp}, {actor.key}) ---\n{message[:4000]}"
+        _audit(s, Actions.CHANGE_CLARIFIED, cr, actor, details={"message": message[:500]})
+        snap = to_dict(cr)
+    _event(cr_id, "change_clarified", "review", detail={"message": message[:500]}, actor=actor.key, trace_id=snap["trace_id"])
+    start_review(cr_id, sync=False)
+    return get_change(cr_id)
 
 
 def request_execution(cr_id: int, *, actor: Actor) -> dict:
-    raise NotImplementedError("request_execution() is implemented in Task 5 (approval + execution handoff)")
+    """approved → executing; enqueue a FixExecution for the ExecutorService (the ONLY execution route for
+    changes). The claim gates the FixExecution insert: a lost claim raises BEFORE the row is created, so a
+    concurrent move off 'approved' can never enqueue a double AWS mutation."""
+    from agenticops.models import FixExecution
+    if not settings.executor_enabled:
+        raise ChangeStateError("Executor is disabled (executor_enabled=false)")
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.execute", subject=cr)
+        if cr.status != "approved":
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', only approved requests can be executed")
+        plan = active_plan_for(s, cr_id)
+        if plan is None or plan.status != "approved":
+            raise ChangeStateError("no approved change plan to execute")
+        if not _claim(s, cr_id, "approved", "executing"):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, "executing")
+        _transition_plan(plan, "executing")
+        execution = FixExecution(fix_plan_id=plan.id, health_issue_id=None, status="pending", executed_by=actor.key)
+        s.add(execution)
+        s.flush()
+        _audit(s, Actions.CHANGE_EXECUTION_STARTED, cr, actor, details={"plan_id": plan.id, "execution_id": execution.id},
+               old_status="approved", new_status="executing")
+        snap, plan_id, execution_id = to_dict(cr), plan.id, execution.id
+    _event(cr_id, "execution_started", "execution", "started",
+           detail={"plan_id": plan_id, "execution_id": execution_id, "executor": "agent:executor"},
+           actor=actor.key, trace_id=snap["trace_id"])
+    return {"execution_id": execution_id, "fix_plan_id": plan_id, "change": snap}
+
+
+_PASS_VALUES = {"pass", "passed", "ok", "succeeded", "success", "true"}
+
+
+def _post_checks_passed(post_checks: list, results: Optional[list]) -> Optional[bool]:
+    """True = all pass, False = a failure, None = results missing/incomplete (→ needs_review)."""
+    if not post_checks:
+        return None
+    results = results or []
+    if len(results) < len(post_checks):
+        return None
+    for item in results:
+        if isinstance(item, dict):
+            status = item.get("status", item.get("result", item.get("passed")))
+        else:
+            status = item
+        if str(status).lower() not in _PASS_VALUES:
+            return False
+    return True
+
+
+def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_results: Optional[list] = None,
+                        error: str = "") -> Optional[dict]:
+    """The ONLY writer of completed / needs_review / failed / rolled_back. Deterministic; no LLM input.
+
+    An IDEMPOTENT executor callback, not a human action: no _check, and no _claim. The `!= executing` guard
+    returns the current snapshot (never raises) so a re-delivered callback is a safe no-op; the terminal is
+    a pure function of the execution result, so a duplicate recomputes the SAME status."""
+    with _session() as s:
+        plan = s.get(FixPlan, fix_plan_id)
+        if plan is None or plan.plan_kind != "change" or not plan.change_request_id:
+            return None
+        cr = _load(s, plan.change_request_id)
+        if cr.status != "executing":
+            logger.warning("on_execution_result: CR #%d is '%s', ignoring result %s", cr.id, cr.status, execution_status)
+            return to_dict(cr)
+        if execution_status == "succeeded":
+            verdict = _post_checks_passed(list(plan.post_checks or []), post_check_results)
+            new_status = "completed" if verdict is True else "needs_review"
+            reason = "all post-checks passed" if verdict is True else (
+                "post-check failed" if verdict is False else "post-check results missing or incomplete")
+        elif execution_status == "rolled_back":
+            new_status, reason = "rolled_back", error or "execution rolled back"
+        else:  # failed | aborted | anything else
+            new_status, reason = "failed", error or f"execution {execution_status}"
+        _transition(cr, new_status)
+        from agenticops.run_context import get_run_context
+        actor_key = get_run_context().actor if get_run_context().actor != "system" else "agent:executor"
+        action = {"completed": Actions.CHANGE_COMPLETED, "needs_review": Actions.CHANGE_NEEDS_REVIEW,
+                  "failed": Actions.CHANGE_FAILED, "rolled_back": Actions.CHANGE_ROLLED_BACK}[new_status]
+        AuditService.log(action, EntityTypes.CHANGE_REQUEST, str(cr.id), entity_name=cr.title, actor=actor_key,
+                         details={"execution_status": execution_status, "reason": reason, "plan_id": fix_plan_id,
+                                  "post_check_results": (post_check_results or [])[:20]},
+                         old_values={"status": "executing"}, new_values={"status": new_status}, session=s)
+        snap = to_dict(cr)
+    _event(snap["id"], "execution_completed", "execution", new_status,
+           detail={"plan_id": fix_plan_id, "execution_status": execution_status, "reason": reason}, actor=actor_key, trace_id=snap["trace_id"])
+    try:
+        notify_change_result(snap, new_status)
+    except Exception:
+        logger.debug("notify_change_result failed", exc_info=True)
+    return snap
+
+
+def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> dict:
+    """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge."""
+    reason = _require_reason(reason)
+    if outcome not in ("completed", "failed"):
+        raise ChangeValidationError("outcome must be completed or failed")
+    with _session() as s:
+        cr = _load(s, cr_id)
+        _check(actor, "change.approve", subject=cr)
+        if cr.status != "needs_review":
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not needs_review")
+        if not _claim(s, cr_id, "needs_review", outcome):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, outcome)
+        action = Actions.CHANGE_COMPLETED if outcome == "completed" else Actions.CHANGE_FAILED
+        _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True},
+               old_status="needs_review", new_status=outcome)
+        snap = to_dict(cr)
+    _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])
+    try:
+        notify_change_result(snap, outcome)
+    except Exception:
+        logger.debug("notify_change_result failed", exc_info=True)
+    return snap
+
+
+def change_timeline(cr_id: int) -> list[dict]:
+    """pipeline events ∪ audit_logs for one change, sorted by time; unified shape."""
+    from agenticops.audit.models import AuditLog
+    from agenticops.services.pipeline_events import get_timeline
+    entries = [
+        {"ts": e["created_at"], "kind": "event", "type": e["event_type"], "actor": e["actor"], "status": e["status"],
+         "detail": e["detail"], "stage": e["stage"]}
+        for e in get_timeline(change_request_id=cr_id)
+    ]
+    with _session() as s:
+        for a in s.query(AuditLog).filter_by(entity_type=EntityTypes.CHANGE_REQUEST, entity_id=str(cr_id)).all():
+            entries.append({"ts": a.timestamp.isoformat() if a.timestamp else None, "kind": "audit", "type": a.action,
+                            "actor": a.actor or a.user_email or "system",
+                            "status": (a.new_values or {}).get("status"), "detail": a.details, "stage": "audit"})
+    return sorted(entries, key=lambda e: e["ts"] or "")
