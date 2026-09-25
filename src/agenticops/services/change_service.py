@@ -298,6 +298,7 @@ def restart_review(cr_id: int, *, actor: Actor) -> dict:
     stale review — its watchdog died with its process — so it is rolled back first and then restarted;
     a review still inside the timeout is refused so a live one is never cut short.
     """
+    _require_enabled()
     _check(actor, "change.request")
     stale: Optional[str] = None
     stale_attempt = 0
@@ -805,6 +806,7 @@ def _require_reason(reason: Optional[str]) -> str:
 def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
     """planned → approved (human gate). The claim + every field write share one transaction, so a
     concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak."""
+    _require_enabled()
     reason = _require_reason(reason)
     with _session() as s:
         cr = _load(s, cr_id)
@@ -834,6 +836,7 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
 
 def reject(cr_id: int, *, actor: Actor, reason: str) -> dict:
     """planned → rejected (human declines a planned change; use cancel for any other state)."""
+    _require_enabled()
     reason = _require_reason(reason)
     with _session() as s:
         cr = _load(s, cr_id)
@@ -863,6 +866,7 @@ def cancel(cr_id: int, *, actor: Actor, reason: str) -> dict:
     RACE gate (a concurrent move off `old` loses it); the following _transition is the VALIDITY gate — it
     re-runs validate_change_transition(old, "cancelled") on the still-`old` in-memory row, so cancelling
     from a non-cancellable state (e.g. executing) raises and rolls the claim's UPDATE back."""
+    _require_enabled()
     reason = _require_reason(reason)
     with _session() as s:
         cr = _load(s, cr_id)
@@ -886,6 +890,7 @@ def clarify(cr_id: int, *, actor: Actor, message: str) -> dict:
     """Requester answers a needs_clarification review: append the answer to the description and restart the
     review. clarify does NOT transition the CR itself — start_review's atomic claim owns needs_clarification
     → under_review — so no _claim here; a double-clarify merely double-appends the description (additive)."""
+    _require_enabled()
     message = (message or "").strip()
     if not message:
         raise ChangeValidationError("message is required")
@@ -907,6 +912,7 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
     """approved → executing; enqueue a FixExecution for the ExecutorService (the ONLY execution route for
     changes). The claim gates the FixExecution insert: a lost claim raises BEFORE the row is created, so a
     concurrent move off 'approved' can never enqueue a double AWS mutation."""
+    _require_enabled()
     from agenticops.models import FixExecution
     if not settings.executor_enabled:
         raise ChangeStateError("Executor is disabled (executor_enabled=false)")
@@ -999,6 +1005,7 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
 
 def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> dict:
     """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge."""
+    _require_enabled()
     reason = _require_reason(reason)
     if outcome not in ("completed", "failed"):
         raise ChangeValidationError("outcome must be completed or failed")

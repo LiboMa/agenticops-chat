@@ -262,3 +262,63 @@ class TestLostClaimRace:
         assert db.query(FixExecution).count() == before   # load-bearing: no FixExecution enqueued (no double AWS mutation)
         assert db.get(ChangeRequest, cr_id).status == "approved"       # request_execution rolled back
         assert db.get(FixPlan, plan_id).status == "approved"           # plan not moved to executing
+
+
+class TestKillSwitch:
+    """change_management_enabled=false stops every human decision before it reads, checks or writes anything;
+    work already in flight still lands, so a flag flip never strands a running execution."""
+
+    @pytest.mark.parametrize("call,kwargs", [
+        ("approve", {"reason": "ok"}),
+        ("reject", {"reason": "no"}),
+        ("cancel", {"reason": "x"}),
+        ("clarify", {"message": "m"}),
+        ("request_execution", {}),
+        ("restart_review", {}),
+        ("resolve_review", {"outcome": "completed", "reason": "r"}),
+    ])
+    def test_every_human_decision_refuses_when_disabled(self, db, call, kwargs):
+        from agenticops.audit.models import AuditLog
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _planned(db)
+        audits = db.query(AuditLog).count()
+        authz_rows = db.query(AuditLog).filter(AuditLog.action.like("authz.%")).count()
+        executions = db.query(FixExecution).count()
+        # The executor is on, so request_execution's own "Executor is disabled" cannot pass for the kill switch.
+        # ALICE is the requester: a gate placed after _check would leave an authz.denied_shadow row behind.
+        with patch.object(settings, "change_management_enabled", False), patch.object(settings, "executor_enabled", True), \
+             patch.object(cs, "notify_change_result"), patch.object(cs, "start_review") as sr:
+            with pytest.raises(cs.ChangeStateError, match="Change management is disabled"):
+                getattr(cs, call)(cr_id, actor=ALICE, **kwargs)
+        sr.assert_not_called()
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "planned"
+        assert db.query(AuditLog).count() == audits
+        assert db.query(AuditLog).filter(AuditLog.action.like("authz.%")).count() == authz_rows
+        assert db.query(FixExecution).count() == executions
+
+    def test_an_approved_change_queues_no_execution_when_disabled(self, db):
+        """The case the switch exists for: an already-approved change must not reach the executor."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _planned(db)
+        cs.approve(cr_id, actor=BOB, reason="ok")
+        executions = db.query(FixExecution).count()
+        with patch.object(settings, "change_management_enabled", False), patch.object(settings, "executor_enabled", True):
+            with pytest.raises(cs.ChangeStateError, match="Change management is disabled"):
+                cs.request_execution(cr_id, actor=BOB)
+        db.expire_all()
+        assert db.query(FixExecution).count() == executions
+        assert db.get(ChangeRequest, cr_id).status == "approved"
+        assert db.get(FixPlan, plan_id).status == "approved"
+
+    def test_an_execution_in_flight_still_completes_when_disabled(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _executing(db)
+        with patch.object(settings, "change_management_enabled", False), patch.object(cs, "notify_change_result"):
+            out = cs.on_execution_result(plan_id, "succeeded", post_check_results=[{"check": "tag present", "status": "pass"}])
+        assert out["status"] == "completed"
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "completed"

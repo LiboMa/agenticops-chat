@@ -22,22 +22,71 @@ def db(tmp_path):
     models_mod._engine = None
 
 
+def _plain_console(buf: StringIO, width: int) -> Console:
+    """Markup is still parsed; color_system=None keeps highlighter ANSI out of the text (FORCE_COLOR may be set)."""
+    return Console(file=buf, width=width, color_system=None)
+
+
+def _as_the_repl_prints_it(out: str) -> str:
+    """The REPL prints a handler's return value with console.print, which parses Rich markup."""
+    buf = StringIO()
+    _plain_console(buf, 1000).print(out)
+    return buf.getvalue()
+
+
+def _review_stores(status, risk_level=None, text="SRE: planned, L1"):
+    """A start_review stand-in: leaves the row the way a finished review does, then returns the SRE's text."""
+    from agenticops.models import ChangeRequest
+
+    def _review(cr_id, *, sync):
+        s = get_session()
+        cr = s.get(ChangeRequest, cr_id)
+        cr.status, cr.risk_level = status, risk_level
+        s.commit()
+        s.close()
+        return text
+    return _review
+
+
+def _cr(status, **fields):
+    """A change_service.get_change result, trimmed to the keys the CLI reads."""
+    return {"id": 4, "status": status, "title": "Tag web", "risk_level": "L1", "requested_change_type": "normal",
+            "effective_change_type": None, **fields}
+
+
+def _row(**fields):
+    """One change_service.list_changes row."""
+    return {"id": 1, "title": "Tag web", "status": "planned", "risk_level": "L1", "effective_change_type": "standard",
+            "requested_by": "cli:m", "updated_at": "2026-09-17T00:00:00", **fields}
+
+
 def test_helpers():
     from agenticops.cli.main import _extract_target_hints, _parse_change_ref
     assert _extract_target_hints("tag i-0abc12345678 and sg-1234abcd plus arn:aws:s3:::b1") == ["i-0abc12345678", "sg-1234abcd", "arn:aws:s3:::b1"]
     assert _parse_change_ref("C12") == 12 and _parse_change_ref("c#7") == 7 and _parse_change_ref("12") is None
+    # Minor 6: exactly C<digits> or C#<digits>; a stray '#', a letter or a non-ASCII digit is not a change ref
+    assert [_parse_change_ref(t) for t in ("C#12", " C3 ", "C0")] == [12, 3, 0]
+    for token in ("12", "C", "CX", "C1#2", "#C12", "C²"):
+        assert _parse_change_ref(token) is None, token
+    # Minor 11: a hex id ends at a word boundary (a 20-hex id is no id); an ARN never ends in . , ; : )
+    assert _extract_target_hints("i-0123456789abcdef0123") == []
+    assert _extract_target_hints("(sg-1234abcd).") == ["sg-1234abcd"]
+    assert _extract_target_hints("see arn:aws:s3:::b1.") == ["arn:aws:s3:::b1"]
+    assert _extract_target_hints("arn:aws:iam::123456789012:role/x)") == ["arn:aws:iam::123456789012:role/x"]
 
 
 def test_slash_change_creates_and_reviews_sync(db):
     from agenticops.cli import main as cli
-    with patch("agenticops.cli.main.init_db"), \
-         patch("agenticops.services.change_service.start_review", return_value="SRE: planned, L1") as sr, \
+    from agenticops.models import ChangeRequest
+    buf = StringIO()
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
+         patch("agenticops.services.change_service.start_review", side_effect=_review_stores("planned", "L1")) as sr, \
          patch("agenticops.services.change_service.notify_change_requested"), \
          patch("getpass.getuser", return_value="malibo"):
         out = cli._slash_change(None, ["add", "tag", "Env=prod", "to", "i-0abc12345678", "--account", "dev"])
-    assert "C#" in out and "SRE: planned, L1" in out
-    from agenticops.models import ChangeRequest
     cr = db.query(ChangeRequest).one()
+    assert f"✓ Change request C#{cr.id} — status: planned · risk L1" in out
+    assert "SRE: planned, L1" in buf.getvalue()
     assert cr.source == "cli" and cr.requested_by == "cli:malibo" and cr.target_hints == ["i-0abc12345678"] and cr.account_id is not None
     sr.assert_called_once_with(cr.id, sync=True)
 
@@ -53,7 +102,9 @@ def test_slash_approve_reject_execute_changes(db):
     from agenticops.cli import main as cli
     from agenticops.services import change_service as cs
     with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"):
-        with patch.object(cs, "approve", return_value={"id": 4, "status": "approved"}) as ap:
+        with patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
+             patch("rich.prompt.Confirm.ask", return_value=True), \
+             patch.object(cs, "approve", return_value={"id": 4, "status": "approved"}) as ap:
             out = cli._slash_approve(None, ["C4", "looks", "good"])
         assert "approved" in out and ap.call_args.kwargs["reason"] == "looks good" and ap.call_args.kwargs["actor"].key == "cli:malibo"
         with patch.object(cs, "reject", return_value={"id": 4, "status": "rejected"}) as rj:
@@ -65,7 +116,9 @@ def test_slash_approve_reject_execute_changes(db):
              patch("rich.prompt.Confirm.ask", return_value=True):
             out = cli._slash_execute(None, ["C4"])
         assert "Execution #9" in out and ex.called
-        with patch.object(cs, "approve", side_effect=cs.ChangeStateError("is 'approved'")):
+        with patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
+             patch("rich.prompt.Confirm.ask", return_value=True), \
+             patch.object(cs, "approve", side_effect=cs.ChangeStateError("is 'approved'")):
             assert "approved" in cli._slash_approve(None, ["C4", "again"])
 
 
@@ -76,7 +129,7 @@ def test_slash_changes_lists(db):
              "requested_by": "cli:m", "updated_at": "2026-09-17T00:00:00"}]
     with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes", return_value=rows) as lc:
         out = cli._slash_changes(None, ["planned"])
-    assert "Tag web" in out or "C#1" in out
+    assert "Tag web" in out and "C#1" in out
     assert lc.call_args.kwargs["status"] == "planned"
 
 
@@ -87,7 +140,8 @@ def test_slash_changes_never_truncates_the_change_id(db):
     rows = [{"id": 1234, "title": "Add Env=prod tag to i-0abc12345678 for the quarterly audit", "status": "needs_clarification",
              "risk_level": "L2", "effective_change_type": "emergency", "requested_by": "cli:malibo",
              "updated_at": "2026-09-18T01:02:03+00:00"}]
-    with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes", return_value=rows):
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=120)), \
+         patch.object(cs, "list_changes", return_value=rows):
         out = cli._slash_changes(None, [])
     for text in ("C#1234", "needs clarification", "emergency", "cli:malibo", "2026-09-18T01:02:03"):
         assert text in out
@@ -100,13 +154,16 @@ def test_slash_approve_change_prompts_for_a_missing_reason(db):
     """Ruling 4: `Prompt` is bound before the C<id> branch, and an empty answer never approves."""
     from agenticops.cli import main as cli
     from agenticops.services import change_service as cs
-    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"):
-        with patch.object(cs, "approve") as ap, patch("rich.prompt.Prompt.ask", return_value=""):
+    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
+         patch.object(cs, "get_change", return_value=_cr("planned", title="t")):
+        with patch.object(cs, "approve") as ap, patch("rich.prompt.Prompt.ask", return_value=""), \
+             patch("rich.prompt.Confirm.ask") as ca:
             out = cli._slash_approve(None, ["C4"])
         assert "A reason is required" in out
         ap.assert_not_called()
+        ca.assert_not_called()
         with patch.object(cs, "approve", return_value={"id": 4, "status": "approved"}) as ap, \
-             patch("rich.prompt.Prompt.ask", return_value="ok"):
+             patch("rich.prompt.Prompt.ask", return_value="ok"), patch("rich.prompt.Confirm.ask", return_value=True):
             cli._slash_approve(None, ["C4"])
         assert ap.call_args.kwargs["reason"] == "ok"
 
@@ -157,12 +214,16 @@ def test_slash_change_reports_a_completed_review(db):
 
 
 def test_usage_help_and_command_table_name_change_refs():
-    """Ruling 6 + wiring: usage lines and /help name C<id>; the three new commands are dispatchable."""
+    """Ruling 6 + wiring: usage lines and /help name C<id>; the three new commands are dispatchable.
+    Minor 12: `[reason...]` is escaped in the raw strings, so Rich prints it instead of eating it as a tag."""
     from agenticops.cli import main as cli
-    assert "/approve <plan_id|C<id>> [reason...]" in cli._slash_approve(None, [])
-    assert "/execute <plan_id|C<id>>" in cli._slash_execute(None, [])
+    usage = cli._slash_approve(None, [])
     help_text = cli._slash_help(None, [])
-    assert "/approve <plan_id|C<id>> [reason...]" in help_text and "/execute <plan_id|C<id>>" in help_text
+    assert "\\[reason...]" in usage and "\\[reason...]" in help_text
+    assert "/approve <plan_id|C<id>> [reason...]" in _as_the_repl_prints_it(usage)
+    assert "/approve <plan_id|C<id>> [reason...]" in _as_the_repl_prints_it(help_text)
+    assert "/execute <plan_id|C<id>>" in cli._slash_execute(None, [])
+    assert "/execute <plan_id|C<id>>" in help_text
     assert "Changes:" in help_text and "/change <description>" in help_text
     assert "/changes " in help_text and "/reject C<id> <reason>" in help_text
     assert cli.SLASH_COMMANDS["change"] is cli._slash_change
@@ -179,18 +240,6 @@ def test_reference_links_include_change_refs():
 
 
 # ── Free text is shown literally (titles, SRE text, rollback reasons) ──
-
-
-def _plain_console(buf: StringIO, width: int) -> Console:
-    """Markup is still parsed; color_system=None keeps highlighter ANSI out of the text (FORCE_COLOR may be set)."""
-    return Console(file=buf, width=width, color_system=None)
-
-
-def _as_the_repl_prints_it(out: str) -> str:
-    """The REPL prints a handler's return value with console.print, which parses Rich markup."""
-    buf = StringIO()
-    _plain_console(buf, 1000).print(out)
-    return buf.getvalue()
 
 
 def test_slash_changes_shows_bracketed_titles_literally(db):
@@ -217,13 +266,13 @@ def test_slash_change_output_survives_bracketed_review_text(db):
         s.close()
         return "Checked [/var/log] on the [prod] hosts"
 
-    with patch("agenticops.cli.main.init_db"), \
+    buf = StringIO()
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
          patch("agenticops.services.change_service.start_review", side_effect=_review), \
          patch("agenticops.services.change_service.notify_change_requested"):
         out = cli._slash_change(None, ["rotate", "logs"])
-    seen = _as_the_repl_prints_it(out)
-    assert "did not complete (review crashed reading [/var/log])" in seen
-    assert "Checked [/var/log] on the [prod] hosts" in seen
+    assert "did not complete (review crashed reading [/var/log])" in _as_the_repl_prints_it(out)
+    assert "Checked [/var/log] on the [prod] hosts" in buf.getvalue()
 
 
 def test_slash_execute_change_confirmation_shows_the_whole_title(db):
@@ -238,3 +287,292 @@ def test_slash_execute_change_confirmation_shows_the_whole_title(db):
         out = cli._slash_execute(None, ["C4"])
     assert "Title: [prod] delete old snapshots" in buf.getvalue()
     assert "cancelled" in out and not ex.called
+
+
+# ── Kill switch: every CLI change entry point (review Imp #1) ──────────
+
+_DISABLED = "[yellow]Change management is disabled (change_management_enabled=false).[/yellow]"
+
+
+@pytest.mark.parametrize("command,args", [
+    ("_slash_changes", []), ("_slash_reject", ["C4", "no"]), ("_slash_approve", ["C4", "ok"]), ("_slash_execute", ["C4"]),
+])
+def test_kill_switch_covers_every_cli_change_command(db, command, args):
+    """With change management off each entry point answers "disabled" before any service call or prompt
+    (/change itself: test_slash_change_disabled)."""
+    from agenticops.cli import main as cli
+    from agenticops.config import settings
+    from agenticops.services import change_service as cs
+    with patch.object(settings, "change_management_enabled", False), patch("agenticops.cli.main.init_db"), \
+         patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "list_changes", return_value=[]) as lc, patch.object(cs, "reject") as rj, \
+         patch.object(cs, "get_change", return_value=_cr("approved")) as gc, patch.object(cs, "approve") as ap, \
+         patch.object(cs, "request_execution") as ex, patch("rich.prompt.Prompt.ask", return_value="ok") as pa, \
+         patch("rich.prompt.Confirm.ask", return_value=True) as ca:
+        out = getattr(cli, command)(None, args)
+    assert out == _DISABLED
+    for reached in (lc, rj, gc, ap, ex, pa, ca):
+        reached.assert_not_called()
+
+
+def test_kill_switch_leaves_the_fix_plan_path_alone(db):
+    """Only C<id> is gated: with the flag off a plain plan id still reaches the fix-plan code."""
+    from agenticops.cli import main as cli
+    from agenticops.config import settings
+    with patch.object(settings, "change_management_enabled", False), patch("agenticops.cli.main.init_db"):
+        assert "Fix plan #12 not found." in cli._slash_approve(None, ["12"])
+        assert "Fix plan #12 not found." in cli._slash_execute(None, ["12"])
+
+
+# ── /changes: plain text at the terminal's width (Imp #2, Minors 1, 2, 10) ──
+
+
+def test_slash_changes_returns_text_the_repl_can_print(db):
+    """No ANSI in the returned table: the REPL console's highlighter bolds the `[` of every "\\x1b[" it is
+    given, and the terminal then shows colour codes as literal fragments."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes", return_value=[_row()]):
+        out = cli._slash_changes(None, [])
+    assert "\x1b" not in out
+    repl = StringIO()
+    # the REPL console's settings (main.py `console`); colour pinned on so the check cannot pass vacuously
+    Console(file=repl, highlight=True, force_terminal=True, tab_size=2, width=200, color_system="truecolor").print(out)
+    assert "\x1b\x1b[" not in repl.getvalue()
+
+
+def test_slash_changes_fits_the_terminal_and_keeps_the_id_whole(db):
+    """Rendered at the REPL console's width; only C# refuses to wrap, so a 5-digit id stays whole and no line
+    is wider than the terminal."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    title = "Add Env=prod tag to the web and db hosts"
+    assert len(title) == 40
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=60)), \
+         patch.object(cs, "list_changes", return_value=[_row(id=12345, title=title)]):
+        out = cli._slash_changes(None, [])
+    assert "C#12345" in out
+    assert max(len(line) for line in out.splitlines()) <= 60
+
+
+@pytest.mark.parametrize("args", [["needs", "clarification"], ["needs-clarification"]])
+def test_slash_changes_filters_by_the_status_as_displayed(db, args):
+    """The table shows `needs clarification`; that spelling (and the dashed one) is the filter."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes", return_value=[]) as lc:
+        cli._slash_changes(None, args)
+    assert lc.call_args.kwargs["status"] == "needs_clarification"
+
+
+def test_slash_changes_rejects_an_unknown_status(db):
+    """An unknown status is named with the valid ones — never a silent "No change requests found."."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes") as lc:
+        out = cli._slash_changes(None, ["bogus"])
+    assert "Unknown status 'bogus'" in out and "Valid:" in out and "planned" in out
+    lc.assert_not_called()
+
+
+# ── /change: flags, and a head that tells what the review recorded (Minors 3, 7, 8, 11, 13) ──
+
+
+def test_slash_change_emergency_flag_is_stored(db):
+    from agenticops.cli import main as cli
+    from agenticops.models import ChangeRequest
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch("agenticops.services.change_service.start_review", return_value=None), \
+         patch("agenticops.services.change_service.notify_change_requested"):
+        cli._slash_change(None, ["restart", "web", "--emergency"])
+    cr = db.query(ChangeRequest).one()
+    assert cr.requested_change_type == "emergency" and cr.description == "restart web"
+
+
+@pytest.mark.parametrize("args", [["tag", "x", "--account"], ["tag", "--account", "--emergency"]])
+def test_slash_change_account_needs_a_name(db, args):
+    """`--account` at the end, or followed by a flag, is a usage error — never a silently dropped account and
+    never an account named `--emergency`."""
+    from agenticops.cli import main as cli
+    from agenticops.models import ChangeRequest
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch("agenticops.services.change_service.start_review") as sr, \
+         patch("agenticops.services.change_service.notify_change_requested"):
+        out = cli._slash_change(None, args)
+    assert "--account needs an account name" in out
+    assert db.query(ChangeRequest).count() == 0
+    sr.assert_not_called()
+
+
+def test_slash_change_unknown_account_error_is_shown_literally(db):
+    """The service echoes the typed account name; a `[/x]` in it must not raise out of the REPL's print."""
+    from agenticops.cli import main as cli
+    from agenticops.models import ChangeRequest
+    with patch("agenticops.cli.main.init_db"), patch("agenticops.services.change_service.start_review") as sr:
+        out = cli._slash_change(None, ["x", "--account", "[/x]"])
+    assert out.startswith("[red]")
+    assert "account '[/x]' not found" in _as_the_repl_prints_it(out)
+    assert db.query(ChangeRequest).count() == 0
+    sr.assert_not_called()
+
+
+def test_slash_change_names_why_the_review_did_not_start(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "start_review", side_effect=cs.ChangeStateError("[/x] busy")), \
+         patch.object(cs, "notify_change_requested"):
+        out = cli._slash_change(None, ["tag", "i-0abc12345678"])
+    assert "did not complete (review not started: [/x] busy)" in _as_the_repl_prints_it(out)
+    assert "✓" not in out
+
+
+def test_slash_change_never_ticks_a_review_that_has_not_finished(db):
+    """Only a recorded verdict earns the ✓: a CR still under_review (another reviewer took it over, or it has
+    not finished) gets the yellow head."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "start_review", side_effect=_review_stores("under_review")), \
+         patch.object(cs, "notify_change_requested"):
+        out = cli._slash_change(None, ["tag", "i-0abc12345678"])
+    assert "has not finished here" in out and "✓" not in out
+
+
+def test_slash_change_offers_approval_only_for_a_planned_change(db):
+    """The approve hint appears only for `planned` and names the requester≠approver rule; the Web link is absolute."""
+    from agenticops.cli import main as cli
+    from agenticops.config import settings
+    from agenticops.models import ChangeRequest
+    from agenticops.services import change_service as cs
+    outs = {}
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(settings, "web_base_url", "https://ops.example.com/"), patch.object(cs, "notify_change_requested"):
+        for status, risk in (("planned", "L1"), ("needs_clarification", None)):
+            with patch.object(cs, "start_review", side_effect=_review_stores(status, risk)):
+                outs[status] = cli._slash_change(None, ["tag", "i-0abc12345678"])
+    planned_id, clarify_id = [cr.id for cr in db.query(ChangeRequest).order_by(ChangeRequest.id)]
+    assert f"/approve C{planned_id}" in outs["planned"] and "someone other than the requester" in outs["planned"]
+    assert f"https://ops.example.com/app/changes/{planned_id}" in outs["planned"]
+    assert "/approve" not in outs["needs_clarification"]
+    assert f"https://ops.example.com/app/changes/{clarify_id}" in outs["needs_clarification"]
+
+
+def test_slash_change_prints_the_review_itself_and_returns_only_the_status(db):
+    """The SRE's Markdown is rendered on the console; the returned text holds no Markdown trigger, so the REPL
+    prints it as Rich markup — never as Markdown, which would show `[green]` raw."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    buf = StringIO()
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
+         patch.object(cs, "start_review", side_effect=_review_stores("planned", "L1", "## Review\n```bash\necho hi\n```")), \
+         patch.object(cs, "notify_change_requested"):
+        out = cli._slash_change(None, ["tag", "i-0abc12345678"])
+    assert "```" not in out and not out.startswith("#")
+    assert "echo hi" in buf.getvalue() and "```" not in buf.getvalue()  # rendered as Markdown, not printed raw
+    seen = _as_the_repl_prints_it(out)
+    assert "✓ Change request" in seen and "[green]" not in seen
+
+
+# ── /approve C<id>: shown and confirmed, refused before any prompt (Minor 5) ──
+
+
+def test_slash_approve_change_refuses_a_change_that_is_not_planned_before_any_prompt(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "get_change", return_value=_cr("approved")), patch.object(cs, "approve") as ap, \
+         patch("rich.prompt.Prompt.ask", return_value="ok") as pa, patch("rich.prompt.Confirm.ask", return_value=True) as ca:
+        out = cli._slash_approve(None, ["C4"])
+    assert "only a planned change" in out
+    for reached in (pa, ca, ap):
+        reached.assert_not_called()
+
+
+def test_slash_approve_change_shows_it_and_asks_before_approving(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    buf = StringIO()
+    change = _cr("planned", title="[prod] rotate keys", risk_level="L2", effective_change_type="standard")
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
+         patch.object(cs, "get_change", return_value=change), patch.object(cs, "approve") as ap, \
+         patch("rich.prompt.Confirm.ask", return_value=False):
+        out = cli._slash_approve(None, ["C4", "reviewed"])
+    assert "Approval cancelled" in out
+    ap.assert_not_called()
+    shown = buf.getvalue()
+    assert "Title: [prod] rotate keys" in shown and "Risk: L2" in shown and "Type: standard" in shown
+
+
+# ── /execute C<id>: refused before the prompt; errors shown literally (Minors 4, 5, 13) ──
+
+
+def test_slash_execute_change_not_found_is_red_and_never_prompts(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "get_change", side_effect=cs.ChangeNotFound("ChangeRequest #4 not found")), \
+         patch("rich.prompt.Confirm.ask") as ca:
+        out = cli._slash_execute(None, ["C4"])
+    assert out == "[red]ChangeRequest #4 not found[/red]"
+    ca.assert_not_called()
+
+
+def test_slash_execute_change_refuses_a_change_that_is_not_approved_before_the_prompt(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "get_change", return_value=_cr("planned")), patch.object(cs, "request_execution") as ex, \
+         patch("rich.prompt.Confirm.ask", return_value=True) as ca:
+        out = cli._slash_execute(None, ["C4"])
+    assert "only an approved change" in out
+    ca.assert_not_called()
+    ex.assert_not_called()
+
+
+def test_slash_execute_change_error_is_shown_literally(db):
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "get_change", return_value=_cr("approved")), \
+         patch.object(cs, "request_execution", side_effect=cs.ChangeStateError("[/x] boom")), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        out = cli._slash_execute(None, ["C4"])
+    assert "[/x] boom" in _as_the_repl_prints_it(out)
+
+
+@pytest.mark.parametrize("command,args,failing", [
+    ("_slash_reject", ["C4", "no"], "reject"),
+    ("_slash_approve", ["C4", "ok"], "get_change"),
+    ("_slash_approve", ["C4", "ok"], "approve"),
+])
+def test_change_command_errors_are_shown_literally(db, command, args, failing):
+    """Every service error the change commands print is escaped: a `[/x]` in it must not raise out of the REPL."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(StringIO(), 1000)), \
+         patch.object(cs, "get_change", return_value=_cr("planned")), patch("rich.prompt.Confirm.ask", return_value=True), \
+         patch.object(cs, failing, side_effect=cs.ChangeStateError("[/x] refused")):
+        out = getattr(cli, command)(None, args)
+    assert out.startswith("[red]") and "[/x] refused" in _as_the_repl_prints_it(out)
+
+
+# ── Control characters in free text (Minor 9) ──────────────────────────
+
+
+def test_control_characters_in_a_title_never_reach_the_terminal(db):
+    """escape() handles markup only: an ESC sequence in a title (web/IM intake) could conceal text on the
+    terminal — here in /changes and in the summary a human confirms an execution against."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    title = "\x1b[8mhidden\x1b[0m visible"
+    with patch("agenticops.cli.main.init_db"), patch.object(cs, "list_changes", return_value=[_row(title=title)]):
+        out = cli._slash_changes(None, [])
+    assert "\x1b" not in out and "hidden" in out
+    buf = StringIO()
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
+         patch.object(cs, "get_change", return_value=_cr("approved", title=title)), \
+         patch.object(cs, "request_execution") as ex, patch("rich.prompt.Confirm.ask", return_value=False):
+        cli._slash_execute(None, ["C4"])
+    assert "\x1b" not in buf.getvalue() and "hidden" in buf.getvalue()
+    ex.assert_not_called()

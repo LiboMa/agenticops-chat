@@ -17,6 +17,8 @@ def db(tmp_path, monkeypatch):
     # tests/conftest.py keeps the ledger OFF for every test (the tool tests have no DB fixture
     # and would otherwise write to the developer's .env database); this file asserts on it.
     monkeypatch.setattr(settings, "command_audit_enabled", True)
+    # the change_required refusal names /change only while change management is on (settings.yaml may turn it off)
+    monkeypatch.setattr(settings, "change_management_enabled", True)
     Base.metadata.create_all(models_mod.get_engine())
     s = get_session()
     yield s
