@@ -1,9 +1,37 @@
-"""Root conftest: registers --run-integration CLI flag and skips integration tests by default."""
+"""Root conftest: --run-integration flag (integration tests skipped by default) and the unit-test guards."""
 
 import subprocess
 import warnings
 
 import pytest
+
+
+def _block_live_bedrock_runtime() -> None:
+    """Make every LIVE Bedrock runtime request fail fast for the rest of this process.
+
+    Unit tests must never reach a real model. Without this, a background agent thread — e.g. the
+    auto-execute an auto-approved fix plan spawns — runs a REAL agent: real cost, an interpreter exit
+    that hangs while the call is in flight, and tool calls against whatever database
+    settings.database_url points at by then. The guard sits at botocore's HTTP step, which is reached
+    only when no before-call hook (Stubber) answered, so stubbed and mocked clients are untouched and
+    other services pass through. It is never undone: daemon threads can outlive the session.
+    """
+    from botocore.client import BaseClient
+
+    if getattr(BaseClient._make_request, "_aiops_live_model_guard", False):
+        return
+    real_make_request = BaseClient._make_request
+
+    def _guarded_make_request(self, operation_model, request_dict, request_context):
+        if self.meta.service_model.service_name == "bedrock-runtime":
+            raise RuntimeError(
+                f"Live Bedrock runtime call {operation_model.name} blocked in unit tests — "
+                "mock the agent, the model or the client, or run with --run-integration"
+            )
+        return real_make_request(self, operation_model, request_dict, request_context)
+
+    _guarded_make_request._aiops_live_model_guard = True
+    BaseClient._make_request = _guarded_make_request
 
 
 def pytest_configure(config):
@@ -19,6 +47,8 @@ def pytest_configure(config):
             + "\n".join(untracked[:5]),
             stacklevel=1,
         )
+    if not config.getoption("--run-integration"):
+        _block_live_bedrock_runtime()
 
 
 def pytest_addoption(parser):
