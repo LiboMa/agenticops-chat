@@ -239,15 +239,21 @@ def start_review(cr_id: int, *, sync: bool) -> Optional[str]:
     sync=False : daemon watchdog thread that STARTS and then JOINS the daemon worker → returns None.
 
     Every entry into under_review bumps `review_attempt`. That number keys this attempt's rollbacks, so
-    a late actor from an earlier attempt can never roll back a later one.
+    a late actor from an earlier attempt can never roll back a later one — which only holds because the
+    entry itself is an atomic claim (`_claim_for_review`): two concurrent starts cannot both win, so one
+    attempt number identifies exactly one review run.
     """
     with _session() as s:
-        cr = _load(s, cr_id)
+        cr = _load(s, cr_id)  # 404s a missing CR
         old = cr.status
-        _transition(cr, "under_review")
-        cr.review_attempt = (cr.review_attempt or 0) + 1
-        attempt = cr.review_attempt
         trace_id = cr.trace_id
+        claimed, attempt = _claim_for_review(s, cr_id)
+        if not claimed:
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} cannot start review from '{old}' "
+                f"(only a draft or a clarified request can, and only one review at a time)"
+            )
+        cr = _load(s, cr_id)  # the refreshed row, for the audit snapshot
         _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"),
                details={"phase": "started", "attempt": attempt}, old_status=old, new_status="under_review")
     _event(cr_id, "change_review_started", "review", "started", detail={"attempt": attempt},
@@ -294,7 +300,8 @@ def restart_review(cr_id: int, *, actor: Actor) -> dict:
         # Keyed to the attempt we just read: a same-process watchdog for that orphan firing a moment
         # later is a 0-row no-op, because the restart below bumps the attempt.
         _review_failed(cr_id, stale_attempt, stale, phase="stale_recovery")
-    start_review(cr_id, sync=False)  # 409s by itself if a verdict landed in the meantime
+    # 409s by itself if a verdict landed in the meantime, or if a concurrent start won the claim
+    start_review(cr_id, sync=False)
     return get_change(cr_id)
 
 
@@ -346,6 +353,7 @@ def _watchdog_join(cr_id: int, attempt: int, worker: threading.Thread, timeout: 
     try:
         worker.start()
     except BaseException:
+        logger.exception("change review worker for CR #%d could not be started", cr_id)
         _review_failed(cr_id, attempt, "review could not be started (thread spawn failed)")
         raise
     worker.join(timeout=timeout)
@@ -358,6 +366,28 @@ def _watchdog_fire(cr_id: int, attempt: int) -> None:
         _review_failed(cr_id, attempt, f"review timed out after {settings.change_review_timeout_seconds}s")
     except Exception:
         logger.debug("change review watchdog failed for CR #%d", cr_id, exc_info=True)
+
+
+def _claim_for_review(session, cr_id: int) -> tuple[bool, int]:
+    """Atomically move draft|needs_clarification → under_review AND bump review_attempt, in one
+    conditional UPDATE. Returns (claimed, attempt). Two concurrent starts cannot both win — the loser
+    gets (False, 0) — so every winning attempt number identifies exactly one review run. The WHERE's
+    source set IS the transition-validity check (the two states validate_change_transition allows into
+    under_review), so no separate validate call is needed."""
+    changed = (
+        session.query(ChangeRequest)
+        .filter(ChangeRequest.id == cr_id,
+                ChangeRequest.status.in_(("draft", "needs_clarification")))
+        .update({"status": "under_review",
+                 "review_attempt": ChangeRequest.review_attempt + 1,
+                 "updated_at": datetime.now(timezone.utc)},
+                synchronize_session=False)
+    )
+    if not changed:
+        return (False, 0)
+    session.refresh(session.get(ChangeRequest, cr_id))  # bulk UPDATE left the identity-map row stale
+    cr = session.get(ChangeRequest, cr_id)
+    return (True, cr.review_attempt)
 
 
 def _review_failed(cr_id: int, attempt: int, error: str, *, phase: str = "failed") -> None:

@@ -363,20 +363,25 @@ def test_pg_statements_for_a_fully_migrated_catalog_are_empty():
 
 def test_pg_statements_for_an_early_2_6_0_catalog_complete_it():
     """M-2 / M-3: a database migrated by the earlier 2.6.0 build has nullable plan_kind, no FK on
-    change_request_id and VARCHAR(100) actor keys — exactly those are finished, nothing else is touched."""
+    change_request_id, VARCHAR(100) actor keys and no review_attempt (the fix-round-2 column) —
+    exactly those are finished, nothing else is touched."""
     from sqlalchemy import String
     from sqlalchemy.dialects import postgresql
-    from agenticops.models import _ACTOR_KEY_COLUMNS_2_6_0, _pg_migration_statements
+    from agenticops.models import _ACTOR_KEY_COLUMNS_2_6_0, _add_column_ddl, _pg_migration_statements
+    pg = postgresql.dialect()
     cols, fks, idxs = _orm_shaped_stub()
     _set_column(cols, "fix_plans", "plan_kind", nullable=True)
+    _drop_column(cols, "change_requests", "review_attempt")  # the early build created the table without it
     fks["fix_plans"] = [fk for fk in fks["fix_plans"] if fk["constrained_columns"] != ["change_request_id"]]
     for table, names in _ACTOR_KEY_COLUMNS_2_6_0.items():
         for n in names:
             _set_column(cols, table, n, type=String(100))
-    stmts = _pg_migration_statements(_StubInspector(cols, fks, idxs), postgresql.dialect(),
+    stmts = _pg_migration_statements(_StubInspector(cols, fks, idxs), pg,
                                      existing_constraints={"ck_fix_plans_origin"})
+    add = lambda tbl, col, extra=None: f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {_add_column_ddl(pg, tbl, col, extra)}"
     widen = [f"ALTER TABLE {t} ALTER COLUMN {c} TYPE VARCHAR(255)" for t, names in _ACTOR_KEY_COLUMNS_2_6_0.items() for c in names]
     assert stmts == [
+        add("change_requests", "review_attempt", "DEFAULT 0 NOT NULL"),
         "UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL",
         "ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL",
         "ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "

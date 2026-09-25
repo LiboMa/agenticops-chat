@@ -246,6 +246,18 @@ class TestReviewLifecycle:
         assert len(rows) == 1  # a review that reached a verdict writes no failure row
         assert rows[0].entity_type == "change_request" and rows[0].entity_id == str(cr["id"])
 
+    def test_a_failing_audit_row_rolls_the_claim_back(self, db):
+        """The other direction of one-transaction: no audit row → no claim. The CR stays a draft at
+        attempt 0, so a failed start cannot burn an attempt number or leave the CR under_review."""
+        from agenticops.services import change_service as cs
+        cr = self._cr(db)
+        with patch.object(cs, "_audit", side_effect=RuntimeError("audit write failed")):
+            with pytest.raises(RuntimeError):
+                cs.start_review(cr["id"], sync=True)
+        c = cs.get_change(cr["id"])
+        assert c["status"] == "draft" and c["review_attempt"] == 0
+        assert _audits(db, "change.reviewed") == []
+
     def test_review_attempt_counts_starts_and_is_in_the_snapshot(self, db):
         """Every entry into under_review bumps the counter; both audit rows of an attempt carry it."""
         from agenticops.services import change_service as cs
@@ -455,6 +467,77 @@ class TestAttemptKeying:
             for t in threading.enumerate():
                 if t.name.startswith("change-review"):
                     t.join(timeout=5)
+
+
+class TestAtomicClaim:
+    """Entry into under_review is a conditional UPDATE, so one attempt number = one review run."""
+
+    def test_claim_for_review_is_atomic_and_bumps(self, db):
+        from agenticops.services import change_service as cs
+        cr = _draft()
+        with cs._session() as s:
+            row = cs._load(s, cr["id"])  # identity-mapped BEFORE the bulk UPDATE
+            assert cs._claim_for_review(s, cr["id"]) == (True, 1)
+            # A bulk UPDATE does not write through the identity map: without the refresh inside the
+            # claim these two still read the old row, and the audit snapshot would be wrong.
+            assert (row.status, row.review_attempt) == ("under_review", 1)
+        with cs._session() as s:  # a second claim on an under_review row loses and writes nothing
+            assert cs._claim_for_review(s, cr["id"]) == (False, 0)
+        c = cs.get_change(cr["id"])
+        assert c["status"] == "under_review" and c["review_attempt"] == 1
+        with cs._session() as s:  # needs_clarification is the other legal source state
+            cs.transition_change(cs._load(s, cr["id"]), "needs_clarification")
+        with cs._session() as s:
+            assert cs._claim_for_review(s, cr["id"]) == (True, 2)
+        assert cs.get_change(cr["id"])["status"] == "under_review"
+
+    def test_concurrent_start_review_lets_exactly_one_win(self, db):
+        """Two starts on one draft: exactly one claims it, the other gets a 409 — never two attempt 1s.
+
+        Against 541e793 both win: the → under_review edge was an in-memory validate plus an ORM UPDATE
+        by PK, so both callers read `draft`, both bumped 0 → 1, and two SRE runs then shared one key —
+        each run's no-verdict/crash/timeout rollback acting on the other's. The barrier releases both
+        threads in exactly that window (after the row read, before the claim).
+        """
+        from agenticops.services import change_service as cs
+        cr = _draft()
+        barrier = threading.Barrier(2, timeout=10)
+        real_load = cs._load
+        reads = itertools.count(1)
+        results: list = []
+
+        def barrier_load(session, cr_id):
+            row = real_load(session, cr_id)
+            if next(reads) <= 2:  # the two racing callers' first read; the winner's second read runs free
+                barrier.wait()
+            return row
+
+        def start():
+            try:
+                cs.start_review(cr["id"], sync=False)
+                results.append("won")
+            except cs.ChangeStateError:
+                results.append("409")
+
+        racers = [threading.Thread(target=start, name=f"change-start-{i}", daemon=True) for i in (1, 2)]
+        with patch.object(cs, "_load", barrier_load), patch.object(cs, "_run_review"), \
+             patch.object(cs, "notify_change_result") as notify:
+            try:
+                for t in racers:
+                    t.start()
+                for t in racers:
+                    t.join(timeout=20)
+            finally:
+                barrier.abort()  # a caller left waiting must never wedge the suite
+                for t in racers + [t for t in threading.enumerate() if t.name.startswith("change-review")]:
+                    t.join(timeout=5)
+        assert not any(t.is_alive() for t in racers), "a racing start never finished"
+        assert sorted(results) == ["409", "won"], f"both callers claimed the same review: {results}"
+        c = cs.get_change(cr["id"])
+        assert c["status"] == "under_review" and c["review_attempt"] == 1
+        started = [a for a in _audits(db, "change.reviewed") if a.details.get("phase") == "started"]
+        assert len(started) == 1 and started[0].details["attempt"] == 1
+        notify.assert_not_called()  # a lost claim is not a failed review: no rollback, no notification
 
 
 class TestStaleReviewRecovery:
