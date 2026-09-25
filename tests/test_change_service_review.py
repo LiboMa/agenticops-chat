@@ -50,6 +50,10 @@ def _draft_plan(db, cr_id, rollback=None, post_checks=None):
     return plan
 
 
+def _policy_events(db, cr_id) -> int:
+    return db.query(PipelineEvent).filter_by(change_request_id=cr_id, event_type="policy_decision").count()
+
+
 class TestGrounding:
     def test_ground_matches_inventory_by_id_and_name(self, db):
         from agenticops.services import change_service as cs
@@ -169,7 +173,7 @@ class TestGrounding:
         with cs._session() as s:  # a timeout + restart happened: the row is now attempt 2, still under_review
             s.get(ChangeRequest, cr_id).review_attempt = 2
         before, audits = cs.get_change(cr_id), db.query(AuditLog).count()
-        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}') as ex:
             token = cs._review_attempt_var.set(1)  # the stale, still-running SRE invocation of attempt 1
             try:
                 with pytest.raises(cs.ChangeStateError, match="no longer at review attempt 1"):
@@ -178,6 +182,7 @@ class TestGrounding:
                     cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
             finally:
                 cs._review_attempt_var.reset(token)
+            assert not ex.called  # a stale attempt is refused BEFORE its describe: it runs no command at all
             assert cs.get_change(cr_id) == before and db.query(AuditLog).count() == audits  # nothing written
             token = cs._review_attempt_var.set(2)  # the live attempt
             try:
@@ -188,6 +193,45 @@ class TestGrounding:
         c = cs.get_change(cr_id)
         assert [(t["resource_id"], t["hint"]) for t in c["target_resources"]] == [("i-0abc", "i-0abc"), ("i-0def", "web-2")]
         assert cs.ground_targets(cr_id)["unresolved"] == []  # the direct/manual path (no attempt) is unchanged
+
+    # ── Hints are compared stripped; attach answers with the target AS STORED ──
+    def test_attach_strips_the_hint(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("web-2",))
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+            out = cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="  web-2 ")
+        assert out["hint"] == "web-2" and cs.get_change(cr_id)["target_resources"][0]["hint"] == "web-2"
+        assert cs.ground_targets(cr_id)["unresolved"] == []
+        # a row written before this fix may still hold an unstripped hint: both sides are stripped
+        assert cs._hint_resolved(" Web-2 ", [{"hint": "web-2 ", "resource_id": "i-0def"}])
+
+    def test_attach_returns_the_target_as_stored(self, db):
+        """The caller sees what the row holds: a KEPT non-default hint — and, for a target already grounded
+        from the inventory, that inventory entry (so the tool message must not assume describe evidence)."""
+        from agenticops.services import change_service as cs
+        from agenticops.tools.change_tools import attach_change_target
+        cr_id = _cr(db, targets=("web-1", "web-2"))  # web-1 is i-0abc's inventory name; web-2 is not in the inventory
+        cs.ground_targets(cr_id)
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+            cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+            again = cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-3")
+            inv = cs.attach_target(cr_id, "i-0abc", "ec2:instance", actor=agent_actor("sre"), hint="web-9")
+            msg = attach_change_target(cr_id, "i-0abc", "ec2:instance", hint="web-9")
+        stored = {t["resource_id"]: t for t in cs.get_change(cr_id)["target_resources"]}
+        assert again == stored["i-0def"] and again["hint"] == "web-2"  # the KEPT hint, not the one this call asked for
+        assert inv == stored["i-0abc"] and (inv["evidence"], inv["hint"]) == ("inventory", "web-1")
+        assert msg == f"Target i-0abc (EC2Instance) attached to C#{cr_id} for hint 'web-1' (verified by: inventory)."
+
+    def test_attach_returns_the_stored_entry_when_the_scrubber_rewrites_its_id(self, db):
+        """AS STORED holds even when the before_flush secret scrubber rewrites the id itself (a valid alias ARN
+        whose qualifier reads like a labeled secret): the attach neither crashes nor reports an id the row lacks."""
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=())
+        arn = "arn:aws:lambda:us-east-1:123456789012:function:rotate-password:production"
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"ResourceTagMappingList":[{}]}'):
+            out = cs.attach_target(cr_id, arn, "lambda:function", actor=agent_actor("sre"))
+        stored = cs.get_change(cr_id)["target_resources"]
+        assert [out] == stored and out["resource_id"] != arn  # the row's (scrubbed) id, not the argument
 
 
 class TestPolicy:
@@ -207,6 +251,32 @@ class TestPolicy:
             ev.return_value.action = "require_human"; ev.return_value.rule_name = "x"; ev.return_value.itsm_change_type = "normal"
             cs.evaluate_policy(cr_id, "L2", "network")
         assert ev.call_args.kwargs["emergency"] is True and ev.call_args.kwargs["plan_kind"] == "change"
+
+    def test_policy_is_evaluated_only_during_the_live_review(self, db):
+        """A stale run must not write a policy_decision event (submit_review's approved path evaluates policy
+        BEFORE its claim), and a CR that is not under review has no policy to evaluate."""
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db)
+        cs.ground_targets(cr_id)
+        with cs._session() as s:  # a timeout + restart happened: the row is now attempt 2, still under_review
+            s.get(ChangeRequest, cr_id).review_attempt = 2
+        token = cs._review_attempt_var.set(1)  # the stale, still-running SRE invocation of attempt 1
+        try:
+            with pytest.raises(cs.ChangeStateError, match="no longer at review attempt 1"):
+                cs.evaluate_policy(cr_id, "L1", "tag")
+        finally:
+            cs._review_attempt_var.reset(token)
+        assert _policy_events(db, cr_id) == 0
+        token = cs._review_attempt_var.set(2)  # the live attempt
+        try:
+            assert cs.evaluate_policy(cr_id, "L1", "tag").action == "auto_approve"
+        finally:
+            cs._review_attempt_var.reset(token)
+        assert _policy_events(db, cr_id) == 1
+        draft_id = _cr(db, under_review=False)
+        with pytest.raises(cs.ChangeStateError, match="not under_review — policy is evaluated only during review"):
+            cs.evaluate_policy(draft_id, "L1", "tag")
+        assert _policy_events(db, draft_id) == 0
 
 
 class TestSubmitReview:
@@ -288,12 +358,14 @@ class TestStaleAttemptRace:
 
     Attempt N's SRE run exceeds change_review_timeout_seconds; the watchdog rolls attempt N back (keyed N,
     Task 3) and a restart bumps the row to attempt N+1 (still under_review). Attempt N's STILL-RUNNING
-    invocation (a join-timeout does not kill the thread) finally calls submit_review. A status-only claim
-    would MATCH (the row IS under_review) and attempt N's stale verdict would land on attempt N+1. The
-    attempt-keyed claim must reject it — the row stays under_review at N+1 and NO field write leaks.
+    invocation (a join-timeout does not kill the thread) finally calls submit_review. A status-only check
+    would MATCH (the row IS under_review) and attempt N's stale verdict would land on attempt N+1.
 
-    This test FAILS against a status-only claim (drop `attempt=` from _claim and the verdict lands: status
-    becomes planned and reviewed_by is stamped).
+    Two guards, one per window. A run that is already stale when it submits is refused by evaluate_policy's
+    live-review guard, before the policy_decision event is written (first test). A restart that lands
+    AFTER the policy was evaluated is refused by the attempt-keyed claim — the row stays under_review at
+    N+1 and NO field write leaks (second test; it FAILS against a status-only claim: drop `attempt=` from
+    _claim and the verdict lands, status planned).
     """
 
     def test_stale_attempt_verdict_cannot_land_on_the_next_attempt(self, db):
@@ -303,10 +375,11 @@ class TestStaleAttemptRace:
         _draft_plan(db, cr_id)
         with cs._session() as s:  # a timeout+restart happened: the row is now attempt 2, still under_review
             s.get(ChangeRequest, cr_id).review_attempt = 2
+        before = cs.get_change(cr_id)
         token = cs._review_attempt_var.set(1)  # the stale, still-running SRE invocation belongs to attempt 1
         try:
             with patch.object(cs, "notify_change_pending_approval"), patch.object(cs, "notify_change_result"):
-                with pytest.raises(cs.ChangeStateError):
+                with pytest.raises(cs.ChangeStateError, match="no longer at review attempt 1"):  # at the policy step
                     cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
                                      reasons=["stale verdict from attempt 1"], actor=agent_actor("sre"))
         finally:
@@ -315,3 +388,32 @@ class TestStaleAttemptRace:
         assert c["status"] == "under_review"     # the verdict did not land
         assert c["review_attempt"] == 2          # the newer attempt is untouched
         assert c["reviewed_by"] is None          # the whole transaction rolled back — no field-write trace
+        assert c == before                       # no CR field changed at all
+        assert _policy_events(db, cr_id) == 0    # ... and the stale run wrote no policy_decision event
+
+    def test_a_restart_after_the_policy_evaluation_still_loses_the_claim(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db)
+        cs.ground_targets(cr_id)
+        _draft_plan(db, cr_id)
+        with cs._session() as s:  # this run's attempt is live when it submits
+            s.get(ChangeRequest, cr_id).review_attempt = 1
+        real_policy = cs.evaluate_policy
+
+        def policy_then_restart(*args, **kwargs):
+            decision = real_policy(*args, **kwargs)
+            with cs._session() as s:  # the watchdog rolls attempt 1 back and a restart claims attempt 2
+                s.get(ChangeRequest, cr_id).review_attempt = 2
+            return decision
+
+        token = cs._review_attempt_var.set(1)
+        try:
+            with patch.object(cs, "evaluate_policy", side_effect=policy_then_restart), \
+                 patch.object(cs, "notify_change_pending_approval"), patch.object(cs, "notify_change_result"):
+                with pytest.raises(cs.ChangeStateError, match="no longer under_review at attempt 1"):  # at the claim
+                    cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
+                                     reasons=["stale verdict from attempt 1"], actor=agent_actor("sre"))
+        finally:
+            cs._review_attempt_var.reset(token)
+        c = cs.get_change(cr_id)
+        assert (c["status"], c["review_attempt"], c["reviewed_by"]) == ("under_review", 2, None)

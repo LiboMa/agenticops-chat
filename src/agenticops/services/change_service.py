@@ -497,10 +497,23 @@ def _hint_matches(hint: str, r: CloudResource) -> bool:
 
 
 def _hint_resolved(hint: str, target_resources) -> bool:
-    """A requester hint is resolved when some grounded target names it (its hint) or IS it (its id)."""
-    h = (hint or "").lower()
-    return any(h in (str(t.get("hint", "")).lower(), str(t.get("resource_id", "")).lower())
+    """A requester hint is resolved when some grounded target names it (its hint) or IS it (its id).
+    Both sides compared stripped and case-folded."""
+    h = (hint or "").strip().lower()
+    return any(h in (str(t.get("hint", "")).strip().lower(), str(t.get("resource_id", "")).strip().lower())
                for t in (target_resources or []))
+
+
+def require_live_review(cr, what: str) -> None:
+    """Review-time writes (targets, the policy event, the change plan) happen only while THIS review runs:
+    the CR must be under_review and — on the agent path, where _run_review published its attempt — still at
+    that attempt (a run whose attempt was rolled back and restarted must not write into the newer one)."""
+    if cr.status != "under_review":
+        raise ChangeStateError(f"ChangeRequest #{cr.id} is '{cr.status}', not under_review — {what}")
+    attempt = _review_attempt_var.get()
+    if attempt is not None and (cr.review_attempt or 0) != attempt:
+        raise ChangeStateError(
+            f"ChangeRequest #{cr.id} is no longer at review attempt {attempt} (the review was rolled back and restarted)")
 
 
 def ground_targets(cr_id: int) -> dict:
@@ -509,15 +522,7 @@ def ground_targets(cr_id: int) -> dict:
     like submit_review, keyed to the review attempt, so a stale run cannot ground targets on a newer one."""
     with _session() as s:
         cr = _load(s, cr_id)
-        if cr.status != "under_review":
-            raise ChangeStateError(
-                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
-            )
-        attempt = _review_attempt_var.get()  # THIS run's attempt (agent path) or None (direct/manual)
-        if attempt is not None and (cr.review_attempt or 0) != attempt:
-            raise ChangeStateError(
-                f"ChangeRequest #{cr_id} is no longer at review attempt {attempt} (the review was rolled back and restarted)"
-            )
+        require_live_review(cr, "targets can only be grounded during review")
         q = s.query(CloudResource)
         if cr.account_id:
             q = q.filter(CloudResource.account_id == cr.account_id)
@@ -543,12 +548,14 @@ def ground_targets(cr_id: int) -> dict:
 def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Actor, region: str = "",
                   hint: str = "") -> dict:
     """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds, and only
-    during review (checked before the describe AND again in the write, keyed to the review attempt). `hint`
-    names the requester's original wording this target resolves (so ground_targets and submit_review stop
-    treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an already attached
-    target with a hint repairs a DEFAULT hint; an existing non-default hint is never overwritten."""
+    during THIS review (require_live_review, checked before the describe AND again in the write). `hint`
+    (stripped) names the requester's original wording this target resolves (so ground_targets and
+    submit_review stop treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an
+    already attached target with a hint repairs a DEFAULT hint; an existing non-default hint is never
+    overwritten. Returns the target entry AS STORED (a kept hint, or an inventory entry, is what the caller sees)."""
     from agenticops.tools.aws_cli_tool import _execute_aws_cli
     resource_id = (resource_id or "").strip()
+    hint = (hint or "").strip()
     if not resource_id:
         raise ChangeValidationError("resource_id is required")
     template = _ARN_DESCRIBE if resource_id.startswith("arn:") else DESCRIBE_BY_TYPE.get(resource_type)
@@ -566,10 +573,8 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
         raise ChangeValidationError(f"invalid region {region!r}")
     with _session() as s:
         cr = _load(s, cr_id)
-        if cr.status != "under_review":  # before the describe: a refused call must not run any command
-            raise ChangeStateError(
-                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
-            )
+        # before the describe: a refused call (review over, or a stale attempt) must not run any command
+        require_live_review(cr, "targets can only be grounded during review")
         account = _account_name(s, cr)
     command = template.format(rid=resource_id) + (f" --region {region}" if region else "")
     result = _execute_aws_cli(command, account)
@@ -581,15 +586,7 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
         cr = _load(s, cr_id)
         # Re-checked in the WRITE: the review may have ended — or been rolled back and restarted — while the
         # describe ran. Raising here rolls this session back, so such a call writes nothing.
-        if cr.status != "under_review":
-            raise ChangeStateError(
-                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
-            )
-        attempt = _review_attempt_var.get()  # THIS run's attempt (agent path) or None (direct/manual)
-        if attempt is not None and (cr.review_attempt or 0) != attempt:
-            raise ChangeStateError(
-                f"ChangeRequest #{cr_id} is no longer at review attempt {attempt} (the review was rolled back and restarted)"
-            )
+        require_live_review(cr, "targets can only be grounded during review")
         items = list(cr.target_resources or [])
         current = next((t for t in items if t.get("resource_id") == resource_id), None)
         if current is None:
@@ -603,14 +600,19 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
         cr.updated_at = datetime.now(timezone.utc)
         _audit(s, Actions.CHANGE_REVIEWED, cr, actor, details={"phase": "target_attached", "resource_id": resource_id,
                                                               "resource_type": resource_type, "command": command})
-    return item
+        s.flush()  # the before_flush secret scrubber runs here: the entry read back below is what the row holds
+        # by POSITION, not by id: the scrubber may rewrite the id itself, but it maps the list 1:1
+        stored = dict(cr.target_resources[len(items) if current is None else items.index(current)])
+    return stored
 
 
 def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
-    """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius)."""
+    """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius).
+    Only during THIS review (require_live_review): a stale run is refused before its policy_decision event."""
     from agenticops.services.policy_engine import estimate_blast_radius, get_policy_engine
     with _session() as s:
         cr = _load(s, cr_id)
+        require_live_review(cr, "policy is evaluated only during review")
         provider = native_account = None
         if cr.account_id:
             acct = s.get(CloudAccount, cr.account_id)

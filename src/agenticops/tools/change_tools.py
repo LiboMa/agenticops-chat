@@ -145,7 +145,10 @@ def attach_change_target(change_request_id: int, resource_id: str, resource_type
         item = cs.attach_target(change_request_id, resource_id, resource_type, actor=_actor_from_context(), region=region, hint=hint)
     except cs.ChangeError as e:
         return f"Target not attached: {e}"
-    return f"Target {item['resource_id']} ({item['resource_type']}) attached to C#{change_request_id} (verified by: {item['evidence']['command']})."
+    # item is the entry AS STORED: an already inventory-grounded target keeps its evidence "inventory" (a str)
+    evidence = item["evidence"]["command"] if isinstance(item["evidence"], dict) else item["evidence"]
+    return (f"Target {item['resource_id']} ({item['resource_type']}) attached to C#{change_request_id} "
+            f"for hint '{item['hint']}' (verified by: {evidence}).")
 
 
 @tool

@@ -1007,8 +1007,11 @@ def _save_change_plan(change_request_id, risk_level, title, summary, steps, roll
         cr = session.get(ChangeRequest, change_request_id)
         if cr is None:
             return f"ChangeRequest #{change_request_id} not found."
-        if cr.status != "under_review":
-            return f"ChangeRequest #{change_request_id} is '{cr.status}', not under_review — a plan can only be saved during review."
+        from agenticops.services.change_service import ChangeStateError, require_live_review
+        try:  # under_review AND (agent path) still this run's attempt — a stale run must not write the plan
+            require_live_review(cr, "a plan can only be saved during review.")
+        except ChangeStateError as e:
+            return str(e)
         # Dedup per change request (mirrors the fix-path check-then-act above: not atomic,
         # safe for SQLite single-writer; change plans are saved inside one SRE review flow).
         existing = (

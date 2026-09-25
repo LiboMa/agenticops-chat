@@ -67,6 +67,39 @@ def test_change_plan_requires_under_review(db):
     assert "under_review" in out and db.query(FixPlan).count() == 0
 
 
+def test_change_plan_is_keyed_to_the_review_attempt(db):
+    """A stale SRE run (its attempt was rolled back and restarted) must neither create nor rewrite the newer
+    attempt's plan; the live attempt saves and updates as before."""
+    from agenticops.services import change_service as cs
+    from agenticops.tools.metadata_tools import save_fix_plan
+    cr_id = _cr_under_review(db)
+    with cs._session() as s:  # a timeout + restart happened: the row is now attempt 2, still under_review
+        s.get(ChangeRequest, cr_id).review_attempt = 2
+    refusal = f"ChangeRequest #{cr_id} is no longer at review attempt 1 (the review was rolled back and restarted)"
+
+    def save(attempt, **overrides):
+        token = cs._review_attempt_var.set(attempt)
+        try:
+            return save_fix_plan(plan_kind="change", change_request_id=cr_id, **{**GOOD, **overrides})
+        finally:
+            cs._review_attempt_var.reset(token)
+
+    assert save(1) == refusal and db.query(FixPlan).count() == 0  # a returned string, and none created
+    assert "saved" in save(2)  # the live attempt saves as today
+    db.expire_all()
+    plan = db.query(FixPlan).one()
+    before = (plan.id, plan.title, plan.steps, plan.updated_at)
+    events = db.query(PipelineEvent).filter_by(change_request_id=cr_id).count()
+    assert save(1, title="stale rewrite") == refusal
+    db.expire_all()
+    plan = db.query(FixPlan).one()  # still exactly one plan, unchanged
+    assert (plan.id, plan.title, plan.steps, plan.updated_at) == before
+    assert db.query(PipelineEvent).filter_by(change_request_id=cr_id).count() == events
+    assert "UPDATED" in save(2, title="tag v2")  # ... and updates as today
+    db.expire_all()
+    assert db.query(FixPlan).one().title == "tag v2"
+
+
 def test_change_plan_does_not_trigger_fix_auto_approve(db):
     from agenticops.tools.metadata_tools import save_fix_plan
     cr_id = _cr_under_review(db)
