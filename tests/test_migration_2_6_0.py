@@ -135,6 +135,25 @@ def test_fresh_database_needs_no_rebuild(tmp_path):
     assert _notnull(engine, "fix_plans")["health_issue_id"] is False
 
 
+def test_migration_adds_review_attempt_to_an_existing_change_requests_table(tmp_path):
+    """A dev database on which the earlier 2.6.0 code already created change_requests gains the
+    round-2 column in place; existing rows read 0 (SQLite allows NOT NULL here because of DEFAULT 0)."""
+    path = tmp_path / "agenticops.db"
+    con = sqlite3.connect(path)
+    con.executescript(
+        "CREATE TABLE change_requests (id INTEGER PRIMARY KEY, title VARCHAR(300), status VARCHAR(30),"
+        " created_at DATETIME);"
+        "INSERT INTO change_requests (id, title, status, created_at)"
+        " VALUES (4, 'old cr', 'under_review', '2026-01-01 00:00:00');"
+    )
+    con.commit()
+    con.close()
+    engine = _run_init_db(path)
+    assert _notnull(engine, "change_requests")["review_attempt"] is True
+    with engine.connect() as c:
+        assert tuple(c.execute(text("SELECT id, review_attempt FROM change_requests")).one()) == (4, 0)
+
+
 def test_add_column_ddl_types_follow_dialect():
     """ADD COLUMN types come from the ORM column compiled for the target dialect — never a
     hard-coded DATETIME, which PostgreSQL rejects (type "datetime" does not exist)."""
@@ -286,6 +305,7 @@ def _pre_2_6_0_stub():
         _drop_column(cols, "fix_plans", n)
     _drop_column(cols, "pipeline_events", "change_request_id")
     _drop_column(cols, "audit_logs", "actor")
+    _drop_column(cols, "change_requests", "review_attempt")
     _set_column(cols, "fix_plans", "approved_by", type=String(100))
     _set_column(cols, "fix_executions", "executed_by", type=String(100))
     fks["fix_plans"] = [fk for fk in fks["fix_plans"] if fk["constrained_columns"] != ["change_request_id"]]
@@ -313,6 +333,7 @@ def test_pg_statements_for_a_pre_2_6_0_catalog():
         add("fix_plans", "updated_at"),
         add("pipeline_events", "change_request_id"),
         add("audit_logs", "actor"),
+        add("change_requests", "review_attempt", "DEFAULT 0 NOT NULL"),
         "UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL",
         "ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL",
         "ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "

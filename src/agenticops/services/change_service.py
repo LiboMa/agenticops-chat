@@ -132,6 +132,7 @@ def to_dict(cr: ChangeRequest) -> dict:
         "requested_change_type": cr.requested_change_type, "effective_change_type": cr.effective_change_type,
         "risk_level": cr.risk_level, "action_type": cr.action_type, "status": cr.status,
         "review_verdict": cr.review_verdict, "review_reasons": list(cr.review_reasons or []),
+        "review_attempt": cr.review_attempt or 0,
         "reviewed_by": cr.reviewed_by, "reviewed_at": _iso(cr.reviewed_at),
         "policy_rule": cr.policy_rule, "policy_action": cr.policy_action,
         "approved_by": cr.approved_by, "approver_user_id": cr.approver_user_id, "approved_at": _iso(cr.approved_at),
@@ -235,28 +236,33 @@ def start_review(cr_id: int, *, sync: bool) -> Optional[str]:
     """draft|needs_clarification → under_review, then run the SRE change review.
 
     sync=True  : run in this thread and return the SRE's text (Main agent's review_change tool).
-    sync=False : daemon worker thread + a daemon watchdog that JOINS that worker → returns None.
+    sync=False : daemon watchdog thread that STARTS and then JOINS the daemon worker → returns None.
+
+    Every entry into under_review bumps `review_attempt`. That number keys this attempt's rollbacks, so
+    a late actor from an earlier attempt can never roll back a later one.
     """
     with _session() as s:
         cr = _load(s, cr_id)
         old = cr.status
         _transition(cr, "under_review")
+        cr.review_attempt = (cr.review_attempt or 0) + 1
+        attempt = cr.review_attempt
         trace_id = cr.trace_id
-        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"), details={"phase": "started"},
-               old_status=old, new_status="under_review")
-    _event(cr_id, "change_review_started", "review", "started", actor="agent:sre", trace_id=trace_id)
+        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"),
+               details={"phase": "started", "attempt": attempt}, old_status=old, new_status="under_review")
+    _event(cr_id, "change_review_started", "review", "started", detail={"attempt": attempt},
+           actor="agent:sre", trace_id=trace_id)
     if sync:
-        return _run_review(cr_id, trace_id)
+        return _run_review(cr_id, trace_id, attempt)
     try:
-        worker = threading.Thread(target=_run_review, args=(cr_id, trace_id), daemon=True,
+        worker = threading.Thread(target=_run_review, args=(cr_id, trace_id, attempt), daemon=True,
                                   name=f"change-review-{cr_id}")
-        worker.start()
-        threading.Thread(target=_watchdog_join, args=(cr_id, worker, settings.change_review_timeout_seconds),
+        threading.Thread(target=_watchdog_join, args=(cr_id, attempt, worker, settings.change_review_timeout_seconds),
                          daemon=True, name=f"change-review-watchdog-{cr_id}").start()
     except BaseException:
-        # Nothing is armed to finish the review, so it must not stay under_review. The rollback is
-        # conditional, so a worker that did start and reaches a verdict still wins.
-        _review_failed(cr_id, "review could not be started (thread spawn failed)")
+        # Nothing is armed to finish the review, so it must not stay under_review. The worker is started
+        # by the watchdog, so a failure here means no worker is running either.
+        _review_failed(cr_id, attempt, "review could not be started (thread spawn failed)")
         raise
     return None
 
@@ -270,8 +276,10 @@ def restart_review(cr_id: int, *, actor: Actor) -> dict:
     """
     _check(actor, "change.request")
     stale: Optional[str] = None
+    stale_attempt = 0
     with _session() as s:
         cr = _load(s, cr_id)
+        stale_attempt = cr.review_attempt or 0
         if cr.status == "under_review":
             age = _age_seconds(cr.updated_at or cr.created_at)
             if age < settings.change_review_timeout_seconds:
@@ -283,17 +291,22 @@ def restart_review(cr_id: int, *, actor: Actor) -> dict:
         elif cr.status != "draft":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', only drafts can be (re)submitted for review")
     if stale:
-        _review_failed(cr_id, stale, phase="stale_recovery")
+        # Keyed to the attempt we just read: a same-process watchdog for that orphan firing a moment
+        # later is a 0-row no-op, because the restart below bumps the attempt.
+        _review_failed(cr_id, stale_attempt, stale, phase="stale_recovery")
     start_review(cr_id, sync=False)  # 409s by itself if a verdict landed in the meantime
     return get_change(cr_id)
 
 
-def _run_review(cr_id: int, trace_id: Optional[str]) -> Optional[str]:
+def _run_review(cr_id: int, trace_id: Optional[str], attempt: int) -> Optional[str]:
     """Thread body: set context, run the SRE Mode C agent, enforce 'a review must end with a verdict'.
 
     sync=True runs this in the CALLER's thread (CLI /change, Main's review_change tool), so both the
     trace id and the Run Context are set through tokens and reset in finally — leaving agent:sre behind
     would mis-attribute every later write in that thread. A CR without a trace keeps the caller's.
+
+    `attempt` is OUR attempt number: every rollback below is keyed to it, so a worker that returns long
+    after its own attempt timed out cannot roll back the attempt a human started in the meantime.
     """
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
     _tid_token = set_trace_id(trace_id) if trace_id else None
@@ -306,20 +319,17 @@ def _run_review(cr_id: int, trace_id: Optional[str]) -> Optional[str]:
             result = str(sre_agent_review_change(cr_id))
         except Exception as e:
             logger.exception("Change review crashed for CR #%d", cr_id)
-            _review_failed(cr_id, f"review crashed: {e}")
+            _review_failed(cr_id, attempt, f"review crashed: {e}")
             return result
         except BaseException as e:
             # ^C in the CLI, a SystemExit, a killed worker: roll back so the CR is not stuck
             # under_review, then let it through — a BaseException is not ours to swallow.
             logger.warning("Change review aborted for CR #%d (%s)", cr_id, type(e).__name__)
-            _review_failed(cr_id, f"review aborted: {type(e).__name__}")
+            _review_failed(cr_id, attempt, f"review aborted: {type(e).__name__}")
             raise
-        try:
-            status = get_change(cr_id)["status"]
-        except ChangeNotFound:
-            return result
-        if status == "under_review":
-            _review_failed(cr_id, "review ended without a verdict (submit_change_review was not called)")
+        # No read-then-check: the keyed conditional UPDATE IS the check (a verdict, a deleted row or a
+        # later attempt all make it a 0-row no-op).
+        _review_failed(cr_id, attempt, "review ended without a verdict (submit_change_review was not called)")
         return result
     finally:
         reset_run_context(_rc_token)
@@ -327,52 +337,60 @@ def _run_review(cr_id: int, trace_id: Optional[str]) -> Optional[str]:
             _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
 
 
-def _watchdog_join(cr_id: int, worker: threading.Thread, timeout: float) -> None:
-    """Guard ONE review attempt by joining its own thread (the executor_service watchdog pattern).
+def _watchdog_join(cr_id: int, attempt: int, worker: threading.Thread, timeout: float) -> None:
+    """Guard ONE review attempt: start its worker, then join it (the executor_service watchdog pattern).
 
-    A watchdog that waits on the attempt's thread cannot outlive that attempt, so a failed attempt
-    can never time out the next one — no attempt bookkeeping and no cancel path needed.
+    The watchdog owns the start, so a worker can never run without the thread that guards it, and a
+    watchdog that waits on its own worker cannot outlive the attempt it guards.
     """
+    try:
+        worker.start()
+    except BaseException:
+        _review_failed(cr_id, attempt, "review could not be started (thread spawn failed)")
+        raise
     worker.join(timeout=timeout)
     if worker.is_alive():
-        _watchdog_fire(cr_id)
+        _watchdog_fire(cr_id, attempt)
 
 
-def _watchdog_fire(cr_id: int) -> None:
+def _watchdog_fire(cr_id: int, attempt: int) -> None:
     try:
-        if get_change(cr_id)["status"] == "under_review":
-            _review_failed(cr_id, f"review timed out after {settings.change_review_timeout_seconds}s")
-    except ChangeNotFound:
-        pass
+        _review_failed(cr_id, attempt, f"review timed out after {settings.change_review_timeout_seconds}s")
     except Exception:
         logger.debug("change review watchdog failed for CR #%d", cr_id, exc_info=True)
 
 
-def _review_failed(cr_id: int, error: str, *, phase: str = "failed") -> None:
+def _review_failed(cr_id: int, attempt: int, error: str, *, phase: str = "failed") -> None:
     """under_review → draft (never stuck), review_failed event, notification.
 
-    The rollback is a CONDITIONAL update (`WHERE status='under_review'`, the only legal source of this
-    edge): a verdict committed by the review's own session inside this window must win. 0 rows changed
-    means the review finished after all — then nothing at all is written: no audit row, no event, no
-    notification, and review_reasons is left as the reviewer wrote it.
+    The rollback is a CONDITIONAL update keyed on (status, review_attempt): `under_review` is the only
+    legal source of this edge, and `review_attempt` says WHICH attempt is being rolled back. Both halves
+    are needed — a verdict committed inside this window must win (status), and a late actor from an
+    earlier attempt must not roll back the attempt a human started since (attempt). 0 rows changed means
+    exactly one of those happened: then nothing at all is written — no audit row, no event, no
+    notification, and review_reasons is left as its owner wrote it.
     """
     reason = error[:500]
     with _session() as s:
         changed = (
             s.query(ChangeRequest)
-            .filter(ChangeRequest.id == cr_id, ChangeRequest.status == "under_review")
+            .filter(ChangeRequest.id == cr_id, ChangeRequest.status == "under_review",
+                    ChangeRequest.review_attempt == attempt)
             .update({"status": "draft", "updated_at": datetime.now(timezone.utc)},
                     synchronize_session=False)
         )
         if not changed:
-            logger.info("review rollback for CR #%d skipped: it is no longer under_review", cr_id)
+            logger.info("review rollback for CR #%d attempt %d skipped: not under_review or a later attempt",
+                        cr_id, attempt)
             return
         cr = _load(s, cr_id)
         cr.review_reasons = [reason]  # ORM write: goes through the flush-time secret redaction
-        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"), details={"phase": phase, "error": reason},
+        _audit(s, Actions.CHANGE_REVIEWED, cr, agent_actor("sre"),
+               details={"phase": phase, "attempt": attempt, "error": reason},
                old_status="under_review", new_status="draft")
         snap = to_dict(cr)
-    _event(cr_id, "review_failed", "review", "failed", detail={"error": reason}, actor="agent:sre", trace_id=snap["trace_id"])
+    _event(cr_id, "review_failed", "review", "failed", detail={"error": reason, "attempt": attempt},
+           actor="agent:sre", trace_id=snap["trace_id"])
     try:
         notify_change_result(snap, "review_failed")
     except Exception:

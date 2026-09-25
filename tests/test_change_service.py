@@ -4,10 +4,12 @@
 a later task, and patch() would otherwise fail on the missing attribute. ``_run_review`` imports
 the name from the module at call time, so the patched attribute is what runs.
 """
+import itertools
+import json
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -45,6 +47,16 @@ def _draft():
     with patch.object(cs, "notify_change_requested"):
         return cs.create_change_request(source="cli", actor=cli_actor(), title="t", description="d",
                                         start_review=False)
+
+
+def _wait_until(pred, what, timeout=10.0):
+    """Poll a predicate written by another thread (real-thread tests only)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {what}")
 
 
 class TestCreate:
@@ -139,7 +151,7 @@ class TestReviewLifecycle:
         with cs._session() as s:
             cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
         with patch.object(cs, "notify_change_result"):
-            cs._watchdog_fire(cr["id"])
+            cs._watchdog_fire(cr["id"], 0)  # no start_review ran, so the row is still at attempt 0
         assert cs.get_change(cr["id"])["status"] == "draft"
 
     def test_watchdog_noop_when_review_finished(self, db):
@@ -148,7 +160,7 @@ class TestReviewLifecycle:
         with cs._session() as s:
             row = s.get(ChangeRequest, cr["id"])
             cs.transition_change(row, "under_review"); cs.transition_change(row, "planned")
-        cs._watchdog_fire(cr["id"])
+        cs._watchdog_fire(cr["id"], 0)
         assert cs.get_change(cr["id"])["status"] == "planned"
 
     def test_start_review_from_wrong_state_is_409(self, db):
@@ -161,30 +173,36 @@ class TestReviewLifecycle:
             cs.start_review(cr["id"], sync=True)
 
     def test_async_start_review_spawns_worker_and_a_join_watchdog(self, db):
-        """Pins the whole async wiring: target, args, daemon, name and the started-ness of BOTH threads.
+        """Pins the whole async wiring: target, args (incl. the attempt), daemon, name — and who starts what.
 
         `not timer.called` is the MAJOR-1 regression pin — a Timer is not bound to an attempt, so a
-        stale one from a failed attempt used to time out the next, legitimate review.
+        stale one from a failed attempt used to time out the next, legitimate review. Round 2: the
+        worker is constructed here but STARTED by the watchdog, so exactly one start happens at this
+        level and a worker can never run without the thread that guards it.
         """
         from agenticops.config import settings
         from agenticops.services import change_service as cs
         cr = self._cr(db)
-        with patch.object(cs.threading, "Thread") as thread, patch.object(cs.threading, "Timer") as timer:
+        worker_mock, watchdog_mock = Mock(name="worker"), Mock(name="watchdog")
+        with patch.object(cs.threading, "Thread", side_effect=[worker_mock, watchdog_mock]) as thread, \
+             patch.object(cs.threading, "Timer") as timer:
             cs.start_review(cr["id"], sync=False)
         assert not timer.called
         assert thread.call_count == 2
         worker, watchdog = thread.call_args_list
         assert worker.args == () and worker.kwargs == {
-            "target": cs._run_review, "args": (cr["id"], cr["trace_id"]),
+            "target": cs._run_review, "args": (cr["id"], cr["trace_id"], 1),
             "daemon": True, "name": f"change-review-{cr['id']}",
         }
         assert watchdog.args == () and watchdog.kwargs == {
             "target": cs._watchdog_join,
-            "args": (cr["id"], thread.return_value, settings.change_review_timeout_seconds),
+            "args": (cr["id"], 1, worker_mock, settings.change_review_timeout_seconds),
             "daemon": True, "name": f"change-review-watchdog-{cr['id']}",
         }
-        assert thread.return_value.start.call_count == 2  # both spawned threads were actually started
-        assert cs.get_change(cr["id"])["status"] == "under_review"
+        watchdog_mock.start.assert_called_once_with()  # the only start at this level
+        worker_mock.start.assert_not_called()  # the watchdog owns the worker's start
+        snap = cs.get_change(cr["id"])
+        assert snap["status"] == "under_review" and snap["review_attempt"] == 1
 
     def test_spawn_failure_rolls_the_review_back_and_surfaces(self, db):
         from agenticops.services import change_service as cs
@@ -227,6 +245,23 @@ class TestReviewLifecycle:
         rows = _audits(db, "change.reviewed")
         assert len(rows) == 1  # a review that reached a verdict writes no failure row
         assert rows[0].entity_type == "change_request" and rows[0].entity_id == str(cr["id"])
+
+    def test_review_attempt_counts_starts_and_is_in_the_snapshot(self, db):
+        """Every entry into under_review bumps the counter; both audit rows of an attempt carry it."""
+        from agenticops.services import change_service as cs
+        cr = self._cr(db)
+        assert cr["review_attempt"] == 0
+        with patch("agenticops.agents.sre_agent.sre_agent_review_change", return_value="no verdict", create=True), \
+             patch.object(cs, "notify_change_result"):
+            cs.start_review(cr["id"], sync=True)
+        c = cs.get_change(cr["id"])
+        assert c["status"] == "draft" and c["review_attempt"] == 1
+        assert {a.details["phase"]: a.details["attempt"] for a in _audits(db, "change.reviewed")} == {
+            "started": 1, "failed": 1,
+        }
+        with patch.object(cs.threading, "Thread"):  # the restart's worker/watchdog stay inert
+            out = cs.restart_review(cr["id"], actor=cli_actor())
+        assert out["status"] == "under_review" and out["review_attempt"] == 2
 
     def test_restart_review_requires_draft(self, db):
         from agenticops.services import change_service as cs
@@ -271,33 +306,155 @@ class TestWatchdog:
         """MAJOR 1: attempt #1's watchdog must never roll back attempt #2 (its worker is done → no fire)."""
         from agenticops.services import change_service as cs
         cr = _draft()
-        attempt1 = threading.Thread(target=lambda: None, name="change-review-attempt-1")
-        attempt1.start()
-        attempt1.join()
+        finished = Mock(name="attempt-1-worker")
+        finished.is_alive.return_value = False
         with cs._session() as s:  # attempt #2 is legitimately under review
-            cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
+            row = s.get(ChangeRequest, cr["id"])
+            cs.transition_change(row, "under_review")
+            row.review_attempt = 2
         with patch.object(cs, "notify_change_result") as notify:
-            cs._watchdog_join(cr["id"], attempt1, 0)
+            cs._watchdog_join(cr["id"], 1, finished, 0)
         assert cs.get_change(cr["id"])["status"] == "under_review"
         notify.assert_not_called()
 
+    def test_watchdog_join_starts_joins_and_fires_only_if_alive(self, db):
+        """The watchdog owns its worker: start → join(timeout) → fire ONLY while the worker is alive."""
+        from agenticops.services import change_service as cs
+        for alive in (True, False):
+            worker = Mock(name="worker")
+            worker.is_alive.return_value = alive
+            with patch.object(cs, "_watchdog_fire") as fire:
+                cs._watchdog_join(7, 3, worker, 1.5)
+            worker.start.assert_called_once_with()
+            worker.join.assert_called_once_with(timeout=1.5)
+            assert fire.call_args_list == ([call(7, 3)] if alive else [])
+        unstartable = Mock(name="unstartable-worker")
+        unstartable.start.side_effect = RuntimeError("can't start new thread")
+        with patch.object(cs, "_review_failed") as failed:
+            with pytest.raises(RuntimeError):
+                cs._watchdog_join(7, 3, unstartable, 1.5)
+        assert failed.call_count == 1 and failed.call_args.args[:2] == (7, 3)
+        unstartable.join.assert_not_called()
+
     def test_review_failed_leaves_a_finished_review_untouched(self, db):
-        """MAJOR 2: 0 rows updated → no transition, no audit row, no event, no notification."""
+        """MAJOR 2, status half of the key: 0 rows → no transition, no audit row, no event, no notify."""
         from agenticops.services import change_service as cs
         cr = _draft()
         with cs._session() as s:
             row = s.get(ChangeRequest, cr["id"])
             cs.transition_change(row, "under_review")
             cs.transition_change(row, "planned")
+            row.review_attempt = 1  # the attempt matches, so only the status can stop the rollback
             row.review_reasons = ["the real verdict"]
         before = db.query(PipelineEvent).filter_by(change_request_id=cr["id"]).count()
         with patch.object(cs, "notify_change_result") as notify:
-            cs._review_failed(cr["id"], "a stale watchdog fired")
+            cs._review_failed(cr["id"], 1, "a stale watchdog fired")
         c = cs.get_change(cr["id"])
         assert c["status"] == "planned" and c["review_reasons"] == ["the real verdict"]
         assert db.query(PipelineEvent).filter_by(change_request_id=cr["id"]).count() == before
         assert _audits(db, "change.reviewed") == []
         notify.assert_not_called()
+
+    def test_review_failed_is_a_noop_for_a_different_attempt(self, db):
+        """MAJOR 1 round 2, attempt half of the key: a late actor from #1 cannot roll back #2."""
+        from agenticops.services import change_service as cs
+        cr = _draft()
+        with cs._session() as s:
+            row = s.get(ChangeRequest, cr["id"])
+            cs.transition_change(row, "under_review")  # attempt #2 genuinely IS under review
+            row.review_attempt = 2
+            row.review_reasons = ["attempt 2 is running"]
+        before = db.query(PipelineEvent).filter_by(change_request_id=cr["id"]).count()
+        with patch.object(cs, "notify_change_result") as notify:
+            cs._review_failed(cr["id"], 1, "late")
+        c = cs.get_change(cr["id"])
+        assert c["status"] == "under_review" and c["review_reasons"] == ["attempt 2 is running"]
+        assert db.query(PipelineEvent).filter_by(change_request_id=cr["id"]).count() == before
+        assert _audits(db, "change.reviewed") == []
+        notify.assert_not_called()
+        with patch.object(cs, "notify_change_result") as notify:  # the current attempt still rolls back
+            cs._review_failed(cr["id"], 2, "now")
+        assert cs.get_change(cr["id"])["status"] == "draft"
+        notify.assert_called_once()
+
+
+class TestAttemptKeying:
+    """A rollback is only ever legitimate for the attempt that issued it."""
+
+    @pytest.mark.parametrize("ending", ["no_verdict", "crash"])
+    def test_late_rollback_from_a_timed_out_attempt_cannot_touch_the_next_one(self, db, ending):
+        """Attempt #1 hangs past the timeout, a human restarts, then #1 finally returns (or raises).
+
+        Its own end-of-run / crash rollback must be a 0-row no-op: attempt #2 genuinely IS
+        `under_review`, so the status half of the key cannot stop it — only the attempt half can.
+        Releasing #2 afterwards proves the CURRENT attempt's rollback still applies.
+        """
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr = _draft()
+        gate1, gate2 = threading.Event(), threading.Event()
+        started1, started2 = threading.Event(), threading.Event()
+        turn = itertools.count(1)
+        rollbacks: list = []
+        real_failed = cs._review_failed
+
+        def spy_failed(*a, **kw):  # signature-agnostic: appended AFTER the write, so a wait means "done"
+            try:
+                return real_failed(*a, **kw)
+            finally:
+                rollbacks.append(a)
+
+        def fake_sre(change_request_id):
+            if next(turn) == 1:
+                started1.set()
+                gate1.wait(timeout=15)
+                if ending == "crash":
+                    raise RuntimeError("attempt 1 died on its way out")
+                return "attempt 1 returns far too late"
+            started2.set()
+            gate2.wait(timeout=15)
+            return "attempt 2 forgot the verdict too"
+
+        def failed_events():
+            return (db.query(PipelineEvent)
+                    .filter_by(change_request_id=cr["id"], event_type="review_failed")
+                    .order_by(PipelineEvent.id).all())
+
+        try:
+            with patch("agenticops.agents.sre_agent.sre_agent_review_change", side_effect=fake_sre, create=True), \
+                 patch.object(cs, "_review_failed", spy_failed), \
+                 patch.object(cs, "notify_change_result") as notify:
+                with patch.object(settings, "change_review_timeout_seconds", 0.05):
+                    cs.start_review(cr["id"], sync=False)
+                    assert started1.wait(timeout=5), "attempt 1's worker never ran"
+                    _wait_until(lambda: len(rollbacks) >= 1, "attempt 1 to time out")
+                assert cs.get_change(cr["id"])["status"] == "draft" and notify.call_count == 1
+
+                with patch.object(settings, "change_review_timeout_seconds", 30):  # #2's watchdog must not fire
+                    cs.restart_review(cr["id"], actor=cli_actor())
+                assert started2.wait(timeout=5), "attempt 2's worker never ran"
+                assert cs.get_change(cr["id"])["status"] == "under_review"
+
+                gate1.set()  # attempt 1 returns (or raises) long after its own attempt was rolled back
+                _wait_until(lambda: len(rollbacks) >= 2, "attempt 1's late rollback to run")
+                c = cs.get_change(cr["id"])
+                assert c["status"] == "under_review", "attempt 1's late rollback hit attempt 2"
+                assert c["review_attempt"] == 2
+                assert c["review_reasons"][0].startswith("review timed out")  # worker #1 wrote nothing
+                assert len(failed_events()) == 1 and notify.call_count == 1
+
+                gate2.set()  # the current attempt's own rollback still applies
+                _wait_until(lambda: len(rollbacks) >= 3, "attempt 2's rollback to run")
+                rows = failed_events()
+                assert cs.get_change(cr["id"])["status"] == "draft"
+                assert len(rows) == 2 and json.loads(rows[1].detail)["attempt"] == 2
+                assert notify.call_count == 2
+        finally:
+            gate1.set()
+            gate2.set()
+            for t in threading.enumerate():
+                if t.name.startswith("change-review"):
+                    t.join(timeout=5)
 
 
 class TestStaleReviewRecovery:

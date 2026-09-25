@@ -501,6 +501,7 @@ class ChangeRequest(Base):
     status: Mapped[str] = mapped_column(String(30), default="draft")
     review_verdict: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     review_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    review_attempt: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # bumped on every → under_review; keys rollbacks
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     policy_rule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -1144,6 +1145,7 @@ _ADD_COLUMNS_2_6_0: dict[str, dict[str, Optional[str]]] = {
     },
     "pipeline_events": {"change_request_id": None},
     "audit_logs": {"actor": None},
+    "change_requests": {"review_attempt": "DEFAULT 0 NOT NULL"},
 }
 
 # Actor-key columns (`user:<email>`; users.email is String(255)) widened from VARCHAR(100) in the fix wave (M-2).
