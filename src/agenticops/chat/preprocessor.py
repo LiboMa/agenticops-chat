@@ -3,7 +3,7 @@
 Handles:
 - I#N reference resolution (HealthIssue by ID)
 - R#N reference resolution (CloudResource by ID)
-- C#N reference resolution (ChangeRequest by ID)
+- C#N reference resolution (ChangeRequest by ID; only when change_management_enabled)
 - @file/path extraction and content injection (CLI)
 - Pre-read file content injection (Web upload)
 """
@@ -105,13 +105,14 @@ def resolve_references(text: str) -> tuple[str, list[str]]:
         else:
             warnings.append(f"Resource R#{resource_id} not found")
 
-    for match in CHANGE_REF_PATTERN.finditer(text):
-        cr_id = int(match.group(1))
-        block = _resolve_change_ref(cr_id)
-        if block:
-            context_blocks.append(block)
-        else:
-            warnings.append(f"ChangeRequest C#{cr_id} not found")
+    from agenticops.config import settings
+    if settings.change_management_enabled:
+        for cr_id in dict.fromkeys(int(m) for m in CHANGE_REF_PATTERN.findall(text)):
+            block = _resolve_change_ref(cr_id)
+            if block:
+                context_blocks.append(block)
+            else:
+                warnings.append(f"ChangeRequest C#{cr_id} not found")
 
     if context_blocks:
         enriched = text + "\n\n" + "\n\n".join(context_blocks)

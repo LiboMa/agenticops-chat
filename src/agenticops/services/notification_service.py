@@ -273,7 +273,7 @@ def notify_execution_result(
 
 
 def _change_severity(risk_level, outcome: str | None = None) -> str:
-    if outcome in ("failed", "rolled_back", "review_failed"):
+    if outcome in ("failed", "rolled_back", "review_failed", "needs_review"):
         return "high"
     return {"L0": "low", "L1": "low", "L2": "medium", "L3": "high"}.get(risk_level or "", "medium")
 
@@ -284,7 +284,9 @@ def _change_link(cr_id: int) -> str:
 
 def notify_change_requested(cr: dict) -> None:
     """Notify: a change request was opened (sent immediately — changes are not batched)."""
-    targets = ", ".join(t.get("resource_id", "") for t in cr.get("target_resources") or []) or "(to be grounded)"
+    grounded = [t.get("resource_id") for t in cr.get("target_resources") or [] if t.get("resource_id")]
+    hints = [h for h in cr.get("target_hints") or [] if h]
+    targets = ", ".join(grounded) or (f"(to be grounded: {', '.join(hints)})" if hints else "(to be grounded)")
     notify_event(
         "change_requested",
         f"[CHANGE] Change #{cr['id']} requested: {cr['title']}",

@@ -92,7 +92,6 @@ SPECIALIZED AGENTS (dispatch all AWS work to these):
   full read-only AWS CLI covering 60+ services. Call with query and optional region.
 - executor_agent: Executes APPROVED fix plans (L4 Auto Operation). Call with fix_plan_id. Only works on approved plans.
 - reporter_agent: Generates operations reports (daily, incident, inventory). Call with report_type and scope.
-- review_change: Reviews a CHANGE REQUEST (C#N) — grounds targets, classifies risk, evaluates policy, saves the change plan. Call with change_request_id. READ-ONLY.
 
 METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_active_account: Get all enabled cloud accounts. Returns JSON array.
@@ -104,7 +103,6 @@ METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_fix_plan: Get the latest fix plan for a health issue.
 - get_approved_fix_plan: Safety gate — retrieve a fix plan only if it is approved.
 - approve_fix_plan: Approve a fix plan (L0/L1 can be agent-approved; L2/L3 require human).
-- request_change / get_change_request / list_change_requests / execute_change: Change Management (ITSM) — open, inspect, list and queue execution of change requests (C#N).
 
 NETWORK TOOLS:
 - detect_network_anomalies: Detect structural issues in a VPC's network topology.
@@ -134,15 +132,6 @@ ROUTING RULES:
 5.6. "execute" / "run fix" / "apply fix" + plan ID → dispatch to executor_agent.
      SAFETY: First call get_approved_fix_plan to confirm approved status. Show plan summary to user
      and request explicit confirmation before dispatching to executor_agent.
-5.7. CHANGE MANAGEMENT — a modification with NO HealthIssue behind it (add/remove tags or labels, scale
-     capacity, change configuration or parameters, edit network firewall rules or identity/permission
-     policies — e.g. security groups, IAM), or the user explicitly asks for a "change request" / "CR", or
-     the message starts with "[CHANGE REQUEST]" → call request_change(title, description, account,
-     targets, change_type), then IMMEDIATELY review_change(change_request_id). Present the verdict, risk,
-     plan summary and the reference C#N, and tell the user where to approve
-     (Web: Plans & Changes; CLI: /approve C<N>). NEVER route such intents to sre_query for writes.
-     "approve/execute change C#N" → approval is a human action in Web/CLI; execute_change only after the
-     user confirms an APPROVED change.
 6. "report" / "summary" / "daily" → dispatch to reporter_agent.
 7. Questions about existing resources/accounts/issues → use metadata tools (no agent needed).
 8. Network topology questions → use detect_network_anomalies or analyze_network_segments.
@@ -185,8 +174,6 @@ ROUTING RULES:
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
    This is your CATCH-ALL for AWS queries that don't fit rules 2-9, and the home for
    any explicit CLI command request (never run host/CLI commands yourself).
-   If sre_query reports a write command refused as change_required, do not retry it — offer to open a
-   change request (rule 5.7).
 11. Web research: When you need external web data (status pages, documentation,
     CVE info), call activate_skill("web-research") to load web_search + web_fetch, then
     fetch the relevant URL. Only public URLs — private IPs blocked for security.
@@ -212,7 +199,6 @@ IMPORTANT — YOUR BOUNDARIES:
 
 OUTPUT FORMATTING:
 - When referencing issues, use I#N notation (e.g., I#170). When referencing resources, use R#N notation (e.g., R#42).
-  When referencing change requests, use C#N notation (e.g., C#7).
   These references are auto-linked in the web UI and CLI.
 - End EVERY reply with exactly one line (no text after it):
   <<SUGGEST>>["<action 1>", "<action 2>", "<action 3>"]
@@ -221,6 +207,40 @@ OUTPUT FORMATTING:
   a direct answer option to that question. This line is machine-parsed and
   hidden from the user - do not reference it in your prose.
 """
+
+
+# Change Management (ITSM) section — appended to the main prompt only when change_management_enabled,
+# in lockstep with change_management_tools(): an agent must never see a tool it cannot use.
+CHANGE_MANAGEMENT_PROMPT = """
+CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind them:
+- review_change: Reviews a CHANGE REQUEST (C#N) — grounds targets, classifies risk, evaluates policy,
+  saves the change plan. Call with change_request_id. READ-ONLY.
+- request_change / get_change_request / list_change_requests / execute_change: open, inspect, list and
+  queue execution of change requests (C#N).
+5.7. CHANGE ROUTING (takes precedence over rules 5.5, 5.6 and 10 for these intents): a modification
+     with NO HealthIssue behind it (add/remove tags or labels, scale capacity, change configuration or
+     parameters, edit network firewall rules or identity/permission policies — e.g. security groups,
+     IAM), or the user explicitly asks for a "change request" / "CR", or the message starts with
+     "[CHANGE REQUEST]" → call request_change(title, description, account, targets, change_type), then
+     IMMEDIATELY review_change(change_request_id). Present the verdict, risk, plan summary and the
+     reference C#N, and tell the user where to approve (Web: Plans & Changes; CLI: /approve C<N>).
+     NEVER route such intents to sre_query for writes.
+   - Approving or rejecting a change request is a HUMAN action in the Web UI or CLI — you cannot do it.
+   - A plan that belongs to a change request is NOT a fix plan: NEVER pass it to approve_fix_plan or
+     executor_agent (rules 5.5 and 5.6 are for fix plans only). "execute change C#N" → execute_change,
+     only after the user confirms an APPROVED change.
+   - If sre_query reports a write command refused as change_required, do not retry it — offer to open
+     a change request.
+CONTEXT: <referenced_change> blocks carry pre-fetched change requests — C#N references are resolved
+before reaching you. Reference change requests as C#N (e.g., C#7); they are auto-linked in the web UI
+and CLI.
+"""
+
+
+def change_management_prompt() -> str:
+    """The Change Management prompt section — empty when the feature is off (same gate as
+    change_management_tools())."""
+    return CHANGE_MANAGEMENT_PROMPT if settings.change_management_enabled else ""
 
 
 def change_management_tools() -> list:
@@ -288,7 +308,7 @@ When dispatching to detect_agent, scope the check to: {focus} resources.
 If the user explicitly requests a different scope, honor their request over this default.
 """
 
-    prompt = MAIN_SYSTEM_PROMPT + focus_section
+    prompt = MAIN_SYSTEM_PROMPT + change_management_prompt() + focus_section
 
     mcp_tools = _safe_mcp_clients()
 

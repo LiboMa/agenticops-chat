@@ -81,6 +81,19 @@ class TestChangeRequiredMatch:
         from agenticops.services.policy_engine import validate_policy
         assert validate_policy({"rules": [], "change_required": "aws rds modify-"})
 
+    def test_refusal_names_change_surfaces_only_when_enabled(self):
+        from agenticops.config import settings
+        from agenticops.services.command_audit import change_required_refusal
+        cmd = "aws rds modify-db-instance --db-instance-identifier db1"
+        with patch.object(settings, "change_management_enabled", True):
+            on = change_required_refusal(cmd, "aws rds modify-")
+        with patch.object(settings, "change_management_enabled", False):
+            off = change_required_refusal(cmd, "aws rds modify-")
+        assert "/change" in on and "Plans & Changes" in on
+        assert "/change" not in off and "Plans & Changes" not in off and "change request" not in off.lower()
+        for out in (on, off):
+            assert "change_required" in out and "approved plan" in out and out.endswith(f"Command: {cmd}")
+
 
 def _approved_plan(db) -> int:
     issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved", resource_id="r")

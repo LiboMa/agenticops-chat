@@ -98,11 +98,12 @@ def approved_plan_in_context() -> Optional[int]:
 
 
 def change_required_refusal(command: str, pattern: str) -> str:
+    from agenticops.config import settings
+    how = (" Open a change request instead: in Chat type /change <what you want changed>, or use the Web UI "
+           "Plans & Changes → New change request." if settings.change_management_enabled else "")
     return (
         f"This command matches the high-risk pattern '{pattern}' (config/policies.yaml change_required) and "
-        f"can only run inside an approved plan. Open a change request instead: in Chat type "
-        f"/change <what you want changed>, or use the Web UI Plans & Changes → New change request. "
-        f"Command: {command}"
+        f"can only run inside an approved plan.{how} Command: {command}"
     )
 
 
