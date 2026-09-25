@@ -140,6 +140,55 @@ class TestGrounding:
         c = cs.get_change(cr_id)
         assert c["status"] == "draft" and c["target_resources"] == [] and c["target_hints"] == ["i-0abc", "web-2"]
 
+    # ── The write re-checks the review, keyed to the attempt (mirrors submit_review) ──
+    def test_attach_writes_nothing_when_the_review_ends_during_the_describe(self, db):
+        from agenticops.audit.models import AuditLog
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("web-2",))
+
+        def describe_while_the_review_ends(*args, **kwargs):
+            with cs._session() as s:  # e.g. a needs_clarification verdict lands while the describe runs
+                cs.transition_change(s.get(ChangeRequest, cr_id), "needs_clarification")
+            return '{"Reservations": [1]}'
+
+        audits = db.query(AuditLog).count()
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", side_effect=describe_while_the_review_ends) as ex:
+            with pytest.raises(cs.ChangeStateError, match="targets can only be grounded during review"):
+                cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+        assert ex.called  # the review was live when the call began: the describe ran, the WRITE was refused
+        c = cs.get_change(cr_id)
+        assert c["status"] == "needs_clarification"
+        assert c["target_resources"] == [] and c["target_hints"] == ["web-2"]
+        assert db.query(AuditLog).count() == audits
+
+    def test_grounding_is_keyed_to_the_review_attempt(self, db):
+        """A stale SRE run (its attempt was rolled back and restarted) must not ground targets on the newer one."""
+        from agenticops.audit.models import AuditLog
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=("i-0abc", "web-2"))
+        with cs._session() as s:  # a timeout + restart happened: the row is now attempt 2, still under_review
+            s.get(ChangeRequest, cr_id).review_attempt = 2
+        before, audits = cs.get_change(cr_id), db.query(AuditLog).count()
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"Reservations": [1]}'):
+            token = cs._review_attempt_var.set(1)  # the stale, still-running SRE invocation of attempt 1
+            try:
+                with pytest.raises(cs.ChangeStateError, match="no longer at review attempt 1"):
+                    cs.ground_targets(cr_id)
+                with pytest.raises(cs.ChangeStateError, match="no longer at review attempt 1"):
+                    cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+            finally:
+                cs._review_attempt_var.reset(token)
+            assert cs.get_change(cr_id) == before and db.query(AuditLog).count() == audits  # nothing written
+            token = cs._review_attempt_var.set(2)  # the live attempt
+            try:
+                assert [g["resource_id"] for g in cs.ground_targets(cr_id)["grounded"]] == ["i-0abc"]
+                cs.attach_target(cr_id, "i-0def", "ec2:instance", actor=agent_actor("sre"), hint="web-2")
+            finally:
+                cs._review_attempt_var.reset(token)
+        c = cs.get_change(cr_id)
+        assert [(t["resource_id"], t["hint"]) for t in c["target_resources"]] == [("i-0abc", "i-0abc"), ("i-0def", "web-2")]
+        assert cs.ground_targets(cr_id)["unresolved"] == []  # the direct/manual path (no attempt) is unchanged
+
 
 class TestPolicy:
     def test_evaluate_policy_uses_change_kind_and_logs_event(self, db):

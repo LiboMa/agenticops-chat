@@ -505,12 +505,18 @@ def _hint_resolved(hint: str, target_resources) -> bool:
 
 def ground_targets(cr_id: int) -> dict:
     """Deterministic: match target_hints against the inventory (account-scoped); write matches.
-    Only during review: target_resources must not change once a verdict (or approval) rests on them."""
+    Only during review: target_resources must not change once a verdict (or approval) rests on them — and,
+    like submit_review, keyed to the review attempt, so a stale run cannot ground targets on a newer one."""
     with _session() as s:
         cr = _load(s, cr_id)
         if cr.status != "under_review":
             raise ChangeStateError(
                 f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
+            )
+        attempt = _review_attempt_var.get()  # THIS run's attempt (agent path) or None (direct/manual)
+        if attempt is not None and (cr.review_attempt or 0) != attempt:
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} is no longer at review attempt {attempt} (the review was rolled back and restarted)"
             )
         q = s.query(CloudResource)
         if cr.account_id:
@@ -537,9 +543,10 @@ def ground_targets(cr_id: int) -> dict:
 def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Actor, region: str = "",
                   hint: str = "") -> dict:
     """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds, and only
-    during review. `hint` names the requester's original wording this target resolves (so ground_targets and
-    submit_review stop treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an
-    already attached target with a hint repairs a DEFAULT hint; an existing non-default hint is never overwritten."""
+    during review (checked before the describe AND again in the write, keyed to the review attempt). `hint`
+    names the requester's original wording this target resolves (so ground_targets and submit_review stop
+    treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an already attached
+    target with a hint repairs a DEFAULT hint; an existing non-default hint is never overwritten."""
     from agenticops.tools.aws_cli_tool import _execute_aws_cli
     resource_id = (resource_id or "").strip()
     if not resource_id:
@@ -572,6 +579,17 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
             "evidence": {"command": command, "excerpt": result[:300]}, "hint": (hint or resource_id)}
     with _session() as s:
         cr = _load(s, cr_id)
+        # Re-checked in the WRITE: the review may have ended — or been rolled back and restarted — while the
+        # describe ran. Raising here rolls this session back, so such a call writes nothing.
+        if cr.status != "under_review":
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} is '{cr.status}', not under_review — targets can only be grounded during review"
+            )
+        attempt = _review_attempt_var.get()  # THIS run's attempt (agent path) or None (direct/manual)
+        if attempt is not None and (cr.review_attempt or 0) != attempt:
+            raise ChangeStateError(
+                f"ChangeRequest #{cr_id} is no longer at review attempt {attempt} (the review was rolled back and restarted)"
+            )
         items = list(cr.target_resources or [])
         current = next((t for t in items if t.get("resource_id") == resource_id), None)
         if current is None:
