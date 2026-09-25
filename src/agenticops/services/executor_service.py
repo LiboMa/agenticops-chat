@@ -70,37 +70,15 @@ class ExecutorService:
         executor agent thread. The plan (if executing) → failed and, for a change
         plan, the change request → failed via on_execution_result("aborted"); the
         still-running agent's later writes and change_required commands are refused
-        because its plan is no longer approved/executing.
+        because its plan is no longer approved/executing. False when the ticket is
+        missing or no longer running (see _close_ticket).
         """
-        from agenticops.models import FixExecution, FixPlan, get_db_session
-
-        is_change = False
-        plan_id = None
-        with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if not execution or execution.status != "running":
-                return False
-            execution.status = "aborted"
-            execution.completed_at = datetime.now(timezone.utc)
-            execution.error_message = "Cancelled by operator"
-            plan_id = execution.fix_plan_id
-            plan = session.query(FixPlan).filter_by(id=plan_id).first()
-            if plan is not None and plan.status == "executing":
-                is_change = plan.plan_kind == "change"
-                from agenticops.models import transition_plan
-                transition_plan(plan, "failed")
-            session.commit()
+        ok = self._close_ticket(execution_id, "aborted", "Cancelled by operator")
+        if ok:
             logger.info("Execution #%d marked as aborted (cancellation requested)", execution_id)
-
-        with self._lock:
-            self._active_executions.pop(execution_id, None)
-        if is_change:
-            try:
-                from agenticops.services.change_service import on_execution_result
-                on_execution_result(plan_id, "aborted", error="Cancelled by operator")
-            except Exception:
-                logger.warning("change on_execution_result failed for FixPlan #%s after cancel", plan_id, exc_info=True)
-        return True
+            with self._lock:
+                self._active_executions.pop(execution_id, None)
+        return ok
 
     def _poll_loop(self):
         """Main polling loop — runs in daemon thread."""
@@ -243,42 +221,52 @@ class ExecutorService:
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 
+    def _close_ticket(self, execution_id: int, ticket_status: str, message: str) -> bool:
+        """Close a still-running ticket as ``ticket_status``; its executing plan → failed; for a change plan the
+        change mapper gets ``ticket_status`` (its request → failed).
+
+        The ticket is the arbiter between the three writers that close it — this one (a cancel, the watchdog, a
+        crash, the post-run reconcile) and save_execution_result — so the first write is a compare-and-set,
+        ``UPDATE … WHERE id=? AND status='running'`` (the _check_for_pending claim): only its winner goes on
+        to the plan. False (and nothing written) when the ticket is missing or no longer running — it was
+        already closed by one of the others. The plan is the TICKET's plan.
+        """
+        from sqlalchemy import update
+        from agenticops.models import FixExecution, FixPlan, get_db_session, transition_plan
+        from agenticops.security.redaction import redact_obj
+
+        with get_db_session() as session:
+            # Core UPDATE: past the ORM's before_flush secret scrubber, so the message is scrubbed here.
+            closed = session.execute(
+                update(FixExecution)
+                .where(FixExecution.id == execution_id, FixExecution.status == "running")
+                .values(status=ticket_status, completed_at=datetime.now(timezone.utc), error_message=redact_obj(message))
+            )
+            if closed.rowcount != 1:
+                return False
+            plan_id = session.query(FixExecution.fix_plan_id).filter_by(id=execution_id).scalar()
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            is_change = plan is not None and plan.plan_kind == "change"
+            if plan is not None and plan.status == "executing":
+                transition_plan(plan, "failed")
+            session.commit()
+        # Change plan: feed the terminal to the change mapper after commit (a no-op unless its request is
+        # executing). Best-effort: a post-commit side-effect must never crash the handler that closes the ticket.
+        if is_change:
+            try:
+                from agenticops.services.change_service import on_execution_result
+                on_execution_result(plan_id, ticket_status, error=message)
+            except Exception:
+                logger.warning("change on_execution_result failed for FixPlan #%s", plan_id, exc_info=True)
+        return True
+
     def _fail_execution(self, execution_id: int, message: str) -> bool:
         """Close a still-running ticket as failed; its executing plan → failed; a change plan's request → failed.
 
         False (and nothing written) when the ticket is missing or no longer running — it was already closed
         by save_execution_result, a cancel, the watchdog or a crash. The plan is the TICKET's plan.
         """
-        from agenticops.models import FixExecution, FixPlan, get_db_session
-
-        is_change = False
-        plan_id = None
-        with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if not execution or execution.status != "running":
-                return False
-            execution.status = "failed"
-            execution.completed_at = datetime.now(timezone.utc)
-            execution.error_message = message
-            plan_id = execution.fix_plan_id
-            plan = session.query(FixPlan).filter_by(id=plan_id).first()
-            if plan:
-                is_change = plan.plan_kind == "change"
-                from agenticops.models import InvalidStatusTransition, transition_plan
-                try:
-                    transition_plan(plan, "failed")
-                except InvalidStatusTransition:
-                    logger.warning("Plan #%s in '%s' cannot move to failed (%s)", plan_id, plan.status, message[:80])
-            session.commit()
-        # Change plan: feed the terminal to the change mapper after commit. Best-effort: a post-commit
-        # side-effect must never crash the handler that closes the ticket.
-        if is_change:
-            try:
-                from agenticops.services.change_service import on_execution_result
-                on_execution_result(plan_id, "failed", error=message)
-            except Exception:
-                logger.warning("change on_execution_result failed for FixPlan #%s", plan_id, exc_info=True)
-        return True
+        return self._close_ticket(execution_id, "failed", message)
 
     def _mark_crashed(self, execution_id: int, fix_plan_id: int, error: str):
         """Mark a crashed execution in the DB (fix_plan_id kept for the caller's signature; the ticket's plan is used)."""

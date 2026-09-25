@@ -17,6 +17,11 @@ from agenticops.services.executor_service import ExecutorService
 # ============================================================================
 
 
+def _cas_params(mock_session):
+    """Bound parameters of the ticket-closing compare-and-set (the Core UPDATE passed to session.execute)."""
+    return mock_session.execute.call_args[0][0].compile().params
+
+
 @pytest.fixture
 def disabled_settings():
     """Settings with executor_enabled=False."""
@@ -141,15 +146,16 @@ class TestActiveCount:
 
 class TestCancelExecution:
     def test_cancel_running_execution(self):
-        """Cancel a running execution — sets status to aborted."""
+        """Cancel a running execution — the compare-and-set closes the ticket as aborted."""
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.id = 1
-        mock_execution.status = "running"
+        mock_plan = MagicMock()
+        mock_plan.status = "executing"
+        mock_plan.plan_kind = "fix"     # fix plan: no change mapper call
 
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_execution
+        mock_session.execute.return_value.rowcount = 1  # the CAS won the running ticket
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_plan
 
         with patch("agenticops.services.executor_service.ExecutorService.cancel_execution.__module__"):
             pass
@@ -163,17 +169,20 @@ class TestCancelExecution:
             result = svc.cancel_execution(1)
 
             assert result is True
-            assert mock_execution.status == "aborted"
-            assert mock_execution.error_message == "Cancelled by operator"
+            params = _cas_params(mock_session)
+            assert params["status"] == "aborted"
+            assert params["error_message"] == "Cancelled by operator"
+            assert params["id_1"] == 1 and params["status_1"] == "running"
+            assert mock_plan.status == "failed"
             mock_session.commit.assert_called_once()
             assert 1 not in svc._active_executions
 
     def test_cancel_nonexistent_execution(self):
-        """Cancel returns False if execution not found."""
+        """Cancel returns False if execution not found (the compare-and-set matches no row)."""
         svc = ExecutorService()
 
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+        mock_session.execute.return_value.rowcount = 0
 
         with patch("agenticops.models.get_db_session") as mock_get_db:
             mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -181,16 +190,15 @@ class TestCancelExecution:
 
             result = svc.cancel_execution(999)
             assert result is False
+            mock_session.query.assert_not_called()
+            mock_session.commit.assert_not_called()
 
     def test_cancel_non_running_execution(self):
-        """Cancel returns False if execution is not in 'running' status."""
+        """Cancel returns False if execution is not in 'running' status (the CAS's WHERE excludes it)."""
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "succeeded"
-
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_execution
+        mock_session.execute.return_value.rowcount = 0
 
         with patch("agenticops.models.get_db_session") as mock_get_db:
             mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -198,6 +206,9 @@ class TestCancelExecution:
 
             result = svc.cancel_execution(1)
             assert result is False
+            assert _cas_params(mock_session)["status_1"] == "running"
+            mock_session.query.assert_not_called()
+            mock_session.commit.assert_not_called()
 
 
 # ============================================================================
@@ -385,16 +396,12 @@ class TestMarkCrashed:
     def test_mark_crashed_updates_db(self):
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "running"
         mock_plan = MagicMock()
         mock_plan.status = "executing"  # real state machine: only executing -> failed is legal
 
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
-            mock_execution,
-            mock_plan,
-        ]
+        mock_session.execute.return_value.rowcount = 1  # the CAS won the running ticket
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_plan
 
         with patch("agenticops.models.get_db_session") as mock_get_db:
             mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -402,65 +409,57 @@ class TestMarkCrashed:
 
             svc._mark_crashed(1, 5, "out of memory")
 
-            assert mock_execution.status == "failed"
-            assert "out of memory" in mock_execution.error_message
-            assert mock_execution.completed_at is not None
+            params = _cas_params(mock_session)
+            assert params["status"] == "failed"
+            assert "out of memory" in params["error_message"]
+            assert params["completed_at"] is not None
+            assert params["status_1"] == "running"
             assert mock_plan.status == "failed"
             mock_session.commit.assert_called_once()
 
     def test_mark_crashed_skips_non_running(self):
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "succeeded"
-
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_execution
+        mock_session.execute.return_value.rowcount = 0  # the ticket is no longer running
 
         with patch("agenticops.models.get_db_session") as mock_get_db:
             mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
             svc._mark_crashed(1, 5, "error")
-            # status should not change
-            assert mock_execution.status == "succeeded"
+            # nothing beyond the failed compare-and-set: no plan read, no commit
+            mock_session.query.assert_not_called()
+            mock_session.commit.assert_not_called()
 
     def test_mark_crashed_no_plan(self):
         """If fix_plan not found, still marks execution as failed."""
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "running"
-
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
-            mock_execution,
-            None,  # no plan found
-        ]
+        mock_session.execute.return_value.rowcount = 1
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None  # no plan found
 
         with patch("agenticops.models.get_db_session") as mock_get_db:
             mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
             svc._mark_crashed(1, 5, "error")
-            assert mock_execution.status == "failed"
+            assert _cas_params(mock_session)["status"] == "failed"
+            mock_session.commit.assert_called_once()
 
 
 class TestMarkTimedOut:
     def test_mark_timed_out_updates_db(self):
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "running"
         mock_plan = MagicMock()
         mock_plan.status = "executing"  # real state machine: only executing -> failed is legal
         mock_plan.plan_kind = "fix"     # fix plan: no change mapper call
 
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
-            mock_execution,
-            mock_plan,
-        ]
+        mock_session.execute.return_value.rowcount = 1  # the CAS won the running ticket
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_plan
 
         with patch("agenticops.services.executor_service.settings") as mock_settings:
             mock_settings.executor_total_timeout = 300
@@ -471,20 +470,18 @@ class TestMarkTimedOut:
 
                 svc._mark_timed_out(1)
 
-                assert mock_execution.status == "failed"
-                assert "300s" in mock_execution.error_message
-                assert mock_execution.completed_at is not None
+                params = _cas_params(mock_session)
+                assert params["status"] == "failed"
+                assert "300s" in params["error_message"]
+                assert params["completed_at"] is not None
                 assert mock_plan.status == "failed"
                 mock_session.commit.assert_called_once()
 
     def test_mark_timed_out_skips_non_running(self):
         svc = ExecutorService()
 
-        mock_execution = MagicMock()
-        mock_execution.status = "aborted"
-
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_execution
+        mock_session.execute.return_value.rowcount = 0  # e.g. already aborted
 
         with patch("agenticops.services.executor_service.settings") as mock_settings:
             mock_settings.executor_total_timeout = 300
@@ -494,7 +491,8 @@ class TestMarkTimedOut:
                 mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
                 svc._mark_timed_out(1)
-                assert mock_execution.status == "aborted"  # unchanged
+                mock_session.query.assert_not_called()  # unchanged: nothing past the lost CAS
+                mock_session.commit.assert_not_called()
 
 
 # ============================================================================

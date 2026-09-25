@@ -1001,9 +1001,10 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
                         error: str = "") -> Optional[dict]:
     """The ONLY writer of completed / needs_review / failed / rolled_back. Deterministic; no LLM input.
 
-    An IDEMPOTENT executor callback, not a human action: no _check, and no _claim. The `!= executing` guard
-    returns the current snapshot (never raises) so a re-delivered callback is a safe no-op; the terminal is
-    a pure function of the execution result, so a duplicate recomputes the SAME status."""
+    An IDEMPOTENT executor callback, not a human action: no _check, but a _claim of executing → the terminal.
+    The `!= executing` guard returns the current snapshot (never raises) so a re-delivered callback is a safe
+    no-op; two overlapping callers with different statuses produce exactly one terminal and one audit row —
+    the claim's loser returns the current snapshot and writes nothing."""
     with _session() as s:
         plan = s.get(FixPlan, fix_plan_id)
         if plan is None or plan.plan_kind != "change" or not plan.change_request_id:
@@ -1021,6 +1022,11 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
             new_status, reason = "rolled_back", error or "execution rolled back"
         else:  # failed | aborted | anything else
             new_status, reason = "failed", error or f"execution {execution_status}"
+        if not _claim(s, cr.id, "executing", new_status):
+            logger.warning("on_execution_result: CR #%d lost the executing claim to a concurrent result, "
+                           "ignoring result %s", cr.id, execution_status)
+            s.refresh(cr)
+            return to_dict(cr)
         _transition(cr, new_status)
         from agenticops.run_context import get_run_context
         actor_key = get_run_context().actor if get_run_context().actor != "system" else "agent:executor"

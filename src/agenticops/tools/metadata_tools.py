@@ -1358,31 +1358,56 @@ def save_execution_result(
         # route the terminal to the change mapper instead. Capture CR id before commit.
         is_change = plan.plan_kind == "change"
         change_request_id = plan.change_request_id
+        # The plan names the issue its result belongs to — never the agent's argument (a typo is logged, not fatal).
+        issue_id = None if is_change else plan.health_issue_id
+        if health_issue_id is not None and health_issue_id != issue_id:
+            logger.warning("save_execution_result: ignoring health_issue_id=%s — FixPlan #%d belongs to HealthIssue #%s",
+                           health_issue_id, fix_plan_id, issue_id)
 
+        now = datetime.now(timezone.utc)
+        fields = dict(
+            status=status,
+            completed_at=now,
+            pre_check_results=_parse_json(pre_check_results, []),
+            step_results=_parse_json(step_results, []),
+            post_check_results=_parse_json(post_check_results, []),
+            rollback_results=_parse_json(rollback_results, []),
+            error_message=error_message or None,
+            duration_ms=duration_ms,
+        )
         # The queued run's own ticket (ExecutorService claimed it pending→running and named it in the Run
         # Context) is closed IN PLACE — one row per queued execution; it keeps executed_by (the requester),
-        # started_at (the claim) and health_issue_id. Chat / auto-pipeline runs have no ticket → a new row.
-        now = datetime.now(timezone.utc)
+        # started_at (the claim) and health_issue_id. The close is a compare-and-set on status='running', the
+        # same one a cancel / the watchdog / a crash makes (ExecutorService._close_ticket): the ticket's first
+        # closer wins, and a result that lost it is refused, never inserted as a second row. Chat /
+        # auto-pipeline runs have no ticket → a new row.
         execution = None
         if rc.execution_id:
-            execution = (session.query(FixExecution)
-                         .filter_by(id=rc.execution_id, fix_plan_id=fix_plan_id, status="running").first())
-        if execution is None:
+            from sqlalchemy import update
+            from agenticops.security.redaction import redact_obj
+            closed = session.execute(
+                update(FixExecution)
+                .where(FixExecution.id == rc.execution_id, FixExecution.fix_plan_id == fix_plan_id,
+                       FixExecution.status == "running")
+                # Core UPDATE: past the ORM's before_flush secret scrubber, so the values are scrubbed here.
+                .values(**{k: redact_obj(v) for k, v in fields.items()})
+            )
+            if closed.rowcount != 1:
+                session.rollback()
+                logger.warning("save_execution_result: Execution #%d for FixPlan #%d is no longer running — "
+                               "the agent's '%s' result was not recorded", rc.execution_id, fix_plan_id, status)
+                return (f"REJECTED: Execution #{rc.execution_id} for FixPlan #{fix_plan_id} is no longer running — "
+                        f"it was cancelled, timed out or already recorded; this result was not recorded.")
+            session.refresh(plan)  # validate the transition below against the plan as it is now
+        else:
             execution = FixExecution(
                 fix_plan_id=fix_plan_id,
-                health_issue_id=health_issue_id if not is_change else None,
+                health_issue_id=issue_id,
                 started_at=now,
                 executed_by=executed_by,
+                **fields,
             )
             session.add(execution)
-        execution.status = status
-        execution.completed_at = now
-        execution.pre_check_results = _parse_json(pre_check_results, [])
-        execution.step_results = _parse_json(step_results, [])
-        execution.post_check_results = _parse_json(post_check_results, [])
-        execution.rollback_results = _parse_json(rollback_results, [])
-        execution.error_message = error_message or None
-        execution.duration_ms = duration_ms
 
         # Update FixPlan status through the state machine (approved → executing → terminal).
         # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
@@ -1400,7 +1425,7 @@ def save_execution_result(
         # while HealthIssue.status tracks the lifecycle. Controlled by executor_auto_resolve flag.
         auto_resolved = False
         if status == "succeeded" and settings.executor_auto_resolve and not is_change:
-            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
             if issue and issue.status in ("fix_approved", "fix_executed"):
                 issue.status = "resolved"
                 issue.resolved_at = datetime.now(timezone.utc)
@@ -1416,7 +1441,7 @@ def save_execution_result(
                 log_event(None, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms,
                           change_request_id=change_request_id)
             else:
-                log_event(health_issue_id, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms)
+                log_event(issue_id, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms)
         except Exception:
             pass
 
@@ -1424,7 +1449,7 @@ def save_execution_result(
         if auto_resolved:
             try:
                 from agenticops.services.resolution_service import trigger_post_resolution
-                trigger_post_resolution(health_issue_id)
+                trigger_post_resolution(issue_id)
             except Exception as e:
                 logger.warning("Failed to trigger post-resolution pipeline: %s", e)
 
@@ -1442,21 +1467,21 @@ def save_execution_result(
         else:
             try:
                 from agenticops.services.notification_service import notify_execution_result, notify_im_origin
-                notify_execution_result(fix_plan_id, health_issue_id, status, error_message)
+                notify_execution_result(fix_plan_id, issue_id, status, error_message)
                 notify_im_origin(
-                    health_issue_id, "execution_completed",
-                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{health_issue_id} (Plan #{fix_plan_id})"
+                    issue_id, "execution_completed",
+                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{issue_id} (Plan #{fix_plan_id})"
                     + (f": {error_message[:200]}" if error_message else ""),
                 )
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
 
         msg = (
-            f"FixExecution #{execution.id} saved for FixPlan #{fix_plan_id}. "
+            f"FixExecution #{execution.id if execution is not None else rc.execution_id} saved for FixPlan #{fix_plan_id}. "
             f"Status: {status}. FixPlan status updated to '{plan.status}'."
         )
         if auto_resolved:
-            msg += f" HealthIssue #{health_issue_id} auto-resolved. Post-resolution pipeline triggered."
+            msg += f" HealthIssue #{issue_id} auto-resolved. Post-resolution pipeline triggered."
         return msg
     except Exception as e:
         session.rollback()

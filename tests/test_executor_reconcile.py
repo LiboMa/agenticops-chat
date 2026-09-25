@@ -126,15 +126,16 @@ def _in_run(pid, cr_id=None, ex_id=None):
 
 def _recorder(status, **fields):
     """A fake executor_agent that passes the REAL gate and records its result through the REAL tool.
-    Returns (fake, seen): seen["gate"] / seen["saved"] are the two tools' return values."""
+    It passes the plan's health_issue_id unless fields names another. Returns (fake, seen):
+    seen["gate"] / seen["saved"] are the two tools' return values."""
     from agenticops.tools.metadata_tools import get_approved_fix_plan, save_execution_result
     seen = {}
 
     def fake(fix_plan_id):
         seen["gate"] = get_approved_fix_plan(fix_plan_id)
         plan = json.loads(seen["gate"])
-        seen["saved"] = save_execution_result(fix_plan_id=fix_plan_id, health_issue_id=plan["health_issue_id"],
-                                              status=status, **fields)
+        seen["saved"] = save_execution_result(**{"fix_plan_id": fix_plan_id, "status": status,
+                                                 "health_issue_id": plan["health_issue_id"], **fields})
         return "recorded"
     return fake, seen
 
@@ -190,6 +191,30 @@ def test_a_fix_run_closes_its_own_ticket_in_place(db):
     assert [r.id for r in rows] == [ex_id]
     assert rows[0].status == "succeeded" and rows[0].health_issue_id == issue_id and rows[0].executed_by == "user:alice"
     assert db.get(FixPlan, pid).status == "executed"
+
+
+def test_the_plan_not_the_agent_names_the_issue_a_result_resolves(db, caplog):
+    from agenticops.models import PipelineEvent
+    issue_id, pid, ex_id = _fix_run(db)
+    other_id, _, _ = _fix_run(db, plan_status="approved", ticket_status=None)  # another fix_approved issue
+    fake, seen = _recorder("succeeded", health_issue_id=other_id)  # the agent names the wrong issue
+    with caplog.at_level(logging.WARNING, logger="agenticops.tools.metadata_tools"), \
+         patch("agenticops.services.resolution_service.trigger_post_resolution") as post, \
+         patch("agenticops.services.notification_service.notify_execution_result") as notify, \
+         patch("agenticops.services.notification_service.notify_im_origin") as im_origin:
+        _run(ex_id, pid, fake)
+    db.expire_all()
+    ex = db.get(FixExecution, ex_id)
+    assert ex.status == "succeeded" and ex.health_issue_id == issue_id  # the issue the ticket was claimed with
+    assert db.get(HealthIssue, issue_id).status == "resolved"
+    assert db.get(HealthIssue, other_id).status == "fix_approved"  # untouched
+    post.assert_called_once_with(issue_id)
+    assert notify.call_args.args[1] == issue_id and im_origin.call_args.args[0] == issue_id
+    events = db.query(PipelineEvent).filter_by(event_type="execution_completed").all()
+    assert [e.health_issue_id for e in events] == [issue_id]
+    assert f"HealthIssue #{issue_id} auto-resolved" in seen["saved"]
+    assert any(r.levelno == logging.WARNING and f"health_issue_id={other_id}" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_without_a_run_context_a_new_row_is_inserted(db):
@@ -307,14 +332,17 @@ def test_a_timeout_fails_the_run_and_a_second_close_writes_nothing(db, monkeypat
     assert "timed out after 7s" in db.get(FixExecution, ex_id).error_message
 
 
-def test_a_failing_reconcile_is_contained(db):
+def test_a_failing_reconcile_is_contained(db, caplog):
     cr_id, pid, ex_id = _change_run(db)
     svc = ExecutorService()
     svc._active_executions[ex_id] = MagicMock()
-    with patch.object(ExecutorService, "_fail_execution", side_effect=RuntimeError("db down")) as reconcile, \
+    with caplog.at_level(logging.WARNING, logger="agenticops.services.executor_service"), \
+         patch.object(ExecutorService, "_fail_execution", side_effect=RuntimeError("db down")) as reconcile, \
          patch("agenticops.agents.executor_agent.executor_agent", return_value="Executor agent error: x"):
         svc._run_executor(ex_id, pid)  # does not raise
     assert reconcile.called and ex_id not in svc._active_executions
+    assert any(r.levelno == logging.WARNING and f"post-run reconcile failed for Execution #{ex_id}" in r.getMessage()
+               for r in caplog.records)
 
 
 # ── (a) account binding ──────────────────────────────────────────────────────
@@ -340,6 +368,48 @@ def test_a_change_whose_account_resolution_raises_is_refused_and_logged(db, capl
     assert not agent_cls.called and not model_cls.called
     assert any(r.levelno == logging.WARNING and f"Executor account resolution failed for FixPlan #{pid}" in r.getMessage()
                for r in caplog.records)
+
+
+def _account_refusal(cr_id):
+    return (f"REJECTED: cannot resolve credentials for the account of change request C#{cr_id} — "
+            f"a change runs only on its own account, never on a fallback.")
+
+
+def test_a_change_whose_account_read_raises_is_refused(db):
+    """The account block's own first read raises, before the plan's kind is known: the Run Context names the
+    change request, so the run is refused rather than handed the fallback tools."""
+    import agenticops.models as models_mod
+    from agenticops.agents.executor_agent import executor_agent
+    cr_id, pid, ex_id = _change_run(db)
+    real_session, calls = models_mod.get_db_session, []
+
+    def flaky_session():  # executor_agent's 1st get_db_session() is the 9b gate, its 2nd the account block
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            return real_session()
+        raise RuntimeError("database is locked")
+
+    with _executor_build() as (agent_cls, model_cls, cli_tool), _in_run(pid, cr_id, ex_id), \
+         patch("agenticops.models.get_db_session", side_effect=flaky_session):
+        out = executor_agent(fix_plan_id=pid)
+    assert out == _account_refusal(cr_id)
+    assert calls == [1, 2]  # refused right after the account block: no further read
+    assert not cli_tool.called and not agent_cls.called and not model_cls.called
+
+
+def test_a_change_whose_request_row_is_missing_is_refused(db):
+    """Only a change request that WAS read and has no account clears the binding; a missing row does not."""
+    from agenticops.agents.executor_agent import executor_agent
+    cr_id, pid, ex_id = _change_run(db)
+    db.query(ChangeRequest).filter_by(id=cr_id).delete(synchronize_session=False)  # bulk: the plan keeps its id
+    db.commit()
+    db.expire_all()
+    assert db.get(FixPlan, pid).change_request_id == cr_id and db.get(ChangeRequest, cr_id) is None
+    with _executor_build() as (agent_cls, model_cls, cli_tool), _in_run(pid, cr_id, ex_id), \
+         patch("agenticops.services.change_service.change_execution_refusal", return_value=None):
+        out = executor_agent(fix_plan_id=pid)
+    assert out == _account_refusal(cr_id)
+    assert not cli_tool.called and not agent_cls.called and not model_cls.called
 
 
 def test_a_change_with_no_account_uses_the_account_addressed_tools(db):
@@ -427,7 +497,7 @@ def test_after_a_cancel_the_still_running_agent_can_neither_record_nor_run(db):
     with _in_run(pid, cr_id, ex_id):
         out = save_execution_result(fix_plan_id=pid, status="succeeded", post_check_results=PASSED)
         in_plan = approved_plan_in_context()
-    assert out.startswith("REJECTED:") or "not executable" in out
+    assert out.startswith("REJECTED:") and f"C#{cr_id}" in out
     db.expire_all()
     assert db.query(FixExecution).count() == 1 and db.get(ChangeRequest, cr_id).status == "failed"
     assert in_plan is None
@@ -445,3 +515,105 @@ def test_web_cancel_attributes_the_change_failure_to_the_canceller(db):
     [row] = _audits(db, "change.failed")
     assert row.actor != "agent:executor"
     assert row.actor == web_anonymous_actor().key  # auth off: the web actor
+
+
+# ── the ticket is the arbiter: a cancel, a timeout and a recorded result close it by compare-and-set ─────
+
+def _refused_late(ex_id, pid):
+    return (f"REJECTED: Execution #{ex_id} for FixPlan #{pid} is no longer running — it was cancelled, timed out "
+            f"or already recorded; this result was not recorded.")
+
+
+@contextmanager
+def _cancel_after_saves_read(ex_id):
+    """Cancel the ticket after save_execution_result has read the plan and before it writes the ticket."""
+    from agenticops.services import change_service
+    real = change_service.change_execution_refusal
+
+    def refusal_then_cancel(plan):
+        refusal = real(plan)
+        assert ExecutorService().cancel_execution(ex_id) is True  # in its own session, committed
+        return refusal
+
+    with patch("agenticops.services.change_service.change_execution_refusal", side_effect=refusal_then_cancel):
+        yield
+
+
+def test_a_cancel_inside_a_change_runs_save_wins_and_the_save_is_refused(db):
+    from agenticops.tools.metadata_tools import save_execution_result
+    cr_id, pid, ex_id = _change_run(db)
+    with _in_run(pid, cr_id, ex_id), _cancel_after_saves_read(ex_id):
+        out = save_execution_result(fix_plan_id=pid, status="succeeded", post_check_results=PASSED)
+    assert out == _refused_late(ex_id, pid)
+    db.expire_all()
+    [ex] = db.query(FixExecution).filter_by(fix_plan_id=pid).all()  # no second row
+    assert ex.id == ex_id and ex.status == "aborted" and ex.error_message == "Cancelled by operator"
+    assert db.get(FixPlan, pid).status == "failed" and db.get(ChangeRequest, cr_id).status == "failed"
+    assert len(_audits(db, "change.failed")) == 1 and _audits(db, "change.completed") == []
+
+
+def test_a_cancel_inside_a_fix_runs_save_wins_and_the_save_is_refused(db):
+    from agenticops.tools.metadata_tools import save_execution_result
+    issue_id, pid, ex_id = _fix_run(db)
+    with _in_run(pid, None, ex_id), _cancel_after_saves_read(ex_id):
+        out = save_execution_result(fix_plan_id=pid, health_issue_id=issue_id, status="succeeded")
+    assert out == _refused_late(ex_id, pid)
+    db.expire_all()
+    [ex] = db.query(FixExecution).filter_by(fix_plan_id=pid).all()  # no second row
+    assert ex.id == ex_id and ex.status == "aborted"
+    assert db.get(FixPlan, pid).status == "failed" and db.get(HealthIssue, issue_id).status == "fix_approved"
+
+
+def test_after_a_recorded_result_a_cancel_and_a_timeout_write_nothing(db):
+    from agenticops.tools.metadata_tools import save_execution_result
+    cr_id, pid, ex_id = _change_run(db)
+    with _in_run(pid, cr_id, ex_id):
+        out = save_execution_result(fix_plan_id=pid, status="succeeded", post_check_results=PASSED)
+    assert out.startswith(f"FixExecution #{ex_id} saved")
+    before = _snapshot(db, pid, cr_id, ex_id)
+    assert before[:4] == ("succeeded", "executed", "completed", 1)
+    svc = ExecutorService()
+    assert svc.cancel_execution(ex_id) is False
+    assert svc._fail_execution(ex_id, "Execution timed out after 7s") is False
+    assert _snapshot(db, pid, cr_id, ex_id) == before and db.get(FixExecution, ex_id).error_message is None
+    assert len(_audits(db, "change.completed")) == 1 and _audits(db, "change.failed") == []
+
+
+def test_two_overlapping_mapper_calls_leave_one_terminal_and_one_audit_row(db, caplog):
+    from agenticops.services import change_service
+    cr_id, pid, _ = _change_run(db)
+    real = change_service._post_checks_passed
+
+    def a_failure_lands_meanwhile(post_checks, results):  # the 1st call has read the request as executing
+        verdict = real(post_checks, results)
+        change_service.on_execution_result(pid, "failed", error="Execution timed out after 7s")  # commits first
+        return verdict
+
+    with caplog.at_level(logging.WARNING, logger="agenticops.services.change_service"), \
+         patch.object(change_service, "_post_checks_passed", side_effect=a_failure_lands_meanwhile):
+        snap = change_service.on_execution_result(pid, "succeeded",
+                                                  post_check_results=[{"check": "c", "status": "pass"}])
+    db.expire_all()
+    assert db.get(ChangeRequest, cr_id).status == "failed" and snap["status"] == "failed"
+    terminal = [a for a in ("change.completed", "change.needs_review", "change.failed", "change.rolled_back")
+                for _ in _audits(db, a)]
+    assert terminal == ["change.failed"]
+    assert any(r.levelno == logging.WARNING and f"CR #{cr_id} lost the executing claim" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_the_ticket_closes_scrub_secrets_as_the_orm_write_does(db):
+    """Both compare-and-set closes write through Core, past the ORM's before_flush scrubber."""
+    from agenticops.tools.metadata_tools import save_execution_result
+    akid = "AKIAIOSFODNN7EXAMPLE"  # the AWS documentation example key id
+    issue_a, a, ex_a = _fix_run(db)
+    _, b, ex_b = _fix_run(db)
+    with _in_run(a, None, ex_a):
+        out = save_execution_result(fix_plan_id=a, health_issue_id=issue_a, status="failed",
+                                    error_message=f"key {akid}", step_results=json.dumps([{"output": f"used {akid}"}]))
+    assert out.startswith(f"FixExecution #{ex_a} saved")
+    assert ExecutorService()._fail_execution(ex_b, f"Executor ended without recording a result: {akid}") is True
+    db.expire_all()
+    for ex_id in (ex_a, ex_b):
+        ex = db.get(FixExecution, ex_id)
+        assert ex.status == "failed" and akid not in f"{ex.step_results} {ex.error_message}"

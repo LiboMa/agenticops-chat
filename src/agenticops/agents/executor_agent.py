@@ -208,12 +208,19 @@ def executor_agent(fix_plan_id: int) -> str:
                     from agenticops.models import ChangeRequest
                     cr = db.get(ChangeRequest, plan_for_acct.change_request_id)
                     account_id = cr.account_id if cr else None
-                    if not account_id:
-                        bound_change = None  # no account on the request → the account-addressed tools below
+                    if cr is not None and not cr.account_id:
+                        bound_change = None  # a request read with no account → the account-addressed tools below
                 if account_id:
                     cli_tool = get_cli_tool_for_issue(account_id)
         except Exception:
             logger.warning("Executor account resolution failed for FixPlan #%d", fix_plan_id, exc_info=True)
+            from agenticops.run_context import get_run_context
+            rc_cr = get_run_context().change_request_id
+            if bound_change is None and rc_cr:
+                # The read failed before the plan's kind was known. The Run Context names a change request (the
+                # 9b gate passes a change plan only then), so the change stays presumed bound; a fix-plan run
+                # names none and keeps its fallback.
+                bound_change = f"C#{rc_cr}"
         if bound_change and cli_tool is None:
             # 凭证安全铁律 #2: a change bound to an account never runs on a fallback's credentials.
             return (f"REJECTED: cannot resolve credentials for the account of change request {bound_change} — "
