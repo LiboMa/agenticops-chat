@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import time
 import threading
@@ -29,6 +30,7 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.status import Status
 from rich.rule import Rule
+from rich.markup import escape
 
 from agenticops import __version__
 from agenticops.config import settings
@@ -1647,8 +1649,13 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Fix Plans:[/cyan]
   /fix list [issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
-  /approve <plan_id> [reason...]   Approve a fix plan as cli:<user> (L2/L3 human gate)
-  /execute <plan_id>               Execute an approved fix plan
+  /approve <plan_id|C<id>> [reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
+  /execute <plan_id|C<id>>         Execute an approved fix plan or change
+
+[cyan]Changes:[/cyan]
+  /change <description> [--account NAME] [--emergency]  Open a change request; SRE reviews it now
+  /changes [STATUS]                List change requests (optional status filter)
+  /reject C<id> <reason>           Reject a planned change request
 
 [cyan]Workflows:[/cyan]  [dim](/help workflow for details)[/dim]
   /workflow full-scan              Full infrastructure scan
@@ -2278,15 +2285,144 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
   /fix show <plan_id>[/yellow]"""
 
 
-def _slash_approve(ctx: ChatContext, args: list) -> str:
-    """Handle /approve <plan_id> [reason...] — approve a fix plan as the CLI user.
+_TARGET_HINT_RE = re.compile(r"\b(i-[0-9a-f]{8,17}|sg-[0-9a-f]{8,17}|subnet-[0-9a-f]{8,17}|vpc-[0-9a-f]{8,17}|vol-[0-9a-f]{8,17}|arn:aws[^\s,]+)")
 
-    The approver is the OS user (cli:<user>), never a typed name; the optional reason is audited.
+
+def _extract_target_hints(text: str) -> list[str]:
+    seen, out = set(), []
+    for m in _TARGET_HINT_RE.finditer(text or ""):
+        if m.group(1) not in seen:
+            seen.add(m.group(1)); out.append(m.group(1))
+    return out
+
+
+def _parse_change_ref(token: str) -> Optional[int]:
+    """'C12' / 'c12' / 'C#12' → 12; anything else (incl. plain digits = fix plan id) → None."""
+    t = (token or "").strip().upper().replace("#", "")
+    if len(t) > 1 and t[0] == "C" and t[1:].isdigit():
+        return int(t[1:])
+    return None
+
+
+def _slash_change(ctx: ChatContext, args: list) -> str:
+    """Handle /change <description> [--account NAME] [--emergency] — open a change request and review it now."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import change_service as cs
+
+    if not settings.change_management_enabled:
+        return "[yellow]Change management is disabled (change_management_enabled=false).[/yellow]"
+    if not args:
+        return "[yellow]Usage: /change <what to change and why> [--account NAME] [--emergency][/yellow]"
+    words, account, emergency = list(args), "", False
+    if "--account" in words:
+        i = words.index("--account")
+        account = words[i + 1] if i + 1 < len(words) else ""
+        del words[i:i + 2]
+    if "--emergency" in words:
+        emergency = True
+        words.remove("--emergency")
+    text = " ".join(words).strip()
+    if not text:
+        return "[yellow]Usage: /change <what to change and why> [--account NAME] [--emergency][/yellow]"
+    init_db()
+    try:
+        cr = cs.create_change_request(
+            source="cli", actor=cli_actor(), title=text[:80], description=text, account_name=account or None,
+            targets=_extract_target_hints(text), requested_change_type="emergency" if emergency else "normal",
+            start_review=False,
+        )
+    except cs.ChangeError as e:
+        return f"[red]{e}[/red]"
+    display = ThinkingDisplay(console)
+    with display.live_display():
+        display.start(f"SRE reviewing change C#{cr['id']}")
+        display.tool_call("review_change", f"change_request_id={cr['id']}")
+        try:
+            result = cs.start_review(cr["id"], sync=True)
+        except cs.ChangeError as e:
+            result = f"Review not started: {e}"
+        display.complete("Review ended")
+    final = cs.get_change(cr["id"])
+    # The reasons and the SRE's text are free text: escaped, so `[prod]` shows and `[/var/log]` cannot raise
+    # a MarkupError out of the REPL's print.
+    if final["status"] == "draft":  # rolled back: the review did NOT complete
+        why = "; ".join(final.get("review_reasons") or []) or "no verdict was recorded"
+        head = (f"[yellow]Change request C#{cr['id']} — status: draft — the review did not complete "
+                f"({escape(why)}). Nothing was approved.[/yellow]")
+    else:
+        head = (f"[green]✓ Change request C#{cr['id']} — status: {final['status']}"
+                f"{' · risk ' + final['risk_level'] if final.get('risk_level') else ''}[/green]")
+    return (f"{head}\n{escape(result or '')}\n"
+            f"[dim]Approve with: /approve C{cr['id']} <reason>   ·   Web: /app/changes/{cr['id']}[/dim]")
+
+
+def _slash_changes(ctx: ChatContext, args: list) -> str:
+    """Handle /changes [status] — list change requests."""
+    from agenticops.services import change_service as cs
+    init_db()
+    status = args[0] if args else None
+    rows = cs.list_changes(status=status, limit=50)
+    if not rows:
+        return "[dim]No change requests found.[/dim]"
+    table = create_table("Change Requests")
+    # Title is the one flexible column: Rich shrinks only width-less columns before cutting ALL columns
+    # evenly, and the fixed ones already fill most of the 120-column render — so the C# id stays whole.
+    for col, w in (("C#", 6), ("Title", None), ("Status", 20), ("Risk", 5), ("Type", 10), ("Requested by", 18), ("Updated", 20)):
+        table.add_column(col, width=w)
+    for r in rows:
+        table.add_row(f"C#{r['id']}", escape((r["title"] or "")[:40]), r["status"].replace("_", " "), r.get("risk_level") or "-",
+                      r.get("effective_change_type") or r.get("requested_change_type") or "-", r["requested_by"],
+                      (r.get("updated_at") or r.get("created_at") or "")[:19])
+    buf = StringIO()
+    width = ctx.console.size.width if ctx is not None and hasattr(ctx, "console") else 120
+    Console(file=buf, force_terminal=True, width=width).print(table)
+    # Titles are markup-parsed twice: in the table above and again when the REPL prints this string.
+    return escape(buf.getvalue())
+
+
+def _slash_reject(ctx: ChatContext, args: list) -> str:
+    """Handle /reject C<id> <reason> — reject a planned change request."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import change_service as cs
+    cr_id = _parse_change_ref(args[0]) if args else None
+    reason = " ".join(args[1:]).strip()
+    if cr_id is None or not reason:
+        return "[yellow]Usage: /reject C<id> <reason>[/yellow]"
+    init_db()
+    try:
+        out = cs.reject(cr_id, actor=cli_actor(), reason=reason)
+    except cs.ChangeError as e:
+        return f"[red]{e}[/red]"
+    return f"[green]Change C#{cr_id} rejected ({out['status']}).[/green]"
+
+
+def _slash_approve(ctx: ChatContext, args: list) -> str:
+    """Handle /approve <plan_id|C<id>> [reason...] — approve a fix plan or a change request as the CLI user.
+
+    The approver is the OS user (cli:<user>), never a typed name; the reason is audited. A change
+    (C<id>) always needs a reason — it is prompted for when missing; for a fix plan it is optional.
     """
-    from rich.prompt import Confirm
+    from rich.prompt import Confirm, Prompt
+
+    cr_id = _parse_change_ref(args[0]) if args else None
+    if cr_id is not None:
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services import change_service as cs
+        reason = " ".join(args[1:]).strip()
+        if not reason:
+            reason = Prompt.ask("Approval reason (required)").strip()
+            if not reason:
+                return "[red]A reason is required to approve a change.[/red]"
+        actor = cli_actor()
+        init_db()
+        try:
+            out = cs.approve(cr_id, actor=actor, reason=reason)
+        except cs.ChangeError as e:
+            return f"[red]{e}[/red]"
+        return f"[green]Change C#{cr_id} approved by {actor.key} ({out['status']}). Execute with: /execute C{cr_id}[/green]"
 
     if not args:
-        return "[yellow]Usage: /approve <plan_id> [reason...][/yellow]"
+        return "[yellow]Usage: /approve <plan_id|C<id>> [reason...][/yellow]"
 
     try:
         plan_id = int(args[0])
@@ -2357,11 +2493,30 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_execute(ctx: ChatContext, args: list) -> str:
-    """Handle /execute <plan_id> command — execute an approved fix plan as the CLI user."""
+    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or queue an approved
+    change request (C<id>) for the executor, as the CLI user."""
     from rich.prompt import Confirm
 
+    cr_id = _parse_change_ref(args[0]) if args else None
+    if cr_id is not None:
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services import change_service as cs
+        init_db()
+        try:
+            cr = cs.get_change(cr_id)
+        except cs.ChangeError as e:
+            return f"[red]{e}[/red]"
+        console.print(f"[bold]Execute change C#{cr_id}?[/bold]\n  Title: {escape(cr['title'])}\n  Status: {cr['status']}\n  Risk: {cr.get('risk_level')}")
+        if not Confirm.ask("Confirm execution?"):
+            return "[dim]Execution cancelled.[/dim]"
+        try:
+            out = cs.request_execution(cr_id, actor=cli_actor())
+        except cs.ChangeError as e:
+            return f"[red]{e}[/red]"
+        return f"[green]Execution #{out['execution_id']} queued for change C#{cr_id} (plan #{out['fix_plan_id']}).[/green]"
+
     if not args:
-        return "[yellow]Usage: /execute <plan_id>[/yellow]"
+        return "[yellow]Usage: /execute <plan_id|C<id>>[/yellow]"
 
     try:
         plan_id = int(args[0])
@@ -3486,6 +3641,11 @@ SLASH_COMMANDS = {
     "approve": _slash_approve,
     "execute": _slash_execute,
     "exec": _slash_execute,
+
+    # Changes
+    "change": _slash_change,
+    "changes": _slash_changes,
+    "reject": _slash_reject,
 
     # Workflows
     "workflow": _slash_workflow,
