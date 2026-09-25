@@ -237,9 +237,13 @@ class ExecutorService:
                         logger.warning("Plan #%d in '%s' cannot move to failed after crash", fix_plan_id, plan.status)
                 session.commit()
                 # Change plan: feed the crash terminal to the change mapper (after commit, inside the guard).
+                # Best-effort: a post-commit side-effect must never crash the crash handler itself.
                 if is_change:
-                    from agenticops.services.change_service import on_execution_result
-                    on_execution_result(fix_plan_id, "failed", error=crash_msg)
+                    try:
+                        from agenticops.services.change_service import on_execution_result
+                        on_execution_result(fix_plan_id, "failed", error=crash_msg)
+                    except Exception:
+                        logger.warning("change on_execution_result failed for FixPlan #%s after crash", fix_plan_id, exc_info=True)
 
     def _mark_timed_out(self, execution_id: int):
         """Mark a timed-out execution in the DB."""
@@ -265,6 +269,10 @@ class ExecutorService:
                         logger.warning("Plan #%s in '%s' cannot move to failed after timeout", plan_id, plan.status)
                 session.commit()
                 # Change plan: feed the timeout terminal to the change mapper (after commit, inside the guard).
+                # Best-effort: a post-commit side-effect must never crash the timeout handler itself.
                 if is_change:
-                    from agenticops.services.change_service import on_execution_result
-                    on_execution_result(plan_id, "failed", error=timeout_msg)
+                    try:
+                        from agenticops.services.change_service import on_execution_result
+                        on_execution_result(plan_id, "failed", error=timeout_msg)
+                    except Exception:
+                        logger.warning("change on_execution_result failed for FixPlan #%s after timeout", plan_id, exc_info=True)
