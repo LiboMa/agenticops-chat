@@ -269,25 +269,53 @@ def notify_execution_result(
     flush_consolidated(issue_id)
 
 
-# ── Change Management (MVP-2.6.0) ───────────────────────────────────
-# Stubs: change_service calls these at every lifecycle point already; the real
-# bodies (subject/body/severity per event, approval links) land with the change
-# notification task. No-ops here so no half-written message goes out meanwhile.
+# ── Change Management (MVP-2.6.0) ─────────────────────────────────────
+
+
+def _change_severity(risk_level, outcome: str | None = None) -> str:
+    if outcome in ("failed", "rolled_back", "review_failed"):
+        return "high"
+    return {"L0": "low", "L1": "low", "L2": "medium", "L3": "high"}.get(risk_level or "", "medium")
+
+
+def _change_link(cr_id: int) -> str:
+    return f"{settings.web_base_url.rstrip('/')}/app/changes/{cr_id}"
 
 
 def notify_change_requested(cr: dict) -> None:
-    """Notify: a change request was filed (stub)."""
-    return None
+    """Notify: a change request was opened (sent immediately — changes are not batched)."""
+    targets = ", ".join(t.get("resource_id", "") for t in cr.get("target_resources") or []) or "(to be grounded)"
+    notify_event(
+        "change_requested",
+        f"[CHANGE] Change #{cr['id']} requested: {cr['title']}",
+        (f"Change request #{cr['id']} opened by {cr['requested_by']} ({cr.get('requested_change_type', 'normal')}).\n\n"
+         f"Title: {cr['title']}\nTargets: {targets}\n{_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level")),
+    )
 
 
 def notify_change_pending_approval(cr: dict, plan: dict) -> None:
-    """Notify: a reviewed change (with its plan) is waiting for a human approval (stub)."""
-    return None
+    """Notify: reviewed and planned — a human approver is needed (deep link included)."""
+    notify_event(
+        "change_pending_approval",
+        f"[CHANGE] Change #{cr['id']} awaits approval ({cr.get('risk_level') or '?'}, {cr.get('effective_change_type') or 'normal'})",
+        (f"Change request #{cr['id']} '{cr['title']}' was reviewed by the SRE agent and needs approval.\n\n"
+         f"Plan #{plan.get('id')}: {plan.get('title')}\nRisk: {cr.get('risk_level')}\n"
+         f"Requested by: {cr['requested_by']}\n\nApprove or reject: {_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level")),
+    )
 
 
 def notify_change_result(cr: dict, outcome: str) -> None:
-    """Notify: a change reached an outcome — review_failed, rejected, completed, failed (stub)."""
-    return None
+    """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
+    rejected / needs_clarification / review_failed)."""
+    notify_event(
+        "change_result",
+        f"[CHANGE] Change #{cr['id']} {outcome.upper()}: {cr['title']}",
+        (f"Change request #{cr['id']} is now {outcome}.\n\nRequested by: {cr['requested_by']}\n"
+         f"Risk: {cr.get('risk_level') or '?'}\n{_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level"), outcome),
+    )
 
 
 def notify_report_saved(

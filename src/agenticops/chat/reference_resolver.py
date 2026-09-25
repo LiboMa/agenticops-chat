@@ -1,6 +1,6 @@
-"""Shared HealthIssue / CloudResource reference resolution.
+"""Shared HealthIssue / CloudResource / ChangeRequest reference resolution.
 
-Single source of truth for both the chat preprocessor (I#/R# inline refs) and
+Single source of truth for both the chat preprocessor (I#/R#/C# inline refs) and
 the /send_to command. Returns plain dicts so each caller can format as needed.
 """
 
@@ -38,3 +38,16 @@ def fetch_resource(resource_pk: int) -> Optional[dict]:
             "resource_type": r.resource_type, "name": r.name, "region": r.region,
             "status": r.status,
         }
+
+
+def fetch_change(cr_id: int) -> Optional[dict]:
+    """Return a ChangeRequest as a dict, or None if not found."""
+    from agenticops.models import ChangeRequest
+    with get_db_session() as session:
+        cr = session.get(ChangeRequest, cr_id)
+        if not cr:
+            return None
+        return {"id": cr.id, "title": cr.title, "status": cr.status, "risk_level": cr.risk_level,
+                "requested_by": cr.requested_by, "requested_change_type": cr.requested_change_type,
+                "targets": [t.get("resource_id") for t in (cr.target_resources or [])],
+                "description": (cr.description or "")[:500]}

@@ -14,7 +14,7 @@ import pytest
 # Base prompt size goldens (chars), ±25% tolerance. Re-baseline deliberately
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
-    "main": 10_100,
+    "main": 11_600,
     "sre": 11_900,
     "detect": 8_900,
     "rca": 8_000,

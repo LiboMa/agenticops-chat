@@ -26,7 +26,7 @@ from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
 from agenticops.agents.reporter_agent import reporter_agent
-from agenticops.agents.sre_agent import sre_agent, sre_query
+from agenticops.agents.sre_agent import sre_agent, sre_query, review_change
 from agenticops.agents.executor_agent import executor_agent
 from agenticops.agents.enhanced import enhanced_task
 from agenticops.tools.metadata_tools import (
@@ -71,6 +71,7 @@ from agenticops.tools.im_tools import (
 from agenticops.tools.account_tools import (
     list_cloud_accounts, add_cloud_account, update_cloud_account, remove_cloud_account,
 )
+from agenticops.tools.change_tools import request_change, get_change_request, list_change_requests, execute_change
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ SPECIALIZED AGENTS (dispatch all AWS work to these):
   full read-only AWS CLI covering 60+ services. Call with query and optional region.
 - executor_agent: Executes APPROVED fix plans (L4 Auto Operation). Call with fix_plan_id. Only works on approved plans.
 - reporter_agent: Generates operations reports (daily, incident, inventory). Call with report_type and scope.
+- review_change: Reviews a CHANGE REQUEST (C#N) — grounds targets, classifies risk, evaluates policy, saves the change plan. Call with change_request_id. READ-ONLY.
 
 METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_active_account: Get all enabled cloud accounts. Returns JSON array.
@@ -102,6 +104,7 @@ METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_fix_plan: Get the latest fix plan for a health issue.
 - get_approved_fix_plan: Safety gate — retrieve a fix plan only if it is approved.
 - approve_fix_plan: Approve a fix plan (L0/L1 can be agent-approved; L2/L3 require human).
+- request_change / get_change_request / list_change_requests / execute_change: Change Management (ITSM) — open, inspect, list and queue execution of change requests (C#N).
 
 NETWORK TOOLS:
 - detect_network_anomalies: Detect structural issues in a VPC's network topology.
@@ -131,6 +134,15 @@ ROUTING RULES:
 5.6. "execute" / "run fix" / "apply fix" + plan ID → dispatch to executor_agent.
      SAFETY: First call get_approved_fix_plan to confirm approved status. Show plan summary to user
      and request explicit confirmation before dispatching to executor_agent.
+5.7. CHANGE MANAGEMENT — a modification with NO HealthIssue behind it (add/remove tags or labels, scale
+     capacity, change configuration or parameters, edit network firewall rules or identity/permission
+     policies — e.g. security groups, IAM), or the user explicitly asks for a "change request" / "CR", or
+     the message starts with "[CHANGE REQUEST]" → call request_change(title, description, account,
+     targets, change_type), then IMMEDIATELY review_change(change_request_id). Present the verdict, risk,
+     plan summary and the reference C#N, and tell the user where to approve
+     (Web: Plans & Changes; CLI: /approve C<N>). NEVER route such intents to sre_query for writes.
+     "approve/execute change C#N" → approval is a human action in Web/CLI; execute_change only after the
+     user confirms an APPROVED change.
 6. "report" / "summary" / "daily" → dispatch to reporter_agent.
 7. Questions about existing resources/accounts/issues → use metadata tools (no agent needed).
 8. Network topology questions → use detect_network_anomalies or analyze_network_segments.
@@ -173,6 +185,8 @@ ROUTING RULES:
    "describe Step Functions", "show GuardDuty findings") → dispatch to sre_query.
    This is your CATCH-ALL for AWS queries that don't fit rules 2-9, and the home for
    any explicit CLI command request (never run host/CLI commands yourself).
+   If sre_query reports a write command refused as change_required, do not retry it — offer to open a
+   change request (rule 5.7).
 11. Web research: When you need external web data (status pages, documentation,
     CVE info), call activate_skill("web-research") to load web_search + web_fetch, then
     fetch the relevant URL. Only public URLs — private IPs blocked for security.
@@ -198,6 +212,7 @@ IMPORTANT — YOUR BOUNDARIES:
 
 OUTPUT FORMATTING:
 - When referencing issues, use I#N notation (e.g., I#170). When referencing resources, use R#N notation (e.g., R#42).
+  When referencing change requests, use C#N notation (e.g., C#7).
   These references are auto-linked in the web UI and CLI.
 - End EVERY reply with exactly one line (no text after it):
   <<SUGGEST>>["<action 1>", "<action 2>", "<action 3>"]
@@ -206,6 +221,14 @@ OUTPUT FORMATTING:
   a direct answer option to that question. This line is machine-parsed and
   hidden from the user - do not reference it in your prose.
 """
+
+
+def change_management_tools() -> list:
+    """Change Management tools for the main agent — absent entirely when the feature is off
+    (an agent must never see a tool it cannot use)."""
+    if not settings.change_management_enabled:
+        return []
+    return [request_change, review_change, get_change_request, list_change_requests, execute_change]
 
 
 def create_main_agent(model_id_override: str = "", effort_override: str = "") -> Agent:
@@ -284,6 +307,8 @@ If the user explicitly requests a different scope, honor their request over this
             sre_query,
             executor_agent,
             reporter_agent,
+            # Change Management (review_change + ITSM tools) — empty when change_management_enabled=false
+            *change_management_tools(),
             # Direct metadata tools
             get_active_account,
             get_managed_resources,
