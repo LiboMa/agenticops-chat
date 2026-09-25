@@ -280,8 +280,8 @@ def notify_change_requested(cr: dict) -> None:
     return None
 
 
-def notify_change_pending_approval(cr: dict) -> None:
-    """Notify: a reviewed change is waiting for a human approval (stub)."""
+def notify_change_pending_approval(cr: dict, plan: dict) -> None:
+    """Notify: a reviewed change (with its plan) is waiting for a human approval (stub)."""
     return None
 
 

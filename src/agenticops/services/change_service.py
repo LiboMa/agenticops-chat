@@ -10,8 +10,10 @@ never touch detached ORM rows.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
@@ -20,7 +22,7 @@ from agenticops.auth.actor import Actor, agent_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
-    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, FixPlan, InvalidStatusTransition,
+    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixPlan, InvalidStatusTransition,
     get_db_session, transition_change, transition_plan,
 )
 from agenticops.services.notification_service import (  # noqa: F401  (pending_approval: approval stage)
@@ -34,6 +36,13 @@ CHANGE_SOURCES = {"chat", "web", "cli", "im", "webhook", "api"}
 REQUESTED_CHANGE_TYPES = {"normal", "emergency"}
 REVIEW_VERDICTS = ("approved_for_planning", "needs_clarification", "rejected")
 CHANGE_ACTION_TYPES = ("tag", "scale", "config", "network", "iam", "delete", "other")
+
+# The review attempt this thread's SRE run belongs to. `_run_review` publishes it here (RunContext is
+# fixed-shape, so it cannot carry it); `submit_review` reads it to key its status claim. Strands copies
+# the context into the tool thread, so a value SET here BEFORE the agent runs is visible to submit_review
+# called within — and the direct/manual path (no _run_review) reads the None default, keying on status
+# only, which is safe because the stale-run race is structurally impossible without a _run_review restart.
+_review_attempt_var: ContextVar[Optional[int]] = ContextVar("change_review_attempt", default=None)
 
 
 # ── Errors (mapped to HTTP by the router) ─────────────────────────────
@@ -319,6 +328,7 @@ def _run_review(cr_id: int, trace_id: Optional[str], attempt: int) -> Optional[s
     _tid_token = set_trace_id(trace_id) if trace_id else None
     _rc_token = set_run_context(RunContext(actor="agent:sre", trace_id=trace_id, agent_name="sre",
                                            change_request_id=cr_id))
+    _ra_token = _review_attempt_var.set(attempt)  # so submit_review keys its claim on OUR attempt
     result: Optional[str] = None
     try:
         try:
@@ -339,6 +349,7 @@ def _run_review(cr_id: int, trace_id: Optional[str], attempt: int) -> Optional[s
         _review_failed(cr_id, attempt, "review ended without a verdict (submit_change_review was not called)")
         return result
     finally:
+        _review_attempt_var.reset(_ra_token)
         reset_run_context(_rc_token)
         if _tid_token is not None:
             _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
@@ -425,3 +436,313 @@ def _review_failed(cr_id: int, attempt: int, error: str, *, phase: str = "failed
         notify_change_result(snap, "review_failed")
     except Exception:
         logger.debug("notify_change_result failed", exc_info=True)
+
+
+# ── Review: grounding, policy, verdict ────────────────────────────────
+
+DESCRIBE_BY_TYPE: dict[str, str] = {
+    "ec2:instance": "aws ec2 describe-instances --instance-ids {rid}",
+    "ec2:security-group": "aws ec2 describe-security-groups --group-ids {rid}",
+    "ec2:subnet": "aws ec2 describe-subnets --subnet-ids {rid}",
+    "ec2:vpc": "aws ec2 describe-vpcs --vpc-ids {rid}",
+    "ec2:volume": "aws ec2 describe-volumes --volume-ids {rid}",
+    "rds:db": "aws rds describe-db-instances --db-instance-identifier {rid}",
+    "eks:cluster": "aws eks describe-cluster --name {rid}",
+    "s3:bucket": "aws s3api head-bucket --bucket {rid}",
+    "lambda:function": "aws lambda get-function --function-name {rid}",
+    "autoscaling:group": "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names {rid}",
+    "elbv2:load-balancer": "aws elbv2 describe-load-balancers --load-balancer-arns {rid}",
+}
+_ARN_DESCRIBE = "aws resourcegroupstaggingapi get-resources --resource-arn-list {rid}"
+
+
+def _claim(session, cr_id: int, from_status: str, to_status: str, *, attempt: Optional[int] = None) -> bool:
+    """Conditional status transition; returns True iff it moved the row. When `attempt` is given, ALSO require
+    review_attempt==attempt, so a stale SRE run (whose attempt was already rolled back and restarted) cannot
+    land its verdict on the newer attempt. synchronize_session=False leaves the loaded row's in-memory status
+    unchanged, so the subsequent _transition(cr, to_status) still validates the edge and stamps
+    updated_at/closed_at on the ORM row (same-status validate is a no-op — established by the T5 note)."""
+    q = session.query(ChangeRequest).filter(ChangeRequest.id == cr_id, ChangeRequest.status == from_status)
+    if attempt is not None:
+        q = q.filter(ChangeRequest.review_attempt == attempt)
+    changed = q.update({"status": to_status, "updated_at": datetime.now(timezone.utc)},
+                       synchronize_session=False)
+    return bool(changed)
+
+
+def _account_name(session, cr: ChangeRequest) -> str:
+    if not cr.account_id:
+        return ""
+    return session.query(CloudAccount.name).filter_by(id=cr.account_id).scalar() or ""
+
+
+def _hint_matches(hint: str, r: CloudResource) -> bool:
+    h = hint.lower()
+    rid = (r.resource_id or "").lower()
+    if h == rid or (h.startswith("arn:") and rid and (h.endswith("/" + rid) or h.endswith(":" + rid))):
+        return True
+    if (r.name or "").lower() == h:
+        return True
+    tags = r.tags or {}
+    return str(tags.get("Name", "")).lower() == h
+
+
+def ground_targets(cr_id: int) -> dict:
+    """Deterministic: match target_hints against the inventory (account-scoped); write matches."""
+    with _session() as s:
+        cr = _load(s, cr_id)
+        q = s.query(CloudResource)
+        if cr.account_id:
+            q = q.filter(CloudResource.account_id == cr.account_id)
+        rows = q.all()
+        existing = {t.get("resource_id") for t in (cr.target_resources or [])}
+        grounded, unresolved = [], []
+        for hint in cr.target_hints or []:
+            match = next((r for r in rows if _hint_matches(hint, r)), None)
+            if match is None:
+                if not any(hint.lower() == str(t.get("resource_id", "")).lower() for t in (cr.target_resources or [])):
+                    unresolved.append(hint)
+                continue
+            item = {"resource_id": match.resource_id, "resource_type": match.resource_type, "db_id": match.id,
+                    "region": match.region, "evidence": "inventory", "hint": hint}
+            grounded.append(item)
+            if match.resource_id not in existing:
+                cr.target_resources = list(cr.target_resources or []) + [item]
+                existing.add(match.resource_id)
+        cr.updated_at = datetime.now(timezone.utc)
+        return {"grounded": grounded, "unresolved": unresolved, "target_resources": list(cr.target_resources or [])}
+
+
+def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Actor, region: str = "",
+                  hint: str = "") -> dict:
+    """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds.
+    `hint` names the requester's original wording this target resolves (so submit_review stops treating
+    that hint as unresolved); defaults to the resource_id itself."""
+    from agenticops.tools.aws_cli_tool import _execute_aws_cli
+    resource_id = (resource_id or "").strip()
+    if not resource_id:
+        raise ChangeValidationError("resource_id is required")
+    template = _ARN_DESCRIBE if resource_id.startswith("arn:") else DESCRIBE_BY_TYPE.get(resource_type)
+    if template is None:
+        raise ChangeValidationError(
+            f"unknown resource_type {resource_type!r}; use one of {sorted(DESCRIBE_BY_TYPE)} or pass the resource ARN"
+        )
+    # LOAD-BEARING (credential 铁律 §3): resource_id / region are LLM-supplied and get str.format-ed into a
+    # CLI command that _execute_aws_cli runs verbatim. A value like "i-0abc --profile other" would smuggle a
+    # --profile flag → botocore reads ~/.aws instead of the injected FROZEN creds → a read on the WRONG
+    # account. Reject anything that is not a bare id/ARN (no whitespace, no leading '-'); ARNs keep ':' '/'.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]*", resource_id):
+        raise ChangeValidationError(f"invalid resource_id {resource_id!r}")
+    if region and not re.fullmatch(r"[a-z]{2}(-gov)?-[a-z]+-\d", region):
+        raise ChangeValidationError(f"invalid region {region!r}")
+    with _session() as s:
+        cr = _load(s, cr_id)
+        account = _account_name(s, cr)
+    command = template.format(rid=resource_id) + (f" --region {region}" if region else "")
+    result = _execute_aws_cli(command, account)
+    if not result or result.startswith("Error") or result == "(no output)":
+        raise ChangeValidationError(f"target {resource_id!r} could not be verified: {(result or '')[:200]}")
+    item = {"resource_id": resource_id, "resource_type": resource_type, "db_id": None, "region": region or None,
+            "evidence": {"command": command, "excerpt": result[:300]}, "hint": (hint or resource_id)}
+    with _session() as s:
+        cr = _load(s, cr_id)
+        if not any(t.get("resource_id") == resource_id for t in (cr.target_resources or [])):
+            cr.target_resources = list(cr.target_resources or []) + [item]
+        if resource_id not in (cr.target_hints or []):
+            cr.target_hints = list(cr.target_hints or []) + [resource_id]
+        cr.updated_at = datetime.now(timezone.utc)
+        _audit(s, Actions.CHANGE_REVIEWED, cr, actor, details={"phase": "target_attached", "resource_id": resource_id,
+                                                              "resource_type": resource_type, "command": command})
+    return item
+
+
+def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
+    """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius)."""
+    from agenticops.services.policy_engine import estimate_blast_radius, get_policy_engine
+    with _session() as s:
+        cr = _load(s, cr_id)
+        provider = native_account = None
+        if cr.account_id:
+            acct = s.get(CloudAccount, cr.account_id)
+            if acct:
+                provider = acct.provider
+                native_account = (acct.credentials or {}).get("account_id") or None
+        targets = list(cr.target_resources or [])
+        emergency = cr.requested_change_type == "emergency"
+        trace_id = cr.trace_id
+    first = targets[0]["resource_id"] if targets else None
+    decision = get_policy_engine().evaluate(
+        risk_level=risk_level, provider=provider, resource_id=first,
+        blast_radius=estimate_blast_radius(first, native_account), plan_kind="change",
+        emergency=emergency, action_type=action_type,
+    )
+    _event(cr_id, "policy_decision", "approval", decision.action,
+           detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},
+           actor="policy-engine", trace_id=trace_id)
+    return decision
+
+
+def _effective_change_type(decision, requested: str) -> str:
+    if requested == "emergency":
+        return "emergency"
+    if decision.itsm_change_type in ("standard", "normal", "emergency"):
+        return decision.itsm_change_type
+    return "standard" if decision.action == "auto_approve" else "normal"
+
+
+def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None, action_type: Optional[str] = None,
+                  reasons: Optional[list[str]] = None, actor: Actor) -> dict:
+    """SRE verdict → code decides state. Policy is re-evaluated here; the LLM's reading is advisory.
+
+    Every status move is an attempt-keyed conditional claim (`_claim`), not a read-then-write: the attempt
+    is the one `_run_review` published for THIS SRE run (None on the direct/manual path). A stale run whose
+    attempt was already rolled back and restarted therefore loses the claim and raises INSIDE the session —
+    so its `reviewed_by` / verdict / policy field writes all roll back and leave no trace on the newer
+    attempt. That is why the approved_for_planning path validates read-only first and writes the CR fields
+    only in the SAME transaction as the claim (an early write would survive a lost claim → a leak).
+    """
+    _check(actor, "change.review")
+    if verdict not in REVIEW_VERDICTS:
+        raise ChangeValidationError(f"verdict must be one of {REVIEW_VERDICTS}")
+    reasons = [str(r)[:500] for r in (reasons or [])][:20]
+    if verdict == "approved_for_planning":
+        if risk_level not in ("L0", "L1", "L2", "L3"):
+            raise ChangeValidationError("risk_level must be L0-L3 for approved_for_planning")
+        if action_type not in CHANGE_ACTION_TYPES:
+            raise ChangeValidationError(f"action_type must be one of {CHANGE_ACTION_TYPES}")
+
+    # THIS run's attempt (agent path) or None (direct/manual). Read ONCE; keys every claim below. Never
+    # re-read cr.review_attempt at submit time — that would read the newer attempt and defeat the guard.
+    current_attempt = _review_attempt_var.get()
+    stale = (f"ChangeRequest #{cr_id} is no longer under_review at attempt {current_attempt} "
+             f"(concurrent rollback/restart or verdict)")
+
+    if verdict != "approved_for_planning":
+        # Field writes + attempt-keyed claim + transition in ONE transaction: a lost claim rolls the field
+        # writes back too, so a stale/superseded verdict leaves no trace.
+        with _session() as s:
+            cr = _load(s, cr_id)
+            if cr.status != "under_review":  # fast, friendly fail (the claim is the real guard)
+                raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not under_review")
+            cr.reviewed_by = actor.key
+            cr.reviewed_at = datetime.now(timezone.utc)
+            cr.review_verdict = verdict
+            cr.review_reasons = reasons
+            if verdict == "needs_clarification":
+                if not _claim(s, cr_id, "under_review", "needs_clarification", attempt=current_attempt):
+                    raise ChangeStateError(stale)
+                _transition(cr, "needs_clarification")
+                _audit(s, Actions.CHANGE_REVIEWED, cr, actor, details={"verdict": verdict, "reasons": reasons},
+                       old_status="under_review", new_status="needs_clarification")
+                outcome = "needs_clarification"
+            else:  # rejected
+                if not _claim(s, cr_id, "under_review", "rejected", attempt=current_attempt):
+                    raise ChangeStateError(stale)
+                _transition(cr, "rejected")
+                cr.rejected_by, cr.rejected_at = actor.key, datetime.now(timezone.utc)
+                cr.rejection_reason = "; ".join(reasons) or "rejected by review"
+                _audit(s, Actions.CHANGE_REJECTED, cr, actor, details={"verdict": verdict, "reasons": reasons},
+                       old_status="under_review", new_status="rejected")
+                outcome = "rejected"
+            snap = to_dict(cr)
+        _event(cr_id, "change_reviewed", "review", outcome, detail={"verdict": verdict, "reasons": reasons},
+               actor=actor.key, trace_id=snap["trace_id"])
+        try:
+            notify_change_result(snap, outcome)
+        except Exception:
+            logger.debug("notify_change_result failed", exc_info=True)
+        return snap
+
+    # approved_for_planning — validate READ-ONLY (no CR field write yet), then policy, then apply.
+    with _session() as s:
+        cr = _load(s, cr_id)
+        if cr.status != "under_review":  # fast, friendly fail
+            raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not under_review")
+        unresolved = [h for h in (cr.target_hints or [])
+                      if not any(str(t.get("hint", "")).lower() == h.lower() or str(t.get("resource_id", "")).lower() == h.lower()
+                                 for t in (cr.target_resources or []))]
+        if not cr.target_resources or unresolved:
+            raise ChangeStateError(f"all targets must be grounded before planning; unresolved: {unresolved or 'none grounded'}")
+        plan = active_plan_for(s, cr_id)
+        if plan is None or plan.status != "draft":
+            raise ChangeStateError("a draft change plan (save_fix_plan plan_kind=change) is required before submitting the verdict")
+        if not plan.rollback_plan or not plan.post_checks:
+            raise ChangeStateError("the change plan must have a non-empty rollback_plan and non-empty post_checks")
+        plan_id = plan.id
+        plan_dict = {"id": plan.id, "title": plan.title, "risk_level": risk_level, "summary": plan.summary}
+
+    decision = evaluate_policy(cr_id, risk_level, action_type)
+    with _session() as s:
+        cr = _load(s, cr_id)
+        plan = s.get(FixPlan, plan_id)
+        # All CR/plan field writes happen HERE, before the claim, so a lost claim rolls them ALL back
+        # (no reviewed_by / verdict / policy leak onto a newer attempt).
+        cr.reviewed_by = actor.key
+        cr.reviewed_at = datetime.now(timezone.utc)
+        cr.review_verdict = verdict
+        cr.risk_level = risk_level
+        cr.action_type = action_type
+        plan.risk_level = risk_level
+        cr.policy_rule = decision.rule_name
+        cr.policy_action = decision.action
+        cr.effective_change_type = _effective_change_type(decision, cr.requested_change_type)
+        cr.review_reasons = reasons + [f"policy:{decision.rule_name}:{decision.action}"] + list(decision.reasons)[:5]
+        if decision.action == "block":
+            if not _claim(s, cr_id, "under_review", "rejected", attempt=current_attempt):
+                raise ChangeStateError(stale)
+            _transition(cr, "rejected")
+            transition_plan(plan, "rejected")
+            plan.rejected_by, plan.rejected_at, plan.rejection_reason = "policy-engine", datetime.now(timezone.utc), decision.rule_name
+            cr.rejected_by, cr.rejected_at = "policy-engine", datetime.now(timezone.utc)
+            cr.rejection_reason = f"blocked by policy rule {decision.rule_name}: " + "; ".join(decision.reasons)
+            _audit(s, Actions.CHANGE_REJECTED, cr, actor, details={"policy_decision": decision.to_dict()},
+                   old_status="under_review", new_status="rejected")
+            snap = to_dict(cr)
+            outcome = "rejected"
+        else:
+            if not _claim(s, cr_id, "under_review", "planned", attempt=current_attempt):
+                raise ChangeStateError(stale)
+            _transition(cr, "planned")
+            transition_plan(plan, "pending_approval")
+            _audit(s, Actions.CHANGE_REVIEWED, cr, actor,
+                   details={"verdict": verdict, "risk_level": risk_level, "action_type": action_type,
+                            "reasons": reasons, "policy_decision": decision.to_dict(), "plan_id": plan_id},
+                   old_status="under_review", new_status="planned")
+            snap = to_dict(cr)
+            outcome = "planned"
+    _event(cr_id, "change_reviewed", "review", outcome,
+           detail={"verdict": verdict, "risk_level": risk_level, "action_type": action_type, "plan_id": plan_id,
+                   "policy_decision": decision.to_dict()}, actor=actor.key, trace_id=snap["trace_id"])
+
+    if outcome == "rejected":
+        try:
+            notify_change_result(snap, "rejected")
+        except Exception:
+            logger.debug("notify_change_result failed", exc_info=True)
+        return snap
+
+    if decision.action == "auto_approve" and settings.change_auto_approve_standard:
+        auto = agent_actor("auto-pipeline")
+        globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)")
+        globals()["request_execution"](cr_id, actor=auto)
+        return get_change(cr_id)
+
+    try:
+        notify_change_pending_approval(snap, plan_dict)
+    except Exception:
+        logger.debug("notify_change_pending_approval failed", exc_info=True)
+    return snap
+
+
+# ── Approval + execution handoff (Task 5 implements the bodies) ────────
+# submit_review's auto-approve branch reaches these via globals()[...] (deferred lookup) and the Task-4
+# tests patch them. They must EXIST as module attributes now so patch.object(cs, "approve") can bind — a
+# missing attribute makes patch.object raise AttributeError at setup. Until Task 5 they fail loud; the
+# branch is reachable only when settings.change_auto_approve_standard is true (default false).
+
+def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
+    raise NotImplementedError("approve() is implemented in Task 5 (approval + execution handoff)")
+
+
+def request_execution(cr_id: int, *, actor: Actor) -> dict:
+    raise NotImplementedError("request_execution() is implemented in Task 5 (approval + execution handoff)")
