@@ -219,31 +219,52 @@ class ExecutorService:
         """Mark a crashed execution in the DB."""
         from agenticops.models import FixExecution, FixPlan, get_db_session
 
+        crash_msg = f"Agent crashed: {error[:500]}"
+        is_change = False
         with get_db_session() as session:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
             if execution and execution.status == "running":
                 execution.status = "failed"
                 execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = f"Agent crashed: {error[:500]}"
+                execution.error_message = crash_msg
                 plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
                 if plan:
+                    is_change = plan.plan_kind == "change"
                     from agenticops.models import InvalidStatusTransition, transition_plan
                     try:
                         transition_plan(plan, "failed")
                     except InvalidStatusTransition:
                         logger.warning("Plan #%d in '%s' cannot move to failed after crash", fix_plan_id, plan.status)
                 session.commit()
+                # Change plan: feed the crash terminal to the change mapper (after commit, inside the guard).
+                if is_change:
+                    from agenticops.services.change_service import on_execution_result
+                    on_execution_result(fix_plan_id, "failed", error=crash_msg)
 
     def _mark_timed_out(self, execution_id: int):
         """Mark a timed-out execution in the DB."""
-        from agenticops.models import FixExecution, get_db_session
+        from agenticops.models import FixExecution, FixPlan, get_db_session
 
+        timeout_msg = f"Execution timed out after {settings.executor_total_timeout}s"
+        is_change = False
+        plan_id = None
         with get_db_session() as session:
             execution = session.query(FixExecution).filter_by(id=execution_id).first()
             if execution and execution.status == "running":
                 execution.status = "failed"
                 execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = (
-                    f"Execution timed out after {settings.executor_total_timeout}s"
-                )
+                execution.error_message = timeout_msg
+                plan_id = execution.fix_plan_id
+                plan = session.query(FixPlan).filter_by(id=plan_id).first()
+                if plan:
+                    is_change = plan.plan_kind == "change"
+                    from agenticops.models import InvalidStatusTransition, transition_plan
+                    try:
+                        transition_plan(plan, "failed")
+                    except InvalidStatusTransition:
+                        logger.warning("Plan #%s in '%s' cannot move to failed after timeout", plan_id, plan.status)
                 session.commit()
+                # Change plan: feed the timeout terminal to the change mapper (after commit, inside the guard).
+                if is_change:
+                    from agenticops.services.change_service import on_execution_result
+                    on_execution_result(plan_id, "failed", error=timeout_msg)

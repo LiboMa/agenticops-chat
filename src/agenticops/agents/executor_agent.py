@@ -186,15 +186,22 @@ def executor_agent(fix_plan_id: int) -> str:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_executor_interventions, get_bedrock_boto_session
         from agenticops.models import get_db_session, FixPlan, HealthIssue
 
-        # Resolve provider CLI tool from fix plan's issue account
+        # Resolve provider CLI tool from the plan's account: the issue's account for a fix
+        # plan, the change request's account for a change plan (凭证安全铁律 #3 — account-addressed).
         cli_tool = None
         try:
             with get_db_session() as db:
                 plan_for_acct = db.query(FixPlan).filter_by(id=fix_plan_id).first()
-                if plan_for_acct:
+                account_id = None
+                if plan_for_acct and plan_for_acct.health_issue_id:
                     issue = db.query(HealthIssue).filter_by(id=plan_for_acct.health_issue_id).first()
-                    if issue and issue.account_id:
-                        cli_tool = get_cli_tool_for_issue(issue.account_id)
+                    account_id = issue.account_id if issue else None
+                elif plan_for_acct and plan_for_acct.change_request_id:
+                    from agenticops.models import ChangeRequest
+                    cr = db.get(ChangeRequest, plan_for_acct.change_request_id)
+                    account_id = cr.account_id if cr else None
+                if account_id:
+                    cli_tool = get_cli_tool_for_issue(account_id)
         except Exception:
             pass
 

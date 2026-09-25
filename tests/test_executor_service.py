@@ -448,9 +448,15 @@ class TestMarkTimedOut:
 
         mock_execution = MagicMock()
         mock_execution.status = "running"
+        mock_plan = MagicMock()
+        mock_plan.status = "executing"  # real state machine: only executing -> failed is legal
+        mock_plan.plan_kind = "fix"     # fix plan: no change mapper call
 
         mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_execution
+        mock_session.query.return_value.filter_by.return_value.first.side_effect = [
+            mock_execution,
+            mock_plan,
+        ]
 
         with patch("agenticops.services.executor_service.settings") as mock_settings:
             mock_settings.executor_total_timeout = 300
@@ -464,6 +470,7 @@ class TestMarkTimedOut:
                 assert mock_execution.status == "failed"
                 assert "300s" in mock_execution.error_message
                 assert mock_execution.completed_at is not None
+                assert mock_plan.status == "failed"
                 mock_session.commit.assert_called_once()
 
     def test_mark_timed_out_skips_non_running(self):
