@@ -20,6 +20,15 @@ export const PLAN_TERMINAL_STATUSES: ReadonlySet<FixPlanStatus> =
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 
+export type PlansTab = "fix" | "changes" | "audit";
+/** The tab to show for a `?tab=` value. The Changes tab exists only while change management is enabled:
+ *  "changes" (or no/unknown value) → "changes" when on, "fix" when off; "fix" and "audit" always stand. */
+export function resolvePlansTab(requested: string | null, changesOn: boolean): PlansTab {
+  if (requested === "fix") return "fix";
+  if (requested === "audit") return "audit";
+  return changesOn ? "changes" : "fix";
+}
+
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */
 export function toQuery<T extends { [K in keyof T]: string | number | undefined | null }>(params: T): string {
   const qs = new URLSearchParams();

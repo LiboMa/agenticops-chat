@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, resolvePlansTab, toQuery } from "@/lib/plans";
 import type { ChangeStatus } from "@/api/types";
 
 describe("toQuery", () => {
@@ -48,5 +48,18 @@ describe("terminal sets are typed (M3)", () => {
     // @ts-expect-error M3: CHANGE_TERMINAL_STATUSES is ReadonlySet<ChangeStatus>, not <string>
     CHANGE_TERMINAL_STATUSES.has("definitely-not-a-status");
     expect(CHANGE_TERMINAL_STATUSES.has("completed")).toBe(true);
+  });
+});
+
+describe("resolvePlansTab", () => {
+  it.each([
+    { requested: null, changesOn: true, result: "changes" },
+    { requested: null, changesOn: false, result: "fix" },
+    { requested: "changes", changesOn: false, result: "fix" },
+    { requested: "audit", changesOn: false, result: "audit" },
+    { requested: "fix", changesOn: true, result: "fix" },
+    { requested: "bogus", changesOn: true, result: "changes" },
+  ])("$requested with changesOn=$changesOn -> $result", ({ requested, changesOn, result }) => {
+    expect(resolvePlansTab(requested, changesOn)).toBe(result);
   });
 });

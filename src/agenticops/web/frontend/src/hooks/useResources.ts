@@ -11,7 +11,7 @@ interface ResourceFilters {
   offset?: number;
 }
 
-export function useResources(filters: ResourceFilters = {}) {
+export function useResources(filters: ResourceFilters = {}, enabled = true) {
   const params = new URLSearchParams();
   if (filters.type) params.set("type", filters.type);
   if (filters.region) params.set("region", filters.region);
@@ -25,5 +25,6 @@ export function useResources(filters: ResourceFilters = {}) {
     queryKey: ["resources", filters],
     queryFn: () => apiFetch<PaginatedResources>(`/resources${qs ? `?${qs}` : ""}`),
     staleTime: 60_000,
+    enabled,
   });
 }
