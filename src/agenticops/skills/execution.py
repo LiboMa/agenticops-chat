@@ -158,7 +158,8 @@ def run_on_host(
     # Security classification — always before any transport; write-tier attempts are
     # ledgered (command_audits), read-only ones are not.
     tier = classify_shell_command(command)
-    from agenticops.services.command_audit import approved_plan_in_context, change_required_refusal, record_command
+    from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
+                                                    change_required_refusal, record_command)
     if tier == "blocked":
         record_command(tool="run_on_host", tier=tier, command=command, outcome="blocked",
                        account=account, region=region, target=host_id)
@@ -167,6 +168,11 @@ def run_on_host(
             f"'rm -rf /', 'mkfs', 'shutdown', 'reboot', and pipe-to-bash are not allowed. "
             f"Command: {command}"
         )
+    # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
+    refused = change_context_refusal(tool="run_on_host", tier=tier, command=command,
+                                     account=account, region=region, target=host_id)
+    if refused is not None:
+        return refused
     if tier in ("write", "unknown") and not require_confirmation:
         record_command(tool="run_on_host", tier=tier, command=command, outcome="refused", reason="confirmation",
                        account=account, region=region, target=host_id)
@@ -461,7 +467,8 @@ def run_kubectl(
     # because the `-n <ns>` insert would make a pattern like "kubectl delete" unmatchable.
     tier = classify_kubectl_command(command)
     ledger_cmd = f"kubectl -n {namespace} {command}"
-    from agenticops.services.command_audit import approved_plan_in_context, change_required_refusal, record_command
+    from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
+                                                    change_required_refusal, record_command)
 
     if tier == "blocked":
         record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="blocked",
@@ -471,6 +478,12 @@ def run_kubectl(
             f"'delete namespace kube-system' and 'delete --all --all-namespaces' "
             f"are not allowed. Command: kubectl {command}"
         )
+
+    # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
+    refused = change_context_refusal(tool="run_kubectl", tier=tier, command=ledger_cmd,
+                                     account=account, region=region, target=cluster_name)
+    if refused is not None:
+        return refused
 
     if tier in ("write", "unknown") and not require_confirmation:
         record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="refused", reason="confirmation",

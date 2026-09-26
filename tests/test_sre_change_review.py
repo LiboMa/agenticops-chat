@@ -94,6 +94,15 @@ def test_mode_c_tools_only_in_the_change_review_build():
     assert "save_fix_plan" in default
 
 
+def test_enhanced_task_is_dropped_from_the_change_review_build():
+    """G10: enhanced_task delegates to an external backend, outside the change gates — the change-review
+    build must never carry it, while a Mode A build still does when the backend is enabled."""
+    from agenticops.config import settings
+    with patch.object(settings, "acp_enhanced_enabled", True):
+        assert "enhanced_task" not in _built_tool_names(change_review=True)
+        assert "enhanced_task" in _built_tool_names()  # Mode A build (change_review=False)
+
+
 def test_sre_agent_review_change_invokes_agent_with_mode_c_prompt():
     from agenticops.agents import sre_agent as mod
     fake_agent = MagicMock()

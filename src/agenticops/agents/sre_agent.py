@@ -339,8 +339,10 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
         # Agent Memory (cross-agent search)
         search_agent_memory,
     ]
-    # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off)
-    if settings.acp_enhanced_enabled:
+    # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off).
+    # Never in the change-review build: enhanced_task runs outside the change gates (its own backend), so a
+    # Mode C review/preflight must not carry it (least privilege + the in-code change read-only guard).
+    if settings.acp_enhanced_enabled and not change_review:
         _tools.append(enhanced_task)
     return Agent(
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT if change_review else SRE_BASE_PROMPT,

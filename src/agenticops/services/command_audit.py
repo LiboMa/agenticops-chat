@@ -97,6 +97,30 @@ def approved_plan_in_context() -> Optional[int]:
         return None
 
 
+def change_context_refusal(
+    *, tool: str, tier: str, command: str, account: str = "", region: str = "", target: str = ""
+) -> Optional[str]:
+    """Refuse (as text) a write command run while the Run Context names a change with no approved plan.
+
+    A change review / preflight runs under change_request_id but no fix plan; the change's plan is only
+    approved after review. Until then the run is read-only IN CODE: readonly commands are unaffected
+    (returns None), but any write/unknown command is refused with a `change_not_approved` ledger row and
+    an explanatory string. An approved/executing plan in the Run Context lifts the guard (returns None).
+    Callers invoke this after their readonly/blocked handling and before the change_required match.
+    """
+    if tier == "readonly":
+        return None
+    from agenticops.run_context import get_run_context
+    if not get_run_context().change_request_id:
+        return None
+    if approved_plan_in_context() is not None:
+        return None
+    record_command(tool=tool, tier=tier, command=command, outcome="refused",
+                   reason="change_not_approved", account=account, region=region, target=target)
+    return ("This change request has no approved plan yet, so its review/preflight is read-only. "
+            "Approve the change's plan before running write commands. Command: " + command)
+
+
 def change_required_refusal(command: str, pattern: str) -> str:
     from agenticops.config import settings
     how = (" Open a change request instead: in Chat type /change <what you want changed>, or use the Web UI "
@@ -127,6 +151,10 @@ def guarded_run(
     """
     if tier == "readonly":
         return run()
+    refused = change_context_refusal(tool=tool, tier=tier, command=command,
+                                     account=account, region=region, target=target)
+    if refused is not None:
+        return refused
     from agenticops.services.policy_engine import get_policy_engine
     pattern = get_policy_engine().change_required_match(command)
     if pattern and approved_plan_in_context() is None:

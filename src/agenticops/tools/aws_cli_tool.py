@@ -310,7 +310,8 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
 
     # 3. Classify and enforce security tier — write-tier attempts are ledgered (command_audits)
     tier = _classify_command(command)
-    from agenticops.services.command_audit import approved_plan_in_context, change_required_refusal, record_command
+    from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
+                                                    change_required_refusal, record_command)
 
     if tier == "blocked":
         record_command(tool="run_aws_cli", tier=tier, command=command, outcome="blocked", account=account)
@@ -321,6 +322,11 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
             f"--with-decryption) are not allowed — live credentials must never enter "
             f"agent context. Use metadata reads (describe-/list-) instead. Command: {command}"
         )
+
+    # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
+    refused = change_context_refusal(tool="run_aws_cli", tier=tier, command=command, account=account)
+    if refused is not None:
+        return refused
 
     if tier in ("write", "unknown") and not require_confirmation:
         record_command(tool="run_aws_cli", tier=tier, command=command, outcome="refused", reason="confirmation",
