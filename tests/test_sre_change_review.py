@@ -23,7 +23,31 @@ def test_prompt_has_mode_c_and_stays_english():
     assert not re.search(r"[一-鿿]", SRE_SYSTEM_PROMPT)
 
 
-def _built_tool_names(**kwargs) -> set:
+def test_the_base_prompt_is_the_full_prompt_without_mode_c():
+    """The Mode A/B builds do not carry the Mode C tools, so their prompt must not describe them."""
+    from agenticops.agents.sre_agent import SRE_BASE_PROMPT, SRE_SYSTEM_PROMPT
+    for kw in ("MODE C", "C#N", "CHANGE REVIEW", "plan_kind='change'", "(Mode A/C)", *MODE_C_TOOLS):
+        assert kw not in SRE_BASE_PROMPT, kw
+    for kw in ("READ-ONLY", "NEVER execute fixes", "save_fix_plan", "L0", "L1", "L2", "L3", "TWO modes",
+               "Only generate plans (Mode A) or query information (Mode B)."):
+        assert kw in SRE_BASE_PROMPT, kw
+    # one blank line between Mode B and the rules, as between every other pair of sections
+    assert "and key attributes.\n\nRULES & GUARDRAILS (CRITICAL):" in SRE_BASE_PROMPT
+    assert not re.search(r"[一-鿿]", SRE_BASE_PROMPT)
+    assert SRE_SYSTEM_PROMPT.count("MODE C — CHANGE REVIEW PROTOCOL") == 1
+
+
+def test_a_broken_anchor_fails_at_import_rather_than_leaking_mode_c():
+    from agenticops.agents import sre_agent as mod
+    for broken in (mod.SRE_SYSTEM_PROMPT.replace("(Mode A/C)", "(Modes A and C)"),        # anchor gone
+                   mod.SRE_SYSTEM_PROMPT + "You have THREE modes of operation:\n",        # anchor twice
+                   mod.SRE_SYSTEM_PROMPT.replace("RULES & GUARDRAILS (CRITICAL):", "RULES:")):
+        with pytest.raises(RuntimeError, match="exactly once"):
+            mod._without_mode_c(broken)
+
+
+def _build(**kwargs) -> dict:
+    """Run _create_sre_agent with nothing real behind it: capture the Agent's tools and the prompt it is given."""
     from agenticops.agents import sre_agent as mod
     captured = {}
 
@@ -37,9 +61,29 @@ def _built_tool_names(**kwargs) -> set:
          patch("agenticops.config.get_agent_context_manager", return_value=None), \
          patch("agenticops.config.get_bedrock_boto_session", return_value=None), \
          patch("agenticops.agents.preamble.bedrock_model_kwargs", return_value={}), \
-         patch.object(mod, "build_system_prompt", return_value="p"):
+         patch.object(mod, "build_system_prompt", return_value="p") as build_prompt:
         mod._create_sre_agent(**kwargs)
-    return {getattr(t, "tool_name", None) or getattr(t, "__name__", None) or str(t) for t in captured["tools"]}
+    build_prompt.assert_called_once()
+    captured["prompt"], = build_prompt.call_args.args
+    captured["prompt_kwargs"] = build_prompt.call_args.kwargs
+    return captured
+
+
+def _built_tool_names(**kwargs) -> set:
+    return {getattr(t, "tool_name", None) or getattr(t, "__name__", None) or str(t) for t in _build(**kwargs)["tools"]}
+
+
+def test_only_the_change_review_build_is_given_the_mode_c_prompt():
+    from agenticops.agents import sre_agent as mod
+    same_kwargs = {"include_account": False, "agent_type": "sre", "agent_name": "sre"}
+    for kwargs in ({}, {"cli_tools": [MagicMock()]}):  # the Mode A (sre_agent) and Mode B (sre_query) builds
+        built = _build(**kwargs)
+        assert "MODE C" not in built["prompt"], kwargs
+        assert built["prompt"] == mod.SRE_BASE_PROMPT, kwargs
+        assert built["prompt_kwargs"] == same_kwargs, kwargs
+    built = _build(change_review=True)
+    assert built["prompt"] == mod.SRE_SYSTEM_PROMPT
+    assert built["prompt_kwargs"] == same_kwargs
 
 
 def test_mode_c_tools_only_in_the_change_review_build():

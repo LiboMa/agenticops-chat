@@ -231,6 +231,36 @@ SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _SRE_SKILLS_BL
 SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
 
 
+def _once(text: str, old: str) -> str:
+    """`old`, checked to occur exactly once in `text` (a RuntimeError, not an assert that -O strips)."""
+    found = text.count(old)
+    if found != 1:
+        raise RuntimeError(f"SRE prompt: {old[:60]!r} must occur exactly once, found {found}")
+    return old
+
+
+def _without_mode_c(full: str) -> str:
+    """The Mode A/B prompt: `full` without Mode C. Every anchor must occur exactly once, so a prompt edit that
+    breaks one fails at import instead of leaking Mode C into the other builds."""
+    start = full.index(_once(full, "MODE C — CHANGE REVIEW PROTOCOL"))
+    end = full.index(_once(full, "RULES & GUARDRAILS (CRITICAL):"))
+    text = full
+    for old, new in (
+        ("You have THREE modes of operation:", "You have TWO modes of operation:"),
+        ("  C) Change review — review a human's CHANGE REQUEST (C#N) for legitimacy and\n"
+         "     produce the change plan the Executor will run after approval.\n", ""),
+        (full[start:end], ""),  # the blank line before MODE C stays, as the one before RULES
+        ("(Mode A/C)", "(Mode A)"),
+    ):
+        text = text.replace(_once(text, old), new)
+    return text
+
+
+# Mode A (sre_agent) and Mode B (sre_query) builds: they do not carry the Mode C tools, so they must not see Mode C
+# (an agent must never see a tool it cannot use). Only the change-review build gets SRE_SYSTEM_PROMPT.
+SRE_BASE_PROMPT = _without_mode_c(SRE_SYSTEM_PROMPT)
+
+
 # Mode C tools — only in the change-review build (least privilege): the Mode A (sre_agent) and Mode B
 # (sre_query) builds never carry them (the Main agent has its own read tools for change requests).
 _CHANGE_REVIEW_TOOLS = (
@@ -245,7 +275,8 @@ _CHANGE_REVIEW_TOOLS = (
 def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_review: bool = False) -> Agent:
     """Create a reusable SRE Agent instance.
 
-    change_review=True builds the Mode C (change review) agent: the only build that carries the change tools.
+    change_review=True builds the Mode C (change review) agent: the only build that carries the change tools
+    and the only one whose prompt describes Mode C (SRE_SYSTEM_PROMPT; every other build gets SRE_BASE_PROMPT).
     """
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
 
@@ -312,7 +343,8 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     if settings.acp_enhanced_enabled:
         _tools.append(enhanced_task)
     return Agent(
-        system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT, include_account=False, agent_type="sre", agent_name="sre"),
+        system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT if change_review else SRE_BASE_PROMPT,
+                                          include_account=False, agent_type="sre", agent_name="sre"),
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("sre"),
