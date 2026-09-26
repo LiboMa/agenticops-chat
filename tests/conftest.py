@@ -12,9 +12,11 @@ def _block_live_bedrock_runtime() -> None:
     Unit tests must never reach a real model. Without this, a background agent thread — e.g. the
     auto-execute an auto-approved fix plan spawns — runs a REAL agent: real cost, an interpreter exit
     that hangs while the call is in flight, and tool calls against whatever database
-    settings.database_url points at by then. The guard sits at botocore's HTTP step, which is reached
-    only when no before-call hook (Stubber) answered, so stubbed and mocked clients are untouched and
-    other services pass through. It is never undone: daemon threads can outlive the session.
+    settings.database_url points at by then. The guard wraps BaseClient._make_request, botocore's HTTP
+    step, which is reached only when no before-call hook answered: a Stubber and client- or agent-level
+    mocks never reach _make_request, so they are untouched, and other services pass through. An
+    HTTP-layer mock of bedrock-runtime (a before-send hook, moto) sits BELOW the guard and is never
+    reached: the guard raises first. It is never undone: daemon threads can outlive the session.
     """
     from botocore.client import BaseClient
 
@@ -35,7 +37,8 @@ def _block_live_bedrock_runtime() -> None:
 
 
 def pytest_configure(config):
-    """Warn if untracked test files exist — they inflate test counts."""
+    """Warn if untracked test files exist — they inflate test counts — and, unless --run-integration,
+    install the live-Bedrock guard (_block_live_bedrock_runtime)."""
     result = subprocess.run(
         ["git", "status", "--short", "tests/"],
         capture_output=True, text=True, timeout=5
