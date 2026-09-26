@@ -336,6 +336,7 @@ rejection_reason, updated_at`。`FixExecutionResponse.health_issue_id` 改 Optio
 | status | String(30) index default "draft" | §3.2 |
 | review_verdict | String(30) nullable | approved_for_planning / needs_clarification / rejected |
 | review_reasons | JSON list | |
+| review_attempt | Integer default 0 | 每次进入 `under_review` +1；所有回滚（看门狗 / worker 无结论 / 崩溃 / stale 恢复）都以 `(status='under_review', review_attempt=发起它的那次)` 为条件更新，迟到的回滚对下一次评审是 0 行 no-op（Plan B Task 3 round 2 裁定） |
 | reviewed_by, reviewed_at | String(100) / DateTime nullable | |
 | policy_rule, policy_action | String(100) / String(30) nullable | 命中规则与动作 |
 | approved_by, approver_user_id, approved_at, approval_reason | 同上形状 | |

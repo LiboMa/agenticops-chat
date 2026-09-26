@@ -1292,7 +1292,7 @@ Web Chat 输入：`给 EC2 实例 <i-xxxxxxxx> 加一个 tag ChangeTest=2026-09-
 
 - [ ] **Step 6: RBAC 强制模式抽查（Test 7）**
 
-再建一个变更到 planned（不执行）；临时 `AIOPS_RBAC_ENFORCE=true` 重启后端；用同一 actor 审批 → 403（申请人=审批人，SoD）；`GET /api/audit?action=authz.denied` 有一行；恢复 `false` 重启；把该变更 cancel（理由 "E2E cleanup"）。
+SoD 只在有身份的 actor 之间生效（匿名 Web 主体豁免——Plan A 裁决），所以用 CLI 身份演示：在 REPL 用 `/change …` 建一个变更并让它到 planned（不执行）；临时 `AIOPS_RBAC_ENFORCE=true` 重启后端与 REPL；同一 OS 用户 `/approve C<id> 理由` → 红色 403 文案（申请人=审批人）；`GET /api/audit?action=authz.denied` 有一行；恢复 `false` 重启；把该变更 cancel（理由 "E2E cleanup"）。
 
 - [ ] **Step 7: Chat 直接写路径（Test 8）**
 

@@ -2235,7 +2235,7 @@ def db(tmp_path):
 
 def test_request_change_uses_context_actor_and_source(db):
     from agenticops.tools.change_tools import request_change
-    with run_context(actor="user:alice", actor_user_id=1, chat_session_id="sess-1"), \
+    with run_context(actor="user:alice", actor_user_id=1, actor_permissions=("read", "write"), chat_session_id="sess-1"), \
          patch("agenticops.services.change_service.start_review") as sr, \
          patch("agenticops.services.change_service.notify_change_requested"):
         out = request_change(title="Tag web", description="add Env=prod", account="dev", targets="i-0abc, i-0def")
@@ -2330,7 +2330,7 @@ import logging
 
 from strands import tool
 
-from agenticops.auth.actor import Actor, parse_actor
+from agenticops.auth.actor import Actor, actor_from_run_context
 from agenticops.config import settings
 from agenticops.run_context import get_run_context
 from agenticops.services import change_service as cs
@@ -2341,11 +2341,13 @@ _SOURCE_BY_KIND = {"user": "chat", "web": "chat", "cli": "cli", "im": "im", "web
 
 
 def _actor_from_context() -> Actor:
+    """Acting identity for a tool call: the Run Context actor (with its permission flags), or —
+    when no context was set — an agent acting on its own (Plan A ruling: a context-less tool call
+    is never a human; the LLM-supplied string must not grant power)."""
     ctx = get_run_context()
     if ctx.actor == "system":
         return Actor("agent", "main")
-    a = parse_actor(ctx.actor)
-    return Actor(a.kind, a.id, ctx.actor_user_id, a.permissions)
+    return actor_from_run_context(ctx)
 
 
 def _plan_summary(cr_id: int) -> dict | None:
@@ -3272,18 +3274,27 @@ def test_approve_requires_reason_and_binds_identity(client):
 
 
 def test_sod_403_when_enforced(client):
+    """SoD needs identified actors (the anonymous web actor is exempt by ruling): request AND approve as the
+    same authenticated user by making current_actor resolve to that user."""
     from agenticops.config import settings
-    cr_id = _planned()
-    # requester was user:alice; anonymous approver is a different actor → allowed even when enforced …
-    # … so emulate the same actor via rbac by making the request come from web:anonymous
     from agenticops.services import change_service as cs
+    from agenticops.web import deps
+    alice = Actor("user", "alice", 1, ("read", "write"))
     with patch.object(cs, "notify_change_requested"):
-        cr2 = cs.create_change_request(source="web", actor=Actor("web", "anonymous"), title="t", description="d", start_review=False)
+        cr2 = cs.create_change_request(source="web", actor=alice, title="t", description="d", start_review=False)
     with cs._session() as s:
         row = s.get(ChangeRequest, cr2["id"]); cs.transition_change(row, "under_review"); cs.transition_change(row, "planned")
-    with patch.object(settings, "rbac_enforce", True):
-        r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self"})
-    assert r.status_code == 403
+    from agenticops.web.app import app
+    app.dependency_overrides[deps.current_actor] = lambda: alice
+    try:
+        with patch.object(settings, "rbac_enforce", True):
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self"})
+        assert r.status_code == 403
+        with patch.object(settings, "rbac_enforce", False):
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)"})
+        assert r.status_code == 200  # shadow mode: allowed, audited
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
 
 
 def test_reject_cancel_clarify_review(client):
@@ -4148,3 +4159,5 @@ git commit -m "test(change): closed-loop pipeline with mocked SRE/Executor; Plan
 ## 执行记录
 
 （执行时追加：日期 · 全量测试结果 · 冒烟结果 · 提示词金标新值）
+
+- 2026-09-26 · 全量测试 `tests/`：5336 passed / 85 skipped / 1 failed（`tests/test_prompt_budget.py::TestPromptHygiene::test_no_cjk_in_base_prompts` — reporter 提示词含 CJK，源自主人未提交的 `reporter_agent.py`，已知）· 提示词预算 `tests/test_prompt_budget.py`：26 passed / 1 failed（同一 CJK 用例；7 个尺寸金标用例全过）· 冒烟：uvicorn 启动冒烟由 controller 执行（Task 13 ruling 1）· `BASE_PROMPT_GOLDENS`：main=12_100，sre=11_900（未改）
