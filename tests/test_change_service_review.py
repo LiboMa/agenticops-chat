@@ -487,3 +487,26 @@ class TestStaleAttemptRace:
             cs._review_attempt_var.reset(token)
         c = cs.get_change(cr_id)
         assert (c["status"], c["review_attempt"], c["reviewed_by"]) == ("under_review", 2, None)
+
+    @pytest.mark.parametrize("verdict", ["needs_clarification", "rejected"])
+    def test_a_stale_clarification_or_rejection_cannot_land_on_the_next_attempt(self, db, verdict):
+        """These verdicts evaluate no policy, so the attempt-keyed claim is their only guard."""
+        from agenticops.audit.models import AuditLog
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db)
+        with cs._session() as s:  # a timeout+restart happened: the row is now attempt 2, still under_review
+            s.get(ChangeRequest, cr_id).review_attempt = 2
+        before, audits = cs.get_change(cr_id), db.query(AuditLog).count()
+        events = db.query(PipelineEvent).filter_by(change_request_id=cr_id).count()
+        token = cs._review_attempt_var.set(1)  # the stale, still-running SRE invocation belongs to attempt 1
+        try:
+            with patch.object(cs, "notify_change_result") as result:
+                with pytest.raises(cs.ChangeStateError, match="no longer under_review at attempt 1"):  # at the claim
+                    cs.submit_review(cr_id, verdict=verdict, reasons=["stale verdict from attempt 1"],
+                                     actor=agent_actor("sre"))
+        finally:
+            cs._review_attempt_var.reset(token)
+        assert cs.get_change(cr_id) == before  # no reviewed_by / verdict / reasons / rejected_* write leaked
+        assert db.query(AuditLog).count() == audits
+        assert db.query(PipelineEvent).filter_by(change_request_id=cr_id).count() == events
+        result.assert_not_called()
