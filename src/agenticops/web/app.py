@@ -641,7 +641,9 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
 
     The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
     need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
-    refused request (400/401/403) applies nothing, not even the other keys of the same body."""
+    request refused by the security-toggle checks (400/401/403) applies nothing; the other keys keep their own,
+    non-atomic validation. A changed toggle's audit rows and its yaml write commit together BEFORE the value
+    goes live in memory, so a failed write leaves the old value in force and an identical retry redoes it all."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
@@ -763,18 +765,19 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         settings.galaxy_model_id = val
         save_to_yaml({"galaxy_model_id": val})
 
-    # Security toggles — applied last, one audit row per changed value, then ONE yaml write
-    changed: dict[str, Any] = {}
-    for key in sorted(change_updates):
-        old, new = getattr(settings, key), change_updates[key]
-        if old == new:
-            continue
-        setattr(settings, key, new)
-        changed[key] = new
-        AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=current.key,
-                         user_id=current.user_id, old_values={key: old}, new_values={key: new})
+    # Security toggles — last. One audit row per changed value and the ONE yaml write share a session (a yaml
+    # failure rolls the rows back); only then does the in-memory value flip. Any failure leaves the old value
+    # live, so an identical retry still sees the change and redoes all three steps.
+    changed = {k: v for k, v in sorted(change_updates.items()) if getattr(settings, k) != v}
     if changed:
-        save_to_yaml(changed)
+        with get_db_session() as s:
+            for key, new in changed.items():
+                AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=current.key,
+                                 user_id=current.user_id, old_values={key: getattr(settings, key)},
+                                 new_values={key: new}, session=s)
+            save_to_yaml(changed)
+        for key, new in changed.items():
+            setattr(settings, key, new)
 
     return await api_get_settings()
 

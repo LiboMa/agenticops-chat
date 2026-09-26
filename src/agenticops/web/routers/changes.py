@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from agenticops.auth.actor import Actor
 from agenticops.config import settings
@@ -18,14 +18,17 @@ from agenticops.web.schemas import (
     ChangeResolveReviewBody, ChangeTimelineEntry, FixExecutionResponse, FixPlanResponse,
 )
 
-router = APIRouter(prefix="/api/changes", tags=["changes"])
-
 _PERIOD = {"7d": timedelta(days=7), "30d": timedelta(days=30), "90d": timedelta(days=90)}
 
 
 def _enabled() -> None:
     if not settings.change_management_enabled:
         raise HTTPException(status_code=404, detail="Change management is disabled (change_management_enabled=false)")
+
+
+# A router dependency runs before parameter/body validation, so with the flag off even invalid input gets the 404
+# (only malformed JSON still gets 422 — FastAPI decodes the body before any dependency runs)
+router = APIRouter(prefix="/api/changes", tags=["changes"], dependencies=[Depends(_enabled)])
 
 
 def _call(fn, *args, **kwargs):
@@ -42,10 +45,10 @@ def _last_policy_decision(cr_id: int) -> Optional[dict]:
 
 
 @router.post("", response_model=ChangeRequestResponse, status_code=201)
-async def api_create_change(data: ChangeRequestCreate, actor: Actor = Depends(current_actor)):
+async def api_create_change(data: ChangeRequestCreate, request: Request, actor: Actor = Depends(current_actor)):
     """Open a change request; the SRE review starts in the background (poll GET /api/changes/{id})."""
-    _enabled()
-    source = "web" if actor.kind in ("user", "web") else "api"
+    # APIAuthMiddleware sets request.state.api_key only for aiops_* API keys; the Web UI signs in with a session token
+    source = "api" if getattr(request.state, "api_key", None) is not None else "web"
     return _call(cs.create_change_request, source=source, actor=actor, title=data.title, description=data.description,
                  account_name=data.account_name, targets=data.targets, requested_change_type=data.requested_change_type,
                  justification=data.justification, start_review=True)
@@ -57,7 +60,6 @@ async def api_list_changes(
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d)$"),
     limit: int = Query(default=50, ge=1, le=500), offset: int = Query(default=0, ge=0),
 ):
-    _enabled()
     if status and status not in VALID_CHANGE_STATUSES:
         # a typo must not look like an empty list
         raise HTTPException(status_code=422,
@@ -68,7 +70,6 @@ async def api_list_changes(
 
 @router.get("/{cr_id}", response_model=ChangeRequestDetail)
 async def api_get_change(cr_id: int):
-    _enabled()
     snap = _call(cs.get_change, cr_id)
     with get_db_session() as session:
         plans = session.query(FixPlan).filter_by(change_request_id=cr_id).order_by(FixPlan.created_at.desc()).all()
@@ -85,38 +86,32 @@ async def api_get_change(cr_id: int):
 
 @router.post("/{cr_id}/approve", response_model=ChangeRequestResponse)
 async def api_approve_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
-    _enabled()
     return _call(cs.approve, cr_id, actor=actor, reason=body.reason)
 
 
 @router.post("/{cr_id}/reject", response_model=ChangeRequestResponse)
 async def api_reject_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
-    _enabled()
     return _call(cs.reject, cr_id, actor=actor, reason=body.reason)
 
 
 @router.post("/{cr_id}/cancel", response_model=ChangeRequestResponse)
 async def api_cancel_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
-    _enabled()
     return _call(cs.cancel, cr_id, actor=actor, reason=body.reason)
 
 
 @router.post("/{cr_id}/clarify", response_model=ChangeRequestResponse, status_code=202)
 async def api_clarify_change(cr_id: int, body: ChangeClarifyBody, actor: Actor = Depends(current_actor)):
-    _enabled()
     return _call(cs.clarify, cr_id, actor=actor, message=body.message)
 
 
 @router.post("/{cr_id}/review", response_model=ChangeRequestResponse, status_code=202)
 async def api_review_change(cr_id: int, actor: Actor = Depends(current_actor)):
     """(Re)start the SRE review of a draft — e.g. after a watchdog rollback."""
-    _enabled()
     return _call(cs.restart_review, cr_id, actor=actor)
 
 
 @router.post("/{cr_id}/execute", response_model=FixExecutionResponse, status_code=202)
 async def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
-    _enabled()
     out = _call(cs.request_execution, cr_id, actor=actor)
     with get_db_session() as session:
         return FixExecutionResponse.model_validate(session.get(FixExecution, out["execution_id"]))
@@ -124,12 +119,10 @@ async def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
 
 @router.post("/{cr_id}/resolve-review", response_model=ChangeRequestResponse)
 async def api_resolve_review(cr_id: int, body: ChangeResolveReviewBody, actor: Actor = Depends(current_actor)):
-    _enabled()
     return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason)
 
 
 @router.get("/{cr_id}/timeline", response_model=List[ChangeTimelineEntry])
 async def api_change_timeline(cr_id: int):
-    _enabled()
     _call(cs.get_change, cr_id)  # 404 guard
     return cs.change_timeline(cr_id)

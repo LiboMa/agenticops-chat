@@ -1,7 +1,8 @@
 """Global search API endpoint — extracted from app.py.
 
 MVP-2.6.0: change plans are labelled `change_plan` (parent = their change request) and change requests are
-searchable (`change_requests` group, only while change_management_enabled — same rule as /api/changes).
+searchable (`change_requests` group). Both only while change_management_enabled — same rule as /api/changes:
+with the flag off there is no change_requests group and no change plan in the fix_plans group.
 """
 
 from fastapi import APIRouter, Query
@@ -47,12 +48,11 @@ async def api_search(
             ]
 
         if "fix_plans" in search_types:
-            rows = (
-                db.query(FixPlan)
-                .filter(func.lower(FixPlan.title).like(search_term))
-                .limit(limit)
-                .all()
-            )
+            query = db.query(FixPlan).filter(func.lower(FixPlan.title).like(search_term))
+            if not settings.change_management_enabled:
+                # a change plan links to change pages whose API 404s while the feature is off
+                query = query.filter(FixPlan.plan_kind != "change")
+            rows = query.limit(limit).all()
             results["fix_plans"] = [
                 SearchResultItem(
                     id=r.id, title=r.title,
