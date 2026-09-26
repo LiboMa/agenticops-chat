@@ -4,10 +4,11 @@ Mechanically extracted from app.py (no logic change) to shrink app.py and give
 routers a dependency-leaf module to import from (avoids app<->router import cycle).
 """
 
+import json
 from datetime import datetime
 from typing import Annotated, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AccountCreate(BaseModel):
@@ -382,6 +383,25 @@ class FixPlanResponse(BaseModel):
     account_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("steps", "pre_checks", "post_checks", "rollback_plan", mode="before")
+    @classmethod
+    def _decode_legacy_json(cls, value, info):
+        """Legacy rows hold these JSON columns as JSON *strings* (an agent passed pre-encoded JSON); decode
+        them so one such row cannot 500 every fix-plan list. Undecodable text is kept, wrapped, not dropped."""
+        want = dict if info.field_name == "rollback_plan" else list
+        for _ in range(3):
+            if not isinstance(value, str):
+                break
+            try:
+                value = json.loads(value)
+            except ValueError:
+                break
+        if value is None:
+            return want()
+        if isinstance(value, want):
+            return value
+        return {"raw": value} if want is dict else [value]
 
 
 class FixExecutionResponse(BaseModel):

@@ -552,6 +552,40 @@ def test_fix_plan_lists_place_change_plans_in_their_request_account(client):
     assert client.get(f"/api/fix-plans/{change_plan_id}").json()["account_id"] == dev
 
 
+def test_fix_plan_reads_decode_legacy_string_encoded_json(client):
+    """Legacy rows (dev box #74/#80) hold their JSON columns as JSON *strings*; the strict response
+    schema turned every fix-plan list containing one into a 500 (Fix Plans tab stuck on Loading)."""
+    plan_id, issue_id = _fix_plan_in(_account_id("dev"))
+    s = get_session()
+    try:
+        p = s.get(FixPlan, plan_id)
+        p.steps = '[{"step": 0, "action": "decommission"}]'
+        p.rollback_plan = '{"path_a": "restore"}'
+        p.post_checks = '["alb gone"]'
+        p.pre_checks = "not json"
+        s.commit()
+    finally:
+        s.close()
+    listed = client.get("/api/fix-plans?kind=fix")
+    assert listed.status_code == 200
+    (row,) = listed.json()
+    assert row["steps"] == [{"step": 0, "action": "decommission"}]
+    assert row["rollback_plan"] == {"path_a": "restore"}
+    assert row["post_checks"] == ["alb gone"]
+    assert row["pre_checks"] == ["not json"]
+    assert client.get(f"/api/fix-plans/{plan_id}").json()["steps"] == [{"step": 0, "action": "decommission"}]
+    assert client.get(f"/api/health-issues/{issue_id}/fix-plans").status_code == 200
+
+
+def test_fix_plan_response_wraps_undecodable_or_missing_json_columns():
+    from agenticops.web.schemas import FixPlanResponse
+    base = dict(id=1, risk_level="L1", title="t", summary="s", estimated_impact="", status="draft",
+                approved_by=None, approved_at=None, created_at=datetime.now(timezone.utc))
+    r = FixPlanResponse.model_validate({**base, "steps": None, "pre_checks": '"[\\"a\\"]"',
+                                        "post_checks": {"k": 1}, "rollback_plan": "undo by hand"})
+    assert (r.steps, r.pre_checks, r.post_checks, r.rollback_plan) == ([], ["a"], [{"k": 1}], {"raw": "undo by hand"})
+
+
 def test_cancel_change_execution_authorizes_on_change_execute(client):
     """(g) Cancelling a running CHANGE execution authorizes on change.execute (not change.cancel): a
     write caller cancels (200 + one plan.execution_cancelled row, plan_kind=change); a reader is 403."""
