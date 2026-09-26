@@ -719,3 +719,30 @@ def test_mark_fix_executed_leaves_an_auto_resolved_issue_alone(db):
     assert out == (f"HealthIssue #{issue_id} already auto-resolved. Execution #{ex_id} recorded. "
                    f"No status change needed.")
     assert status == "resolved"
+
+
+# ── (f) G13: a change run is bound to its CR's account; a fix run is unbound ──
+
+def _binding_recorder():
+    """A fake executor_agent that records the bound_account_id of the RunContext it runs under."""
+    from agenticops.run_context import get_run_context
+    seen = {}
+
+    def fake(fix_plan_id):
+        seen["bound"] = get_run_context().bound_account_id
+        return "recorded"
+    return fake, seen
+
+
+def test_a_change_run_is_bound_to_its_change_request_account(db):
+    _cr_id, pid, ex_id = _change_run(db)  # cr.account_id = the 'dev' account
+    fake, seen = _binding_recorder()
+    _run(ex_id, pid, fake)
+    assert seen["bound"] == _dev_id(db)
+
+
+def test_a_fix_run_is_unbound(db):
+    _issue_id, pid, ex_id = _fix_run(db)  # a fix plan has no change request
+    fake, seen = _binding_recorder()
+    _run(ex_id, pid, fake)
+    assert seen["bound"] is None

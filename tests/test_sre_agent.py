@@ -375,3 +375,41 @@ class TestSREAgentToolList:
         assert "L1" in SRE_SYSTEM_PROMPT
         assert "L2" in SRE_SYSTEM_PROMPT
         assert "L3" in SRE_SYSTEM_PROMPT
+
+
+class TestChangeReviewBinding:
+    """G13 — sre_agent_review_change runs the whole review bound to the CR's account."""
+
+    def test_review_runs_bound_to_the_change_request_account(self, db_session, monkeypatch):
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock
+
+        from agenticops.models import ChangeRequest, CloudAccount
+        from agenticops.run_context import get_run_context
+
+        acct = CloudAccount(name="prod", provider="aws", is_enabled=True, credentials={}, regions=["us-east-1"])
+        db_session.add(acct)
+        db_session.flush()
+        cr = ChangeRequest(title="t", description="d", requested_by="user:alice",
+                           status="reviewing", account_id=acct.id)
+        db_session.add(cr)
+        db_session.commit()
+
+        seen = {}
+
+        def fake_invoke(agent, prompt, **kw):
+            seen["bound"] = get_run_context().bound_account_id
+            return "verdict"
+
+        @contextmanager
+        def fake_tracker(*a, **k):
+            yield MagicMock()
+
+        monkeypatch.setattr("agenticops.agents.sre_agent._create_sre_agent", lambda **kw: MagicMock())
+        monkeypatch.setattr("agenticops.agents.sre_agent.get_cli_tool_for_issue", lambda account_id: MagicMock())
+        monkeypatch.setattr("agenticops.services.agent_log_service.track_agent", fake_tracker)
+        monkeypatch.setattr("agenticops.agents.preamble.invoke_with_retry", fake_invoke)
+
+        from agenticops.agents.sre_agent import sre_agent_review_change
+        sre_agent_review_change(cr.id)
+        assert seen["bound"] == acct.id

@@ -415,33 +415,42 @@ def sre_agent_review_change(change_request_id: int) -> str:
     propagates on purpose: change_service._run_review logs it and rolls the request back to draft with
     the reason (fail-closed).
     """
+    from contextlib import nullcontext
+
     from agenticops.agents.preamble import infer_parent_agent, invoke_with_retry
+    from agenticops.run_context import run_context
     from agenticops.services import change_service as cs
     from agenticops.services.agent_log_service import track_agent
 
     cr = cs.get_change(change_request_id)
-    cli_tool = None
-    account_hint = ""
-    if cr.get("account_id"):
-        # Credential rule: a CR bound to an account is reviewed on THAT account or not at all — never
-        # fall back to the default, auto-resolving CLI tool (it may resolve to another account).
-        cli_tool = get_cli_tool_for_issue(cr["account_id"])
-        if cli_tool is None:
-            raise RuntimeError(
-                f"credentials for account #{cr['account_id']} of ChangeRequest #{change_request_id} could not "
-                "be resolved — refusing to review it on any other account")
-        name = _account_name(cr["account_id"])
-        if name:
-            account_hint = f" Target account: '{name}' — pass account='{name}' to every tool that takes an account."
-    agent = _create_sre_agent(cli_tool=cli_tool, change_review=True)
-    prompt = (
-        f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
-        "read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
-        "with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict."
-    ) + account_hint
-    with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
-        result = invoke_with_retry(agent, prompt)
-        tracker.set_result(result)
+    account_id = cr.get("account_id")
+    # Bind the whole review (credential resolution AND the agent run) to the CR's account, so no tool the
+    # agent calls can resolve another account. update_run_context preserves the change_request_id _run_review
+    # already set. Unbound (no account) is unchanged.
+    binding = run_context(bound_account_id=account_id) if account_id else nullcontext()
+    with binding:
+        cli_tool = None
+        account_hint = ""
+        if account_id:
+            # Credential rule: a CR bound to an account is reviewed on THAT account or not at all — never
+            # fall back to the default, auto-resolving CLI tool (it may resolve to another account).
+            cli_tool = get_cli_tool_for_issue(account_id)
+            if cli_tool is None:
+                raise RuntimeError(
+                    f"credentials for account #{account_id} of ChangeRequest #{change_request_id} could not "
+                    "be resolved — refusing to review it on any other account")
+            name = _account_name(account_id)
+            if name:
+                account_hint = f" Target account: '{name}' — pass account='{name}' to every tool that takes an account."
+        agent = _create_sre_agent(cli_tool=cli_tool, change_review=True)
+        prompt = (
+            f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
+            "read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
+            "with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict."
+        ) + account_hint
+        with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
+            result = invoke_with_retry(agent, prompt)
+            tracker.set_result(result)
     return str(result)
 
 

@@ -31,6 +31,7 @@ class RunContext:
     change_request_id: Optional[int] = None
     chat_session_id: Optional[str] = None
     execution_id: Optional[int] = None        # the queued FixExecution an ExecutorService run is closing
+    bound_account_id: Optional[int] = None     # a change run/review may touch ONLY this account id (resolver fails closed on any other)
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

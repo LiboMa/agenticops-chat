@@ -163,6 +163,7 @@ class ExecutorService:
         from agenticops.run_context import RunContext, reset_run_context, set_run_context
         approved_by = trace_id = None
         change_request_id = None
+        bound_account_id = None  # a change plan binds this run to its CR's account; a fix plan / lookup-miss stays unbound
         try:
             from agenticops.models import FixPlan, HealthIssue, get_db_session
             with get_db_session() as db:
@@ -170,6 +171,7 @@ class ExecutorService:
                 if plan:
                     approved_by = plan.approved_by
                     change_request_id = plan.change_request_id
+                    bound_account_id = plan.change_request.account_id if plan.change_request else None
                     if plan.health_issue_id:
                         trace_id = db.query(HealthIssue.trace_id).filter_by(id=plan.health_issue_id).scalar()
                     elif plan.change_request:
@@ -180,7 +182,8 @@ class ExecutorService:
             set_trace_id(trace_id)
         _rc_token = set_run_context(RunContext(actor="agent:executor", on_behalf_of=approved_by, trace_id=trace_id,
                                                agent_name="executor", fix_plan_id=fix_plan_id,
-                                               change_request_id=change_request_id, execution_id=execution_id))
+                                               change_request_id=change_request_id, execution_id=execution_id,
+                                               bound_account_id=bound_account_id))
         try:
             from agenticops.agents.executor_agent import executor_agent
 
