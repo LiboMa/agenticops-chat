@@ -156,6 +156,8 @@ BLOCKED_PATTERNS = [
     "ecr get-login-password",      # returns a usable registry password
     "ecr get-authorization-token", # returns base64 registry credentials
     "--with-decryption",           # SSM SecureString → plaintext secret value
+    "sts assume-role",             # mints creds for another role (hyphen-prefix also covers -with-saml / -with-web-identity)
+    "aws configure",               # reads/writes ~/.aws credentials & profiles; bypasses account resolution (bare 'configure' token only — 'aws configservice …' is safe)
     # ── Destructive operations. Entries are `<service> <verb>` WITHOUT the `aws ` prefix: the check is a
     # plain substring test on the lowered command, and a global option placed before the service
     # (`aws --region us-east-1 ec2 terminate-instances`, `aws --output json iam create-user`,
@@ -176,14 +178,53 @@ BLOCKED_PATTERNS = [
 
 TIMEOUT_SECONDS = 30
 
+# aws honours an explicit --profile OVER the frozen creds the platform injects, reading ~/.aws and running on
+# the WRONG account. Refusing the flag is the fix (NOT AWS_CONFIG_FILE=/dev/null, which breaks legit SSO setups).
+_PROFILE_REFUSAL = ("--profile is not allowed; pass account=<name> so the platform resolves "
+                    "the target account's credentials.")
+
+
+def profile_flag_token(command: str) -> Optional[str]:
+    """The first token that is (an abbreviation of) --profile, else None. Tolerant split.
+
+    argparse accepts every >=3-char prefix of --profile (--profile/--profil/…/--pro/--pr/--p) and `--prof=x`,
+    even after the subcommand. `--profile-name` (longer) and `--policy-arn` are NOT abbreviations of --profile.
+    """
+    try:
+        toks = shlex.split(command)
+    except ValueError:
+        toks = command.split()
+    for tok in toks:
+        name = tok.split("=", 1)[0].lower()
+        if len(name) >= 3 and "--profile".startswith(name):
+            return tok
+    return None
+
+
+def blocked_pattern_match(command: str, patterns=None) -> Optional[str]:
+    """The blocked pattern `command` matches, else None. Two passes, in order:
+
+    1. raw substring (unchanged) — still flags a pattern quoted in prose (`please run ec2 terminate-instances`);
+    2. pattern_token_match — interleave- and abbreviation-robust, so `aws ec2 --region x terminate-instances`
+       and `--with-decrypt` (abbrev of --with-decryption) no longer slip past the substring check.
+    """
+    if patterns is None:
+        patterns = BLOCKED_PATTERNS
+    low = command.lower()
+    for p in patterns:
+        if p in low:
+            return p
+    from agenticops.services.policy_engine import pattern_token_match
+    return pattern_token_match(command, patterns)
+
 
 def _classify_command(command: str) -> str:
     """Classify a command as 'blocked', 'write', 'readonly', or 'unknown'."""
     cmd_lower = command.lower().strip()
 
-    for pattern in BLOCKED_PATTERNS:
-        if pattern.lower() in cmd_lower:
-            return "blocked"
+    blocked = blocked_pattern_match(command)
+    if blocked:
+        return "blocked"
 
     for prefix in WRITE_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):
@@ -203,6 +244,11 @@ def _execute_aws_cli(command: str, account: str = "") -> str:
     Appends --output json if needed, executes via subprocess, truncates output
     based on settings.cli_max_output_chars (0 = no limit).
     """
+    # Defensive: describe/attach paths reach here without run_aws_cli's front gate. A --profile
+    # would run on the wrong account (aws honours it over the injected frozen creds) — refuse.
+    if profile_flag_token(command) is not None:
+        return _PROFILE_REFUSAL
+
     # Auto-append --output json if not specified
     if "--output" not in command:
         command = f"{command} --output json"
@@ -308,6 +354,14 @@ def run_aws_cli(command: str, require_confirmation: bool = False, account: str =
         if dangerous in command:
             return f"Error: Shell operators ({dangerous}) are not allowed in AWS CLI commands for security reasons."
 
+    # 2b. Refuse --profile before classification: aws honours it over the injected frozen creds and
+    #     would run on the wrong account. Ledger the attempt, then return the actionable fix.
+    if profile_flag_token(command) is not None:
+        from agenticops.services.command_audit import record_command
+        record_command(tool="run_aws_cli", tier="blocked", command=command, outcome="blocked",
+                       reason="profile_flag", account=account)
+        return _PROFILE_REFUSAL
+
     # 3. Classify and enforce security tier — write-tier attempts are ledgered (command_audits)
     tier = _classify_command(command)
     from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
@@ -393,6 +447,13 @@ def run_aws_cli_readonly(command: str, account: str = "") -> str:
     for dangerous in ["|", ";", "&&", "$(", "`", ">", "<"]:
         if dangerous in command:
             return f"Error: Shell operators ({dangerous}) are not allowed in AWS CLI commands for security reasons."
+
+    # 2b. Refuse --profile before classification (same wrong-account risk as run_aws_cli).
+    if profile_flag_token(command) is not None:
+        from agenticops.services.command_audit import record_command
+        record_command(tool="run_aws_cli_readonly", tier="blocked", command=command, outcome="blocked",
+                       reason="profile_flag", account=account)
+        return _PROFILE_REFUSAL
 
     # 3. Must be classified as readonly — reject everything else
     tier = _classify_command(command)

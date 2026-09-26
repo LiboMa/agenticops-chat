@@ -126,7 +126,9 @@ class TestRunAwsCliLedger:
         "aws --output json iam create-user --user-name x",
         "aws --region us-east-1 iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
         "aws --region us-east-1 iam create-access-key --user-name x",
-        "aws --profile p organizations delete-organization",
+        # G12: --profile is now refused by an earlier gate (its own test); --region keeps this the
+        # "interleaved global before the service still blocks the destructive verb" case it was written for.
+        "aws --region us-east-1 organizations delete-organization",
         "aws ec2 terminate-instances --instance-ids i-1",
         "aws iam create-user --user-name x",
         "aws iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
@@ -373,7 +375,8 @@ class TestProviderCliLedger:
         ("aws --region us-east-1 iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
          "iam attach-"),
         ("aws --region us-east-1 iam create-access-key --user-name x", "iam create-access-key"),
-        ("aws --profile p organizations delete-organization", "organizations delete-"),
+        # G12: --profile is refused earlier now (own test); --region preserves the interleaving case.
+        ("aws --region us-east-1 organizations delete-organization", "organizations delete-"),
         ("aws ec2 terminate-instances --instance-ids i-1", "ec2 terminate-instances"),
         ("aws iam create-user --user-name x", "iam create-user"),
         ("aws iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess", "iam attach-"),
@@ -394,6 +397,34 @@ class TestProviderCliLedger:
     def test_provider_reads_with_global_options_are_not_blocked(self, db, monkeypatch, command):
         tool, run, _ = self._tool(monkeypatch)
         assert tool(command) == "{}" and run.called
+
+    # ── G12: --profile refusal + interleave/abbreviation-robust blocking on the provider path ──
+
+    @pytest.mark.parametrize("command", [
+        "aws ec2 describe-instances --profile x",
+        "aws ec2 describe-instances --prof x",
+    ])
+    def test_provider_refuses_profile_flag(self, db, monkeypatch, command):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool(command)
+        assert "--profile is not allowed" in out and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome, row.reason) == \
+               ("provider_aws_cli", "blocked", "blocked", "profile_flag")
+
+    def test_provider_blocks_interleaved_global_before_verb(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool("aws ec2 --region x terminate-instances --instance-ids i-1")
+        assert out == "Error: Blocked dangerous pattern 'ec2 terminate-instances' in command." and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome) == ("provider_aws_cli", "blocked", "blocked")
+
+    def test_provider_blocks_abbreviated_recursive(self, db, monkeypatch):
+        tool, run, _ = self._tool(monkeypatch)
+        out = tool("aws s3 rm s3://b --recurs")
+        assert out == "Error: Blocked dangerous pattern 's3 rm --recursive' in command." and not run.called
+        (row,) = _rows(db)
+        assert (row.tool, row.tier, row.outcome) == ("provider_aws_cli", "blocked", "blocked")
 
     @pytest.mark.parametrize("fault,reason,text", [
         ("no_session", "no_session", "no resolved session for account 'dev'"),

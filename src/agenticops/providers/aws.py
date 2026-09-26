@@ -228,15 +228,22 @@ class AWSProvider(CloudProvider):
             # resolved account and it is NOT confirmation-gated, so every non-readonly attempt
             # is recorded and change_required commands need an approved plan in the Run Context.
             from agenticops.services.command_audit import cli_outcome, guarded_run, record_command
-            from agenticops.tools.aws_cli_tool import _classify_command
+            from agenticops.tools.aws_cli_tool import (_PROFILE_REFUSAL, _classify_command,
+                                                       blocked_pattern_match, profile_flag_token)
 
-            # Blocked pattern check
-            cmd_lower = command.lower()
-            for pattern in BLOCKED_PATTERNS:
-                if pattern.lower() in cmd_lower:
-                    record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
-                                   account=account_name)
-                    return f"Error: Blocked dangerous pattern '{pattern}' in command."
+            # Refuse --profile before anything else: aws honours it over the injected frozen creds and
+            # would run on the WRONG account. Ledger the attempt, then return the actionable fix.
+            if profile_flag_token(command) is not None:
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
+                               reason="profile_flag", account=account_name)
+                return _PROFILE_REFUSAL
+
+            # Blocked pattern check — interleave/abbreviation-robust (matches the main path).
+            blocked = blocked_pattern_match(command, BLOCKED_PATTERNS)
+            if blocked:
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
+                               account=account_name)
+                return f"Error: Blocked dangerous pattern '{blocked}' in command."
 
             def _execute() -> str:
                 cmd = command

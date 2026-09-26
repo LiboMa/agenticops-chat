@@ -497,6 +497,38 @@ def _tokens_match_in_order(pattern_tokens: list[str], command_tokens: list[tuple
     return False
 
 
+def pattern_token_match(command: str, patterns) -> Optional[str]:
+    """The first pattern that matches `command` by TOKENS (no raw substring), else None.
+
+    A pattern's non-dash WORDS must appear in order in the normalised command (_tokens_match_in_order:
+    bare word = whole token, hyphenated word = prefix, option values ineligible) AND its dash FLAGS must
+    each be present among the raw tokens — exactly, or as an argparse ABBREVIATION: a raw token's name (the
+    part before `=`) is a >=3-char prefix of the flag, so `--with-decrypt` matches the pattern flag
+    `--with-decryption`. A word-only pattern ignores flags; a flag-only pattern ignores word order. This is
+    the shared token half of both change_required matching (word-only patterns) and the aws-CLI blocked list
+    (which adds a raw-substring pre-pass of its own), so an interleaved global option
+    (`aws ec2 --region x terminate-instances`) or an abbreviated flag no longer defeats a match.
+    """
+    normalized = _normalize_for_policy(command)
+    try:
+        raw = shlex.split(command or "")
+    except ValueError:
+        raw = (command or "").split()
+    raw_names = [t.split("=", 1)[0].lower() for t in raw]
+    for pattern in patterns:
+        toks = pattern.lower().split()
+        words = [t for t in toks if not t.startswith("-")]
+        flags = [t for t in toks if t.startswith("-")]
+        if not words and not flags:
+            continue
+        if words and not _tokens_match_in_order(words, normalized):
+            continue
+        if not all(any(n == f or (len(n) >= 3 and f.startswith(n)) for n in raw_names) for f in flags):
+            continue
+        return pattern
+    return None
+
+
 class PolicyEngine:
     """Evaluates fix-plan approval policy rules in declaration order."""
 
@@ -739,12 +771,12 @@ class PolicyEngine:
         and `ssh host "sudo systemctl restart nginx"` match `systemctl restart` (and so does a pattern word
         inside quoted prose — a deliberate false refusal, tunable in the yaml, never a false pass). A hyphenated
         pattern token never matches an option VALUE: `aws lambda invoke --function-name update-inventory` is None.
+
+        Delegates to the module-level pattern_token_match (the shared token half): every change_required pattern
+        is word-only, so the flag machinery is inert here and the behaviour is exactly the ordered-subsequence
+        match documented above.
         """
-        command_tokens = _normalize_for_policy(command)
-        for pattern in self.change_required:
-            if _tokens_match_in_order(pattern.lower().split(), command_tokens):
-                return pattern
-        return None
+        return pattern_token_match(command, self.change_required)
 
 
 def validate_policy(data: dict) -> list[str]:
