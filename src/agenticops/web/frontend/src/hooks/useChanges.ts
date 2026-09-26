@@ -1,10 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { ChangeRequest, ChangeRequestCreate, ChangeRequestDetail, FixExecution } from "@/api/types";
+import type { ChangeRequest, ChangeRequestCreate, ChangeRequestDetail, ChangeStatus, FixExecution } from "@/api/types";
 import { isTerminalChange, toQuery, type Period } from "@/lib/plans";
 
-// A type alias, not an interface: only an alias is assignable to toQuery's Record parameter.
-export type ChangeFilters = { status?: string; account_id?: number; requested_by?: string; period?: Period; limit?: number; offset?: number };
+export type ChangeFilters = { status?: ChangeStatus; account_id?: number; requested_by?: string; period?: Period; limit?: number; offset?: number };
+
+/** Every query a change mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
+export const changeMutationKeys = (id: number): QueryKey[] =>
+  [["changes"], ["change", id], ["change-timeline", id], ["fix-plans"], ["plan-stats"]];
 
 export function useChanges(filters: ChangeFilters = {}) {
   return useQuery({
@@ -29,22 +32,27 @@ export function useCreateChange() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ChangeRequestCreate) => apiFetch<ChangeRequest>("/changes", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["changes"] }),
+    // a create changes the list and the counts
+    onSuccess: () => [["changes"], ["plan-stats"]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 
-export type ChangeAction = "approve" | "reject" | "cancel" | "clarify" | "execute" | "review" | "resolve-review";
+// Each action carries exactly the body the backend expects; review/execute take none.
+export type ChangeActionArgs =
+  | { id: number; action: "approve" | "reject" | "cancel"; body: { reason: string } }
+  | { id: number; action: "clarify"; body: { message: string } }
+  | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason?: string } }
+  | { id: number; action: "review" }
+  | { id: number; action: "execute" };
 
 export function useChangeAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action, body }: { id: number; action: ChangeAction; body?: Record<string, unknown> }) =>
-      apiFetch<ChangeRequest | FixExecution>(`/changes/${id}/${action}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["changes"] });
-      qc.invalidateQueries({ queryKey: ["change", vars.id] });
-      qc.invalidateQueries({ queryKey: ["change-timeline", vars.id] });
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-    },
+    mutationFn: (args: ChangeActionArgs) =>
+      apiFetch<ChangeRequest | FixExecution>(`/changes/${args.id}/${args.action}`, {
+        method: "POST",
+        body: "body" in args ? JSON.stringify(args.body) : undefined,
+      }),
+    onSuccess: (_d, vars) => changeMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }

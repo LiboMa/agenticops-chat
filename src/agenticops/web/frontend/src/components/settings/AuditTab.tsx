@@ -52,10 +52,19 @@ const columns: Column<AuditLogEntry>[] = [
 
 const DETAILS_MAX_CHARS = 120;
 
-/** `details` arrives as a dict, and React throws on an object child: "-" for null, a string (legacy rows)
- *  as-is, anything else as JSON cut to DETAILS_MAX_CHARS with the full JSON in the tooltip. */
+/** null, undefined, or an object with no own keys (the ORM default `{}`) — all render as "-". */
+export function isEmptyDetails(details: unknown): boolean {
+  return (
+    details === null ||
+    details === undefined ||
+    (typeof details === "object" && Object.keys(details as object).length === 0)
+  );
+}
+
+/** `details` arrives as a dict, and React throws on an object child: "-" for empty (null/undefined/`{}`),
+ *  a string (legacy rows) as-is, anything else as JSON cut to DETAILS_MAX_CHARS with the full JSON in the tooltip. */
 function DetailsCell({ details }: { details: unknown }) {
-  if (details === null || details === undefined) return <span className="text-sm text-muted-foreground">-</span>;
+  if (isEmptyDetails(details)) return <span className="text-sm text-muted-foreground">-</span>;
   if (typeof details === "string") return <span className="text-sm text-muted-foreground">{details}</span>;
   const json = JSON.stringify(details);
   return (

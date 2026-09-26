@@ -1,9 +1,11 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { FixPlan, PlanKind } from "@/api/types";
 import { toQuery } from "@/lib/plans";
 
-// A type alias, not an interface: only an alias is assignable to toQuery's Record parameter.
+/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
+export const fixPlanMutationKeys = (id: number): QueryKey[] => [["fix-plans"], ["fix-plan", id], ["plan-stats"]];
+
 export type FixPlanFilters = {
   status?: string;
   risk_level?: string;
@@ -38,10 +40,7 @@ export function useApproveFixPlan() {
         method: "PUT",
         body: JSON.stringify({ reason, approved_by }),
       }),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-      qc.invalidateQueries({ queryKey: ["fix-plan", vars.id] });
-    },
+    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 
@@ -53,10 +52,7 @@ export function useRejectFixPlan() {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-      qc.invalidateQueries({ queryKey: ["fix-plan", vars.id] });
-    },
+    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 

@@ -38,7 +38,10 @@ export interface AppSettings {
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };
-type SettingsPatch = Partial<Omit<AppSettings, "agent_models">> & { agent_models?: Record<string, AgentModelPatch> };
+// change_management_enabled and acp_available_backends are read-only: PATCH /api/settings rejects them as
+// unknown keys (400), so they are dropped from the patch shape (they stay readable on AppSettings).
+type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled" | "acp_available_backends">>
+  & { agent_models?: Record<string, AgentModelPatch> };
 
 export function useSettings() {
   return useQuery<AppSettings>({

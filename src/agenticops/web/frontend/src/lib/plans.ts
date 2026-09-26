@@ -4,17 +4,24 @@ import type { ChangeStatus, FixPlanStatus } from "@/api/types";
 // and VALID_PLAN_STATUSES / FIXPLAN_TERMINAL_STATUSES.
 export const CHANGE_STATUSES = ["draft", "under_review", "needs_clarification", "planned", "approved", "executing",
   "needs_review", "completed", "failed", "rolled_back", "rejected", "cancelled"] as const satisfies readonly ChangeStatus[];
-export const CHANGE_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "rolled_back", "rejected", "cancelled"]);
-export const isTerminalChange = (s: string | undefined | null) => !!s && CHANGE_TERMINAL_STATUSES.has(s);
+// Built from the element type so a misspelt member fails to compile; widen only at the .has call for plain strings.
+export const CHANGE_TERMINAL_STATUSES: ReadonlySet<ChangeStatus> =
+  new Set<ChangeStatus>(["completed", "failed", "rolled_back", "rejected", "cancelled"]);
+export const isTerminalChange = (s: string | undefined | null) =>
+  !!s && (CHANGE_TERMINAL_STATUSES as ReadonlySet<string>).has(s);
+/** The pure non-terminal -> terminal transition rule (node-testable); the timeline hook refetches once on it. */
+export const becameTerminalChange = (prev: string | undefined, next: string | undefined) =>
+  isTerminalChange(next) && !isTerminalChange(prev);
 
 export const PLAN_STATUSES = ["draft", "pending_approval", "approved", "executing", "executed", "failed", "rejected"] as const satisfies readonly FixPlanStatus[];
-export const PLAN_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["executed", "failed", "rejected"]);
+export const PLAN_TERMINAL_STATUSES: ReadonlySet<FixPlanStatus> =
+  new Set<FixPlanStatus>(["executed", "failed", "rejected"]);
 
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */
-export function toQuery(params: Record<string, string | number | undefined | null>): string {
+export function toQuery<T extends { [K in keyof T]: string | number | undefined | null }>(params: T): string {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") qs.set(key, String(value));
