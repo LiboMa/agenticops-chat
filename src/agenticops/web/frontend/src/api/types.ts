@@ -728,10 +728,11 @@ export interface SearchResultItem {
   id: number;
   title: string;
   subtitle: string;
-  entity_type: "issue" | "fix_plan" | "report" | "resource";
+  entity_type: "issue" | "fix_plan" | "report" | "resource" | "change_request" | "change_plan";
   status?: string;
   severity?: string;
   report_type?: string;
+  // For a change_plan item, parent_id is the owning change request id.
   parent_id?: number;
   updated_at?: string;
   created_at?: string;
@@ -741,9 +742,13 @@ export interface SearchResponse {
   query: string;
   results: {
     issues: SearchResultItem[];
+    // A change plan arrives in the fix_plans group as entity_type "change_plan"
+    // (with parent_id = change request id); ordinary plans stay "fix_plan".
     fix_plans: SearchResultItem[];
     reports: SearchResultItem[];
     resources: SearchResultItem[];
+    // Only present when the backend's change-search flag is on.
+    change_requests?: SearchResultItem[];
   };
 }
 
