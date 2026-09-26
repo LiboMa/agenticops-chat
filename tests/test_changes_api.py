@@ -597,3 +597,14 @@ def test_cancel_change_execution_authorizes_on_change_execute(client):
         assert rows[0].details["plan_kind"] == "change" and rows[0].details["execution_id"] == ex_id
     finally:
         s.close()
+
+
+# ── G15 FR-5: the create schema caps free-text inputs (422 before the service) ──
+
+def test_create_rejects_oversized_inputs_at_the_schema(client):
+    """FR-5: ChangeRequestCreate caps description/justification/targets, so an over-cap body is a 422 at
+    schema validation and the service is never entered (no notify patch needed). On BASE it had no caps."""
+    assert client.post("/api/changes", json={"title": "t", "description": "x" * 8001}).status_code == 422
+    assert client.post("/api/changes", json={"title": "t", "description": "d", "justification": "y" * 2001}).status_code == 422
+    assert client.post("/api/changes", json={"title": "t", "description": "d", "targets": [f"i-{i}" for i in range(21)]}).status_code == 422
+    assert client.post("/api/changes", json={"title": "t", "description": "d", "targets": ["z" * 201]}).status_code == 422

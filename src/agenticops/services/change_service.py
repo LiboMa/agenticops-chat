@@ -249,6 +249,17 @@ def create_change_request(
     if not title or not description:
         raise ChangeValidationError("title and description are required")
     hints = [str(t).strip() for t in (targets or []) if str(t).strip()]
+    # Bound the free-text inputs at intake so a client cannot store an unbounded blob (the web schema mirrors
+    # these, rejecting an over-cap body with a 422 before we are even called). NOTE: clarify() may later grow
+    # `description` past this cap — appended clarifications are additive and intentionally not re-validated.
+    if len(description) > 8000:
+        raise ChangeValidationError("description too long (max 8000 characters)")
+    if len(justification or "") > 2000:
+        raise ChangeValidationError("justification too long (max 2000 characters)")
+    if len(hints) > 20:
+        raise ChangeValidationError("too many targets (max 20)")
+    if any(len(h) > 200 for h in hints):
+        raise ChangeValidationError("target too long (max 200 characters each)")
 
     trace_id = get_trace_id() or generate_trace_id()
     with _session() as s:
@@ -843,8 +854,32 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
 
     if decision.action == "auto_approve" and settings.change_auto_approve_standard:
         auto = agent_actor("auto-pipeline")
-        globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)")
-        globals()["request_execution"](cr_id, actor=auto)
+        try:
+            globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)")
+        except Exception:
+            # The auto-approve() itself failed (a lost claim, an audit-write error): the CR is still 'planned'.
+            # Do not propagate — a review must not 500 because auto-approval could not fire. Fall back to the
+            # human gate (the change simply waits for a person to approve it), exactly the non-auto path below.
+            logger.warning("auto-approve of ChangeRequest #%s failed — it stays planned for a human approver",
+                           cr_id, exc_info=True)
+            try:
+                notify_change_pending_approval(snap, plan_dict)
+            except Exception:
+                logger.debug("notify_change_pending_approval failed", exc_info=True)
+            return get_change(cr_id)
+        try:
+            globals()["request_execution"](cr_id, actor=auto)
+        except Exception:
+            # Approved but not enqueued (executor disabled, a lost claim): the APPROVAL is durable — never roll
+            # it back. The change waits at 'approved' for an enabled executor / a human execute, and we surface
+            # the gap as an attention-needing notification rather than losing the approval to an exception.
+            logger.warning("auto-approved ChangeRequest #%s but could not enqueue execution — it waits at approved",
+                           cr_id, exc_info=True)
+            try:
+                notify_change_result(get_change(cr_id), "execution_not_queued")
+            except Exception:
+                logger.debug("notify_change_result failed", exc_info=True)
+            return get_change(cr_id)
         return get_change(cr_id)
 
     try:
@@ -969,6 +1004,8 @@ def clarify(cr_id: int, *, actor: Actor, message: str) -> dict:
         if cr.status != "needs_clarification":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not awaiting clarification")
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        # Appending the (4000-char-capped) answer can push the stored description past the 8000-char intake
+        # cap — this is intentional: clarifications are additive answers to the review, not fresh input.
         cr.description = f"{cr.description}\n\n--- Clarification ({stamp}, {actor.key}) ---\n{message[:4000]}"
         _audit(s, Actions.CHANGE_CLARIFIED, cr, actor, details={"message": message[:500]})
         snap = to_dict(cr)

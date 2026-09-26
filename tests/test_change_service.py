@@ -705,3 +705,30 @@ class TestClarifyAuthz:
             out = cs.clarify(cid, actor=ALICE, message="the instance is i-0abc")
         assert "the instance is i-0abc" in out["description"]
         sr.assert_called_once_with(cid, sync=False)  # only the owner's successful clarify restarts the review
+
+
+# ── G15 FR-5: create_change_request bounds its free-text inputs ────────────────
+
+def test_create_change_request_bounds_free_text(db):
+    """FR-5: create_change_request caps description (8000), justification (2000), target count (20) and
+    per-target length (200); the boundary value is accepted, one over raises. On BASE all are unbounded."""
+    from agenticops.services import change_service as cs
+
+    def _mk(**kw):
+        args = dict(source="cli", actor=cli_actor(), title="t", description="d", start_review=False)
+        args.update(kw)
+        with patch.object(cs, "notify_change_requested"):
+            return cs.create_change_request(**args)
+
+    _mk(description="x" * 8000)                               # at the cap: accepted
+    with pytest.raises(cs.ChangeValidationError):
+        _mk(description="x" * 8001)
+    _mk(justification="y" * 2000)
+    with pytest.raises(cs.ChangeValidationError):
+        _mk(justification="y" * 2001)
+    _mk(targets=[f"i-{i}" for i in range(20)])
+    with pytest.raises(cs.ChangeValidationError):
+        _mk(targets=[f"i-{i}" for i in range(21)])
+    _mk(targets=["z" * 200])                                 # at the cap: accepted
+    with pytest.raises(cs.ChangeValidationError):
+        _mk(targets=["z" * 201])

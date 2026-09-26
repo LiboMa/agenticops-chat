@@ -323,3 +323,64 @@ class TestKillSwitch:
         assert out["status"] == "completed"
         db.expire_all()
         assert db.get(ChangeRequest, cr_id).status == "completed"
+
+
+# ── G15 FR-3: the auto-approve branch of submit_review is durable ──────────────
+
+def _under_review_with_draft_l1_plan(db):
+    """A CR at 'under_review' with a grounded target and a draft L1 change plan — the exact state
+    submit_review consumes. Unlike _planned it does NOT call submit_review, so the caller drives the
+    auto-approve branch itself (with the settings it wants)."""
+    from agenticops.services import change_service as cs
+    with patch.object(cs, "notify_change_requested"):
+        cr = cs.create_change_request(source="web", actor=ALICE, title="tag", description="add Env=prod",
+                                      account_name="dev", targets=["i-0abc"], start_review=False)
+    with cs._session() as s:
+        cs.transition_change(s.get(ChangeRequest, cr["id"]), "under_review")
+    cs.ground_targets(cr["id"])
+    plan = FixPlan(plan_kind="change", change_request_id=cr["id"], risk_level="L1", title="p", summary="s",
+                   steps=[{"action": "tag", "command": "aws ec2 create-tags"}], rollback_plan={"steps": ["aws ec2 delete-tags"]},
+                   post_checks=[{"check": "tag present", "command": "aws ec2 describe-tags"}], status="draft")
+    db.add(plan); db.commit()
+    return cr["id"], plan.id
+
+
+class TestAutoApproveDurability:
+    """FR-3: a standard-change auto-approve must survive a failed enqueue or a failed approve. The approval
+    is durable and submit_review never errors out — on BASE the exception propagates straight through it."""
+
+    def test_disabled_executor_leaves_the_change_approved_and_notifies(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _under_review_with_draft_l1_plan(db)
+        with patch.object(settings, "change_auto_approve_standard", True), \
+             patch.object(settings, "executor_enabled", False), \
+             patch.object(cs, "notify_change_pending_approval") as pending, \
+             patch.object(cs, "notify_change_result") as result:
+            out = cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
+                                   reasons=["ok"], actor=agent_actor("sre"))
+        assert isinstance(out, dict)                        # no ChangeStateError escaped submit_review
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "approved"   # approval is durable, the change waits
+        assert db.query(FixExecution).count() == 0                 # nothing was enqueued
+        assert [c.args[1] for c in result.call_args_list] == ["execution_not_queued"]
+        pending.assert_not_called()
+
+    def test_failed_auto_approve_falls_back_to_the_human_gate(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _under_review_with_draft_l1_plan(db)
+        with patch.object(settings, "change_auto_approve_standard", True), \
+             patch.object(settings, "executor_enabled", True), \
+             patch.object(cs, "approve", side_effect=cs.ChangeStateError("lost the claim")) as approve, \
+             patch.object(cs, "notify_change_pending_approval") as pending, \
+             patch.object(cs, "notify_change_result") as result:
+            out = cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
+                                   reasons=["ok"], actor=agent_actor("sre"))
+        assert isinstance(out, dict)                        # no exception escaped
+        approve.assert_called_once()
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "planned"    # stays planned for a human approver
+        assert db.query(FixExecution).count() == 0
+        pending.assert_called_once()                        # fell back to the pending-approval notification
+        result.assert_not_called()

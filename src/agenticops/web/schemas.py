@@ -5,7 +5,7 @@ routers a dependency-leaf module to import from (avoids app<->router import cycl
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -803,12 +803,14 @@ class AuditLogResponse(BaseModel):
 
 
 class ChangeRequestCreate(BaseModel):
+    # Caps mirror change_service.create_change_request so an over-cap body is 422 at validation, before
+    # the service is entered (title 300 / description 8000 / justification 2000 / 20 targets, 200 chars each).
     title: str = Field(..., min_length=1, max_length=300)
-    description: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1, max_length=8000)
     account_name: Optional[str] = None
-    targets: List[str] = Field(default_factory=list)
+    targets: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
     requested_change_type: str = Field("normal", pattern="^(normal|emergency)$")
-    justification: str = ""
+    justification: str = Field("", max_length=2000)
 
 
 class ChangeRequestResponse(BaseModel):

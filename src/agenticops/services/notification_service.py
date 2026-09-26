@@ -273,7 +273,7 @@ def notify_execution_result(
 
 
 def _change_severity(risk_level, outcome: str | None = None) -> str:
-    if outcome in ("failed", "rolled_back", "review_failed", "needs_review"):
+    if outcome in ("failed", "rolled_back", "review_failed", "needs_review", "execution_not_queued"):
         return "high"
     return {"L0": "low", "L1": "low", "L2": "medium", "L3": "high"}.get(risk_level or "", "medium")
 
@@ -313,7 +313,7 @@ def notify_change_pending_approval(cr: dict, plan: dict) -> None:
 
 def notify_change_result(cr: dict, outcome: str) -> None:
     """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
-    rejected / needs_clarification / review_failed)."""
+    rejected / needs_clarification / review_failed / execution_not_queued)."""
     notify_event(
         "change_result",
         f"[CHANGE] Change #{cr['id']} {outcome.upper()}: {cr['title']}",
