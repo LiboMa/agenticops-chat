@@ -1515,6 +1515,21 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
         if not execution:
             return f"FixExecution #{execution_id} not found."
 
+        # Only a finished run of this issue's plan: after a refused late save (a cancel won the ticket) the run
+        # is aborted and its plan failed, yet the executor still calls this tool.
+        plan = session.query(FixPlan).filter_by(id=execution.fix_plan_id).first()
+        if (execution.status != "succeeded" or plan is None or plan.status != "executed"
+                or plan.health_issue_id != health_issue_id):
+            if plan is None:
+                plan_state = "missing"
+            else:
+                owner = (f"HealthIssue #{plan.health_issue_id}" if plan.health_issue_id
+                         else f"change request C#{plan.change_request_id}")
+                plan_state = f"'{plan.status}' (for {owner})"
+            return (f"REJECTED: FixExecution #{execution_id} is '{execution.status}' and its FixPlan "
+                    f"#{execution.fix_plan_id} is {plan_state} — only a succeeded run of HealthIssue "
+                    f"#{health_issue_id}'s executed plan marks it fix_executed.")
+
         old_status = issue.status
 
         # If already auto-resolved by save_execution_result(), don't overwrite

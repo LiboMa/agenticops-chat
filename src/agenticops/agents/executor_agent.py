@@ -199,6 +199,12 @@ def executor_agent(fix_plan_id: int) -> str:
             with get_db_session() as db:
                 plan_for_acct = db.query(FixPlan).filter_by(id=fix_plan_id).first()
                 account_id = None
+                if plan_for_acct is None:
+                    # A plan row that reads as missing is treated like a failed read (the except branch below).
+                    from agenticops.run_context import get_run_context
+                    rc_cr = get_run_context().change_request_id
+                    if bound_change is None and rc_cr:
+                        bound_change = f"C#{rc_cr}"
                 if plan_for_acct and plan_for_acct.health_issue_id:
                     issue = db.query(HealthIssue).filter_by(id=plan_for_acct.health_issue_id).first()
                     account_id = issue.account_id if issue else None

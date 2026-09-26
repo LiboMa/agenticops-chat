@@ -4,10 +4,11 @@ A queued run closes its own FixExecution ticket in place, so there is one row pe
 returns without recording its result, a cancel and a timeout fail the ticket, its plan and, for a change plan,
 the change request. save_execution_result refuses another plan's result and a change plan outside its queued
 run. A change plan whose account is bound but cannot be resolved is refused before any model is built.
+mark_fix_executed marks an issue only for a succeeded run of that issue's executed plan.
 """
 import json
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -412,6 +413,31 @@ def test_a_change_whose_request_row_is_missing_is_refused(db):
     assert not cli_tool.called and not agent_cls.called and not model_cls.called
 
 
+def test_a_change_run_whose_plan_row_reads_as_missing_is_refused(db):
+    """A plan row that reads as missing is treated like a failed read: the Run Context names the change request,
+    so the run is refused rather than handed the fallback tools."""
+    from agenticops.agents.executor_agent import executor_agent
+    missing = 9999
+    assert db.get(FixPlan, missing) is None
+    with _executor_build() as (agent_cls, model_cls, cli_tool), _in_run(missing, 7, None):
+        out = executor_agent(fix_plan_id=missing)
+    assert out.startswith("REJECTED: cannot resolve credentials for the account of change request C#7")
+    assert out == _account_refusal(7)
+    assert not cli_tool.called and not agent_cls.called and not model_cls.called
+
+
+def test_a_run_whose_plan_row_reads_as_missing_without_a_change_request_is_unchanged(db):
+    """No change request in the Run Context (a fix-plan run, or no queued run at all): the fallback, as before."""
+    from agenticops.agents.executor_agent import executor_agent
+    missing = 9999
+    for run in (_in_run(missing, None, None), nullcontext()):
+        with _executor_build() as (agent_cls, _, cli_tool), run:
+            out = executor_agent(fix_plan_id=missing)
+        assert out == "done" and agent_cls.call_count == 1 and not cli_tool.called
+        tools = agent_cls.call_args.kwargs["tools"]
+        assert run_aws_cli in tools and run_aws_cli_readonly in tools
+
+
 def test_a_change_with_no_account_uses_the_account_addressed_tools(db):
     from agenticops.agents.executor_agent import executor_agent
     cr_id, pid, ex_id = _change_run(db, account=False)
@@ -539,12 +565,22 @@ def _cancel_after_saves_read(ex_id):
         yield
 
 
-def test_a_cancel_inside_a_change_runs_save_wins_and_the_save_is_refused(db):
+def _late_result_logged(caplog, ex_id, pid, status):
+    """The lost compare-and-set's WARNING: the only record of the discarded late result."""
+    want = (f"save_execution_result: Execution #{ex_id} for FixPlan #{pid} is no longer running — "
+            f"the agent's '{status}' result was not recorded")
+    return [r.levelno for r in caplog.records
+            if r.name == "agenticops.tools.metadata_tools" and r.getMessage() == want] == [logging.WARNING]
+
+
+def test_a_cancel_inside_a_change_runs_save_wins_and_the_save_is_refused(db, caplog):
     from agenticops.tools.metadata_tools import save_execution_result
     cr_id, pid, ex_id = _change_run(db)
-    with _in_run(pid, cr_id, ex_id), _cancel_after_saves_read(ex_id):
+    with caplog.at_level(logging.WARNING, logger="agenticops.tools.metadata_tools"), \
+         _in_run(pid, cr_id, ex_id), _cancel_after_saves_read(ex_id):
         out = save_execution_result(fix_plan_id=pid, status="succeeded", post_check_results=PASSED)
     assert out == _refused_late(ex_id, pid)
+    assert _late_result_logged(caplog, ex_id, pid, "succeeded")
     db.expire_all()
     [ex] = db.query(FixExecution).filter_by(fix_plan_id=pid).all()  # no second row
     assert ex.id == ex_id and ex.status == "aborted" and ex.error_message == "Cancelled by operator"
@@ -552,12 +588,14 @@ def test_a_cancel_inside_a_change_runs_save_wins_and_the_save_is_refused(db):
     assert len(_audits(db, "change.failed")) == 1 and _audits(db, "change.completed") == []
 
 
-def test_a_cancel_inside_a_fix_runs_save_wins_and_the_save_is_refused(db):
+def test_a_cancel_inside_a_fix_runs_save_wins_and_the_save_is_refused(db, caplog):
     from agenticops.tools.metadata_tools import save_execution_result
     issue_id, pid, ex_id = _fix_run(db)
-    with _in_run(pid, None, ex_id), _cancel_after_saves_read(ex_id):
+    with caplog.at_level(logging.WARNING, logger="agenticops.tools.metadata_tools"), \
+         _in_run(pid, None, ex_id), _cancel_after_saves_read(ex_id):
         out = save_execution_result(fix_plan_id=pid, health_issue_id=issue_id, status="succeeded")
     assert out == _refused_late(ex_id, pid)
+    assert _late_result_logged(caplog, ex_id, pid, "succeeded")
     db.expire_all()
     [ex] = db.query(FixExecution).filter_by(fix_plan_id=pid).all()  # no second row
     assert ex.id == ex_id and ex.status == "aborted"
@@ -617,3 +655,67 @@ def test_the_ticket_closes_scrub_secrets_as_the_orm_write_does(db):
     for ex_id in (ex_a, ex_b):
         ex = db.get(FixExecution, ex_id)
         assert ex.status == "failed" and akid not in f"{ex.step_results} {ex.error_message}"
+
+
+# ── mark_fix_executed: only a succeeded run of the issue's executed plan ─────
+
+def _mark(db, issue_id, ex_id):
+    """mark_fix_executed's result and the issue's status afterwards."""
+    from agenticops.tools.metadata_tools import mark_fix_executed
+    out = mark_fix_executed(health_issue_id=issue_id, execution_id=ex_id)
+    db.expire_all()
+    return out, db.get(HealthIssue, issue_id).status
+
+
+def test_mark_fix_executed_refuses_a_run_a_cancel_aborted(db):
+    """After a refused late save (the cancel won) the ticket is aborted and the plan failed; the executor still
+    calls mark_fix_executed, and the issue must not read fix_executed."""
+    issue_id, pid, ex_id = _fix_run(db, plan_status="failed", ticket_status="aborted")
+    before = _snapshot(db, pid, None, ex_id)
+    out, status = _mark(db, issue_id, ex_id)
+    assert out == (f"REJECTED: FixExecution #{ex_id} is 'aborted' and its FixPlan #{pid} is 'failed' "
+                   f"(for HealthIssue #{issue_id}) — only a succeeded run of HealthIssue #{issue_id}'s executed "
+                   f"plan marks it fix_executed.")
+    assert status == "fix_approved" and _snapshot(db, pid, None, ex_id) == before
+
+
+@pytest.mark.parametrize("plan_status, ticket_status", [
+    ("executed", "failed"),      # the run failed (the plan was executed by another run)
+    ("executing", "succeeded"),  # the plan is not executed
+], ids=["failed-run", "plan-not-executed"])
+def test_mark_fix_executed_refuses_an_unfinished_run(db, plan_status, ticket_status):
+    issue_id, pid, ex_id = _fix_run(db, plan_status=plan_status, ticket_status=ticket_status)
+    before = _snapshot(db, pid, None, ex_id)
+    out, status = _mark(db, issue_id, ex_id)
+    assert out.startswith(f"REJECTED: FixExecution #{ex_id} is '{ticket_status}' and its FixPlan #{pid} is "
+                          f"'{plan_status}'")
+    assert status == "fix_approved" and _snapshot(db, pid, None, ex_id) == before
+
+
+def test_mark_fix_executed_refuses_another_issues_run(db):
+    owner_id, pid, ex_id = _fix_run(db, plan_status="executed", ticket_status="succeeded")
+    other_id, _, _ = _fix_run(db, plan_status="approved", ticket_status=None)
+    before = _snapshot(db, pid, None, ex_id)
+    out, status = _mark(db, other_id, ex_id)
+    assert out == (f"REJECTED: FixExecution #{ex_id} is 'succeeded' and its FixPlan #{pid} is 'executed' "
+                   f"(for HealthIssue #{owner_id}) — only a succeeded run of HealthIssue #{other_id}'s executed "
+                   f"plan marks it fix_executed.")
+    assert status == "fix_approved" and _snapshot(db, pid, None, ex_id) == before
+    assert db.get(HealthIssue, owner_id).status == "fix_approved"
+
+
+def test_mark_fix_executed_marks_a_succeeded_run_of_the_issues_executed_plan(db):
+    issue_id, pid, ex_id = _fix_run(db, plan_status="executed", ticket_status="succeeded")
+    out, status = _mark(db, issue_id, ex_id)
+    assert out == f"HealthIssue #{issue_id} status: fix_approved -> fix_executed. Execution #{ex_id} recorded."
+    assert status == "fix_executed"
+
+
+def test_mark_fix_executed_leaves_an_auto_resolved_issue_alone(db):
+    issue_id, pid, ex_id = _fix_run(db, plan_status="executed", ticket_status="succeeded")
+    db.get(HealthIssue, issue_id).status = "resolved"
+    db.commit()
+    out, status = _mark(db, issue_id, ex_id)
+    assert out == (f"HealthIssue #{issue_id} already auto-resolved. Execution #{ex_id} recorded. "
+                   f"No status change needed.")
+    assert status == "resolved"
