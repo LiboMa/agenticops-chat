@@ -22,6 +22,7 @@ AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM 
 | 技能广域加载 + 脚本沙箱 | 2.5.0 追加 | URL / git / zip 导入 → 一律草稿 + 溯源戳；整包安全扫描（`.py` ast 绑定解析 / `.sh` 逐行）；无凭证无网络的脚本沙箱（拿不到隔离器就拒跑，默认关）；Skills 页导入器 | `skills/sources.py`、`skills/security.py`、`skills/sandbox.py`，`web/routers/skills.py`，前端 `pages/Skills.tsx` | 同上「追加交付」；`skills/ADDING_SKILLS.md` |
 | 模型层 | 2.5.0 | Claude 5 家族（单段版本号 `claude-opus-5`）+ Bedrock 上的 OpenAI 模型；Anthropic 专属特性（prompt cache、扩展思考）按模型族门控，唯一真源 `preamble.bedrock_model_kwargs` | `agents/preamble.py`，`config.py` | `CLAUDE.md` Architecture |
 | Web 路由拆分 | 2.5.0 合流 | `app.py` 的 webhooks / schedules / skills 路由抽到 `web/routers/`，`web/schemas.py` 独立成叶子模块；死掉的 `@app.on_event` 移除（lifespan 已覆盖）；227 条路由 | `web/routers/*.py`，`web/schemas.py` | `designs/APP_ROUTER_SPLIT_PLAN.md` |
+| 变更管理（Change / ITSM） | 2.6.0 | 日常变更走 Main → SRE 合法性审核（只读 Mode C）→ 审批 → Executor，**不建 HealthIssue**；一张 Plan 表两来源（`fix_plans.plan_kind` fix\|change + `ck_fix_plans_origin` CHECK）+ `change_requests` 12 态工单；RBAC 影子模式（审批人身份绑定 + 结构化 SoD）；两本账（`audit_logs` 决策 + `command_audits` 命令）+ `/api/plans/stats`。**后端 + 前端已实现，真实 E2E 待与主人联合验证** | `services/change_service.py`、`tools/change_tools.py`、`auth/`、`web/routers/{changes,plans,audit}.py`，前端 `pages/PlansAndChanges.tsx`、`pages/ChangeDetail.tsx`、`components/plans/` | `MVP-2.6.0-RELEASE.md` |
 
 ---
 

@@ -28,10 +28,11 @@ Web Dashboard ──────┘         │
                               └──► Agent Skills (SKILL.md packages) — 15 domain skills
 ```
 
-- **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions
+- **Agents-as-tools**: Main agent routes to 6 specialist sub-agents exposed as `@tool` functions. SRE gains a read-only Mode C (change review) exposed to Main as `review_change`; Main gains 5 change tools; no new agent (MVP-2.6.0)
 - **Tiered models**: `bedrock_model_id` (default Sonnet 4.6 — mid tier for router/executor), `bedrock_model_id_cheap` (Haiku 4.5), `bedrock_model_id_strong` (Opus 4.6). Per-agent overrides live in `config/settings.yaml` (`agent_*_model_id`) and win over tier defaults — the committed defaults run main on **Opus 5**, sre on **Fable 5.1**, rca/executor on Opus 4.6, scan/detect/reporter on Sonnet 4.6. **Claude 5 family**: Opus 5 / Sonnet 5 / Fable 5.1 are `INFERENCE_PROFILE`-only (reach them as `global.anthropic.*`). Their **single-segment version ids** (`claude-opus-5`, no minor) are handled by the cost-key and picker-label regexes and by `MODEL_WINDOW_DEFAULTS` — a family missing there silently bills $0 and falls back to the global window. `MODEL_WINDOW_DEFAULTS` matching is first-substring-wins, so a specific family must precede its prefix (`claude-fable-5-1` before `claude-fable-5`); `tests/test_claude5_bedrock_models.py` pins this. **Multi-provider**: OpenAI (ChatGPT-family) Bedrock models are first-class — dynamic listing covers Anthropic + OpenAI (`gpt-oss-*` ON_DEMAND raw ids; `gpt-5.6-*` via `global.openai.*` inference profiles); Anthropic-only request features (prompt-cache cachePoints, extended thinking) are capability-gated per model family in `agents/preamble.bedrock_model_kwargs` and never sent to non-Claude models.
 - **Extended-thinking request shape is model-dependent** (`agents/preamble.supports_adaptive_thinking`, keyed on the version parsed from the model id): Claude **≥ 4.6** takes adaptive thinking — `{"thinking":{"type":"adaptive"},"output_config":{"effort":"low|medium|high|xhigh|max"}}` — and **400s on the legacy `budget_tokens`** field; Claude **< 4.6** (Haiku 4.5 and older) is the reverse, rejecting `adaptive`. `thinking_fields_for_budget(budget, max_tokens, model_id)` therefore takes the model id as a **required** argument: the shapes are mutually exclusive and guessing wrong fails the request rather than degrading. The budget stays the internal currency (so MVP-2.2.1 escalation is unchanged) and maps to an effort tier: 2048 low, 4096 medium, 8192 high, 12288 xhigh, above that max. Non-Anthropic ids keep the `budget_tokens` shape on purpose — that is what `bedrock_model_kwargs` reads to build their native `reasoning_effort`.
 - **Auto-fix pipeline**: HealthIssue → RCA → post-RCA quality gate (evidence check → critic → confidence ≥ 0.6) → SRE → Approve(L0/L1) → Execute → Resolve. Low-confidence/refuted RCA → `needs_review`, no auto-fix
+- **Change Management (ITSM, MVP-2.6.0)**: routine changes flow ChangeRequest → SRE legitimacy review (Mode C, read-only) → policy → approval → Executor, with **NO HealthIssue**. One Plan table two origins (`fix_plans.plan_kind` = `fix`|`change`, mutually-exclusive `ck_fix_plans_origin` CHECK) + a `change_requests` ticket; two code-level state-machine validators; CR terminal state is written ONLY by `on_execution_result`. All change tools are gated by `change_management_enabled` and injected in lockstep with the prompt (an agent never sees a tool it cannot use). Approve/reject is a HUMAN action (Web/CLI) — never an agent
 - **Signal Gate (MVP-2.2.0)**: ALL issue creation (webhook/agent/REST) flows through `services/signal_gate.process_signal` — L1 deterministic rules (fingerprint-v2 = account|provider|resource|issue_type|upstream-key, flapping, cooldown, resource+type merge) + L2 cheap-LLM gray-zone judge (merge-or-new ONLY, never noise, fail-open). Every event = one auditable Signal row (`alert_events`); `GET /api/signals` + promote endpoint
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)
@@ -68,10 +69,11 @@ Web Dashboard ──────┘         │
 | Module | Key Files | Purpose |
 |--------|-----------|---------|
 | `cli/` | `main.py`, `context.py`, `display.py`, `formatters.py`, `init_helpers.py` | CLI entry, chat loop, slash commands, init wizard |
-| `web/` | `app.py`, `session_manager.py`, `routers/cost.py` | FastAPI (~70 endpoints), per-session agents, SSE streaming; concurrent chat sessions via frontend `chatStream` store; cursor-paginated + virtualized history; `GET /api/cost/summary` (real-time token/cost aggregation); unified Settings **Messaging** tab via `/api/messaging/*` (facade over channels.yaml + im-apps.yaml + NotificationLog; old `/api/notifications/*` + `/api/settings/{channels,im-apps}` deprecated) |
+| `web/` | `app.py`, `session_manager.py`, `routers/{cost,changes,plans,audit}.py` | FastAPI (~70 endpoints), per-session agents, SSE streaming; concurrent chat sessions via frontend `chatStream` store; cursor-paginated + virtualized history; `GET /api/cost/summary` (real-time token/cost aggregation); unified Settings **Messaging** tab via `/api/messaging/*` (facade over channels.yaml + im-apps.yaml + NotificationLog; old `/api/notifications/*` + `/api/settings/{channels,im-apps}` deprecated). **Change Management (MVP-2.6.0)**: `routers/{changes,plans,audit}.py` — `/api/changes/*` lifecycle, `/api/plans/stats`, `/api/audit*` + `/api/command-audits`; FixPlan endpoints hardened (approve takes the session actor + optional reason, new reject, `PUT` drops status/approved_by, list `kind` filter); global search gains a `change_requests` group |
 | `agents/` | `main_agent.py`, `scan_agent.py`, `detect_agent.py`, `rca_agent.py`, `sre_agent.py`, `executor_agent.py`, `reporter_agent.py` | 7 agents (1 router + 6 specialists) |
-| `tools/` | `metadata_tools.py`, `aws_cli_tool.py` | Agent tools: DB CRUD, AWS CLI wrapper |
-| `services/` | `pipeline_service.py`, `rca_service.py`, `rca_quality.py`, `signal_gate.py`, `notification_service.py`, `pipeline_events.py`, `resolution_service.py`, `executor_service.py`, `cost_service.py` | Auto-fix pipeline, auto-RCA + post-RCA quality gate (evidence check → critic → confidence gate), **Signal Gate** (unified dedup/noise judgment for ALL issue-creation paths: L1 deterministic rules + L2 gray-zone LLM merge-only), notifications, event timeline, token/cost aggregation |
+| `tools/` | `metadata_tools.py`, `aws_cli_tool.py`, `change_tools.py` | Agent tools: DB CRUD, AWS CLI wrapper, Main-agent change tools (`request_change`/`get_change_request`/`list_change_requests`/`execute_change`) |
+| `services/` | `pipeline_service.py`, `rca_service.py`, `rca_quality.py`, `signal_gate.py`, `notification_service.py`, `pipeline_events.py`, `resolution_service.py`, `executor_service.py`, `cost_service.py`, `change_service.py`, `command_audit.py`, `plan_stats_service.py` | Auto-fix pipeline, auto-RCA + post-RCA quality gate (evidence check → critic → confidence gate), **Signal Gate** (unified dedup/noise judgment for ALL issue-creation paths: L1 deterministic rules + L2 gray-zone LLM merge-only), notifications, event timeline, token/cost aggregation. **Change Management (MVP-2.6.0)**: `change_service` owns the ChangeRequest state machine + transactions (create→review→approve→execute→terminal, optimistic-locked); `command_audit` fail-soft ledger of write-tier tool commands (`command_audits`); `plan_stats_service` pure aggregation behind `GET /api/plans/stats` |
+| `auth/` | `actor.py`, `authz.py`, `service.py`, `models.py` | Identity + authorization (MVP-2.6.0): `Actor` resolution from the authenticated session (six kinds: `user:`/`web:anonymous`/`cli:`/`agent:`/`im:`/`webhook:`); single `authz.check(actor, permission, subject=)` against `config/rbac.yaml` (permission→`users.permissions` flags + structured SoD/ownership rules). **Shadow mode** default (`rbac_enforce=false`): denials audited as `authz.denied_shadow`, request allowed; `enforce: always` rules bite even in shadow. Approvers are identity-bound (never client-supplied) |
 | `cost.py` | — | Pure token→USD cost computation via `config.token_cost_table`; `compute_cost(model, tokens)` never raises |
 | `models.py` | — | SQLAlchemy models: HealthIssue, FixPlan, RCAResult, Report, etc. |
 | `config.py` | — | Pydantic-settings config (`AIOPS_` env prefix) |
@@ -233,13 +235,29 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `command_audit_enabled` | `true` | Tool-layer ledger of write-tier command attempts (command_audits); read-only commands are not recorded |
 | `rbac_enforce` | `false` | Enforce `config/rbac.yaml` (403 + SoD). False = shadow mode: denials audited as `authz.denied_shadow`, request allowed. Meaningful only with `api_auth_enabled=true`; the anonymous web actor is exempt from SoD |
 | `rbac_file` | `config/rbac.yaml` | Permission matrix (permission → required `users.permissions` flags) + built-in subjects + structured SoD rules |
-| `change_management_enabled` | `true` | Enable the ITSM change flow: change tools on the main agent, `/api/changes`, CLI `/change` |
+| `change_management_enabled` | `true` | Enable the ITSM change flow: change tools on the main agent, `/api/changes`, CLI `/change`, and the Web `/app/plans` Changes tab + `/app/changes/:id` |
 | `change_auto_approve_standard` | `false` | Let a policy `auto_approve` decision approve a change WITHOUT a human. Both the yaml rule and this flag must agree |
 | `change_review_timeout_seconds` | `600` | SRE change-review watchdog; on timeout the request returns to `draft` with a `review_failed` event |
 
 ## HealthIssue State Machine
 
 9 states: `open` → `investigating` → `acknowledged` → `root_cause_identified` → `fix_planned` → `fix_approved` → `fix_executing` → `fix_executed` → `resolved`. Transitions enforced by `validate_status_transition()` (409 on invalid).
+
+## Change / Plan State Machines (MVP-2.6.0)
+
+**ChangeRequest** (12 states), enforced by `validate_change_transition()` (409 on invalid):
+`draft → under_review → {planned | needs_clarification | rejected}`; `planned → approved`; `approved → executing`;
+`executing → {completed | failed | rolled_back | needs_review}`; `needs_review → {completed | failed}` (human verdict —
+a redo is a NEW change request). Terminal: `completed`/`failed`/`rolled_back`/`rejected`/`cancelled`. `under_review → draft`
+is the watchdog rollback, keyed by `review_attempt` (late rollbacks are 0-row no-ops).
+
+**FixPlan** (both kinds), enforced by `validate_plan_transition()`:
+`draft → {pending_approval | approved | rejected}`; `pending_approval → {approved | rejected}`;
+`approved → {executing | rejected}` (reject-from-approved = withdrawn); `executing → {executed | failed}`. Replaces the
+old 6 direct status assignments; `FIXPLAN_*_STATUSES` dedup sets unchanged.
+
+All state changes use `UPDATE … WHERE id=:id AND status=:expected` + rowcount check (409 on 0 rows) to block concurrent
+double-approve / double-execute.
 
 ## Build & Run
 

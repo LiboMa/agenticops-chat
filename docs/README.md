@@ -28,6 +28,7 @@ keeps its existing name (`README_CN.md`) — external links depend on it.
 
 | Version | Date | File | Live evidence |
 |---|---|---|---|
+| 2.6.0 | 2026-09-26 | [`MVP-2.6.0-RELEASE.md`](MVP-2.6.0-RELEASE.md) | pending owner-joint run (`MVP-2.6.0-E2E-REPORT.md`) |
 | 2.5.0 | 2026-08-31 (+ 2026-09-08 addendum) | [`MVP-2.5.0-RELEASE.md`](MVP-2.5.0-RELEASE.md) | [`MVP-2.5.0-E2E-REPORT.md`](MVP-2.5.0-E2E-REPORT.md) |
 | 2.2.1 | 2026-07-27 | [`MVP-2.2.1-RELEASE.md`](MVP-2.2.1-RELEASE.md) | [`MVP-2.2.1-CHAOS-L2-E2E-REPORT.md`](MVP-2.2.1-CHAOS-L2-E2E-REPORT.md) |
 | 2.2.0 | 2026-07-21 | [`MVP-2.2.0-RELEASE.md`](MVP-2.2.0-RELEASE.md) | [`MVP-2.2.0-CHAOS-E2E-REPORT.md`](MVP-2.2.0-CHAOS-E2E-REPORT.md) |
@@ -49,6 +50,7 @@ are **not** updated when the code moves on; read them with their date in mind.
 
 | Document | Date | Subject |
 |---|---|---|
+| [`audits/2026-09-10/`](audits/2026-09-10/) | 2026-09-10 | Full-repo health audit + autonomous-harness roadmap: `00-summary.md` (verdict, ten-dimension check, merged P0s, test baseline), `01`–`06` partition reports with evidence JSONL, `07-roadmap.md` (target architecture, invariants, phases without dates) |
 | [`AGENTIC-SRE-READINESS-AUDIT-2026-08-29.md`](AGENTIC-SRE-READINESS-AUDIT-2026-08-29.md) | 2026-08-29 | Readiness audit against an agentic-SRE bar |
 | [`AUDIT-2026-06.md`](AUDIT-2026-06.md) | 2026-06 | Codebase health audit + loop-engineering roadmap |
 | [`STRATEGY-ANALYSIS-2026Q1.md`](STRATEGY-ANALYSIS-2026Q1.md) | 2026-03 | Strategy analysis |
