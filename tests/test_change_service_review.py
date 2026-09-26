@@ -54,6 +54,10 @@ def _policy_events(db, cr_id) -> int:
     return db.query(PipelineEvent).filter_by(change_request_id=cr_id, event_type="policy_decision").count()
 
 
+SQS_ARN = "arn:aws:sqs:ap-southeast-1:111111111111:q1"
+ALB_ARN = "arn:aws:elasticloadbalancing:ap-southeast-1:111111111111:loadbalancer/app/web/50dc6c495c0c9188"
+
+
 class TestGrounding:
     def test_ground_matches_inventory_by_id_and_name(self, db):
         from agenticops.services import change_service as cs
@@ -87,9 +91,74 @@ class TestGrounding:
         cr_id = _cr(db, targets=())
         with pytest.raises(cs.ChangeValidationError):
             cs.attach_target(cr_id, "thing-1", "made:up", actor=agent_actor("sre"))
-        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"ResourceTagMappingList":[{}]}') as ex:
-            cs.attach_target(cr_id, "arn:aws:sqs:ap-southeast-1:111111111111:q1", "sqs:queue", actor=agent_actor("sre"))
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli",
+                   return_value=f'{{"ResourceTagMappingList":[{{"ResourceARN": "{SQS_ARN}"}}]}}') as ex:
+            cs.attach_target(cr_id, SQS_ARN, "sqs:queue", actor=agent_actor("sre"))
         assert "resourcegroupstaggingapi get-resources" in ex.call_args.args[0]
+
+    # ── F-ARN: a zero exit is not presence. Two describes answer a MISSING resource with exit 0 and an empty
+    # collection (the tagging API also for an existing ARN with no tags), so their answer must LIST the target. ──
+    @pytest.mark.parametrize("resource_id, resource_type, output, command, reason", [
+        pytest.param(SQS_ARN, "sqs:queue", '{"ResourceTagMappingList": []}',
+                     f"aws resourcegroupstaggingapi get-resources --resource-arn-list {SQS_ARN}",
+                     "does not list it; the tagging API lists only resources that carry at least one tag", id="a-arn-unlisted"),
+        pytest.param("web-asg", "autoscaling:group", '{"AutoScalingGroups": []}',
+                     "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names web-asg",
+                     "AutoScalingGroups does not list it", id="d-asg-unlisted"),
+        pytest.param("web-asg", "autoscaling:group", '{"AutoScalingGroups": [{"AutoScalingGroupName": "web-asg-2"}]}',
+                     "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names web-asg",
+                     "AutoScalingGroups does not list it", id="d-asg-other-name"),
+        pytest.param(SQS_ARN, "sqs:queue", f'{{"ResourceTagMappingList": [{{"ResourceARN": "{SQS_ARN[:20]}\n... (truncated)',
+                     f"aws resourcegroupstaggingapi get-resources --resource-arn-list {SQS_ARN}",
+                     "not the expected JSON", id="f-arn-unparseable"),
+    ])
+    def test_attach_refuses_a_target_the_describe_does_not_list(self, db, resource_id, resource_type, output, command, reason):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=())
+        before = cs.get_change(cr_id)
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value=output) as ex:
+            with pytest.raises(cs.ChangeValidationError) as err:
+                cs.attach_target(cr_id, resource_id, resource_type, actor=agent_actor("sre"))
+        assert str(err.value).startswith(f"target {resource_id!r} could not be verified: ") and reason in str(err.value)
+        assert ex.call_args.args[0] == command
+        after = cs.get_change(cr_id)
+        assert after["target_resources"] == [] and after == before  # nothing written
+
+    def test_the_arn_refusal_says_how_to_attach_an_untagged_resource(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=())
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"ResourceTagMappingList": []}'):
+            with pytest.raises(cs.ChangeValidationError) as err:
+                cs.attach_target(cr_id, SQS_ARN, "sqs:queue", actor=agent_actor("sre"))
+        assert f"by its bare id with a typed resource_type, one of {sorted(cs.DESCRIBE_BY_TYPE)}" in str(err.value)
+
+    @pytest.mark.parametrize("resource_id, resource_type, output, command", [
+        pytest.param(SQS_ARN, "sqs:queue", f'{{"ResourceTagMappingList": [{{"ResourceARN": "{SQS_ARN}", "Tags": []}}]}}',
+                     f"aws resourcegroupstaggingapi get-resources --resource-arn-list {SQS_ARN}", id="b-arn-listed"),
+        pytest.param(ALB_ARN, "elbv2:load-balancer", f'{{"LoadBalancers": [{{"LoadBalancerArn": "{ALB_ARN}"}}]}}',
+                     f"aws elbv2 describe-load-balancers --load-balancer-arns {ALB_ARN}", id="c-arn-typed-describe"),
+        pytest.param("web-asg", "autoscaling:group",
+                     '{"AutoScalingGroups": [{"AutoScalingGroupName": "web-asg-2"}, {"AutoScalingGroupName": "web-asg"}]}',
+                     "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names web-asg", id="e-asg-listed"),
+        pytest.param("my-bucket", "s3:bucket", "(no output)", "aws s3api head-bucket --bucket my-bucket", id="g-s3-no-output"),
+    ])
+    def test_attach_verifies_a_listed_target(self, db, resource_id, resource_type, output, command):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=())
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value=output) as ex:
+            out = cs.attach_target(cr_id, resource_id, resource_type, actor=agent_actor("sre"))
+        assert ex.call_args.args[0] == command
+        assert out["evidence"] == {"command": command, "excerpt": output[:300]}  # "(no output)" is stored as-is
+        assert cs.get_change(cr_id)["target_resources"] == [out]
+
+    def test_no_output_verifies_only_a_bare_bucket_name(self, db):
+        from agenticops.services import change_service as cs
+        cr_id = _cr(db, targets=())
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value="(no output)"):
+            for rid, rtype in (("i-0def", "ec2:instance"), ("arn:aws:s3:::my-bucket", "s3:bucket")):
+                with pytest.raises(cs.ChangeValidationError, match="could not be verified"):
+                    cs.attach_target(cr_id, rid, rtype, actor=agent_actor("sre"))
+        assert cs.get_change(cr_id)["target_resources"] == []
 
     # ── Ruling 3: attach_target input validation is LOAD-BEARING security ──
     # An LLM-supplied resource_id like "i-0abc --profile other" would smuggle a --profile flag into the
@@ -228,7 +297,8 @@ class TestGrounding:
         from agenticops.services import change_service as cs
         cr_id = _cr(db, targets=())
         arn = "arn:aws:lambda:us-east-1:123456789012:function:rotate-password:production"
-        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli", return_value='{"ResourceTagMappingList":[{}]}'):
+        with patch("agenticops.tools.aws_cli_tool._execute_aws_cli",
+                   return_value=f'{{"ResourceTagMappingList":[{{"ResourceARN": "{arn}"}}]}}'):
             out = cs.attach_target(cr_id, arn, "lambda:function", actor=agent_actor("sre"))
         stored = cs.get_change(cr_id)["target_resources"]
         assert [out] == stored and out["resource_id"] != arn  # the row's (scrubbed) id, not the argument

@@ -9,6 +9,7 @@ never touch detached ORM rows.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
@@ -468,8 +469,8 @@ def _review_failed(cr_id: int, attempt: int, error: str, *, phase: str = "failed
                     synchronize_session=False)
         )
         if not changed:
-            logger.info("review rollback for CR #%d attempt %d skipped: not under_review or a later attempt",
-                        cr_id, attempt)
+            logger.debug("review rollback for CR #%d attempt %d skipped: not under_review or a later attempt",
+                         cr_id, attempt)
             return
         cr = _load(s, cr_id)
         cr.review_reasons = [reason]  # ORM write: goes through the flush-time secret redaction
@@ -500,7 +501,25 @@ DESCRIBE_BY_TYPE: dict[str, str] = {
     "autoscaling:group": "aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names {rid}",
     "elbv2:load-balancer": "aws elbv2 describe-load-balancers --load-balancer-arns {rid}",
 }
+# Typed describes that also take an ARN as the id, and fail on a missing resource: an ARN of these types uses
+# its typed describe rather than the tagging API.
+DESCRIBE_ACCEPTS_ARN = frozenset({"elbv2:load-balancer", "lambda:function", "rds:db"})
 _ARN_DESCRIBE = "aws resourcegroupstaggingapi get-resources --resource-arn-list {rid}"
+# Describes that answer a MISSING resource with exit 0 and an empty collection (the tagging API also answers so
+# for an existing ARN with no tags), so their answer must LIST the target: template → (collection, entry key).
+_MUST_LIST = {
+    _ARN_DESCRIBE: ("ResourceTagMappingList", "ResourceARN"),
+    DESCRIBE_BY_TYPE["autoscaling:group"]: ("AutoScalingGroups", "AutoScalingGroupName"),
+}
+
+
+def _describe_lists(result: str, collection: str, key: str, resource_id: str) -> Optional[bool]:
+    """Whether a describe's JSON answer lists `resource_id` (an entry of `collection` whose `key` equals it
+    exactly). None when the answer is not that JSON (e.g. truncated by cli_max_output_chars)."""
+    try:
+        return any(isinstance(e, dict) and e.get(key) == resource_id for e in json.loads(result)[collection])
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 def _claim(session, cr_id: int, from_status: str, to_status: str, *, attempt: Optional[int] = None) -> bool:
@@ -585,8 +604,9 @@ def ground_targets(cr_id: int) -> dict:
 
 def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Actor, region: str = "",
                   hint: str = "") -> dict:
-    """Attach a target NOT in the inventory — only after a CODE-executed read-only describe succeeds, and only
-    during THIS review (require_live_review, checked before the describe AND again in the write). `hint`
+    """Attach a target NOT in the inventory — only after a CODE-executed read-only describe shows it exists (a
+    zero exit is not enough where a describe answers a missing resource with an empty list: see _MUST_LIST), and
+    only during THIS review (require_live_review, checked before the describe AND again in the write). `hint`
     (stripped) names the requester's original wording this target resolves (so ground_targets and
     submit_review stop treating that hint as unresolved); defaults to the resource_id itself. Re-attaching an
     already attached target with a hint repairs a DEFAULT hint; an existing non-default hint is never
@@ -596,7 +616,9 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
     hint = (hint or "").strip()
     if not resource_id:
         raise ChangeValidationError("resource_id is required")
-    template = _ARN_DESCRIBE if resource_id.startswith("arn:") else DESCRIBE_BY_TYPE.get(resource_type)
+    is_arn = resource_id.startswith("arn:")
+    template = (DESCRIBE_BY_TYPE[resource_type] if is_arn and resource_type in DESCRIBE_ACCEPTS_ARN
+                else _ARN_DESCRIBE if is_arn else DESCRIBE_BY_TYPE.get(resource_type))
     if template is None:
         raise ChangeValidationError(
             f"unknown resource_type {resource_type!r}; use one of {sorted(DESCRIBE_BY_TYPE)} or pass the resource ARN"
@@ -616,8 +638,18 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
         account = _account_name(s, cr)
     command = template.format(rid=resource_id) + (f" --region {region}" if region else "")
     result = _execute_aws_cli(command, account)
-    if not result or result.startswith("Error") or result == "(no output)":
+    # head-bucket prints nothing on success in some AWS CLI versions: for a bare bucket name, exit 0 is the proof
+    bucket_found = resource_type == "s3:bucket" and not is_arn and result == "(no output)"
+    if not bucket_found and (not result or result.startswith("Error") or result == "(no output)"):
         raise ChangeValidationError(f"target {resource_id!r} could not be verified: {(result or '')[:200]}")
+    must_list = _MUST_LIST.get(template)
+    listed = _describe_lists(result, *must_list, resource_id) if must_list else True
+    if not listed:  # False (not listed) or None (unparseable): fail closed
+        why = "the describe output is not the expected JSON" if listed is None else f"{must_list[0]} does not list it"
+        if template == _ARN_DESCRIBE:
+            why += ("; the tagging API lists only resources that carry at least one tag, so attach an untagged "
+                    f"resource by its bare id with a typed resource_type, one of {sorted(DESCRIBE_BY_TYPE)}")
+        raise ChangeValidationError(f"target {resource_id!r} could not be verified: {why}")
     item = {"resource_id": resource_id, "resource_type": resource_type, "db_id": None, "region": region or None,
             "evidence": {"command": command, "excerpt": result[:300]}, "hint": (hint or resource_id)}
     with _session() as s:
