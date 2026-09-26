@@ -4,9 +4,11 @@
 toggles, change search, and change plans carrying their change request's account.
 """
 
+import logging
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -386,8 +388,9 @@ def test_settings_security_toggle_applies_persists_and_audits(client, settings_i
 
 
 def test_settings_toggle_yaml_failure_applies_nothing_and_a_retry_heals(client, settings_io):
-    """The audit rows and the yaml write commit together BEFORE the in-memory flip: a failed yaml write rolls
-    the rows back and leaves the old value live, so an identical retry still sees the change and redoes it."""
+    """The audit rows are written, then the yaml, then the rows commit, all BEFORE the in-memory flip: a failed
+    yaml write rolls the rows back and leaves the old value live, so an identical retry still sees the change
+    and redoes it."""
     from agenticops.config import settings
     from agenticops.web.app import app
     client = TestClient(app, raise_server_exceptions=False)  # same DB; a failed write answers 500 instead of raising
@@ -417,6 +420,56 @@ def test_settings_toggle_audit_failure_applies_nothing_and_a_retry_heals(client,
     assert r.status_code == 200 and settings.rbac_enforce is True
     settings_io.assert_called_once_with({"rbac_enforce": True})
     assert _settings_audits() == [("update", "rbac_enforce", "web:anonymous", {"rbac_enforce": False}, {"rbac_enforce": True})]
+
+
+@contextmanager
+def _commit_fails():
+    """get_db_session whose commit fails after the flush (SQLite busy past its timeout, disk I/O, a PostgreSQL
+    connection lost after the flush): the real one rolls back and re-raises."""
+    from sqlalchemy.exc import OperationalError
+    from agenticops.models import get_db_session
+
+    def _commit():
+        raise OperationalError("COMMIT", {}, Exception("database is locked"))
+    with get_db_session() as s:
+        s.commit = _commit
+        yield s
+
+
+def test_settings_toggle_commit_failure_restores_the_yaml_and_a_retry_heals(client, settings_io):
+    """A commit that fails after the yaml write puts the old value back in the yaml: no audit row, the old value
+    live, and no toggle in settings.yaml that a restart would turn on."""
+    from agenticops.config import settings
+    from agenticops.web.app import app
+    with patch("agenticops.web.app.get_db_session", _commit_fails):
+        r = TestClient(app, raise_server_exceptions=False).patch("/api/settings", json={"rbac_enforce": True})
+    assert r.status_code == 500
+    assert settings_io.call_args_list == [call({"rbac_enforce": True}), call({"rbac_enforce": False})]
+    assert settings.rbac_enforce is False and _settings_audits() == []
+    settings_io.reset_mock()
+    r = client.patch("/api/settings", json={"rbac_enforce": True})
+    assert r.status_code == 200 and settings.rbac_enforce is True
+    settings_io.assert_called_once_with({"rbac_enforce": True})
+    assert _settings_audits() == [("update", "rbac_enforce", "web:anonymous", {"rbac_enforce": False}, {"rbac_enforce": True})]
+
+
+def test_settings_toggle_failed_restore_is_logged_and_the_commit_error_stands(client, settings_io, caplog):
+    """The restore is best effort: when it fails too, an ERROR names the key, and the request still fails with
+    the commit's own error, not the restore's."""
+    from sqlalchemy.exc import OperationalError
+    from agenticops.config import settings
+    from agenticops.web.app import app
+    settings_io.side_effect = [None, OSError("read-only config mount")]
+    with patch("agenticops.web.app.get_db_session", _commit_fails), \
+         caplog.at_level(logging.ERROR, logger="agenticops.web.app"):
+        r = TestClient(app, raise_server_exceptions=False).patch("/api/settings", json={"rbac_enforce": True})
+    assert r.status_code == 500
+    [rec] = [rec for rec in caplog.records if rec.name == "agenticops.web.app" and rec.levelno == logging.ERROR]
+    assert "rbac_enforce" in rec.getMessage() and isinstance(rec.exc_info[1], OSError)
+    assert settings.rbac_enforce is False and _settings_audits() == []
+    settings_io.side_effect = [None, OSError("read-only config mount")]
+    with patch("agenticops.web.app.get_db_session", _commit_fails), pytest.raises(OperationalError):
+        client.patch("/api/settings", json={"rbac_enforce": True})  # the fixture's client re-raises the app's error
 
 
 def test_settings_unchanged_toggle_writes_nothing(client, settings_io):
