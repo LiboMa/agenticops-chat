@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 PERMISSIONS = (
     "change.request", "change.review", "change.approve", "change.reject", "change.cancel", "change.clarify",
-    "change.execute", "plan.approve", "plan.reject", "plan.execute", "audit.read",
+    "change.execute", "plan.approve", "plan.reject", "plan.execute", "plan.edit", "audit.read",
 )
 
 _RULE_TYPES = {"actor_must_differ_from_field", "actor_must_match_field_unless_admin", "deny_actor_kind_when_risk_in"}
@@ -44,7 +44,7 @@ DEFAULT_POLICY: dict = {
         "change.request": ["read"], "change.review": ["write"], "change.approve": ["write"],
         "change.reject": ["write"], "change.cancel": ["write"], "change.clarify": ["read"],
         "change.execute": ["write"], "plan.approve": ["write"], "plan.reject": ["write"],
-        "plan.execute": ["write"], "audit.read": ["admin"],
+        "plan.execute": ["write"], "plan.edit": ["write"], "audit.read": ["admin"],
     },
     "subjects": {
         "anonymous": ["read", "write", "admin"], "cli": ["read", "write", "admin"],

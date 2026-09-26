@@ -70,7 +70,9 @@ class Actions:
     CHANGE_NEEDS_REVIEW = "change.needs_review"
     PLAN_APPROVED = "plan.approved"
     PLAN_REJECTED = "plan.rejected"
+    PLAN_EDITED = "plan.edited"
     PLAN_EXECUTE_REQUESTED = "plan.execute_requested"
+    PLAN_EXECUTION_CANCELLED = "plan.execution_cancelled"
     AUTHZ_DENIED = "authz.denied"
     AUTHZ_DENIED_SHADOW = "authz.denied_shadow"
 

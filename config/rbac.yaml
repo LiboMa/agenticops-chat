@@ -28,6 +28,7 @@ permissions:
   plan.approve:   [write]
   plan.reject:    [write]
   plan.execute:   [write]
+  plan.edit:      [write]
   audit.read:     [admin]
 
 subjects:

@@ -550,3 +550,50 @@ def test_fix_plan_lists_place_change_plans_in_their_request_account(client):
     assert [p["id"] for p in client.get(f"/api/fix-plans?kind=change&account_id={dev}").json()] == [change_plan_id]
     assert client.get(f"/api/fix-plans?account_id={prod}").json() == []
     assert client.get(f"/api/fix-plans/{change_plan_id}").json()["account_id"] == dev
+
+
+def test_cancel_change_execution_authorizes_on_change_execute(client):
+    """(g) Cancelling a running CHANGE execution authorizes on change.execute (not change.cancel): a
+    write caller cancels (200 + one plan.execution_cancelled row, plan_kind=change); a reader is 403."""
+    from agenticops.audit.models import AuditLog
+    from agenticops.config import settings
+    from agenticops.models import FixExecution
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    reader = Actor("user", "reader", 9, ("read",))
+    writer = Actor("user", "wanda", 10, ("read", "write"))
+    s = get_session()
+    try:
+        cr = ChangeRequest(title="t", description="d", requested_by="user:alice", status="executing",
+                           account_id=_account_id("dev"))
+        s.add(cr); s.flush()
+        plan = FixPlan(plan_kind="change", change_request_id=cr.id, risk_level="L1", title="p", summary="s",
+                       status="executing", rollback_plan={"steps": ["undo"]}, post_checks=[{"check": "c"}])
+        s.add(plan); s.flush()
+        ex = FixExecution(fix_plan_id=plan.id, status="running", executed_by="user:bob")
+        s.add(ex); s.commit()
+        pid, ex_id = plan.id, ex.id
+    finally:
+        s.close()
+    # a read-only caller under enforce is refused; nothing is cancelled
+    app.dependency_overrides[deps.current_actor] = lambda: reader
+    try:
+        with patch.object(settings, "rbac_enforce", True):
+            assert client.post(f"/api/fix-executions/{ex_id}/cancel").status_code == 403
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    # a change.execute holder cancels (change.execute, NOT change.cancel — cancel here means abort the run)
+    app.dependency_overrides[deps.current_actor] = lambda: writer
+    try:
+        with patch.object(settings, "rbac_enforce", True):
+            assert client.post(f"/api/fix-executions/{ex_id}/cancel").status_code == 200
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    s = get_session()
+    try:
+        rows = s.query(AuditLog).filter_by(action="plan.execution_cancelled").all()
+        assert len(rows) == 1
+        assert rows[0].entity_id == str(pid)
+        assert rows[0].details["plan_kind"] == "change" and rows[0].details["execution_id"] == ex_id
+    finally:
+        s.close()

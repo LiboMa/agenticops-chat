@@ -2484,10 +2484,24 @@ async def api_create_fix_plan(data: FixPlanCreate):
         return FixPlanResponse.model_validate(plan)
 
 
+# FixPlanUpdate content fields (everything except the deprecated `status` alias). Editing any of these
+# is gated by plan.edit and is refused once the plan is locked (approved / executing / terminal).
+_FIXPLAN_CONTENT_FIELDS = {"risk_level", "title", "summary", "steps", "rollback_plan",
+                           "estimated_impact", "pre_checks", "post_checks"}
+
+
 @app.put("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
 async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = Depends(current_actor)):
     """Update plan CONTENT. Status changes must use /approve, /reject, /execute
-    (status="rejected" is kept as a deprecated alias for the pre-2.6 UI)."""
+    (status="rejected" is kept as a deprecated alias for the pre-2.6 UI).
+
+    Content is immutable once the plan is approved/executing or terminal (409). A content edit is
+    authorized (plan.edit) and audited — one plan.edited row carrying only the fields that changed. A
+    PUT that changes nothing writes no row and does not bump updated_at. The content-free reject alias
+    is NOT a content edit: it stays gated by plan.reject and keeps its transition-409 behavior."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import FIXPLAN_TERMINAL_STATUSES
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
@@ -2500,11 +2514,29 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
         status_alias = update_data.pop("status", None)
         if status_alias is not None and status_alias != "rejected":
             raise HTTPException(status_code=400, detail="Status changes must use /approve, /reject or /execute")
+        content_present = any(k in update_data for k in _FIXPLAN_CONTENT_FIELDS)
+        if content_present:
+            if plan.status in (FIXPLAN_TERMINAL_STATUSES | {"approved", "executing"}):
+                raise HTTPException(status_code=409,
+                                    detail=f"This plan's content is locked at status '{plan.status}'; edits are not allowed.")
+            try:
+                authz.check(actor, "plan.edit", subject=plan)
+            except authz.AuthzDenied as e:
+                raise HTTPException(status_code=403, detail=str(e))
+        changed_old, changed_new = {}, {}
         for key, value in update_data.items():
-            setattr(plan, key, value)
+            current = getattr(plan, key)
+            if current != value:
+                changed_old[key] = current
+                changed_new[key] = value
+                setattr(plan, key, value)
         if status_alias == "rejected":
             _reject_plan(session, plan, actor, "(rejected via deprecated PUT status)")
-        plan.updated_at = datetime.now(timezone.utc)
+        if changed_new:
+            AuditService.log(Actions.PLAN_EDITED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                             user_id=actor.user_id, details={"fields": sorted(changed_new)},
+                             old_values=changed_old, new_values=changed_new, session=session)
+            plan.updated_at = datetime.now(timezone.utc)  # bump only when content actually changed
         session.flush()
         return _fix_plan_response(session, plan)
 
@@ -2769,8 +2801,30 @@ async def api_get_trace(trace_id: str):
 
 @app.post("/api/fix-executions/{execution_id}/cancel")
 async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
-    """Cancel a running fix execution."""
+    """Cancel a running fix execution — authorized against the plan behind it (plan.execute for a fix
+    plan, change.execute for a change plan; cancelling a run is executing it, not change.cancel) and
+    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    with get_db_session() as session:
+        plan = (session.query(FixPlan)
+                .join(FixExecution, FixExecution.fix_plan_id == FixPlan.id)
+                .filter(FixExecution.id == execution_id).first())
+        if plan is None:
+            raise HTTPException(status_code=400, detail="Execution not found or not in running state")
+        plan_id = plan.id
+        plan_kind = plan.plan_kind or "fix"
+        try:
+            if plan_kind == "change":
+                authz.check(actor, "change.execute", subject=plan.change_request)
+            else:
+                authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
     if _executor_service.cancel_execution(execution_id):
+        AuditService.log(Actions.PLAN_EXECUTION_CANCELLED, EntityTypes.FIX_PLAN, str(plan_id),
+                         actor=actor.key, user_id=actor.user_id,
+                         details={"execution_id": execution_id, "plan_kind": plan_kind})
         return {"status": "cancelled", "execution_id": execution_id}
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
