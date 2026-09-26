@@ -31,6 +31,10 @@ export interface AppSettings {
   acp_enhanced_enabled: boolean;
   acp_enhanced_backend: string;
   acp_available_backends: string[];
+  // Change management
+  change_management_enabled: boolean; // read-only: PATCH /api/settings rejects it as an unknown key (400)
+  change_auto_approve_standard: boolean;
+  rbac_enforce: boolean;
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };

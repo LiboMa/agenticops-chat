@@ -388,7 +388,7 @@ function FixPlanCard({
               {t("issues.approve")}
             </button>
             <button
-              onClick={() => rejectMut.mutate(fp.id)}
+              onClick={() => rejectMut.mutate({ id: fp.id, reason: "rejected from UI" })}
               disabled={rejectMut.isPending}
               className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
             >

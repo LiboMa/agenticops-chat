@@ -1,9 +1,11 @@
 interface ErrorBannerProps {
   message: string;
   onRetry?: () => void;
+  /** The action button's text; defaults to "Retry". */
+  actionLabel?: string;
 }
 
-export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
+export function ErrorBanner({ message, onRetry, actionLabel = "Retry" }: ErrorBannerProps) {
   return (
     <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex items-start gap-3">
       <svg className="h-5 w-5 text-destructive mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -17,7 +19,7 @@ export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
           onClick={onRetry}
           className="text-sm font-medium text-destructive hover:text-destructive/80 px-3 py-1 rounded-md border border-destructive/30 hover:bg-destructive/5 transition-colors"
         >
-          Retry
+          {actionLabel}
         </button>
       )}
     </div>

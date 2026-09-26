@@ -588,7 +588,7 @@ function FixPlanTab({
 
   async function handleReject() {
     if (!(await confirm("Are you sure you want to reject this fix plan?", { variant: "destructive", confirmText: "Reject" }))) return;
-    rejectMut.mutate(fp.id, {
+    rejectMut.mutate({ id: fp.id, reason: "rejected from UI" }, {
       onSuccess: () => fixPlans.refetch(),
       onError: (err) => setActionMsg(`Reject failed: ${err.message}`),
     });

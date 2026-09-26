@@ -23,6 +23,29 @@ export function clearAuthToken(): void {
   localStorage.removeItem("aiops_user");
 }
 
+const LOC_PREFIXES = new Set(["body", "query", "path"]);
+
+/** A FastAPI error `detail` as one readable line: a string as-is; a 422 list as "field: msg; field: msg"
+ *  (field = the `loc` entries after "body"/"query"/"path", joined by "."); any other value as JSON. */
+export function formatErrorDetail(detail: unknown): string {
+  if (detail === undefined) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item: unknown) => {
+        if (item && typeof item === "object" && typeof (item as { msg?: unknown }).msg === "string") {
+          const { loc, msg } = item as { loc?: unknown; msg: string };
+          const parts = Array.isArray(loc) ? loc.map(String) : [];
+          if (parts.length > 0 && LOC_PREFIXES.has(parts[0])) parts.shift();
+          return parts.length > 0 ? `${parts.join(".")}: ${msg}` : msg;
+        }
+        return formatErrorDetail(item);
+      })
+      .join("; ");
+  }
+  return JSON.stringify(detail);
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
@@ -52,7 +75,7 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new ApiError(res.status, body.detail ?? body.error ?? res.statusText);
+    throw new ApiError(res.status, formatErrorDetail(body.detail ?? body.error ?? res.statusText));
   }
 
   if (res.status === 204) return undefined as T;
