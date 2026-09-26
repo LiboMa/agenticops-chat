@@ -3,12 +3,15 @@
 Sources: fix_plans (both kinds), change_requests, fix_executions, audit_logs, command_audits.
 Percentiles and the series buckets are computed in Python (tables are small at MVP scale), so no
 dialect-specific SQL is needed on SQLite or PostgreSQL.
+The window and the buckets are UTC: an aware start/end is converted to UTC and a naive one is taken as UTC.
 
 What each block counts:
 - totals, lead_time, outcomes, breakdown and series are a COHORT: the plans (both kinds) and change
   requests CREATED in [start, end) — a change created before the window and closed inside it is not in
   `completed`. The work items are fix plans and change requests; a change plan is its request's child and
-  never a work item of its own, but its executions feed lead_time, outcomes and the executors.
+  never a work item of its own, but its executions feed lead_time, outcomes and the executors. The series
+  dates a change request's completion by its closed_at and a fix plan's by the latest completed_at among
+  its executions — its updated_at only when none has one, since an edit re-stamps updated_at.
 - approvals are decision EVENTS whose audit timestamp falls in [start, end), each counted once, under its
   work item's kind, and only when that kind is selected. change.* rows are change decisions. A plan.* row
   takes its plan's plan_kind; one that classifies as "change" is the echo change_service writes onto the
@@ -25,21 +28,27 @@ What each block counts:
 
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func
 
 _DECISION_ACTIONS = ("plan.approved", "change.approved", "plan.rejected", "change.rejected",
                      "authz.denied", "authz.denied_shadow")
+_KINDS = ("all", "fix", "change")
+_BUCKETS = ("day", "week")
 
 
 def _pct(values: list[float], p: float) -> Optional[float]:
+    """The nearest-rank p-th percentile — the smallest value with at least p% of the values at or below it —
+    rounded to 0.1; None for no values."""
     if not values:
         return None
     vals = sorted(values)
-    k = max(0, min(len(vals) - 1, int(round((p / 100.0) * (len(vals) - 1)))))
+    n = len(vals)
+    k = max(0, math.ceil(p / 100 * n) - 1)
     return round(vals[k], 1)
 
 
@@ -93,6 +102,12 @@ def _decision_kind(a, plan_kinds: dict[int, str]) -> Optional[str]:
 
 
 def plan_stats(start: datetime, end: datetime, kind: str = "all", bucket: str = "day") -> dict:
+    if kind not in _KINDS:
+        raise ValueError(f"kind must be one of {'|'.join(_KINDS)}, got {kind!r}")
+    if bucket not in _BUCKETS:
+        raise ValueError(f"bucket must be one of {'|'.join(_BUCKETS)}, got {bucket!r}")
+    start, end = (d.astimezone(timezone.utc) if d.tzinfo else d.replace(tzinfo=timezone.utc) for d in (start, end))
+
     from agenticops.audit.models import AuditLog
     from agenticops.models import (
         CHANGE_TERMINAL_STATUSES, FIXPLAN_TERMINAL_STATUSES, ChangeRequest, CommandAudit, FixExecution, FixPlan,
@@ -137,8 +152,10 @@ def plan_stats(start: datetime, end: datetime, kind: str = "all", bucket: str = 
             elif a.action == "authz.denied_shadow":
                 approvals["authz_denied_shadow"] += 1
 
-        req_to_approve = [s for s in (_secs(c.requested_at or c.created_at, c.approved_at) for c in changes) if s is not None]
-        req_to_approve += [s for s in (_secs(p.created_at, p.approved_at) for p in fix_plans) if s is not None]
+        # a negative span is clock skew or a back-filled stamp, not a lead time: dropped here as in approve_to_start
+        req_to_approve = [s for s in (_secs(c.requested_at or c.created_at, c.approved_at) for c in changes)
+                          if s is not None and s >= 0]
+        req_to_approve += [s for s in (_secs(p.created_at, p.approved_at) for p in fix_plans) if s is not None and s >= 0]
         approve_to_start, exec_durations = [], []
         plan_by_id = {p.id: p for p in plans}
         for e in execs:
@@ -165,12 +182,18 @@ def plan_stats(start: datetime, end: datetime, kind: str = "all", bucket: str = 
         by_account = Counter(str(c.account_id) for c in changes if c.account_id)
 
         # series: work items created per bucket (a change plan is not counted again), and the cohort's
-        # completions (change requests by closed_at; fix plans by updated_at)
+        # completions — a change request by its closed_at; a fix plan by the latest completed_at among its
+        # executions, else by its updated_at (which an edit re-stamps, so it is only the fallback)
+        ended: dict[int, datetime] = {}
+        for e in execs:
+            if e.completed_at:
+                ended[e.fix_plan_id] = max(e.completed_at, ended.get(e.fix_plan_id, e.completed_at))
         rows: dict[str, dict[str, int]] = defaultdict(lambda: {"created": 0, "completed": 0, "failed": 0})
         for p in fix_plans:
             rows[_bucket_key(p.created_at, bucket)]["created"] += 1
-            if p.updated_at and p.status in ("executed", "failed"):
-                rows[_bucket_key(p.updated_at, bucket)]["completed" if p.status == "executed" else "failed"] += 1
+            done = ended.get(p.id) or p.updated_at
+            if done and p.status in ("executed", "failed"):
+                rows[_bucket_key(done, bucket)]["completed" if p.status == "executed" else "failed"] += 1
         for c in changes:
             rows[_bucket_key(c.created_at, bucket)]["created"] += 1
             if c.closed_at and c.status == "completed":

@@ -5,7 +5,9 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from starlette.testclient import TestClient
 
-from agenticops.models import Base, ChangeRequest, CommandAudit, FixExecution, FixPlan, HealthIssue, RCAResult, get_session
+from agenticops.models import (
+    Base, ChangeRequest, CloudAccount, CommandAudit, FixExecution, FixPlan, HealthIssue, RCAResult, get_session,
+)
 
 
 @pytest.fixture
@@ -58,6 +60,31 @@ def _seed(db):
 
 def _created(st):
     return sum(row["created"] for row in st["series"])
+
+
+def _fix_plan(db, status, **kw):
+    """A fix plan with its own HealthIssue and RCAResult (ck_fix_plans_origin needs both)."""
+    issue = HealthIssue(title="t", description="d", severity="low", source="t", status="resolved", resource_id="r"); db.add(issue); db.flush()
+    rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9); db.add(rca); db.flush()
+    plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="fix", summary="s", status=status, **kw)
+    db.add(plan); db.flush()
+    return plan
+
+
+def _stats(**kw):
+    """plan_stats over the 30 days up to now."""
+    from agenticops.services.plan_stats_service import plan_stats
+    end = datetime.now(timezone.utc)
+    return plan_stats(end - timedelta(days=30), end, **kw)
+
+
+def _col(st, col):
+    """One series column as {bucket: count}, zero rows left out."""
+    return {row["bucket"]: row[col] for row in st["series"] if row[col]}
+
+
+def _day(dt):
+    return dt.date().isoformat()
 
 
 def _approvals(kind):
@@ -129,14 +156,164 @@ def test_series_created_counts_work_items(db):
     daily = plan_stats(start, end, kind="all", bucket="day")
     assert _created(daily) == 3
     assert [row["bucket"] for row in daily["series"]] == sorted(row["bucket"] for row in daily["series"])
-    # completed: cr1 (by closed_at); cr3 failed 40 days ago, outside the cohort; fp has no updated_at yet
-    assert sum(row["completed"] for row in daily["series"]) == 1 and sum(row["failed"] for row in daily["series"]) == 0
+    # completed: cr1 by its closed_at, fp by its execution's completed_at (fp has no updated_at);
+    # cr3 failed 40 days ago, outside the cohort
+    assert sum(row["failed"] for row in daily["series"]) == 0
+    assert [sum(row["completed"] for row in plan_stats(start, end, kind=k)["series"]) for k in ("all", "fix", "change")] == [2, 1, 1]
     assert _created(plan_stats(start, end, kind="change", bucket="day")) == 2
     assert _created(plan_stats(start, end, kind="fix", bucket="day")) == 1
-    # a fix plan completes at its updated_at
-    db.query(FixPlan).filter_by(plan_kind="fix").update({"updated_at": end - timedelta(minutes=45)})
+
+
+def test_series_dates_a_fix_plans_completion_by_its_execution(db):
+    """PUT /api/fix-plans/{id} re-stamps updated_at on a finished plan: an edit must not move its completion."""
+    now = datetime.now(timezone.utc)
+    done, edited = now - timedelta(days=5), now - timedelta(days=3)
+    fp = _fix_plan(db, "executed", created_at=now - timedelta(days=6), updated_at=edited)
+    db.add(FixExecution(fix_plan_id=fp.id, status="succeeded", started_at=done - timedelta(minutes=5), completed_at=done))
     db.commit()
-    assert [sum(row["completed"] for row in plan_stats(start, end, kind=k)["series"]) for k in ("all", "fix", "change")] == [2, 1, 1]
+    assert _col(_stats(kind="fix"), "completed") == {_day(done): 1}  # not {_day(edited): 1}
+
+
+def test_series_falls_back_to_a_fix_plans_updated_at(db):
+    """No execution with a completed_at: the plan's updated_at dates it. No date at all: not in the series."""
+    now = datetime.now(timezone.utc)
+    failed_at = now - timedelta(days=2)
+    _fix_plan(db, "failed", created_at=now - timedelta(days=4), updated_at=failed_at)  # failed without running
+    _fix_plan(db, "executed", created_at=now - timedelta(days=4))  # no execution, no updated_at
+    db.commit()
+    st = _stats(kind="fix")
+    assert _col(st, "failed") == {_day(failed_at): 1} and _col(st, "completed") == {}
+
+
+def test_series_takes_the_latest_completed_at_of_any_execution(db):
+    """The latest completed_at over ALL the plan's executions, whatever their status; an execution without one is
+    ignored, and a plan whose executions all lack one falls back to its updated_at."""
+    d = datetime.now(timezone.utc) - timedelta(days=5)
+    fp = _fix_plan(db, "failed", created_at=d - timedelta(days=2), updated_at=d + timedelta(days=1))
+    db.add_all([FixExecution(fix_plan_id=fp.id, status="failed", completed_at=d - timedelta(days=1)),
+                FixExecution(fix_plan_id=fp.id, status="aborted", completed_at=d),  # a cancelled run ends the plan
+                FixExecution(fix_plan_id=fp.id, status="running")])  # never recorded an end
+    legacy = _fix_plan(db, "executed", created_at=d - timedelta(days=2), updated_at=d + timedelta(days=2))
+    db.add(FixExecution(fix_plan_id=legacy.id, status="succeeded"))  # completed_at NULL
+    db.commit()
+    st = _stats(kind="fix")
+    assert _col(st, "failed") == {_day(d): 1}
+    assert _col(st, "completed") == {_day(d + timedelta(days=2)): 1}
+
+
+def test_window_is_utc_whatever_the_caller_passes(db):
+    """An aware start/end is converted to UTC and a naive one is taken as UTC: the same instant, the same stats."""
+    from agenticops.services.plan_stats_service import plan_stats
+    _seed(db)
+    end = datetime.now(timezone.utc); start = end - timedelta(hours=4)  # the seeded rows sit 30 min to 3 h back
+    utc = plan_stats(start, end)
+    assert utc["totals"]["open"] == 1  # the window holds rows, so a shifted one would show
+    sgt = timezone(timedelta(hours=8))
+    assert plan_stats(start.astimezone(sgt), end.astimezone(sgt)) == utc
+    naive = plan_stats(start.replace(tzinfo=None), end.replace(tzinfo=None))
+    assert naive["period"]["start"].endswith("+00:00") and naive["period"]["end"].endswith("+00:00")
+    assert naive == utc
+
+
+def test_plan_stats_rejects_an_unknown_kind_or_bucket(db):
+    """The router constrains HTTP callers; a direct caller gets an error, not stats labelled with its typo."""
+    with pytest.raises(ValueError, match="kind"):
+        _stats(kind="bogus")
+    with pytest.raises(ValueError, match="bucket"):
+        _stats(bucket="month")
+
+
+@pytest.mark.parametrize(("values", "p", "expected"), [
+    ([1, 2], 50, 1),
+    ([1, 2, 3, 4], 50, 2),
+    ([1, 2, 3, 4, 5, 6], 90, 6),
+    (list(range(1, 11)), 90, 9),
+    ([5], 50, 5),
+    ([], 50, None),
+])
+def test_pct_is_nearest_rank(values, p, expected):
+    from agenticops.services.plan_stats_service import _pct
+    assert _pct(values, p) == expected
+
+
+def test_empty_window_is_sparse(db):
+    """The contract Plan C consumes for a window with no rows: no status keys, no buckets, null percentiles."""
+    from agenticops.services.plan_stats_service import plan_stats
+    _seed(db)
+    end = datetime.now(timezone.utc) - timedelta(days=100); start = end - timedelta(days=30)  # before every seeded row
+    assert plan_stats(start, end) == {
+        "period": {"start": start.isoformat(), "end": end.isoformat(), "bucket": "day"},
+        "kind": "all",
+        "totals": {"by_kind_status": {}, "open": 0},
+        "approvals": {"auto": 0, "human": 0, "rejected": 0, "authz_denied": 0, "authz_denied_shadow": 0},
+        "lead_time": {"request_to_approve_p50_s": None, "request_to_approve_p90_s": None,
+                      "approve_to_start_p50_s": None, "exec_duration_p50_s": None},
+        "outcomes": {"success_rate": None, "rollbacks": 0, "needs_review": 0},
+        "breakdown": {"by_actor": {"requesters": [], "approvers": [], "executors": []},
+                      "by_risk": {}, "by_change_type": {}, "by_action_type": {}, "by_account": {}},
+        "series": [],
+        "commands": {"by_outcome": {}, "by_tool": {}},
+    }
+
+
+def test_lead_times_outcomes_and_breakdowns(db):
+    t = datetime.now(timezone.utc) - timedelta(days=1)
+
+    def at(minutes):
+        return t + timedelta(minutes=minutes)
+
+    acct = CloudAccount(name="dev", provider="aws", is_enabled=True, credentials={}, regions=[]); db.add(acct); db.flush()
+    cr_a = ChangeRequest(title="a", description="d", requested_by="user:alice", status="completed", account_id=acct.id,
+                         effective_change_type="standard", requested_at=t, created_at=t,
+                         approved_at=at(10), approved_by="user:bob", closed_at=at(60))
+    cr_b = ChangeRequest(title="b", description="d", requested_by="user:alice", status="rolled_back", account_id=acct.id,
+                         requested_change_type="emergency", requested_at=t, created_at=t,
+                         approved_at=at(30), approved_by="user:carol", closed_at=at(60))
+    cr_c = ChangeRequest(title="c", description="d", requested_by="user:dave", status="needs_review",
+                         requested_change_type="emergency", effective_change_type="normal", requested_at=t, created_at=t)
+    db.add_all([cr_a, cr_b, cr_c]); db.flush()
+    fp = _fix_plan(db, "executed", created_at=t, approved_at=at(20), approved_by="user:bob")
+    cp_a = FixPlan(plan_kind="change", change_request_id=cr_a.id, risk_level="L1", title="a", summary="s", status="executed",
+                   created_at=at(5), approved_at=at(10), approved_by="user:bob")
+    cp_b = FixPlan(plan_kind="change", change_request_id=cr_b.id, risk_level="L1", title="b", summary="s", status="failed",
+                   created_at=at(5), approved_at=at(30), approved_by="user:carol")
+    db.add_all([cp_a, cp_b]); db.flush()
+    db.add_all([
+        FixExecution(fix_plan_id=fp.id, status="succeeded", executed_by="agent:executor",
+                     started_at=at(22), completed_at=at(23), duration_ms=30000),
+        FixExecution(fix_plan_id=cp_a.id, status="succeeded", executed_by="agent:executor",
+                     started_at=at(15), completed_at=at(16), duration_ms=60000),
+        FixExecution(fix_plan_id=cp_b.id, status="rolled_back", executed_by="user:carol",
+                     started_at=at(40), completed_at=at(42), duration_ms=90000),
+    ])
+    db.commit()
+    st = _stats()
+    # request → approve: cr_a 600 s, fp 1200 s, cr_b 1800 s (cr_c is not approved); approve → start: fp 120 s,
+    # cp_a 300 s, cp_b 600 s; durations 30, 60 and 90 s
+    assert st["lead_time"] == {"request_to_approve_p50_s": 1200.0, "request_to_approve_p90_s": 1800.0,
+                               "approve_to_start_p50_s": 300.0, "exec_duration_p50_s": 60.0}
+    assert st["outcomes"] == {"success_rate": 0.667, "rollbacks": 1, "needs_review": 1}  # 2 succeeded, 1 rolled back
+    b = st["breakdown"]
+    assert b["by_account"] == {str(acct.id): 2}
+    assert b["by_change_type"] == {"standard": 1, "emergency": 1, "normal": 1}  # effective, else requested
+    assert b["by_actor"]["approvers"] == [{"actor": "user:bob", "count": 2}, {"actor": "user:carol", "count": 1}]
+    assert b["by_actor"]["executors"] == [{"actor": "agent:executor", "count": 2}, {"actor": "user:carol", "count": 1}]
+
+
+def test_request_to_approve_drops_negative_spans(db):
+    """An approval stamped before its request is clock skew or a back-filled stamp, not a lead time — dropped from
+    both the change and the fix-plan spans, as approve_to_start already does."""
+    t = datetime.now(timezone.utc) - timedelta(hours=6)
+    db.add_all([
+        ChangeRequest(title="ok", description="d", requested_by="user:alice", status="approved",
+                      requested_at=t, created_at=t, approved_at=t + timedelta(minutes=10)),
+        ChangeRequest(title="skewed", description="d", requested_by="user:alice", status="approved",
+                      requested_at=t, created_at=t, approved_at=t - timedelta(minutes=5)),
+    ])
+    _fix_plan(db, "approved", created_at=t, approved_at=t - timedelta(minutes=2))
+    db.commit()
+    lead = _stats()["lead_time"]
+    assert (lead["request_to_approve_p50_s"], lead["request_to_approve_p90_s"]) == (600.0, 600.0)
 
 
 def test_approvals_count_work_items_per_kind(db):
