@@ -185,18 +185,52 @@ def executor_agent(fix_plan_id: int) -> str:
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_executor_interventions, get_bedrock_boto_session
         from agenticops.models import get_db_session, FixPlan, HealthIssue
+        from agenticops.services.change_service import change_execution_refusal
+        with get_db_session() as db:
+            refusal = change_execution_refusal(db.query(FixPlan).filter_by(id=fix_plan_id).first())
+        if refusal:
+            return f"REJECTED: {refusal}"
 
-        # Resolve provider CLI tool from fix plan's issue account
+        # Resolve provider CLI tool from the plan's account: the issue's account for a fix
+        # plan, the change request's account for a change plan (凭证安全铁律 #3 — account-addressed).
         cli_tool = None
+        bound_change = None  # "C#<n>" while a change plan's account is (or may be) bound and unresolved
         try:
             with get_db_session() as db:
                 plan_for_acct = db.query(FixPlan).filter_by(id=fix_plan_id).first()
-                if plan_for_acct:
+                account_id = None
+                if plan_for_acct is None:
+                    # A plan row that reads as missing is treated like a failed read (the except branch below).
+                    from agenticops.run_context import get_run_context
+                    rc_cr = get_run_context().change_request_id
+                    if bound_change is None and rc_cr:
+                        bound_change = f"C#{rc_cr}"
+                if plan_for_acct and plan_for_acct.health_issue_id:
                     issue = db.query(HealthIssue).filter_by(id=plan_for_acct.health_issue_id).first()
-                    if issue and issue.account_id:
-                        cli_tool = get_cli_tool_for_issue(issue.account_id)
+                    account_id = issue.account_id if issue else None
+                elif plan_for_acct and plan_for_acct.change_request_id:
+                    # Fail closed: a change plan is presumed bound until its change request says otherwise.
+                    bound_change = f"C#{plan_for_acct.change_request_id}"
+                    from agenticops.models import ChangeRequest
+                    cr = db.get(ChangeRequest, plan_for_acct.change_request_id)
+                    account_id = cr.account_id if cr else None
+                    if cr is not None and not cr.account_id:
+                        bound_change = None  # a request read with no account → the account-addressed tools below
+                if account_id:
+                    cli_tool = get_cli_tool_for_issue(account_id)
         except Exception:
-            pass
+            logger.warning("Executor account resolution failed for FixPlan #%d", fix_plan_id, exc_info=True)
+            from agenticops.run_context import get_run_context
+            rc_cr = get_run_context().change_request_id
+            if bound_change is None and rc_cr:
+                # The read failed before the plan's kind was known. The Run Context names a change request (the
+                # 9b gate passes a change plan only then), so the change stays presumed bound; a fix-plan run
+                # names none and keeps its fallback.
+                bound_change = f"C#{rc_cr}"
+        if bound_change and cli_tool is None:
+            # 凭证安全铁律 #2: a change bound to an account never runs on a fallback's credentials.
+            return (f"REJECTED: cannot resolve credentials for the account of change request {bound_change} — "
+                    f"a change runs only on its own account, never on a fallback.")
 
         # Query risk level BEFORE agent creation for smart model selection
         model_id, max_tokens = get_agent_model_config("executor")

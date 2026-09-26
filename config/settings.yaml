@@ -137,6 +137,9 @@ ssh_default_key_path: ''
 ssh_bastion_host: ''
 policy_engine_enabled: true
 policy_file: config/policies.yaml
+change_management_enabled: true
+change_auto_approve_standard: false   # standard changes still wait for a human until you flip this
+change_review_timeout_seconds: 600
 itsm_enabled: false
 itsm_dry_run: true
 itsm_servicenow_url: ''
@@ -190,6 +193,10 @@ skills_auto_improve_enabled: true
 skills_post_resolution_review: true
 skills_improvement_notify: true
 api_auth_enabled: false
+rbac_enforce: false          # shadow mode by default — see config/rbac.yaml
+rbac_file: config/rbac.yaml
+audit_retention_days: 365
+command_audit_enabled: true
 session_ttl_minutes: 30
 session_history_depth: 20
 default_regions:

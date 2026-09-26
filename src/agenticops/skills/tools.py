@@ -441,16 +441,28 @@ def run_skill_script(skill_name: str, script: str, args: str = "", stdin_text: s
     # refusal would tell the agent the security boundary declined, and it would go reasoning
     # about permissions instead of surfacing the bug. Kept as two branches on purpose — a
     # blanket `except Exception` here would make Task 7's refusal contract unobservable.
+    from agenticops.services.command_audit import record_command
+
+    ledger_cmd = f"{skill_name}/{script} {args}".strip()
     try:
         res = _sandbox.run_script(skill_name, script, parsed, stdin_text or None)
     except RuntimeError as e:
+        record_command(tool="run_skill_script", tier="script", command=ledger_cmd, outcome="refused",
+                       reason="sandbox", target=skill_name, output_excerpt=str(e))
         return f"Sandbox refused to run: {e}"
     except Exception as e:
         logger.exception("run_skill_script failed on skill=%s script=%s", skill_name, script)
+        record_command(tool="run_skill_script", tier="script", command=ledger_cmd, outcome="error",
+                       target=skill_name, output_excerpt=f"{type(e).__name__}: {e}")
         return (
             f"Sandbox internal error (a defect, NOT a policy refusal): "
             f"{type(e).__name__}: {e}"
         )
+
+    # Every sandbox run is ledgered (tier "script"); exit code decides executed|error.
+    record_command(tool="run_skill_script", tier="script", command=ledger_cmd,
+                   outcome="executed" if res.exit_code == 0 else "error", exit_code=res.exit_code,
+                   target=skill_name, output_excerpt=(res.stdout or "")[:2000], duration_ms=res.duration_ms)
 
     header = (
         f"exit_code={res.exit_code} isolation={res.isolation} duration_ms={res.duration_ms}"

@@ -16,6 +16,8 @@ function stepIndex(status: IssueStatus): number {
   const idx = STEPS.findIndex((s) => s.key === status);
   // "acknowledged" maps to "investigating"
   if (idx === -1 && status === "acknowledged") return 1;
+  // "fix_executing" is the "Execute" step in progress
+  if (idx === -1 && status === "fix_executing") return STEPS.findIndex((s) => s.key === "fix_executed");
   return idx === -1 ? 0 : idx;
 }
 

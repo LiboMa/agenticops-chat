@@ -39,6 +39,29 @@ _SSH_FALLBACK_CLASSES = {
     "InvalidInstanceId", "TargetNotConnected", "AccessDenied", "Timeout", "NoCredentials",
 }
 
+# Reply prefixes meaning "did not run / failed" for the command ledger's executed|error.
+# The transports return prose, not status codes, so the outcome is judged from the text.
+_LEDGER_ERROR_PREFIXES = (
+    "Error",                                        # account resolution, unknown method, missing binary
+    "SSH error", "SSH command timed out",           # _execute_ssh
+    "SSM ", "Command Failed", "Command Cancelled",  # _execute_ssm / _run_auto_ladder
+    "kubectl error", "kubectl command timed out", "Failed to update kubeconfig",  # _execute_kubectl
+)
+_SSH_FALLBACK_MARKER = "\nFalling back to SSH "
+
+
+def _ledger_outcome(result: str) -> str:
+    """executed|error for a command_audits row, judged from the tool's reply text.
+
+    For the SSM→SSH ladder ("SSM failed: …\\nFalling back to SSH <ip> ...\\n<ssh reply>") the
+    SSH leg decides — the command may well have run over SSH after SSM failed.
+    """
+    text = result or ""
+    idx = text.find(_SSH_FALLBACK_MARKER)
+    if idx >= 0:
+        text = text[idx + len(_SSH_FALLBACK_MARKER):].split("\n", 1)[-1]
+    return "error" if text.startswith(_LEDGER_ERROR_PREFIXES) else "executed"
+
 
 def _get_ssm_client(region: str, account: Any) -> Any:
     """Get an SSM client for a registered account. Fail-closed; no ambient fallback.
@@ -132,37 +155,61 @@ def run_on_host(
     if not command:
         return "Error: Empty command."
 
-    # Security classification — always before any transport.
+    # Security classification — always before any transport; write-tier attempts are
+    # ledgered (command_audits), read-only ones are not.
     tier = classify_shell_command(command)
+    from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
+                                                    change_required_refusal, record_command)
     if tier == "blocked":
+        record_command(tool="run_on_host", tier=tier, command=command, outcome="blocked",
+                       account=account, region=region, target=host_id)
         return (
             f"Error: Command blocked for safety. Dangerous operations like "
             f"'rm -rf /', 'mkfs', 'shutdown', 'reboot', and pipe-to-bash are not allowed. "
             f"Command: {command}"
         )
+    # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
+    refused = change_context_refusal(tool="run_on_host", tier=tier, command=command,
+                                     account=account, region=region, target=host_id)
+    if refused is not None:
+        return refused
     if tier in ("write", "unknown") and not require_confirmation:
+        record_command(tool="run_on_host", tier=tier, command=command, outcome="refused", reason="confirmation",
+                       account=account, region=region, target=host_id)
         return (
             f"This command modifies system state and requires confirmation. "
             f"Classification: {tier}. Command: {command}\n"
             f"Present this to the user and call again with require_confirmation=True after approval."
         )
+    if tier in ("write", "unknown"):
+        from agenticops.services.policy_engine import get_policy_engine
+        pattern = get_policy_engine().change_required_match(command)
+        if pattern and approved_plan_in_context() is None:
+            record_command(tool="run_on_host", tier=tier, command=command, outcome="refused", reason="change_required",
+                           account=account, region=region, target=host_id)
+            return change_required_refusal(command, pattern)
 
+    t0 = time.monotonic()
     if method == "ssh":
-        return _run_ssh_for_host(host_id, command)
-
-    if method == "ssm":
+        result = _run_ssh_for_host(host_id, command)
+    elif method == "ssm":
         from agenticops.credentials.resolver import AccountResolutionError
         try:
             snap, eff_region, _ = _resolve_host_account(host_id, account, region)
         except AccountResolutionError as e:
-            return f"Error: {e}"
-        ok, text, _ = _execute_ssm(host_id, command, eff_region, snap)
-        return text
+            result = f"Error: {e}"
+        else:
+            _ok, result, _ = _execute_ssm(host_id, command, eff_region, snap)
+    elif method == "auto":
+        result = _run_auto_ladder(host_id, command, region, account)
+    else:
+        result = f"Error: Unknown method '{method}'. Use 'auto', 'ssm', or 'ssh'."
 
-    if method == "auto":
-        return _run_auto_ladder(host_id, command, region, account)
-
-    return f"Error: Unknown method '{method}'. Use 'auto', 'ssm', or 'ssh'."
+    if tier in ("write", "unknown"):
+        record_command(tool="run_on_host", tier=tier, command=command, outcome=_ledger_outcome(result),
+                       account=account, region=region, target=host_id, output_excerpt=result,
+                       duration_ms=int((time.monotonic() - t0) * 1000))
+    return result
 
 
 def _run_auto_ladder(host_id: str, command: str, region: str, account: str) -> str:
@@ -415,24 +462,53 @@ def run_kubectl(
     if not command:
         return "Error: Empty kubectl command."
 
-    # Security classification
+    # Security classification — write-tier attempts are ledgered (command_audits) as the fully
+    # qualified `kubectl -n <ns> <cmd>`; change_required is matched against `kubectl <cmd>`
+    # because the `-n <ns>` insert would make a pattern like "kubectl delete" unmatchable.
     tier = classify_kubectl_command(command)
+    ledger_cmd = f"kubectl -n {namespace} {command}"
+    from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
+                                                    change_required_refusal, record_command)
 
     if tier == "blocked":
+        record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="blocked",
+                       account=account, region=region, target=cluster_name)
         return (
             f"Error: kubectl command blocked for safety. Operations like "
             f"'delete namespace kube-system' and 'delete --all --all-namespaces' "
             f"are not allowed. Command: kubectl {command}"
         )
 
+    # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
+    refused = change_context_refusal(tool="run_kubectl", tier=tier, command=ledger_cmd,
+                                     account=account, region=region, target=cluster_name)
+    if refused is not None:
+        return refused
+
     if tier in ("write", "unknown") and not require_confirmation:
+        record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="refused", reason="confirmation",
+                       account=account, region=region, target=cluster_name)
         return (
             f"This kubectl command modifies cluster state and requires confirmation. "
             f"Classification: {tier}. Command: kubectl -n {namespace} {command}\n"
             f"Present this to the user and call again with require_confirmation=True after approval."
         )
 
-    return _execute_kubectl(cluster_name, command, region, namespace, account)
+    if tier in ("write", "unknown"):
+        from agenticops.services.policy_engine import get_policy_engine
+        pattern = get_policy_engine().change_required_match(f"kubectl {command}")
+        if pattern and approved_plan_in_context() is None:
+            record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="refused",
+                           reason="change_required", account=account, region=region, target=cluster_name)
+            return change_required_refusal(ledger_cmd, pattern)
+
+    t0 = time.monotonic()
+    result = _execute_kubectl(cluster_name, command, region, namespace, account)
+    if tier in ("write", "unknown"):
+        record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome=_ledger_outcome(result),
+                       account=account, region=region, target=cluster_name, output_excerpt=result,
+                       duration_ms=int((time.monotonic() - t0) * 1000))
+    return result
 
 
 def _execute_kubectl(

@@ -10,6 +10,8 @@ const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
 const IssueDetail = lazy(() => import("@/pages/IssueDetail"));
+const PlansAndChanges = lazy(() => import("@/pages/PlansAndChanges"));
+const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
@@ -88,6 +90,22 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <IssueDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="plans"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <PlansAndChanges />
+                </Suspense>
+              }
+            />
+            <Route
+              path="changes/:id"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ChangeDetail />
                 </Suspense>
               }
             />

@@ -67,23 +67,18 @@ class ExecutorService:
         """Request cancellation of a running execution.
 
         Note: This sets the DB status to 'aborted' but cannot forcibly kill the
-        executor agent thread. The agent will check status on next tool call.
+        executor agent thread. The plan (if executing) → failed and, for a change
+        plan, the change request → failed via on_execution_result("aborted"); the
+        still-running agent's later writes and change_required commands are refused
+        because its plan is no longer approved/executing. False when the ticket is
+        missing or no longer running (see _close_ticket).
         """
-        from agenticops.models import FixExecution, get_db_session
-
-        with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if not execution or execution.status != "running":
-                return False
-            execution.status = "aborted"
-            execution.completed_at = datetime.now(timezone.utc)
-            execution.error_message = "Cancelled by operator"
-            session.commit()
+        ok = self._close_ticket(execution_id, "aborted", "Cancelled by operator")
+        if ok:
             logger.info("Execution #%d marked as aborted (cancellation requested)", execution_id)
-
-        with self._lock:
-            self._active_executions.pop(execution_id, None)
-        return True
+            with self._lock:
+                self._active_executions.pop(execution_id, None)
+        return ok
 
     def _poll_loop(self):
         """Main polling loop — runs in daemon thread."""
@@ -155,7 +150,40 @@ class ExecutorService:
         watchdog.start()
 
     def _run_executor(self, execution_id: int, fix_plan_id: int):
-        """Invoke executor_agent for a specific fix plan."""
+        """Invoke executor_agent for a specific fix plan (worker thread — sets its own Run Context).
+
+        The context carries the plan (so ``approved_plan_in_context()`` lets change_required
+        commands run), the queued ticket (``execution_id``, which save_execution_result closes in
+        place), the approver as ``on_behalf_of`` and the issue's trace id. It is set even when the
+        lookup fails, so audit rows are never attributed to ``system``. A run that returns without
+        recording its result is reconciled: the still-running ticket, its plan and a change plan's
+        request are failed (``_fail_execution``).
+        """
+        from agenticops.config import set_trace_id
+        from agenticops.run_context import RunContext, reset_run_context, set_run_context
+        approved_by = trace_id = None
+        change_request_id = None
+        bound_account_id = None  # a change plan binds this run to its CR's account; a fix plan / lookup-miss stays unbound
+        try:
+            from agenticops.models import FixPlan, HealthIssue, get_db_session
+            with get_db_session() as db:
+                plan = db.query(FixPlan).filter_by(id=fix_plan_id).first()
+                if plan:
+                    approved_by = plan.approved_by
+                    change_request_id = plan.change_request_id
+                    bound_account_id = plan.change_request.account_id if plan.change_request else None
+                    if plan.health_issue_id:
+                        trace_id = db.query(HealthIssue.trace_id).filter_by(id=plan.health_issue_id).scalar()
+                    elif plan.change_request:
+                        trace_id = plan.change_request.trace_id
+        except Exception:
+            logger.debug("executor run-context lookup failed for FixPlan #%d", fix_plan_id, exc_info=True)
+        if trace_id:
+            set_trace_id(trace_id)
+        _rc_token = set_run_context(RunContext(actor="agent:executor", on_behalf_of=approved_by, trace_id=trace_id,
+                                               agent_name="executor", fix_plan_id=fix_plan_id,
+                                               change_request_id=change_request_id, execution_id=execution_id,
+                                               bound_account_id=bound_account_id))
         try:
             from agenticops.agents.executor_agent import executor_agent
 
@@ -169,7 +197,17 @@ class ExecutorService:
         except Exception as e:
             logger.exception("Executor agent crashed for FixPlan #%d", fix_plan_id)
             self._mark_crashed(execution_id, fix_plan_id, str(e))
+        else:
+            # A run that returned without recording its result (a refusal, a model error the agent
+            # caught, the iteration cap) must not leave the ticket running and the plan/change executing.
+            # A no-op when save_execution_result already closed the ticket.
+            try:
+                self._fail_execution(execution_id, f"Executor ended without recording a result: {str(result)[:300]}")
+            except Exception:
+                logger.warning("post-run reconcile failed for Execution #%d", execution_id, exc_info=True)
         finally:
+            reset_run_context(_rc_token)  # self-contained: never leaves the plan context behind
+            set_trace_id(None)  # symmetric with the IM sites: the worker's trace goes with it
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 
@@ -186,31 +224,57 @@ class ExecutorService:
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 
-    def _mark_crashed(self, execution_id: int, fix_plan_id: int, error: str):
-        """Mark a crashed execution in the DB."""
-        from agenticops.models import FixExecution, FixPlan, get_db_session
+    def _close_ticket(self, execution_id: int, ticket_status: str, message: str) -> bool:
+        """Close a still-running ticket as ``ticket_status``; its executing plan → failed; for a change plan the
+        change mapper gets ``ticket_status`` (its request → failed).
+
+        The ticket is the arbiter between the three writers that close it — this one (a cancel, the watchdog, a
+        crash, the post-run reconcile) and save_execution_result — so the first write is a compare-and-set,
+        ``UPDATE … WHERE id=? AND status='running'`` (the _check_for_pending claim): only its winner goes on
+        to the plan. False (and nothing written) when the ticket is missing or no longer running — it was
+        already closed by one of the others. The plan is the TICKET's plan.
+        """
+        from sqlalchemy import update
+        from agenticops.models import FixExecution, FixPlan, get_db_session, transition_plan
+        from agenticops.security.redaction import redact_obj
 
         with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if execution and execution.status == "running":
-                execution.status = "failed"
-                execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = f"Agent crashed: {error[:500]}"
-                plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
-                if plan:
-                    plan.status = "failed"
-                session.commit()
+            # Core UPDATE: past the ORM's before_flush secret scrubber, so the message is scrubbed here.
+            closed = session.execute(
+                update(FixExecution)
+                .where(FixExecution.id == execution_id, FixExecution.status == "running")
+                .values(status=ticket_status, completed_at=datetime.now(timezone.utc), error_message=redact_obj(message))
+            )
+            if closed.rowcount != 1:
+                return False
+            plan_id = session.query(FixExecution.fix_plan_id).filter_by(id=execution_id).scalar()
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            is_change = plan is not None and plan.plan_kind == "change"
+            if plan is not None and plan.status == "executing":
+                transition_plan(plan, "failed")
+            session.commit()
+        # Change plan: feed the terminal to the change mapper after commit (a no-op unless its request is
+        # executing). Best-effort: a post-commit side-effect must never crash the handler that closes the ticket.
+        if is_change:
+            try:
+                from agenticops.services.change_service import on_execution_result
+                on_execution_result(plan_id, ticket_status, error=message)
+            except Exception:
+                logger.warning("change on_execution_result failed for FixPlan #%s", plan_id, exc_info=True)
+        return True
+
+    def _fail_execution(self, execution_id: int, message: str) -> bool:
+        """Close a still-running ticket as failed; its executing plan → failed; a change plan's request → failed.
+
+        False (and nothing written) when the ticket is missing or no longer running — it was already closed
+        by save_execution_result, a cancel, the watchdog or a crash. The plan is the TICKET's plan.
+        """
+        return self._close_ticket(execution_id, "failed", message)
+
+    def _mark_crashed(self, execution_id: int, fix_plan_id: int, error: str):
+        """Mark a crashed execution in the DB (fix_plan_id kept for the caller's signature; the ticket's plan is used)."""
+        self._fail_execution(execution_id, f"Agent crashed: {error[:500]}")
 
     def _mark_timed_out(self, execution_id: int):
         """Mark a timed-out execution in the DB."""
-        from agenticops.models import FixExecution, get_db_session
-
-        with get_db_session() as session:
-            execution = session.query(FixExecution).filter_by(id=execution_id).first()
-            if execution and execution.status == "running":
-                execution.status = "failed"
-                execution.completed_at = datetime.now(timezone.utc)
-                execution.error_message = (
-                    f"Execution timed out after {settings.executor_total_timeout}s"
-                )
-                session.commit()
+        self._fail_execution(execution_id, f"Execution timed out after {settings.executor_total_timeout}s")

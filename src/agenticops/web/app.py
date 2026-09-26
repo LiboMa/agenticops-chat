@@ -5,19 +5,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
 
-from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from sqlalchemy import case, func, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import joinedload
 
 from agenticops.models import (
     AgentMemory,
     AgentMemoryFact,
     AlertEvent,
+    ChangeRequest,
     CloudAccount,
     CloudResource,
     Anomaly,
@@ -62,6 +63,8 @@ from agenticops.web.helpers import (  # cross-router helpers (extracted)
     _infra_ref_key, _guess_type, _build_account_name_map,
     _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report,
 )
+from agenticops.auth.actor import Actor
+from agenticops.web.deps import current_actor, require_authenticated_user
 
 
 
@@ -317,6 +320,10 @@ from agenticops.web.routers import signals as _signals_router
 app.include_router(_signals_router.router)
 from agenticops.web.routers import security as _security_router
 app.include_router(_security_router.router)
+from agenticops.web.routers import changes as _changes_router
+app.include_router(_changes_router.router)
+from agenticops.web.routers import plans as _plans_router
+app.include_router(_plans_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -622,13 +629,26 @@ async def api_get_settings():
         "acp_enhanced_enabled": settings.acp_enhanced_enabled,
         "acp_enhanced_backend": settings.acp_enhanced_backend,
         "acp_available_backends": _acp_available_backends(),
+        # Change management (MVP-2.6.0) — the two security toggles persist to settings.yaml
+        "change_management_enabled": settings.change_management_enabled,
+        "change_auto_approve_standard": settings.change_auto_approve_standard,
+        "rbac_enforce": settings.rbac_enforce,
     }
 
 
 @app.patch("/api/settings")
-async def api_update_settings(body: dict = Body(...)):
+async def api_update_settings(request: Request, body: dict = Body(...), current: Actor = Depends(current_actor)):
     """Update runtime settings. Agent models + report config persist to settings.yaml;
-    boolean toggles and scan_focus are session-level (reset on restart)."""
+    boolean toggles and scan_focus are session-level (reset on restart).
+
+    The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
+    need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
+    request refused by the security-toggle checks (400/401/403) applies nothing; the other keys keep their own,
+    non-atomic validation. A changed toggle's audit rows are written, then the yaml, then the rows commit — all
+    BEFORE the value goes live in memory. A failed yaml write rolls the rows back; a commit that fails after the
+    write restores the old values in the yaml (best effort: a failed restore is logged). Either way the old value
+    stays in force and an identical retry redoes it all."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
     BOOL_KEYS = {
@@ -645,10 +665,22 @@ async def api_update_settings(body: dict = Body(...)):
     # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
     ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
 
-    ALL_KEYS = BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | {"scan_focus", "agent_models", "galaxy_model_id"}
+    # Change-management security toggles — persisted to settings.yaml (must survive a restart)
+    CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS
+                | {"scan_focus", "agent_models", "galaxy_model_id"})
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
+
+    # Security toggles are validated and authorized BEFORE anything is applied
+    change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
+    for key in sorted(change_updates):
+        if not isinstance(change_updates[key], bool):
+            raise HTTPException(400, f"{key} must be a boolean")
+    if change_updates and settings.api_auth_enabled:
+        await require_authenticated_user(request, admin=True)
 
     for key in BOOL_KEYS:
         if key in body:
@@ -736,6 +768,33 @@ async def api_update_settings(body: dict = Body(...)):
             raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
         settings.galaxy_model_id = val
         save_to_yaml({"galaxy_model_id": val})
+
+    # Security toggles — last. One audit row per changed value, then the ONE yaml write, inside one session: a
+    # yaml failure rolls the rows back, and a commit that fails after the write puts the old values back in the
+    # yaml. Only then does the in-memory value flip, so any failure leaves the old value live and an identical
+    # retry still sees the change and redoes all three steps.
+    changed = {k: v for k, v in sorted(change_updates.items()) if getattr(settings, k) != v}
+    if changed:
+        old = {k: getattr(settings, k) for k in changed}
+        yaml_written = False
+        try:
+            with get_db_session() as s:
+                for key, new in changed.items():
+                    AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings",
+                                     actor=current.key, user_id=current.user_id, old_values={key: old[key]},
+                                     new_values={key: new}, session=s)
+                save_to_yaml(changed)
+                yaml_written = True
+        except BaseException:
+            if yaml_written:
+                try:
+                    save_to_yaml(old)  # best effort; the commit's own error is what the request raises
+                except Exception:
+                    logger.exception("The audit commit failed and settings.yaml could not be restored: it still "
+                                     "holds the new value of %s", ", ".join(changed))
+            raise
+        for key, new in changed.items():
+            setattr(settings, key, new)
 
     return await api_get_settings()
 
@@ -2152,12 +2211,44 @@ async def api_list_health_issue_fix_plans(issue_id: int):
         return [FixPlanResponse.model_validate(p) for p in plans]
 
 
+_ISSUE_AGENT_LABELS = {
+    "rca": ("RCA triggered", "RCA trigger failed"),
+    "sre": ("Fix plan generated", "Fix plan generation failed"),
+}
+
+
+def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on_behalf_of: str) -> None:
+    """Thread target for the manual RCA / fix-plan triggers (POST /api/health-issues/{id}/rca and
+    /generate-fix-plan). ContextVars do not cross threading.Thread, so THIS thread sets the issue's trace
+    and a Run Context — agent:rca | agent:sre acting on behalf of the requesting web actor — and resets
+    both in finally (the pipeline-thread pattern of rca_service / pipeline_service). Failures are logged,
+    never raised out of the thread."""
+    from agenticops.config import set_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _tid_token = set_trace_id(trace_id)
+    _rc_token = set_run_context(RunContext(actor=f"agent:{agent_name}", on_behalf_of=on_behalf_of,
+                                           trace_id=trace_id, agent_name=agent_name))
+    done_label, failed_label = _ISSUE_AGENT_LABELS[agent_name]
+    try:
+        if agent_name == "rca":
+            from agenticops.agents.rca_agent import rca_agent as agent
+        else:
+            from agenticops.agents.sre_agent import sre_agent as agent
+        result = agent(issue_id=issue_id)
+        logger.info("%s for issue #%d: %s", done_label, issue_id, str(result)[:200])
+    except Exception:
+        logger.exception("%s for issue #%d", failed_label, issue_id)
+    finally:
+        reset_run_context(_rc_token)
+        _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
+
+
 @app.post("/api/health-issues/{issue_id}/rca", response_model=RCAResponse, status_code=202)
-async def api_trigger_rca(issue_id: int):
+async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA analysis for a health issue via the rca_agent.
 
-    Runs the rca_agent as a tool call and stores the result.
-    Returns the new RCA result.
+    Runs the rca_agent in a background thread (agent:rca on behalf of the requesting actor,
+    under the issue's trace) and returns immediately.
     """
     import threading
 
@@ -2165,21 +2256,10 @@ async def api_trigger_rca(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
+        issue_trace_id = issue.trace_id
 
-        # Run RCA agent in background thread and return immediately
-        issue_title = issue.title
-        issue_desc = issue.description
-        issue_resource = issue.resource_id
-
-    def _run_rca():
-        try:
-            from agenticops.agents.rca_agent import rca_agent
-            result = rca_agent(issue_id=issue_id)
-            logger.info("RCA triggered for issue #%d: %s", issue_id, str(result)[:200])
-        except Exception:
-            logger.exception("RCA trigger failed for issue #%d", issue_id)
-
-    thread = threading.Thread(target=_run_rca, daemon=True, name=f"rca-trigger-{issue_id}")
+    thread = threading.Thread(target=_run_issue_agent, args=("rca", issue_id, issue_trace_id, actor.key),
+                              daemon=True, name=f"rca-trigger-{issue_id}")
     thread.start()
 
     # Return a placeholder — the RCA will be available after the agent completes
@@ -2193,10 +2273,11 @@ async def api_trigger_rca(issue_id: int):
 
 
 @app.post("/api/health-issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_fix_plan(issue_id: int):
+async def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for a health issue via the sre_agent.
 
-    Requires an existing RCA result. Runs sre_agent in background.
+    Requires an existing RCA result. Runs sre_agent in a background thread (agent:sre on behalf
+    of the requesting actor, under the issue's trace).
     """
     import threading
 
@@ -2204,6 +2285,7 @@ async def api_trigger_fix_plan(issue_id: int):
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
+        issue_trace_id = issue.trace_id
 
         rca = (
             session.query(RCAResult)
@@ -2229,15 +2311,8 @@ async def api_trigger_fix_plan(issue_id: int):
                        f"Wait for it to complete or reject it first.",
             )
 
-    def _run_fix_plan():
-        try:
-            from agenticops.agents.sre_agent import sre_agent
-            result = sre_agent(issue_id=issue_id)
-            logger.info("Fix plan generated for issue #%d: %s", issue_id, str(result)[:200])
-        except Exception:
-            logger.exception("Fix plan generation failed for issue #%d", issue_id)
-
-    thread = threading.Thread(target=_run_fix_plan, daemon=True, name=f"fixplan-trigger-{issue_id}")
+    thread = threading.Thread(target=_run_issue_agent, args=("sre", issue_id, issue_trace_id, actor.key),
+                              daemon=True, name=f"fixplan-trigger-{issue_id}")
     thread.start()
 
     return JSONResponse(
@@ -2261,19 +2336,63 @@ async def api_list_providers():
 # ============================================================================
 
 
+def _fix_plan_response(session, plan) -> FixPlanResponse:
+    resp = FixPlanResponse.model_validate(plan)
+    if plan.health_issue_id:
+        resp.account_id = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
+    elif plan.change_request_id:
+        resp.account_id = session.query(ChangeRequest.account_id).filter_by(id=plan.change_request_id).scalar()
+    return resp
+
+
+def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
+    """Shared by POST /reject and the deprecated PUT status alias. Raises HTTPException 403 / 409
+    (409 also for a change plan — it belongs to its change request).
+    The audit row is added to the caller's session — decision and state commit together."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.change_service import fix_path_refusal
+    refusal = fix_path_refusal(plan, "rejected")
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    if plan.status == "rejected":
+        # validate_plan_transition treats current == new as a no-op, so without this guard a second reject
+        # would silently overwrite rejected_by / rejected_at / rejection_reason. rejected is terminal → 409.
+        raise HTTPException(status_code=409, detail="Fix plan is already rejected")
+    try:
+        authz.check(actor, "plan.reject", subject=plan)
+    except authz.AuthzDenied as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    old = plan.status
+    try:
+        transition_plan(plan, "rejected")
+    except InvalidStatusTransition as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    plan.rejected_by = actor.key
+    plan.rejected_at = datetime.now(timezone.utc)
+    plan.rejection_reason = reason
+    AuditService.log(Actions.PLAN_REJECTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                     user_id=actor.user_id, details={"reason": reason, "risk_level": plan.risk_level},
+                     old_values={"status": old}, new_values={"status": "rejected"}, session=session)
+
+
 @app.get("/api/fix-plans", response_model=List[FixPlanResponse])
 async def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
     account_id: Optional[int] = Query(None),
+    kind: Optional[str] = Query(None, pattern="^(fix|change)$"),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
-    """List fix plans with filtering."""
+    """List fix plans with filtering (`kind` = fix | change)."""
     with get_db_session() as session:
         query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
 
+        if kind:
+            query = query.filter_by(plan_kind=kind)
         if status:
             query = query.filter_by(status=status)
         if risk_level:
@@ -2281,19 +2400,28 @@ async def api_list_fix_plans(
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
         if account_id is not None:
-            query = query.join(HealthIssue).filter(HealthIssue.account_id == account_id)
+            # a fix plan's account is its HealthIssue's, a change plan's is its ChangeRequest's
+            query = (query.outerjoin(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
+                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id)
+                          .filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id)))
 
         plans = query.offset(offset).limit(limit).all()
-        # Resolve account_id from related HealthIssue
-        issue_ids = {p.health_issue_id for p in plans}
+        # Resolve account_id from the plan's parent: its HealthIssue (fix) or its ChangeRequest (change)
+        issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
         issue_accounts: dict[int, Optional[int]] = {}
         if issue_ids:
             rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
             issue_accounts = {iid: aid for iid, aid in rows}
+        cr_ids = {p.change_request_id for p in plans if p.change_request_id}
+        cr_accounts: dict[int, Optional[int]] = {}
+        if cr_ids:
+            rows = session.query(ChangeRequest.id, ChangeRequest.account_id).filter(ChangeRequest.id.in_(cr_ids)).all()
+            cr_accounts = {cid: aid for cid, aid in rows}
         results = []
         for p in plans:
             resp = FixPlanResponse.model_validate(p)
-            resp.account_id = issue_accounts.get(p.health_issue_id)
+            resp.account_id = (issue_accounts.get(p.health_issue_id) if p.health_issue_id
+                               else cr_accounts.get(p.change_request_id))
             results.append(resp)
         return results
 
@@ -2305,10 +2433,7 @@ async def api_get_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        resp = FixPlanResponse.model_validate(plan)
-        issue = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
-        resp.account_id = issue
-        return resp
+        return _fix_plan_response(session, plan)
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
@@ -2359,60 +2484,110 @@ async def api_create_fix_plan(data: FixPlanCreate):
         return FixPlanResponse.model_validate(plan)
 
 
+# FixPlanUpdate content fields (everything except the deprecated `status` alias). Editing any of these
+# is gated by plan.edit and is refused once the plan is locked (approved / executing / terminal).
+_FIXPLAN_CONTENT_FIELDS = {"risk_level", "title", "summary", "steps", "rollback_plan",
+                           "estimated_impact", "pre_checks", "post_checks"}
+
+
 @app.put("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
-async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate):
-    """Update a fix plan."""
+async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = Depends(current_actor)):
+    """Update plan CONTENT. Status changes must use /approve, /reject, /execute
+    (status="rejected" is kept as a deprecated alias for the pre-2.6 UI).
+
+    Content is immutable once the plan is approved/executing or terminal (409). A content edit is
+    authorized (plan.edit) and audited — one plan.edited row carrying only the fields that changed. A
+    PUT that changes nothing writes no row and does not bump updated_at. The content-free reject alias
+    is NOT a content edit: it stays gated by plan.reject and keeps its transition-409 behavior."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import FIXPLAN_TERMINAL_STATUSES
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "edited")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
         update_data = data.model_dump(exclude_unset=True)
+        status_alias = update_data.pop("status", None)
+        if status_alias is not None and status_alias != "rejected":
+            raise HTTPException(status_code=400, detail="Status changes must use /approve, /reject or /execute")
+        content_present = any(k in update_data for k in _FIXPLAN_CONTENT_FIELDS)
+        if content_present:
+            if plan.status in (FIXPLAN_TERMINAL_STATUSES | {"approved", "executing"}):
+                raise HTTPException(status_code=409,
+                                    detail=f"This plan's content is locked at status '{plan.status}'; edits are not allowed.")
+            try:
+                authz.check(actor, "plan.edit", subject=plan)
+            except authz.AuthzDenied as e:
+                raise HTTPException(status_code=403, detail=str(e))
+        changed_old, changed_new = {}, {}
         for key, value in update_data.items():
-            setattr(plan, key, value)
-
+            current = getattr(plan, key)
+            if current != value:
+                changed_old[key] = current
+                changed_new[key] = value
+                setattr(plan, key, value)
+        if status_alias == "rejected":
+            _reject_plan(session, plan, actor, "(rejected via deprecated PUT status)")
+        if changed_new:
+            AuditService.log(Actions.PLAN_EDITED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                             user_id=actor.user_id, details={"fields": sorted(changed_new)},
+                             old_values=changed_old, new_values=changed_new, session=session)
+            plan.updated_at = datetime.now(timezone.utc)  # bump only when content actually changed
         session.flush()
-        return FixPlanResponse.model_validate(plan)
+        return _fix_plan_response(session, plan)
 
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
-async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=True)):
-    """Approve a fix plan with risk-level enforcement.
-
-    L2/L3 plans require human approval — agent: prefixed approvers are rejected.
-    Already approved or rejected plans return 400.
-    """
+async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(default=FixPlanApproveBody()),
+                               actor: Actor = Depends(current_actor)):
+    """Approve a plan as the authenticated actor. The body's approved_by is a legacy claimed name:
+    it is audited (details.claimed_name) but never stored as the approver. The L2/L3 agent ceiling
+    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import InvalidStatusTransition, transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
+        # An already-decided plan is a state conflict (409, as reject reports it), not a bad request.
         if plan.status == "approved":
-            raise HTTPException(status_code=400, detail="Fix plan is already approved")
+            raise HTTPException(status_code=409, detail="Fix plan is already approved")
         if plan.status == "rejected":
-            raise HTTPException(status_code=400, detail="Fix plan was rejected. Create a new plan instead")
-
-        # L2/L3 risk gate: reject agent-initiated approvals
-        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
-            raise HTTPException(
-                status_code=403,
-                detail=f"L2/L3 fix plans require human approval. Agent '{approved_by}' cannot approve risk level {plan.risk_level}",
-            )
-
-        plan.status = "approved"
-        plan.approved_by = approved_by
+            raise HTTPException(status_code=409, detail="Fix plan was rejected. Create a new plan instead")
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        old = plan.status
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
-
-        # Sync HealthIssue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
-
+        details = {"reason": data.reason, "risk_level": plan.risk_level, "plan_kind": plan.plan_kind}
+        if data.approved_by and actor.kind == "web":
+            details["claimed_name"] = data.approved_by
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details=details,
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
         # Capture plan_id before session closes
         approved_plan_id = plan.id
-
         session.flush()
-        response = FixPlanResponse.model_validate(plan)
+        response = _fix_plan_response(session, plan)
 
     # Chain to auto-execute (outside DB session)
     try:
@@ -2424,6 +2599,18 @@ async def api_approve_fix_plan(plan_id: int, approved_by: str = Body(..., embed=
     return response
 
 
+@app.post("/api/fix-plans/{plan_id}/reject", response_model=FixPlanResponse)
+async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Actor = Depends(current_actor)):
+    """Reject a draft / pending / approved (withdraw) plan with a mandatory reason."""
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        _reject_plan(session, plan, actor, data.reason)
+        session.flush()
+        return _fix_plan_response(session, plan)
+
+
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)
 async def api_delete_fix_plan(plan_id: int):
     """Delete a fix plan."""
@@ -2431,6 +2618,10 @@ async def api_delete_fix_plan(plan_id: int):
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "deleted")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
         session.delete(plan)
 
 
@@ -2440,16 +2631,24 @@ async def api_delete_fix_plan(plan_id: int):
 
 
 @app.post("/api/fix-plans/{plan_id}/execute", response_model=FixExecutionResponse, status_code=202)
-async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="api_user", embed=True)):
-    """Trigger execution of an approved fix plan.
+async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger execution of an approved fix plan as the authenticated actor (no body is read).
 
     Creates a FixExecution record in 'pending' status. The actual execution
     is handled asynchronously by the executor agent.
     """
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.models import transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "executed")
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
 
         if plan.status != "approved":
             raise HTTPException(
@@ -2463,17 +2662,24 @@ async def api_execute_fix_plan(plan_id: int, executed_by: str = Body(default="ap
                 detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
             )
 
-        # Mark plan as executing
-        plan.status = "executing"
+        try:
+            authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
+        # Mark plan as executing (status verified 'approved' above — cannot raise)
+        transition_plan(plan, "executing")
 
         execution = FixExecution(
             fix_plan_id=plan_id,
             health_issue_id=plan.health_issue_id,
             status="pending",
-            executed_by=executed_by,
+            executed_by=actor.key,
         )
         session.add(execution)
         session.flush()
+        AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details={"execution_id": execution.id}, session=session)
         return FixExecutionResponse.model_validate(execution)
 
 
@@ -2594,9 +2800,31 @@ async def api_get_trace(trace_id: str):
 
 
 @app.post("/api/fix-executions/{execution_id}/cancel")
-async def api_cancel_execution(execution_id: int):
-    """Cancel a running fix execution."""
+async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
+    """Cancel a running fix execution — authorized against the plan behind it (plan.execute for a fix
+    plan, change.execute for a change plan; cancelling a run is executing it, not change.cancel) and
+    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    with get_db_session() as session:
+        plan = (session.query(FixPlan)
+                .join(FixExecution, FixExecution.fix_plan_id == FixPlan.id)
+                .filter(FixExecution.id == execution_id).first())
+        if plan is None:
+            raise HTTPException(status_code=400, detail="Execution not found or not in running state")
+        plan_id = plan.id
+        plan_kind = plan.plan_kind or "fix"
+        try:
+            if plan_kind == "change":
+                authz.check(actor, "change.execute", subject=plan.change_request)
+            else:
+                authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
     if _executor_service.cancel_execution(execution_id):
+        AuditService.log(Actions.PLAN_EXECUTION_CANCELLED, EntityTypes.FIX_PLAN, str(plan_id),
+                         actor=actor.key, user_id=actor.user_id,
+                         details={"execution_id": execution_id, "plan_kind": plan_kind})
         return {"status": "cancelled", "execution_id": execution_id}
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
@@ -3843,6 +4071,14 @@ async def api_send_chat_message(session_id: str, request: Request):
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
         set_trace_id(_chat_trace_id)
+        # Run Context for this chat turn — tools/services read it for audit attribution
+        # (the REST dependency current_actor does not run for this SSE handler).
+        from agenticops.auth.actor import actor_from_request
+        from agenticops.run_context import RunContext, set_run_context
+        _actor = actor_from_request(request)
+        set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
+                                   actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
+                                   agent_name="main", chat_session_id=session_id))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
@@ -4101,7 +4337,9 @@ if settings.api_auth_enabled:
             if token.startswith("aiops_"):
                 result = AuthService.validate_api_key(token)
                 if result:
-                    user, _ = result
+                    user, api_key = result
+                    # The key's scoped permissions cap the owner's: actor_from_request intersects them.
+                    request.state.api_key = api_key
             else:
                 user = AuthService.validate_session(token)
 

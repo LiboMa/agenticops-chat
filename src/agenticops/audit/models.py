@@ -24,6 +24,7 @@ class AuditLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     user_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # NULL for system actions
     user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    actor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)  # actor key (user:<email> / cli:x / agent:x)
     action: Mapped[str] = mapped_column(String(50))  # create, update, delete, login, logout, etc.
     entity_type: Mapped[str] = mapped_column(String(50))  # account, resource, anomaly, user, etc.
     entity_id: Mapped[str] = mapped_column(String(100))  # ID of the affected entity

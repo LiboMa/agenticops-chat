@@ -34,6 +34,7 @@ export type IssueStatus =
   | "root_cause_identified"
   | "fix_planned"
   | "fix_approved"
+  | "fix_executing"
   | "fix_executed"
   | "resolved"
   | "acknowledged" // legacy fallback
@@ -144,10 +145,14 @@ export type FixPlanStatus =
   | "failed"
   | "rejected";
 
+export type PlanKind = "fix" | "change";
+
 export interface FixPlan {
   id: number;
-  health_issue_id: number;
-  rca_result_id: number;
+  plan_kind: PlanKind;
+  health_issue_id: number | null;
+  rca_result_id: number | null;
+  change_request_id: number | null;
   risk_level: RiskLevel;
   title: string;
   summary: string;
@@ -159,14 +164,18 @@ export interface FixPlan {
   status: FixPlanStatus;
   approved_by: string | null;
   approved_at: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
   created_at: string;
+  updated_at: string | null;
   account_id: number | null;
 }
 
 export interface FixExecution {
   id: number;
   fix_plan_id: number;
-  health_issue_id: number;
+  health_issue_id: number | null;
   status: string;
   started_at: string | null;
   completed_at: string | null;
@@ -246,13 +255,14 @@ export interface ConnectionTestResult {
 export interface AuditLogEntry {
   id: number;
   timestamp: string;
-  user_id: number;
-  user_email: string;
+  user_id: number | null;
+  user_email: string | null;
+  actor: string | null;
   action: string;
   entity_type: string;
   entity_id: string;
   entity_name: string | null;
-  details: string | null;
+  details: Record<string, unknown> | null;
   old_values: Record<string, unknown> | null;
   new_values: Record<string, unknown> | null;
   ip_address: string | null;
@@ -718,10 +728,11 @@ export interface SearchResultItem {
   id: number;
   title: string;
   subtitle: string;
-  entity_type: "issue" | "fix_plan" | "report" | "resource";
+  entity_type: "issue" | "fix_plan" | "report" | "resource" | "change_request" | "change_plan";
   status?: string;
   severity?: string;
   report_type?: string;
+  // For a change_plan item, parent_id is the owning change request id.
   parent_id?: number;
   updated_at?: string;
   created_at?: string;
@@ -731,9 +742,13 @@ export interface SearchResponse {
   query: string;
   results: {
     issues: SearchResultItem[];
+    // A change plan arrives in the fix_plans group as entity_type "change_plan"
+    // (with parent_id = change request id); ordinary plans stay "fix_plan".
     fix_plans: SearchResultItem[];
     reports: SearchResultItem[];
     resources: SearchResultItem[];
+    // Only present when the backend's change-search flag is on.
+    change_requests?: SearchResultItem[];
   };
 }
 
@@ -963,4 +978,125 @@ export interface AttackPathItem {
   port: number | null;
   path: string[];
   reachability: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Change Management (MVP-2.6.0)                                      */
+/* ------------------------------------------------------------------ */
+
+export type ChangeStatus =
+  | "draft" | "under_review" | "needs_clarification" | "planned" | "approved"
+  | "executing" | "needs_review" | "completed" | "failed" | "rolled_back" | "rejected" | "cancelled";
+
+export type ChangeType = "standard" | "normal" | "emergency";
+
+export interface ChangeTarget {
+  resource_id: string;
+  resource_type: string;
+  db_id: number | null;
+  region: string | null;
+  evidence: string | { command: string; excerpt: string };
+  hint?: string;
+}
+
+export interface ChangeRequest {
+  id: number;
+  title: string;
+  description: string;
+  justification: string;
+  source: string;
+  requested_by: string;
+  requester_user_id: number | null;
+  requested_at: string | null;
+  account_id: number | null;
+  target_hints: string[];
+  target_resources: ChangeTarget[];
+  requested_change_type: "normal" | "emergency";
+  effective_change_type: ChangeType | null;
+  risk_level: RiskLevel | null;
+  action_type: string | null;
+  status: ChangeStatus;
+  review_verdict: string | null;
+  review_reasons: string[];
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  policy_rule: string | null;
+  policy_action: string | null;
+  approved_by: string | null;
+  approver_user_id: number | null;
+  approved_at: string | null;
+  approval_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  closed_at: string | null;
+  trace_id: string | null;
+  chat_session_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ChangeRequestDetail extends ChangeRequest {
+  plans: FixPlan[];
+  executions: FixExecution[];
+  policy_decision: Record<string, unknown> | null;
+}
+
+export interface ChangeTimelineEntry {
+  ts: string | null;
+  kind: "event" | "audit";
+  type: string;
+  actor: string | null;
+  status: string | null;
+  stage: string | null;
+  detail: unknown;
+}
+
+export interface ChangeRequestCreate {
+  title: string;
+  description: string;
+  account_name?: string;
+  targets: string[];
+  requested_change_type: "normal" | "emergency";
+  justification?: string;
+}
+
+export interface PlanStats {
+  period: { start: string; end: string; bucket: string };
+  kind: string;
+  totals: { by_kind_status: Record<string, Record<string, number>>; open: number };
+  approvals: { auto: number; human: number; rejected: number; authz_denied: number; authz_denied_shadow: number };
+  lead_time: {
+    request_to_approve_p50_s: number | null; request_to_approve_p90_s: number | null;
+    approve_to_start_p50_s: number | null; exec_duration_p50_s: number | null;
+  };
+  outcomes: { success_rate: number | null; rollbacks: number; needs_review: number };
+  breakdown: {
+    by_actor: { requesters: { actor: string; count: number }[]; approvers: { actor: string; count: number }[]; executors: { actor: string; count: number }[] };
+    by_risk: Record<string, number>; by_change_type: Record<string, number>; by_action_type: Record<string, number>; by_account: Record<string, number>;
+  };
+  series: { bucket: string; created: number; completed: number; failed: number }[];
+  commands: { by_outcome: Record<string, number>; by_tool: Record<string, number> };
+}
+
+export interface CommandAudit {
+  id: number;
+  created_at: string;
+  actor: string;
+  on_behalf_of: string | null;
+  agent_name: string | null;
+  tool: string;
+  tier: string;
+  account: string;
+  region: string;
+  target: string;
+  command: string;
+  outcome: "executed" | "refused" | "blocked" | "error";
+  reason: string | null;
+  exit_code: number | null;
+  output_excerpt: string;
+  duration_ms: number;
+  trace_id: string | null;
+  fix_plan_id: number | null;
+  change_request_id: number | null;
 }

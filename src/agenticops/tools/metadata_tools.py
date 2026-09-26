@@ -8,10 +8,11 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from strands import tool
 
-from agenticops.config import settings
+from agenticops.config import AGENT_NAMES, settings
 from agenticops.models import (
     CloudAccount,
     CloudResource,
@@ -22,6 +23,7 @@ from agenticops.models import (
     InvalidStatusTransition,
     RCAResult,
     get_session,
+    transition_plan,
     validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
@@ -811,16 +813,18 @@ def get_rca_result(health_issue_id: int) -> str:
 
 @tool
 def save_fix_plan(
-    health_issue_id: int,
-    rca_result_id: int,
-    risk_level: str,
-    title: str,
-    summary: str,
+    health_issue_id: int = 0,
+    rca_result_id: int = 0,
+    risk_level: str = "L1",
+    title: str = "",
+    summary: str = "",
     steps: str = "[]",
     rollback_plan: str = "{}",
     estimated_impact: str = "",
     pre_checks: str = "[]",
     post_checks: str = "[]",
+    plan_kind: str = "fix",
+    change_request_id: int = 0,
 ) -> str:
     """Save a structured fix plan for a health issue.
 
@@ -835,6 +839,10 @@ def save_fix_plan(
         estimated_impact: Description of expected downtime or performance impact
         pre_checks: JSON array of pre-conditions to verify before starting
         post_checks: JSON array of checks to verify after completion
+        plan_kind: 'fix' (default) or 'change'. For change requests pass plan_kind='change' and
+            change_request_id (health_issue_id/rca_result_id are ignored). Change plans MUST include
+            a non-empty rollback_plan and post_checks.
+        change_request_id: The ChangeRequest ID this plan addresses (required when plan_kind='change')
 
     Returns:
         - Created: confirmation with new FixPlan ID and risk level
@@ -866,6 +874,14 @@ def save_fix_plan(
         post_parsed = json.loads(post_checks) if isinstance(post_checks, str) else post_checks
     except json.JSONDecodeError:
         post_parsed = [post_checks]
+
+    if plan_kind not in ("fix", "change"):
+        return "Invalid plan_kind. Must be 'fix' or 'change'."
+    if plan_kind == "change":
+        return _save_change_plan(change_request_id, risk_level, title, summary, steps_parsed, rollback_parsed,
+                                 estimated_impact, pre_parsed, post_parsed)
+    if not health_issue_id or not rca_result_id:
+        return "health_issue_id and rca_result_id are required for plan_kind='fix'."
 
     session = get_session()
     try:
@@ -974,6 +990,70 @@ def save_fix_plan(
         session.close()
 
 
+def _save_change_plan(change_request_id, risk_level, title, summary, steps, rollback, impact, pre, post) -> str:
+    """Change plans: no issue/RCA, dedup per change request, rollback + post_checks mandatory,
+    NO auto-approve here (submit_change_review routes approval)."""
+    from agenticops.models import (
+        FIXPLAN_LOCKED_STATUSES, FIXPLAN_REPLACEABLE_STATUSES, FIXPLAN_TERMINAL_STATUSES, ChangeRequest,
+    )
+    if not change_request_id:
+        return "change_request_id is required for plan_kind='change'."
+    if not rollback or (isinstance(rollback, dict) and not any(v for v in rollback.values())):
+        return "Change plans require a non-empty rollback_plan (how to undo the change)."
+    if not post:
+        return "Change plans require non-empty post_checks (commands that PROVE the change took effect)."
+    session = get_session()
+    try:
+        cr = session.get(ChangeRequest, change_request_id)
+        if cr is None:
+            return f"ChangeRequest #{change_request_id} not found."
+        from agenticops.services.change_service import ChangeStateError, require_live_review
+        try:  # under_review AND (agent path) still this run's attempt — a stale run must not write the plan
+            require_live_review(cr, "a plan can only be saved during review.")
+        except ChangeStateError as e:
+            return str(e)
+        # Dedup per change request (mirrors the fix-path check-then-act above: not atomic,
+        # safe for SQLite single-writer; change plans are saved inside one SRE review flow).
+        existing = (
+            session.query(FixPlan)
+            .filter_by(change_request_id=change_request_id, plan_kind="change")
+            .filter(FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES))
+            .order_by(FixPlan.created_at.desc())
+            .first()
+        )
+        if existing and existing.status in FIXPLAN_LOCKED_STATUSES:
+            return f"ChangeRequest #{change_request_id} already has plan #{existing.id} in '{existing.status}'."
+        is_update = bool(existing and existing.status in FIXPLAN_REPLACEABLE_STATUSES)
+        if is_update:
+            plan = existing
+            plan.risk_level, plan.title, plan.summary = risk_level, title, summary
+            plan.steps, plan.rollback_plan, plan.estimated_impact = steps, rollback, impact
+            plan.pre_checks, plan.post_checks = pre, post
+            plan.updated_at = datetime.now(timezone.utc)
+            event_type = "fix_plan_updated"
+        else:
+            plan = FixPlan(plan_kind="change", change_request_id=change_request_id, risk_level=risk_level, title=title,
+                           summary=summary, steps=steps, rollback_plan=rollback, estimated_impact=impact,
+                           pre_checks=pre, post_checks=post, status="draft")
+            session.add(plan)
+            event_type = "fix_plan_created"
+        session.commit()
+        try:
+            from agenticops.services.pipeline_events import log_event
+            log_event(None, event_type, "planning", detail={"plan_id": plan.id, "risk_level": risk_level, "plan_kind": "change"},
+                      actor="agent:sre", change_request_id=change_request_id)
+        except Exception:
+            pass
+        action = "UPDATED" if is_update else "saved"
+        return (f"Change plan #{plan.id} {action} for ChangeRequest #{change_request_id} (risk {risk_level}). "
+                f"Now call submit_change_review to deliver your verdict.")
+    except Exception as e:
+        session.rollback()
+        return f"Error saving change plan: {e}"
+    finally:
+        session.close()
+
+
 @tool
 def get_fix_plan(health_issue_id: int) -> str:
     """Get the latest fix plan for a health issue.
@@ -1016,22 +1096,67 @@ def get_fix_plan(health_issue_id: int) -> str:
         session.close()
 
 
+# Agent identities a context-less approve_fix_plan call may record as the approver (M-6). Any other
+# "agent:<name>" the LLM supplies is stored as agent:unattributed — attribution among agents is not LLM-chosen.
+_KNOWN_AGENT_IDS = frozenset(AGENT_NAMES) | {"auto-pipeline"}
+
+
 @tool
 def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
     """Approve a fix plan. L0/L1 can be auto-approved; L2/L3 require human approval.
+    A plan that belongs to a change request is refused — change approval is a human action on the change request.
+
+    The real approver is the Run Context actor; approved_by is a claimed name when a context
+    exists. Without a Run Context the call is an agent acting (an "agent:<name>" value keeps
+    its name only for a known agent name, anything else is recorded as agent:unattributed) —
+    a human name passed here never approves anything. Approval is checked against rbac (agents
+    cannot approve L2/L3), and a self-declared "agent:<name>" is a privilege CEILING: it is
+    held to the agent rules too (as the vetted identity — a known agent name, else agent:unattributed),
+    so it can only lower authority, never grant it.
 
     Args:
         fix_plan_id: The FixPlan ID to approve
-        approved_by: Name/identifier of the approver
+        approved_by: Claimed name/identifier of the approver (audited, never the stored approver)
 
     Returns:
         Confirmation of approval or rejection reason.
     """
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import Actor, actor_from_run_context, parse_actor
+    from agenticops.run_context import get_run_context
+
+    ctx = get_run_context()
+    claim = parse_actor(approved_by)  # the LLM-supplied string, never an identity by itself
+    # An "agent:<name>" claim keeps its name only for a KNOWN agent (M-6); any other name is agent:unattributed.
+    # Both the context-less actor and the ceiling below are built from this VETTED identity, never from the raw
+    # string — an invented name cannot reach an audit row's actor column (it is recorded as details.claimed_name).
+    claimed_agent = (Actor("agent", claim.id if claim.id in _KNOWN_AGENT_IDS else "unattributed")
+                     if claim.kind == "agent" else None)
+    if ctx.actor != "system":
+        actor = actor_from_run_context(ctx)  # carries the user's permission flags
+    else:
+        # No Run Context (stray thread, direct call): a context-less tool call is an agent
+        # acting, never a human. The LLM-supplied string cannot grant itself an identity.
+        actor = claimed_agent or Actor("agent", "unattributed")
+    # The claimed name is audit-only: recorded when it differs from the identity that actually approved.
+    claimed = approved_by if approved_by and approved_by != actor.key else None
+    # Ceiling-as-claim (I-1): inside a human context an "agent:<name>" self-declaration is ALSO checked as
+    # that (vetted) agent — the claim can only REDUCE privilege (L2/L3 park), never grant it. With an agent
+    # actor the rbac check below already is the agent check, so no second evaluation (and no duplicate audit row).
+    ceiling = claimed_agent if claimed_agent is not None and actor.kind != "agent" else None
+    denial_details = {"via": "agent_tool", **({"claimed_name": claimed, "context_actor": actor.key} if claimed else {})}
+
     session = get_session()
     try:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
         if not plan:
             return f"FixPlan #{fix_plan_id} not found."
+
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            return f"REJECTED: {refusal}"
 
         if plan.status == "approved":
             return f"FixPlan #{fix_plan_id} is already approved."
@@ -1039,25 +1164,45 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         if plan.status == "rejected":
             return f"FixPlan #{fix_plan_id} was rejected. Create a new plan instead."
 
-        # L2/L3 require human approval — flag it but still record
-        if plan.risk_level in ("L2", "L3") and approved_by.startswith("agent:"):
-            plan.status = "pending_approval"
-            session.commit()
+        try:
+            authz.check(actor, "plan.approve", subject=plan, details=denial_details)
+            if ceiling is not None:
+                authz.check(ceiling, "plan.approve", subject=plan, details=denial_details)
+        except authz.AuthzDenied as e:
+            # Agent on L2/L3 (always-enforced rule — as the actor or as the claimed ceiling) or an
+            # enforced RBAC denial: park the plan for a human instead of approving. Nothing chains.
+            try:
+                transition_plan(plan, "pending_approval")
+                session.commit()
+                status_note = "Status set to 'pending_approval'."
+            except InvalidStatusTransition:
+                session.rollback()
+                status_note = f"Status remains '{plan.status}'."
             return (
-                f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval. "
-                f"Status set to 'pending_approval'. A human operator must approve L2/L3 plans."
+                f"FixPlan #{fix_plan_id} (risk {plan.risk_level}) requires human approval: {e.reason}. "
+                f"{status_note} A human operator must approve it."
             )
 
-        plan.status = "approved"
-        plan.approved_by = approved_by
+        old = plan.status
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            return str(e)
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
-        session.commit()
 
-        # Update health issue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
-            session.commit()
+
+        details = {"risk_level": plan.risk_level, "plan_kind": plan.plan_kind, "via": "agent_tool"}
+        if claimed:
+            details["claimed_name"] = claimed
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         user_id=actor.user_id, details=details,
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
+        session.commit()  # decision + state + audit row in one transaction
 
         # Auto-trigger execution for approved plans
         try:
@@ -1069,12 +1214,12 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         # Auto-notify
         try:
             from agenticops.services.notification_service import notify_fix_approved
-            notify_fix_approved(fix_plan_id, approved_by, plan.risk_level)
+            notify_fix_approved(fix_plan_id, actor.key, plan.risk_level)
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
         return (
-            f"FixPlan #{fix_plan_id} approved by {approved_by}. "
+            f"FixPlan #{fix_plan_id} approved by {actor.key}. "
             f"Risk: {plan.risk_level}. HealthIssue status updated to 'fix_approved'."
         )
     except Exception as e:
@@ -1091,10 +1236,15 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
 @tool
 def get_approved_fix_plan(fix_plan_id: int) -> str:
-    """Safety gate: retrieve a fix plan ONLY if its status is 'approved'.
+    """Safety gate: retrieve a fix plan ONLY if its status is 'approved' or 'executing'.
+    A change plan is returned only inside the execution its change request queued
+    (change_service.change_execution_refusal).
 
     This is the mandatory first step before execution. Returns full plan
-    details needed for execution, or rejects with an explanation.
+    details needed for execution, or rejects with an explanation. 'executing'
+    is accepted because the queued execution route (POST /execute, CLI /execute,
+    change_service.request_execution) marks the plan 'executing' at enqueue time,
+    and 'executing' is only reachable from 'approved' through the validator.
 
     Args:
         fix_plan_id: The FixPlan ID to retrieve.
@@ -1108,15 +1258,22 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
         if not plan:
             return f"REJECTED: FixPlan #{fix_plan_id} not found."
 
-        if plan.status != "approved":
+        from agenticops.services.change_service import change_execution_refusal
+        refusal = change_execution_refusal(plan)
+        if refusal:
+            return f"REJECTED: {refusal}"
+
+        if plan.status not in ("approved", "executing"):
             return (
-                f"REJECTED: FixPlan #{fix_plan_id} status is '{plan.status}', not 'approved'. "
+                f"REJECTED: FixPlan #{fix_plan_id} status is '{plan.status}', not approved/executing. "
                 f"Only approved plans can be executed."
             )
 
         return _truncate(json.dumps({
             "id": plan.id,
             "health_issue_id": plan.health_issue_id,
+            "plan_kind": plan.plan_kind,
+            "change_request_id": plan.change_request_id,
             "rca_result_id": plan.rca_result_id,
             "risk_level": plan.risk_level,
             "title": plan.title,
@@ -1138,8 +1295,8 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
 @tool
 def save_execution_result(
     fix_plan_id: int,
-    health_issue_id: int,
-    status: str,
+    health_issue_id: Optional[int] = None,
+    status: str = "",
     step_results: str = "[]",
     pre_check_results: str = "[]",
     post_check_results: str = "[]",
@@ -1152,7 +1309,8 @@ def save_execution_result(
 
     Args:
         fix_plan_id: The FixPlan ID that was executed.
-        health_issue_id: The HealthIssue ID associated with the plan.
+        health_issue_id: The HealthIssue ID associated with the plan (None for a change plan,
+            whose outcome is routed to the change request instead).
         status: Execution outcome: succeeded, failed, rolled_back, or aborted.
         step_results: JSON array of per-step results [{step_index, command, status, output, duration_ms}].
         pre_check_results: JSON array of pre-check outcomes.
@@ -1168,6 +1326,11 @@ def save_execution_result(
     valid_statuses = {"succeeded", "failed", "rolled_back", "aborted"}
     if status not in valid_statuses:
         return f"Invalid execution status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
+    from agenticops.run_context import get_run_context
+    rc = get_run_context()
+    if rc.fix_plan_id and rc.fix_plan_id != fix_plan_id:
+        return (f"REJECTED: this run executes FixPlan #{rc.fix_plan_id} — "
+                f"it cannot record a result for FixPlan #{fix_plan_id}.")
 
     def _parse_json(val, fallback):
         try:
@@ -1180,14 +1343,31 @@ def save_execution_result(
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
         if not plan:
             return f"FixPlan #{fix_plan_id} not found."
+        from agenticops.services.change_service import change_execution_refusal
+        refusal = change_execution_refusal(plan)
+        if refusal:
+            return f"REJECTED: {refusal}"
 
-        execution = FixExecution(
-            fix_plan_id=fix_plan_id,
-            health_issue_id=health_issue_id,
+        if plan.status not in ("approved", "executing"):
+            return (
+                f"FixPlan #{fix_plan_id} is '{plan.status}' — not executable. "
+                f"Only approved/executing plans can record an execution result."
+            )
+
+        # Change plans have no HealthIssue: skip issue sync/notify/post-resolution and
+        # route the terminal to the change mapper instead. Capture CR id before commit.
+        is_change = plan.plan_kind == "change"
+        change_request_id = plan.change_request_id
+        # The plan names the issue its result belongs to — never the agent's argument (a typo is logged, not fatal).
+        issue_id = None if is_change else plan.health_issue_id
+        if health_issue_id is not None and health_issue_id != issue_id:
+            logger.warning("save_execution_result: ignoring health_issue_id=%s — FixPlan #%d belongs to HealthIssue #%s",
+                           health_issue_id, fix_plan_id, issue_id)
+
+        now = datetime.now(timezone.utc)
+        fields = dict(
             status=status,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
-            executed_by=executed_by,
+            completed_at=now,
             pre_check_results=_parse_json(pre_check_results, []),
             step_results=_parse_json(step_results, []),
             post_check_results=_parse_json(post_check_results, []),
@@ -1195,22 +1375,57 @@ def save_execution_result(
             error_message=error_message or None,
             duration_ms=duration_ms,
         )
-        session.add(execution)
+        # The queued run's own ticket (ExecutorService claimed it pending→running and named it in the Run
+        # Context) is closed IN PLACE — one row per queued execution; it keeps executed_by (the requester),
+        # started_at (the claim) and health_issue_id. The close is a compare-and-set on status='running', the
+        # same one a cancel / the watchdog / a crash makes (ExecutorService._close_ticket): the ticket's first
+        # closer wins, and a result that lost it is refused, never inserted as a second row. Chat /
+        # auto-pipeline runs have no ticket → a new row.
+        execution = None
+        if rc.execution_id:
+            from sqlalchemy import update
+            from agenticops.security.redaction import redact_obj
+            closed = session.execute(
+                update(FixExecution)
+                .where(FixExecution.id == rc.execution_id, FixExecution.fix_plan_id == fix_plan_id,
+                       FixExecution.status == "running")
+                # Core UPDATE: past the ORM's before_flush secret scrubber, so the values are scrubbed here.
+                .values(**{k: redact_obj(v) for k, v in fields.items()})
+            )
+            if closed.rowcount != 1:
+                session.rollback()
+                logger.warning("save_execution_result: Execution #%d for FixPlan #%d is no longer running — "
+                               "the agent's '%s' result was not recorded", rc.execution_id, fix_plan_id, status)
+                return (f"REJECTED: Execution #{rc.execution_id} for FixPlan #{fix_plan_id} is no longer running — "
+                        f"it was cancelled, timed out or already recorded; this result was not recorded.")
+            session.refresh(plan)  # validate the transition below against the plan as it is now
+        else:
+            execution = FixExecution(
+                fix_plan_id=fix_plan_id,
+                health_issue_id=issue_id,
+                started_at=now,
+                executed_by=executed_by,
+                **fields,
+            )
+            session.add(execution)
 
-        # Update FixPlan status
-        if status == "succeeded":
-            plan.status = "executed"
-        elif status in ("failed", "rolled_back"):
-            plan.status = "failed"
-        # aborted -> keep approved (allow retry)
+        # Update FixPlan status through the state machine (approved → executing → terminal).
+        # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
+        terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
+        if terminal:
+            if plan.status == "approved":
+                transition_plan(plan, "executing")
+            transition_plan(plan, terminal)
+        elif plan.status == "executing":
+            transition_plan(plan, "failed")  # aborted mid-run: an executing plan can never run again
 
         # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
         # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,
         # intentionally skipping fix_executed. The FixExecution table tracks execution detail,
         # while HealthIssue.status tracks the lifecycle. Controlled by executor_auto_resolve flag.
         auto_resolved = False
-        if status == "succeeded" and settings.executor_auto_resolve:
-            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
+        if status == "succeeded" and settings.executor_auto_resolve and not is_change:
+            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
             if issue and issue.status in ("fix_approved", "fix_executed"):
                 issue.status = "resolved"
                 issue.resolved_at = datetime.now(timezone.utc)
@@ -1218,12 +1433,15 @@ def save_execution_result(
 
         session.commit()
 
-        # Log pipeline event
+        # Log pipeline event (against the CR for a change plan, else the issue)
         try:
             from agenticops.services.pipeline_events import log_event
-            log_event(health_issue_id, "execution_completed", "execution", status,
-                      detail={"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved},
-                      duration_ms=duration_ms)
+            detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved}
+            if is_change:
+                log_event(None, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms,
+                          change_request_id=change_request_id)
+            else:
+                log_event(issue_id, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms)
         except Exception:
             pass
 
@@ -1231,28 +1449,39 @@ def save_execution_result(
         if auto_resolved:
             try:
                 from agenticops.services.resolution_service import trigger_post_resolution
-                trigger_post_resolution(health_issue_id)
+                trigger_post_resolution(issue_id)
             except Exception as e:
                 logger.warning("Failed to trigger post-resolution pipeline: %s", e)
 
-        # Auto-notify + IM origin update
-        try:
-            from agenticops.services.notification_service import notify_execution_result, notify_im_origin
-            notify_execution_result(fix_plan_id, health_issue_id, status, error_message)
-            notify_im_origin(
-                health_issue_id, "execution_completed",
-                f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{health_issue_id} (Plan #{fix_plan_id})"
-                + (f": {error_message[:200]}" if error_message else ""),
-            )
-        except Exception:
-            logger.debug("Notification trigger failed", exc_info=True)
+        # Change plan → deterministic terminal mapper (transitions the CR); fix plan → notifications.
+        # Called AFTER commit so the mapper reads committed plan/execution state and never contends
+        # with this function's own write transaction (Ruling 3).
+        if is_change:
+            try:
+                from agenticops.services.change_service import on_execution_result
+                on_execution_result(fix_plan_id, status,
+                                    post_check_results=_parse_json(post_check_results, []),
+                                    error=error_message)
+            except Exception:
+                logger.warning("change on_execution_result failed for FixPlan #%d", fix_plan_id, exc_info=True)
+        else:
+            try:
+                from agenticops.services.notification_service import notify_execution_result, notify_im_origin
+                notify_execution_result(fix_plan_id, issue_id, status, error_message)
+                notify_im_origin(
+                    issue_id, "execution_completed",
+                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{issue_id} (Plan #{fix_plan_id})"
+                    + (f": {error_message[:200]}" if error_message else ""),
+                )
+            except Exception:
+                logger.debug("Notification trigger failed", exc_info=True)
 
         msg = (
-            f"FixExecution #{execution.id} saved for FixPlan #{fix_plan_id}. "
+            f"FixExecution #{execution.id if execution is not None else rc.execution_id} saved for FixPlan #{fix_plan_id}. "
             f"Status: {status}. FixPlan status updated to '{plan.status}'."
         )
         if auto_resolved:
-            msg += f" HealthIssue #{health_issue_id} auto-resolved. Post-resolution pipeline triggered."
+            msg += f" HealthIssue #{issue_id} auto-resolved. Post-resolution pipeline triggered."
         return msg
     except Exception as e:
         session.rollback()
@@ -1262,7 +1491,7 @@ def save_execution_result(
 
 
 @tool
-def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
+def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
     """Mark a HealthIssue as fix_executed after successful execution.
 
     Transitions HealthIssue status to 'fix_executed' and records the execution reference.
@@ -1274,6 +1503,8 @@ def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
     Returns:
         Confirmation of the status update.
     """
+    if not health_issue_id:
+        return "This is a change plan (no HealthIssue); nothing to mark — the change request state is derived from save_execution_result."
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
@@ -1283,6 +1514,21 @@ def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
         execution = session.query(FixExecution).filter_by(id=execution_id).first()
         if not execution:
             return f"FixExecution #{execution_id} not found."
+
+        # Only a finished run of this issue's plan: after a refused late save (a cancel won the ticket) the run
+        # is aborted and its plan failed, yet the executor still calls this tool.
+        plan = session.query(FixPlan).filter_by(id=execution.fix_plan_id).first()
+        if (execution.status != "succeeded" or plan is None or plan.status != "executed"
+                or plan.health_issue_id != health_issue_id):
+            if plan is None:
+                plan_state = "missing"
+            else:
+                owner = (f"HealthIssue #{plan.health_issue_id}" if plan.health_issue_id
+                         else f"change request C#{plan.change_request_id}")
+                plan_state = f"'{plan.status}' (for {owner})"
+            return (f"REJECTED: FixExecution #{execution_id} is '{execution.status}' and its FixPlan "
+                    f"#{execution.fix_plan_id} is {plan_state} — only a succeeded run of HealthIssue "
+                    f"#{health_issue_id}'s executed plan marks it fix_executed.")
 
         old_status = issue.status
 
@@ -1308,7 +1554,7 @@ def mark_fix_executed(health_issue_id: int, execution_id: int) -> str:
 
 
 @tool
-def mark_fix_failed(health_issue_id: int, execution_id: int, reason: str = "") -> str:
+def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: str = "") -> str:
     """Record that a fix execution failed. Keeps HealthIssue in fix_approved state to allow retry.
 
     Args:
@@ -1319,6 +1565,8 @@ def mark_fix_failed(health_issue_id: int, execution_id: int, reason: str = "") -
     Returns:
         Confirmation message.
     """
+    if not health_issue_id:
+        return "This is a change plan (no HealthIssue); nothing to mark — the change request state is derived from save_execution_result."
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()

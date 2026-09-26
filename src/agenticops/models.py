@@ -1,17 +1,22 @@
 """SQLAlchemy models for AgenticOps."""
 
 import json
+import logging
+import os
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import NullPool, StaticPool
 
 from agenticops.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -463,35 +468,109 @@ class HealthIssue(Base):
 
 
 # ============================================================================
+# Change Requests (MVP-2.6.0 Change Management)
+# ============================================================================
+
+
+class ChangeRequest(Base):
+    """ITSM change ticket: who wants what changed, reviewed by SRE, approved, executed via a Plan."""
+
+    __tablename__ = "change_requests"
+    __table_args__ = (
+        Index("idx_change_request_status", "status"),
+        Index("idx_change_request_requested_by", "requested_by"),
+        Index("idx_change_request_account", "account_id"),
+        Index("idx_change_request_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text)
+    justification: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(20), default="api")  # chat|web|cli|im|webhook|api
+    requested_by: Mapped[str] = mapped_column(String(255))  # actor key, e.g. user:<email> (users.email is 255)
+    requester_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cloud_accounts.id"), nullable=True)
+    target_hints: Mapped[list] = mapped_column(JSON, default=list)  # raw strings the requester typed (ids/ARNs/names)
+    target_resources: Mapped[list] = mapped_column(JSON, default=list)  # GROUNDED only: [{resource_id, resource_type, db_id, region, evidence}]
+    requested_change_type: Mapped[str] = mapped_column(String(20), default="normal")  # normal|emergency
+    effective_change_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # standard|normal|emergency
+    risk_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # L0-L3
+    action_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # tag|scale|config|network|iam|delete|other
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    review_verdict: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    review_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    review_attempt: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # bumped on every → under_review; keys rollbacks
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    policy_rule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    policy_action: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    approver_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approval_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    chat_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    plans: Mapped[list["FixPlan"]] = relationship(back_populates="change_request")
+
+
+# ============================================================================
 # Fix Plans (SRE Agent)
 # ============================================================================
 
 
 class FixPlan(Base):
-    """Structured fix plans generated by the SRE Agent."""
+    """Structured plans. plan_kind='fix' (from HealthIssue+RCA) or 'change' (from a ChangeRequest)."""
 
     __tablename__ = "fix_plans"
+    __table_args__ = (
+        Index("idx_fix_plan_kind", "plan_kind"),
+        Index("idx_fix_plan_change_request", "change_request_id"),
+        CheckConstraint(
+            "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL "
+            "AND change_request_id IS NULL) OR "
+            "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL "
+            "AND rca_result_id IS NULL)",
+            name="ck_fix_plans_origin",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    health_issue_id: Mapped[int] = mapped_column(ForeignKey("health_issues.id"))
-    rca_result_id: Mapped[int] = mapped_column(ForeignKey("rca_results.id"))
+    plan_kind: Mapped[str] = mapped_column(String(10), default="fix", server_default="fix")
+    health_issue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("health_issues.id"), nullable=True)
+    rca_result_id: Mapped[Optional[int]] = mapped_column(ForeignKey("rca_results.id"), nullable=True)
+    change_request_id: Mapped[Optional[int]] = mapped_column(ForeignKey("change_requests.id"), nullable=True)
     risk_level: Mapped[str] = mapped_column(String(20))  # L0, L1, L2, L3
     title: Mapped[str] = mapped_column(String(300))
     summary: Mapped[str] = mapped_column(Text)
-    steps: Mapped[list] = mapped_column(JSON, default=list)  # ordered fix steps
+    steps: Mapped[list] = mapped_column(JSON, default=list)  # ordered steps
     rollback_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     estimated_impact: Mapped[str] = mapped_column(Text, default="")
     pre_checks: Mapped[list] = mapped_column(JSON, default=list)
     post_checks: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(30), default="draft")
-    # Lifecycle: draft -> pending_approval -> approved -> executing -> executed | failed | rejected
-    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Lifecycle (validate_plan_transition): draft -> pending_approval -> approved -> executing -> executed | failed | rejected
+    approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    health_issue: Mapped["HealthIssue"] = relationship(back_populates="fix_plans")
-    rca_result: Mapped["RCAResult"] = relationship()
+    health_issue: Mapped[Optional["HealthIssue"]] = relationship(back_populates="fix_plans")
+    rca_result: Mapped[Optional["RCAResult"]] = relationship()
+    change_request: Mapped[Optional["ChangeRequest"]] = relationship(back_populates="plans")
     fix_executions: Mapped[list["FixExecution"]] = relationship(back_populates="fix_plan")
 
 
@@ -499,6 +578,95 @@ class FixPlan(Base):
 FIXPLAN_TERMINAL_STATUSES = {"executed", "failed", "rejected"}
 FIXPLAN_REPLACEABLE_STATUSES = {"draft"}
 FIXPLAN_LOCKED_STATUSES = {"pending_approval", "approved", "executing"}
+
+
+# ── FixPlan state machine (MVP-2.6.0) ─────────────────────────────────
+# Applies to BOTH plan kinds (fix | change). Replaces the direct status
+# assignments that used to live in metadata_tools / pipeline_service /
+# app.py / cli. Terminal: executed, failed, rejected.
+
+VALID_PLAN_STATUSES = {
+    "draft", "pending_approval", "approved", "executing", "executed", "failed", "rejected",
+}
+
+PLAN_TRANSITIONS: dict[str, set[str]] = {
+    "draft":            {"pending_approval", "approved", "rejected"},
+    "pending_approval": {"approved", "rejected"},
+    "approved":         {"executing", "rejected"},   # rejected from approved = withdrawn before execution
+    "executing":        {"executed", "failed"},
+    "executed":         set(),
+    "failed":           set(),
+    "rejected":         set(),
+}
+
+
+def validate_plan_transition(current: str, new: str) -> None:
+    """Validate a FixPlan status transition (raises InvalidStatusTransition / ValueError)."""
+    if new not in VALID_PLAN_STATUSES:
+        raise ValueError(f"Invalid plan status '{new}'. Valid: {', '.join(sorted(VALID_PLAN_STATUSES))}")
+    if current == new:
+        return
+    allowed = PLAN_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidStatusTransition(
+            f"Cannot transition plan from '{current}' to '{new}'. "
+            f"Allowed from '{current}': {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
+def transition_plan(plan, new_status: str) -> None:
+    """Validate and apply a FixPlan status change; stamps updated_at."""
+    validate_plan_transition(plan.status, new_status)
+    plan.status = new_status
+    plan.updated_at = datetime.now(timezone.utc)
+
+
+# ── ChangeRequest (MVP-2.6.0 Change Management) ───────────────────────
+
+VALID_CHANGE_STATUSES = {
+    "draft", "under_review", "needs_clarification", "planned", "approved",
+    "executing", "needs_review", "completed", "failed", "rolled_back", "rejected", "cancelled",
+}
+CHANGE_TERMINAL_STATUSES = {"completed", "failed", "rolled_back", "rejected", "cancelled"}
+
+CHANGE_TRANSITIONS: dict[str, set[str]] = {
+    "draft":               {"under_review", "cancelled"},
+    "under_review":        {"planned", "needs_clarification", "rejected", "draft"},  # draft = watchdog rollback
+    "needs_clarification": {"under_review", "cancelled"},
+    "planned":             {"approved", "rejected", "cancelled"},
+    "approved":            {"executing", "cancelled"},
+    "executing":           {"completed", "failed", "rolled_back", "needs_review"},
+    "needs_review":        {"completed", "failed"},  # human verdict; a redo is a NEW change request
+    "completed":           set(),
+    "failed":              set(),
+    "rolled_back":         set(),
+    "rejected":            set(),
+    "cancelled":           set(),
+}
+
+
+def validate_change_transition(current: str, new: str) -> None:
+    """Validate a ChangeRequest status transition (raises InvalidStatusTransition / ValueError)."""
+    if new not in VALID_CHANGE_STATUSES:
+        raise ValueError(f"Invalid change status '{new}'. Valid: {', '.join(sorted(VALID_CHANGE_STATUSES))}")
+    if current == new:
+        return
+    allowed = CHANGE_TRANSITIONS.get(current, set())
+    if new not in allowed:
+        raise InvalidStatusTransition(
+            f"Cannot transition change from '{current}' to '{new}'. "
+            f"Allowed from '{current}': {', '.join(sorted(allowed)) or 'none (terminal)'}"
+        )
+
+
+def transition_change(cr, new_status: str) -> None:
+    """Validate and apply a ChangeRequest status change; stamps updated_at / closed_at."""
+    validate_change_transition(cr.status, new_status)
+    cr.status = new_status
+    now = datetime.now(timezone.utc)
+    cr.updated_at = now
+    if new_status in CHANGE_TERMINAL_STATUSES:
+        cr.closed_at = now
 
 
 # ============================================================================
@@ -517,12 +685,12 @@ class FixExecution(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fix_plan_id: Mapped[int] = mapped_column(ForeignKey("fix_plans.id"))
-    health_issue_id: Mapped[int] = mapped_column(ForeignKey("health_issues.id"))
+    health_issue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("health_issues.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="pending")
     # Lifecycle: pending -> running -> succeeded | failed | rolled_back | aborted
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    executed_by: Mapped[str] = mapped_column(String(100), default="executor_agent")
+    executed_by: Mapped[str] = mapped_column(String(255), default="executor_agent")
     pre_check_results: Mapped[list] = mapped_column(JSON, default=list)
     step_results: Mapped[list] = mapped_column(JSON, default=list)
     post_check_results: Mapped[list] = mapped_column(JSON, default=list)
@@ -533,7 +701,7 @@ class FixExecution(Base):
 
     # Relationships
     fix_plan: Mapped["FixPlan"] = relationship(back_populates="fix_executions")
-    health_issue: Mapped["HealthIssue"] = relationship(back_populates="fix_executions")
+    health_issue: Mapped[Optional["HealthIssue"]] = relationship(back_populates="fix_executions")
 
 
 # ============================================================================
@@ -542,16 +710,18 @@ class FixExecution(Base):
 
 
 class PipelineEvent(Base):
-    """Timeline event log for HealthIssue lifecycle tracking."""
+    """Timeline event log for HealthIssue AND ChangeRequest lifecycles (exactly one id set)."""
 
     __tablename__ = "pipeline_events"
     __table_args__ = (
         Index("idx_pipeline_event_issue", "health_issue_id"),
+        Index("idx_pipeline_event_change", "change_request_id"),
         Index("idx_pipeline_event_time", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    health_issue_id: Mapped[int] = mapped_column(index=True)
+    health_issue_id: Mapped[Optional[int]] = mapped_column(nullable=True, index=True)
+    change_request_id: Mapped[Optional[int]] = mapped_column(nullable=True)
     event_type: Mapped[str] = mapped_column(String(50))
     stage: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(20))
@@ -560,6 +730,47 @@ class PipelineEvent(Base):
     duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+
+
+# ============================================================================
+# Command Audit (MVP-2.6.0) — tool-layer ledger of write-tier commands
+# ============================================================================
+
+
+class CommandAudit(Base):
+    """One row per write/unknown/blocked command attempt made by run_aws_cli / run_on_host /
+    run_kubectl / run_skill_script. Read-only commands are NOT recorded."""
+
+    __tablename__ = "command_audits"
+    __table_args__ = (
+        Index("idx_command_audit_created", "created_at"),
+        Index("idx_command_audit_actor", "actor"),
+        Index("idx_command_audit_outcome", "outcome"),
+        Index("idx_command_audit_plan", "fix_plan_id"),
+        Index("idx_command_audit_change", "change_request_id"),
+        Index("idx_command_audit_trace", "trace_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    actor: Mapped[str] = mapped_column(String(255), default="system")
+    actor_user_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    on_behalf_of: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    agent_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    tool: Mapped[str] = mapped_column(String(30))  # run_aws_cli|run_on_host|run_kubectl|run_skill_script
+    tier: Mapped[str] = mapped_column(String(10))  # write|unknown|blocked|script
+    account: Mapped[str] = mapped_column(String(100), default="")
+    region: Mapped[str] = mapped_column(String(30), default="")
+    target: Mapped[str] = mapped_column(String(200), default="")  # host id / cluster / skill
+    command: Mapped[str] = mapped_column(Text)  # redacted
+    outcome: Mapped[str] = mapped_column(String(10))  # executed|refused|blocked|error
+    reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # confirmation|change_required|...
+    exit_code: Mapped[Optional[int]] = mapped_column(nullable=True)
+    output_excerpt: Mapped[str] = mapped_column(Text, default="")  # redacted, <= 2000 chars
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    fix_plan_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    change_request_id: Mapped[Optional[int]] = mapped_column(nullable=True)
 
 
 # ============================================================================
@@ -912,6 +1123,250 @@ class AgentMemory(Base):
 # ============================================================================
 
 
+# ── MVP-2.6.0 migration helpers ───────────────────────────────────────
+
+_NULLABLE_ORIGIN_COLUMNS: dict[str, tuple[str, ...]] = {
+    "fix_plans": ("health_issue_id", "rca_result_id"),
+    "fix_executions": ("health_issue_id",),
+    "pipeline_events": ("health_issue_id",),
+}
+
+# table → {column: extra DDL clause or None}. The column TYPE is deliberately not spelled
+# here: it is compiled from the ORM column for the engine's dialect (SQLite DATETIME vs
+# PostgreSQL TIMESTAMP WITHOUT TIME ZONE), so both paths share one source of truth.
+_ADD_COLUMNS_2_6_0: dict[str, dict[str, Optional[str]]] = {
+    "fix_plans": {
+        "plan_kind": "DEFAULT 'fix'",
+        "change_request_id": None,
+        "rejected_by": None,
+        "rejected_at": None,
+        "rejection_reason": None,
+        "updated_at": None,
+    },
+    "pipeline_events": {"change_request_id": None},
+    "audit_logs": {"actor": None},
+    "change_requests": {"review_attempt": "DEFAULT 0 NOT NULL"},
+}
+
+# Actor-key columns (`user:<email>`; users.email is String(255)) widened from VARCHAR(100) in the fix wave (M-2).
+# SQLite ignores VARCHAR lengths (no rebuild); PostgreSQL gets a metadata-only ALTER COLUMN TYPE per column.
+_ACTOR_KEY_COLUMNS_2_6_0: dict[str, tuple[str, ...]] = {
+    "fix_plans": ("approved_by", "rejected_by"),
+    "fix_executions": ("executed_by",),
+    "change_requests": ("requested_by", "reviewed_by", "approved_by", "rejected_by"),
+    "command_audits": ("actor", "on_behalf_of"),
+    "audit_logs": ("actor",),
+}
+_ACTOR_KEY_WIDTH = 255
+
+_INDEXES_2_6_0: tuple[tuple[str, str, str], ...] = (  # (table, index, column)
+    ("fix_plans", "idx_fix_plan_kind", "plan_kind"),
+    ("fix_plans", "idx_fix_plan_change_request", "change_request_id"),
+    ("pipeline_events", "idx_pipeline_event_change", "change_request_id"),
+    ("audit_logs", "ix_audit_logs_actor", "actor"),
+)
+
+_CK_FIX_PLANS_ORIGIN_SQL = (
+    "(plan_kind = 'fix' AND health_issue_id IS NOT NULL AND rca_result_id IS NOT NULL AND change_request_id IS NULL) OR "
+    "(plan_kind = 'change' AND change_request_id IS NOT NULL AND health_issue_id IS NULL AND rca_result_id IS NULL)"
+)
+
+# Once per process per database URL (I-2): init_db() is a runtime hot path, so the 2.6.0 pass must not
+# re-issue its DDL/DML on every call. Marked only after a SUCCESSFUL pass — a failure retries next time.
+_migrated_2_6_0_urls: set[str] = set()
+_migrate_2_6_0_lock = threading.Lock()
+
+
+def _add_column_ddl(dialect, table_name: str, col: str, extra: Optional[str]) -> str:
+    """`<col> <type>[ <extra>]` for ADD COLUMN, type compiled from the ORM column for `dialect`."""
+    col_type = Base.metadata.tables[table_name].c[col].type.compile(dialect=dialect)
+    return f"{col} {col_type}" + (f" {extra}" if extra else "")
+
+
+def _sqlite_notnull_columns(engine, table_name: str) -> set[str]:
+    with engine.connect() as conn:
+        rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+    return {r[1] for r in rows if r[3]}
+
+
+def _backup_sqlite_file(engine) -> Optional[str]:
+    """Snapshot the SQLite file to <db>.bak-pre-2.6.0 once (before the first table rebuild).
+
+    An online backup (sqlite3.Connection.backup — a consistent snapshot even while another process is
+    mid-write; a plain file copy can tear in rollback-journal mode) written to a temp name in the same
+    directory and published with os.replace, so the final name is never a half-written file.
+    Idempotent: an existing backup is kept as is."""
+    import shutil
+    import sqlite3
+    import tempfile
+    db_path = engine.url.database
+    if not db_path or db_path == ":memory:":
+        return None
+    bak = f"{db_path}.bak-pre-2.6.0"
+    if os.path.exists(bak) or not os.path.exists(db_path):
+        return bak
+    fd, tmp = tempfile.mkstemp(prefix=".bak-pre-2.6.0.", dir=os.path.dirname(os.path.abspath(db_path)))
+    os.close(fd)
+    try:
+        src, dst = sqlite3.connect(db_path), sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        shutil.copymode(db_path, tmp)  # mkstemp gives 0600; keep the database file's own mode (as copy2 did)
+        os.replace(tmp, bak)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    logger.info("Pre-2.6.0 database backup written to %s", bak)
+    return bak
+
+
+def _sqlite_rebuild_table(engine, table) -> None:
+    """sqlite.org 'other kinds of ALTER': create <t>__new from the ORM metadata (no indexes),
+    copy the common columns, drop the old table (drops its indexes), rename new → old name
+    (this direction leaves other tables' FK references pointing at the surviving name), then
+    recreate the indexes. FK enforcement is off in this project, so no PRAGMA dance is needed."""
+    from sqlalchemy import MetaData
+
+    tmp_name = f"{table.name}__new"
+    tmp_meta = MetaData()
+    tmp_table = table.to_metadata(tmp_meta, name=tmp_name)
+    for idx in list(tmp_table.indexes):
+        tmp_table.indexes.discard(idx)
+    # The CREATE TABLE DDL resolves each FK target through tmp_meta, so the referenced
+    # tables must exist there as metadata copies (nothing is emitted for them).
+    for fk in table.foreign_keys:
+        if fk.column.table.name not in tmp_meta.tables:
+            fk.column.table.to_metadata(tmp_meta)
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS {tmp_name}"))
+        tmp_table.create(conn)
+        old_cols = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table.name})")).fetchall()}
+        common = [c.name for c in table.columns if c.name in old_cols]
+        cols_sql = ", ".join(common)
+        conn.execute(text(f"INSERT INTO {tmp_name} ({cols_sql}) SELECT {cols_sql} FROM {table.name}"))
+        conn.execute(text(f"DROP TABLE {table.name}"))
+        conn.execute(text(f"ALTER TABLE {tmp_name} RENAME TO {table.name}"))
+        for idx in table.indexes:
+            idx.create(conn)
+    logger.info("Rebuilt table %s with relaxed NOT NULL constraints (MVP-2.6.0)", table.name)
+
+
+def _pg_migration_statements(insp, dialect, existing_constraints: set[str]) -> list[str]:
+    """PostgreSQL DDL/DML for MVP-2.6.0, gated on the live catalog (`insp` = sqlalchemy.inspect(engine)):
+    only what is missing is emitted, so a migrated database gets an EMPTY list — no ACCESS EXCLUSIVE lock
+    is taken for work already done. `existing_constraints` are the constraint names on fix_plans
+    (pg_constraint scoped by conrelid). Pure: no connection, nothing executed."""
+    stmts: list[str] = []
+
+    def columns(table: str) -> dict[str, dict]:
+        return {c["name"]: c for c in insp.get_columns(table)}
+
+    # 1. plan-lineage columns become nullable (change plans have no issue / RCA)
+    for table, names in _NULLABLE_ORIGIN_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col in names:
+            if col in existing and not existing[col]["nullable"]:
+                stmts.append(f"ALTER TABLE {table} ALTER COLUMN {col} DROP NOT NULL")
+    # 2. new columns (types compiled from the ORM for this dialect)
+    for table, spec in _ADD_COLUMNS_2_6_0.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col, extra in spec.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {_add_column_ddl(dialect, table, col, extra)}")
+    # 3. fix_plans: plan_kind backfill + NOT NULL (M-3), FK to change_requests (M-3), origin CHECK
+    if insp.has_table("fix_plans"):
+        plan_kind = columns("fix_plans").get("plan_kind")
+        if plan_kind is None or plan_kind["nullable"]:  # just added above, or left nullable by an earlier 2.6.0 run
+            stmts.append("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL")
+            stmts.append("ALTER TABLE fix_plans ALTER COLUMN plan_kind SET NOT NULL")
+        fks = insp.get_foreign_keys("fix_plans")
+        if not any(fk.get("constrained_columns") == ["change_request_id"] for fk in fks):
+            stmts.append("ALTER TABLE fix_plans ADD CONSTRAINT fix_plans_change_request_id_fkey "
+                         "FOREIGN KEY (change_request_id) REFERENCES change_requests (id)")
+        if "ck_fix_plans_origin" not in existing_constraints:
+            stmts.append(f"ALTER TABLE fix_plans ADD CONSTRAINT ck_fix_plans_origin CHECK ({_CK_FIX_PLANS_ORIGIN_SQL})")
+    # 4. actor-key columns → VARCHAR(255) (M-2; widening varchar is metadata-only on PostgreSQL)
+    for table, names in _ACTOR_KEY_COLUMNS_2_6_0.items():
+        if not insp.has_table(table):
+            continue
+        existing = columns(table)
+        for col in names:
+            length = getattr(existing[col]["type"], "length", None) if col in existing else None
+            if length is not None and length < _ACTOR_KEY_WIDTH:
+                stmts.append(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE VARCHAR({_ACTOR_KEY_WIDTH})")
+    # 5. indexes
+    for table, index, col in _INDEXES_2_6_0:
+        if insp.has_table(table) and index not in {ix["name"] for ix in insp.get_indexes(table)}:
+            stmts.append(f"CREATE INDEX IF NOT EXISTS {index} ON {table}({col})")
+    return stmts
+
+
+def _migrate_2_6_0(engine) -> None:
+    """Idempotent MVP-2.6.0 schema migration (runs after create_all) — once per process per database URL.
+    Raises on failure (init_db never starts on a half-migrated schema) and then retries on the next call."""
+    key = str(engine.url)
+    with _migrate_2_6_0_lock:
+        if key in _migrated_2_6_0_urls:
+            return
+        _run_migrate_2_6_0(engine)
+        _migrated_2_6_0_urls.add(key)
+
+
+def _run_migrate_2_6_0(engine) -> None:
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    if dialect == "sqlite":
+        tables = {"fix_plans": FixPlan.__table__, "fix_executions": FixExecution.__table__,
+                  "pipeline_events": PipelineEvent.__table__}
+        needs_rebuild = [
+            name for name, cols in _NULLABLE_ORIGIN_COLUMNS.items()
+            if insp.has_table(name) and any(c in _sqlite_notnull_columns(engine, name) for c in cols)
+        ]
+        if needs_rebuild:
+            _backup_sqlite_file(engine)
+            for name in needs_rebuild:
+                _sqlite_rebuild_table(engine, tables[name])
+            insp = inspect(engine)
+        # Any column still missing (e.g. table rebuilt by an older run) → plain ADD COLUMN
+        for tbl, cols in _ADD_COLUMNS_2_6_0.items():
+            if not insp.has_table(tbl):
+                continue
+            existing = {c["name"] for c in insp.get_columns(tbl)}
+            with engine.begin() as conn:
+                for col, extra in cols.items():
+                    if col not in existing:
+                        conn.execute(text(
+                            f"ALTER TABLE {tbl} ADD COLUMN {_add_column_ddl(engine.dialect, tbl, col, extra)}"
+                        ))
+                if tbl == "fix_plans":
+                    conn.execute(text("UPDATE fix_plans SET plan_kind = 'fix' WHERE plan_kind IS NULL"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fix_plan_kind ON fix_plans(plan_kind)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fix_plan_change_request ON fix_plans(change_request_id)"))
+                if tbl == "pipeline_events":
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pipeline_event_change ON pipeline_events(change_request_id)"))
+                if tbl == "audit_logs":
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_actor ON audit_logs(actor)"))
+    elif dialect == "postgresql":
+        with engine.begin() as conn:
+            existing_constraints: set[str] = set()
+            if insp.has_table("fix_plans"):
+                existing_constraints = {r[0] for r in conn.execute(text(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = 'fix_plans'::regclass"
+                )).fetchall()}
+            for stmt in _pg_migration_statements(insp, engine.dialect, existing_constraints):
+                conn.execute(text(stmt))
+
+
 def init_db(engine=None):
     """Initialize database and create all tables.
 
@@ -1251,6 +1706,9 @@ def init_db(engine=None):
     import agenticops.galaxy.models  # noqa: F401 — register galaxy_* tables in Base metadata
 
     Base.metadata.create_all(engine)
+    # MVP-2.6.0: relax plan-lineage NOT NULLs (table rebuild on SQLite), add change columns.
+    # Raises on failure on purpose — never start on a half-migrated schema.
+    _migrate_2_6_0(engine)
 
     # Migration: migrate AWSAccount rows → CloudAccount (if aws_accounts exists and cloud_accounts is empty)
     # Re-inspect after create_all to see newly created tables

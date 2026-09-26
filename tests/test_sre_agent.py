@@ -25,6 +25,9 @@ def db_session(tmp_path):
     db_url = f"sqlite:///{tmp_path}/test.db"
     settings.database_url = db_url
 
+    # approve_fix_plan writes its audit row in the same transaction — register audit_logs
+    import agenticops.audit.models  # noqa: F401
+
     engine = models_mod.get_engine()
     Base.metadata.create_all(engine)
 
@@ -261,12 +264,14 @@ class TestApproveFixPlan:
 
         from agenticops.tools.metadata_tools import approve_fix_plan
 
+        # Context-less call = an agent acting. `sre_agent` is not one of the known agent ids (M-6), so the
+        # stored approver is agent:unattributed; the LLM-chosen name is only audited as the claim.
         result = approve_fix_plan(fix_plan_id=plan.id, approved_by="agent:sre_agent")
         assert "approved" in result.lower()
 
         db_session.refresh(plan)
         assert plan.status == "approved"
-        assert plan.approved_by == "agent:sre_agent"
+        assert plan.approved_by == "agent:unattributed"
         assert plan.approved_at is not None
 
     def test_l3_requires_human_approval(self, db_session, health_issue, rca_result):
@@ -292,7 +297,11 @@ class TestApproveFixPlan:
         assert plan.status == "pending_approval"
 
     def test_human_can_approve_l3(self, db_session, health_issue, rca_result):
-        """Test that a human can approve L3 plans."""
+        """Test that a human can approve L3 plans.
+
+        Identity comes from the Run Context (the authenticated user), never from the
+        LLM-supplied approved_by string — that string is only audited as a claimed name.
+        """
         plan = FixPlan(
             health_issue_id=health_issue.id,
             rca_result_id=rca_result.id,
@@ -304,14 +313,16 @@ class TestApproveFixPlan:
         db_session.add(plan)
         db_session.commit()
 
+        from agenticops.run_context import run_context
         from agenticops.tools.metadata_tools import approve_fix_plan
 
-        result = approve_fix_plan(fix_plan_id=plan.id, approved_by="john.doe@company.com")
+        with run_context(actor="user:john.doe@company.com", actor_user_id=7, actor_permissions=("read", "write")):
+            result = approve_fix_plan(fix_plan_id=plan.id, approved_by="john.doe@company.com")
         assert "approved" in result.lower()
 
         db_session.refresh(plan)
         assert plan.status == "approved"
-        assert plan.approved_by == "john.doe@company.com"
+        assert plan.approved_by == "user:john.doe@company.com"
 
     def test_approve_nonexistent_plan(self, db_session):
         """Test approving non-existent plan."""
@@ -364,3 +375,41 @@ class TestSREAgentToolList:
         assert "L1" in SRE_SYSTEM_PROMPT
         assert "L2" in SRE_SYSTEM_PROMPT
         assert "L3" in SRE_SYSTEM_PROMPT
+
+
+class TestChangeReviewBinding:
+    """G13 — sre_agent_review_change runs the whole review bound to the CR's account."""
+
+    def test_review_runs_bound_to_the_change_request_account(self, db_session, monkeypatch):
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock
+
+        from agenticops.models import ChangeRequest, CloudAccount
+        from agenticops.run_context import get_run_context
+
+        acct = CloudAccount(name="prod", provider="aws", is_enabled=True, credentials={}, regions=["us-east-1"])
+        db_session.add(acct)
+        db_session.flush()
+        cr = ChangeRequest(title="t", description="d", requested_by="user:alice",
+                           status="reviewing", account_id=acct.id)
+        db_session.add(cr)
+        db_session.commit()
+
+        seen = {}
+
+        def fake_invoke(agent, prompt, **kw):
+            seen["bound"] = get_run_context().bound_account_id
+            return "verdict"
+
+        @contextmanager
+        def fake_tracker(*a, **k):
+            yield MagicMock()
+
+        monkeypatch.setattr("agenticops.agents.sre_agent._create_sre_agent", lambda **kw: MagicMock())
+        monkeypatch.setattr("agenticops.agents.sre_agent.get_cli_tool_for_issue", lambda account_id: MagicMock())
+        monkeypatch.setattr("agenticops.services.agent_log_service.track_agent", fake_tracker)
+        monkeypatch.setattr("agenticops.agents.preamble.invoke_with_retry", fake_invoke)
+
+        from agenticops.agents.sre_agent import sre_agent_review_change
+        sre_agent_review_change(cr.id)
+        assert seen["bound"] == acct.id

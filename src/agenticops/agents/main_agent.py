@@ -26,7 +26,7 @@ from agenticops.agents.scan_agent import scan_agent
 from agenticops.agents.detect_agent import detect_agent
 from agenticops.agents.rca_agent import rca_agent
 from agenticops.agents.reporter_agent import reporter_agent
-from agenticops.agents.sre_agent import sre_agent, sre_query
+from agenticops.agents.sre_agent import sre_agent, sre_query, review_change
 from agenticops.agents.executor_agent import executor_agent
 from agenticops.agents.enhanced import enhanced_task
 from agenticops.tools.metadata_tools import (
@@ -71,6 +71,7 @@ from agenticops.tools.im_tools import (
 from agenticops.tools.account_tools import (
     list_cloud_accounts, add_cloud_account, update_cloud_account, remove_cloud_account,
 )
+from agenticops.tools.change_tools import request_change, get_change_request, list_change_requests, execute_change
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,48 @@ OUTPUT FORMATTING:
 """
 
 
+# Change Management (ITSM) section — appended to the main prompt only when change_management_enabled,
+# in lockstep with change_management_tools(): an agent must never see a tool it cannot use.
+CHANGE_MANAGEMENT_PROMPT = """
+CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind them:
+- review_change: Reviews a CHANGE REQUEST (C#N) — grounds targets, classifies risk, evaluates policy,
+  saves the change plan. Call with change_request_id. READ-ONLY.
+- request_change / get_change_request / list_change_requests / execute_change: open, inspect, list and
+  queue execution of change requests (C#N).
+5.7. CHANGE ROUTING (takes precedence over rules 5.5, 5.6 and 10 for these intents): a modification
+     with NO HealthIssue behind it (add/remove tags or labels, scale capacity, change configuration or
+     parameters, edit network firewall rules or identity/permission policies — e.g. security groups,
+     IAM), or the user explicitly asks for a "change request" / "CR", or the message starts with
+     "[CHANGE REQUEST]" → call request_change(title, description, account, targets, change_type), then
+     IMMEDIATELY review_change(change_request_id). Present the verdict, risk, plan summary and the
+     reference C#N, and tell the user where to approve (Web: Plans & Changes; CLI: /approve C<N>).
+     NEVER route such intents to sre_query for writes.
+   - Approving or rejecting a change request is a HUMAN action in the Web UI or CLI — you cannot do it.
+   - A plan that belongs to a change request is NOT a fix plan: NEVER pass it to approve_fix_plan or
+     executor_agent (rules 5.5 and 5.6 are for fix plans only). "execute change C#N" → execute_change,
+     only after the user confirms an APPROVED change.
+   - If sre_query reports a write command refused as change_required, do not retry it — offer to open
+     a change request.
+CONTEXT: <referenced_change> blocks carry pre-fetched change requests — C#N references are resolved
+before reaching you. Reference change requests as C#N (e.g., C#7); they are auto-linked in the web UI
+and CLI.
+"""
+
+
+def change_management_prompt() -> str:
+    """The Change Management prompt section — empty when the feature is off (same gate as
+    change_management_tools())."""
+    return CHANGE_MANAGEMENT_PROMPT if settings.change_management_enabled else ""
+
+
+def change_management_tools() -> list:
+    """Change Management tools for the main agent — absent entirely when the feature is off
+    (an agent must never see a tool it cannot use)."""
+    if not settings.change_management_enabled:
+        return []
+    return [request_change, review_change, get_change_request, list_change_requests, execute_change]
+
+
 def create_main_agent(model_id_override: str = "", effort_override: str = "") -> Agent:
     """Create and return the Main Agent (Orchestrator).
 
@@ -265,7 +308,7 @@ When dispatching to detect_agent, scope the check to: {focus} resources.
 If the user explicitly requests a different scope, honor their request over this default.
 """
 
-    prompt = MAIN_SYSTEM_PROMPT + focus_section
+    prompt = MAIN_SYSTEM_PROMPT + change_management_prompt() + focus_section
 
     mcp_tools = _safe_mcp_clients()
 
@@ -284,6 +327,8 @@ If the user explicitly requests a different scope, honor their request over this
             sre_query,
             executor_agent,
             reporter_agent,
+            # Change Management (review_change + ITSM tools) — empty when change_management_enabled=false
+            *change_management_tools(),
             # Direct metadata tools
             get_active_account,
             get_managed_resources,

@@ -14,7 +14,9 @@ import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useCancelExecution } from "@/hooks/useFixExecutions";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
+import { ReasonDialog } from "@/components/plans/ReasonDialog";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
@@ -25,10 +27,15 @@ import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { PipelineStepper } from "@/components/ui/PipelineStepper";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { PipelineTimeline } from "@/components/plans/PipelineTimeline";
+import { RunbookStep } from "@/components/plans/RunbookStep";
+import { CheckItem } from "@/components/plans/CheckItem";
+import { RollbackPlan } from "@/components/plans/RollbackPlan";
+import { ExecutionsTable } from "@/components/plans/ExecutionsTable";
 import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { apiFetch } from "@/api/client";
-import type { IssueStatus, PipelineEvent, MergedAlert, FixPlan } from "@/api/types";
+import type { IssueStatus, MergedAlert, FixPlan } from "@/api/types";
 
 /* ================================================================== */
 /*  Tab type                                                           */
@@ -62,8 +69,6 @@ export default function IssueDetail() {
   const [rcaLoading, setRcaLoading] = useState(false);
   const [fixPlanLoading, setFixPlanLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const [approverName, setApproverName] = useState("");
-  const [showApproveForm, setShowApproveForm] = useState(false);
 
   /* -- Handlers ---------------------------------------------------- */
   const triggerRca = async () => {
@@ -238,10 +243,6 @@ export default function IssueDetail() {
           rejectMut={rejectMut}
           executeMut={executeMut}
           cancelExecMut={cancelExecMut}
-          approverName={approverName}
-          setApproverName={setApproverName}
-          showApproveForm={showApproveForm}
-          setShowApproveForm={setShowApproveForm}
           setActionMsg={setActionMsg}
           t={t}
         />
@@ -512,10 +513,6 @@ function FixPlanTab({
   rejectMut,
   executeMut,
   cancelExecMut,
-  approverName,
-  setApproverName,
-  showApproveForm,
-  setShowApproveForm,
   setActionMsg,
   t,
 }: {
@@ -529,14 +526,13 @@ function FixPlanTab({
   rejectMut: ReturnType<typeof useRejectFixPlan>;
   executeMut: ReturnType<typeof useExecuteFixPlan>;
   cancelExecMut: ReturnType<typeof useCancelExecution>;
-  approverName: string;
-  setApproverName: (v: string) => void;
-  showApproveForm: boolean;
-  setShowApproveForm: (v: boolean) => void;
   setActionMsg: (v: string | null) => void;
   t: (key: string) => string;
 }) {
   const { confirm, dialog } = useConfirm();
+  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
+  const [claimedName, setClaimedName] = useState("");
+  const { isAuthenticated } = useAuth();
 
   if (fixPlans.isLoading) return <Spinner label="Loading fix plans..." />;
 
@@ -571,28 +567,6 @@ function FixPlanTab({
   const fp = latestPlan ?? plans[0];
   const needsApproval = fp.status === "draft" || fp.status === "pending_approval";
   const canExecute = fp.status === "approved";
-
-  function handleApprove() {
-    if (!approverName.trim()) return;
-    approveMut.mutate(
-      { id: fp.id, approved_by: approverName.trim() },
-      {
-        onSuccess: () => {
-          setShowApproveForm(false);
-          fixPlans.refetch();
-        },
-        onError: (err) => setActionMsg(`Approve failed: ${err.message}`),
-      },
-    );
-  }
-
-  async function handleReject() {
-    if (!(await confirm("Are you sure you want to reject this fix plan?", { variant: "destructive", confirmText: "Reject" }))) return;
-    rejectMut.mutate(fp.id, {
-      onSuccess: () => fixPlans.refetch(),
-      onError: (err) => setActionMsg(`Reject failed: ${err.message}`),
-    });
-  }
 
   async function handleExecute() {
     if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
@@ -701,39 +675,15 @@ function FixPlanTab({
             )}
 
             <div className="flex items-center gap-3">
-              {!showApproveForm ? (
-                <button
-                  onClick={() => setShowApproveForm(true)}
-                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  {t("issues.approve")}
-                </button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder={t("issues.approverPlaceholder")}
-                    value={approverName}
-                    onChange={(e) => setApproverName(e.target.value)}
-                    className="border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                  <button
-                    onClick={handleApprove}
-                    disabled={approveMut.isPending || !approverName.trim()}
-                    className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                  >
-                    {approveMut.isPending ? t("issues.approving") : t("common.confirm")}
-                  </button>
-                  <button
-                    onClick={() => setShowApproveForm(false)}
-                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-                  >
-                    {t("common.cancel")}
-                  </button>
-                </div>
-              )}
               <button
-                onClick={handleReject}
+                onClick={() => { approveMut.reset(); setApprovalDialog("approve"); }}
+                disabled={approveMut.isPending}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {t("issues.approve")}
+              </button>
+              <button
+                onClick={() => { rejectMut.reset(); setApprovalDialog("reject"); }}
                 disabled={rejectMut.isPending}
                 className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors"
               >
@@ -742,6 +692,32 @@ function FixPlanTab({
             </div>
           </CardBody>
         </Card>
+      )}
+
+      {needsApproval && approvalDialog && (
+        <ReasonDialog
+          title={`${t(approvalDialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} #${fp.id}`}
+          description={fp.title}
+          confirmText={approvalDialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          variant={approvalDialog === "reject" ? "destructive" : "default"}
+          required={approvalDialog === "reject"}
+          busy={approveMut.isPending || rejectMut.isPending}
+          error={(approvalDialog === "approve" ? approveMut.error : rejectMut.error)?.message ?? null}
+          onConfirm={(reason) => {
+            const done = { onSuccess: () => setApprovalDialog(null) };
+            if (approvalDialog === "approve") {
+              const name = claimedName.trim();
+              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+            } else rejectMut.mutate({ id: fp.id, reason }, done);
+          }}
+          onClose={() => setApprovalDialog(null)}
+        >
+          {approvalDialog === "approve" && !isAuthenticated && (
+            <input type="text" value={claimedName} onChange={(e) => setClaimedName(e.target.value)} maxLength={100}
+              placeholder={t("issues.approverPlaceholder")}
+              className="w-full mb-3 border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          )}
+        </ReasonDialog>
       )}
 
       {/* Execute action */}
@@ -765,77 +741,16 @@ function FixPlanTab({
         <Card>
           <CardBody>
             <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.executionHistory")}</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">ID</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.tab.issue")}</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.executedBy")}</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.duration")}</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.started")}</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("issues.actions")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {executions.data.map((ex) => (
-                    <tr key={ex.id} className="hover:bg-secondary transition-colors">
-                      <td className="px-4 py-2 text-sm font-mono text-muted-foreground">#{ex.id}</td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            ex.status === "succeeded"
-                              ? "bg-green-500/20 text-green-400"
-                              : ex.status === "failed"
-                                ? "bg-red-500/20 text-red-400"
-                                : "bg-secondary text-muted-foreground"
-                          }`}
-                        >
-                          {ex.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-sm text-muted-foreground">{ex.executed_by}</td>
-                      <td className="px-4 py-2 text-sm text-muted-foreground">
-                        {ex.duration_ms > 0 ? `${(ex.duration_ms / 1000).toFixed(1)}s` : "-"}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-muted-foreground">
-                        {ex.started_at ? formatFullDate(ex.started_at) : "-"}
-                      </td>
-                      <td className="px-4 py-2">
-                        {(ex.status === "pending" || ex.status === "running") && (
-                          <button
-                            onClick={async () => {
-                              if (!(await confirm("Cancel this execution?", { variant: "destructive", confirmText: "Cancel Execution" }))) return;
-                              cancelExecMut.mutate(ex.id, {
-                                onError: (err) => setActionMsg(`Cancel failed: ${err.message}`),
-                              });
-                            }}
-                            disabled={cancelExecMut.isPending}
-                            className="px-3 py-1 text-xs font-medium text-red-500 border border-red-500/30 rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors"
-                          >
-                            {t("common.cancel")}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {executions.data.some((ex) => ex.error_message) && (
-              <div className="mt-4">
-                {executions.data
-                  .filter((ex) => ex.error_message)
-                  .map((ex) => (
-                    <div
-                      key={ex.id}
-                      className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400 mb-2"
-                    >
-                      <strong>#{ex.id} {t("issues.executionError")}:</strong> {ex.error_message}
-                    </div>
-                  ))}
-              </div>
-            )}
+            <ExecutionsTable
+              executions={executions.data}
+              onCancel={async (id) => {
+                if (!(await confirm("Cancel this execution?", { variant: "destructive", confirmText: "Cancel Execution" }))) return;
+                cancelExecMut.mutate(id, {
+                  onError: (err) => setActionMsg(`Cancel failed: ${err.message}`),
+                });
+              }}
+              cancelPending={cancelExecMut.isPending}
+            />
           </CardBody>
         </Card>
       )}
@@ -987,244 +902,5 @@ function MergedAlertsSection({
         </div>
       </CardBody>
     </Card>
-  );
-}
-
-/* ================================================================== */
-/*  Pipeline Timeline                                                  */
-/* ================================================================== */
-
-const STAGE_COLORS: Record<string, string> = {
-  detection: "bg-blue-500",
-  rca: "bg-amber-500",
-  planning: "bg-violet-500",
-  approval: "bg-emerald-500",
-  execution: "bg-orange-500",
-  resolution: "bg-green-600",
-  notification: "bg-muted-foreground/40",
-};
-
-const STATUS_ICONS: Record<string, string> = {
-  completed: "\u2713",
-  started: "\u25B6",
-  failed: "\u2717",
-  skipped: "\u2013",
-};
-
-function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
-  return (
-    <div className="relative">
-      <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-muted" />
-      <div className="space-y-3">
-        {events.map((ev, i) => {
-          const color = STAGE_COLORS[ev.stage] || "bg-muted-foreground/40";
-          const icon = STATUS_ICONS[ev.status] || "\u2022";
-          const isFailed = ev.status === "failed";
-          return (
-            <div key={ev.id ?? i} className="relative flex items-start gap-3 pl-0">
-              <div
-                className={`relative z-10 flex-shrink-0 w-[31px] h-[31px] rounded-full flex items-center justify-center text-white text-xs font-bold ${color} ${isFailed ? "ring-2 ring-red-300" : ""}`}
-              >
-                {icon}
-              </div>
-              <div className="flex-1 min-w-0 pb-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-foreground">
-                    {ev.event_type.replace(/_/g, " ")}
-                  </span>
-                  <span
-                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${
-                      isFailed
-                        ? "bg-red-500/20 text-red-400"
-                        : ev.status === "started"
-                          ? "bg-blue-500/20 text-blue-400"
-                          : ev.status === "skipped"
-                            ? "bg-secondary text-muted-foreground"
-                            : "bg-green-500/20 text-green-400"
-                    }`}
-                  >
-                    {ev.status}
-                  </span>
-                  {ev.duration_ms != null && ev.duration_ms > 0 && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {ev.duration_ms >= 1000
-                        ? `${(ev.duration_ms / 1000).toFixed(1)}s`
-                        : `${ev.duration_ms}ms`}
-                    </span>
-                  )}
-                  {ev.trace_id && (
-                    <span className="text-[10px] font-mono text-primary">
-                      {ev.trace_id}
-                    </span>
-                  )}
-                </div>
-                {ev.detail && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {Object.entries(ev.detail).map(([k, v]) =>
-                      v != null ? (
-                        <span
-                          key={k}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-[10px] text-muted-foreground font-mono"
-                        >
-                          {k}: {typeof v === "object" ? JSON.stringify(v) : String(v).slice(0, 80)}
-                        </span>
-                      ) : null,
-                    )}
-                  </div>
-                )}
-                <div className="text-[10px] text-muted-foreground mt-0.5">
-                  {ev.actor !== "system" && <span className="mr-2">{ev.actor}</span>}
-                  {formatFullDate(ev.created_at)}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ================================================================== */
-/*  Runbook helper components                                          */
-/* ================================================================== */
-
-function RunbookStep({ index, step }: { index: number; step: unknown }) {
-  const isObj = typeof step === "object" && step !== null && !Array.isArray(step);
-  const s = isObj ? (step as Record<string, unknown>) : null;
-  const action = s?.action ?? s?.description ?? s?.step;
-  const command = s?.command as string | undefined;
-  const text = typeof step === "string" ? step : typeof action === "string" ? action : null;
-
-  return (
-    <li className="border border-border rounded-lg p-4 bg-background">
-      <div className="flex gap-3">
-        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-sm font-semibold">
-          {index}
-        </span>
-        <div className="flex-1 min-w-0">
-          {text ? (
-            <div
-              className="text-foreground text-sm leading-relaxed report-content"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
-            />
-          ) : (
-            <pre className="text-foreground text-sm whitespace-pre-wrap">
-              {JSON.stringify(step, null, 2)}
-            </pre>
-          )}
-          {command && <CommandBlock command={command} />}
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function CommandBlock({ command }: { command: string }) {
-  const { t } = useLocale();
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    navigator.clipboard.writeText(command).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  return (
-    <div className="mt-3 relative group">
-      <div
-        className="rounded-lg p-3 text-sm font-mono overflow-x-auto"
-        style={{ backgroundColor: "#1e1e2e", color: "#cdd6f4" }}
-      >
-        <span className="select-none" style={{ color: "#a6e3a1" }}>
-          ${" "}
-        </span>
-        {command}
-      </div>
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
-        style={{ backgroundColor: "#313244", color: "#a6adc8" }}
-      >
-        {copied ? t("issues.copied") : t("issues.copy")}
-      </button>
-    </div>
-  );
-}
-
-function CheckItem({ item }: { item: unknown }) {
-  const isObj = typeof item === "object" && item !== null && !Array.isArray(item);
-  const s = isObj ? (item as Record<string, unknown>) : null;
-  const text = typeof item === "string" ? item : (s?.check ?? s?.description ?? s?.action);
-  const command = s?.command as string | undefined;
-
-  return (
-    <li className="flex items-start gap-2 text-sm text-muted-foreground">
-      <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <div className="flex-1 min-w-0">
-        <span>{typeof text === "string" ? text : JSON.stringify(item)}</span>
-        {command && <CommandBlock command={command} />}
-      </div>
-    </li>
-  );
-}
-
-function RollbackPlan({ plan }: { plan: Record<string, unknown> }) {
-  const { t } = useLocale();
-  const trigger = plan.trigger as string | undefined;
-  const steps = Array.isArray(plan.steps) ? plan.steps : null;
-
-  return (
-    <div className="mt-6 border border-amber-500/30 rounded-lg bg-amber-500/5 overflow-hidden">
-      <div className="px-4 py-3 border-b border-amber-500/30">
-        <h4 className="font-semibold text-foreground">{t("issues.rollbackPlan")}</h4>
-      </div>
-      <div className="p-4 space-y-3">
-        {trigger && (
-          <div className="flex items-start gap-2 text-sm text-amber-500 bg-amber-500/10 rounded-lg px-3 py-2">
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span>
-              <strong>{t("issues.rollbackTrigger")}:</strong> {trigger}
-            </span>
-          </div>
-        )}
-        {steps ? (
-          <ol className="space-y-3">
-            {steps.map((step: unknown, i: number) => (
-              <RunbookStep key={i} index={i + 1} step={step} />
-            ))}
-          </ol>
-        ) : (
-          <dl className="space-y-2 text-sm">
-            {Object.entries(plan)
-              .filter(([k]) => k !== "trigger" && k !== "steps")
-              .map(([k, v]) => (
-                <div key={k}>
-                  <dt className="font-medium text-foreground capitalize">
-                    {k.replace(/_/g, " ")}
-                  </dt>
-                  <dd className="text-muted-foreground mt-0.5">
-                    {typeof v === "string" ? (
-                      v
-                    ) : (
-                      <pre
-                        className="rounded-lg p-3 text-sm font-mono overflow-x-auto mt-1"
-                        style={{ backgroundColor: "#1e1e2e", color: "#cdd6f4" }}
-                      >
-                        {JSON.stringify(v, null, 2)}
-                      </pre>
-                    )}
-                  </dd>
-                </div>
-              ))}
-          </dl>
-        )}
-      </div>
-    </div>
   );
 }

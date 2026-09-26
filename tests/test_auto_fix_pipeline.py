@@ -41,6 +41,7 @@ def db_session(tmp_path):
     settings.database_url = db_url
 
     engine = models_mod.get_engine()
+    import agenticops.audit.models  # noqa: F401  # register audit_logs before create_all
     Base.metadata.create_all(engine)
 
     session = get_session()

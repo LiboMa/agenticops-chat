@@ -3,6 +3,7 @@
 Handles:
 - I#N reference resolution (HealthIssue by ID)
 - R#N reference resolution (CloudResource by ID)
+- C#N reference resolution (ChangeRequest by ID; only when change_management_enabled)
 - @file/path extraction and content injection (CLI)
 - Pre-read file content injection (Web upload)
 """
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Patterns
 ISSUE_REF_PATTERN = re.compile(r"\bI#(\d+)\b")
 RESOURCE_REF_PATTERN = re.compile(r"\bR#(\d+)\b")
+CHANGE_REF_PATTERN = re.compile(r"\bC#(\d+)\b")
 FILE_REF_PATTERN = re.compile(r"@((?:/|\.\.?/)[^\s]+)")
 
 
@@ -65,10 +67,25 @@ def _resolve_resource_ref(resource_id: int) -> str | None:
     )
 
 
-def resolve_references(text: str) -> tuple[str, list[str]]:
-    """Find I#N and R#N references, resolve them, return (enriched_text, warnings).
+def _resolve_change_ref(cr_id: int) -> str | None:
+    from agenticops.chat.reference_resolver import fetch_change
+    d = fetch_change(cr_id)
+    if not d:
+        return None
+    return (
+        f'<referenced_change id="{d["id"]}">\n'
+        f"Title: {d['title']}\nStatus: {d['status']}\nRisk: {d['risk_level'] or 'unassessed'}\n"
+        f"Type: {d['requested_change_type']}\nRequested by: {d['requested_by']}\n"
+        f"Targets: {', '.join(t for t in d['targets'] if t) or 'none grounded yet'}\n"
+        f"Description: {d['description']}\n</referenced_change>"
+    )
+
+
+def resolve_references(text: str, *, change_ref_text: str | None = None) -> tuple[str, list[str]]:
+    """Find I#N, R#N and C#N references, resolve them, return (enriched_text, warnings).
 
     The original text is preserved. Resolved context blocks are appended at the end.
+    C#N references are read from `change_ref_text` when given (the user's typed text), else from `text`.
     """
     context_blocks: list[str] = []
     warnings: list[str] = []
@@ -88,6 +105,16 @@ def resolve_references(text: str) -> tuple[str, list[str]]:
             context_blocks.append(block)
         else:
             warnings.append(f"Resource R#{resource_id} not found")
+
+    from agenticops.config import settings
+    if settings.change_management_enabled:
+        change_refs = CHANGE_REF_PATTERN.findall(text if change_ref_text is None else change_ref_text)
+        for cr_id in dict.fromkeys(int(m) for m in change_refs):
+            block = _resolve_change_ref(cr_id)
+            if block:
+                context_blocks.append(block)
+            else:
+                warnings.append(f"ChangeRequest C#{cr_id} not found")
 
     if context_blocks:
         enriched = text + "\n\n" + "\n\n".join(context_blocks)
@@ -178,8 +205,8 @@ def preprocess_message(
     text_parts.append(text)
     combined = "\n\n".join(text_parts)
 
-    # 4. Resolve I#/R# references
-    enriched_text, ref_warnings = resolve_references(combined)
+    # 4. Resolve I#/R#/C# references (C# only from what the user typed, never from an attached file)
+    enriched_text, ref_warnings = resolve_references(combined, change_ref_text=text)
     warnings.extend(ref_warnings)
 
     # 5. If no media blocks, return plain string (100% backward compatible)

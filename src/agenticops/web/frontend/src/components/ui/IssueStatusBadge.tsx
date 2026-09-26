@@ -8,6 +8,8 @@ const STYLES: Record<IssueStatus, { dot: string; text: string }> = {
   root_cause_identified: { dot: "bg-orange-500", text: "text-orange-600 dark:text-orange-400" },
   fix_planned: { dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
   fix_approved: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  // the same state as FixPlanStatusBadge's "executing"
+  fix_executing: { dot: "bg-blue-500 dark:bg-green-500", text: "text-blue-600 dark:text-green-400" },
   fix_executed: { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
   resolved: { dot: "bg-green-500", text: "text-green-600 dark:text-green-400" },
   acknowledged: { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
@@ -20,6 +22,7 @@ const LABELS: Record<IssueStatus, string> = {
   root_cause_identified: "RCA Complete",
   fix_planned: "Fix Planned",
   fix_approved: "Fix Approved",
+  fix_executing: "Executing",
   fix_executed: "Fix Executed",
   resolved: "Resolved",
   acknowledged: "Acknowledged",

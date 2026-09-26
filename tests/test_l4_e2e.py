@@ -513,8 +513,8 @@ class TestExecutorService:
         session.refresh(execution)
         assert execution.status == "pending"
 
-    def test_cancel_nonexistent(self):
-        """Test cancelling a non-existent execution."""
+    def test_cancel_nonexistent(self, test_db):
+        """Test cancelling a non-existent execution (on the tmp DB: the cancel's compare-and-set is a write)."""
         from agenticops.services.executor_service import ExecutorService
 
         svc = ExecutorService()

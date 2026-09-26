@@ -14,6 +14,7 @@ from agenticops.providers.base import (
     get_cached_session,
     set_cached_session,
 )
+from agenticops.tools.aws_cli_tool import BLOCKED_PATTERNS as _SHARED_BLOCKED_PATTERNS
 
 try:
     import boto3
@@ -22,14 +23,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-BLOCKED_PATTERNS = [
-    "iam create-user", "iam delete-user", "iam create-access-key",
-    "iam attach-", "s3 rm --recursive", "ec2 terminate-instances",
-    "organizations create-", "organizations delete-",
-    "--force",
-]
+# Single source of truth is aws_cli_tool.BLOCKED_PATTERNS (secret-revealing reads such as get-secret-value /
+# --with-decryption / get-login-password, plus the destructive operations), so sub-agent provider tools block
+# exactly what the main path blocks. This tool is NOT confirmation-gated, so the bulk S3 delete the main tool
+# only confirmation-gates as a write stays hard-blocked here as before.
+BLOCKED_PATTERNS = [*_SHARED_BLOCKED_PATTERNS, "s3 rm --recursive"]
 
 TIMEOUT_SECONDS = 30
+LEDGER_TOOL = "provider_aws_cli"  # command_audits.tool
 
 
 def _sts_region_for_arn(role_arn: str) -> str | None:
@@ -199,6 +200,8 @@ class AWSProvider(CloudProvider):
         - Auto-appends --output json
         - Sets credential env vars from session
         - 30s timeout, 4000 char output limit
+        - Ledgers every non-readonly attempt (command_audits) and refuses
+          change_required commands unless an approved plan is in the Run Context
         """
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
@@ -221,68 +224,90 @@ class AWSProvider(CloudProvider):
                 if dangerous in command:
                     return f"Error: Shell operator '{dangerous}' is not allowed."
 
-            # Blocked pattern check
-            cmd_lower = command.lower()
-            for pattern in BLOCKED_PATTERNS:
-                if pattern.lower() in cmd_lower:
-                    return f"Error: Blocked dangerous pattern '{pattern}' in command."
+            # Command ledger (command_audits): this tool is what executor/SRE/RCA get for a
+            # resolved account and it is NOT confirmation-gated, so every non-readonly attempt
+            # is recorded and change_required commands need an approved plan in the Run Context.
+            from agenticops.services.command_audit import cli_outcome, guarded_run, record_command
+            from agenticops.tools.aws_cli_tool import (_PROFILE_REFUSAL, _classify_command,
+                                                       blocked_pattern_match, profile_flag_token)
 
-            # Auto-append --output json
-            if "--output" not in command:
-                command = f"{command} --output json"
+            # Refuse --profile before anything else: aws honours it over the injected frozen creds and
+            # would run on the WRONG account. Ledger the attempt, then return the actionable fix.
+            if profile_flag_token(command) is not None:
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
+                               reason="profile_flag", account=account_name)
+                return _PROFILE_REFUSAL
 
-            try:
-                args = shlex.split(command)
-            except ValueError as e:
-                return f"Error: Invalid command syntax: {e}"
+            # Blocked pattern check — interleave/abbreviation-robust (matches the main path).
+            blocked = blocked_pattern_match(command, BLOCKED_PATTERNS)
+            if blocked:
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
+                               account=account_name)
+                return f"Error: Blocked dangerous pattern '{blocked}' in command."
 
-            # Build a CLEAN env: strip all ambient AWS_* so a host profile/token
-            # can never leak into this account's command, then inject ONLY this
-            # account's resolved credentials. Extraction failure = hard error
-            # (NEVER fall back to ambient — that runs on the WRONG account).
-            env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
-            if not session:
-                return (
-                    f"Error: no resolved session for account '{account_name}'; "
-                    "cannot run AWS CLI safely (refusing to use ambient credentials)."
-                )
-            try:
-                frozen = session.get_credentials().get_frozen_credentials()
-            except Exception as e:
-                return f"Error: failed to resolve credentials for account '{account_name}': {e}"
-            env["AWS_ACCESS_KEY_ID"] = frozen.access_key
-            env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
-            if frozen.token:
-                env["AWS_SESSION_TOKEN"] = frozen.token
-            # Re-inject a default region for commands that omit --region (we just
-            # stripped any ambient AWS_DEFAULT_REGION/AWS_REGION).
-            if default_region and "--region" not in command:
-                env["AWS_DEFAULT_REGION"] = default_region
+            def _execute() -> str:
+                cmd = command
+                # Auto-append --output json
+                if "--output" not in cmd:
+                    cmd = f"{cmd} --output json"
 
-            try:
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT_SECONDS,
-                    shell=False,
-                    env=env,
-                )
-            except subprocess.TimeoutExpired:
-                return f"Error: Command timed out after {TIMEOUT_SECONDS}s."
-            except FileNotFoundError:
-                return "Error: AWS CLI ('aws') not found on PATH."
+                try:
+                    args = shlex.split(cmd)
+                except ValueError as e:
+                    return f"Error: Invalid command syntax: {e}"
 
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                return f"Error (exit {result.returncode}): {stderr}"
+                # Build a CLEAN env: strip all ambient AWS_* so a host profile/token
+                # can never leak into this account's command, then inject ONLY this
+                # account's resolved credentials. Extraction failure = hard error
+                # (NEVER fall back to ambient — that runs on the WRONG account).
+                env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+                if not session:
+                    return (
+                        f"Error: no resolved session for account '{account_name}'; "
+                        "cannot run AWS CLI safely (refusing to use ambient credentials)."
+                    )
+                try:
+                    frozen = session.get_credentials().get_frozen_credentials()
+                except Exception as e:
+                    return f"Error: failed to resolve credentials for account '{account_name}': {e}"
+                env["AWS_ACCESS_KEY_ID"] = frozen.access_key
+                env["AWS_SECRET_ACCESS_KEY"] = frozen.secret_key
+                if frozen.token:
+                    env["AWS_SESSION_TOKEN"] = frozen.token
+                # Re-inject a default region for commands that omit --region (we just
+                # stripped any ambient AWS_DEFAULT_REGION/AWS_REGION).
+                if default_region and "--region" not in cmd:
+                    env["AWS_DEFAULT_REGION"] = default_region
 
-            output = result.stdout.strip()
-            from agenticops.config import settings
-            limit = settings.cli_max_output_chars
-            if limit > 0 and len(output) > limit:
-                output = output[:limit] + "\n... (truncated)"
-            return output if output else "(no output)"
+                try:
+                    result = subprocess.run(
+                        args,
+                        capture_output=True,
+                        text=True,
+                        timeout=TIMEOUT_SECONDS,
+                        shell=False,
+                        env=env,
+                    )
+                except subprocess.TimeoutExpired:
+                    return f"Error: Command timed out after {TIMEOUT_SECONDS}s."
+                except FileNotFoundError:
+                    return "Error: AWS CLI ('aws') not found on PATH."
+
+                if result.returncode != 0:
+                    stderr = result.stderr.strip()
+                    return f"Error (exit {result.returncode}): {stderr}"
+
+                output = result.stdout.strip()
+                from agenticops.config import settings
+                limit = settings.cli_max_output_chars
+                if limit > 0 and len(output) > limit:
+                    output = output[:limit] + "\n... (truncated)"
+                return output if output else "(no output)"
+
+            # Tier comes from the shared classifier; guarded_run skips readonly and records everything
+            # else — including a "blocked" verdict our narrower BLOCKED_PATTERNS let through.
+            return guarded_run(tool=LEDGER_TOOL, tier=_classify_command(command), command=command,
+                               run=_execute, outcome_of=cli_outcome, account=account_name)
 
         _run_aws_cli.__name__ = f"run_aws_cli_{safe_name}"
         _run_aws_cli.__doc__ = (

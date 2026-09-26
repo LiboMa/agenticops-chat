@@ -31,10 +31,17 @@ export interface AppSettings {
   acp_enhanced_enabled: boolean;
   acp_enhanced_backend: string;
   acp_available_backends: string[];
+  // Change management
+  change_management_enabled: boolean; // read-only: PATCH /api/settings rejects it as an unknown key (400)
+  change_auto_approve_standard: boolean;
+  rbac_enforce: boolean;
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };
-type SettingsPatch = Partial<Omit<AppSettings, "agent_models">> & { agent_models?: Record<string, AgentModelPatch> };
+// change_management_enabled and acp_available_backends are read-only: PATCH /api/settings rejects them as
+// unknown keys (400), so they are dropped from the patch shape (they stay readable on AppSettings).
+type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled" | "acp_available_backends">>
+  & { agent_models?: Record<string, AgentModelPatch> };
 
 export function useSettings() {
   return useQuery<AppSettings>({

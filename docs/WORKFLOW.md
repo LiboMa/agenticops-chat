@@ -396,6 +396,62 @@ flowchart TD
 
 ---
 
+## Change Management Flow (ITSM — no HealthIssue)
+
+A routine change (tag edit, scaling, config) does **not** go through the incident pipeline. It flows
+Main → SRE legitimacy review → approval → Executor, with an audit ledger and an identity-bound approver.
+The change plan is a `FixPlan` with `plan_kind="change"` (never a HealthIssue).
+
+```mermaid
+flowchart TD
+    REQ["① Request<br/>Chat /change · Web POST /api/changes · CLI"] --> CREATE["change_service.create_change_request<br/>authz change.request · CR=draft<br/>audit change.requested · notify"]
+    CREATE --> REVIEW["② SRE Review (Mode C, READ-ONLY)<br/>CR=under_review · watchdog"]
+
+    REVIEW --> GROUND{"③ Ground targets<br/>(fail-closed)"}
+    GROUND -->|"Any target unprovable"| CLARIFY["needs_clarification<br/>(requester clarifies → re-review)"]
+    GROUND -->|"All grounded"| PLAN["④ Risk L0–L3 + policy<br/>save change plan<br/>(rollback + post_checks REQUIRED)"]
+
+    PLAN --> VERDICT{"⑤ submit_change_review<br/>(code re-runs policy)"}
+    VERDICT -->|"policy block"| REJECTED["rejected"]
+    VERDICT -->|"planned"| AUTO{"auto_approve rule<br/>AND change_auto_approve_standard?"}
+
+    AUTO -->|"yes"| APPROVED["Auto-approved ✓<br/>actor agent:auto-pipeline"]
+    AUTO -->|"no (default)"| PENDING["⑥ pending_approval<br/>notify change_pending_approval (deep link)"]
+
+    PENDING -->|"Web/CLI approve<br/>authz change.approve + SoD · reason REQUIRED"| APPROVED
+    APPROVED --> QUEUE["⑦ request_execution<br/>FixExecution(pending) → Executor queue"]
+    QUEUE --> EXEC["executor_agent(fix_plan_id)<br/>(unchanged gate)"]
+    EXEC --> RESULT{"⑧ on_execution_result<br/>(only writer of CR terminal state)"}
+
+    RESULT -->|"post_checks all pass"| COMPLETED["CR=completed<br/>audit + notify change_result"]
+    RESULT -->|"results missing/partial"| NEEDSREVIEW["CR=needs_review<br/>(human verdict; redo = NEW change)"]
+    RESULT -->|"step failed"| FAILED["CR=failed"]
+    RESULT -->|"rolled back"| ROLLEDBACK["CR=rolled_back"]
+
+    style CLARIFY fill:#f96
+    style REJECTED fill:#f66
+    style FAILED fill:#f66
+    style ROLLEDBACK fill:#f96
+    style NEEDSREVIEW fill:#f96
+    style APPROVED fill:#6f6
+    style COMPLETED fill:#6f6
+```
+
+**Two ledgers, one gate:**
+
+- **Decisions** → `audit_logs` (with an `actor` column): every requested/reviewed/approved/rejected/
+  executed decision, written in the **same transaction** as the state change. Authorization runs through a
+  single `authz.check(actor, permission, subject=)` against `config/rbac.yaml`; with `rbac_enforce=false`
+  (default **shadow mode**) a denial is audited as `authz.denied_shadow` and the request is allowed.
+- **Commands** → `command_audits`: every write-tier tool command (`run_aws_cli` / `run_on_host` /
+  `run_kubectl`), fail-soft. A command matching `policies.yaml` `change_required` with no approved-plan
+  context is **refused** and the user is pointed at `/change`.
+
+**Invariants:** the CR terminal state is written only by `on_execution_result`; an unprovable target
+yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag.
+
+---
+
 ## Skills & Knowledge Base Flow
 
 ```mermaid
@@ -1067,6 +1123,39 @@ Bot:  Report sent to slack-incidents channel
 ```
 
 **Setup:** Configure IM app credentials in `config/im-apps.yaml` and notification channels in `config/channels.yaml`.
+
+---
+
+### Tutorial 13: Raise & Approve a Change (no incident)
+
+```bash
+# 1. Open a change request from chat (SRE reviews it immediately)
+aiops chat "/change add tag ChangeTest=2026-09 to i-0abc123 --account prod"
+#    → returns C#N, the SRE verdict, risk (e.g. L1), and a plan with a
+#      describe-tags post-check and a delete-tags rollback
+
+# 2. List change requests
+aiops chat "/changes"
+aiops chat "/changes pending_approval"
+
+# 3. Approve it — the approver must differ from the requester; a reason is required
+aiops chat "/approve C7 approved for the tagging rollout"
+
+# 4. Execute the approved change (queued to the Executor)
+aiops chat "/execute C7"
+#    → Executor applies create-tags, the post-check runs aws ec2 describe-tags,
+#      and the CR moves to completed (needs_review if the post-check result is missing)
+```
+
+On the web: **Plans** (`/app/plans`) → **Change Plans** tab → **New change request**, then open
+`/app/changes/:id` to review, approve (reason required), execute, and read the timeline. The **Audit**
+tab shows the decision/command ledgers and `GET /api/plans/stats` KPIs. `C#N` anywhere in chat
+auto-links to the change page.
+
+**When a direct write is refused:** if you ask an agent to run a high-risk command
+(e.g. `aws ec2 modify-security-group-rules …`) with no approved plan behind it, the tool layer refuses
+it (`change_required`) and suggests opening a change request — that is the system steering you onto the
+audited path, not a bug.
 
 ---
 

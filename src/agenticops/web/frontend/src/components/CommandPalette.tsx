@@ -10,9 +10,11 @@ interface CommandPaletteProps {
 
 const ENTITY_STYLES: Record<string, { label: string; badge: string }> = {
   issue: { label: "Issues", badge: "text-red-700 bg-red-100" },
-  fix_plan: { label: "Fix Plans", badge: "text-blue-700 bg-blue-100" },
+  fix_plan: { label: "Plans", badge: "text-blue-700 bg-blue-100" },
   report: { label: "Reports", badge: "text-emerald-700 bg-emerald-100" },
   resource: { label: "Resources", badge: "text-cyan-700 bg-cyan-100" },
+  change_plan: { label: "Change Plans", badge: "text-violet-700 bg-violet-100" },
+  change_request: { label: "Change Requests", badge: "text-violet-700 bg-violet-100" },
 };
 
 function entityRoute(item: SearchResultItem): string {
@@ -25,6 +27,10 @@ function entityRoute(item: SearchResultItem): string {
       return `/app/reports/${item.id}`;
     case "resource":
       return `/app/resources/${item.id}`;
+    case "change_request":
+      return `/app/changes/${item.id}`;
+    case "change_plan":
+      return item.parent_id != null ? `/app/changes/${item.parent_id}` : "/app/plans?tab=changes";
   }
 }
 
@@ -60,6 +66,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     return [
       ...data.results.issues,
       ...data.results.fix_plans,
+      ...(data.results.change_requests ?? []),
       ...data.results.reports,
       ...(data.results.resources ?? []),
     ];
@@ -99,6 +106,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   const issues = data?.results.issues ?? [];
   const fixPlans = data?.results.fix_plans ?? [];
+  const changeRequests = data?.results.change_requests ?? [];
   const reports = data?.results.reports ?? [];
   const resources = data?.results.resources ?? [];
 
@@ -128,7 +136,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                 <div className="font-medium text-sm truncate">{item.title}</div>
                 <div className="text-xs text-muted-foreground truncate">{item.subtitle}</div>
               </div>
-              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md whitespace-nowrap ${style.badge}`}>
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md whitespace-nowrap ${(ENTITY_STYLES[item.entity_type] ?? style).badge}`}>
                 {badgeText(item)}
               </span>
             </div>
@@ -186,6 +194,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               <div className="py-1">
                 {renderSection(ENTITY_STYLES.issue.label, issues, "issue")}
                 {renderSection(ENTITY_STYLES.fix_plan.label, fixPlans, "fix_plan")}
+                {renderSection(ENTITY_STYLES.change_request.label, changeRequests, "change_request")}
                 {renderSection(ENTITY_STYLES.report.label, reports, "report")}
                 {renderSection(ENTITY_STYLES.resource.label, resources, "resource")}
               </div>

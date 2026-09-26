@@ -75,8 +75,11 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
 
 
 def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
-    """Run sre_agent for the given issue to generate a fix plan."""
+    """Run sre_agent for the given issue to generate a fix plan (daemon thread — sets its own Run Context)."""
     _restore_trace_id(trace_id)
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="sre"))
     try:
         from agenticops.agents.sre_agent import sre_agent
 
@@ -87,6 +90,8 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         )
     except Exception:
         logger.exception("Auto-SRE failed for HealthIssue #%d", health_issue_id)
+    finally:
+        reset_run_context(_rc_token)
 
 
 # ── Stage 2: Auto-Approve (after fix plan saved) ─────────────────────
@@ -143,10 +148,32 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            # Trust-Kernel ceiling (M-5): the always-enforced agent rule (no-agent-approval-above-l1) holds
+            # regardless of policies.yaml — a rule granting auto_approve to L2/L3 cannot make
+            # agent:auto-pipeline approve them. The check writes its own authz.denied audit row.
+            from agenticops.auth import authz
+            from agenticops.auth.actor import agent_actor
+            try:
+                authz.check(agent_actor("auto-pipeline"), "plan.approve", subject=plan)
+            except authz.AuthzDenied as e:
+                logger.info("Auto-approve: FixPlan #%d (%s) left as is — %s", fix_plan_id, plan.risk_level, e.reason)
+                return
+
             # Approve plan (policy auto_approve, or legacy L0/L1)
-            plan.status = "approved"
+            from agenticops.models import transition_plan
+            transition_plan(plan, "approved")
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
+
+            # Audit row in the SAME transaction as the status change (decision + state together)
+            from agenticops.audit.service import Actions, AuditService, EntityTypes
+            AuditService.log(
+                Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor="agent:auto-pipeline",
+                details={"risk_level": plan.risk_level, "plan_kind": plan.plan_kind,
+                         "policy_rule": decision.rule_name if decision else "legacy-l0-l1",
+                         "policy_action": decision.action if decision else "auto_approve"},
+                old_values={"status": "draft"}, new_values={"status": "approved"}, session=session,
+            )
 
             # Capture values before session closes
             risk_level = plan.risk_level
@@ -299,6 +326,13 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
                   detail={"plan_id": fix_plan_id, "executor": "agent:executor"},
                   trace_id=trace_id)
 
+    # Daemon thread — sets its own Run Context; fix_plan_id is what lets
+    # approved_plan_in_context() admit change_required commands for this plan.
+    # Set immediately before the try so the finally's reset always pairs with it.
+    from agenticops.config import get_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=trace_id or get_trace_id(),
+                                           agent_name="executor", fix_plan_id=fix_plan_id))
     try:
         from agenticops.agents.executor_agent import executor_agent
 
@@ -314,6 +348,7 @@ def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
                       detail={"plan_id": fix_plan_id}, trace_id=trace_id)
         logger.exception("Auto-execute failed for FixPlan #%d", fix_plan_id)
     finally:
+        reset_run_context(_rc_token)
         # Safety net: flush any consolidated notifications for this issue
         if _issue_id:
             try:

@@ -39,7 +39,7 @@ def trigger_post_resolution(health_issue_id: int) -> None:
 
 
 def _run_post_resolution(health_issue_id: int) -> None:
-    """Run RAG pipeline + case distillation for a resolved issue."""
+    """Run RAG pipeline + case distillation for a resolved issue (daemon thread — sets its own Run Context)."""
     from agenticops.models import HealthIssue, get_db_session
 
     # Verify issue is actually resolved
@@ -52,7 +52,24 @@ def _run_post_resolution(health_issue_id: int) -> None:
                 issue.status if issue else "not found",
             )
             return
+        trace_id = issue.trace_id
 
+    # ContextVars do not cross threading.Thread: this thread sets the issue's trace and a Run Context
+    # (agent:auto-pipeline — nobody to act on behalf of) so RAG / distillation / skill-improvement writes
+    # are attributed; both are reset in finally.
+    from agenticops.config import set_trace_id
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    _tid_token = set_trace_id(trace_id)
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=trace_id, agent_name="resolution"))
+    try:
+        _post_resolution_steps(health_issue_id)
+    finally:
+        reset_run_context(_rc_token)
+        _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
+
+
+def _post_resolution_steps(health_issue_id: int) -> None:
+    """RAG pipeline → case distillation → skill-gap analysis → pipeline-run record, for a verified-resolved issue."""
     from agenticops.services.pipeline_events import log_event
 
     log_event(health_issue_id, "resolved", "resolution",

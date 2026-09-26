@@ -287,12 +287,21 @@ class FeishuWSService:
                 )
                 logger.debug(">>> Agent input (first 500): %s", agent_input[:500])
                 # Set IM origin + trace_id context
-                from agenticops.config import set_im_origin, generate_trace_id, set_trace_id
+                from agenticops.config import set_im_origin, generate_trace_id, get_trace_id, set_trace_id
+                from agenticops.auth.actor import im_actor
+                from agenticops.run_context import RunContext, reset_run_context, set_run_context
                 _im_token = set_im_origin({"platform": "feishu", "chat_id": chat_id})
                 _trace_token = set_trace_id(generate_trace_id())
-                result = agent(agent_input)
-                set_im_origin(None)  # clear after agent completes
-                set_trace_id(None)
+                # Run Context for this IM turn (P1 identity = chat_id; P3 swaps in the sender id).
+                # Reset afterwards: this runs on a pooled worker thread that outlives the turn.
+                _rc_token = set_run_context(RunContext(actor=im_actor("feishu", chat_id).key,
+                                                       trace_id=get_trace_id(), agent_name="main"))
+                try:
+                    result = agent(agent_input)
+                finally:
+                    set_im_origin(None)  # clear after the turn — even when the agent raises
+                    set_trace_id(None)
+                    reset_run_context(_rc_token)
                 response_text = str(result)
                 from agenticops.chat.suggestions import extract_suggestions
                 response_text, _ = extract_suggestions(response_text)

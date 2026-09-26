@@ -39,6 +39,11 @@ const columns: Column<AuditLogEntry>[] = [
     ),
   },
   {
+    key: "actor",
+    header: "Actor",
+    render: (a) => <span className="text-xs font-mono">{a.actor ?? a.user_email ?? "system"}</span>,
+  },
+  {
     key: "user_email",
     header: "User",
     render: (r) => <span className="text-sm text-muted-foreground">{r.user_email}</span>,
@@ -46,13 +51,33 @@ const columns: Column<AuditLogEntry>[] = [
   {
     key: "details",
     header: "Details",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {r.details ?? "-"}
-      </span>
-    ),
+    render: (r) => <DetailsCell details={r.details} />,
   },
 ];
+
+const DETAILS_MAX_CHARS = 120;
+
+/** null, undefined, or an object with no own keys (the ORM default `{}`) — all render as "-". */
+export function isEmptyDetails(details: unknown): boolean {
+  return (
+    details === null ||
+    details === undefined ||
+    (typeof details === "object" && Object.keys(details as object).length === 0)
+  );
+}
+
+/** `details` arrives as a dict, and React throws on an object child: "-" for empty (null/undefined/`{}`),
+ *  a string (legacy rows) as-is, anything else as JSON cut to DETAILS_MAX_CHARS with the full JSON in the tooltip. */
+function DetailsCell({ details }: { details: unknown }) {
+  if (isEmptyDetails(details)) return <span className="text-sm text-muted-foreground">-</span>;
+  if (typeof details === "string") return <span className="text-sm text-muted-foreground">{details}</span>;
+  const json = JSON.stringify(details);
+  return (
+    <span className="text-sm text-muted-foreground" title={json}>
+      {json.length > DETAILS_MAX_CHARS ? `${json.slice(0, DETAILS_MAX_CHARS)}…` : json}
+    </span>
+  );
+}
 
 export function AuditTab() {
   const [action, setAction] = useState("");

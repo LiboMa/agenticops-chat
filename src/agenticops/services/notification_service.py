@@ -154,21 +154,22 @@ def _run_notify(
                     "Notification [%s]: sent=%d failed=%d channels=%s",
                     event_type, ok, fail, list(results.keys()),
                 )
-                # Log pipeline event for issue-related notifications
-                if event_type in ("issue_created", "rca_completed", "fix_planned",
-                                   "fix_approved", "execution_result"):
+                # Log pipeline event for issue- and change-related notifications
+                _ISSUE_EVENTS = ("issue_created", "rca_completed", "fix_planned", "fix_approved", "execution_result")
+                if event_type in _ISSUE_EVENTS or event_type.startswith("change_"):
                     try:
-                        from agenticops.services.pipeline_events import log_event as _log_pe
-                        # Extract issue_id from subject (pattern: "Issue #NNN")
                         import re
-                        m = re.search(r"Issue #(\d+)", subject)
-                        if not m:
-                            m = re.search(r"#(\d+)", subject)
-                        if m:
-                            _log_pe(
-                                int(m.group(1)), "notification_sent", "notification",
-                                detail={"channels": list(results.keys()), "sent": ok, "failed": fail},
-                            )
+                        from agenticops.services.pipeline_events import log_event as _log_pe
+                        detail = {"channels": list(results.keys()), "sent": ok, "failed": fail}
+                        if event_type.startswith("change_"):
+                            m = re.search(r"Change #(\d+)", subject)
+                            if m:
+                                _log_pe(None, "notification_sent", "notification", detail=detail,
+                                        change_request_id=int(m.group(1)))
+                        else:
+                            m = re.search(r"Issue #(\d+)", subject) or re.search(r"#(\d+)", subject)
+                            if m:
+                                _log_pe(int(m.group(1)), "notification_sent", "notification", detail=detail)
                     except Exception:
                         pass
         finally:
@@ -266,6 +267,60 @@ def notify_execution_result(
     )
     # Execution is the last pipeline stage — flush consolidated buffer
     flush_consolidated(issue_id)
+
+
+# ── Change Management (MVP-2.6.0) ─────────────────────────────────────
+
+
+def _change_severity(risk_level, outcome: str | None = None) -> str:
+    if outcome in ("failed", "rolled_back", "review_failed", "needs_review", "execution_not_queued"):
+        return "high"
+    return {"L0": "low", "L1": "low", "L2": "medium", "L3": "high"}.get(risk_level or "", "medium")
+
+
+def _change_link(cr_id: int) -> str:
+    return f"{settings.web_base_url.rstrip('/')}/app/changes/{cr_id}"
+
+
+def notify_change_requested(cr: dict) -> None:
+    """Notify: a change request was opened (sent immediately — changes are not batched)."""
+    grounded = [t.get("resource_id") for t in cr.get("target_resources") or [] if t.get("resource_id")]
+    hints = [h for h in cr.get("target_hints") or [] if h]
+    targets = ", ".join(grounded) or (f"(to be grounded: {', '.join(hints)})" if hints else "(to be grounded)")
+    notify_event(
+        "change_requested",
+        f"[CHANGE] Change #{cr['id']} requested: {cr['title']}",
+        (f"Change request #{cr['id']} opened by {cr['requested_by']} ({cr.get('requested_change_type', 'normal')}).\n\n"
+         f"Title: {cr['title']}\nTargets: {targets}\n{_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level")),
+    )
+
+
+def notify_change_pending_approval(cr: dict, plan: dict) -> None:
+    """Notify: reviewed and planned — a human approver is needed (deep link included)."""
+    # One line, so a summary cannot forge the lines under it; an empty summary adds no line.
+    summary = " ".join(str(plan.get("summary") or "").split())[:500]
+    summary_line = f"Summary: {summary}\n" if summary else ""
+    notify_event(
+        "change_pending_approval",
+        f"[CHANGE] Change #{cr['id']} awaits approval ({cr.get('risk_level') or '?'}, {cr.get('effective_change_type') or 'normal'})",
+        (f"Change request #{cr['id']} '{cr['title']}' was reviewed by the SRE agent and needs approval.\n\n"
+         f"Plan #{plan.get('id')}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
+         f"Requested by: {cr['requested_by']}\n\nApprove or reject: {_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level")),
+    )
+
+
+def notify_change_result(cr: dict, outcome: str) -> None:
+    """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
+    rejected / needs_clarification / review_failed / execution_not_queued)."""
+    notify_event(
+        "change_result",
+        f"[CHANGE] Change #{cr['id']} {outcome.upper()}: {cr['title']}",
+        (f"Change request #{cr['id']} is now {outcome}.\n\nRequested by: {cr['requested_by']}\n"
+         f"Risk: {cr.get('risk_level') or '?'}\n{_change_link(cr['id'])}"),
+        _change_severity(cr.get("risk_level"), outcome),
+    )
 
 
 def notify_report_saved(

@@ -122,7 +122,7 @@ class TokenUsage:
 
 
 def format_reference_links(text: str, base_url: str) -> str:
-    """Detect I#N and R#N patterns in text and return formatted URL lines."""
+    """Detect I#N, R#N and C#N patterns in text and return formatted URL lines."""
     import re
     seen: set[str] = set()
     lines: list[str] = []
@@ -136,6 +136,11 @@ def format_reference_links(text: str, base_url: str) -> str:
         if key not in seen:
             seen.add(key)
             lines.append(f"  {key} → {base_url}/app/resources/{m.group(1)}")
+    for m in re.finditer(r'\bC#(\d+)\b', text):
+        key = f"C#{m.group(1)}"
+        if key not in seen:
+            seen.add(key)
+            lines.append(f"  {key} → {base_url}/app/changes/{m.group(1)}")
     if lines:
         return "References:\n" + "\n".join(lines)
     return ""

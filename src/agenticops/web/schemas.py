@@ -5,7 +5,7 @@ routers a dependency-leaf module to import from (avoids app<->router import cycl
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -332,7 +332,10 @@ class FixPlanCreate(BaseModel):
 
 
 class FixPlanUpdate(BaseModel):
-    """Schema for updating a fix plan."""
+    """Content-only update. Status changes go through /approve, /reject, /execute.
+    `status: "rejected"` is still accepted as a DEPRECATED alias for POST /reject (old UI);
+    the handler answers 400 for any other status value. Identity is never read from the body."""
+    model_config = ConfigDict(extra="forbid")
     risk_level: Optional[str] = Field(None, pattern="^(L0|L1|L2|L3)$")
     title: Optional[str] = Field(None, max_length=300)
     summary: Optional[str] = None
@@ -341,15 +344,25 @@ class FixPlanUpdate(BaseModel):
     estimated_impact: Optional[str] = None
     pre_checks: Optional[List] = None
     post_checks: Optional[List] = None
-    status: Optional[str] = Field(None, pattern="^(draft|pending_approval|approved|executing|executed|failed|rejected)$")
-    approved_by: Optional[str] = Field(None, max_length=100)
+    status: Optional[str] = Field(None, description="DEPRECATED alias for POST /reject (only 'rejected' is accepted)")
+
+
+class FixPlanApproveBody(BaseModel):
+    approved_by: Optional[str] = Field(None, max_length=100, description="Legacy claimed name; audited, never trusted")
+    reason: Optional[str] = Field(None, max_length=2000)
+
+
+class FixPlanRejectBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 class FixPlanResponse(BaseModel):
     """Schema for fix plan response."""
     id: int
-    health_issue_id: int
-    rca_result_id: int
+    plan_kind: str = "fix"
+    health_issue_id: Optional[int] = None
+    rca_result_id: Optional[int] = None
+    change_request_id: Optional[int] = None
     risk_level: str
     title: str
     summary: str
@@ -361,7 +374,11 @@ class FixPlanResponse(BaseModel):
     status: str
     approved_by: Optional[str]
     approved_at: Optional[datetime]
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     account_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -371,7 +388,7 @@ class FixExecutionResponse(BaseModel):
     """Schema for fix execution response."""
     id: int
     fix_plan_id: int
-    health_issue_id: int
+    health_issue_id: Optional[int] = None
     status: str
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -767,6 +784,7 @@ class AuditLogResponse(BaseModel):
     timestamp: datetime
     user_id: Optional[int]
     user_email: Optional[str]
+    actor: Optional[str] = None
     action: str
     entity_type: str
     entity_id: str
@@ -775,5 +793,113 @@ class AuditLogResponse(BaseModel):
     old_values: Optional[dict]
     new_values: Optional[dict]
     ip_address: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================================================
+# Change Management (MVP-2.6.0)
+# ============================================================================
+
+
+class ChangeRequestCreate(BaseModel):
+    # Caps mirror change_service.create_change_request so an over-cap body is 422 at validation, before
+    # the service is entered (title 300 / description 8000 / justification 2000 / 20 targets, 200 chars each).
+    title: str = Field(..., min_length=1, max_length=300)
+    description: str = Field(..., min_length=1, max_length=8000)
+    account_name: Optional[str] = None
+    targets: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
+    requested_change_type: str = Field("normal", pattern="^(normal|emergency)$")
+    justification: str = Field("", max_length=2000)
+
+
+class ChangeRequestResponse(BaseModel):
+    """Snapshot of a change request (from change_service.to_dict — timestamps are ISO strings)."""
+    id: int
+    title: str
+    description: str
+    justification: str = ""
+    source: str
+    requested_by: str
+    requester_user_id: Optional[int] = None
+    requested_at: Optional[str] = None
+    account_id: Optional[int] = None
+    target_hints: list = Field(default_factory=list)
+    target_resources: list = Field(default_factory=list)
+    requested_change_type: str = "normal"
+    effective_change_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    action_type: Optional[str] = None
+    status: str
+    review_verdict: Optional[str] = None
+    review_reasons: list = Field(default_factory=list)
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    policy_rule: Optional[str] = None
+    policy_action: Optional[str] = None
+    approved_by: Optional[str] = None
+    approver_user_id: Optional[int] = None
+    approved_at: Optional[str] = None
+    approval_reason: Optional[str] = None
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    closed_at: Optional[str] = None
+    trace_id: Optional[str] = None
+    chat_session_id: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ChangeRequestDetail(ChangeRequestResponse):
+    plans: List[FixPlanResponse] = Field(default_factory=list)
+    executions: List[FixExecutionResponse] = Field(default_factory=list)
+    # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)
+    policy_decision: Optional[dict] = None
+
+
+class ChangeReasonBody(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeClarifyBody(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChangeResolveReviewBody(BaseModel):
+    outcome: str = Field(..., pattern="^(completed|failed)$")
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeTimelineEntry(BaseModel):
+    ts: Optional[str] = None
+    kind: str  # event | audit
+    type: str
+    actor: Optional[str] = None
+    status: Optional[str] = None
+    stage: Optional[str] = None
+    detail: Optional[object] = None
+
+
+class CommandAuditResponse(BaseModel):
+    id: int
+    created_at: datetime
+    actor: str
+    on_behalf_of: Optional[str] = None
+    agent_name: Optional[str] = None
+    tool: str
+    tier: str
+    account: str = ""
+    region: str = ""
+    target: str = ""
+    command: str
+    outcome: str
+    reason: Optional[str] = None
+    exit_code: Optional[int] = None
+    output_excerpt: str = ""
+    duration_ms: int = 0
+    trace_id: Optional[str] = None
+    fix_plan_id: Optional[int] = None
+    change_request_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)

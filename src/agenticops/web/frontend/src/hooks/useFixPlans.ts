@@ -1,24 +1,24 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { FixPlan } from "@/api/types";
+import type { FixPlan, PlanKind } from "@/api/types";
+import { toQuery } from "@/lib/plans";
 
-interface FixPlanFilters {
+/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
+export const fixPlanMutationKeys = (id: number): QueryKey[] => [["fix-plans"], ["fix-plan", id], ["plan-stats"]];
+
+export type FixPlanFilters = {
   status?: string;
   risk_level?: string;
   health_issue_id?: number;
-}
+  account_id?: number;
+  kind?: PlanKind;
+  limit?: number;
+};
 
 export function useFixPlans(filters: FixPlanFilters = {}) {
-  const params = new URLSearchParams();
-  if (filters.status) params.set("status", filters.status);
-  if (filters.risk_level) params.set("risk_level", filters.risk_level);
-  if (filters.health_issue_id)
-    params.set("health_issue_id", String(filters.health_issue_id));
-  const qs = params.toString();
-
   return useQuery({
     queryKey: ["fix-plans", filters],
-    queryFn: () => apiFetch<FixPlan[]>(`/fix-plans${qs ? `?${qs}` : ""}`),
+    queryFn: () => apiFetch<FixPlan[]>(`/fix-plans${toQuery(filters)}`),
     staleTime: 30_000,
   });
 }
@@ -34,30 +34,25 @@ export function useFixPlan(id: number) {
 export function useApproveFixPlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, approved_by }: { id: number; approved_by: string }) =>
+    // approved_by is the legacy claimed name: the backend audits it but never trusts it
+    mutationFn: ({ id, reason, approved_by }: { id: number; reason?: string; approved_by?: string }) =>
       apiFetch<FixPlan>(`/fix-plans/${id}/approve`, {
         method: "PUT",
-        body: JSON.stringify({ approved_by }),
+        body: JSON.stringify({ reason, approved_by }),
       }),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-      qc.invalidateQueries({ queryKey: ["fix-plan", vars.id] });
-    },
+    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 
 export function useRejectFixPlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<FixPlan>(`/fix-plans/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ status: "rejected" }),
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      apiFetch<FixPlan>(`/fix-plans/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
       }),
-    onSuccess: (_data, id) => {
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-      qc.invalidateQueries({ queryKey: ["fix-plan", id] });
-    },
+    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 

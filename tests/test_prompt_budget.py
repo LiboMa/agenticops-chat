@@ -14,8 +14,8 @@ import pytest
 # Base prompt size goldens (chars), ±25% tolerance. Re-baseline deliberately
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
-    "main": 10_100,
-    "sre": 9_700,
+    "main": 12_100,
+    "sre": 11_900,
     "detect": 8_900,
     "rca": 8_000,
     "executor": 5_000,
@@ -29,7 +29,7 @@ _CJK_RE = re.compile(r"[一-鿿]")
 
 
 def _base_prompts() -> dict[str, str]:
-    from agenticops.agents.main_agent import MAIN_SYSTEM_PROMPT
+    from agenticops.agents.main_agent import CHANGE_MANAGEMENT_PROMPT, MAIN_SYSTEM_PROMPT
     from agenticops.agents.sre_agent import SRE_SYSTEM_PROMPT
     from agenticops.agents.detect_agent import DETECT_SYSTEM_PROMPT
     from agenticops.agents.rca_agent import RCA_SYSTEM_PROMPT
@@ -38,7 +38,8 @@ def _base_prompts() -> dict[str, str]:
     from agenticops.agents.scan_agent import SCAN_SYSTEM_PROMPT
 
     return {
-        "main": MAIN_SYSTEM_PROMPT,
+        # Measured with Change Management on — the largest prompt Main can get.
+        "main": MAIN_SYSTEM_PROMPT + CHANGE_MANAGEMENT_PROMPT,
         "sre": SRE_SYSTEM_PROMPT,
         "detect": DETECT_SYSTEM_PROMPT,
         "rca": RCA_SYSTEM_PROMPT,
@@ -160,6 +161,7 @@ class TestRoutingDocstrings:
         "rca_agent": ("agenticops.agents.rca_agent", ["RCA", "root cause", "investigate"]),
         "sre_agent": ("agenticops.agents.sre_agent", ["fix", "remediate", "READ-ONLY"]),
         "sre_query": ("agenticops.agents.sre_agent", ["CATCH-ALL", "kubectl"]),
+        "review_change": ("agenticops.agents.sre_agent", ["change request", "READ-ONLY", "C#"]),
         "executor_agent": ("agenticops.agents.executor_agent", ["execute", "approved"]),
         "reporter_agent": ("agenticops.agents.reporter_agent", ["report", "summary"]),
     }

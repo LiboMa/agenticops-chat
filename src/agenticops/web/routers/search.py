@@ -1,9 +1,15 @@
-"""Global search API endpoint — extracted from app.py (no logic change)."""
+"""Global search API endpoint — extracted from app.py.
+
+MVP-2.6.0: change plans are labelled `change_plan` (parent = their change request) and change requests are
+searchable (`change_requests` group). Both only while change_management_enabled — same rule as /api/changes:
+with the flag off there is no change_requests group and no change plan in the fix_plans group.
+"""
 
 from fastapi import APIRouter, Query
 from sqlalchemy import func
 
-from agenticops.models import CloudResource, FixPlan, HealthIssue, Report, get_db_session
+from agenticops.config import settings
+from agenticops.models import ChangeRequest, CloudResource, FixPlan, HealthIssue, Report, get_db_session
 from agenticops.web.schemas import SearchResponse, SearchResultItem
 
 router = APIRouter()
@@ -12,10 +18,10 @@ router = APIRouter()
 @router.get("/api/search", response_model=SearchResponse)
 async def api_search(
     q: str = Query(..., min_length=1),
-    types: str = Query(default="issues,fix_plans,reports,resources"),
+    types: str = Query(default="issues,fix_plans,reports,resources,change_requests"),
     limit: int = Query(default=5, le=10),
 ):
-    """Global search across issues, fix plans, reports, and resources."""
+    """Global search across issues, fix/change plans, reports, resources and change requests."""
     search_types = {t.strip() for t in types.split(",")}
     search_term = f"%{q.lower()}%"
     results: dict = {}
@@ -42,18 +48,35 @@ async def api_search(
             ]
 
         if "fix_plans" in search_types:
-            rows = (
-                db.query(FixPlan)
-                .filter(func.lower(FixPlan.title).like(search_term))
-                .limit(limit)
-                .all()
-            )
+            query = db.query(FixPlan).filter(func.lower(FixPlan.title).like(search_term))
+            if not settings.change_management_enabled:
+                # a change plan links to change pages whose API 404s while the feature is off
+                query = query.filter(FixPlan.plan_kind != "change")
+            rows = query.limit(limit).all()
             results["fix_plans"] = [
                 SearchResultItem(
                     id=r.id, title=r.title,
                     subtitle=(r.summary or "")[:100],
-                    entity_type="fix_plan", status=r.status,
-                    parent_id=r.health_issue_id,
+                    entity_type="change_plan" if r.plan_kind == "change" else "fix_plan", status=r.status,
+                    parent_id=r.change_request_id if r.plan_kind == "change" else r.health_issue_id,
+                    created_at=r.created_at,
+                ).model_dump()
+                for r in rows
+            ]
+
+        if "change_requests" in search_types and settings.change_management_enabled:
+            rows = (
+                db.query(ChangeRequest)
+                .filter(func.lower(ChangeRequest.title).like(search_term))
+                .limit(limit)
+                .all()
+            )
+            results["change_requests"] = [
+                SearchResultItem(
+                    id=r.id, title=r.title,
+                    subtitle=(r.description or "")[:100],
+                    entity_type="change_request", status=r.status,
+                    parent_id=None,
                     created_at=r.created_at,
                 ).model_dump()
                 for r in rows

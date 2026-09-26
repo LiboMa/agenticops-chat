@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60
 MAX_OUTPUT = 8000
+LEDGER_TOOL = "provider_ssh"  # command_audits.tool
 
 
 class SSHProvider(CloudProvider):
@@ -135,16 +136,31 @@ class SSHProvider(CloudProvider):
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
         provider = self
+        host = str((self.account.credentials or {}).get("host") or "")
 
         def _run_ssh(command: str) -> str:
             command = command.strip()
             if not command:
                 return "Error: empty command."
-            result = provider.execute(command=command)
-            if result["rc"] != 0:
-                err = result["stderr"] or result["stdout"]
-                return f"Error (exit {result['rc']}): {err}"
-            return result["stdout"] or "(no output)"
+            from agenticops.services.command_audit import cli_outcome, guarded_run, record_command
+            from agenticops.skills.security import classify_shell_command
+
+            def _execute() -> str:
+                result = provider.execute(command=command)
+                if result["rc"] != 0:
+                    err = result["stderr"] or result["stdout"]
+                    return f"Error (exit {result['rc']}): {err}"
+                return result["stdout"] or "(no output)"
+
+            # Command ledger (command_audits): execute() refuses blocked commands itself — record
+            # that and keep its reply; everything else passes the change_required gate and is recorded.
+            tier = classify_shell_command(command)
+            if tier == "blocked":
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
+                               account=account_name, target=host)
+                return _execute()
+            return guarded_run(tool=LEDGER_TOOL, tier=tier, command=command, run=_execute,
+                               outcome_of=cli_outcome, account=account_name, target=host)
 
         _run_ssh.__name__ = f"run_ssh_{safe_name}"
         _run_ssh.__doc__ = (

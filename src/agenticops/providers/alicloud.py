@@ -18,6 +18,7 @@ from agenticops.providers.base import (
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 30
+LEDGER_TOOL = "provider_alicloud_cli"  # command_audits.tool
 
 
 class AlicloudProvider(CloudProvider):
@@ -112,46 +113,54 @@ class AlicloudProvider(CloudProvider):
                 if dangerous in command:
                     return f"Error: Shell operator '{dangerous}' is not allowed."
 
-            # Auto-append --region
-            if "--region" not in command:
-                command = f"{command} --region {default_region}"
+            def _execute() -> str:
+                cmd = command
+                # Auto-append --region
+                if "--region" not in cmd:
+                    cmd = f"{cmd} --region {default_region}"
 
-            try:
-                args = shlex.split(command)
-            except ValueError as e:
-                return f"Error: Invalid command syntax: {e}"
+                try:
+                    args = shlex.split(cmd)
+                except ValueError as e:
+                    return f"Error: Invalid command syntax: {e}"
 
-            # Build env with credentials
-            env = os.environ.copy()
-            if resolved.get("access_key_id"):
-                env["ALIBABA_CLOUD_ACCESS_KEY_ID"] = resolved["access_key_id"]
-            if resolved.get("access_key_secret"):
-                env["ALIBABA_CLOUD_ACCESS_KEY_SECRET"] = resolved["access_key_secret"]
+                # Build env with credentials
+                env = os.environ.copy()
+                if resolved.get("access_key_id"):
+                    env["ALIBABA_CLOUD_ACCESS_KEY_ID"] = resolved["access_key_id"]
+                if resolved.get("access_key_secret"):
+                    env["ALIBABA_CLOUD_ACCESS_KEY_SECRET"] = resolved["access_key_secret"]
 
-            try:
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT_SECONDS,
-                    shell=False,
-                    env=env,
-                )
-            except subprocess.TimeoutExpired:
-                return f"Error: Command timed out after {TIMEOUT_SECONDS}s."
-            except FileNotFoundError:
-                return "Error: Alicloud CLI ('aliyun') not found on PATH."
+                try:
+                    result = subprocess.run(
+                        args,
+                        capture_output=True,
+                        text=True,
+                        timeout=TIMEOUT_SECONDS,
+                        shell=False,
+                        env=env,
+                    )
+                except subprocess.TimeoutExpired:
+                    return f"Error: Command timed out after {TIMEOUT_SECONDS}s."
+                except FileNotFoundError:
+                    return "Error: Alicloud CLI ('aliyun') not found on PATH."
 
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                return f"Error (exit {result.returncode}): {stderr}"
+                if result.returncode != 0:
+                    stderr = result.stderr.strip()
+                    return f"Error (exit {result.returncode}): {stderr}"
 
-            output = result.stdout.strip()
-            from agenticops.config import settings
-            limit = settings.cli_max_output_chars
-            if limit > 0 and len(output) > limit:
-                output = output[:limit] + "\n... (truncated)"
-            return output if output else "(no output)"
+                output = result.stdout.strip()
+                from agenticops.config import settings
+                limit = settings.cli_max_output_chars
+                if limit > 0 and len(output) > limit:
+                    output = output[:limit] + "\n... (truncated)"
+                return output if output else "(no output)"
+
+            # Command ledger (command_audits): aliyun has no dedicated classifier — list/show/get/describe
+            # are readonly; everything else is recorded and passes the change_required gate.
+            from agenticops.services.command_audit import cli_outcome, generic_cli_tier, guarded_run
+            return guarded_run(tool=LEDGER_TOOL, tier=generic_cli_tier(command), command=command,
+                               run=_execute, outcome_of=cli_outcome, account=account_name)
 
         _run_aliyun_cli.__name__ = f"run_aliyun_cli_{safe_name}"
         _run_aliyun_cli.__doc__ = (

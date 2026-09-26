@@ -19,6 +19,8 @@ from agenticops.web.schemas import (
     HealthIssueUpdate,
     FixPlanCreate,
     FixPlanUpdate,
+    FixPlanApproveBody,
+    FixPlanRejectBody,
     AnomalyStatusUpdate,
     LoginRequest,
     APIKeyCreate,
@@ -169,6 +171,46 @@ class TestHealthIssueCreate:
             description="CPU > 95%",
         )
         assert h.severity == "high"
+
+
+# ---------- FixPlanUpdate / approve / reject bodies (MVP-2.6.0 S1) ----------
+
+
+class TestFixPlanUpdate:
+    def test_content_only_partial_update(self):
+        u = FixPlanUpdate(title="renamed")
+        assert u.model_dump(exclude_unset=True) == {"title": "renamed"}
+
+    def test_approved_by_is_rejected(self):
+        # identity is never read from the body — extra="forbid"
+        with pytest.raises(ValidationError):
+            FixPlanUpdate(approved_by="Mallory")
+
+    def test_unknown_field_is_rejected(self):
+        with pytest.raises(ValidationError):
+            FixPlanUpdate(foo="bar")
+
+    def test_status_has_no_schema_pattern(self):
+        # the HANDLER decides: "rejected" is the deprecated PUT alias, anything else is a 400 (not a 422)
+        assert FixPlanUpdate(status="rejected").status == "rejected"
+        assert FixPlanUpdate(status="approved").status == "approved"
+
+    def test_risk_level_pattern_kept(self):
+        with pytest.raises(ValidationError):
+            FixPlanUpdate(risk_level="L9")
+
+
+class TestFixPlanBodies:
+    def test_approve_body_is_fully_optional(self):
+        b = FixPlanApproveBody()
+        assert b.approved_by is None and b.reason is None
+
+    def test_reject_body_requires_non_empty_reason(self):
+        with pytest.raises(ValidationError):
+            FixPlanRejectBody()
+        with pytest.raises(ValidationError):
+            FixPlanRejectBody(reason="")
+        assert FixPlanRejectBody(reason="not needed").reason == "not needed"
 
 
 # ---------- AnomalyStatusUpdate ----------

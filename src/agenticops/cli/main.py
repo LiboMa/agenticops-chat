@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import time
 import threading
@@ -29,6 +30,7 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.status import Status
 from rich.rule import Rule
+from rich.markup import escape
 
 from agenticops import __version__
 from agenticops.config import settings
@@ -1039,6 +1041,23 @@ def update_schedule(
 # ============================================================================
 
 
+def _begin_cli_turn(agent_name: str) -> None:
+    """Fresh trace id + Run Context for one CLI agent run (audit attribution: cli:<os user>).
+
+    Called first on every CLI path that starts an agent: the `aiops run …` subcommands (fresh
+    processes), the headless `aiops chat "…"`, and each REPL turn — BEFORE the slash dispatch,
+    since /scan and /detect run sub-agents that would otherwise execute under an empty or
+    stale context. ContextVars are per-thread; these paths run the agent on the calling thread.
+    """
+    from agenticops.auth.actor import cli_actor
+    from agenticops.config import generate_trace_id, set_trace_id
+    from agenticops.run_context import RunContext, set_run_context
+
+    trace_id = generate_trace_id()
+    set_trace_id(trace_id)
+    set_run_context(RunContext(actor=cli_actor().key, trace_id=trace_id, agent_name=agent_name))
+
+
 @run_app.command("scan")
 def run_scan(
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
@@ -1047,6 +1066,7 @@ def run_scan(
 ):
     """Scan AWS resources via the Scan Agent."""
     from agenticops.agents.scan_agent import scan_agent
+    _begin_cli_turn("scan")
 
     regions_str = regions if regions else "all"
 
@@ -1065,6 +1085,7 @@ def run_detect(
 ):
     """Run health detection via the Detect Agent."""
     from agenticops.agents.detect_agent import detect_agent
+    _begin_cli_turn("detect")
 
     console.print(f"[bold]Running detect agent (scope={scope})...[/bold]")
 
@@ -1091,6 +1112,7 @@ def run_analyze(
         session.close()
 
     from agenticops.agents.rca_agent import rca_agent
+    _begin_cli_turn("rca")
 
     console.print(f"[bold]Running RCA on HealthIssue #{issue_id}...[/bold]")
 
@@ -1109,6 +1131,7 @@ def run_report(
     init_db()
 
     from agenticops.agents.reporter_agent import reporter_agent
+    _begin_cli_turn("reporter")
 
     console.print(f"[bold]Generating {type} report (scope={scope})...[/bold]")
 
@@ -1624,10 +1647,15 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
   /resolve <id>                    Resolve issue
 
 [cyan]Fix Plans:[/cyan]
-  /fix list [issue_id] [--status S] [--risk L]   List fix plans
+  /fix list \\[issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
-  /approve <plan_id>               Approve a fix plan (L2/L3 human gate)
-  /execute <plan_id>               Execute an approved fix plan
+  /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
+  /execute <plan_id|C<id>>         Execute an approved fix plan or change
+
+[cyan]Changes:[/cyan]
+  /change <description> [--account NAME] [--emergency]  Open a change request; SRE reviews it now
+  /changes [STATUS]                List change requests (optional status filter)
+  /reject C<id> <reason>           Reject a planned change request
 
 [cyan]Workflows:[/cyan]  [dim](/help workflow for details)[/dim]
   /workflow full-scan              Full infrastructure scan
@@ -2121,7 +2149,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
 
     if not args:
         return """[yellow]Usage:
-  /fix list [issue_id] [--status S] [--risk L]
+  /fix list \\[issue_id] [--status S] [--risk L]
   /fix show <plan_id>[/yellow]"""
 
     sub = args[0].lower()
@@ -2130,7 +2158,8 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
         init_db()
         session = get_session()
         try:
-            query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
+            # Fix plans only: a change plan has no issue, and /changes lists it
+            query = session.query(FixPlan).filter(FixPlan.plan_kind == "fix").order_by(FixPlan.created_at.desc())
 
             # Parse optional filters
             rest = args[1:]
@@ -2172,17 +2201,17 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
                 table.add_row(
                     str(p.id),
                     f"[{rc}]{p.risk_level}[/{rc}]",
-                    p.title[:40],
+                    _safe_text(p.title[:40]),
                     status_str,
                     str(p.health_issue_id),
-                    p.approved_by or "-",
+                    _safe_text(p.approved_by or "-"),
                     p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "-",
                 )
 
             buf = StringIO()
-            temp_console = Console(file=buf, force_terminal=True, width=ctx.console.size.width if hasattr(ctx, 'console') else 120)
-            temp_console.print(table)
-            return buf.getvalue()
+            # As /changes: no ANSI in the returned text, and escaped because the REPL parses it as markup again.
+            Console(file=buf, width=console.size.width, color_system=None).print(table)
+            return escape(buf.getvalue())
         finally:
             session.close()
 
@@ -2253,22 +2282,221 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
 
     else:
         return """[yellow]Usage:
-  /fix list [issue_id] [--status S] [--risk L]
+  /fix list \\[issue_id] [--status S] [--risk L]
   /fix show <plan_id>[/yellow]"""
 
 
+_TARGET_HINT_RE = re.compile(r"\b((?:i|sg|subnet|vpc|vol)-[0-9a-f]{8,17}\b|arn:aws[^\s,]*[^\s,.;:)])")
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_FENCE_RE = re.compile(r"`{3,}")
+_CHANGE_DISABLED = "[yellow]Change management is disabled (change_management_enabled=false).[/yellow]"
+_CHANGE_USAGE = "[yellow]Usage: /change <what to change and why> [--account NAME] [--emergency][/yellow]"
+
+
+def _strip_ctrl(text) -> str:
+    """C0/C1 control characters removed — an ESC sequence in a title can conceal or rewrite text; tab and
+    newline are kept."""
+    return _CTRL_CHARS_RE.sub("", str(text or ""))
+
+
+def _safe_text(text) -> str:
+    """Free text shown literally by Rich: control characters stripped, markup escaped (`[prod]` shows,
+    `[/var/log]` cannot raise a MarkupError out of the REPL), and every run of 3+ backticks broken with U+200B:
+    the REPL renders a whole reply holding a fence as Markdown (print_with_truncation), its Rich tags raw."""
+    return _FENCE_RE.sub(lambda m: "\u200b".join(m.group()), escape(_strip_ctrl(text)))
+
+
+def _one_line(text) -> str:
+    """Whitespace, newlines included, collapsed to single spaces: free text cannot add a line to a summary."""
+    return " ".join(str(text or "").split())
+
+
+def _extract_target_hints(text: str) -> list[str]:
+    seen, out = set(), []
+    for m in _TARGET_HINT_RE.finditer(text or ""):
+        if m.group(1) not in seen:
+            seen.add(m.group(1)); out.append(m.group(1))
+    return out
+
+
+def _parse_change_ref(token: str) -> Optional[int]:
+    """'C12' / 'c12' / 'C#12' → 12; anything else (incl. plain digits = fix plan id) → None."""
+    m = re.fullmatch(r"[Cc]#?(\d+)", (token or "").strip(), re.ASCII)
+    return int(m.group(1)) if m else None
+
+
+def _slash_change(ctx: ChatContext, args: list) -> str:
+    """Handle /change <description> [--account NAME] [--emergency] — open a change request and review it now."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import change_service as cs
+
+    if not settings.change_management_enabled:
+        return _CHANGE_DISABLED
+    words, account, emergency = list(args), "", False
+    if "--account" in words:
+        i = words.index("--account")
+        account = words[i + 1] if i + 1 < len(words) else ""
+        if not account or account.startswith("--"):
+            return "[yellow]--account needs an account name.[/yellow]\n" + _CHANGE_USAGE
+        del words[i:i + 2]
+    if "--emergency" in words:
+        emergency = True
+        words.remove("--emergency")
+    text = " ".join(words).strip()
+    if not text:
+        return _CHANGE_USAGE
+    init_db()
+    try:
+        cr = cs.create_change_request(
+            source="cli", actor=cli_actor(), title=text[:80], description=text, account_name=account or None,
+            targets=_extract_target_hints(text), requested_change_type="emergency" if emergency else "normal",
+            start_review=False,
+        )
+    except cs.ChangeError as e:
+        return f"[red]{_safe_text(e)}[/red]"
+    display = ThinkingDisplay(console)
+    review_text, not_started = "", ""
+    with display.live_display():
+        display.start(f"SRE reviewing change C#{cr['id']}")
+        display.tool_call("review_change", f"change_request_id={cr['id']}")
+        try:
+            review_text = cs.start_review(cr["id"], sync=True) or ""
+        except cs.ChangeError as e:
+            not_started = f"review not started: {e}"
+        display.complete("Review ended")
+    if review_text:
+        # Printed here, not returned: the SRE writes Markdown, and the REPL renders a WHOLE reply as Markdown
+        # when it holds "#"/"```" (print_with_truncation) — the status line's Rich tags would then print raw.
+        clean = _strip_ctrl(review_text)
+        console.print(Rule("[bold cyan]SRE review[/bold cyan]", style="cyan"))
+        console.print(Markdown(clean) if clean.startswith("#") or "```" in clean else escape(clean))
+    cid = cr["id"]
+    final = cs.get_change(cid)
+    status = final["status"]
+    web = f"{settings.web_base_url.rstrip('/')}/app/changes/{cid}"
+    if status in ("planned", "needs_clarification", "rejected"):  # the review recorded a verdict
+        head = (f"[green]✓ Change request C#{cid} — status: {status}"
+                f"{' · risk ' + final['risk_level'] if final.get('risk_level') else ''}[/green]")
+    elif status == "draft":  # rolled back: the review did NOT complete
+        why = not_started or "; ".join(final.get("review_reasons") or []) or "no verdict was recorded"
+        head = (f"[yellow]Change request C#{cid} — status: draft — the review did not complete "
+                f"({_safe_text(why)}). Nothing was approved.[/yellow]")
+    else:  # e.g. still under_review: another reviewer took it over, or it has not finished
+        head = (f"[yellow]Change request C#{cid} — status: {status} — the review has not finished here; "
+                f"follow it with /changes or on the Web.[/yellow]")
+    if status == "planned":
+        foot = (f"[dim]Approval needs someone other than the requester: /approve C{cid} <reason>   ·   "
+                f"Web: {web}[/dim]")
+    else:
+        foot = f"[dim]Web: {web}[/dim]"
+    return f"{head}\n{foot}"
+
+
+def _slash_changes(ctx: ChatContext, args: list) -> str:
+    """Handle /changes [STATUS] — list change requests."""
+    from agenticops.models import VALID_CHANGE_STATUSES
+    from agenticops.services import change_service as cs
+    if not settings.change_management_enabled:
+        return _CHANGE_DISABLED
+    status = "_".join(" ".join(args).replace("-", " ").split()).lower() or None
+    if status and status not in VALID_CHANGE_STATUSES:
+        return (f"[yellow]Unknown status '{_safe_text(status)}'. Valid: "
+                f"{', '.join(sorted(VALID_CHANGE_STATUSES))}[/yellow]")
+    init_db()
+    rows = cs.list_changes(status=status, limit=50)
+    if not rows:
+        return "[dim]No change requests found.[/dim]"
+    table = create_table("Change Requests")
+    # Every column but C# is width-less and wraps: Rich shrinks wrapable columns first and cuts a no_wrap one only
+    # as a last resort — so the id stays whole at the terminal's width and long cells wrap inside their borders.
+    # overflow="fold": a word wider than its column folds onto the next line instead of ending in "…".
+    table.add_column("C#", no_wrap=True)
+    for col in ("Title", "Status", "Risk", "Type", "Requested by", "Updated"):
+        table.add_column(col, overflow="fold")
+    for r in rows:
+        table.add_row(f"C#{r['id']}", _safe_text((r["title"] or "")[:40]), r["status"].replace("_", " "),
+                      r.get("risk_level") or "-",
+                      r.get("effective_change_type") or r.get("requested_change_type") or "-",
+                      _safe_text(r["requested_by"]),
+                      (r.get("updated_at") or r.get("created_at") or "")[:16].replace("T", " "))
+    buf = StringIO()
+    # color_system=None: no ANSI in the returned text — the REPL's highlighter splits every "\x1b[" it is given.
+    Console(file=buf, width=console.size.width, color_system=None).print(table)
+    # Titles are markup-parsed twice: in the table above and again when the REPL prints this string.
+    return escape(buf.getvalue())
+
+
+def _slash_reject(ctx: ChatContext, args: list) -> str:
+    """Handle /reject C<id> <reason> — reject a planned change request."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import change_service as cs
+    if not settings.change_management_enabled:
+        return _CHANGE_DISABLED
+    cr_id = _parse_change_ref(args[0]) if args else None
+    reason = " ".join(args[1:]).strip()
+    if cr_id is None or not reason:
+        return "[yellow]Usage: /reject C<id> <reason>[/yellow]"
+    init_db()
+    try:
+        out = cs.reject(cr_id, actor=cli_actor(), reason=reason)
+    except cs.ChangeError as e:
+        return f"[red]{_safe_text(e)}[/red]"
+    return f"[green]Change C#{cr_id} rejected ({out['status']}).[/green]"
+
+
 def _slash_approve(ctx: ChatContext, args: list) -> str:
-    """Handle /approve <plan_id> command — approve a fix plan."""
-    from rich.prompt import Prompt, Confirm
+    """Handle /approve <plan_id|C<id>> [reason...] — approve a fix plan or a change request as the CLI user.
+
+    The approver is the OS user (cli:<user>), never a typed name; the reason is audited. A change
+    (C<id>) always needs a reason — it is prompted for when missing; for a fix plan it is optional.
+    """
+    from rich.prompt import Confirm, Prompt
+
+    cr_id = _parse_change_ref(args[0]) if args else None
+    if cr_id is not None:
+        if not settings.change_management_enabled:
+            return _CHANGE_DISABLED
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services import change_service as cs
+        init_db()
+        try:
+            cr = cs.get_change(cr_id)
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        if cr["status"] != "planned":
+            return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only a planned change can be approved.[/yellow]"
+        console.print(f"[bold]Approve change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
+                      f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level') or '-'}\n"
+                      f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}")
+        reason = " ".join(args[1:]).strip()
+        if not reason:
+            reason = Prompt.ask("Approval reason (required)").strip()
+            if not reason:
+                return "[red]A reason is required to approve a change.[/red]"
+        if not Confirm.ask("Approve this change?"):
+            return "[dim]Approval cancelled.[/dim]"
+        actor = cli_actor()
+        try:
+            out = cs.approve(cr_id, actor=actor, reason=reason)
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        return f"[green]Change C#{cr_id} approved by {actor.key} ({out['status']}). Execute with: /execute C{cr_id}[/green]"
 
     if not args:
-        return "[yellow]Usage: /approve <plan_id>[/yellow]"
+        return "[yellow]Usage: /approve <plan_id|C<id>> \\[reason...][/yellow]"
 
     try:
         plan_id = int(args[0])
     except ValueError:
         return "[red]Invalid plan ID.[/red]"
+    reason = " ".join(args[1:]).strip()
 
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import cli_actor
+    from agenticops.models import InvalidStatusTransition, transition_plan
+
+    actor = cli_actor()
     init_db()
     session = get_session()
 
@@ -2277,12 +2505,22 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if not plan:
             return f"[red]Fix plan #{plan_id} not found.[/red]"
 
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "approved")
+        if refusal:
+            return f"[yellow]{_safe_text(refusal)}[/yellow]"
+
         if plan.status == "approved":
             return "[yellow]Fix plan is already approved.[/yellow]"
         if plan.status == "rejected":
             return "[yellow]Fix plan was rejected. Create a new plan instead.[/yellow]"
         if plan.status not in ("draft", "pending_approval"):
             return f"[yellow]Fix plan status is '{plan.status}', cannot approve.[/yellow]"
+
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            return f"[red]{e}[/red]"
 
         # L2/L3 warning
         if plan.risk_level in ("L2", "L3"):
@@ -2295,38 +2533,73 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             if not Confirm.ask("Proceed with approval?"):
                 return "[dim]Approval cancelled.[/dim]"
 
-        approver = Prompt.ask("Your name (approver)")
-        if not approver.strip():
-            return "[red]Approver name is required.[/red]"
-
-        plan.status = "approved"
-        plan.approved_by = approver.strip()
+        old = plan.status
+        try:
+            transition_plan(plan, "approved")
+        except InvalidStatusTransition as e:
+            return f"[red]{e}[/red]"
+        plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
 
-        # Sync HealthIssue status
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
+        # Sync HealthIssue status (change plans have no issue)
+        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
         if issue:
             issue.status = "fix_approved"
 
-        session.commit()
+        AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         details={"reason": reason or None, "risk_level": plan.risk_level,
+                                  "plan_kind": plan.plan_kind, "via": "cli"},
+                         old_values={"status": old}, new_values={"status": "approved"}, session=session)
+        session.commit()  # decision + state + audit row in one transaction
 
-        return f"[green]Fix plan #{plan_id} approved by {approver.strip()}.[/green]"
+        # No auto-chain into execution from the CLI: the operator runs /execute explicitly
+        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green] Execute with: /execute {plan_id}"
     finally:
         session.close()
 
 
 def _slash_execute(ctx: ChatContext, args: list) -> str:
-    """Handle /execute <plan_id> command — execute an approved fix plan."""
+    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or queue an approved
+    change request (C<id>) for the executor, as the CLI user."""
     from rich.prompt import Confirm
 
+    cr_id = _parse_change_ref(args[0]) if args else None
+    if cr_id is not None:
+        if not settings.change_management_enabled:
+            return _CHANGE_DISABLED
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services import change_service as cs
+        init_db()
+        try:
+            cr = cs.get_change(cr_id)
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        if cr["status"] != "approved":
+            return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only an approved change can be executed.[/yellow]"
+        console.print(f"[bold]Execute change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
+                      f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level')}")
+        if not Confirm.ask("Confirm execution?"):
+            return "[dim]Execution cancelled.[/dim]"
+        try:
+            out = cs.request_execution(cr_id, actor=cli_actor())
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        return f"[green]Execution #{out['execution_id']} queued for change C#{cr_id} (plan #{out['fix_plan_id']}).[/green]"
+
     if not args:
-        return "[yellow]Usage: /execute <plan_id>[/yellow]"
+        return "[yellow]Usage: /execute <plan_id|C<id>>[/yellow]"
 
     try:
         plan_id = int(args[0])
     except ValueError:
         return "[red]Invalid plan ID.[/red]"
 
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.auth.actor import cli_actor
+    from agenticops.models import transition_plan
+
+    actor = cli_actor()
     init_db()
     session = get_session()
 
@@ -2335,11 +2608,21 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not plan:
             return f"[red]Fix plan #{plan_id} not found.[/red]"
 
+        from agenticops.services.change_service import fix_path_refusal
+        refusal = fix_path_refusal(plan, "executed")
+        if refusal:
+            return f"[yellow]{_safe_text(refusal)}[/yellow]"
+
         if plan.status != "approved":
             return f"[yellow]Fix plan status is '{plan.status}', must be 'approved' to execute.[/yellow]"
 
         if not settings.executor_enabled:
             return "[red]Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable.[/red]"
+
+        try:
+            authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            return f"[red]{e}[/red]"
 
         console.print(
             f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
@@ -2350,17 +2633,20 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
 
-        # Create FixExecution record
+        # Create FixExecution record (status verified 'approved' above — transition cannot raise)
         execution = FixExecution(
             fix_plan_id=plan.id,
             health_issue_id=plan.health_issue_id,
             status="pending",
-            executed_by="cli_user",
+            executed_by=actor.key,
             started_at=datetime.now(timezone.utc),
         )
-        plan.status = "executing"
+        transition_plan(plan, "executing")
         session.add(execution)
-        session.commit()
+        session.flush()
+        AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
+                         details={"execution_id": execution.id, "via": "cli"}, session=session)
+        session.commit()  # execution row + status + audit row in one transaction
 
         return (
             f"[green]Execution #{execution.id} created for fix plan #{plan_id}.[/green]\n"
@@ -3432,6 +3718,11 @@ SLASH_COMMANDS = {
     "execute": _slash_execute,
     "exec": _slash_execute,
 
+    # Changes
+    "change": _slash_change,
+    "changes": _slash_changes,
+    "reject": _slash_reject,
+
     # Workflows
     "workflow": _slash_workflow,
     "wf": _slash_workflow,
@@ -3814,10 +4105,9 @@ def _run_headless(query: str, account: Optional[str] = None):
     agent = create_main_agent()
     enriched, warnings = preprocess_message(query, resolve_file_refs=True)
 
-    # Set trace_id for this headless invocation
-    from agenticops.config import generate_trace_id, set_trace_id
     from agenticops.services.agent_log_service import track_agent
-    set_trace_id(generate_trace_id())
+    # Trace id + Run Context for this headless turn (audit attribution: cli:<os user>)
+    _begin_cli_turn("main")
 
     is_tty = sys.stdout.isatty()
 
@@ -4202,6 +4492,10 @@ def chat(
             if not user_input:
                 continue
 
+            # Trace id + Run Context for this REPL turn — set BEFORE the slash dispatch so
+            # /scan, /detect (sub-agents) run under this turn's identity, not an empty/stale one.
+            _begin_cli_turn("main")
+
             # Check for slash commands
             if user_input.startswith("/"):
                 ctx.add_to_history("user", user_input)
@@ -4241,10 +4535,6 @@ def chat(
             # Set scan focus from context before each agent call
             from agenticops.config import set_scan_focus as _set_sf
             _set_sf(ctx.scan_focus)
-
-            # Set trace_id for this REPL turn
-            from agenticops.config import generate_trace_id as _gen_tid, set_trace_id as _set_tid
-            _set_tid(_gen_tid())
 
             # Call agent with streaming output + animated spinner
             try:

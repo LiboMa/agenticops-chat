@@ -41,15 +41,18 @@ class TestRunOnHost:
 
     @patch("agenticops.skills.execution.classify_shell_command", return_value="write")
     @patch("agenticops.skills.execution._resolve_host_account", return_value=(_SNAP, "us-east-1", "explicit"))
-    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "restarted", ""))
+    @patch("agenticops.skills.execution._execute_ssm", return_value=(True, "reloaded", ""))
     def test_write_with_confirmation_ssm(self, mock_exec, mock_resolve, mock_cls):
         from agenticops.skills.execution import run_on_host
 
+        # `systemctl reload` is a plain confirmed write; `systemctl restart` is a
+        # policies.yaml change_required pattern and is refused outside an approved plan
+        # (covered by tests/test_command_audit.py).
         result = run_on_host(
-            host_id="i-0123456789abcdef0", command="systemctl restart nginx",
+            host_id="i-0123456789abcdef0", command="systemctl reload nginx",
             method="ssm", require_confirmation=True,
         )
-        assert result == "restarted"
+        assert result == "reloaded"
 
     @patch("agenticops.skills.execution.classify_shell_command", return_value="unknown")
     def test_unknown_requires_confirmation(self, mock_cls):

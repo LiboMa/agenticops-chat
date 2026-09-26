@@ -2,6 +2,11 @@
  * Lightweight markdown-to-HTML renderer for report content.
  * Handles headings, bold, italic, inline code, code blocks, tables,
  * lists, horizontal rules, and links.
+ *
+ * Security: link hrefs are restricted to an allowlist (http(s), root-relative,
+ * or fragment) so `javascript:`/`data:`/`vbscript:` links render as plain text
+ * instead of clickable anchors. Ref autolinks: I#N → issue, R#N → resource,
+ * C#N → change request.
  */
 
 function escapeHtml(s: string): string {
@@ -10,6 +15,18 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Allowlist for link hrefs. Strip leading control/space chars and any embedded
+// tab/newline/CR (all of which browsers ignore inside a scheme) before testing,
+// so obfuscated `java\tscript:` / " javascript:" cannot slip past. Anything that
+// is not http(s), root-relative (/…), or a fragment (#…) is rejected.
+function isSafeHref(href: string): boolean {
+  const h = href
+    .replace(/^[\u0000- ]+/, "")
+    .replace(/[\t\n\r]/g, "")
+    .toLowerCase();
+  return /^(https?:|\/|#)/.test(h);
 }
 
 export function renderMarkdown(md: string): string {
@@ -35,7 +52,9 @@ export function renderMarkdown(md: string): string {
   }
 
   function inlineFormat(text: string): string {
-    let s = escapeHtml(text);
+    // Strip NUL first: it is our anchor-placeholder delimiter, so any NUL in the
+    // source must not survive to be mistaken for one.
+    let s = escapeHtml(text.replace(/\u0000/g, ""));
     // inline code
     s = s.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
     // bold + italic
@@ -44,17 +63,27 @@ export function renderMarkdown(md: string): string {
     s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     // italic
     s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    // links
-    s = s.replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" class="md-link" target="_blank" rel="noopener">$1</a>',
-    );
+    // Links: only allowlisted hrefs become anchors; anything else falls back to
+    // its label text. Each accepted anchor is parked behind a NUL-delimited
+    // placeholder so the ref-autolink passes below never rewrite an href or a
+    // link label (e.g. a "C#2" label or a "#C#1" fragment).
+    const anchors: string[] = [];
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, href: string) => {
+      if (!isSafeHref(href)) return label;
+      anchors.push(`<a href="${href}" class="md-link" target="_blank" rel="noopener">${label}</a>`);
+      return `\u0000${anchors.length - 1}\u0000`;
+    });
     // Auto-link I#N → /app/issues/N
     s = s.replace(/\bI#(\d+)\b/g,
       '<a href="/app/issues/$1" class="md-link md-ref" title="Issue #$1">I#$1</a>');
     // Auto-link R#N → /app/resources/N
     s = s.replace(/\bR#(\d+)\b/g,
       '<a href="/app/resources/$1" class="md-link md-ref" title="Resource #$1">R#$1</a>');
+    // Auto-link C#N → /app/changes/N
+    s = s.replace(/\bC#(\d+)\b/g,
+      '<a href="/app/changes/$1" class="md-link md-ref" title="Change #$1">C#$1</a>');
+    // Restore parked anchors.
+    s = s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => anchors[Number(i)] ?? "");
     return s;
   }
 

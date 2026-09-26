@@ -150,6 +150,19 @@ def resolve_account_session(account_ref: str | SimpleNamespace, region: str | No
     auto-refreshing session.
     """
     snap = _coerce_snapshot(account_ref)
+
+    # Account binding (change run/review): a bound run may touch ONLY its own account. Checked BEFORE the
+    # cache lookup so a cached OTHER-account session cannot slip through. find_instance_account /
+    # find_cluster_account probe loops `except AccountResolutionError: break`, so a bound probe simply
+    # skips the accounts it may not touch. Fail closed — NEVER resolve another account's credentials.
+    from agenticops.run_context import get_run_context
+    bound = get_run_context().bound_account_id
+    if bound is not None and getattr(snap, "id", None) != bound:
+        raise AccountResolutionError(
+            f"this run is bound to account id={bound}; refusing to resolve account "
+            f"'{getattr(snap, 'name', account_ref)}' (id={getattr(snap, 'id', None)})"
+        )
+
     provider = snap.provider
     account_id = str(snap.credentials.get("account_id") or "")
     region_key = region or (snap.regions[0] if snap.regions else "")

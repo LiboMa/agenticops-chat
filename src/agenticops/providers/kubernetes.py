@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60
 MAX_OUTPUT = 8000
+LEDGER_TOOL = "provider_kubectl"  # command_audits.tool
 
 
 class KubernetesProvider(CloudProvider):
@@ -157,16 +158,33 @@ class KubernetesProvider(CloudProvider):
         account_name = self.account.name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", account_name)
         provider = self
+        target = str((self.account.credentials or {}).get("context") or "") or account_name
 
         def _run_k8s(command: str) -> str:
             command = command.strip()
             if not command:
                 return "Error: empty command."
-            result = provider._run_kubectl(command)
-            if result["rc"] != 0:
-                err = result["stderr"] or result["stdout"]
-                return f"Error (exit {result['rc']}): {err}"
-            return result["stdout"] or "(no output)"
+            from agenticops.services.command_audit import cli_outcome, guarded_run, record_command
+            from agenticops.skills.security import classify_kubectl_command
+
+            def _execute() -> str:
+                result = provider._run_kubectl(command)
+                if result["rc"] != 0:
+                    err = result["stderr"] or result["stdout"]
+                    return f"Error (exit {result['rc']}): {err}"
+                return result["stdout"] or "(no output)"
+
+            # Command ledger (command_audits): rows and change_required matching use the fully
+            # qualified `kubectl …` form whether or not the agent typed the prefix; _run_kubectl
+            # refuses blocked commands itself — record that and keep its reply.
+            qualified = command if command.split()[0] == "kubectl" else f"kubectl {command}"
+            tier = classify_kubectl_command(command)
+            if tier == "blocked":
+                record_command(tool=LEDGER_TOOL, tier="blocked", command=qualified, outcome="blocked",
+                               account=account_name, target=target)
+                return _execute()
+            return guarded_run(tool=LEDGER_TOOL, tier=tier, command=qualified, run=_execute,
+                               outcome_of=cli_outcome, account=account_name, target=target)
 
         _run_k8s.__name__ = f"run_kubectl_{safe_name}"
         _run_k8s.__doc__ = (

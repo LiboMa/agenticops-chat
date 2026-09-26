@@ -536,6 +536,14 @@ class Scheduler:
                 from agenticops.services.notification_service import set_schedule_running
                 set_schedule_running(True)
                 try:
+                    # Fresh thread → ContextVars start empty: set the trace + Run Context here so
+                    # tools attribute their audit rows to the scheduler (no reset needed — the
+                    # thread ends with this run).
+                    from agenticops.config import generate_trace_id, get_trace_id, set_trace_id
+                    from agenticops.run_context import RunContext, set_run_context
+                    _trace_id = get_trace_id() or generate_trace_id()
+                    set_trace_id(_trace_id)
+                    set_run_context(RunContext(actor="agent:scheduler", agent_name="main", trace_id=_trace_id))
                     agent = create_main_agent()
                     result = agent(enhanced_prompt)
                     response_text = str(result)

@@ -1,4 +1,4 @@
-"""Root conftest: registers --run-integration CLI flag and skips integration tests by default."""
+"""Root conftest: --run-integration flag (integration tests skipped by default) and the unit-test guards."""
 
 import subprocess
 import warnings
@@ -6,8 +6,39 @@ import warnings
 import pytest
 
 
+def _block_live_bedrock_runtime() -> None:
+    """Make every LIVE Bedrock runtime request fail fast for the rest of this process.
+
+    Unit tests must never reach a real model. Without this, a background agent thread — e.g. the
+    auto-execute an auto-approved fix plan spawns — runs a REAL agent: real cost, an interpreter exit
+    that hangs while the call is in flight, and tool calls against whatever database
+    settings.database_url points at by then. The guard wraps BaseClient._make_request, botocore's HTTP
+    step, which is reached only when no before-call hook answered: a Stubber and client- or agent-level
+    mocks never reach _make_request, so they are untouched, and other services pass through. An
+    HTTP-layer mock of bedrock-runtime (a before-send hook, moto) sits BELOW the guard and is never
+    reached: the guard raises first. It is never undone: daemon threads can outlive the session.
+    """
+    from botocore.client import BaseClient
+
+    if getattr(BaseClient._make_request, "_aiops_live_model_guard", False):
+        return
+    real_make_request = BaseClient._make_request
+
+    def _guarded_make_request(self, operation_model, request_dict, request_context):
+        if self.meta.service_model.service_name == "bedrock-runtime":
+            raise RuntimeError(
+                f"Live Bedrock runtime call {operation_model.name} blocked in unit tests — "
+                "mock the agent, the model or the client, or run with --run-integration"
+            )
+        return real_make_request(self, operation_model, request_dict, request_context)
+
+    _guarded_make_request._aiops_live_model_guard = True
+    BaseClient._make_request = _guarded_make_request
+
+
 def pytest_configure(config):
-    """Warn if untracked test files exist — they inflate test counts."""
+    """Warn if untracked test files exist — they inflate test counts — and, unless --run-integration,
+    install the live-Bedrock guard (_block_live_bedrock_runtime)."""
     result = subprocess.run(
         ["git", "status", "--short", "tests/"],
         capture_output=True, text=True, timeout=5
@@ -19,6 +50,8 @@ def pytest_configure(config):
             + "\n".join(untracked[:5]),
             stacklevel=1,
         )
+    if not config.getoption("--run-integration"):
+        _block_live_bedrock_runtime()
 
 
 def pytest_addoption(parser):
@@ -36,3 +69,17 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)
+
+
+@pytest.fixture(autouse=True)
+def _command_ledger_off(monkeypatch):
+    """Keep the tool-layer command ledger (command_audits) OFF unless a test opts in.
+
+    Under pytest settings.database_url is whatever .env says — the developer's real database —
+    and the run_aws_cli / run_on_host / run_kubectl / run_skill_script tests have no DB fixture,
+    so recording their fake attempts would append rows to a REAL audit ledger. Tests that assert
+    on the ledger (tests/test_command_audit.py) point database_url at a tmp file and re-enable it.
+    """
+    from agenticops.config import settings
+
+    monkeypatch.setattr(settings, "command_audit_enabled", False)

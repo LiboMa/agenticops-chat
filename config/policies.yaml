@@ -19,6 +19,9 @@
 #   resource_pattern: <regex matched against the issue's resource_id>
 #   blast_radius_gte: <int — downstream nodes affected per the infra graph>
 #   in_change_freeze: true — matches inside any freeze_windows entry below
+#   plan_kind: [fix, change] — fix plan (default) or change request (MVP-2.6.0)
+#   action_type: [tag, scale, config, network, iam, delete, other] — change request's action
+#   emergency: true|false — requested_change_type=emergency (also lets the change cross freeze windows)
 
 version: 1
 
@@ -32,6 +35,8 @@ freeze_windows: []
 
 rules:
   # Hard stop during declared change freezes, regardless of risk.
+  # An EMERGENCY change (emergency: true) never matches in_change_freeze, so it
+  # crosses the freeze — the change-* rules below still put a human in front of it.
   - name: freeze-window-block
     match: { in_change_freeze: true }
     action: block
@@ -49,6 +54,22 @@ rules:
   - name: impact-severity-escalation
     match: { impact_severity: [critical, high] }
     action: escalate
+
+  # ── Change Management (MVP-2.6.0) ──
+  # Standard change: low-risk tagging/config on a change request. auto_approve here is
+  # NECESSARY but not sufficient — settings.change_auto_approve_standard (default false)
+  # must also be on, otherwise the plan waits for a human approver. An emergency
+  # change is never a standard change (ITIL), so it falls through to the human rule.
+  - name: change-standard-low-risk
+    match: { plan_kind: [change], risk_level: [L0, L1], action_type: [tag, config, scale], emergency: false }
+    action: auto_approve
+    itsm_change_type: standard
+
+  # Any other change (L2/L3, network/iam/delete, emergency) needs a human approver.
+  - name: change-normal-human
+    match: { plan_kind: [change] }
+    action: require_human
+    itsm_change_type: normal
 
   # The historical default: L0/L1 auto-approve. As an ITIL *standard change*
   # this rule is the one-time human pre-authorization of the pattern.
@@ -69,3 +90,66 @@ rules:
     match: { risk_level: [L4] }
     action: require_human
     itsm_change_type: emergency
+
+# ── Change Management (MVP-2.6.0) ────────────────────────────────────────
+# Write commands matching any of these are REFUSED outside an approved plan (fix
+# or change) and the agent is told to open a change request (/change). Matching
+# is an ordered token match: the command is tokenised (wrappers — sudo/env/nohup/
+# time/nice/setsid/doas/unshare/nsenter/… — and every -/-- option dropped, option
+# values kept, lower-cased) and a pattern hits when its words appear in that
+# order — not necessarily adjacent. Bare words match whole tokens; hyphenated
+# entries match as prefixes. The word in COMMAND POSITION (first after the
+# wrappers, first of a quoted payload) is reduced to its basename, so
+# `/bin/systemctl restart nginx` and `sudo /usr/sbin/reboot` hit like the bare
+# names; a path anywhere else is untouched (`kubectl apply -f /tmp/delete-me.yaml`
+# is not gated). Each wrapper's own options are read from its table (`sudo -n`,
+# `sudo --user root`, `sudo -uroot`, `sudo -En`, `env -i`, `time -f %e`, a numeric
+# `nice -5`), and chained wrappers (`sudo -n nice -n 10 /usr/bin/…`) as well as
+# wrappers reached by path (`/usr/bin/sudo -n /usr/bin/…`) are seen through, so
+# the program path after them is still the command word. So is the command
+# carried after `kubectl exec … --`, the container in `docker exec …`, `timeout
+# 30`, `chroot DIR`, `runuser -u USER`, an unquoted `ssh [opts] HOST …` (`kubectl
+# exec pod -- /sbin/reboot`, `ssh host /sbin/reboot`, `timeout 30 /sbin/reboot`
+# all hit `reboot`) and a shell's one-word `-c` payload (`sh -c /sbin/reboot`).
+# `aws rds modify-`
+# hits `aws --profile p rds modify-db-instance`; the bare `reboot` hits
+# `sudo reboot` but not `--tags Key=x,Value=reboot-test`, and it is the
+# `aws ec2 reboot-` entry (not `reboot`) that catches `aws ec2 reboot-instances`;
+# `kubectl delete` does NOT hit `kubectl label pod delete-me`. A quoted payload is
+# inspected too: `bash -c "systemctl restart nginx"`, `sh -c '…'`, `ssh host '…'`
+# hit `systemctl restart`, and so do a `name="cmd …"` value and a JSON body
+# (`--parameters commands="systemctl restart nginx"`, `--parameters
+# '{"commands":["systemctl restart nginx"]}'`). A hyphenated entry never matches
+# an option VALUE: `aws lambda invoke --function-name update-inventory` does not
+# hit `aws lambda update-`, while OUTSIDE a wrapper's option region a known
+# boolean flag (`--no-cli-pager`, `--cli-auto-prompt`, `--debug`, `--dry-run`,
+# `-q`, `--user`, …) takes no value, so `aws ec2 --no-cli-pager
+# modify-security-group-rules` is still gated. Inside a region only that
+# region's own table decides, so the same `--user` DOES take a value there
+# (`sudo --user root /sbin/reboot` still hits `reboot`). EC2
+# reboot/stop are service-affecting (L2/L3 in the SRE rubric); `aws ec2 start-`
+# is deliberately not listed.
+# Deliberately conservative — L1-class writes such as tagging or a
+# single-workload `kubectl scale` are NOT here (the SRE risk rubric says L1).
+# Tune here, not in code.
+change_required:
+  - aws ec2 modify-security-group
+  - aws ec2 revoke-
+  - aws ec2 authorize-
+  - aws rds modify-
+  - aws rds reboot-
+  - aws ec2 reboot-
+  - aws ec2 stop-
+  - aws autoscaling update-
+  - aws autoscaling set-
+  - aws lambda update-
+  - aws eks update-
+  # SSM Run Command / Session Manager: arbitrary remote execution over the platform's primary host channel
+  - aws ssm send-command
+  - aws ssm start-session
+  - kubectl delete
+  - kubectl drain
+  - systemctl stop
+  - systemctl restart
+  - reboot
+  - shutdown

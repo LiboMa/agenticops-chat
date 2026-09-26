@@ -147,6 +147,33 @@ class TestClassifyCommand:
     def test_blocked_commands(self, cmd):
         assert _classify_command(cmd) == "blocked"
 
+    # -- Fix round 2: destructive entries are `<service> <verb>` (no `aws ` prefix), so a global
+    #    option placed before the service cannot slip past the substring check --
+
+    @pytest.mark.parametrize("cmd", [
+        "aws --region us-east-1 ec2 terminate-instances --instance-ids i-1",
+        "aws --output json iam create-user --user-name x",
+        "aws --region us-east-1 iam attach-user-policy --user-name x --policy-arn arn:aws:iam::aws:policy/AdministratorAccess",
+        "aws --region us-east-1 iam create-access-key --user-name x",
+        "aws --profile p organizations delete-organization",
+        "aws --region us-east-1 iam delete-user --user-name x",
+        "aws --profile p organizations move-account --account-id 123 --source-parent-id r-abc --destination-parent-id ou-xyz",
+        "aws --profile p account close-account --account-id 123",
+    ])
+    def test_blocked_with_global_options_before_the_service(self, cmd):
+        assert _classify_command(cmd) == "blocked"
+
+    @pytest.mark.parametrize("cmd", [
+        "aws ec2 describe-instances",
+        "aws --region us-east-1 iam list-users",
+        "aws --region us-east-1 iam list-attached-user-policies --user-name x",
+        "aws --profile p organizations list-accounts",
+        "aws --profile p organizations describe-account --account-id 123",
+        "aws iam list-access-keys --user-name svc",
+    ])
+    def test_reads_with_global_options_are_not_blocked(self, cmd):
+        assert _classify_command(cmd) != "blocked"
+
     # -- Secret-revealing reads are blocked (must not enter agent context) --
 
     @pytest.mark.parametrize("cmd", [
