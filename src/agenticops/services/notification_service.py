@@ -298,11 +298,14 @@ def notify_change_requested(cr: dict) -> None:
 
 def notify_change_pending_approval(cr: dict, plan: dict) -> None:
     """Notify: reviewed and planned — a human approver is needed (deep link included)."""
+    # One line, so a summary cannot forge the lines under it; an empty summary adds no line.
+    summary = " ".join(str(plan.get("summary") or "").split())[:500]
+    summary_line = f"Summary: {summary}\n" if summary else ""
     notify_event(
         "change_pending_approval",
         f"[CHANGE] Change #{cr['id']} awaits approval ({cr.get('risk_level') or '?'}, {cr.get('effective_change_type') or 'normal'})",
         (f"Change request #{cr['id']} '{cr['title']}' was reviewed by the SRE agent and needs approval.\n\n"
-         f"Plan #{plan.get('id')}: {plan.get('title')}\nRisk: {cr.get('risk_level')}\n"
+         f"Plan #{plan.get('id')}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
          f"Requested by: {cr['requested_by']}\n\nApprove or reject: {_change_link(cr['id'])}"),
         _change_severity(cr.get("risk_level")),
     )

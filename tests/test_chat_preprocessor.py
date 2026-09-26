@@ -124,14 +124,14 @@ class TestResolveReferences:
 # ── preprocess_message ──────────────────────────────────────────
 
 class TestPreprocessMessage:
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_plain_text(self, _mock):
         result, warnings = preprocess_message("hello")
         assert result == "hello"
         assert isinstance(result, str)
         assert warnings == []
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_file_contents_web_upload(self, _mock):
         result, warnings = preprocess_message(
             "summarize this",
@@ -142,7 +142,7 @@ class TestPreprocessMessage:
         assert "revenue up 10%" in result
         assert "summarize this" in result
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_image_blocks_returns_list(self, _mock):
         result, warnings = preprocess_message(
             "what is this?",
@@ -152,7 +152,7 @@ class TestPreprocessMessage:
         assert result[0]["text"] == "what is this?"
         assert result[1]["image"]["format"] == "png"
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_document_blocks_returns_list(self, _mock):
         result, warnings = preprocess_message(
             "review doc",
@@ -162,7 +162,7 @@ class TestPreprocessMessage:
         assert result[1]["document"]["format"] == "pdf"
         assert result[1]["document"]["name"] == "spec"
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_mixed_media(self, _mock):
         result, warnings = preprocess_message(
             "analyze",
@@ -172,7 +172,7 @@ class TestPreprocessMessage:
         assert isinstance(result, list)
         assert len(result) == 3  # text + image + doc
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
     @patch("agenticops.chat.preprocessor.is_document_file", return_value=False)
     @patch("agenticops.chat.preprocessor.read_file_as_text", return_value=("file content", None))
@@ -185,7 +185,7 @@ class TestPreprocessMessage:
         assert "file content" in result
         mock_read.assert_called_once_with("/tmp/log.txt")
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=True)
     @patch("agenticops.chat.preprocessor.read_file_as_image_bytes", return_value=(b"\x89PNG", "png", None))
     def test_cli_file_ref_image(self, mock_read, _img, _resolve):
@@ -196,7 +196,7 @@ class TestPreprocessMessage:
         assert isinstance(result, list)
         assert any("image" in block for block in result)
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
     @patch("agenticops.chat.preprocessor.is_document_file", return_value=True)
     @patch("agenticops.chat.preprocessor.read_file_as_document_bytes", return_value=(b"%PDF", "pdf", "doc", None))
@@ -208,7 +208,7 @@ class TestPreprocessMessage:
         assert isinstance(result, list)
         assert any("document" in block for block in result)
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
     @patch("agenticops.chat.preprocessor.is_document_file", return_value=False)
     @patch("agenticops.chat.preprocessor.read_file_as_text", return_value=(None, "File not found: /tmp/nope.txt"))
@@ -219,7 +219,7 @@ class TestPreprocessMessage:
         )
         assert any("File not found" in w for w in warnings)
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=True)
     @patch("agenticops.chat.preprocessor.read_file_as_image_bytes", return_value=(None, None, "Cannot read image"))
     def test_cli_image_read_error(self, _read, _img, _resolve):
@@ -229,7 +229,7 @@ class TestPreprocessMessage:
         )
         assert any("Cannot read" in w for w in warnings)
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
     @patch("agenticops.chat.preprocessor.is_document_file", return_value=True)
     @patch("agenticops.chat.preprocessor.read_file_as_document_bytes", return_value=(None, None, None, "Bad doc"))
@@ -246,7 +246,7 @@ class TestPreprocessMessage:
         result, warnings = preprocess_message("I#99")
         assert "I#99 not found" in warnings[0]
 
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t: (t, []))
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_multiple_file_contents(self, _mock):
         result, warnings = preprocess_message(
             "compare",

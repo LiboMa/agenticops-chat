@@ -81,10 +81,11 @@ def _resolve_change_ref(cr_id: int) -> str | None:
     )
 
 
-def resolve_references(text: str) -> tuple[str, list[str]]:
+def resolve_references(text: str, *, change_ref_text: str | None = None) -> tuple[str, list[str]]:
     """Find I#N, R#N and C#N references, resolve them, return (enriched_text, warnings).
 
     The original text is preserved. Resolved context blocks are appended at the end.
+    C#N references are read from `change_ref_text` when given (the user's typed text), else from `text`.
     """
     context_blocks: list[str] = []
     warnings: list[str] = []
@@ -107,7 +108,8 @@ def resolve_references(text: str) -> tuple[str, list[str]]:
 
     from agenticops.config import settings
     if settings.change_management_enabled:
-        for cr_id in dict.fromkeys(int(m) for m in CHANGE_REF_PATTERN.findall(text)):
+        change_refs = CHANGE_REF_PATTERN.findall(text if change_ref_text is None else change_ref_text)
+        for cr_id in dict.fromkeys(int(m) for m in change_refs):
             block = _resolve_change_ref(cr_id)
             if block:
                 context_blocks.append(block)
@@ -203,8 +205,8 @@ def preprocess_message(
     text_parts.append(text)
     combined = "\n\n".join(text_parts)
 
-    # 4. Resolve I#/R#/C# references
-    enriched_text, ref_warnings = resolve_references(combined)
+    # 4. Resolve I#/R#/C# references (C# only from what the user typed, never from an attached file)
+    enriched_text, ref_warnings = resolve_references(combined, change_ref_text=text)
     warnings.extend(ref_warnings)
 
     # 5. If no media blocks, return plain string (100% backward compatible)

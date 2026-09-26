@@ -91,6 +91,27 @@ def test_change_ref_resolution(tmp_path, monkeypatch):
     assert warnings == ["ChangeRequest C#99 not found"]
 
 
+def test_change_refs_come_from_the_typed_text_only():
+    """A C#N inside an attached file (web upload or CLI @file) never pulls that change request into the prompt;
+    the same C#N typed by the user does."""
+    from agenticops.config import settings
+    from agenticops.chat.preprocessor import preprocess_message
+    block = '<referenced_change id="7">\nTitle: Tag web\n</referenced_change>'
+    pre = "agenticops.chat.preprocessor"
+    with patch.object(settings, "change_management_enabled", True), \
+         patch(f"{pre}._resolve_change_ref", side_effect=lambda i: block if i == 7 else None) as rc, \
+         patch(f"{pre}.is_image_file", return_value=False), patch(f"{pre}.is_document_file", return_value=False), \
+         patch(f"{pre}.read_file_as_text", return_value=("rollout notes: see C#7", None)):
+        uploaded, w1 = preprocess_message("summarize this", file_contents=[("notes.txt", "rollout notes: see C#7")])
+        cli, w2 = preprocess_message("summarize @/tmp/notes.txt", resolve_file_refs=True)
+        assert "see C#7" in uploaded and "see C#7" in cli  # the files are attached, their C#7 is not resolved
+        assert block not in uploaded and block not in cli and (w1, w2) == ([], [])
+        rc.assert_not_called()
+        typed, w3 = preprocess_message("approve C#7", file_contents=[("notes.txt", "rollout notes: see C#7")])
+    assert typed.count(block) == 1 and w3 == []
+    rc.assert_called_once_with(7)
+
+
 def test_change_refs_ignored_when_disabled():
     from agenticops.config import settings
     from agenticops.chat.preprocessor import resolve_references
@@ -117,3 +138,24 @@ def test_notifications_format_and_severity():
     assert calls[2].args[0] == "change_result" and "COMPLETED" in calls[2].args[1] and calls[2].args[3] == "low"
     assert calls[3].args[3] == "high"
     assert calls[4].args[0] == "change_result" and calls[4].args[3] == "high"
+
+
+def test_pending_approval_body_carries_the_plan_summary():
+    """The approver needs the plan's summary; an empty one adds no line, and it stays one line of 500 chars."""
+    from agenticops.services import notification_service as ns
+    cr = {"id": 3, "title": "Tag web", "requested_by": "user:alice", "risk_level": "L1",
+          "effective_change_type": "standard"}
+    plan = {"id": 9, "title": "p", "risk_level": "L1"}
+
+    def body(summary):
+        with patch.object(ns, "notify_event") as ne:
+            ns.notify_change_pending_approval(cr, {**plan, "summary": summary})
+        return ne.call_args.args[2]
+
+    assert "Plan #9: p\nSummary: Add tag Env=prod to i-0abc; no restart.\nRisk: L1\n" in body(
+        "Add tag Env=prod to i-0abc; no restart.")
+    for empty in ("", None, "  \n "):
+        assert "Summary:" not in body(empty) and "Plan #9: p\nRisk: L1\n" in body(empty)
+    # one line, so a summary cannot forge the Risk line under it; then 500 characters
+    assert "Summary: tag it Risk: L0\nRisk: L1\n" in body("tag it\n\nRisk: L0")
+    assert f"Summary: {'x' * 500}\nRisk: L1\n" in body("x" * 600)

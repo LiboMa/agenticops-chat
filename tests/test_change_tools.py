@@ -95,3 +95,12 @@ def test_execute_change_and_list(db):
         cs.create_change_request(source="cli", actor=cs.Actor("cli", "m"), title="t", description="d", start_review=False)
     rows = json.loads(list_change_requests())
     assert len(rows) == 1 and rows[0]["status"] == "draft"
+
+
+def test_request_change_description_is_english_only():
+    """Agent-facing text is English-only: the routing keywords match a request in any language."""
+    import re
+    from agenticops.tools.change_tools import request_change
+    description = request_change.tool_spec["description"]
+    assert "change request" in description and "in any language" in description
+    assert not re.search(r"[一-鿿]", description)  # the CJK range test_prompt_budget checks prompts for

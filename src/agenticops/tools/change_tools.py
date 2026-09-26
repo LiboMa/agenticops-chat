@@ -54,7 +54,7 @@ def request_change(title: str, description: str, account: str = "", targets: str
     """Open a CHANGE REQUEST (ITSM change) for a modification the user asks for — tagging, scaling,
     configuration, network or IAM changes that are NOT fixing an incident.
 
-    USE FOR: "add tag", "change/modify/update <resource>", "scale", "变更", "change request", "CR",
+    USE FOR: "add tag", "change/modify/update <resource>", "scale", "change request", "CR" (in any language),
     or any write intent without a HealthIssue. NOT FOR: incident fixes (sre_agent with an issue id).
     After this, call review_change(change_request_id) so the SRE reviews it in the same turn.
 
