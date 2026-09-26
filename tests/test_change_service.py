@@ -679,3 +679,29 @@ class TestSnapshotsAndQueries:
             cr = cs.create_change_request(source="web", actor=ALICE, title="t", description="d")
         assert cs.get_change(cr["id"])["status"] == "draft"
         assert len(cs.list_changes()) == 1
+
+
+class TestClarifyAuthz:
+    def test_clarify_is_reserved_to_the_requester(self, db):
+        """G11 item (i): clarify authorizes on change.clarify + the requester-or-admin rule (was the plain
+        change.request check). A non-owner is refused (ChangeForbidden); the requester succeeds and the
+        answer is appended, and only then is the review restarted."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        with patch.object(cs, "notify_change_requested"):
+            cr = cs.create_change_request(source="web", actor=ALICE, title="t", description="d",
+                                          account_name="dev", start_review=False)
+        cid = cr["id"]
+        with cs._session() as s:  # legal path: draft → under_review → needs_clarification
+            row = s.get(ChangeRequest, cid)
+            cs.transition_change(row, "under_review")
+            cs.transition_change(row, "needs_clarification")
+        bob = Actor("user", "bob", user_id=2, permissions=("read", "write"))
+        with patch.object(settings, "rbac_enforce", True), \
+             patch.object(cs, "start_review") as sr, \
+             patch("agenticops.audit.service.AuditService.log"):
+            with pytest.raises(cs.ChangeForbidden):
+                cs.clarify(cid, actor=bob, message="the instance is i-0abc")
+            out = cs.clarify(cid, actor=ALICE, message="the instance is i-0abc")
+        assert "the instance is i-0abc" in out["description"]
+        sr.assert_called_once_with(cid, sync=False)  # only the owner's successful clarify restarts the review

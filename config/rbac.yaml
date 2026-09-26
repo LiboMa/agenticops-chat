@@ -5,9 +5,12 @@
 # subjects:    default flags for actors that have no users row.
 #              `anonymous` (web with api_auth_enabled=false) is deliberately all-powerful — it is
 #              exactly what an unauthenticated deployment allows today.
-# rules:       structured deny rules, evaluated after the matrix. Only two types exist:
-#                actor_must_differ_from_field  — str(actor) != getattr(subject, field)      (SoD)
-#                deny_actor_kind_when_risk_in  — actor.kind == actor_kind and subject.risk_level in risk_levels
+# rules:       structured deny rules, evaluated after the matrix. Three types exist:
+#                actor_must_differ_from_field        — str(actor) != getattr(subject, field)      (SoD)
+#                actor_must_match_field_unless_admin — actor.key == getattr(subject, field), unless the actor
+#                                                      has admin (ownership: only the requester or an admin may act)
+#                deny_actor_kind_when_risk_in        — actor.kind == actor_kind and subject.risk_level in risk_levels
+#              The two field rules are skipped for the anonymous web actor (they need identities).
 #              `enforce: always` makes a rule bite even in shadow mode (rbac_enforce=false).
 #              Every rule bearing on a permission is evaluated and an `enforce: always` deny wins over a
 #              shadow deny; such a permission REQUIRES a subject — without one the call is denied (fail-closed).
@@ -20,6 +23,7 @@ permissions:
   change.approve: [write]
   change.reject:  [write]
   change.cancel:  [write]
+  change.clarify: [read]
   change.execute: [write]
   plan.approve:   [write]
   plan.reject:    [write]
@@ -39,6 +43,12 @@ rules:
     type: actor_must_differ_from_field
     field: requested_by
     # skipped for the anonymous web actor (api_auth_enabled=false): SoD needs identities — enable auth to enforce it on the web
+
+  - name: requester-or-admin
+    permission: [change.cancel, change.clarify]
+    type: actor_must_match_field_unless_admin
+    field: requested_by
+    # only the CR's requester (or an admin) may cancel/clarify it; skipped for the anonymous web actor
 
   - name: no-agent-approval-above-l1
     permission: [plan.approve, change.approve]

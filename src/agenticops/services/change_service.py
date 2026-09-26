@@ -965,7 +965,7 @@ def clarify(cr_id: int, *, actor: Actor, message: str) -> dict:
         raise ChangeValidationError("message is required")
     with _session() as s:
         cr = _load(s, cr_id)
-        _check(actor, "change.request", subject=cr)
+        _check(actor, "change.clarify", subject=cr)
         if cr.status != "needs_clarification":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not awaiting clarification")
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

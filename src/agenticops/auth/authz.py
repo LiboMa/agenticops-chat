@@ -2,11 +2,15 @@
 
 check(actor, permission, subject) evaluates config/rbac.yaml:
   1. matrix: required flags ⊆ actor flags (users.permissions for user actors, `subjects` for others)
-  2. rules:  structured deny rules (SoD, agent risk ceiling). SoD (actor_must_differ_from_field)
-             needs identities, so it is skipped for the anonymous `web` actor (api_auth_enabled=false).
-             EVERY rule bearing on the permission is evaluated and an `enforce: always` deny wins over
-             a shadow deny. A rule cannot be evaluated without its subject, so a permission that has a
-             matching rule is denied (fail-closed) when `subject is None`.
+  2. rules:  structured deny rules. THREE types:
+             - actor_must_differ_from_field       — str(actor) != subject.<field> (SoD, e.g. approver ≠ requester)
+             - actor_must_match_field_unless_admin — actor.key must equal subject.<field>, unless the actor has
+                                                     admin (e.g. only the requester or an admin may cancel/clarify)
+             - deny_actor_kind_when_risk_in        — an actor kind may not act above a risk ceiling
+             The two field rules need identities, so both are skipped for the anonymous `web` actor
+             (api_auth_enabled=false). EVERY rule bearing on the permission is evaluated and an
+             `enforce: always` deny wins over a shadow deny. A rule cannot be evaluated without its subject,
+             so a permission that has a matching rule is denied (fail-closed) when `subject is None`.
 Denials raise AuthzDenied when settings.rbac_enforce is true OR the matching rule says
 `enforce: always`; otherwise (shadow mode) the denial is written to audit_logs as
 `authz.denied_shadow` and the call is allowed — i.e. behavior is exactly today's.
@@ -26,11 +30,11 @@ from agenticops.auth.actor import Actor
 logger = logging.getLogger(__name__)
 
 PERMISSIONS = (
-    "change.request", "change.review", "change.approve", "change.reject", "change.cancel", "change.execute",
-    "plan.approve", "plan.reject", "plan.execute", "audit.read",
+    "change.request", "change.review", "change.approve", "change.reject", "change.cancel", "change.clarify",
+    "change.execute", "plan.approve", "plan.reject", "plan.execute", "audit.read",
 )
 
-_RULE_TYPES = {"actor_must_differ_from_field", "deny_actor_kind_when_risk_in"}
+_RULE_TYPES = {"actor_must_differ_from_field", "actor_must_match_field_unless_admin", "deny_actor_kind_when_risk_in"}
 _TOP_LEVEL_KEYS = {"version", "permissions", "subjects", "rules"}
 _RULE_KEYS = {"name", "type", "permission", "field", "actor_kind", "risk_levels", "enforce"}
 
@@ -38,9 +42,9 @@ DEFAULT_POLICY: dict = {
     "version": 1,
     "permissions": {
         "change.request": ["read"], "change.review": ["write"], "change.approve": ["write"],
-        "change.reject": ["write"], "change.cancel": ["write"], "change.execute": ["write"],
-        "plan.approve": ["write"], "plan.reject": ["write"], "plan.execute": ["write"],
-        "audit.read": ["admin"],
+        "change.reject": ["write"], "change.cancel": ["write"], "change.clarify": ["read"],
+        "change.execute": ["write"], "plan.approve": ["write"], "plan.reject": ["write"],
+        "plan.execute": ["write"], "audit.read": ["admin"],
     },
     "subjects": {
         "anonymous": ["read", "write", "admin"], "cli": ["read", "write", "admin"],
@@ -49,6 +53,8 @@ DEFAULT_POLICY: dict = {
     "rules": [
         {"name": "sod-change-approver-not-requester", "permission": "change.approve",
          "type": "actor_must_differ_from_field", "field": "requested_by"},
+        {"name": "requester-or-admin", "permission": ["change.cancel", "change.clarify"],
+         "type": "actor_must_match_field_unless_admin", "field": "requested_by"},
         {"name": "no-agent-approval-above-l1", "permission": ["plan.approve", "change.approve"],
          "type": "deny_actor_kind_when_risk_in", "actor_kind": "agent", "risk_levels": ["L2", "L3"],
          "enforce": "always"},
@@ -130,9 +136,9 @@ class RbacPolicy:
             name = rule.get("name")
             always = rule.get("enforce") == "always"
             rtype = rule.get("type")
-            if rtype == "actor_must_differ_from_field" and actor.kind == "web":
-                # SoD is only evaluable between IDENTIFIED actors; the anonymous web actor
-                # (api_auth_enabled=false) has no identity — enable auth to enforce it on the web.
+            if rtype in ("actor_must_differ_from_field", "actor_must_match_field_unless_admin") and actor.kind == "web":
+                # Both field rules are only evaluable between IDENTIFIED actors; the anonymous web actor
+                # (api_auth_enabled=false) has no identity — enable auth to enforce them on the web.
                 continue
             if subject is None:
                 denies.append((f"subject required to evaluate rule {name}", name, always))
@@ -141,6 +147,14 @@ class RbacPolicy:
                 other = getattr(subject, rule.get("field", ""), None)
                 if other and str(other) == actor.key:
                     denies.append((f"separation of duties: actor equals {rule.get('field')}", name, always))
+            elif rtype == "actor_must_match_field_unless_admin":
+                # ownership rule: the actor must BE the subject's <field> (e.g. the requester) — an admin overrides.
+                # A missing/empty field is falsy, so a non-admin is denied (fail-closed: no requester ⇒ admin-only).
+                if "admin" in self.effective_permissions(actor):
+                    continue
+                other = getattr(subject, rule.get("field", ""), None)
+                if not (other and str(other) == actor.key):
+                    denies.append((f"only the requester or an admin may {permission}", name, always))
             elif rtype == "deny_actor_kind_when_risk_in":
                 risk = getattr(subject, "risk_level", None)
                 if actor.kind == rule.get("actor_kind") and risk in (rule.get("risk_levels") or []):
@@ -197,7 +211,7 @@ def validate_rbac(data: Any) -> list[str]:
             errors.append(f"{label}: 'permission' must be a string or a non-empty list of strings")
         else:
             errors.extend(f"{label}: unknown permission {p!r}" for p in perms if p not in PERMISSIONS)
-        if rtype == "actor_must_differ_from_field" and not (isinstance(rule.get("field"), str) and rule.get("field")):
+        if rtype in ("actor_must_differ_from_field", "actor_must_match_field_unless_admin") and not (isinstance(rule.get("field"), str) and rule.get("field")):
             errors.append(f"{label}: 'field' (string) is required")
         if rtype == "deny_actor_kind_when_risk_in":
             if not (isinstance(rule.get("actor_kind"), str) and rule.get("actor_kind")):

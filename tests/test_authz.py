@@ -320,3 +320,65 @@ class TestCheck:
             check(alice, "change.approve", subject=cr)  # shadow mode: still allowed
         assert any(r.levelno == logging.WARNING and "authz audit write failed" in r.getMessage()
                    for r in caplog.records)
+
+
+class TestRequesterOrAdmin:
+    """G11 — cancel/clarify are reserved to the requester (or an admin override): the new
+    actor_must_match_field_unless_admin rule. The `policy` fixture reloads config/rbac.yaml, so it
+    sees the shipped `requester-or-admin` rule."""
+
+    def _cr(self):
+        return SimpleNamespace(id=1, requested_by="user:alice", risk_level="L1")
+
+    def test_a_non_owner_is_denied_cancel_and_clarify(self, policy):
+        bob = Actor("user", "bob", permissions=("read", "write"))
+        for perm in ("change.cancel", "change.clarify"):
+            allowed, _, rule, always = policy.decide(bob, perm, self._cr())
+            assert (allowed, rule, always) == (False, "requester-or-admin", False), perm
+
+    def test_b_the_requester_may_cancel_and_clarify(self, policy):
+        alice = Actor("user", "alice", permissions=("read", "write"))
+        for perm in ("change.cancel", "change.clarify"):
+            assert policy.decide(alice, perm, self._cr())[0] is True, perm
+
+    def test_c_an_admin_who_is_not_the_requester_may_cancel_and_clarify(self, policy):
+        admin = Actor("user", "carol", permissions=("read", "write", "admin"))
+        for perm in ("change.cancel", "change.clarify"):
+            assert policy.decide(admin, perm, self._cr())[0] is True, perm
+
+    def test_d_shadow_mode_allows_a_non_owner_but_audits(self, policy):
+        from agenticops.config import settings
+        bob = Actor("user", "bob", permissions=("read", "write"))
+        with patch.object(settings, "rbac_enforce", False), \
+             patch("agenticops.audit.service.AuditService.log") as log:
+            check(bob, "change.cancel", subject=self._cr())  # no raise in shadow
+        assert log.called and log.call_args.kwargs["action"] == "authz.denied_shadow"
+        assert log.call_args.kwargs["details"]["rule"] == "requester-or-admin"
+
+    def test_e_web_actor_is_exempt_regardless_of_requester(self, policy):
+        web = Actor("web", "someone", permissions=("read", "write"))  # a web actor WITHOUT admin
+        for perm in ("change.cancel", "change.clarify"):
+            allowed, _, rule, _ = policy.decide(web, perm, self._cr())
+            assert allowed is True and rule is None, perm
+
+    def test_f_the_new_rule_type_requires_a_field(self):
+        good = {
+            "version": 1,
+            "permissions": {"change.cancel": ["write"], "change.clarify": ["read"]},
+            "subjects": {"anonymous": ["read"], "cli": ["read"], "agents": ["read"], "im": ["read"], "webhook": ["read"]},
+            "rules": [{"name": "requester-or-admin", "type": "actor_must_match_field_unless_admin",
+                       "permission": ["change.cancel", "change.clarify"], "field": "requested_by"}],
+        }
+        assert validate_rbac(good) == []                       # well-formed → accepted
+        missing = {**good, "rules": [{k: v for k, v in good["rules"][0].items() if k != "field"}]}
+        assert validate_rbac(missing) != []                    # field missing → rejected
+
+    def test_g_change_request_create_is_unaffected(self, policy):
+        bob = Actor("user", "bob", permissions=("read", "write"))
+        assert policy.decide(bob, "change.request", self._cr())[0] is True  # a non-owner can still create
+
+    def test_h_a_read_only_im_actor_is_denied_cancel_and_clarify(self, policy):
+        im = im_actor("feishu", "ou_1")  # subjects.im == [read]: no write, no admin, not web
+        assert policy.decide(im, "change.cancel", self._cr())[0] is False   # denied at the matrix (no write)
+        allowed, _, rule, _ = policy.decide(im, "change.clarify", self._cr())
+        assert allowed is False and rule == "requester-or-admin"            # [read] reaches the rule, no bypass
