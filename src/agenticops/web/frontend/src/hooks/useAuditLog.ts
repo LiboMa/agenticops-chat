@@ -6,6 +6,7 @@ interface AuditLogParams {
   action?: string;
   entity_type?: string;
   hours?: number;
+  limit?: number;
 }
 
 export function useAuditLog(params: AuditLogParams) {
@@ -13,6 +14,7 @@ export function useAuditLog(params: AuditLogParams) {
   if (params.action) qs.set("action", params.action);
   if (params.entity_type) qs.set("entity_type", params.entity_type);
   if (params.hours) qs.set("hours", String(params.hours));
+  if (params.limit) qs.set("limit", String(params.limit));
   const query = qs.toString();
 
   return useQuery({
