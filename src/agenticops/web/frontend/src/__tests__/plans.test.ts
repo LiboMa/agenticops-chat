@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, resolvePlansTab, toQuery } from "@/lib/plans";
-import type { ChangeStatus } from "@/api/types";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, planRef, planRoute, resolvePlansTab, toQuery } from "@/lib/plans";
+import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
   it("drops undefined, null and empty-string values", () => {
@@ -48,6 +48,19 @@ describe("terminal sets are typed (M3)", () => {
     // @ts-expect-error M3: CHANGE_TERMINAL_STATUSES is ReadonlySet<ChangeStatus>, not <string>
     CHANGE_TERMINAL_STATUSES.has("definitely-not-a-status");
     expect(CHANGE_TERMINAL_STATUSES.has("completed")).toBe(true);
+  });
+});
+
+describe("planRoute / planRef (R2)", () => {
+  it.each([
+    { plan_kind: "change" as PlanKind, change_request_id: 7, health_issue_id: null, route: "/app/changes/7", ref: "C#7" },
+    { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=changes", ref: "-" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/issues/3", ref: "I#3" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=fix", ref: "-" },
+  ])("$plan_kind change=$change_request_id issue=$health_issue_id -> $route / $ref", (row) => {
+    const fp = { plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
+    expect(planRoute(fp)).toBe(row.route);
+    expect(planRef(fp)).toBe(row.ref);
   });
 });
 

@@ -14,7 +14,9 @@ import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useCancelExecution } from "@/hooks/useFixExecutions";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
+import { ReasonDialog } from "@/components/plans/ReasonDialog";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
@@ -67,8 +69,6 @@ export default function IssueDetail() {
   const [rcaLoading, setRcaLoading] = useState(false);
   const [fixPlanLoading, setFixPlanLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const [approverName, setApproverName] = useState("");
-  const [showApproveForm, setShowApproveForm] = useState(false);
 
   /* -- Handlers ---------------------------------------------------- */
   const triggerRca = async () => {
@@ -243,10 +243,6 @@ export default function IssueDetail() {
           rejectMut={rejectMut}
           executeMut={executeMut}
           cancelExecMut={cancelExecMut}
-          approverName={approverName}
-          setApproverName={setApproverName}
-          showApproveForm={showApproveForm}
-          setShowApproveForm={setShowApproveForm}
           setActionMsg={setActionMsg}
           t={t}
         />
@@ -517,10 +513,6 @@ function FixPlanTab({
   rejectMut,
   executeMut,
   cancelExecMut,
-  approverName,
-  setApproverName,
-  showApproveForm,
-  setShowApproveForm,
   setActionMsg,
   t,
 }: {
@@ -534,14 +526,13 @@ function FixPlanTab({
   rejectMut: ReturnType<typeof useRejectFixPlan>;
   executeMut: ReturnType<typeof useExecuteFixPlan>;
   cancelExecMut: ReturnType<typeof useCancelExecution>;
-  approverName: string;
-  setApproverName: (v: string) => void;
-  showApproveForm: boolean;
-  setShowApproveForm: (v: boolean) => void;
   setActionMsg: (v: string | null) => void;
   t: (key: string) => string;
 }) {
   const { confirm, dialog } = useConfirm();
+  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
+  const [claimedName, setClaimedName] = useState("");
+  const { isAuthenticated } = useAuth();
 
   if (fixPlans.isLoading) return <Spinner label="Loading fix plans..." />;
 
@@ -576,28 +567,6 @@ function FixPlanTab({
   const fp = latestPlan ?? plans[0];
   const needsApproval = fp.status === "draft" || fp.status === "pending_approval";
   const canExecute = fp.status === "approved";
-
-  function handleApprove() {
-    if (!approverName.trim()) return;
-    approveMut.mutate(
-      { id: fp.id, approved_by: approverName.trim() },
-      {
-        onSuccess: () => {
-          setShowApproveForm(false);
-          fixPlans.refetch();
-        },
-        onError: (err) => setActionMsg(`Approve failed: ${err.message}`),
-      },
-    );
-  }
-
-  async function handleReject() {
-    if (!(await confirm("Are you sure you want to reject this fix plan?", { variant: "destructive", confirmText: "Reject" }))) return;
-    rejectMut.mutate({ id: fp.id, reason: "rejected from UI" }, {
-      onSuccess: () => fixPlans.refetch(),
-      onError: (err) => setActionMsg(`Reject failed: ${err.message}`),
-    });
-  }
 
   async function handleExecute() {
     if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
@@ -706,39 +675,15 @@ function FixPlanTab({
             )}
 
             <div className="flex items-center gap-3">
-              {!showApproveForm ? (
-                <button
-                  onClick={() => setShowApproveForm(true)}
-                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  {t("issues.approve")}
-                </button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder={t("issues.approverPlaceholder")}
-                    value={approverName}
-                    onChange={(e) => setApproverName(e.target.value)}
-                    className="border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                  <button
-                    onClick={handleApprove}
-                    disabled={approveMut.isPending || !approverName.trim()}
-                    className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                  >
-                    {approveMut.isPending ? t("issues.approving") : t("common.confirm")}
-                  </button>
-                  <button
-                    onClick={() => setShowApproveForm(false)}
-                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-                  >
-                    {t("common.cancel")}
-                  </button>
-                </div>
-              )}
               <button
-                onClick={handleReject}
+                onClick={() => { approveMut.reset(); setApprovalDialog("approve"); }}
+                disabled={approveMut.isPending}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {t("issues.approve")}
+              </button>
+              <button
+                onClick={() => { rejectMut.reset(); setApprovalDialog("reject"); }}
                 disabled={rejectMut.isPending}
                 className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors"
               >
@@ -747,6 +692,32 @@ function FixPlanTab({
             </div>
           </CardBody>
         </Card>
+      )}
+
+      {needsApproval && approvalDialog && (
+        <ReasonDialog
+          title={`${t(approvalDialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} #${fp.id}`}
+          description={fp.title}
+          confirmText={approvalDialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          variant={approvalDialog === "reject" ? "destructive" : "default"}
+          required={approvalDialog === "reject"}
+          busy={approveMut.isPending || rejectMut.isPending}
+          error={(approvalDialog === "approve" ? approveMut.error : rejectMut.error)?.message ?? null}
+          onConfirm={(reason) => {
+            const done = { onSuccess: () => setApprovalDialog(null) };
+            if (approvalDialog === "approve") {
+              const name = claimedName.trim();
+              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+            } else rejectMut.mutate({ id: fp.id, reason }, done);
+          }}
+          onClose={() => setApprovalDialog(null)}
+        >
+          {approvalDialog === "approve" && !isAuthenticated && (
+            <input type="text" value={claimedName} onChange={(e) => setClaimedName(e.target.value)} maxLength={100}
+              placeholder={t("issues.approverPlaceholder")}
+              className="w-full mb-3 border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          )}
+        </ReasonDialog>
       )}
 
       {/* Execute action */}

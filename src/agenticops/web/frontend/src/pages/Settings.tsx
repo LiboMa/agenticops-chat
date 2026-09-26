@@ -1174,6 +1174,7 @@ export default function Settings() {
 
         {/* ── General Tab ──────────────────────────────────────── */}
         <Tabs.Content value="general" className="space-y-6">
+      {updateMut.error && <ErrorBanner message={updateMut.error.message} onRetry={() => updateMut.reset()} actionLabel={t("common.close")} />}
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">Scan Focus</h2>
@@ -1246,6 +1247,22 @@ export default function Settings() {
                 description="Automatically approve low-risk (L0) and minor (L1) fix plans"
                 enabled={s.executor_auto_approve_l0_l1}
                 onChange={(v) => patchSetting("executor_auto_approve_l0_l1", v)}
+                saving={updateMut.isPending}
+              />
+              {s.change_management_enabled && (
+                <SettingToggle
+                  label={t("settings.changeAutoApprove")}
+                  description={t("settings.changeAutoApproveDesc")}
+                  enabled={s.change_auto_approve_standard}
+                  onChange={(v) => patchSetting("change_auto_approve_standard", v)}
+                  saving={updateMut.isPending}
+                />
+              )}
+              <SettingToggle
+                label={t("settings.rbacEnforce")}
+                description={t("settings.rbacEnforceDesc")}
+                enabled={s.rbac_enforce}
+                onChange={(v) => patchSetting("rbac_enforce", v)}
                 saving={updateMut.isPending}
               />
               <SettingToggle

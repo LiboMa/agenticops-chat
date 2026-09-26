@@ -2,6 +2,8 @@ import { useStats } from "@/hooks/useStats";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useSchedules } from "@/hooks/useSchedules";
 import { useFixPlans } from "@/hooks/useFixPlans";
+import { useSettings } from "@/hooks/useSettings";
+import { PLAN_TERMINAL_STATUSES, planRef, planRoute } from "@/lib/plans";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
@@ -22,7 +24,6 @@ const SEV_DOT: Record<string, string> = {
   low: "bg-blue-500 dark:bg-green-500",
 };
 
-const TERMINAL_STATUSES = new Set(["executed", "rejected", "cancelled"]);
 const CLOSED_STATUSES = new Set(["resolved", "dismissed"]);
 
 export default function Dashboard() {
@@ -31,17 +32,24 @@ export default function Dashboard() {
   const anomalies = useAnomalies();
   const schedules = useSchedules();
   const fixPlans = useFixPlans();
+  const settings = useSettings();
   const navigate = useNavigate();
   const security = useSecuritySummary();
+
+  // F14: change surfaces stay hidden while the flag is not true (a settings error counts as false).
+  const changesOn = settings.data?.change_management_enabled === true;
 
   const activeSchedules = useMemo(
     () => (schedules.data ?? []).filter((s) => s.is_enabled),
     [schedules.data],
   );
 
-  const activeFixPlans = useMemo(
-    () => (fixPlans.data ?? []).filter((fp) => !TERMINAL_STATUSES.has(fp.status)),
-    [fixPlans.data],
+  const activePlans = useMemo(
+    () =>
+      (fixPlans.data ?? []).filter(
+        (fp) => !PLAN_TERMINAL_STATUSES.has(fp.status) && (changesOn || fp.plan_kind === "fix"),
+      ),
+    [fixPlans.data, changesOn],
   );
 
   if (stats.isLoading) return <Spinner label={t("common.loading")} />;
@@ -162,19 +170,19 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Active Fix Plans (restored per owner feedback) */}
+        {/* Active Plans (restored per owner feedback) */}
         <div className="duo-fade">
           <div className="text-[11px] font-medium tracking-[0.1em] uppercase text-muted-foreground mb-3">
-            {t("dashboard.activeFixPlans")}
+            {t("dashboard.activePlans")}
           </div>
-          {fixPlans.isLoading ? (
-            <Spinner />
-          ) : activeFixPlans.length > 0 ? (
+          {fixPlans.isLoading || settings.isLoading ? (
+            <Spinner label={t("common.loading")} />
+          ) : activePlans.length > 0 ? (
             <div className="space-y-2">
-              {activeFixPlans.slice(0, 6).map((fp) => (
+              {activePlans.slice(0, 6).map((fp) => (
                 <div
                   key={fp.id}
-                  onClick={() => navigate(`/app/issues/${fp.health_issue_id}`)}
+                  onClick={() => navigate(planRoute(fp))}
                   className="bg-card border rounded-lg px-4 py-3 cursor-pointer transition-colors duration-150 hover:bg-accent"
                 >
                   <div className="flex items-center justify-between mb-1.5">
@@ -184,9 +192,10 @@ export default function Dashboard() {
                     <RiskLevelBadge level={fp.risk_level} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-muted-foreground">
-                      I#{fp.health_issue_id}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-muted-foreground">{planRef(fp)}</span>
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t(`plans.kind.${fp.plan_kind}`)}</span>
+                    </div>
                     <FixPlanStatusBadge status={fp.status} />
                   </div>
                 </div>

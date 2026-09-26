@@ -39,6 +39,11 @@ const columns: Column<AuditLogEntry>[] = [
     ),
   },
   {
+    key: "actor",
+    header: "Actor",
+    render: (a) => <span className="text-xs font-mono">{a.actor ?? a.user_email ?? "system"}</span>,
+  },
+  {
     key: "user_email",
     header: "User",
     render: (r) => <span className="text-sm text-muted-foreground">{r.user_email}</span>,

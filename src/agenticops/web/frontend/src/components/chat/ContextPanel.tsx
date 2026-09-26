@@ -10,7 +10,9 @@ import { PipelineStepper } from "@/components/ui/PipelineStepper";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
+import { ReasonDialog } from "@/components/plans/ReasonDialog";
 import { apiFetch } from "@/api/client";
+import { useAuth } from "@/hooks/useAuth";
 import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useLocale } from "@/i18n/LocaleContext";
@@ -333,6 +335,9 @@ function FixPlanCard({
   executeMut: ReturnType<typeof useExecuteFixPlan>;
 }) {
   const { t } = useLocale();
+  const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
+  const [claimedName, setClaimedName] = useState("");
+  const { isAuthenticated } = useAuth();
 
   return (
     <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
@@ -379,16 +384,14 @@ function FixPlanCard({
         {fp.status === "pending_approval" && (
           <>
             <button
-              onClick={() =>
-                approveMut.mutate({ id: fp.id, approved_by: "web-user" })
-              }
+              onClick={() => { approveMut.reset(); setDialog("approve"); }}
               disabled={approveMut.isPending}
               className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
             >
               {t("issues.approve")}
             </button>
             <button
-              onClick={() => rejectMut.mutate({ id: fp.id, reason: "rejected from UI" })}
+              onClick={() => { rejectMut.reset(); setDialog("reject"); }}
               disabled={rejectMut.isPending}
               className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
             >
@@ -406,6 +409,32 @@ function FixPlanCard({
           </button>
         )}
       </div>
+
+      {dialog && (
+        <ReasonDialog
+          title={`${t(dialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} #${fp.id}`}
+          description={fp.title}
+          confirmText={dialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          variant={dialog === "reject" ? "destructive" : "default"}
+          required={dialog === "reject"}
+          busy={approveMut.isPending || rejectMut.isPending}
+          error={(dialog === "approve" ? approveMut.error : rejectMut.error)?.message ?? null}
+          onConfirm={(reason) => {
+            const done = { onSuccess: () => setDialog(null) };
+            if (dialog === "approve") {
+              const name = claimedName.trim();
+              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+            } else rejectMut.mutate({ id: fp.id, reason }, done);
+          }}
+          onClose={() => setDialog(null)}
+        >
+          {dialog === "approve" && !isAuthenticated && (
+            <input type="text" value={claimedName} onChange={(e) => setClaimedName(e.target.value)} maxLength={100}
+              placeholder={t("issues.approverPlaceholder")}
+              className="w-full mb-3 border border-border bg-background text-foreground rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          )}
+        </ReasonDialog>
+      )}
     </div>
   );
 }
