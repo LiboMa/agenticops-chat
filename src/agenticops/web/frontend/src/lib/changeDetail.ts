@@ -53,13 +53,17 @@ export function toPipelineEvents(entries: ChangeTimelineEntry[]): PipelineEvent[
 /**
  * Extract the display-relevant fields from a policy_decision blob, tolerating
  * missing keys and non-string junk. `escalated_from`/`effective_risk_level`
- * become null when absent or empty; `reasons` keeps only strings.
+ * become null when absent or empty; `reasons` keeps only strings, minus any
+ * already `shown` (the backend copies policy reasons into review_reasons).
  */
 export function policySummary(
   pd: Record<string, unknown> | null | undefined,
+  shown: readonly string[] = [],
 ): { reasons: string[]; escalatedFrom: string | null; effectiveRisk: string | null } {
   const rr = pd?.reasons;
-  const reasons = Array.isArray(rr) ? rr.filter((r): r is string => typeof r === "string") : [];
+  const reasons = Array.isArray(rr)
+    ? rr.filter((r): r is string => typeof r === "string" && !shown.includes(r))
+    : [];
   const esc = pd?.escalated_from;
   const escalatedFrom = typeof esc === "string" && esc !== "" ? esc : null;
   const eff = pd?.effective_risk_level;

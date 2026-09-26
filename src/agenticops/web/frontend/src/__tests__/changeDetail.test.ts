@@ -95,4 +95,10 @@ describe("policySummary (R2)", () => {
   it("escalated_from empty string → null", () => {
     expect(policySummary({ escalated_from: "" }).escalatedFrom).toBeNull();
   });
+
+  it("drops reasons already shown in review_reasons (no duplicated list)", () => {
+    expect(policySummary({ reasons: ["risk_level=L1", "extra"] }, ["sre note", "risk_level=L1"]).reasons).toEqual([
+      "extra",
+    ]);
+  });
 });

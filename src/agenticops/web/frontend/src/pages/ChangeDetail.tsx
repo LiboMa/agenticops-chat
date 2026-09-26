@@ -87,7 +87,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
 
   const cr = q.data;
   const plan = cr.plans[0];
-  const p = policySummary(cr.policy_decision);
+  const p = policySummary(cr.policy_decision, cr.review_reasons);
   const acct = cr.account_id != null ? accounts.data?.find((a) => a.id === cr.account_id) : undefined;
 
   const runDirect = (args: ChangeActionArgs) => {

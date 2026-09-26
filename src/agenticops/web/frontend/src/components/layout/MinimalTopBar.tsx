@@ -7,6 +7,8 @@ const ROUTE_LABELS: Record<string, string> = {
   "/app": "nav.dashboard",
   "/app/chat": "nav.chat",
   "/app/issues": "nav.issues",
+  "/app/plans": "nav.plans",
+  "/app/changes": "nav.plans",
   "/app/schedules": "nav.schedules",
   "/app/reports": "nav.reports",
   "/app/settings": "nav.settings",
