@@ -1647,7 +1647,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
   /resolve <id>                    Resolve issue
 
 [cyan]Fix Plans:[/cyan]
-  /fix list [issue_id] [--status S] [--risk L]   List fix plans
+  /fix list \\[issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
   /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
   /execute <plan_id|C<id>>         Execute an approved fix plan or change
@@ -2149,7 +2149,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
 
     if not args:
         return """[yellow]Usage:
-  /fix list [issue_id] [--status S] [--risk L]
+  /fix list \\[issue_id] [--status S] [--risk L]
   /fix show <plan_id>[/yellow]"""
 
     sub = args[0].lower()
@@ -2158,7 +2158,8 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
         init_db()
         session = get_session()
         try:
-            query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
+            # Fix plans only: a change plan has no issue, and /changes lists it
+            query = session.query(FixPlan).filter(FixPlan.plan_kind == "fix").order_by(FixPlan.created_at.desc())
 
             # Parse optional filters
             rest = args[1:]
@@ -2200,17 +2201,17 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
                 table.add_row(
                     str(p.id),
                     f"[{rc}]{p.risk_level}[/{rc}]",
-                    p.title[:40],
+                    _safe_text(p.title[:40]),
                     status_str,
                     str(p.health_issue_id),
-                    p.approved_by or "-",
+                    _safe_text(p.approved_by or "-"),
                     p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "-",
                 )
 
             buf = StringIO()
-            temp_console = Console(file=buf, force_terminal=True, width=ctx.console.size.width if hasattr(ctx, 'console') else 120)
-            temp_console.print(table)
-            return buf.getvalue()
+            # As /changes: no ANSI in the returned text, and escaped because the REPL parses it as markup again.
+            Console(file=buf, width=console.size.width, color_system=None).print(table)
+            return escape(buf.getvalue())
         finally:
             session.close()
 
@@ -2281,12 +2282,13 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
 
     else:
         return """[yellow]Usage:
-  /fix list [issue_id] [--status S] [--risk L]
+  /fix list \\[issue_id] [--status S] [--risk L]
   /fix show <plan_id>[/yellow]"""
 
 
 _TARGET_HINT_RE = re.compile(r"\b((?:i|sg|subnet|vpc|vol)-[0-9a-f]{8,17}\b|arn:aws[^\s,]*[^\s,.;:)])")
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_FENCE_RE = re.compile(r"`{3,}")
 _CHANGE_DISABLED = "[yellow]Change management is disabled (change_management_enabled=false).[/yellow]"
 _CHANGE_USAGE = "[yellow]Usage: /change <what to change and why> [--account NAME] [--emergency][/yellow]"
 
@@ -2299,8 +2301,14 @@ def _strip_ctrl(text) -> str:
 
 def _safe_text(text) -> str:
     """Free text shown literally by Rich: control characters stripped, markup escaped (`[prod]` shows,
-    `[/var/log]` cannot raise a MarkupError out of the REPL)."""
-    return escape(_strip_ctrl(text))
+    `[/var/log]` cannot raise a MarkupError out of the REPL), and every run of 3+ backticks broken with U+200B:
+    the REPL renders a whole reply holding a fence as Markdown (print_with_truncation), its Rich tags raw."""
+    return _FENCE_RE.sub(lambda m: "\u200b".join(m.group()), escape(_strip_ctrl(text)))
+
+
+def _one_line(text) -> str:
+    """Whitespace, newlines included, collapsed to single spaces: free text cannot add a line to a summary."""
+    return " ".join(str(text or "").split())
 
 
 def _extract_target_hints(text: str) -> list[str]:
@@ -2401,13 +2409,16 @@ def _slash_changes(ctx: ChatContext, args: list) -> str:
     table = create_table("Change Requests")
     # Every column but C# is width-less and wraps: Rich shrinks wrapable columns first and cuts a no_wrap one only
     # as a last resort — so the id stays whole at the terminal's width and long cells wrap inside their borders.
-    for col in ("C#", "Title", "Status", "Risk", "Type", "Requested by", "Updated"):
-        table.add_column(col, no_wrap=(col == "C#"))
+    # overflow="fold": a word wider than its column folds onto the next line instead of ending in "…".
+    table.add_column("C#", no_wrap=True)
+    for col in ("Title", "Status", "Risk", "Type", "Requested by", "Updated"):
+        table.add_column(col, overflow="fold")
     for r in rows:
         table.add_row(f"C#{r['id']}", _safe_text((r["title"] or "")[:40]), r["status"].replace("_", " "),
                       r.get("risk_level") or "-",
                       r.get("effective_change_type") or r.get("requested_change_type") or "-",
-                      _safe_text(r["requested_by"]), (r.get("updated_at") or r.get("created_at") or "")[:19])
+                      _safe_text(r["requested_by"]),
+                      (r.get("updated_at") or r.get("created_at") or "")[:16].replace("T", " "))
     buf = StringIO()
     # color_system=None: no ANSI in the returned text — the REPL's highlighter splits every "\x1b[" it is given.
     Console(file=buf, width=console.size.width, color_system=None).print(table)
@@ -2454,7 +2465,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return f"[red]{_safe_text(e)}[/red]"
         if cr["status"] != "planned":
             return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only a planned change can be approved.[/yellow]"
-        console.print(f"[bold]Approve change C#{cr_id}?[/bold]\n  Title: {_safe_text(cr['title'])}\n"
+        console.print(f"[bold]Approve change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
                       f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level') or '-'}\n"
                       f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}")
         reason = " ".join(args[1:]).strip()
@@ -2565,7 +2576,7 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             return f"[red]{_safe_text(e)}[/red]"
         if cr["status"] != "approved":
             return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only an approved change can be executed.[/yellow]"
-        console.print(f"[bold]Execute change C#{cr_id}?[/bold]\n  Title: {_safe_text(cr['title'])}\n"
+        console.print(f"[bold]Execute change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
                       f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level')}")
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"

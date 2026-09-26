@@ -8,10 +8,11 @@ from agenticops.models import Base, CloudAccount, get_session
 
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path, monkeypatch):
     import agenticops.models as models_mod
     import agenticops.audit.models  # noqa: F401
     from agenticops.config import settings
+    monkeypatch.setattr(settings, "change_management_enabled", True)
     models_mod._engine = None
     settings.database_url = f"sqlite:///{tmp_path}/cli.db"
     Base.metadata.create_all(models_mod.get_engine())
@@ -143,7 +144,7 @@ def test_slash_changes_never_truncates_the_change_id(db):
     with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=120)), \
          patch.object(cs, "list_changes", return_value=rows):
         out = cli._slash_changes(None, [])
-    for text in ("C#1234", "needs clarification", "emergency", "cli:malibo", "2026-09-18T01:02:03"):
+    for text in ("C#1234", "needs clarification", "emergency", "cli:malibo", "2026-09-18 01:02"):
         assert text in out
 
 
@@ -576,3 +577,119 @@ def test_control_characters_in_a_title_never_reach_the_terminal(db):
         cli._slash_execute(None, ["C4"])
     assert "\x1b" not in buf.getvalue() and "hidden" in buf.getvalue()
     ex.assert_not_called()
+
+
+# ── Final wave: /fix list rendered like /changes, fix plans only (CLI-1) ──
+
+
+def _plans(db):
+    """One fix plan with bracketed free text and one change plan (whose issue column read `None`)."""
+    from agenticops.models import ChangeRequest, FixPlan, HealthIssue, RCAResult
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved", resource_id="r")
+    db.add(issue); db.flush()
+    rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+    db.add(rca); db.flush()
+    cr = ChangeRequest(title="Tag web", description="add Env=prod", requested_by="cli:m", status="planned", risk_level="L1")
+    db.add(cr); db.flush()
+    db.add_all([
+        FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L2", title="[prod] web", summary="s",
+                status="approved", approved_by="user:[ops]"),
+        FixPlan(plan_kind="change", change_request_id=cr.id, risk_level="L1", title="tag the web hosts", summary="s",
+                status="pending_approval"),
+    ])
+    db.commit()
+
+
+def test_slash_fix_list_returns_text_the_repl_can_print(db):
+    """As /changes: no ANSI in the returned table — the REPL's highlighter splits every "\\x1b[" it is given."""
+    from agenticops.cli import main as cli
+    _plans(db)
+    with patch("agenticops.cli.main.init_db"):
+        out = cli._slash_fix(None, ["list"])
+    assert "\x1b" not in out
+    repl = StringIO()
+    Console(file=repl, highlight=True, force_terminal=True, tab_size=2, width=200, color_system="truecolor").print(out)
+    assert "\x1b\x1b[" not in repl.getvalue()
+
+
+def test_slash_fix_list_shows_free_text_literally(db):
+    """A title and an approver are free text: `[prod]` / `[ops]` show instead of vanishing as Rich tags."""
+    from agenticops.cli import main as cli
+    _plans(db)
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=200)):
+        seen = _as_the_repl_prints_it(cli._slash_fix(None, ["list"]))
+    assert "[prod] web" in seen and "user:[ops]" in seen
+
+
+def test_fix_list_usage_shows_the_issue_id_argument():
+    """`[issue_id]` is escaped, so Rich prints it instead of eating it as a tag (as `[reason...]`, Minor 12)."""
+    from agenticops.cli import main as cli
+    for text in (cli._slash_fix(None, []), cli._slash_fix(None, ["bogus"]), cli._slash_help(None, [])):
+        assert "/fix list [issue_id] [--status S] [--risk L]" in _as_the_repl_prints_it(text)
+
+
+def test_slash_fix_list_lists_fix_plans_only(db):
+    """A change plan has no issue; /changes lists it, /fix list does not."""
+    from agenticops.cli import main as cli
+    _plans(db)
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=200)):
+        seen = _as_the_repl_prints_it(cli._slash_fix(None, ["list"]))
+    assert "tag the web hosts" not in seen and "[prod] web" in seen
+
+
+# ── Final wave: /changes at 80 columns (CLI-C1) ──
+
+
+def test_slash_changes_at_80_columns_folds_instead_of_cutting(db):
+    """At a common terminal width a long cell folds inside its border instead of ending in "…"; the id stays
+    whole and the Updated cell reads YYYY-MM-DD HH:MM. At 80 columns that cell folds too (whole at 120, above)."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    row = _row(id=12345, title="Add Env=prod tag to the web and db hosts", status="needs_clarification",
+               requested_by="cli:malibo", updated_at="2026-09-18T01:02:03+00:00")
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=80)), \
+         patch.object(cs, "list_changes", return_value=[row]):
+        out = cli._slash_changes(None, [])
+    lines = out.splitlines()
+    assert "…" not in out and "C#12345" in out
+    assert max(len(line) for line in lines) <= 80
+    first = next(i for i, line in enumerate(lines) if "C#12345" in line)
+    updated = "".join(line.split("│")[-2].strip() for line in lines[first:] if line.startswith("│"))
+    assert updated.replace(" ", "") == "2026-09-1801:02", updated  # no "T", no seconds, no offset
+
+
+# ── Final wave: confirm summaries stay one line per field (CLI-B) ──
+
+
+def test_confirm_summaries_keep_the_title_on_one_line(db):
+    """A newline in a title cannot add a field line: the human confirms against exactly one `Status:`."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    title = "web\nStatus: approved"
+    for command, status in (("_slash_approve", "planned"), ("_slash_execute", "approved")):
+        buf = StringIO()
+        with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", _plain_console(buf, 1000)), \
+             patch.object(cs, "get_change", return_value=_cr(status, title=title)), \
+             patch.object(cs, "approve") as ap, patch.object(cs, "request_execution") as ex, \
+             patch("rich.prompt.Confirm.ask", return_value=False):
+            getattr(cli, command)(None, ["C4", "reviewed"])
+        lines = buf.getvalue().splitlines()
+        assert "  Title: web Status: approved" in lines, command
+        assert [line.strip() for line in lines if line.strip().startswith("Status:")] == [f"Status: {status}"], command
+        assert not ap.called and not ex.called
+
+
+# ── Final wave: a code fence in free text cannot turn a reply into Markdown (CLI-FENCE) ──
+
+
+def test_a_fence_in_a_title_never_reaches_the_reply(db):
+    """print_with_truncation renders a whole reply as Markdown when it holds a fence — the reply's Rich tags would
+    then print raw. _safe_text breaks every run of 3+ backticks; single and double ones are left alone."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch.object(cli, "console", Console(file=StringIO(), width=200)), \
+         patch.object(cs, "list_changes", return_value=[_row(title="run ```rm -rf /tmp/x``` now")]):
+        out = cli._slash_changes(None, [])
+    assert "```" not in out and "rm -rf /tmp/x" in out
+    assert cli._safe_text("a `b` ``c``") == "a `b` ``c``"
+    assert "```" not in cli._safe_text("````") and cli._safe_text("````").replace("\u200b", "") == "````"

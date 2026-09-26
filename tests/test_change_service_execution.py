@@ -10,10 +10,11 @@ BOB = Actor("user", "bob", user_id=2, permissions=("read", "write"))
 
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path, monkeypatch):
     import agenticops.models as models_mod
     import agenticops.audit.models  # noqa: F401
     from agenticops.config import settings
+    monkeypatch.setattr(settings, "change_management_enabled", True)
     models_mod._engine = None
     settings.database_url = f"sqlite:///{tmp_path}/exec.db"
     Base.metadata.create_all(models_mod.get_engine())
