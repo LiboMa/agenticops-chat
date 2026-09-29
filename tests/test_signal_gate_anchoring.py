@@ -165,3 +165,66 @@ def test_reanchor_never_downgrades(session):
     assert got[6] == (ir.UNANCHORED, None, None)
     assert session.get(HealthIssue, 3).anchor_candidates == {"rule": "seed", "candidates": []}
     assert ir.reanchor_open_issues(session) == 0  # idempotent
+
+
+# ── Re-anchoring stays inside the account the signal stated (fix round 1) ──
+
+UNMANAGED = "123456789012"
+GLOBAL_ARN = "arn:aws:ec2:us-east-1:533267047935:instance/i-abc123"
+
+
+def _anchor_state(s, issue_id):
+    issue = _issue(s, issue_id)
+    return issue.anchor_status, issue.account_id, issue.resource_ref
+
+
+def test_reanchor_keeps_an_unmanaged_account_unanchored(session):
+    _res(session, 10, GLOBAL, "EC2", "i-abc123")
+    issue_id = _process(_sig(account_id=UNMANAGED)).issue_id
+    assert ir.reanchor_open_issues(session) == 0
+    session.commit()
+    assert _anchor_state(session, issue_id) == (ir.UNANCHORED, None, None)
+    assert _issue(session, issue_id).anchor_candidates["rule"] == "unknown_account"
+
+
+def test_reanchor_keeps_an_account_conflict_unanchored(session):
+    _res(session, 10, GLOBAL, "EC2", "i-abc123")
+    issue_id = _process(_sig(account_id="Agenticops-CN", resource_id=GLOBAL_ARN)).issue_id
+    assert _issue(session, issue_id).anchor_candidates["rule"] == "account_conflict"
+    assert ir.reanchor_open_issues(session) == 0
+    session.commit()
+    assert _anchor_state(session, issue_id) == (ir.UNANCHORED, None, None)
+    assert _issue(session, issue_id).anchor_candidates["rule"] == "account_conflict"
+
+
+def test_reanchor_anchors_inside_a_later_onboarded_stated_account(session):
+    _res(session, 10, GLOBAL, "EC2", "i-abc123")
+    issue_id = _process(_sig(account_id=UNMANAGED)).issue_id
+    session.add(CloudAccount(id=3, name="Agenticops-New", provider="aws", is_enabled=True,
+                             credential_source_type="assume_role",
+                             credentials={"role_arn": f"arn:aws:iam::{UNMANAGED}:role/AgenticOpsRole"}))
+    session.commit()
+    _res(session, 30, 3, "EC2", "i-abc123")
+    assert ir.reanchor_open_issues(session) == 1
+    session.commit()
+    assert _anchor_state(session, issue_id) == (ir.ANCHORED, 3, 30)
+
+
+def test_reanchor_after_a_failed_anchor_stays_inside_the_stated_account(session, monkeypatch):
+    _res(session, 10, GLOBAL, "EC2", "i-abc123")
+    real = ir.resolve
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("resolver bug")
+
+    monkeypatch.setattr(ir, "resolve", boom)
+    issue_id = _process(_sig(account_id=UNMANAGED)).issue_id
+    issue = _issue(session, issue_id)
+    assert issue.anchor_status is None
+    assert issue.anchor_candidates == {"rule": "error", "candidates": [{"account": UNMANAGED, "reason": "error"}]}
+    monkeypatch.setattr(ir, "resolve", real)
+
+    assert ir.reanchor_open_issues(session) == 1  # anchor_status NULL takes any result…
+    session.commit()
+    assert _anchor_state(session, issue_id) == (ir.UNANCHORED, None, None)  # …but never another account's
+    assert _issue(session, issue_id).anchor_candidates["rule"] == "unknown_account"

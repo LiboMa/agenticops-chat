@@ -339,12 +339,27 @@ def resolve(session, *, account_id=None, provider: Optional[str] = None, resourc
     return _decide(rule, rows, settings.identity_type_families, known)
 
 
+def _retry_account(issue):
+    """The account a retry must stay inside: the issue's own account, else the account claim its audit
+    recorded (candidates[0]["account"] — today unknown_account, account_conflict or a failed anchor).
+    None = the signal stated no account."""
+    if issue.account_id is not None:
+        return issue.account_id
+    audit = issue.anchor_candidates
+    candidates = audit.get("candidates") if isinstance(audit, dict) else None
+    first = candidates[0] if isinstance(candidates, list) and candidates else None
+    if isinstance(first, dict) and "account" in first:
+        return first["account"]
+    return None
+
+
 def reanchor_open_issues(session) -> int:
     """Retry the OPEN issues the resolver could not place, after every completed build (spec §3.A.1).
 
     Forward only: an unanchored / ambiguous issue changes only when the new result is anchored or
     account_level, so a shrinking inventory never erases an earlier audit. anchor_status NULL (the backfill
-    or _promote failed) takes any result. Returns the number of issues changed; the caller commits."""
+    or _promote failed) takes any result. The retry stays inside the account the signal stated (_retry_account).
+    Returns the number of issues changed; the caller commits."""
     from agenticops.models import HealthIssue
     from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
 
@@ -356,7 +371,7 @@ def reanchor_open_issues(session) -> int:
     changed = 0
     for issue in issues:
         md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
-        anchor = resolve(session, account_id=issue.account_id, provider=issue.provider,
+        anchor = resolve(session, account_id=_retry_account(issue), provider=issue.provider,
                          resource_id=issue.resource_id, hints=md.get("hints"), alarm_name=issue.alarm_name)
         if issue.anchor_status is not None and anchor.status not in (ANCHORED, ACCOUNT_LEVEL):
             continue

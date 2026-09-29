@@ -393,13 +393,17 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
     # Anchor to one inventory row inside one account (spec §3.A.1). fingerprint-v2 was computed from the raw
     # signal before this and stays that way. No "only enabled account" guess.
     resource = (sig.resource_id or "").strip()
+    audit = None
     try:
         anchor = identity_resolver.resolve(session, account_id=sig.account_id, provider=sig.provider,
                                            resource_id=resource, hints=sig.hints, alarm_name=sig.alarm_name)
     except Exception:
-        # Anchoring is enrichment: keep the signal, leave anchor_status NULL for reanchor_open_issues
+        # Anchoring is enrichment: keep the signal, leave anchor_status NULL for reanchor_open_issues. A stated
+        # account goes into the audit so that retry stays inside it.
         logger.warning("signal-gate: anchoring failed for %r", resource, exc_info=True)
         anchor = None
+        if sig.account_id is not None and str(sig.account_id).strip():
+            audit = {"rule": "error", "candidates": [{"account": str(sig.account_id), "reason": "error"}]}
 
     issue = HealthIssue(
         resource_id=resource or "unknown",
@@ -422,7 +426,7 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         account_id=anchor.account_id if anchor else None,
         resource_ref=anchor.resource_ref if anchor else None,
         anchor_status=anchor.status if anchor else None,
-        anchor_candidates=anchor.audit() if anchor else None,
+        anchor_candidates=anchor.audit() if anchor else audit,
         observed_at=sig.observed_at,
     )
     session.add(issue)
