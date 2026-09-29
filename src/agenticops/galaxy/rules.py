@@ -147,56 +147,152 @@ def _node(resource: dict) -> dict:
     }
 
 
+_SUBNET = ("Subnet",)
+_VPC = ("VPC",)
+_SG = ("SecurityGroup",)
+_EC2 = ("EC2",)
+_ELB = ("ELB",)
+_ROLE = ("IAMRole",)
+_KMS = ("KMS",)
+# raw_data keys holding a row's own ARN when resource_id is a short name (IAMRole.Arn, KMS.KeyArn)
+_OWN_ARN_KEYS = ("Arn", "KeyArn")
+
+
+def _dicts(value) -> list:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _strs(value) -> list:
+    return [v for v in value if isinstance(v, str) and v] if isinstance(value, list) else []
+
+
+def _ref_index(resources: list) -> dict:
+    """(account_id, resource_id or own ARN) -> [(pk, resource_type)]. References resolve inside one account."""
+    index: dict = {}
+    for r in resources:
+        raw = r.get("raw_data") if isinstance(r.get("raw_data"), dict) else {}
+        keys = {r["resource_id"]} | {raw[k] for k in _OWN_ARN_KEYS if isinstance(raw.get(k), str) and raw[k]}
+        for key in keys:
+            index.setdefault((r["account_id"], key), []).append((r["id"], r.get("resource_type", "")))
+    return index
+
+
+def _ref(index: dict, account_id, value, types=None) -> Optional[str]:
+    """Node id of the one row in account_id that `value` names (optionally of `types`); None if 0 or ≥ 2."""
+    hits = [pk for pk, rtype in index.get((account_id, value), ()) if types is None or rtype in types]
+    return resource_node_id(hits[0]) if len(hits) == 1 else None
+
+
+def _spanned_subnets(rtype: str, raw: dict) -> list:
+    """(subnet id, evidence path) for types whose raw_data lists every subnet they span."""
+    if rtype == "RDS":
+        group = raw.get("DBSubnetGroup") if isinstance(raw.get("DBSubnetGroup"), dict) else {}
+        return [(s["SubnetIdentifier"], "raw_data.DBSubnetGroup.Subnets[].SubnetIdentifier")
+                for s in _dicts(group.get("Subnets")) if isinstance(s.get("SubnetIdentifier"), str)]
+    if rtype == "ELB":
+        return [(z["SubnetId"], "raw_data.AvailabilityZones[].SubnetId")
+                for z in _dicts(raw.get("AvailabilityZones")) if isinstance(z.get("SubnetId"), str)]
+    return []
+
+
+def _aws_relations(rtype: str, raw: dict, self_node: str, ref) -> Iterator[tuple]:
+    """Type-specific AWS relations (spec §3.A.3 ②) as (src, dst, relation_type, evidence), written the
+    graph.relations way round. `ref(value, types)` resolves inside the row's account. A missing field or an
+    unresolvable reference yields a None end, which the caller drops."""
+    if rtype == "AutoScaling":
+        for inst in _dicts(raw.get("Instances")):
+            iid = inst.get("InstanceId")
+            if isinstance(iid, str):
+                yield self_node, ref(iid, _EC2), "manages", f"raw_data.Instances[].InstanceId={iid}"
+        # Classic load balancers only; ALB/NLB attach through target groups, which are not collected.
+        for name in _strs(raw.get("LoadBalancerNames")):
+            yield ref(name, _ELB), self_node, "routes_to", f"raw_data.LoadBalancerNames={name}"
+    elif rtype == "RDS":
+        for group in _dicts(raw.get("VpcSecurityGroups")):
+            gid = group.get("VpcSecurityGroupId")
+            if isinstance(gid, str):
+                yield self_node, ref(gid, _SG), "secured_by", f"raw_data.VpcSecurityGroups[].VpcSecurityGroupId={gid}"
+    elif rtype == "ELB":
+        for gid in _strs(raw.get("SecurityGroups")):
+            yield self_node, ref(gid, _SG), "secured_by", f"raw_data.SecurityGroups={gid}"
+    elif rtype == "Lambda":
+        for key, types in (("Role", _ROLE), ("KMSKeyArn", _KMS)):
+            arn = raw.get(key)
+            if isinstance(arn, str) and arn:
+                yield self_node, ref(arn, types), "uses", f"raw_data.{key}={arn}"
+
+
 def derive_rule_graph(resources: list) -> dict:
-    """Build the deterministic rule layer. Returns {nodes, edges, groups}."""
-    # Map cloud resource_id string -> node id (for ID-reference resolution).
-    rid_to_node = {r["resource_id"]: resource_node_id(r["id"]) for r in resources}
+    """Build the deterministic rule layer. Returns {nodes, edges, groups}.
+
+    Id references resolve only inside the referring row's account: the same resource_id in two accounts is
+    two resources (spec §3.A.3 ①). Each (source, target, relation_type) is emitted once, never as a self-loop."""
+    index = _ref_index(resources)
 
     nodes: list = []
     edges: list = []
+    seen: set = set()
     account_ids: set = set()
     groups: dict = {}  # slug -> {slug, display_name, kind, member_count}
+
+    def add(source, target, relation_type, evidence):
+        key = (source, target, relation_type)
+        if source and target and source != target and key not in seen:
+            seen.add(key)
+            edges.append(_rule_edge(source, target, relation_type, evidence))
 
     for r in resources:
         self_node = resource_node_id(r["id"])
         nodes.append(_node(r))
-        account_ids.add(r["account_id"])
+        acct = r["account_id"]
+        account_ids.add(acct)
         raw = r.get("raw_data") if isinstance(r.get("raw_data"), (dict, list)) else {}
         rid = r["resource_id"]
         rtype = r.get("resource_type", "")
 
-        # --- Containment: attach to nearest resolvable parent (subnet > vpc > account) ---
-        parent = None
-        parent_evidence = ""
-        subnet = next((s for s in _iter_values(raw, "SubnetId") if s != rid), None)
-        if rtype != "Subnet" and subnet and subnet in rid_to_node and rid_to_node[subnet] != self_node:
-            parent, parent_evidence = rid_to_node[subnet], f"raw_data.SubnetId={subnet}"
-        if parent is None:
-            vpc = next((v for v in _iter_values(raw, "VpcId") if v != rid), None)
-            if rtype != "VPC" and vpc and vpc in rid_to_node and rid_to_node[vpc] != self_node:
-                parent, parent_evidence = rid_to_node[vpc], f"raw_data.VpcId={vpc}"
-        if parent is None:
-            parent, parent_evidence = account_node_id(r["account_id"]), "account membership"
-        if parent != self_node:
-            edges.append(_rule_edge(parent, self_node, "contains", parent_evidence))
+        def ref(value, types=None, _acct=acct):
+            return _ref(index, _acct, value, types)
 
-        # --- References: security groups guard compute ---
+        # --- Containment: every spanned subnet, else the nearest parent (subnet > vpc > account) ---
+        spanned = [(ref(sid, _SUBNET), f"{path}={sid}")
+                   for sid, path in (_spanned_subnets(rtype, raw) if isinstance(raw, dict) else [])]
+        spanned = [(parent, ev) for parent, ev in spanned if parent]
+        if spanned:
+            for parent, ev in spanned:
+                add(parent, self_node, "contains", ev)
+        else:
+            parent, parent_evidence = None, ""
+            subnet = next((s for s in _iter_values(raw, "SubnetId") if s != rid), None)
+            if rtype != "Subnet" and subnet and ref(subnet, _SUBNET):
+                parent, parent_evidence = ref(subnet, _SUBNET), f"raw_data.SubnetId={subnet}"
+            if parent is None:
+                vpc = next((v for v in _iter_values(raw, "VpcId") if v != rid), None)
+                if rtype != "VPC" and vpc and ref(vpc, _VPC):
+                    parent, parent_evidence = ref(vpc, _VPC), f"raw_data.VpcId={vpc}"
+            if parent is None:
+                parent, parent_evidence = account_node_id(acct), "account membership"
+            add(parent, self_node, "contains", parent_evidence)
+
+        # --- Security groups guard compute ---
         for gid in sorted({g for g in _iter_values(raw, "GroupId") if g != rid}):
-            tgt = rid_to_node.get(gid)
-            if tgt and tgt != self_node:
-                edges.append(_rule_edge(self_node, tgt, "secured_by", f"raw_data.GroupId={gid}"))
+            add(self_node, ref(gid, _SG), "secured_by", f"raw_data.GroupId={gid}")
+
+        # --- Type-specific AWS relations ---
+        if isinstance(raw, dict):
+            for source, target, relation_type, evidence in _aws_relations(rtype, raw, self_node, ref):
+                add(source, target, relation_type, evidence)
 
         # --- Tag grouping: member_of ---
         tags = r.get("tags") if isinstance(r.get("tags"), dict) else {}
         for tag_key, kind in TAG_GROUP_KEYS.items():
             val = tags.get(tag_key)
             if isinstance(val, str) and val.strip():
-                slug = group_slug(r["account_id"], kind, val.strip())
+                slug = group_slug(acct, kind, val.strip())
                 gnode = group_node_id(slug)
                 g = groups.setdefault(slug, {"slug": slug, "display_name": val.strip(),
                                              "kind": kind, "member_count": 0})
                 g["member_count"] += 1
-                edges.append(_rule_edge(self_node, gnode, "member_of", f"tags.{tag_key}={val.strip()}"))
+                add(self_node, gnode, "member_of", f"tags.{tag_key}={val.strip()}")
 
     # Account nodes.
     for aid in sorted(account_ids):
