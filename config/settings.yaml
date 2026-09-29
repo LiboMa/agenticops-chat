@@ -264,6 +264,20 @@ galaxy_llm_exclude_types:
 - KMS
 - S3
 - ECR_Repository
+# K8s relations are rule-derived (MVP-2.6.1); the builder also keeps K8s rows out of the LLM in code.
+- K8s_Namespace
+- K8s_Deployment
+- K8s_StatefulSet
+- K8s_DaemonSet
+- K8s_Service
+- K8s_Ingress
+- K8s_Node
+- K8s_ConfigMap
+- K8s_Secret
+- K8s_PVC
+- K8s_PDB
+- K8s_NetworkPolicy
+- K8s_Pod
 galaxy_builds_keep: 24
 
 # ── Graph facts layer (MVP-2.6.1) ──────────────────────────────

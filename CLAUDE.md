@@ -207,7 +207,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `galaxy_confidence_min` | `0.5` | Minimum confidence to keep an LLM edge |
 | `galaxy_drop_rate_alert` | `0.05` | LLM-edge drop rate that logs a WARNING (drift smoke detector) |
 | `galaxy_expand_node_cap` | `200` | Max nodes per `/expand` before truncation |
-| `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` | Relationship-sparse leaf types excluded from LLM enrichment |
+| `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` + the 13 `K8s_*` types | Relationship-sparse leaf types excluded from LLM enrichment. `K8s_*` rows are always excluded in code too (their relations are rule-derived: cluster/namespace containment, Service/Ingress `routes_to`, `uses` ConfigMap/Secret/PVC, NetworkPolicy/PDB `restricts`, `runs_on` Node, Node `same_as` EC2) |
 | `galaxy_builds_keep` | `24` | Newest build rows retained (older pruned after each build to bound DB growth) |
 | `identity_alarm_name_patterns` | `['^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$']` | Alarm-name regexes → K8s cluster/namespace for issue anchoring (named group `cluster` required, `namespace` optional); a cluster not in inventory stays `unanchored` |
 | `identity_type_families` | `{EKS: [EKS, EKS_Cluster]}` | Types that are one physical resource when account + region + short id match — anchoring keeps the newest `scanned_at` row, the rest are `duplicate_of` candidates, not ambiguity |

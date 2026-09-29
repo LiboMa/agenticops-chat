@@ -36,6 +36,7 @@ def _load_resources(session) -> list:
             "resource_id": r.resource_id, "name": r.name or r.resource_id,
             "tags": r.tags if isinstance(r.tags, dict) else {},
             "raw_data": r.raw_data if isinstance(r.raw_data, dict) else {},
+            "scanned_at": r.scanned_at, "absent_since": r.absent_since,
         })
     return out
 
@@ -242,18 +243,24 @@ def build_graph(trigger: str = "manual", full: bool = False) -> int:
 
     # --- Heavy work outside the lock transaction ---
     try:
-        rule_graph = rules.derive_rule_graph(resources)
+        rule_graph = rules.derive_rule_graph(resources, families=settings.identity_type_families)
+        with get_db_session() as s:
+            _write_unresolved_refs(s, resources, rule_graph["unresolved_refs"])
         valid_ids = {n["id"] for n in rule_graph["nodes"]}
         node_by_id = {n["id"]: n for n in rule_graph["nodes"]}
         resources_by_node = {rules.resource_node_id(r["id"]): r for r in resources}
+        # K8s relations are fully rule-derived: K8s rows are neither shown to the LLM nor accepted from it.
+        non_k8s = [r for r in resources if r["resource_type"] not in rules.K8S_TYPES]
+        llm_ids = valid_ids - {rules.resource_node_id(r["id"]) for r in resources
+                               if r["resource_type"] in rules.K8S_TYPES}
 
         # Which resources need LLM analysis this run?
         exclude = set(settings.galaxy_llm_exclude_types)
-        candidates = [r for r in resources if r["resource_type"] not in exclude]
+        candidates = [r for r in non_k8s if r["resource_type"] not in exclude]
         dirty_pks = current_hashes.keys() if full else diff.dirty
         focus_pool = [r for r in candidates if (full or r["id"] in dirty_pks)]
 
-        global_index = _compact_index(resources)
+        global_index = _compact_index(non_k8s)
         max_tokens = settings.bedrock_max_tokens
         in_tok = out_tok = 0
         fresh_llm_edges: list = []
@@ -265,7 +272,7 @@ def build_graph(trigger: str = "manual", full: bool = False) -> int:
             in_tok += usage["input"]
             out_tok += usage["output"]
             proposed = _parse_llm_edges(text)
-            kept, dropped = _verify_edges(proposed, valid_ids, node_by_id, resources_by_node)
+            kept, dropped = _verify_edges(proposed, llm_ids, node_by_id, resources_by_node)
             fresh_llm_edges.extend(kept)
             total_dropped += dropped
 
@@ -350,6 +357,25 @@ def _persist_state(session, current_hashes: dict, removed: set, build_id: int) -
     for pk in removed:
         if pk in existing:
             session.delete(existing[pk])
+
+
+def _write_unresolved_refs(session, resources: list, unresolved: dict) -> int:
+    """Write each K8s workload's unresolved references back into its raw_data, only where the value changed
+    (spec §3.A.3 ③). The key is volatile (hashing.VOLATILE_KEYS), so this never dirties a content hash.
+    The row is re-read here and only this key is replaced, so a concurrent ingest keeps its other fields."""
+    current = {r["id"]: (r["raw_data"].get("unresolved_refs") or []) for r in resources}
+    written = 0
+    for pk, refs in unresolved.items():
+        if current.get(pk) == refs:
+            continue
+        row = session.get(CloudResource, pk)
+        if row is None:
+            continue
+        raw = dict(row.raw_data) if isinstance(row.raw_data, dict) else {}
+        raw["unresolved_refs"] = refs
+        row.raw_data = raw
+        written += 1
+    return written
 
 
 def _prune_old_builds(session, keep: int) -> None:
