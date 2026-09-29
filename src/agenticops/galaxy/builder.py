@@ -71,7 +71,7 @@ def _build_prompt(focus: list, global_index: str) -> str:
          "name": r["name"], "tags": r["tags"], "raw_data": r["raw_data"]}
         for r in focus
     ], ensure_ascii=False, default=str)
-    allowed = ", ".join(sorted(rules.RELATION_TYPES))
+    allowed = ", ".join(sorted(rules.LLM_RELATION_TYPES))
     return f"""You are analyzing cloud infrastructure inventory to infer SEMANTIC relationships
 that are not already expressed by explicit id references. Examples of semantic links:
 resources that belong to the same logical system/project/stack even without a shared tag;
@@ -181,7 +181,7 @@ def _verify_edges(edges: list, valid_ids: set, node_by_id: dict, resources_by_no
         if src not in valid_ids or tgt not in valid_ids or src == tgt:
             dropped += 1
             continue
-        if rtype not in rules.RELATION_TYPES:
+        if rtype not in rules.LLM_RELATION_TYPES:
             dropped += 1
             continue
         if conf < settings.galaxy_confidence_min:

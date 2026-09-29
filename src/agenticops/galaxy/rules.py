@@ -6,7 +6,9 @@ factual skeleton, which the LLM layer is never allowed to override.
 
 from typing import Any, Iterator
 
-RELATION_TYPES = frozenset({
+# Vocabulary the LLM enrichment prompt may use (unchanged since MVP-2.3). Propagation semantics for rule
+# relations live in agenticops.graph.relations — this set only gates what an LLM edge may be called.
+LLM_RELATION_TYPES = frozenset({
     "contains", "references", "member_of", "attached_to",
     "secured_by", "routes_to", "inferred_group",
 })
