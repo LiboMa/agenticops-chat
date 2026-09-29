@@ -160,6 +160,16 @@ def test_name_shared_by_two_resources_is_ambiguous(session):
     assert (a.status, [c["ref"] for c in a.candidates]) == (ir.AMBIGUOUS, [40, 41])
 
 
+def test_arn_short_id_never_name_matches_unrelated_resource(session):
+    """An ARN's last segment is not a name: '…/stages/default' must not anchor the one SG named 'default'."""
+    _res(session, 80, GLOBAL, "SecurityGroup", "sg-0dflt", region="ap-southeast-1", name="default")
+    stage = "arn:aws:apigateway:ap-southeast-1::/restapis/9xugufy4wh/stages/default"
+    for kw in ({"account_id": GLOBAL}, {}):
+        a = _resolve(session, resource_id=stage, **kw)
+        assert (a.status, a.resource_ref) == (ir.UNANCHORED, None), kw
+    assert _resolve(session, account_id=GLOBAL, resource_id="default").resource_ref == 80  # bare names unchanged
+
+
 # ── rule 5: the account itself ────────────────────────────────────────
 
 
@@ -273,6 +283,26 @@ def test_an_account_we_do_not_manage_is_never_searched_elsewhere(session, kw):
     _res(session, 10, GLOBAL, "EC2", "i-0abc")
     a = _resolve(session, **kw)
     assert (a.status, a.resource_ref, a.account_id, a.rule) == (ir.UNANCHORED, None, None, "unknown_account")
+
+
+def test_arn_account_conflicting_with_explicit_account_never_anchors(session):
+    """The ARN names CN; a claimed GLOBAL (explicit pk, name, or hint) must not anchor GLOBAL's same-named role."""
+    _res(session, 60, CN, "IAMRole", ROLE, region="global")
+    _res(session, 61, GLOBAL, "IAMRole", ROLE, region="global")
+    cn_arn = f"arn:aws-cn:iam::113506788061:role/{ROLE}"
+    for kw in ({"account_id": GLOBAL}, {"account_id": "Agenticops-Global"}, {"hints": {"account": "533267047935"}}):
+        a = _resolve(session, resource_id=cn_arn, **kw)
+        assert (a.status, a.resource_ref, a.account_id, a.rule) == (ir.UNANCHORED, None, None, "account_conflict"), kw
+    assert _resolve(session, account_id=GLOBAL, resource_id=cn_arn).candidates == [
+        {"account": str(GLOBAL), "arn_account": "113506788061", "reason": "account_conflict"}]
+    same = _resolve(session, account_id="Agenticops-CN", resource_id=cn_arn)  # segment agrees: still anchors
+    assert (same.status, same.resource_ref, same.account_id) == (ir.ANCHORED, 60, CN)
+    # The claimed account's own number is unknown (no account_id, no role_arn): no comparison is possible.
+    session.add(CloudAccount(id=3, name="lab", provider="aws", is_enabled=True,
+                             credential_source_type="environment", credentials={}))
+    session.flush()
+    _res(session, 62, 3, "IAMRole", ROLE, region="global")
+    assert _resolve(session, account_id=3, resource_id=cn_arn).resource_ref == 62
 
 
 def test_nothing_matches(session):

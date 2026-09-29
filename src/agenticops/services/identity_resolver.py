@@ -7,7 +7,8 @@ hints, an alarm name — to ONE physical cloud_resources row, or says honestly w
                  reason duplicate_of, not ambiguity)
   ambiguous      the first rule with a hit found two or more physical resources; all become candidates
   account_level  the subject is the account itself (root user, CIS control, account-wide setting)
-  unanchored     nothing matched, or the input names an account we do not manage (rule unknown_account)
+  unanchored     nothing matched, the input names an account we do not manage (rule unknown_account), or
+                 an ARN's account contradicts the stated account (rule account_conflict)
 
 Rules run in order; the first one with any hit decides. Every lookup stays inside one account. When the
 input names no account at all, each rule runs in every enabled account and only a single physical hit
@@ -111,12 +112,20 @@ def _is_account_level(rid: str) -> bool:
     return bool(_ACCOUNT_LEVEL.match(rid) or _ACCOUNT_LEVEL.match(short_id(rid)))
 
 
-def _claimed_account(account_id, hints: dict, rid: str):
-    """The account the input itself names, most trusted first: explicit, hint, the ARN account segment, the
-    number inside an account-level id. None = the input does not say."""
+def _stated_account(account_id, hints: dict):
+    """The account the caller states outright — explicit, then hint. None = not stated."""
     for value in (account_id, hints.get("account")):
         if value is not None and str(value).strip():
             return value
+    return None
+
+
+def _claimed_account(account_id, hints: dict, rid: str):
+    """The account the input itself names, most trusted first: explicit, hint, the ARN account segment, the
+    number inside an account-level id. None = the input does not say."""
+    stated = _stated_account(account_id, hints)
+    if stated is not None:
+        return stated
     m = _ARN_ACCOUNT.match(rid)
     if m:
         return m.group(1)
@@ -125,6 +134,19 @@ def _claimed_account(account_id, hints: dict, rid: str):
         if m:
             return m.group(0)
     return None
+
+
+def _arn_account_conflict(session, pk: int, rid: str) -> Optional[str]:
+    """The ARN's account segment when it contradicts account pk's own number, else None. Compared by number,
+    not by account_pk(segment): two account rows may share one number. An account whose number is unknown
+    (no credentials.account_id, no role_arn) cannot be compared and never conflicts."""
+    from agenticops.models import CloudAccount
+
+    m = _ARN_ACCOUNT.match(rid)
+    if not m:
+        return None
+    number = _account_number(session.query(CloudAccount.credentials).filter(CloudAccount.id == pk).scalar())
+    return m.group(1) if number and number != m.group(1) else None
 
 
 def _clean_hints(hints) -> dict:
@@ -180,7 +202,9 @@ def _inventory_rules(session, rid: str, region: Optional[str]) -> list[Rule]:
         name = m.group("name")
         rules.append(("elb_arn", lambda a: _rows(session, a, region, R.resource_type.in_(_ELB_TYPES),
                                                  or_(R.resource_id == name, R.name == name))))
-    names = sorted({rid, short_id(rid)})
+    # An ARN name-matches only in full: its last segment ('…/stages/default') is not an identity, and the
+    # resource_id rule already does ARN ↔ short-id matching. Non-ARN inputs match as given.
+    names = [rid] if rid.startswith("arn:") else sorted({rid, short_id(rid)})
     # A K8s object's name is an identity only inside its cluster + namespace — rule 6 resolves those.
     rules.append(("name", lambda a: _rows(session, a, region, R.name.in_(names), R.provider != _K8S_PROVIDER)))
     return rules
@@ -292,6 +316,11 @@ def resolve(session, *, account_id=None, provider: Optional[str] = None, resourc
         if pk is None:
             return Anchor(UNANCHORED, rule="unknown_account",
                           candidates=[{"account": str(claimed), "reason": "unknown_account"}])
+        # A stated account the ARN itself contradicts: the resource lives elsewhere, so nothing here is it.
+        conflict = _arn_account_conflict(session, pk, rid) if _stated_account(account_id, clean) is not None else None
+        if conflict:
+            return Anchor(UNANCHORED, rule="account_conflict",
+                          candidates=[{"account": str(claimed), "arn_account": conflict, "reason": "account_conflict"}])
         accounts, known = [pk], pk
     else:
         accounts = [row.id for row in session.query(CloudAccount.id)
