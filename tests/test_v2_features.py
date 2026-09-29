@@ -217,18 +217,6 @@ class TestAlertPipeline:
 
         assert isinstance(_cooldown_map, dict)
 
-    def test_graph_context_none_on_empty_hint(self):
-        from agenticops.im.alert_pipeline import _get_graph_context
-
-        result = _get_graph_context("")
-        assert result is None
-
-    def test_graph_context_graceful_failure(self):
-        from agenticops.im.alert_pipeline import _get_graph_context
-
-        result = _get_graph_context("i-nonexistent")
-        assert result is None or isinstance(result, dict)
-
     def test_detect_status(self):
         from agenticops.im.alert_pipeline import _detect_status
 
@@ -735,23 +723,6 @@ class TestGraphStore:
         # Freshly inserted nodes shouldn't be stale with ttl=0
         # (updated_at is "now", cutoff is also "now", so updated_at >= cutoff)
         assert isinstance(stale, list)
-
-
-# ============================================================================
-# Feature C: Graph Context Tests
-# ============================================================================
-
-
-class TestGraphContext:
-    """Test the alert context builder."""
-
-    def test_returns_none_for_unknown_resource(self):
-        """get_alert_context should return None when resource not in store."""
-        # Use the pipeline's _get_graph_context which wraps errors gracefully
-        from agenticops.im.alert_pipeline import _get_graph_context
-
-        result = _get_graph_context("i-nonexistent-99999")
-        assert result is None or isinstance(result, dict)
 
 
 # ============================================================================

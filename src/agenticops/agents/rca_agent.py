@@ -190,56 +190,6 @@ RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _RCA_SKILLS_BL
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
 
 
-def _build_topology_context(resource_id: str, max_chars: int = 2000) -> str:
-    """Build a TOPOLOGY CONTEXT block from the persisted graph (zero AWS, zero LLM).
-
-    Combines the resource's graph neighborhood (get_alert_context) with recent
-    topology-change snapshots so the RCA agent sees "what changed" without
-    extra tool calls. Fail-soft: any error returns "" and never blocks RCA.
-    """
-    if not settings.rca_topology_context_enabled or not resource_id or resource_id == "unknown":
-        return ""
-    try:
-        lines: list[str] = []
-
-        from agenticops.graph.context import get_alert_context
-        ctx = get_alert_context(resource_id)
-        if ctx:
-            lines.append(f"Resource position: {ctx['topology_summary']}")
-            deps = ctx.get("dependencies", {})
-            downstream = deps.get("downstream", [])[:5]
-            if downstream:
-                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in downstream]
-                lines.append(f"Downstream dependents: {', '.join(dep_strs)}")
-            upstream = deps.get("upstream", [])[:5]
-            if upstream:
-                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in upstream]
-                lines.append(f"Upstream dependencies: {', '.join(dep_strs)}")
-
-        from agenticops.graph.store import GraphStore
-        snapshots = GraphStore().get_recent_snapshots(limit=5)
-        changed = [
-            s for s in snapshots
-            if (s.get("nodes_added") or 0) + (s.get("nodes_removed") or 0) + (s.get("nodes_updated") or 0) > 0
-        ]
-        if changed:
-            lines.append("Recent topology changes (graph sync history):")
-            for s in changed:
-                lines.append(
-                    f"  {s['snapshot_at']}: +{s['nodes_added']} added, "
-                    f"~{s['nodes_updated']} updated, -{s['nodes_removed']} removed"
-                    f" (scope={s['scope'] or 'all'})"
-                )
-
-        if not lines:
-            return ""
-        block = "TOPOLOGY CONTEXT (from infrastructure graph — pre-fetched, no tool call needed):\n" + "\n".join(lines)
-        return block[:max_chars]
-    except Exception:
-        logger.debug("Topology context unavailable for %s", resource_id, exc_info=True)
-        return ""
-
-
 def _build_incident_memory(issue, max_chars: int = 2000) -> str:
     """INCIDENT MEMORY block: prior verified conclusions for the same problem.
 
@@ -412,14 +362,12 @@ def rca_agent(issue_id: int) -> str:
         with batch_mode():
             # Resolve provider CLI tool from issue's account (+ incident memory)
             cli_tool = None
-            issue_resource_id = ""
             incident_memory_block = ""
             try:
                 from agenticops.models import HealthIssue, get_db_session
                 with get_db_session() as db:
                     issue = db.query(HealthIssue).filter_by(id=issue_id).first()
                     if issue:
-                        issue_resource_id = issue.resource_id or ""
                         if issue.account_id:
                             cli_tool = get_cli_tool_for_issue(issue.account_id)
                         incident_memory_block = _build_incident_memory(issue)
@@ -497,9 +445,6 @@ def rca_agent(issue_id: int) -> str:
             )
 
             prompt = f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol."
-            topology_block = _build_topology_context(issue_resource_id)
-            if topology_block:
-                prompt = f"{prompt}\n\n{topology_block}"
             if incident_memory_block:
                 prompt = f"{prompt}\n\n{incident_memory_block}"
 

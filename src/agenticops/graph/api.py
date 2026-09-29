@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -313,40 +314,157 @@ async def search_graph_nodes(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/node/{node_id}/context")
-async def get_node_context(node_id: str) -> dict:
-    """Get full neighborhood context for a node (for RCA enrichment)."""
-    try:
-        from agenticops.graph.context import get_alert_context
-        ctx = get_alert_context(node_id)
-        if ctx is None:
-            return JSONResponse({"error": "Node not found"}, status_code=404)
-        return ctx
-    except Exception as e:
-        logger.exception("Node context lookup failed")
-        return JSONResponse({"error": str(e)}, status_code=500)
+@router.get("/node/{ref}/context")
+def get_node_context(ref: int) -> dict:
+    """One-hop neighborhood of a cloud_resources row over the published relation layer."""
+    from agenticops.graph import query_service as qs
+    from agenticops.models import CloudResource, get_db_session
+
+    with get_db_session() as s:
+        if s.get(CloudResource, ref) is None:
+            return JSONResponse({"error": "Resource not found"}, status_code=404)
+        return qs.neighborhood(ref, depth=1, session=s).to_dict()
 
 
-@router.get("/node/{node_id}/blast-radius")
-async def get_node_blast_radius(
-    node_id: str,
-    depth: int = Query(2, ge=1, le=5, description="Neighborhood depth"),
+@router.get("/node/{ref}/blast-radius")
+def get_node_blast_radius(ref: int, depth: int = Query(3, ge=1, le=3)) -> dict:
+    """Potential impact: everything downstream of the resource over rule relations."""
+    from agenticops.graph import query_service as qs
+    from agenticops.models import CloudResource, get_db_session
+
+    with get_db_session() as s:
+        if s.get(CloudResource, ref) is None:
+            return JSONResponse({"error": "Resource not found"}, status_code=404)
+        data = qs.potential_impact(ref, depth=depth, session=s).to_dict()
+    data["count"] = max(len(data["nodes"]) - 1, 0)
+    return data
+
+
+def _union(subs: list):
+    """Merge per-start subgraphs: a node keeps its smallest hop count, an edge its first occurrence."""
+    from agenticops.graph.query_service import Subgraph
+
+    nodes, edges, reasons = {}, {}, set()
+    for sub in subs:
+        for n in sub.nodes:
+            if n["ref"] not in nodes or n["hops"] < nodes[n["ref"]]["hops"]:
+                nodes[n["ref"]] = n
+        for e in sub.edges:
+            edges.setdefault((e["src"], e["dst"], e["relation_type"], e["provenance"]), e)
+        reasons.update((sub.truncated_reason or "").split("+"))
+    order = [r for r in ("expansion_cap", "node_cap", "edge_cap") if r in reasons]
+    return Subgraph(build_id=None,
+                    nodes=sorted(nodes.values(), key=lambda n: (n["hops"], n["ref"])),
+                    edges=[edges[k] for k in sorted(edges)],
+                    truncated=any(sub.truncated for sub in subs),
+                    truncated_reason="+".join(order) or None)
+
+
+def _blast_count(subs: list, starts: list) -> int:
+    return len({n["ref"] for sub in subs for n in sub.nodes} - set(starts))
+
+
+def _focus_subject(s, issue_id, resource_id, change_request_id):
+    """(starts, anchor, window_center, issue_type, subject_account_id), or a 404 response."""
+    from datetime import datetime, timezone
+
+    from agenticops.models import ChangeRequest, CloudResource, HealthIssue
+    from agenticops.services import identity_resolver as ir
+
+    now = datetime.now(timezone.utc)
+    if issue_id is not None:
+        issue = s.get(HealthIssue, issue_id)
+        if issue is None:
+            return JSONResponse({"error": "Issue not found"}, status_code=404)
+        audit = issue.anchor_candidates if isinstance(issue.anchor_candidates, dict) else {}
+        starts = [issue.resource_ref] if issue.resource_ref else []
+        anchor = {"kind": "issue", "id": issue_id,
+                  "status": issue.anchor_status or (ir.ANCHORED if starts else ir.UNANCHORED),
+                  "rule": audit.get("rule"), "candidates": audit.get("candidates") or []}
+        center = issue.observed_at or issue.first_seen or issue.detected_at or now
+        return starts, anchor, center, issue.issue_type, issue.account_id
+    if resource_id is not None:
+        row = s.get(CloudResource, resource_id)
+        if row is None:
+            return JSONResponse({"error": "Resource not found"}, status_code=404)
+        anchor = {"kind": "resource", "id": resource_id, "status": ir.ANCHORED, "rule": None, "candidates": []}
+        return [resource_id], anchor, now, None, row.account_id
+    cr = s.get(ChangeRequest, change_request_id)
+    if cr is None:
+        return JSONResponse({"error": "Change request not found"}, status_code=404)
+    starts = sorted({t["db_id"] for t in (cr.target_resources or [])
+                     if isinstance(t, dict) and isinstance(t.get("db_id"), int)})
+    anchor = {"kind": "change_request", "id": change_request_id,
+              "status": ir.ANCHORED if starts else ir.UNANCHORED, "rule": None, "candidates": []}
+    return starts, anchor, now, None, cr.account_id
+
+
+@router.get("/focus")
+def get_focus(
+    issue_id: Optional[int] = Query(None, ge=1),
+    resource_id: Optional[int] = Query(None, ge=1, description="cloud_resources.id"),
+    change_request_id: Optional[int] = Query(None, ge=1),
+    depth: int = Query(1, ge=1),
+    node_cap: Optional[int] = Query(None, ge=1, le=10000),
+    edge_cap: Optional[int] = Query(None, ge=1, le=50000),
+    include_llm: bool = Query(False),
 ) -> dict:
-    """Get blast radius / impact analysis from the stored graph."""
-    try:
-        from agenticops.graph.store import GraphStore
-        from agenticops.graph.algorithms import dependency_chain_analysis
+    """Local graph around an issue's anchor, a resource, or a change request's resolved targets (spec §3.A.4).
 
-        store = GraphStore()
-        graph = store.get_node_neighborhood(node_id, depth=depth)
-        if node_id not in graph.graph:
-            return JSONResponse({"error": "Node not found"}, status_code=404)
+    Display layer: neighborhood() over the issue class's default relations, one call per start, unioned
+    (node_cap applies per start); include_llm adds llm edges plus the display-only types (references,
+    inferred_group). Blast radius, three layers (spec §3.E.3): structural = every rule
+    relation within 2 hops both ways; potential = potential_impact; observed = observed_impact over the
+    RCA topology window. Counts exclude the starts. A start whose row is gone or belongs to another
+    account than the subject is dropped (SQLite does not enforce ON DELETE SET NULL)."""
+    from datetime import timedelta
 
-        result = dependency_chain_analysis(graph, node_id)
-        return result.model_dump()
-    except Exception as e:
-        logger.exception("Blast radius analysis failed")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    from sqlalchemy import select
+
+    from agenticops.config import settings
+    from agenticops.graph import query_service as qs
+    from agenticops.graph.relations import NONE, PROPAGATION, default_relations
+    from agenticops.models import CloudResource, get_db_session
+    from agenticops.services import identity_resolver as ir
+
+    if sum(x is not None for x in (issue_id, resource_id, change_request_id)) != 1:
+        return JSONResponse({"error": "pass exactly one of issue_id, resource_id, change_request_id"},
+                            status_code=422)
+    depth = min(depth, settings.graph_query_max_depth)
+    display_only = tuple(sorted(t for t, p in PROPAGATION.items() if p == NONE))
+    with get_db_session() as s:
+        subject = _focus_subject(s, issue_id, resource_id, change_request_id)
+        if isinstance(subject, JSONResponse):
+            return subject
+        starts, anchor, center, issue_type, account = subject
+        rows = {rid: (rtype, acct) for rid, rtype, acct in s.execute(
+            select(CloudResource.id, CloudResource.resource_type, CloudResource.account_id)
+            .where(CloudResource.id.in_(starts)))} if starts else {}
+        kept = [r for r in starts if r in rows and (account is None or rows[r][1] == account)]
+        if starts and not kept:
+            anchor.update(status=ir.UNANCHORED, rule="stale_ref")
+        starts = anchor["refs"] = kept
+        center = qs._naive_utc(center)
+        window = (center - timedelta(minutes=settings.rca_topology_window_before_minutes),
+                  center + timedelta(minutes=settings.rca_topology_window_after_minutes))
+        display, structural, potential, observed = [], [], [], []
+        for ref in starts:
+            rels = default_relations(issue_type, rows[ref][0]) + (display_only if include_llm else ())
+            display.append(qs.neighborhood(ref, depth=depth, relation_types=rels, node_cap=node_cap,
+                                           edge_cap=edge_cap, include_llm=include_llm, session=s))
+            structural.append(qs.neighborhood(ref, depth=2, node_cap=qs.NODE_CAP_MAX,
+                                              edge_cap=qs.EDGE_CAP_MAX, session=s))
+            potential.append(qs.potential_impact(ref, session=s))
+            observed.append(qs.observed_impact(ref, window=window, session=s))
+        build_id = qs.published_build_id(s)
+    union = _union(display)
+    union.build_id = build_id
+    return {**union.to_dict(), "depth": depth, "anchor": anchor,
+            "blast": {"structural": _blast_count(structural, starts),
+                      "potential": _blast_count(potential, starts),
+                      "observed": _blast_count(observed, starts),
+                      "truncated": any(sub.truncated for sub in structural + potential + observed)},
+            "window": {"start": window[0].isoformat(), "end": window[1].isoformat()}}
 
 
 @router.get("/stats")

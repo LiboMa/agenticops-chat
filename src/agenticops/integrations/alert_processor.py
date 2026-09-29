@@ -51,11 +51,7 @@ def process_alert(
     from agenticops.services.signal_gate import SignalInput, process_signal
 
     metric_data: dict = {"webhook_source": alert.source, "tags": alert.tags or {}}
-    im_meta = None
-    if im_origin:
-        im_meta = {k: v for k, v in im_origin.items() if k != "graph_context"}
-        if "graph_context" in im_origin:
-            metric_data["graph_context"] = im_origin["graph_context"]
+    im_meta = dict(im_origin) if im_origin else None
 
     # Legacy toggle: record the raw event but never create issues.
     if not settings.webhook_auto_create_issue:

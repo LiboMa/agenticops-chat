@@ -111,21 +111,8 @@ def handle_alert_message(
     alert = _text_to_alert_payload(text, platform)
     im_origin = {"platform": platform, "chat_id": chat_id}
 
-    # Graph context enrichment (best-effort, non-blocking)
-    graph_ctx = _get_graph_context(alert.resource_hint)
-    if graph_ctx:
-        im_origin["graph_context"] = graph_ctx
-
     # Feed to shared pipeline: dedup -> HealthIssue -> RCA
     result = process_alert(alert, im_origin=im_origin)
-
-    # Trigger on-demand graph sync for freshness (fire-and-forget)
-    if alert.resource_hint and result.action == "created":
-        try:
-            from agenticops.services.graph_sync_service import trigger_sync_for_resource
-            trigger_sync_for_resource(alert.resource_hint)
-        except Exception:
-            logger.debug("On-demand graph sync trigger failed", exc_info=True)
 
     # Enrich IM reply
     if result.action == "created" and result.health_issue_id:
@@ -133,8 +120,6 @@ def handle_alert_message(
             f"Alert: {title}",
             f"Issue #{result.health_issue_id} created. RCA triggered.",
         ]
-        if graph_ctx:
-            parts.append(f"Context: {graph_ctx.get('topology_summary', '')}")
         result.message = "\n".join(parts)
     elif result.action == "deduplicated":
         result.message = f"Alert already tracked (Issue #{result.health_issue_id})."
@@ -198,18 +183,6 @@ def _text_to_alert_payload(text: str, platform: str) -> AlertPayload:
         tags={"im_platform": platform, "status": _detect_status(text)},
         raw={"text": text},
     )
-
-
-def _get_graph_context(resource_hint: str) -> dict | None:
-    """Best-effort graph context enrichment."""
-    if not resource_hint:
-        return None
-    try:
-        from agenticops.graph.context import get_alert_context
-        return get_alert_context(resource_hint)
-    except Exception:
-        logger.debug("Graph context lookup failed for %s", resource_hint, exc_info=True)
-        return None
 
 
 def _try_auto_resolve(title: str, text: str) -> int | None:

@@ -377,7 +377,7 @@ flowchart TD
 **Prevention hooks (graph engine, zero LLM)**:
 
 - **Patrol graph risks** — the scheduled HealthPatrol runs an `AnalyzeGraphRisksStep` after detect: SPOF detection (articulation points/bridges) + capacity-risk analysis (subnet IP exhaustion, EKS pod limits) on the persisted infra graph. Findings become HealthIssues (`source=graph_patrol`) **without** auto-RCA — structural risks need design review, not CloudTrail forensics. Gate: `patrol_graph_checks_enabled`.
-- **RCA topology context** — every `rca_agent()` invocation gets a pre-fetched TOPOLOGY CONTEXT block (resource neighbors, up/downstream dependencies, recent graph-sync changes) so "what changed before this alert" is answered without extra tool calls. Gate: `rca_topology_context_enabled`.
+- **RCA topology context** — the pre-fetched TOPOLOGY CONTEXT prompt block was retired in MVP-2.6.1: it read `graph/context.py`, whose up/downstream labels were inverted. Topology now comes from the published relation layer — `GET /api/graph/focus` returns an issue's local graph with a structural / potential / observed blast radius — and RCA will pull it on demand through the `get_topology_evidence` tool (MVP-2.6.1 Plan C). Gate (reserved for that tool, no effect until then): `rca_topology_context_enabled`.
 - **Pre-execution simulation gate** — `trigger_auto_approve()` runs `simulate_fix_impact()` (graph `impact_analysis`, account-scoped) before policy evaluation; the `impact-severity-escalation` rule in `policies.yaml` escalates plans whose target outage would isolate subnets or break critical paths. Fail-soft: no graph data → rule doesn't match → behavior unchanged.
 
 **Key settings**:
@@ -390,7 +390,7 @@ flowchart TD
 | `AIOPS_EXECUTOR_ENABLED` | `true` | Enable fix execution |
 | `AIOPS_NOTIFICATIONS_ENABLED` | `true` | Auto-notify on pipeline events |
 | `AIOPS_PATROL_GRAPH_CHECKS_ENABLED` | `true` | SPOF/capacity prevention step in patrol |
-| `AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED` | `true` | Topology context injection into RCA |
+| `AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED` | `true` | Gate for the RCA `get_topology_evidence` tool (Plan C; no effect until then) |
 
 > **See also**: [EKS Lab Auto-Fix Pipeline (Use Case 6)](use-cases/use-case-6-eks-lab-auto-fix-pipeline.md) for validated end-to-end test results.
 

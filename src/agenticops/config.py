@@ -755,8 +755,8 @@ class Settings(BaseSettings):
     )
     rca_topology_context_enabled: bool = Field(
         default=True,
-        description="Inject topology context (neighbors, blast radius, recent graph "
-        "changes) into RCA invocations (AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED)",
+        description="Gate for the RCA get_topology_evidence tool (MVP-2.6.1 Plan C); the pre-fetched "
+        "topology prompt block was retired in 2.6.1 (AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED)",
     )
 
     # Auto-Fix Pipeline (RCA → SRE → Approve → Execute)
