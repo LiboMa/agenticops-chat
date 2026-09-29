@@ -4,7 +4,9 @@ Every edge produced here is provenance=rule with confidence 1.0 — the graph's
 factual skeleton, which the LLM layer is never allowed to override.
 """
 
-from typing import Any, Iterator
+import re
+from datetime import datetime, timezone
+from typing import Any, Iterator, Optional
 
 # Vocabulary the LLM enrichment prompt may use (unchanged since MVP-2.3). Propagation semantics for rule
 # relations live in agenticops.graph.relations — this set only gates what an LLM edge may be called.
@@ -34,6 +36,82 @@ def account_node_id(account_id: int) -> str:
 
 def group_slug(account_id: int, kind: str, value: str) -> str:
     return f"{account_id}:{kind}:{value}"
+
+
+# ── Identity helpers (MVP-2.6.1): shared by the anchoring resolver, the K8s connector and the rules ──
+
+_ARN_REGION = re.compile(r"^arn:aws[a-z-]*:[^:]*:(?P<region>[^:]*):")
+
+# K8s Kind → resource_type (spec §3.B.3). Plan B's connector writes these; resolver and rules read them.
+K8S_KIND_TYPES = {
+    "Namespace": "K8s_Namespace", "Deployment": "K8s_Deployment", "StatefulSet": "K8s_StatefulSet",
+    "DaemonSet": "K8s_DaemonSet", "Service": "K8s_Service", "Ingress": "K8s_Ingress", "Node": "K8s_Node",
+    "ConfigMap": "K8s_ConfigMap", "Secret": "K8s_Secret", "PersistentVolumeClaim": "K8s_PVC",
+    "PodDisruptionBudget": "K8s_PDB", "NetworkPolicy": "K8s_NetworkPolicy", "Pod": "K8s_Pod",
+}
+
+
+def k8s_resource_id(cluster: str, kind: str, name: str, namespace: Optional[str] = None) -> str:
+    """'<cluster>/<Kind>/<ns>/<name>' for namespaced objects, '<cluster>/<Kind>/<name>' for cluster-scoped ones."""
+    return f"{cluster}/{kind}/{namespace}/{name}" if namespace else f"{cluster}/{kind}/{name}"
+
+
+def arn_region(value: str) -> str:
+    """Region segment of an ARN; '' for global services and for anything that is not an ARN."""
+    m = _ARN_REGION.match(value or "")
+    return m.group("region") if m else ""
+
+
+def short_id(value: str) -> str:
+    """An ARN's resource part down to its last path segment ('…:instance/i-1' → 'i-1', '…:db:mydb' → 'mydb').
+    Anything that is not an ARN is returned unchanged — a K8s id's last segment is not an identity."""
+    v = (value or "").strip()
+    if v.startswith("arn:"):
+        parts = v.split(":", 5)
+        if len(parts) == 6:
+            res = parts[5]
+            if "/" in res:
+                return res.rsplit("/", 1)[1]
+            return res.split(":", 1)[1] if ":" in res else res
+    return v
+
+
+def type_family(resource_type: str, families: dict) -> str:
+    """The family name when identity_type_families lists the type, else the type itself."""
+    for family, members in (families or {}).items():
+        if resource_type in (members or ()):
+            return family
+    return resource_type
+
+
+def physical_key(row: dict, families: dict) -> tuple:
+    """Rows with the same key are one physical resource: account, region (from the ARN when the column is
+    empty), short id and type family."""
+    rid = row.get("resource_id") or ""
+    return (row.get("account_id"), row.get("region") or arn_region(rid), short_id(rid),
+            type_family(row.get("resource_type") or "", families))
+
+
+def _scan_ts(value) -> datetime:
+    if not isinstance(value, datetime):
+        return datetime.min
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+def dedup_physical(rows: list, families: dict) -> tuple[list, list]:
+    """Collapse rows that are one physical resource. The newest scanned_at wins, then the higher id.
+    Returns (canonical rows sorted by id, [(duplicate, canonical), …] sorted by duplicate id)."""
+    groups: dict = {}
+    for row in rows:
+        groups.setdefault(physical_key(row, families), []).append(row)
+    canon, dups = [], []
+    for members in groups.values():
+        members.sort(key=lambda r: (_scan_ts(r.get("scanned_at")), r["id"]), reverse=True)
+        canon.append(members[0])
+        dups.extend((m, members[0]) for m in members[1:])
+    canon.sort(key=lambda r: r["id"])
+    dups.sort(key=lambda pair: pair[0]["id"])
+    return canon, dups
 
 
 def _iter_values(obj: Any, key: str) -> Iterator[str]:

@@ -1420,12 +1420,40 @@ def _statements_2_6_1(insp, dialect) -> list[str]:
     return stmts
 
 
+def _backfill_anchors_2_6_1(engine) -> None:
+    """Spec §4 backfill 2: anchor every issue that has never been through the resolver. Column-level query and
+    UPDATE, so a later release's HealthIssue columns (added after this runs) cannot break it. Fail-soft: an
+    anchor is an enrichment — a failure logs and leaves anchor_status NULL for reanchor_open_issues."""
+    try:
+        from agenticops.services.identity_resolver import resolve
+
+        with Session(engine) as session:
+            rows = session.query(
+                HealthIssue.id, HealthIssue.resource_id, HealthIssue.account_id, HealthIssue.provider,
+                HealthIssue.alarm_name, HealthIssue.metric_data,
+            ).filter(HealthIssue.anchor_status.is_(None)).all()
+            for row in rows:
+                md = row.metric_data if isinstance(row.metric_data, dict) else {}
+                anchor = resolve(session, account_id=row.account_id, provider=row.provider,
+                                 resource_id=row.resource_id, hints=md.get("hints"), alarm_name=row.alarm_name)
+                values = {"resource_ref": anchor.resource_ref, "anchor_status": anchor.status,
+                          "anchor_candidates": anchor.audit()}
+                if row.account_id is None and anchor.account_id is not None:
+                    values["account_id"] = anchor.account_id
+                session.query(HealthIssue).filter(HealthIssue.id == row.id).update(values, synchronize_session=False)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 anchor backfill skipped: %s", exc)
+
+
 def _run_migrate_2_6_1(engine) -> None:
     stmts = _statements_2_6_1(inspect(engine), engine.dialect)
     if stmts:
         with engine.begin() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
+    # Backfills (spec §4), each fail-soft. Plans B/C/D append theirs after this line.
+    _backfill_anchors_2_6_1(engine)
 
 
 def _migrate_2_6_1(engine) -> None:

@@ -163,3 +163,24 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
     assert all("DATETIME" not in s for s in stmts)
+
+
+def test_backfill_anchors_existing_issues(old_db):
+    """Spec §4 backfill 2: issue 1 names i-0abc with no account; the only enabled account holds it."""
+    engine = _run_init_db(old_db)
+    with engine.connect() as c:
+        row = c.execute(text("SELECT resource_ref, anchor_status, account_id FROM health_issues WHERE id = 1")).one()
+    assert tuple(row) == (10, "anchored", 1)
+
+
+def test_backfill_failure_does_not_block_init_db(old_db, monkeypatch):
+    import agenticops.services.identity_resolver as ir
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("resolver down")
+
+    monkeypatch.setattr(ir, "resolve", boom)
+    engine = _run_init_db(old_db)
+    with engine.connect() as c:
+        assert c.execute(text("SELECT anchor_status FROM health_issues WHERE id = 1")).scalar() is None
+    assert _NEW_HEALTH_COLUMNS <= _cols(engine, "health_issues")
