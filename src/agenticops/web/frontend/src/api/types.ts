@@ -842,7 +842,8 @@ export interface FixPlanWithExecutions {
   executions: FixExecution[];
 }
 
-export type GalaxyHealth = "healthy" | "warning" | "critical";
+// Four values, worst open issue first; `unknown` = no open issue (not "healthy"). See lib/galaxyHealth.ts.
+export type GalaxyHealth = "unknown" | "notice" | "warning" | "critical";
 
 export interface GalaxyNode {
   id: string;
@@ -910,6 +911,7 @@ export interface GalaxyGraphNode {
   type: string;
   acct?: number | null;
   health?: GalaxyHealth;
+  absent?: boolean; // resource nodes: the latest scan no longer saw it
   members?: number;
 }
 export interface GalaxyGraphEdge {

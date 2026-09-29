@@ -6,9 +6,11 @@ import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
 import { GalaxyIssueDialog } from "@/components/galaxy/GalaxyIssueDialog";
 import { GalaxyRawDataPanel } from "@/components/galaxy/GalaxyRawDataPanel";
 import type { Anomaly, GalaxyGraphNode, GalaxyHealth } from "@/api/types";
+import { normalizeHealth } from "@/lib/galaxyHealth";
 
 const HEALTH_STYLE: Record<GalaxyHealth, { bg: string; fg: string; sym: string }> = {
-  healthy: { bg: "rgba(125,133,144,0.18)", fg: "#b9c0c9", sym: "●" },
+  unknown: { bg: "rgba(125,133,144,0.18)", fg: "#b9c0c9", sym: "?" },
+  notice: { bg: "rgba(143,166,196,0.16)", fg: "#aebdd3", sym: "●" },
   warning: { bg: "rgba(250,178,25,0.16)", fg: "#fab219", sym: "⚠" },
   critical: { bg: "rgba(208,59,59,0.18)", fg: "#f08a8a", sym: "⨯" },
 };
@@ -44,7 +46,7 @@ export function GalaxyNodePanel({ node, onClose }: { node: GalaxyGraphNode; onCl
   const rawData = (resource.data?.resource_metadata ?? {}) as Record<string, unknown>;
   const rawCount = Object.keys(rawData).length;
 
-  const health = (node.health || "healthy") as GalaxyHealth;
+  const health = normalizeHealth(node.health);
   const hs = HEALTH_STYLE[health];
   const r = resource.data;
 
@@ -58,9 +60,10 @@ export function GalaxyNodePanel({ node, onClose }: { node: GalaxyGraphNode; onCl
       {isResource ? (
         <>
           <div className="text-[11px] uppercase tracking-wider text-[#9691a8]">{t("galaxy.resource")} · {node.type}</div>
-          <div className="text-[15px] font-semibold text-white mt-0.5 mb-3 break-all">
+          <div className={`text-[15px] font-semibold text-white mt-0.5 break-all ${node.absent ? "line-through opacity-60 mb-1" : "mb-3"}`}>
             {r?.resource_name || node.name || r?.resource_id || node.id}
           </div>
+          {node.absent && <div className="text-[11px] text-[#9691a8] mb-3">{t("galaxy.absent")}</div>}
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full mb-3.5"
                 style={{ background: hs.bg, color: hs.fg }}>
             {hs.sym} {t(`galaxy.health.${health}`)}

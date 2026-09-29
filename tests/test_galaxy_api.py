@@ -142,3 +142,61 @@ def test_reads_follow_finish_time_and_status_prefers_a_running_build(client):
         s.add(GalaxyBuild(status="completed", trigger="rca-recollect", started_at=t + timedelta(minutes=7),
                           finished_at=t + timedelta(minutes=7), rule_graph=empty, llm_graph={"edges": []}))
     assert client.get("/api/galaxy/status").json()["build"]["id"] == running_id
+
+
+# ── four-value health overlay (MVP-2.6.1) ────────────────────────────
+
+
+def _health_cases():
+    """acct-a VPC (res:1): an open low issue, a resolved and a dismissed critical one → notice.
+    acct-a Subnet (res:3, Project=demo): no issue → unknown.
+    acct-b EC2 (res:4): absent; an acct-a issue's stale ref points at it → must not colour."""
+    from datetime import datetime
+
+    with get_db_session() as s:
+        a = s.query(CloudAccount).filter_by(name="acct-a").one()
+        b = CloudAccount(name="acct-b", provider="aws", is_enabled=True)
+        s.add(b); s.flush()
+        s.add_all([
+            CloudResource(account_id=a.id, provider="aws", region="cn-north-1", resource_type="Subnet",
+                          resource_id="subnet-a", name="subnet-a", tags={"Project": "demo"},
+                          raw_data={"VpcId": "vpc-a"}),
+            CloudResource(account_id=b.id, provider="aws", region="cn-north-1", resource_type="EC2",
+                          resource_id="i-9", name="gone", tags={}, raw_data={},
+                          absent_since=datetime(2026, 9, 28)),
+        ])
+        s.flush()
+
+        def issue(ref, resource_id, severity, status="open"):
+            s.add(HealthIssue(resource_id=resource_id, resource_ref=ref, account_id=a.id,
+                              anchor_status="anchored", severity=severity, source="manual", title="t",
+                              description="d", status=status))
+
+        issue(1, "vpc-a", "low")
+        issue(1, "vpc-a", "critical", "resolved")
+        issue(1, "vpc-a", "critical", "dismissed")
+        issue(4, "i-9", "critical")  # stale: res:4 belongs to acct-b now
+
+
+def test_graph_health_is_four_valued_and_follows_the_anchor(client):
+    _health_cases()
+    client.post("/api/galaxy/rebuild", params={"full": True})
+    nodes = {n["id"]: n for n in client.get("/api/galaxy/graph").json()["nodes"]}
+    assert nodes["res:2"]["health"] == "critical"  # the fixture's i-1 issue, anchored after the build
+    assert nodes["res:1"]["health"] == "notice"    # low counts; resolved / dismissed do not
+    assert nodes["res:3"]["health"] == "unknown"   # no issue is not "healthy"
+    assert nodes["res:4"]["health"] == "unknown"   # another account's issue behind a stale ref
+    assert (nodes["res:4"]["absent"], nodes["res:1"]["absent"]) == (True, False)
+    assert {"health", "absent"}.isdisjoint(nodes["acct:1"])
+
+
+def test_overview_and_expand_use_four_values(client):
+    _health_cases()
+    client.post("/api/galaxy/rebuild", params={"full": True})
+    ov = {n["id"]: n for n in client.get("/api/galaxy/overview").json()["nodes"]}
+    assert (ov["acct:1"]["health"], ov["acct:1"]["open_issues"]) == ("critical", 2)
+    assert (ov["acct:2"]["health"], ov["acct:2"]["open_issues"]) == ("unknown", 0)
+    worst = client.get("/api/galaxy/expand", params={"group": "grp:1:project:demo", "health": "worst"}).json()
+    assert [n["id"] for n in worst["nodes"]] == ["res:2", "res:1"]  # worst first, unknown left out
+    every = client.get("/api/galaxy/expand", params={"group": "grp:1:project:demo"}).json()
+    assert [n["health"] for n in every["nodes"]] == ["critical", "notice", "unknown"]
