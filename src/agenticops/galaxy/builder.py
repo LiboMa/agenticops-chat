@@ -1,25 +1,34 @@
-"""Galaxy build pipeline: diff -> L1 rules -> L2 index -> L3 LLM enrichment
+"""Galaxy build pipeline: diff -> L1 rules -> publish rule relations -> L2 index -> L3 LLM enrichment
 -> fail-closed verification -> merge/stabilize -> persist.
 
 Runs synchronously (call inside a background task / thread). Concurrency guard:
-a single 'running' GalaxyBuild row acts as the lock — a second call is a no-op.
+a single 'running' GalaxyBuild row acts as the lock — a second normal build is a no-op.
+The rule layer is published to resource_relations before the LLM phase (MVP-2.6.1). A rule-only refresh
+(llm=False) takes no running row; it shares _RULE_LOCK with the normal build's rule phase.
 """
 
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timezone
+from typing import Optional
 
 from agenticops.config import settings, get_bedrock_boto_session
 from agenticops.cost import compute_cost
 from agenticops.models import get_db_session, CloudResource
-from agenticops.galaxy.models import GalaxyBuild, GalaxyResourceState, GalaxyGroup
+from agenticops.galaxy.models import GalaxyBuild, GalaxyResourceState, GalaxyGroup, ResourceRelation
 from agenticops.galaxy import hashing
 from agenticops.galaxy import rules
 
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "galaxy-v1"
+# Triggers that refresh the rule layer only (spec §3.A.3 ④): K8s discovery (Plan B), RCA re-collect (Plan C).
+RULE_ONLY_TRIGGERS = frozenset({"k8s-discovery", "rca-recollect"})
+# Serialises rule derivation + publication: the normal build's rule phase and every rule-only refresh.
+# In-process only; across processes the running row still keeps normal builds apart.
+_RULE_LOCK = threading.Lock()
 
 
 def _model_id() -> str:
@@ -211,44 +220,74 @@ def _running_build_id(session) -> int:
     return row.id if row else 0
 
 
-def _latest_completed(session) -> GalaxyBuild:
-    return (session.query(GalaxyBuild).filter_by(status="completed")
-            .order_by(GalaxyBuild.id.desc()).first())
+def _latest_llm_build(session) -> Optional[GalaxyBuild]:
+    """Newest completed normal build: the LLM carry source and the incremental-skip reference. A rule-only
+    refresh never qualifies — it carries LLM edges but produced none."""
+    return (session.query(GalaxyBuild)
+            .filter(GalaxyBuild.status == "completed", GalaxyBuild.trigger.notin_(sorted(RULE_ONLY_TRIGGERS)))
+            .order_by(GalaxyBuild.finished_at.desc().nulls_last(), GalaxyBuild.id.desc()).first())
 
 
-def build_graph(trigger: str = "manual", full: bool = False) -> int:
-    """Run one build. Returns build id (or an existing running/latest id on no-op)."""
-    # --- Concurrency guard + diff decision (short transaction) ---
-    with get_db_session() as s:
-        running = _running_build_id(s)
-        if running:
-            logger.info("galaxy: build already running (%s); skipping", running)
-            return running
-        resources = _load_resources(s)
-        current_hashes = {r["id"]: hashing.content_hash(r) for r in resources}
-        prev_rows = {row.resource_pk: row.content_hash for row in s.query(GalaxyResourceState).all()}
-        diff = hashing.compute_diff(prev_rows, current_hashes)
-        latest = _latest_completed(s)
-        if not full and latest is not None and not diff.dirty and not diff.removed:
-            logger.info("galaxy: no resource changes; skipping build")
-            return latest.id
-        prev_llm_edges = list(latest.llm_graph.get("edges", [])) if latest else []
-        # Open the build row (acts as the lock).
-        build = GalaxyBuild(status="running", trigger=trigger, full=full,
-                            model_id=_model_id(), prompt_version=PROMPT_VERSION,
-                            started_at=datetime.now(timezone.utc))
-        s.add(build)
-        s.flush()
-        build_id = build.id
+def latest_published_id(session) -> Optional[int]:
+    """The build GraphQueryService reads: newest rules_published_at, whatever its final status — a build
+    whose LLM phase failed keeps its rule rows readable (spec §3.A.3 ④)."""
+    row = (session.query(GalaxyBuild.id).filter(GalaxyBuild.rules_published_at.isnot(None))
+           .order_by(GalaxyBuild.rules_published_at.desc(), GalaxyBuild.id.desc()).first())
+    return row.id if row else None
 
-    # --- Heavy work outside the lock transaction ---
-    try:
-        rule_graph = rules.derive_rule_graph(resources, families=settings.identity_type_families)
+
+def build_graph(trigger: str = "manual", full: bool = False, llm: bool = True) -> int:
+    """Run one build. Returns the build id (or an existing running / latest id on no-op).
+
+    llm=True is a normal build: the rule layer is published first, then the LLM phase runs outside
+    _RULE_LOCK; it never raises (a failure returns the failed row's id). llm=False is a rule-only refresh
+    (_rule_only_refresh). trigger and llm must agree, so the latest LLM build is known by its trigger."""
+    if (not llm) != (trigger in RULE_ONLY_TRIGGERS):
+        raise ValueError(f"galaxy: trigger {trigger!r} cannot run with llm={llm}; "
+                         f"rule-only triggers are {sorted(RULE_ONLY_TRIGGERS)}")
+    if not llm:
+        return _rule_only_refresh(trigger)
+
+    with _RULE_LOCK:
+        # --- Concurrency guard + diff decision (short transaction) ---
         with get_db_session() as s:
-            _write_unresolved_refs(s, resources, rule_graph["unresolved_refs"])
+            running = _running_build_id(s)
+            if running:
+                logger.info("galaxy: build already running (%s); skipping", running)
+                return running
+            resources = _load_resources(s)
+            current_hashes = {r["id"]: hashing.content_hash(r) for r in resources}
+            prev_rows = {row.resource_pk: row.content_hash for row in s.query(GalaxyResourceState).all()}
+            diff = hashing.compute_diff(prev_rows, current_hashes)
+            latest = _latest_llm_build(s)
+            # A build from before 2.6.1 never published resource_relations. Skipping it would leave the query
+            # layer empty for as long as the inventory stays unchanged (Review Focus 1).
+            if (not full and latest is not None and latest.rules_published_at is not None
+                    and not diff.dirty and not diff.removed):
+                logger.info("galaxy: no resource changes; skipping build")
+                return latest.id
+            prev_llm_edges = list((latest.llm_graph or {}).get("edges", [])) if latest else []
+            # Open the build row (the cross-process lock for normal builds).
+            build = GalaxyBuild(status="running", trigger=trigger, full=full,
+                                model_id=_model_id(), prompt_version=PROMPT_VERSION,
+                                started_at=datetime.now(timezone.utc))
+            s.add(build)
+            s.flush()
+            build_id = build.id
+
+        # --- Rule layer: derive + publish before any LLM call ---
+        try:
+            rule_graph = rules.derive_rule_graph(resources, families=settings.identity_type_families)
+            resources_by_node = {rules.resource_node_id(r["id"]): r for r in resources}
+            with get_db_session() as s:
+                _publish_rules(s, s.get(GalaxyBuild, build_id), resources, rule_graph, resources_by_node)
+        except Exception as e:
+            return _fail_build(build_id, e)
+
+    # --- LLM phase, outside the rule lock: a rule-only refresh may publish meanwhile ---
+    try:
         valid_ids = {n["id"] for n in rule_graph["nodes"]}
         node_by_id = {n["id"]: n for n in rule_graph["nodes"]}
-        resources_by_node = {rules.resource_node_id(r["id"]): r for r in resources}
         # K8s relations are fully rule-derived: K8s rows are neither shown to the LLM nor accepted from it.
         non_k8s = [r for r in resources if r["resource_type"] not in rules.K8S_TYPES]
         llm_ids = valid_ids - {rules.resource_node_id(r["id"]) for r in resources
@@ -303,14 +342,13 @@ def build_graph(trigger: str = "manual", full: bool = False) -> int:
         cost = compute_cost(_model_id(), {"input": in_tok, "output": out_tok})
 
         with get_db_session() as s:
+            _publish_relations(s, build_id, merged, resources_by_node)
             _persist_groups(s, rule_graph["groups"], build_id)
             _persist_state(s, current_hashes, diff.removed, build_id)
             b = s.query(GalaxyBuild).filter_by(id=build_id).one()
             b.status = "completed"
             b.finished_at = datetime.now(timezone.utc)
-            b.rule_graph = {"nodes": rule_graph["nodes"], "edges": rule_graph["edges"]}
             b.llm_graph = {"edges": merged}
-            b.node_count = len(rule_graph["nodes"])
             b.edge_count = len(rule_graph["edges"]) + len(merged)
             b.dropped_edge_count = total_dropped
             b.input_tokens = in_tok
@@ -320,16 +358,105 @@ def build_graph(trigger: str = "manual", full: bool = False) -> int:
         logger.info("galaxy: build %s completed — %d nodes, %d edges, %d dropped, $%.4f",
                     build_id, len(rule_graph["nodes"]), len(rule_graph["edges"]) + len(merged),
                     total_dropped, cost)
-        return build_id
     except Exception as e:
-        logger.exception("galaxy: build %s failed", build_id)
+        return _fail_build(build_id, e)
+    _reanchor()
+    return build_id
+
+
+def _rule_only_refresh(trigger: str) -> int:
+    """Re-derive and publish the rule layer without the LLM (spec §3.A.3 ④).
+
+    Takes no running row, so a normal build in its LLM phase never blocks it; _RULE_LOCK keeps it from
+    interleaving with that build's rule phase. Carries the latest LLM build's edges whose two ends still
+    exist, and writes one completed row with zero tokens. It leaves galaxy_resource_state alone: that is the
+    LLM diff baseline, so the next normal build still sees every change since the last LLM pass.
+    Raises on failure, and then nothing is written (the transaction rolls back); callers log it."""
+    with _RULE_LOCK:
         with get_db_session() as s:
-            b = s.query(GalaxyBuild).filter_by(id=build_id).first()
-            if b:
-                b.status = "failed"
-                b.finished_at = datetime.now(timezone.utc)
-                b.error = str(e)[:2000]
-        return build_id
+            resources = _load_resources(s)
+            latest = _latest_llm_build(s)
+            prev_llm_edges = list((latest.llm_graph or {}).get("edges", [])) if latest else []
+        rule_graph = rules.derive_rule_graph(resources, families=settings.identity_type_families)
+        resources_by_node = {rules.resource_node_id(r["id"]): r for r in resources}
+        valid_ids = {n["id"] for n in rule_graph["nodes"]}
+        carried = [e for e in prev_llm_edges if e["source"] in valid_ids and e["target"] in valid_ids]
+        now = datetime.now(timezone.utc)
+        with get_db_session() as s:
+            build = GalaxyBuild(status="completed", trigger=trigger, full=False, model_id="",
+                                prompt_version=PROMPT_VERSION, started_at=now, finished_at=now,
+                                llm_graph={"edges": carried}, dropped_edge_count=0,
+                                input_tokens=0, output_tokens=0, cost_usd=0.0)
+            s.add(build)
+            s.flush()
+            _publish_rules(s, build, resources, rule_graph, resources_by_node)
+            _publish_relations(s, build.id, carried, resources_by_node)
+            build.edge_count = len(rule_graph["edges"]) + len(carried)
+            _persist_groups(s, rule_graph["groups"], build.id)
+            _prune_old_builds(s, keep=settings.galaxy_builds_keep)
+            build_id = build.id
+    logger.info("galaxy: rule-only refresh %s (%s) — %d nodes, %d rule edges, %d llm edges carried",
+                build_id, trigger, len(rule_graph["nodes"]), len(rule_graph["edges"]), len(carried))
+    _reanchor()
+    return build_id
+
+
+def _publish_rules(session, build: GalaxyBuild, resources: list, rule_graph: dict,
+                   resources_by_node: dict) -> None:
+    """Publish one build's rule layer in the caller's transaction: unresolved_refs write-back, the rule rows
+    of resource_relations, the rule_graph JSON and rules_published_at. Caller holds _RULE_LOCK."""
+    _write_unresolved_refs(session, resources, rule_graph["unresolved_refs"])
+    _publish_relations(session, build.id, rule_graph["edges"], resources_by_node)
+    build.rule_graph = {"nodes": rule_graph["nodes"], "edges": rule_graph["edges"]}
+    build.node_count = len(rule_graph["nodes"])
+    build.edge_count = len(rule_graph["edges"])
+    build.rules_published_at = datetime.now(timezone.utc)
+
+
+def _publish_relations(session, build_id: int, edges: list, resources_by_node: dict) -> int:
+    """Copy a build's resource→resource edges into resource_relations; returns the rows written.
+
+    Account and group endpoints stay in the build JSON only (they narrow scope, they do not propagate
+    faults), and so does an edge whose two ends sit in different accounts: rules never derive one, but the
+    LLM sees every account in its global index."""
+    rows = []
+    for e in edges:
+        src, dst = resources_by_node.get(e["source"]), resources_by_node.get(e["target"])
+        if src is None or dst is None or src["account_id"] != dst["account_id"]:
+            continue
+        rows.append(ResourceRelation(
+            build_id=build_id, account_id=src["account_id"], src_ref=src["id"], dst_ref=dst["id"],
+            relation_type=e["relation_type"], provenance=e.get("provenance") or "rule",
+            evidence={"text": str(e.get("evidence") or "")},
+            confidence=float(e.get("confidence", 1.0) or 0.0)))
+    session.add_all(rows)
+    return len(rows)
+
+
+def _fail_build(build_id: int, exc: Exception) -> int:
+    """Mark a normal build failed; call from an except block. Rule rows it already published stay readable."""
+    logger.exception("galaxy: build %s failed", build_id)
+    with get_db_session() as s:
+        b = s.query(GalaxyBuild).filter_by(id=build_id).first()
+        if b:
+            b.status = "failed"
+            b.finished_at = datetime.now(timezone.utc)
+            b.error = str(exc)[:2000]
+    return build_id
+
+
+def _reanchor() -> None:
+    """Retry anchoring open issues after a completed build (spec §3.A.3 ⑤). Fail-soft: anchoring is an
+    enrichment and must never turn a completed build into an error."""
+    try:
+        from agenticops.services.identity_resolver import reanchor_open_issues
+
+        with get_db_session() as s:
+            changed = reanchor_open_issues(s)
+        if changed:
+            logger.info("galaxy: re-anchored %d open issue(s)", changed)
+    except Exception:
+        logger.exception("galaxy: re-anchoring after the build failed")
 
 
 def _persist_groups(session, groups: list, build_id: int) -> None:
@@ -379,19 +506,25 @@ def _write_unresolved_refs(session, resources: list, unresolved: dict) -> int:
 
 
 def _prune_old_builds(session, keep: int) -> None:
-    """Retain only the `keep` most-recent build rows to bound DB growth.
+    """Retain the `keep` most-recent build rows to bound DB growth, plus every build still in use: a running
+    build (its rule rows may already be what GraphQueryService reads), the latest LLM build (carry source
+    and incremental-skip reference) and the latest published build. A pruned build's resource_relations
+    rows go with it. keep<=0 disables pruning.
 
-    Each GalaxyBuild row stores the full rule+llm graph JSON blobs (hundreds of KB
-    to several MB at scale), and only the latest completed build is ever read, so
-    unbounded retention would grow the DB by GBs/month. keep<=0 disables pruning.
+    Each GalaxyBuild row stores the full rule+llm graph JSON blobs (hundreds of KB to several MB at scale),
+    so unbounded retention would grow the DB by GBs/month.
     """
     if keep is None or keep <= 0:
         return
-    keep_ids = [row.id for row in (session.query(GalaxyBuild.id)
-                                   .order_by(GalaxyBuild.id.desc())
-                                   .limit(keep).all())]
+    keep_ids = {row.id for row in session.query(GalaxyBuild.id).order_by(GalaxyBuild.id.desc()).limit(keep)}
     if not keep_ids:
         return
-    (session.query(GalaxyBuild)
-     .filter(GalaxyBuild.id.notin_(keep_ids))
+    keep_ids |= {row.id for row in session.query(GalaxyBuild.id).filter_by(status="running")}
+    llm = _latest_llm_build(session)
+    keep_ids |= {i for i in (llm.id if llm else None, latest_published_id(session)) if i is not None}
+    doomed = [row.id for row in session.query(GalaxyBuild.id).filter(GalaxyBuild.id.notin_(keep_ids))]
+    if not doomed:
+        return
+    (session.query(ResourceRelation).filter(ResourceRelation.build_id.in_(doomed))
      .delete(synchronize_session=False))
+    session.query(GalaxyBuild).filter(GalaxyBuild.id.in_(doomed)).delete(synchronize_session=False)

@@ -31,8 +31,9 @@ def _health_by_resource_id() -> dict:
 
 
 def _latest_completed(s) -> Optional[GalaxyBuild]:
+    # By finish time, not id: a rule-only refresh opened during a normal build's LLM phase finishes first.
     return (s.query(GalaxyBuild).filter_by(status="completed")
-            .order_by(GalaxyBuild.id.desc()).first())
+            .order_by(GalaxyBuild.finished_at.desc().nulls_last(), GalaxyBuild.id.desc()).first())
 
 
 def _build_dict(b: GalaxyBuild) -> dict:
@@ -59,7 +60,7 @@ async def rebuild(response: Response, full: bool = Query(False)):
     # (matches the codebase pattern, e.g. app.py `await asyncio.to_thread(...)`).
     # Awaiting the result keeps the returned id = the actual completed build, which the
     # tests rely on; the single 'running' row guards against overlap.
-    build_id = await asyncio.to_thread(builder.build_graph, "manual", full)
+    build_id = await asyncio.to_thread(builder.build_graph, "manual", full, True)
     response.status_code = 202
     return {"build_id": build_id}
 
@@ -67,7 +68,10 @@ async def rebuild(response: Response, full: bool = Query(False)):
 @router.get("/status")
 async def status():
     with get_db_session() as s:
-        latest = (s.query(GalaxyBuild).order_by(GalaxyBuild.id.desc()).first())
+        # A running normal build wins over a refresh that finished meanwhile, so the page keeps showing it.
+        latest = (s.query(GalaxyBuild).filter_by(status="running").order_by(GalaxyBuild.id.desc()).first()
+                  or s.query(GalaxyBuild).order_by(GalaxyBuild.finished_at.desc().nulls_last(),
+                                                   GalaxyBuild.id.desc()).first())
         build = _build_dict(latest) if latest else None
     return {"build": build, "next_check_minutes": settings.galaxy_build_interval_minutes}
 
