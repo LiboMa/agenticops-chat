@@ -38,6 +38,8 @@ ACTIVE_ISSUE_STATUSES = (
     "dismissed",
 )
 RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
+# Unresolved problems someone still owns — dismissed suppresses re-alerts but is not open (spec §3.D.6)
+OPEN_ISSUE_STATUSES = tuple(s for s in ACTIVE_ISSUE_STATUSES if s != "dismissed")
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _MERGED_ALERTS_CAP = 50
@@ -131,6 +133,8 @@ class SignalInput:
     im_origin: Optional[dict] = None
     auto_rca: bool = True
     detected_by: str = "detect_agent"
+    hints: dict = field(default_factory=dict)  # {account, region, cluster, namespace, workload, pod, service}
+    observed_at: Optional[datetime] = None     # when the source says the fault happened
 
 
 @dataclass
@@ -181,7 +185,7 @@ def merge_into_issue(session, existing, source, title, description, severity,
     if existing.status in ("open", "investigating"):
         existing.description = description
         if metric_data:
-            md.update({k: v for k, v in metric_data.items() if k != "merged_alerts"})
+            md.update({k: v for k, v in metric_data.items() if k not in ("merged_alerts", "hints")})
             existing.metric_data = md
         if related_changes:
             prior = existing.related_changes if isinstance(existing.related_changes, list) else []
@@ -376,31 +380,30 @@ def _log_gated(issue_id: int, disposition: str, reason: str, signal_id: int) -> 
 
 def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str],
              im_origin: Optional[dict]):
-    from agenticops.models import CloudAccount, CloudResource, HealthIssue
+    from agenticops.models import HealthIssue
+    from agenticops.services import identity_resolver
 
     now = datetime.now(timezone.utc)
     metric_data = dict(sig.metric_data or {})
     if im_origin:
         metric_data.setdefault("im_origin", im_origin)
+    if sig.hints:
+        metric_data["hints"] = dict(sig.hints)  # re-anchoring input; merges never overwrite it
 
-    # Resolve account/provider from resource inventory; fallback: single enabled account
-    account_id = None
-    provider = None
+    # Anchor to one inventory row inside one account (spec §3.A.1). fingerprint-v2 was computed from the raw
+    # signal before this and stays that way. No "only enabled account" guess.
     resource = (sig.resource_id or "").strip()
-    if resource and resource.lower() != "unknown":
-        res = session.query(CloudResource).filter_by(resource_id=resource).first()
-        if res:
-            account_id = res.account_id
-            provider = res.provider
-    if not account_id:
-        enabled = session.query(CloudAccount).filter_by(is_enabled=True).all()
-        if len(enabled) == 1:
-            account_id = enabled[0].id
-            provider = provider or enabled[0].provider
+    try:
+        anchor = identity_resolver.resolve(session, account_id=sig.account_id, provider=sig.provider,
+                                           resource_id=resource, hints=sig.hints, alarm_name=sig.alarm_name)
+    except Exception:
+        # Anchoring is enrichment: keep the signal, leave anchor_status NULL for reanchor_open_issues
+        logger.warning("signal-gate: anchoring failed for %r", resource, exc_info=True)
+        anchor = None
 
     issue = HealthIssue(
         resource_id=resource or "unknown",
-        provider=provider or sig.provider or "aws",
+        provider=sig.provider or "aws",
         severity=(sig.severity or "medium").lower(),
         source=sig.source,
         title=(sig.title or "")[:300],
@@ -416,7 +419,11 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         first_seen=now,
         last_seen=now,
         trace_id=trace_id,
-        account_id=account_id,
+        account_id=anchor.account_id if anchor else None,
+        resource_ref=anchor.resource_ref if anchor else None,
+        anchor_status=anchor.status if anchor else None,
+        anchor_candidates=anchor.audit() if anchor else None,
+        observed_at=sig.observed_at,
     )
     session.add(issue)
     session.flush()

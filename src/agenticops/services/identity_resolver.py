@@ -337,3 +337,33 @@ def resolve(session, *, account_id=None, provider: Optional[str] = None, resourc
         return Anchor(UNANCHORED, account_id=known, rule="none")
     rule, rows = hit
     return _decide(rule, rows, settings.identity_type_families, known)
+
+
+def reanchor_open_issues(session) -> int:
+    """Retry the OPEN issues the resolver could not place, after every completed build (spec §3.A.1).
+
+    Forward only: an unanchored / ambiguous issue changes only when the new result is anchored or
+    account_level, so a shrinking inventory never erases an earlier audit. anchor_status NULL (the backfill
+    or _promote failed) takes any result. Returns the number of issues changed; the caller commits."""
+    from agenticops.models import HealthIssue
+    from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
+
+    issues = (session.query(HealthIssue)
+              .filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES),
+                      or_(HealthIssue.anchor_status.in_((UNANCHORED, AMBIGUOUS)),
+                          HealthIssue.anchor_status.is_(None)))
+              .order_by(HealthIssue.id).all())
+    changed = 0
+    for issue in issues:
+        md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
+        anchor = resolve(session, account_id=issue.account_id, provider=issue.provider,
+                         resource_id=issue.resource_id, hints=md.get("hints"), alarm_name=issue.alarm_name)
+        if issue.anchor_status is not None and anchor.status not in (ANCHORED, ACCOUNT_LEVEL):
+            continue
+        issue.resource_ref = anchor.resource_ref
+        issue.anchor_status = anchor.status
+        issue.anchor_candidates = anchor.audit()
+        if issue.account_id is None and anchor.account_id is not None:
+            issue.account_id = anchor.account_id
+        changed += 1
+    return changed
