@@ -266,6 +266,19 @@ galaxy_llm_exclude_types:
 - ECR_Repository
 galaxy_builds_keep: 24
 
+# ── Graph facts layer (MVP-2.6.1) ──────────────────────────────
+identity_alarm_name_patterns:
+- '^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$'
+identity_type_families:
+  EKS:
+  - EKS
+  - EKS_Cluster
+graph_query_node_cap: 200
+graph_query_edge_cap: 500
+graph_query_max_depth: 2
+rca_topology_window_before_minutes: 30
+rca_topology_window_after_minutes: 10
+
 # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
 security_review_enabled: true
 security_poll_interval_minutes: 10

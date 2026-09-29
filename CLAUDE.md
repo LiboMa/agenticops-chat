@@ -209,6 +209,11 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `galaxy_expand_node_cap` | `200` | Max nodes per `/expand` before truncation |
 | `galaxy_llm_exclude_types` | `[IAMRole,KMS,S3,ECR_Repository]` | Relationship-sparse leaf types excluded from LLM enrichment |
 | `galaxy_builds_keep` | `24` | Newest build rows retained (older pruned after each build to bound DB growth) |
+| `identity_alarm_name_patterns` | `['^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$']` | Alarm-name regexes → K8s cluster/namespace for issue anchoring (named group `cluster` required, `namespace` optional); a cluster not in inventory stays `unanchored` |
+| `identity_type_families` | `{EKS: [EKS, EKS_Cluster]}` | Types that are one physical resource when account + region + short id match — anchoring keeps the newest `scanned_at` row, the rest are `duplicate_of` candidates, not ambiguity |
+| `graph_query_node_cap` / `graph_query_edge_cap` | `200` / `500` | GraphQueryService default caps; truncation is deterministic (abnormal nodes first) |
+| `graph_query_max_depth` | `2` | Max neighborhood depth (`potential_impact` is fixed at 3) |
+| `rca_topology_window_before_minutes` / `…_after_minutes` | `30` / `10` | Time window around `observed_at or first_seen` — observed blast radius (A) and the RCA evidence pack (C) |
 | `signal_gate_enabled` | `true` | Route all HealthIssue creation through the Signal Gate (false = legacy dedup only) |
 | `signal_gate_llm_enabled` | `true` | L2 gray-zone LLM merge judgment (cheap tier, merge-or-new only) |
 | `signal_gate_confidence_min` | `0.7` | Min LLM confidence to accept a gray-zone merge (below → promote) |

@@ -216,6 +216,8 @@ class CloudResource(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1: set by connectors/ingest when a complete collection no longer sees the row (rows are never deleted)
+    absent_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     account: Mapped["CloudAccount"] = relationship(back_populates="resources")
@@ -427,6 +429,8 @@ class HealthIssue(Base):
         Index("idx_health_issue_fingerprint", "fingerprint"),
         Index("idx_health_issue_resource_status", "resource_id", "status"),
         Index("idx_health_issue_type", "issue_type"),
+        Index("idx_health_issue_resource_ref", "resource_ref"),
+        Index("idx_health_issue_anchor_status", "anchor_status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -460,6 +464,13 @@ class HealthIssue(Base):
     account_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("cloud_accounts.id"), nullable=True
     )
+    # MVP-2.6.1 graph anchoring (services/identity_resolver): the one physical resource this issue is about
+    resource_ref: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cloud_resources.id", ondelete="SET NULL"), nullable=True
+    )
+    anchor_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # anchored|ambiguous|account_level|unanchored
+    anchor_candidates: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {"rule": ..., "candidates": [...]}
+    observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # fault time reported by the source
 
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
@@ -1367,6 +1378,67 @@ def _run_migrate_2_6_0(engine) -> None:
                 conn.execute(text(stmt))
 
 
+# ── MVP-2.6.1 migration: graph anchoring columns + relation-build marker ──────────────────────────────
+# New tables (resource_relations) are already made by init_db's create_all; on an existing table create_all
+# skips both the table and its indexes, so this pass only adds columns and indexes, then runs backfills.
+# Plans B/C/D append their own columns/indexes to these two tables instead of adding migration functions.
+_ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
+    "health_issues": {
+        "resource_ref": "REFERENCES cloud_resources(id) ON DELETE SET NULL",
+        "anchor_status": None,
+        "anchor_candidates": None,
+        "observed_at": None,
+    },
+    "cloud_resources": {"absent_since": None},
+    "galaxy_builds": {"rules_published_at": None},
+}
+
+_INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)
+    ("health_issues", "idx_health_issue_resource_ref", "resource_ref"),
+    ("health_issues", "idx_health_issue_anchor_status", "anchor_status"),
+)
+
+_migrated_2_6_1_urls: set[str] = set()
+_migrate_2_6_1_lock = threading.Lock()
+
+
+def _statements_2_6_1(insp, dialect) -> list[str]:
+    """DDL still needed to bring an existing database to the 2.6.1 shape. Pure (inspector + dialect in,
+    statements out) so the PostgreSQL branch is testable without a server; empty once migrated."""
+    guard = " IF NOT EXISTS" if dialect.name == "postgresql" else ""
+    stmts: list[str] = []
+    for tbl, cols in _ADD_COLUMNS_2_6_1.items():
+        if not insp.has_table(tbl):
+            continue
+        existing = {c["name"] for c in insp.get_columns(tbl)}
+        for col, extra in cols.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {tbl} ADD COLUMN{guard} {_add_column_ddl(dialect, tbl, col, extra)}")
+    for tbl, index, cols in _INDEXES_2_6_1:
+        if insp.has_table(tbl) and index not in {ix["name"] for ix in insp.get_indexes(tbl)}:
+            stmts.append(f"CREATE INDEX IF NOT EXISTS {index} ON {tbl}({cols})")
+    return stmts
+
+
+def _run_migrate_2_6_1(engine) -> None:
+    stmts = _statements_2_6_1(inspect(engine), engine.dialect)
+    if stmts:
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.execute(text(stmt))
+
+
+def _migrate_2_6_1(engine) -> None:
+    """Idempotent MVP-2.6.1 migration — once per process per database URL. DDL failures raise (init_db never
+    starts on a half-migrated schema) and retry on the next call."""
+    key = str(engine.url)
+    with _migrate_2_6_1_lock:
+        if key in _migrated_2_6_1_urls:
+            return
+        _run_migrate_2_6_1(engine)
+        _migrated_2_6_1_urls.add(key)
+
+
 def init_db(engine=None):
     """Initialize database and create all tables.
 
@@ -1837,6 +1909,9 @@ def init_db(engine=None):
             ON case_vectors(field_name, resource_type)
         """))
         conn.commit()
+
+    # MVP-2.6.1: graph anchoring columns + relation-build marker; runs last so every legacy column it reads exists.
+    _migrate_2_6_1(engine)
 
     return engine
 

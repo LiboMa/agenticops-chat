@@ -563,6 +563,40 @@ class Settings(BaseSettings):
         "0 = keep all (AIOPS_GALAXY_BUILDS_KEEP)",
     )
 
+    # ── Graph facts layer (MVP-2.6.1 Plan A) ───────────────────────
+    identity_alarm_name_patterns: list[str] = Field(
+        default_factory=lambda: [r"^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$"],
+        description="Alarm-name regexes for issue anchoring; named group `cluster` required, `namespace` optional "
+        "(AIOPS_IDENTITY_ALARM_NAME_PATTERNS)",
+    )
+    identity_type_families: dict[str, list[str]] = Field(
+        default_factory=lambda: {"EKS": ["EKS", "EKS_Cluster"]},
+        description="Resource types counted as one physical resource when account, region and short id match "
+        "(AIOPS_IDENTITY_TYPE_FAMILIES)",
+    )
+    graph_query_node_cap: int = Field(
+        default=200,
+        description="Default node cap of GraphQueryService.neighborhood (AIOPS_GRAPH_QUERY_NODE_CAP)",
+    )
+    graph_query_edge_cap: int = Field(
+        default=500,
+        description="Default edge cap of GraphQueryService.neighborhood (AIOPS_GRAPH_QUERY_EDGE_CAP)",
+    )
+    graph_query_max_depth: int = Field(
+        default=2,
+        description="Max neighborhood depth; potential_impact is fixed at 3 (AIOPS_GRAPH_QUERY_MAX_DEPTH)",
+    )
+    rca_topology_window_before_minutes: int = Field(
+        default=30,
+        description="Evidence window start, minutes before observed_at/first_seen "
+        "(AIOPS_RCA_TOPOLOGY_WINDOW_BEFORE_MINUTES)",
+    )
+    rca_topology_window_after_minutes: int = Field(
+        default=10,
+        description="Evidence window end, minutes after observed_at/first_seen "
+        "(AIOPS_RCA_TOPOLOGY_WINDOW_AFTER_MINUTES)",
+    )
+
     # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
     security_review_enabled: bool = Field(
         default=True,
