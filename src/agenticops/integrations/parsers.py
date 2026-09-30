@@ -512,7 +512,9 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
     # "Region" is a display name ("Asia Pacific (Singapore)"); the region code lives in the AlarmArn.
     hints = _hints(account=body.get("AWSAccountId"), region=arn_region(str(body.get("AlarmArn") or "")))
     if trigger_dict.get("Namespace") == "ContainerInsights":  # EKS / K8s; ECS uses ECS/ContainerInsights
-        dims = {d.get("name"): d.get("value") for d in trigger_dict.get("Dimensions") or [] if isinstance(d, dict)}
+        raw_dims = trigger_dict.get("Dimensions")  # hints are best-effort: a malformed list never fails the parse
+        dims = {d["name"]: d.get("value") for d in (raw_dims if isinstance(raw_dims, list) else [])
+                if isinstance(d, dict) and isinstance(d.get("name"), str)}
         hints.update(_hints(cluster=dims.get("ClusterName"), namespace=dims.get("Namespace"),
                             pod=dims.get("FullPodName") or dims.get("PodName"), service=dims.get("Service")))
     return AlertPayload(

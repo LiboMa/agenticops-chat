@@ -61,6 +61,14 @@ def test_cloudwatch_cluster_dimensions_outside_k8s_container_insights_are_not_k8
     assert _one(body, "cloudwatch").hints == {"account": "111111111111", "region": "ap-southeast-1"}
 
 
+@pytest.mark.parametrize("dimensions", [5, [{"name": {"x": 1}, "value": "shop-prod"}]])
+def test_malformed_container_insights_dimensions_never_fail_the_parse(dimensions):
+    """Hints are best-effort enrichment: a Dimensions value that is not a list of {name: str, value} must not turn
+    a parse that used to succeed into an HTTP 400; it just adds no K8s hints."""
+    body = {**CI_ALARM, "Trigger": {**CI_ALARM["Trigger"], "Dimensions": dimensions}}
+    assert _one(body, "cloudwatch").hints == {"account": "111111111111", "region": "ap-southeast-1"}
+
+
 def test_cloudwatch_without_arn_account_or_time_leaves_them_out():
     body = {"AlarmName": "EKS-agenticops-chaos-lab-RunningPods-Low", "NewStateValue": "ALARM",
             "Trigger": {"MetricName": "pod_number_of_running_pods", "Namespace": "ContainerInsights"}}
