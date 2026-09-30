@@ -3,6 +3,7 @@ needs the shared token (Bearer / X-AIOps-Token / ?token=) or an X-AIOps-Signatur
 is exempt from APIAuthMiddleware's Bearer check; unset, nothing changes and startup logs a WARNING."""
 import json
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -39,6 +40,7 @@ def test_a_signature_over_the_timestamp_and_body_verifies_inside_the_window():
     ("", str(NOW), None, RAW, NOW),                               # no secret configured never verifies
     (SECRET, str(NOW), "", RAW, NOW),
     (SECRET, str(NOW), "deadbeef", RAW, NOW),                     # no sha256= prefix
+    pytest.param(SECRET, "1" + "0" * 400, None, RAW, None, id="timestamp-too-big-for-the-real-clock"),
 ])
 def test_a_signature_that_does_not_match_or_is_stale_is_refused(secret, timestamp, signature, body, now):
     signature = sign(SECRET, str(NOW), RAW) if signature is None else signature
@@ -122,9 +124,34 @@ def test_an_hmac_signature_is_accepted_and_a_stale_or_forged_one_is_not(intake, 
     stale_ts = str(int(time.time()) - 301)
     stale = {"X-AIOps-Timestamp": stale_ts, "X-AIOps-Signature": sign(SECRET, stale_ts, RAW)}
     other_body = json.dumps({**BODY, "NewStateValue": "OK"}).encode()
-    for headers, body in ((stale, RAW), (good, other_body), ({"X-AIOps-Signature": good["X-AIOps-Signature"]}, RAW)):
+    huge = {"X-AIOps-Timestamp": "1" + "0" * 400, "X-AIOps-Signature": good["X-AIOps-Signature"]}   # 401, not 500
+    for headers, body in ((stale, RAW), (good, other_body), ({"X-AIOps-Signature": good["X-AIOps-Signature"]}, RAW),
+                          (huge, RAW)):
         assert _post(intake, headers=headers, body=body).status_code == 401
     assert len(intake.calls) == 1
+
+
+def test_without_both_signature_headers_the_body_is_never_read(monkeypatch):
+    """No token and no complete signature: refused before a byte of the body is read."""
+    import asyncio
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from agenticops.web.routers.webhooks import require_webhook_token
+
+    monkeypatch.setattr(settings, "webhook_secret", SECRET)
+    reads = []
+
+    async def receive():
+        reads.append(1)
+        return {"type": "http.request", "body": RAW, "more_body": False}
+
+    for headers in ([], [(b"x-aiops-signature", b"sha256=00")], [(b"x-aiops-timestamp", str(NOW).encode())]):
+        request = Request({"type": "http", "method": "POST", "path": "/api/webhooks/alert", "headers": headers,
+                           "query_string": b""}, receive)
+        with pytest.raises(HTTPException) as refused:
+            asyncio.run(require_webhook_token(request))
+        assert refused.value.status_code == 401
+    assert reads == []
 
 
 def test_the_check_runs_before_source_validation(intake, monkeypatch):
@@ -170,6 +197,39 @@ def test_with_a_secret_the_middleware_lets_the_intake_through_to_the_token_check
     assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required")
     r = _post(guarded, "/api/webhooks/alert/events/7")              # below {source}: not an intake, Bearer as before
     assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required")
+
+
+@pytest.mark.parametrize("how,expected", [("hmac", 201), ("query", 201), ("bearer", 201), ("tampered", 401)])
+def test_through_the_middleware_every_token_form_passes_and_a_tampered_body_does_not(guarded, monkeypatch, how,
+                                                                                    expected):
+    """api_auth on, secret set: the middleware hands the intake to the token check, never to session validation."""
+    monkeypatch.setattr(settings, "webhook_secret", SECRET)
+    monkeypatch.setattr(settings, "api_auth_enabled", True)
+    path, headers, body = "/api/webhooks/alert/cloudwatch", {}, RAW
+    if how in ("hmac", "tampered"):
+        ts = str(int(time.time()))
+        headers = {"X-AIOps-Timestamp": ts, "X-AIOps-Signature": sign(SECRET, ts, RAW)}
+        body = RAW if how == "hmac" else RAW.replace(b"ALARM", b"OK")      # changed after signing
+    elif how == "query":
+        path += f"?token={SECRET}"
+    else:
+        headers = {"Authorization": f"Bearer {SECRET}"}                  # the secret, not a session token
+    r = _post(guarded, path, headers, body)
+    assert r.status_code == expected
+    if expected == 401:
+        assert r.json()["detail"] == "webhook token or signature required"
+
+
+def test_every_routed_intake_post_carries_the_token_check():
+    """The middleware exemption is safe only while every path it lets through runs require_webhook_token."""
+    from agenticops.web.app import app
+    from agenticops.web.routers.webhooks import is_webhook_intake, require_webhook_token
+
+    intake = [r for r in app.routes
+              if "POST" in (getattr(r, "methods", None) or ()) and is_webhook_intake("POST", r.path)]
+    assert sorted(r.path for r in intake) == ["/api/webhooks/alert", "/api/webhooks/alert/{source}"]
+    for r in intake:
+        assert require_webhook_token in [d.dependency for d in r.dependencies], r.path
 
 
 def test_without_a_secret_the_middleware_still_demands_a_bearer(guarded, monkeypatch):
@@ -227,6 +287,6 @@ def test_startup_warns_only_when_no_secret_is_set(monkeypatch, caplog):
 def test_the_settings_keys_exist():
     import yaml
 
-    with open("config/settings.yaml") as f:
+    with open(Path(__file__).resolve().parents[1] / "config" / "settings.yaml") as f:
         doc = yaml.safe_load(f)
     assert doc["webhook_secret"] == "" and doc["intake_signature_window_seconds"] == 300

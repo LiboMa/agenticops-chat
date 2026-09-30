@@ -22,6 +22,9 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown arg: $1"; exit 1;;
   esac
 done
+if [[ -z "${WEBHOOK_SECRET}" ]]; then
+  echo "WARNING: no webhook secret (--webhook-secret / AIOPS_WEBHOOK_SECRET) — alert webhook intake will be unauthenticated" >&2
+fi
 
 # HARD RULE guard: refuse if any manifest declares a public Service type.
 if grep -rEn "type:\s*(LoadBalancer|NodePort)" "${SCRIPT_DIR}"/*.yaml; then

@@ -21,11 +21,10 @@ def verify_hmac_signature(secret: str, timestamp: str, signature: str, body: byt
     `window_seconds` away from `now` in either direction. An unset secret never verifies."""
     if not (secret and timestamp and signature):
         return False
-    try:
-        ts = int(timestamp)
-    except ValueError:
-        return False
-    if abs((time.time() if now is None else now) - ts) > window_seconds:
+    try:  # a timestamp too big for the clock's float overflows: a refusal, never a 500
+        if abs((time.time() if now is None else now) - int(timestamp)) > window_seconds:
+            return False
+    except (ValueError, OverflowError):
         return False
     return hmac.compare_digest(sign(secret, timestamp, body).encode(), signature.strip().encode())
 

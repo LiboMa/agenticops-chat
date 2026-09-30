@@ -51,9 +51,10 @@ async def require_webhook_token(request: Request) -> None:
                   request.query_params.get("token", ""))
     if any(token_matches(secret, c) for c in candidates):
         return
-    if verify_hmac_signature(secret, request.headers.get("x-aiops-timestamp", ""),
-                             request.headers.get("x-aiops-signature", ""), await request.body(),
-                             window_seconds=settings.intake_signature_window_seconds):
+    timestamp, signature = request.headers.get("x-aiops-timestamp", ""), request.headers.get("x-aiops-signature", "")
+    # The body is read only for a complete signature: a bare unauthenticated POST is refused without it
+    if timestamp and signature and verify_hmac_signature(secret, timestamp, signature, await request.body(),
+                                                         window_seconds=settings.intake_signature_window_seconds):
         return
     raise HTTPException(status_code=401, detail="webhook token or signature required")
 
