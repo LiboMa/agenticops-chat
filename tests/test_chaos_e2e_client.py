@@ -59,6 +59,21 @@ def _fake_clock(values):
     return clock
 
 
+@pytest.mark.parametrize("secret,expected", [("s3cret", {"Authorization": "Bearer sess", "X-AIOps-Token": "s3cret"}),
+                                             ("", {"Authorization": "Bearer sess"})])
+def test_alerts_carry_the_webhook_token_from_the_environment(monkeypatch, secret, expected):
+    """MVP-2.6.1: the app checks AIOPS_WEBHOOK_SECRET on alert intake; the session Bearer alone no longer passes."""
+    monkeypatch.setenv("AIOPS_WEBHOOK_SECRET", secret)
+    c = AgenticOpsClient("http://x")
+    c._token = "sess"
+    sent = []
+    monkeypatch.setattr(client_mod.requests, "post",
+                        lambda url, headers, json, timeout: sent.append((url, headers)) or
+                        types.SimpleNamespace(content=b"", raise_for_status=lambda: None))
+    c.send_cloudwatch_alert({"AlarmName": "EKS-agenticops-chaos-lab-RunningPods-Low"})
+    assert sent == [("http://x/api/webhooks/alert/cloudwatch", expected)]
+
+
 def _record(monkeypatch, c, accounts):
     """client.get returns `accounts`; post / put calls are recorded as (method, path, json)."""
     calls = []

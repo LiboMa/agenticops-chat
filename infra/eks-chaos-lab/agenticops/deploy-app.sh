@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deploy AgenticOps into the chaos-lab EKS cluster (internal-only).
 # Steps: ensure ECR repo → build+push image → create IRSA SA → apply manifests → wait ready.
-# Usage: bash deploy-app.sh [--admin-password PW]
+# Usage: bash deploy-app.sh [--admin-password PW] [--webhook-secret S]
+#   The webhook secret defaults to $AIOPS_WEBHOOK_SECRET; export the same value before running e2e/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,10 +13,12 @@ NS="agenticops"
 ECR_REPO_NAME="agenticops"
 IAM_POLICY_FILE="${SCRIPT_DIR}/../iam/agenticops-irsa-policy.json"
 ADMIN_PW="aiops2026"
+WEBHOOK_SECRET="${AIOPS_WEBHOOK_SECRET:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --admin-password) ADMIN_PW="$2"; shift 2;;
+    --webhook-secret) WEBHOOK_SECRET="$2"; shift 2;;
     *) echo "Unknown arg: $1"; exit 1;;
   esac
 done
@@ -60,6 +63,7 @@ echo "  IRSA role: ${IRSA_ROLE_ARN}"
 echo "[4/6] Create app Secret"
 kubectl create secret generic agenticops-secret -n "${NS}" \
   --from-literal=AIOPS_ADMIN_PASSWORD="${ADMIN_PW}" \
+  --from-literal=AIOPS_WEBHOOK_SECRET="${WEBHOOK_SECRET}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "[5/6] Apply manifests (SA annotation + image substituted)"

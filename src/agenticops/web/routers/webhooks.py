@@ -1,9 +1,13 @@
-"""Webhook API endpoints — extracted from app.py (no logic change)."""
+"""Webhook API endpoints — extracted from app.py.
+
+With `webhook_secret` set, the two alert-intake routes need the shared token or an HMAC signature (MVP-2.6.1
+spec §3.B.5) instead of APIAuthMiddleware's Bearer: CloudWatch-via-SNS and Alertmanager cannot log in.
+"""
 
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
@@ -15,8 +19,42 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_INTAKE_PATH = "/api/webhooks/alert"
 
-@router.post("/api/webhooks/alert")
+
+def is_webhook_intake(method: str, path: str) -> bool:
+    """POST to one of the two alert-intake routes. Reading /api/webhooks/alert/events stays behind Bearer auth."""
+    return method == "POST" and (path == _INTAKE_PATH or path.startswith(_INTAKE_PATH + "/"))
+
+
+def warn_if_unauthenticated() -> None:
+    """Startup: say so when the intake routes take alerts from anyone who can reach them."""
+    if not settings.webhook_secret:
+        logger.warning("webhook: webhook_secret is not set — POST %s[/{source}] is not token-checked "
+                       "(set AIOPS_WEBHOOK_SECRET)", _INTAKE_PATH)
+
+
+async def require_webhook_token(request: Request) -> None:
+    """The shared token as `Authorization: Bearer`, `X-AIOps-Token` or `?token=`, or an X-AIOps-Signature HMAC
+    over X-AIOps-Timestamp + "." + body inside intake_signature_window_seconds. No secret set = no check."""
+    from agenticops.auth.signatures import token_matches, verify_hmac_signature
+
+    secret = settings.webhook_secret
+    if not secret:
+        return
+    auth = request.headers.get("authorization", "")
+    candidates = (auth[7:] if auth.startswith("Bearer ") else "", request.headers.get("x-aiops-token", ""),
+                  request.query_params.get("token", ""))
+    if any(token_matches(secret, c) for c in candidates):
+        return
+    if verify_hmac_signature(secret, request.headers.get("x-aiops-timestamp", ""),
+                             request.headers.get("x-aiops-signature", ""), await request.body(),
+                             window_seconds=settings.intake_signature_window_seconds):
+        return
+    raise HTTPException(status_code=401, detail="webhook token or signature required")
+
+
+@router.post("/api/webhooks/alert", dependencies=[Depends(require_webhook_token)])
 async def api_webhook_alert_auto(request: Request):
     """Receive an alert from any external monitoring system (auto-detect source).
 
@@ -27,7 +65,7 @@ async def api_webhook_alert_auto(request: Request):
     return await _process_webhook_alert(body)
 
 
-@router.post("/api/webhooks/alert/{source}")
+@router.post("/api/webhooks/alert/{source}", dependencies=[Depends(require_webhook_token)])
 async def api_webhook_alert_explicit(source: str, request: Request):
     """Receive an alert with explicit source type.
 

@@ -15,6 +15,7 @@ Proves the AgenticOps 感知→分析→解决→记录 loop against injected fa
 ## Run
 ```bash
 export AIOPS_ADMIN_PASSWORD=...        # matches deploy-app.sh --admin-password
+export AIOPS_WEBHOOK_SECRET=...        # matches deploy-app.sh --webhook-secret (alert posts send it as X-AIOps-Token)
 bash run-e2e.sh                        # all scenarios
 bash run-e2e.sh --assert-only          # deterministic pass/fail only
 bash run-e2e.sh --evidence-only        # chat + report capture only

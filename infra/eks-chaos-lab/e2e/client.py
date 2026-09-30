@@ -5,6 +5,7 @@ Depends only on `requests` (stdlib + requests) so it needs no repo imports.
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,8 @@ class AgenticOpsClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._token: Optional[str] = None
+        # The app's webhook_secret (MVP-2.6.1): sent beside the session Bearer on alert posts; empty = not sent.
+        self.webhook_secret = os.environ.get("AIOPS_WEBHOOK_SECRET", "")
 
     # ---- auth ----
     def login(self, email: str, password: str) -> None:
@@ -41,8 +44,8 @@ class AgenticOpsClient:
         r.raise_for_status()
         return r.json()
 
-    def post(self, path: str, json: Optional[dict] = None) -> Any:
-        r = requests.post(f"{self.base_url}{path}", headers=self._headers(),
+    def post(self, path: str, json: Optional[dict] = None, headers: Optional[dict] = None) -> Any:
+        r = requests.post(f"{self.base_url}{path}", headers={**self._headers(), **(headers or {})},
                           json=json or {}, timeout=self.timeout)
         r.raise_for_status()
         return r.json() if r.content else {}
@@ -73,7 +76,8 @@ class AgenticOpsClient:
 
     # ---- perception ----
     def send_cloudwatch_alert(self, payload: dict) -> Any:
-        return self.post("/api/webhooks/alert/cloudwatch", json=payload)
+        token = {"X-AIOps-Token": self.webhook_secret} if self.webhook_secret else {}
+        return self.post("/api/webhooks/alert/cloudwatch", json=payload, headers=token)
 
     def find_recent_issue(self, title_pattern: str, max_age_min: int = 15) -> Optional[int]:
         data = self.get("/api/health-issues?limit=30")

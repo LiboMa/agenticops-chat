@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    _webhooks_router.warn_if_unauthenticated()
+
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
         try:
@@ -4309,58 +4311,62 @@ if _cors_origins:
 _PUBLIC_PATHS = {"/api/health", "/api/auth/login", "/api/auth/register"}
 _PUBLIC_PREFIXES = ("/app/", "/static/", "/docs", "/openapi.json", "/redoc")
 
-if settings.api_auth_enabled:
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
-    class APIAuthMiddleware(BaseHTTPMiddleware):
-        """Enforce Bearer token auth on /api/* endpoints when enabled."""
 
-        async def dispatch(self, request, call_next):
-            path = request.url.path
+class APIAuthMiddleware(BaseHTTPMiddleware):
+    """Enforce Bearer token auth on /api/* endpoints when enabled."""
 
-            # Skip non-API and public paths
-            if not path.startswith("/api/") or path in _PUBLIC_PATHS:
-                return await call_next(request)
-            if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
-                return await call_next(request)
-            # Allow OPTIONS for CORS preflight
-            if request.method == "OPTIONS":
-                return await call_next(request)
+    async def dispatch(self, request, call_next):
+        path = request.url.path
 
-            auth_header = request.headers.get("authorization", "")
-            if not auth_header.startswith("Bearer "):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Authentication required. Use 'Authorization: Bearer <token>' header."},
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            token = auth_header[7:]
-            from agenticops.auth import AuthService
-
-            # Try API key (aiops_*) or session token
-            user = None
-            if token.startswith("aiops_"):
-                result = AuthService.validate_api_key(token)
-                if result:
-                    user, api_key = result
-                    # The key's scoped permissions cap the owner's: actor_from_request intersects them.
-                    request.state.api_key = api_key
-            else:
-                user = AuthService.validate_session(token)
-
-            if not user:
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Invalid or expired token."},
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            # Attach user to request state for downstream use
-            request.state.user = user
+        # Skip non-API and public paths
+        if not path.startswith("/api/") or path in _PUBLIC_PATHS:
+            return await call_next(request)
+        if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+        # Allow OPTIONS for CORS preflight
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        # Alert intake carries its own shared-token / HMAC check once webhook_secret is set
+        if settings.webhook_secret and _webhooks_router.is_webhook_intake(request.method, path):
             return await call_next(request)
 
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required. Use 'Authorization: Bearer <token>' header."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token = auth_header[7:]
+        from agenticops.auth import AuthService
+
+        # Try API key (aiops_*) or session token
+        user = None
+        if token.startswith("aiops_"):
+            result = AuthService.validate_api_key(token)
+            if result:
+                user, api_key = result
+                # The key's scoped permissions cap the owner's: actor_from_request intersects them.
+                request.state.api_key = api_key
+        else:
+            user = AuthService.validate_session(token)
+
+        if not user:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired token."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Attach user to request state for downstream use
+        request.state.user = user
+        return await call_next(request)
+
+
+if settings.api_auth_enabled:
     app.add_middleware(APIAuthMiddleware)
     logger.info("API authentication enabled — all /api/* endpoints require Bearer token")
 

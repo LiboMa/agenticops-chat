@@ -152,6 +152,10 @@ notifications_consolidated: false
 issue_exclude_patterns: []
 scan_focus: all
 alert_pipeline_mode: both
+# Alert-webhook token (MVP-2.6.1). Set the real value via AIOPS_WEBHOOK_SECRET — never commit one here.
+# Empty = POST /api/webhooks/alert* is not token-checked (startup WARNING).
+webhook_secret: ''
+intake_signature_window_seconds: 300
 im_alert_detection_enabled: true
 im_alert_cooldown_seconds: 60
 dedup_resolved_cooldown_minutes: 60

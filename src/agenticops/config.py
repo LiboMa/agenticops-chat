@@ -977,7 +977,12 @@ class Settings(BaseSettings):
     # Webhooks
     webhook_secret: str = Field(
         default="",
-        description="HMAC secret for webhook signature verification (empty = disabled)",
+        description="Alert-webhook shared token (Bearer / X-AIOps-Token / ?token=, or X-AIOps-Signature HMAC); "
+                    "empty = unchecked",
+    )
+    intake_signature_window_seconds: int = Field(
+        default=300,
+        description="Accepted X-AIOps-Timestamp skew for HMAC-signed intake (alert webhooks, change intake)",
     )
     webhook_auto_create_issue: bool = Field(
         default=True,
