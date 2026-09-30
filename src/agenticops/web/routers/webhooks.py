@@ -23,8 +23,12 @@ _INTAKE_PATH = "/api/webhooks/alert"
 
 
 def is_webhook_intake(method: str, path: str) -> bool:
-    """POST to one of the two alert-intake routes. Reading /api/webhooks/alert/events stays behind Bearer auth."""
-    return method == "POST" and (path == _INTAKE_PATH or path.startswith(_INTAKE_PATH + "/"))
+    """POST to one of the two alert-intake routes. Reading /api/webhooks/alert/events stays behind Bearer auth.
+
+    `{source}` is exactly one non-empty segment, as the router matches it, so a POST to any deeper path (no intake
+    route there today) keeps the Bearer check instead of skipping both."""
+    head, _, source = path.rpartition("/")
+    return method == "POST" and (path == _INTAKE_PATH or (head == _INTAKE_PATH and source != ""))
 
 
 def warn_if_unauthenticated() -> None:

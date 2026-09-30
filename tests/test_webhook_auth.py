@@ -143,6 +143,10 @@ def test_reading_alert_events_is_not_a_webhook_intake(intake, monkeypatch):
     assert not is_webhook_intake("GET", "/api/webhooks/alert/events/7")
     assert not is_webhook_intake("POST", "/api/webhooks/alertx")
     assert not is_webhook_intake("POST", "/api/changes/intake")
+    # {source} is one non-empty segment, as the router matches it: nothing deeper or empty is an intake
+    assert not is_webhook_intake("POST", "/api/webhooks/alert/events/7")
+    assert not is_webhook_intake("POST", "/api/webhooks/alert/prometheus/extra")
+    assert not is_webhook_intake("POST", "/api/webhooks/alert/")
 
 
 # ── APIAuthMiddleware exemption ───────────────────────────────────────────────
@@ -163,6 +167,8 @@ def test_with_a_secret_the_middleware_lets_the_intake_through_to_the_token_check
     r = _post(guarded)
     assert (r.status_code, r.json()["detail"]) == (401, "webhook token or signature required")
     r = guarded.get("/api/webhooks/alert/events")                  # still a Bearer-protected read
+    assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required")
+    r = _post(guarded, "/api/webhooks/alert/events/7")              # below {source}: not an intake, Bearer as before
     assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required")
 
 
