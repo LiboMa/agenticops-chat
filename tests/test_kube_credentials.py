@@ -1,7 +1,10 @@
 """credentials/kube.kubectl_env_for_cluster (MVP-2.6.1 spec §3.B.4): only the target account's credentials,
 a private kubeconfig, never ~/.kube/config, and no ambient fallback."""
 import os
+import re
 import stat
+import subprocess
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +16,8 @@ from agenticops.credentials.resolver import AccountResolutionError
 from agenticops.run_context import run_context
 
 AMBIENT = {"AWS_ACCESS_KEY_ID": "ambient-access-key-id", "AWS_SECRET_ACCESS_KEY": "ambient-secret",
-           "AWS_SESSION_TOKEN": "ambient-token", "AWS_PROFILE": "default", "PATH": "/usr/bin"}
+           "AWS_SESSION_TOKEN": "ambient-token", "AWS_PROFILE": "default", "PATH": "/usr/bin",
+           "KUBECONFIG": "/ambient/kubeconfig"}
 
 
 def _aws(pk=1, name="prod", kubeconfigs=None):
@@ -67,7 +71,9 @@ def test_aws_env_carries_only_the_target_account_and_a_private_kubeconfig(home):
     with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=fake):
         env = kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
 
-    path = home / "data" / "kube" / "1" / "us-east-1" / "lab.kubeconfig"
+    path = kubeconfig_path(_aws(), "us-east-1", "lab")
+    assert path.parents[1].parent == home / "data" / "kube" / "1"      # kube/<pk>/<fp>/<region>/<cluster>
+    assert re.fullmatch(r"[0-9a-f]{16}", path.parents[1].name)
     assert env["KUBECONFIG"] == str(path) and path.is_file()
     assert env["AWS_ACCESS_KEY_ID"] == "target-access-key-id" and env["AWS_SESSION_TOKEN"] == "target-token"
     assert "AWS_PROFILE" not in env and "ambient" not in " ".join(env.values())
@@ -79,7 +85,7 @@ def test_aws_env_carries_only_the_target_account_and_a_private_kubeconfig(home):
     assert kwargs["env"]["AWS_ACCESS_KEY_ID"] == "target-access-key-id" and "AWS_PROFILE" not in kwargs["env"]
     assert kwargs["shell"] is False
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    for d in (path.parent, path.parent.parent, path.parent.parent.parent):
+    for d in path.parents[:4]:                                            # region, fp, pk, kube
         assert stat.S_IMODE(d.stat().st_mode) == 0o700
     assert not (home / "home" / ".kube").exists()                       # ~/.kube/config never touched
     assert [p.name for p in path.parent.iterdir()] == ["lab.kubeconfig"]  # no tmp left behind
@@ -91,11 +97,38 @@ def test_fresh_kubeconfig_is_reused_and_a_stale_one_regenerated(home):
         kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
         kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
         assert len(fake.calls) == 1
-        path = kubeconfig_path(1, "us-east-1", "lab")
+        path = kubeconfig_path(_aws(), "us-east-1", "lab")
         old = path.stat().st_mtime - 3601
         os.utime(path, (old, old))
         kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
     assert len(fake.calls) == 2
+
+
+def test_a_kubeconfig_with_a_future_mtime_is_regenerated(home):
+    fake = _FakeAws()
+    with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=fake):
+        kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
+        path = kubeconfig_path(_aws(), "us-east-1", "lab")
+        future = time.time() + 86400
+        os.utime(path, (future, future))
+        kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
+    assert len(fake.calls) == 2
+
+
+@pytest.mark.parametrize("change", [{"credentials": {"account_id": "222222222222",
+                                                     "role_arn": "arn:aws:iam::222222222222:role/ops"}},
+                                    {"credential_source_type": "access_keys"}])
+def test_changed_credentials_on_the_same_pk_never_reuse_the_old_kubeconfig(home, change):
+    """A PUT that re-points an account, or SQLite reusing a pk, must not hand the new credentials the old account's
+    fresh kubeconfig: get-token would sign for one account and send it to the other's API server (铁律 #4)."""
+    fake = _FakeAws()
+    before, after = _aws(), _aws()
+    for key, value in change.items():
+        setattr(after, key, value)
+    with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=fake):
+        first = kubectl_env_for_cluster(before, "lab", "us-east-1")["KUBECONFIG"]
+        second = kubectl_env_for_cluster(after, "lab", "us-east-1")["KUBECONFIG"]
+    assert first != second and len(fake.calls) == 2
 
 
 def test_accounts_regions_and_clusters_get_separate_files(home):
@@ -112,7 +145,21 @@ def test_generation_failure_raises_and_leaves_nothing(home):
     with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=fake):
         with pytest.raises(KubeconfigError, match="No cluster found"):
             kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
-    assert list(kubeconfig_path(1, "us-east-1", "lab").parent.iterdir()) == []
+    assert list(kubeconfig_path(_aws(), "us-east-1", "lab").parent.iterdir()) == []
+
+
+@pytest.mark.parametrize("exc,match", [(subprocess.TimeoutExpired(["aws"], 15), "timed out"),
+                                       (FileNotFoundError("aws"), "aws CLI not found")])
+def test_update_kubeconfig_timeout_or_missing_cli_raises_and_leaves_nothing(home, exc, match):
+    def run(args, **kwargs):
+        with open(args[args.index("--kubeconfig") + 1], "w") as f:   # whatever the CLI left behind
+            f.write("partial")
+        raise exc
+
+    with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=run):
+        with pytest.raises(KubeconfigError, match=match):
+            kubectl_env_for_cluster(_aws(), "lab", "us-east-1")
+    assert list(kubeconfig_path(_aws(), "us-east-1", "lab").parent.iterdir()) == []
 
 
 def test_resolution_failure_propagates_before_any_subprocess(home):
@@ -125,7 +172,7 @@ def test_resolution_failure_propagates_before_any_subprocess(home):
 
 
 @pytest.mark.parametrize("cluster,region", [("../etc", "us-east-1"), ("lab", "../../x"), ("", "us-east-1"),
-                                            ("lab", ""), ("a/b", "us-east-1")])
+                                            ("lab", ""), ("a/b", "us-east-1"), ("lab\n", "us-east-1")])
 def test_unsafe_or_empty_path_components_are_refused(home, cluster, region):
     with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run") as run:
         with pytest.raises(KubeconfigError):
@@ -148,7 +195,8 @@ def test_registered_kubeconfig_is_only_for_its_cluster(home):
     fake = _FakeAws()
     with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run", side_effect=fake):
         env = kubectl_env_for_cluster(_aws(kubeconfigs={"lab": str(kc)}), "other", "us-east-1")
-    assert env["KUBECONFIG"] == str(kubeconfig_path(1, "us-east-1", "other")) and len(fake.calls) == 1
+    # kubeconfigs is not part of the fingerprint: registering one does not move the generated files.
+    assert env["KUBECONFIG"] == str(kubeconfig_path(_aws(), "us-east-1", "other")) and len(fake.calls) == 1
 
 
 @pytest.mark.parametrize("value", ["relative/kubeconfig", "/nonexistent/kubeconfig", "~/.kube/config"])
@@ -161,6 +209,14 @@ def test_bad_registered_kubeconfig_is_refused(home, value):
     with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run") as run:
         with pytest.raises(KubeconfigError, match="kubeconfigs"):
             kubectl_env_for_cluster(_aws(kubeconfigs={"lab": value}), "lab", "us-east-1")
+    assert not run.called
+
+
+@pytest.mark.parametrize("value", ["/abs/kubeconfig", ["/abs/kubeconfig"]])
+def test_kubeconfigs_that_is_not_a_mapping_is_refused(home, value):
+    with _patch_resolution(), patch("agenticops.credentials.kube.subprocess.run") as run:
+        with pytest.raises(KubeconfigError, match="kubeconfigs"):
+            kubectl_env_for_cluster(_aws(kubeconfigs=value), "lab", "us-east-1")
     assert not run.called
 
 
@@ -179,7 +235,7 @@ def test_kubernetes_account_uses_its_own_kubeconfig_without_cloud_credentials(ho
 
 
 def test_kubernetes_account_with_a_missing_kubeconfig_fails(home):
-    with pytest.raises(KubeconfigError, match="onprem"):
+    with pytest.raises(KubeconfigError, match="onprem': kubeconfig_path not configured or file missing"):
         kubectl_env_for_cluster(_k8s(kubeconfig=str(home / "missing")), "onprem", "")
 
 
@@ -195,7 +251,7 @@ def test_kubernetes_account_without_a_kubeconfig_path_never_falls_back_to_the_sh
     acct = SimpleNamespace(id=5, name="onprem", provider="kubernetes", credentials=creds, regions=[], labels={},
                            credential_source_type="")
     with patch("agenticops.providers.kubernetes.subprocess.run") as run:
-        with pytest.raises(KubeconfigError, match="onprem"):
+        with pytest.raises(KubeconfigError, match="onprem': kubeconfig_path not configured or file missing"):
             kubectl_env_for_cluster(acct, "onprem", "")
         with pytest.raises(RuntimeError, match="onprem"):
             KubernetesProvider(acct)._run_kubectl("kubectl get pods")
