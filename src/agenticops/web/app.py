@@ -1678,6 +1678,7 @@ async def api_trigger_scan(req: ScanRequest, background_tasks: BackgroundTasks):
                 "provider": a.provider,
                 "resources_found": a.resources_found,
                 "resources_updated": a.resources_updated,
+                "resources_absent": a.resources_absent,
                 "regions_scanned": a.regions_scanned,
                 "errors": a.errors,
             }

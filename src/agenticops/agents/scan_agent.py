@@ -96,7 +96,7 @@ def scan_resources(account_ids: str = "", focus: str = "all", regions: str = "")
 
     lines = [f"Scan complete in {result.duration_s}s — {result.total_found} resources found."]
     for a in result.accounts:
-        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, regions={a.regions_scanned}")
+        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, {a.resources_absent} absent, regions={a.regions_scanned}")
         for err in a.errors[:3]:
             lines.append(f"    ⚠ {err}")
     return "\n".join(lines)

@@ -216,7 +216,8 @@ class CloudResource(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # MVP-2.6.1: set by connectors/ingest when a complete collection no longer sees the row (rows are never deleted)
+    # MVP-2.6.1: set by connectors/ingest or scanner/engine when a complete listing no longer sees the row;
+    # cleared when a writer sees it again (services/inventory.mark_seen). Rows are never deleted.
     absent_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships

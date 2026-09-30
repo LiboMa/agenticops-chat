@@ -12,6 +12,14 @@ from agenticops.scanner.engine import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_absent_marking():
+    """These tests have no DB fixture, and under pytest settings.database_url is the developer's real DB:
+    keep absent-marking off here. tests/test_scan_absent.py covers it on a temporary DB."""
+    with patch("agenticops.scanner.engine._mark_absent", return_value=0):
+        yield
+
+
 class TestScanOneAccount:
     def test_runs_commands_for_focus(self):
         """scan_one_account runs CLI commands and parses output."""
