@@ -20,7 +20,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import event, func
+from sqlalchemy import create_engine, event, func
+from sqlalchemy.orm import Session
 
 import agenticops.models as models
 from agenticops.config import settings
@@ -51,12 +52,34 @@ def copy_readonly(src: Path, dst: Path) -> None:
 
 
 def _claimed_accounts(db: Path) -> dict:
-    """health_issues.account_id as it was before the backfill fills some of them in from the anchor."""
+    """The account each issue's signal stated, read before the backfill fills some of them in from the anchor:
+    health_issues.account_id, else the earliest promoted alert_events.account_id (the F1 claim order), mapped to
+    a cloud_accounts pk with account_pk. Plain SQL, on purpose not the resolver's own helper: the copy may
+    predate the 2.6.1 columns, and a measurement must not share the code it checks. A claim that maps to no pk
+    stays as given, so any anchor under it counts as crossed. None = no claim (the signal stated no account, or
+    no ledger row survives)."""
     conn = sqlite3.connect(db)
     try:
-        return dict(conn.execute("SELECT id, account_id FROM health_issues"))
+        issues = conn.execute("SELECT id, account_id FROM health_issues").fetchall()
+        stated: dict = {}
+        if {"health_issue_id", "disposition"} <= {c[1] for c in conn.execute("PRAGMA table_info(alert_events)")}:
+            for issue_id, account in conn.execute(
+                    "SELECT health_issue_id, account_id FROM alert_events WHERE disposition = 'promoted' "
+                    "ORDER BY received_at, id"):
+                stated.setdefault(issue_id, account)
     finally:
         conn.close()
+    engine = create_engine(f"sqlite:///{db}")
+    try:
+        with Session(engine) as s:
+            claimed = {}
+            for issue_id, account in issues:
+                claim = account if account is not None else (stated.get(issue_id) or "").strip() or None
+                pk = ir.account_pk(s, claim) if claim is not None else None
+                claimed[issue_id] = pk if pk is not None else claim
+            return claimed
+    finally:
+        engine.dispose()
 
 
 def _shape(resource_id: str) -> str:
@@ -94,7 +117,8 @@ def measure_anchoring(session) -> dict:
 def measure_duplicates(session, claimed: dict) -> dict:
     """Spec §8.1: an id that several accounts hold is never anchored to the wrong one. Checked on the open issues
     that name such an id, and by probing resolve() with every such id — without an account (anchoring would be
-    a guess) and under each account that holds it (the anchor must stay inside that account)."""
+    a guess) and under each account that holds it (the anchor must stay inside that account). ledger_crossed
+    checks every open anchored issue, duplicate id or not: its anchor's account must be the claimed one."""
     groups = [rid for (rid,) in session.query(CloudResource.resource_id).group_by(CloudResource.resource_id)
               .having(func.count(func.distinct(CloudResource.account_id)) > 1)]
     owner = dict(session.query(CloudResource.id, CloudResource.account_id))
@@ -108,6 +132,10 @@ def measure_duplicates(session, claimed: dict) -> dict:
                       HealthIssue.anchor_status == ir.ANCHORED).all())
     guessed = sum(1 for i in issues if claimed.get(i.id) is None)
     crossed = sum(1 for i in issues if claimed.get(i.id) is not None and owner.get(i.resource_ref) != claimed[i.id])
+    open_anchored = (session.query(HealthIssue.id, HealthIssue.resource_ref)
+                     .filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES), HealthIssue.anchor_status == ir.ANCHORED))
+    checked = [i for i in open_anchored if claimed.get(i.id) is not None]
+    ledger_crossed = sum(1 for i in checked if owner.get(i.resource_ref) != claimed[i.id])
 
     probe_guessed = sum(1 for rid in groups if ir.resolve(session, resource_id=rid).status == ir.ANCHORED)
     in_account = [(acct, ir.resolve(session, account_id=acct, resource_id=rid))
@@ -122,7 +150,8 @@ def measure_duplicates(session, claimed: dict) -> dict:
         "crossed": crossed, "guessed": guessed,
         "probe_guessed": probe_guessed, "in_account_probes": len(in_account),
         "in_account_anchored": len(anchored), "probe_crossed": probe_crossed,
-        "met": crossed == guessed == probe_guessed == probe_crossed == 0,
+        "ledger_checked": len(checked), "ledger_crossed": ledger_crossed,
+        "met": crossed == guessed == probe_guessed == probe_crossed == ledger_crossed == 0,
     }
 
 
@@ -258,7 +287,8 @@ def render_markdown(r: dict) -> str:
         lines += [f"| `{x['shape']}` | {x['count']} |" for x in a["unmatched_shapes"]]
     if not a["met"]:
         lines += ["", "按 spec §8.1，未达标时如实报告原因分布，**不放宽规则去凑数**。`none`：库存里没有这个资源，"
-                  "多为未扫描的资源类型；`unknown_account`：信号指向本平台未管理的账户；`ambiguous`：同一条规则"
+                  "多为未扫描的资源类型；`unknown_account`：信号指向本平台未管理的账户；`account_unknown`：Issue "
+                  "没有账户，也没有留下它的信号记录（已过保留期或从未写入），不跨账户去猜；`ambiguous`：同一条规则"
                   "命中了多个物理资源，候选都记在 `anchor_candidates` 里。"]
     lines += [
         "",
@@ -266,6 +296,10 @@ def render_markdown(r: dict) -> str:
         "",
         f"库存里有 {d['groups']} 组跨账户重复的 `resource_id`，指向它们的未关闭 Issue 有 {d['open_issues']} 条。"
         f"其中锚到错误账户 {d['crossed']} 条，没有账户却被锚定 {d['guessed']} 条。",
+        "",
+        f"不限重复 id，有声明账户的未关闭锚定 Issue 共 {d['ledger_checked']} 条（声明账户在回填前读出：Issue 自身的 "
+        f"`account_id`，为空时取它最早一条 promoted 信号的 `alert_events.account_id`），锚点落在别的账户的 "
+        f"{d['ledger_crossed']} 条（应为 0）。",
         "",
         f"`resolve()` 探测：不给账户时锚定 {d['probe_guessed']} 次（应为 0）；给出持有账户时 "
         f"{d['in_account_anchored']}/{d['in_account_probes']} 次锚定，其中锚到别的账户 {d['probe_crossed']} 次（应为 0）。"
