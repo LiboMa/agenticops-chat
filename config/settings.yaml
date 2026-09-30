@@ -298,6 +298,10 @@ rca_topology_window_after_minutes: 10
 k8s_kubeconfig_max_age_seconds: 3600
 # One kubectl call of the K8s connector may return at most this many bytes; above it the kind is partial.
 k8s_connector_max_output_bytes: 20000000
+# The k8s-discovery schedule (seeded once at startup) collects every cluster target this often. Off: no seed, and
+# `aiops connectors run k8s` / POST /api/connectors/k8s/run answer "disabled".
+k8s_connector_enabled: true
+k8s_discovery_interval_minutes: 10
 
 # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
 security_review_enabled: true

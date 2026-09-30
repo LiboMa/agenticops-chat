@@ -6,12 +6,16 @@ from agenticops.config import PROJECT_ROOT, settings
 KEYS = (
     "k8s_kubeconfig_max_age_seconds",
     "k8s_connector_max_output_bytes",
+    "k8s_connector_enabled",
+    "k8s_discovery_interval_minutes",
 )
 
 
 def test_defaults():
     assert settings.k8s_kubeconfig_max_age_seconds == 3600
     assert settings.k8s_connector_max_output_bytes == 20000000
+    assert settings.k8s_connector_enabled is True
+    assert settings.k8s_discovery_interval_minutes == 10
 
 
 def test_yaml_carries_the_values_not_only_the_schema():

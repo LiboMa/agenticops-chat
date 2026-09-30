@@ -34,7 +34,7 @@ async def api_list_schedules():
 async def api_pipeline_options():
     """Return available pipeline names and AgentChain config schema."""
     return {
-        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "GalaxyBuild",
+        "pipelines": ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "GalaxyBuild", "K8sDiscovery",
                       "SecurityPostureSnapshot", "SecurityIncrementalPoll", "AgentChain"],
         "agent_chain_config": {
             "prompt": {"type": "string", "required": True, "description": "Task description for the agent"},

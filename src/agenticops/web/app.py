@@ -173,6 +173,11 @@ async def lifespan(app: FastAPI):
                     logger.info("galaxy: seeded auto-build schedule (cron=%s, interval=%d min)", _cron, _mins)
             except Exception:
                 logger.debug("galaxy: auto schedule seed skipped", exc_info=True)
+        try:
+            from agenticops.connectors.runner import seed_discovery_schedule
+            seed_discovery_schedule()   # no-op while k8s_connector_enabled is false or the row exists
+        except Exception:
+            logger.debug("k8s: discovery schedule seed skipped", exc_info=True)
         if settings.security_review_enabled:
             try:
                 from agenticops.scheduler.scheduler import Scheduler as _SSched, Schedule as _SSchedule

@@ -608,6 +608,15 @@ class Settings(BaseSettings):
         description="Byte cap on one kubectl call of the K8s connector; a kind whose output exceeds it is partial "
         "(AIOPS_K8S_CONNECTOR_MAX_OUTPUT_BYTES)",
     )
+    k8s_connector_enabled: bool = Field(
+        default=True,
+        description="K8s pull connector: seeds the k8s-discovery schedule; off makes CLI / API runs return "
+        "'disabled' (AIOPS_K8S_CONNECTOR_ENABLED)",
+    )
+    k8s_discovery_interval_minutes: int = Field(
+        default=10,
+        description="Interval of the seeded k8s-discovery schedule (AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES)",
+    )
 
     # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
     security_review_enabled: bool = Field(
