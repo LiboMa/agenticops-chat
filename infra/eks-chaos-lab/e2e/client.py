@@ -47,17 +47,29 @@ class AgenticOpsClient:
         r.raise_for_status()
         return r.json() if r.content else {}
 
+    def put(self, path: str, json: Optional[dict] = None) -> Any:
+        r = requests.put(f"{self.base_url}{path}", headers=self._headers(),
+                         json=json or {}, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
     # ---- account registration (idempotent, environment source) ----
-    def ensure_account(self, name: str, account_id: str, regions: list[str]) -> None:
-        existing = self.get("/api/accounts")
-        if any(a.get("name") == name for a in existing):
-            return
-        self.post("/api/accounts", json={
-            "name": name, "provider": "aws",
-            "credential_source_type": "environment",
-            "credentials": {"account_id": account_id},
-            "regions": regions, "is_enabled": True,
-        })
+    def ensure_account(self, name: str, account_id: str, regions: list[str],
+                       kubeconfigs: Optional[dict] = None) -> None:
+        """kubeconfigs: {cluster: absolute path on the app host}. kubectl only ever uses a kubeconfig registered on
+        the account (or one it generates privately), so an account created before 2.6.1 gets it added here. The
+        credentials are rebuilt from the arguments, never from GET (which masks sensitive values)."""
+        creds = {"account_id": account_id, **({"kubeconfigs": kubeconfigs} if kubeconfigs else {})}
+        existing = next((a for a in self.get("/api/accounts") if a.get("name") == name), None)
+        if existing is None:
+            self.post("/api/accounts", json={
+                "name": name, "provider": "aws",
+                "credential_source_type": "environment",
+                "credentials": creds,
+                "regions": regions, "is_enabled": True,
+            })
+        elif kubeconfigs and (existing.get("credentials") or {}).get("kubeconfigs") != kubeconfigs:
+            self.put(f"/api/accounts/{existing['id']}", json={"credentials": creds})
 
     # ---- perception ----
     def send_cloudwatch_alert(self, payload: dict) -> Any:

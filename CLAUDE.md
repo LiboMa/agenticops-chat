@@ -54,6 +54,11 @@ Web Dashboard ──────┘         │
    `run_aws_cli/_readonly`、`run_on_host(ssm)`、`aws eks update-kubeconfig` 都经它取目标账户 env。**无任何"无上下文回退
    ambient"分支**(旧 `_active_account_var` ContextVar 已删:Strands 同步工具在 `asyncio.to_thread`+`copy_context` 里跑,
    工具内的 ContextVar 写入跨不出工具边界)。主机访问降级阶梯:`run_on_host(method="auto")` SSM → 分类失败 → SSH。
+   kubectl 本身(`run_kubectl` 与 K8s 连接器)的 env 只来自 `credentials/kube.kubectl_env_for_cluster(account, cluster,
+   region)`:上面那份目标账户 env,再加一个私有 kubeconfig —— 账户上登记的 `credentials.kubeconfigs[<cluster>]`(绝对路径),
+   否则在同一 env 下用 `aws eks update-kubeconfig --kubeconfig` 生成 `<data_dir>/kube/<账户主键>/<region>/<cluster>.kubeconfig`
+   (0600);kubernetes 账户用它自己的 `kubeconfig_path`。从不读写 `~/.kube/config`,不用进程的 `KUBECONFIG`,不切换
+   current-context;失败抛 `KubeconfigError` / `AccountResolutionError`,没有回退(MVP-2.6.1)。
 4. **缓存 key 必须含 account**:`credentials/resolver` 双写 `{provider}:{name}:{region}` 与 `{account_id}:{region}`,
    禁止 region-only 取 session。会话缓存单一归属:`aws_tools._session_cache` 即 `providers/base._session_cache`(同一
    dict,线程安全);`SessionFactory._cache` 仅服务 Bedrock 控制面 + test-connection,另属一类。
@@ -214,6 +219,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `graph_query_node_cap` / `graph_query_edge_cap` | `200` / `500` | GraphQueryService default caps; truncation is deterministic (abnormal nodes first) |
 | `graph_query_max_depth` | `2` | Max neighborhood depth (`potential_impact` is fixed at 3) |
 | `rca_topology_window_before_minutes` / `…_after_minutes` | `30` / `10` | Time window around `observed_at or first_seen` — observed blast radius (A) and the RCA evidence pack (C) |
+| `k8s_kubeconfig_max_age_seconds` | `3600` | A generated private kubeconfig (`<data_dir>/kube/<account pk>/<region>/<cluster>.kubeconfig`) younger than this is reused; older is regenerated with `aws eks update-kubeconfig` under the target account's env |
 | `signal_gate_enabled` | `true` | Route all HealthIssue creation through the Signal Gate (false = legacy dedup only) |
 | `signal_gate_llm_enabled` | `true` | L2 gray-zone LLM merge judgment (cheap tier, merge-or-new only) |
 | `signal_gate_confidence_min` | `0.7` | Min LLM confidence to accept a gray-zone merge (below → promote) |

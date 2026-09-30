@@ -448,7 +448,7 @@ def run_kubectl(
     registered account, never a local profile.
 
     Args:
-        cluster_name: EKS cluster name. Leave empty to use the default cluster from config.
+        cluster_name: EKS cluster name (required).
         command: kubectl subcommand (e.g., 'get pods', 'describe node ip-10-0-1-5', 'logs pod/my-app -c main --tail=100').
         region: AWS region. Leave empty to resolve from inventory / account.
         namespace: Kubernetes namespace (default: 'default').
@@ -514,57 +514,43 @@ def run_kubectl(
 def _execute_kubectl(
     cluster_name: str, command: str, region: str, namespace: str, account: str = ""
 ) -> str:
-    """Execute kubectl after updating kubeconfig for the EKS cluster."""
+    """Execute kubectl on one EKS cluster with that cluster's account-scoped env and private kubeconfig
+    (credentials.kube.kubectl_env_for_cluster): never ~/.kube/config, never ambient credentials."""
+    if not cluster_name:
+        return "Error: No cluster_name provided. Pass cluster_name (the EKS cluster name)."
     try:
-        # If KUBECONFIG env var is set, use it directly (skip update-kubeconfig).
-        # This supports pre-configured kubeconfig files (e.g., EKS Lab bastion).
-        kubeconfig_path = os.environ.get("KUBECONFIG", "")
-        if not kubeconfig_path or not os.path.isfile(kubeconfig_path):
-            # No pre-configured kubeconfig — update via aws eks, scoped to a
-            # registered account (explicit → inventory by cluster → default).
-            # The pre-set KUBECONFIG branch above (EKS-lab / bastion) bypasses this.
-            if not cluster_name:
-                return "Error: No cluster_name provided and no KUBECONFIG set. Set AIOPS_EKS_CLUSTER_NAME or pass cluster_name."
-            from agenticops.credentials.resolver import (
-                AccountResolutionError,
-                get_account_snapshot,
-                find_cluster_account,
-                resolve_default_account,
-                get_subprocess_env_for_account,
-                ERR_UNKNOWN_ACCOUNT,
-                list_enabled_accounts,
-            )
-            try:
-                if account:
-                    snap = get_account_snapshot(account, "aws")
-                    if snap is None:
-                        names = ", ".join(sorted(a.name for a in list_enabled_accounts("aws"))) or "(none)"
-                        return f"Error: {ERR_UNKNOWN_ACCOUNT.format(ref=account, provider='aws', names=names)}"
-                    eff_region = region or (snap.regions[0] if snap.regions else "")
+        from agenticops.credentials.kube import KubeconfigError, kubectl_env_for_cluster
+        from agenticops.credentials.resolver import (
+            AccountResolutionError,
+            get_account_snapshot,
+            find_cluster_account,
+            resolve_default_account,
+            ERR_UNKNOWN_ACCOUNT,
+            list_enabled_accounts,
+        )
+        # Registered account only: explicit → inventory by cluster → single-account default.
+        try:
+            if account:
+                snap = get_account_snapshot(account, "aws")
+                if snap is None:
+                    names = ", ".join(sorted(a.name for a in list_enabled_accounts("aws"))) or "(none)"
+                    return f"Error: {ERR_UNKNOWN_ACCOUNT.format(ref=account, provider='aws', names=names)}"
+                eff_region = region or (snap.regions[0] if snap.regions else "")
+            else:
+                found = find_cluster_account(cluster_name, region)
+                if found:
+                    snap, inv_region = found
+                    eff_region = region or inv_region or (snap.regions[0] if snap.regions else "")
                 else:
-                    found = find_cluster_account(cluster_name, region)
-                    if found:
-                        snap, inv_region = found
-                        eff_region = region or inv_region or (snap.regions[0] if snap.regions else "")
-                    else:
-                        snap = resolve_default_account("aws")
-                        eff_region = region or (snap.regions[0] if snap.regions else "")
-                if not eff_region:
-                    return "Error: No region resolved for EKS update-kubeconfig — pass region= or scan inventory."
-                eks_env = get_subprocess_env_for_account(snap, eff_region)
-            except AccountResolutionError as e:
-                return f"Error: {e}"
-            region = eff_region
-            update_result = subprocess.run(
-                ["aws", "eks", "update-kubeconfig", "--name", cluster_name, "--region", region],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                shell=False,
-                env=eks_env,
-            )
-            if update_result.returncode != 0:
-                return f"Failed to update kubeconfig: {update_result.stderr.strip()}"
+                    snap = resolve_default_account("aws")
+                    eff_region = region or (snap.regions[0] if snap.regions else "")
+            if not eff_region:
+                return "Error: No region resolved for EKS update-kubeconfig — pass region= or scan inventory."
+            env = kubectl_env_for_cluster(snap, cluster_name, eff_region)
+        except AccountResolutionError as e:
+            return f"Error: {e}"
+        except KubeconfigError as e:
+            return f"Failed to update kubeconfig: {e}"
 
         # Build kubectl command
         kubectl_cmd = f"kubectl -n {shlex.quote(namespace)} {command}"
@@ -576,6 +562,7 @@ def _execute_kubectl(
             text=True,
             timeout=KUBECTL_TIMEOUT,
             shell=False,
+            env=env,
         )
 
         if result.returncode != 0:

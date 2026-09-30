@@ -57,3 +57,35 @@ def _fake_clock(values):
         except StopIteration: pass
         return last[0]
     return clock
+
+
+def _record(monkeypatch, c, accounts):
+    """client.get returns `accounts`; post / put calls are recorded as (method, path, json)."""
+    calls = []
+    monkeypatch.setattr(c, "get", lambda path: accounts)
+    monkeypatch.setattr(c, "post", lambda path, json=None, headers=None: calls.append(("POST", path, json)))
+    monkeypatch.setattr(c, "put", lambda path, json=None: calls.append(("PUT", path, json)))
+    return calls
+
+
+def test_ensure_account_registers_the_cluster_kubeconfig(monkeypatch):
+    """MVP-2.6.1: kubectl uses only a kubeconfig registered on the account, so the chaos-lab account carries it —
+    on create, and added to an account created before 2.6.1; an up-to-date account is left alone."""
+    kc = {"agenticops-chaos-lab": "/var/run/agenticops/kubeconfig"}
+    creds = {"account_id": "111111111111", "kubeconfigs": kc}
+    c = AgenticOpsClient("http://x")
+
+    calls = _record(monkeypatch, c, [])
+    c.ensure_account("chaos-lab", "111111111111", ["us-east-1"], kubeconfigs=kc)
+    assert calls == [("POST", "/api/accounts", {"name": "chaos-lab", "provider": "aws",
+                                                "credential_source_type": "environment", "credentials": creds,
+                                                "regions": ["us-east-1"], "is_enabled": True})]
+
+    calls = _record(monkeypatch, c, [{"id": 7, "name": "chaos-lab", "credentials": {"account_id": "111111111111"}}])
+    c.ensure_account("chaos-lab", "111111111111", ["us-east-1"], kubeconfigs=kc)
+    assert calls == [("PUT", "/api/accounts/7", {"credentials": creds})]
+
+    calls = _record(monkeypatch, c, [{"id": 7, "name": "chaos-lab", "credentials": creds}])
+    c.ensure_account("chaos-lab", "111111111111", ["us-east-1"], kubeconfigs=kc)
+    c.ensure_account("chaos-lab", "111111111111", ["us-east-1"])
+    assert calls == []

@@ -597,6 +597,13 @@ class Settings(BaseSettings):
         "(AIOPS_RCA_TOPOLOGY_WINDOW_AFTER_MINUTES)",
     )
 
+    # ── Pull connectors (MVP-2.6.1 Plan B) ─────────────────────────
+    k8s_kubeconfig_max_age_seconds: int = Field(
+        default=3600,
+        description="Reuse a generated private kubeconfig (<data_dir>/kube/...) younger than this; older is "
+        "regenerated (AIOPS_K8S_KUBECONFIG_MAX_AGE_SECONDS)",
+    )
+
     # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
     security_review_enabled: bool = Field(
         default=True,

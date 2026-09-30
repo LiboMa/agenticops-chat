@@ -37,7 +37,10 @@ def client() -> AgenticOpsClient:
     c.login(email, pw)
     acct = os.environ.get("AWS_ACCOUNT_ID")
     if acct:
-        c.ensure_account("chaos-lab", acct, ["us-east-1"])
+        # The app's in-cluster service-account kubeconfig (deployment.yaml init container), bound to this account.
+        cluster = os.environ.get("AIOPS_CHAOS_CLUSTER", "agenticops-chaos-lab")
+        kubeconfig = os.environ.get("AIOPS_CHAOS_KUBECONFIG", "/var/run/agenticops/kubeconfig")
+        c.ensure_account("chaos-lab", acct, ["us-east-1"], kubeconfigs={cluster: kubeconfig})
     return c
 
 
