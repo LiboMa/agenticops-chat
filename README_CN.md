@@ -112,7 +112,7 @@ IM Bots ────────────┘        │                  SRE 
 
 | 流水线 | 流向 | LLM 成本 |
 |--------|------|----------|
-| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA 流水线 | 无 |
+| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor`(设了 `AIOPS_WEBHOOK_SECRET` 时校验共享 token / HMAC;解析器填身份提示与源端故障时间)→ HealthIssue → RCA 流水线 | 无 |
 | **IM Agent** | IM 消息 → Main Agent(核实) → `create_health_issue` → 同一流水线 | 有 |
 
 SHA-256 指纹在两条流水线间对问题去重。
@@ -176,6 +176,7 @@ aiops run report --type daily
 | `aiops issues` / `aiops issue <id>` | 列出 / 查看健康问题 |
 | `aiops get\|describe\|create\|update\|delete <entity>` | 对账号、资源、定时任务、通道的 CRUD |
 | `aiops run scan\|detect\|analyze\|report\|schedule\|notify` | 运行某个流水线步骤 |
+| `aiops connectors list` / `aiops connectors run <name>` | 拉取式连接器(K8s 发现):最近运行、立即运行 |
 
 对话内斜杠命令(30+)覆盖 scan/detect/analyze/fix/approve/execute、`/model`、`/skill`、`/workflow`、`/channel`、`/send_to`、`/tokens` 等 —— 输入 `/help`。
 
@@ -187,7 +188,7 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 
 ### API
 
-220+ 个 REST 端点(FastAPI 路由位于 `web/routers/`);完整 OpenAPI 在 `http://localhost:8000/docs`。主要分组:`/api/health-issues`、`/api/fix-plans`、`/api/signals`、`/api/chat/sessions`(SSE)、`/api/resources`、`/api/schedules`、`/api/skills`(+ `/api/skills/import-source`)、`/api/security`、`/api/graph`、`/api/galaxy`、`/api/messaging`、`/api/cost`、`/api/settings`、`/api/auth`。
+220+ 个 REST 端点(FastAPI 路由位于 `web/routers/`);完整 OpenAPI 在 `http://localhost:8000/docs`。主要分组:`/api/health-issues`、`/api/fix-plans`、`/api/signals`、`/api/chat/sessions`(SSE)、`/api/resources`、`/api/schedules`、`/api/skills`(+ `/api/skills/import-source`)、`/api/security`、`/api/graph`、`/api/galaxy`、`/api/messaging`、`/api/cost`、`/api/connectors`、`/api/settings`、`/api/auth`。
 
 ---
 
@@ -212,6 +213,8 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 | `AIOPS_CHANGE_AUTO_APPROVE_STANDARD` | `false` | 让策略的 `auto_approve` 判定免人工批准 standard 变更 —— yaml 规则与此开关必须同时满足 |
 | `AIOPS_RBAC_ENFORCE` | `false` | `false` = 影子模式(拒绝记为 `authz.denied_shadow`,请求放行);`true` = 403 + SoD |
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | 工具层写级命令账本(`command_audits`);只读命令不记录 |
+| `AIOPS_K8S_CONNECTOR_ENABLED` | `true` | K8s 拉取式连接器(只读 `kubectl get`,按账户的私有 kubeconfig)+ `k8s-discovery` 调度(`AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES`,默认 10) |
+| `AIOPS_WEBHOOK_SECRET` | *(空)* | 告警 webhook 共享 token:设了之后 `POST /api/webhooks/alert*` 必须带它(Bearer / `X-AIOps-Token` / `?token=`)或 `X-AIOps-Signature` HMAC,否则 401。为空 = 不校验(启动告警)。不要写进 `settings.yaml` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local`(SQLite/文件)或 `cloud`(Postgres/S3) |
 
 ---
@@ -281,7 +284,7 @@ terraform apply -auto-approve
 各栈细节:[`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md)。
 
 ### 认证(所有 AWS 部署)
-首次启动会用 **`AIOPS_ADMIN_PASSWORD`** 里的密码播种一个 `admin` 用户 —— 在暴露应用前**务必设置它**(不设时会回退到一个众所周知的默认值;任何可达部署都绝不要依赖它)。经 `POST /api/auth/login` 登录;24 小时会话令牌;长期访问用 API key;除 `/api/health` 与 `/api/auth/login` 外所有 `/api/*` 均受保护。
+首次启动会用 **`AIOPS_ADMIN_PASSWORD`** 里的密码播种一个 `admin` 用户 —— 在暴露应用前**务必设置它**(不设时会回退到一个众所周知的默认值;任何可达部署都绝不要依赖它)。经 `POST /api/auth/login` 登录;24 小时会话令牌;长期访问用 API key;除 `/api/health` 与 `/api/auth/login` 外所有 `/api/*` 均受保护。告警 webhook 入口(`POST /api/webhooks/alert*`)改用共享的 `AIOPS_WEBHOOK_SECRET` token 或 HMAC 签名 —— Alertmanager、SNS 这类发送方无法登录;不设时入口不校验,启动时会告警。
 
 更多:[`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md)。
 
@@ -318,6 +321,7 @@ src/agenticops/
 ├── chat/         # 消息预处理, 文件读取, /send_to, /channel
 ├── notify/  im/  # 多通道通知 + IM 机器人 (飞书/Slack)
 ├── integrations/ # 告警处理器, 源解析器
+├── connectors/   # 拉取式连接器 (K8s 发现), 确定性 ingest
 ├── pipeline/ scheduler/ monitor/ scanner/ scan/   # 流水线, cron, 指标, 扫描
 ├── auth/ audit/  # JWT/API-key 认证, 审计轨迹
 ├── models.py     # SQLAlchemy ORM 模型

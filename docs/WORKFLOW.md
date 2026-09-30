@@ -349,7 +349,7 @@ When alerts arrive via webhook, the entire pipeline runs automatically — no hu
 flowchart TD
     PROM["① Prometheus<br/>kube-state-metrics + node-exporter"] -->|scrape 15s| RULES["PrometheusRule<br/>(10 alert rules)"]
     RULES -->|evaluate 30s| AM["② AlertManager"]
-    AM -->|POST webhook| WH["③ AgenticOps API<br/>POST /api/webhooks/prometheus"]
+    AM -->|POST webhook| WH["③ AgenticOps API<br/>POST /api/webhooks/alert/prometheus"]
 
     WH --> PARSE["parse_prometheus()<br/>+ create_health_issue()<br/>(fingerprint dedup)"]
 
@@ -1219,6 +1219,49 @@ Frontend (`pages/Galaxy.tsx`, **Experimental**): a **Canvas starfield** — d3-f
 
 ---
 
+## Pull Connectors (K8s) & Webhook Intake Auth (MVP-2.6.1)
+
+K8s objects are first-class inventory: a read-only pull connector writes them into `cloud_resources` (`provider=kubernetes`), and the Galaxy rule layer derives Deployment → Pod → Node edges from them. Nothing on this path calls an LLM.
+
+```mermaid
+flowchart LR
+    SCH["k8s-discovery schedule<br/>(every 10 min)"] --> RUN["connectors/runner.run_connector"]
+    CLI["aiops connectors run k8s"] --> RUN
+    API["POST /api/connectors/k8s/run"] --> RUN
+    RUN --> TGT["targets: EKS rows of enabled aws accounts<br/>+ kubernetes accounts"]
+    TGT --> ENV["credentials/kube.kubectl_env_for_cluster<br/>target-account env + private kubeconfig"]
+    ENV --> GET["kubectl get KIND -o json<br/>one call per kind, byte-capped"]
+    GET --> ING["connectors/ingest.ingest<br/>upsert + absent_since + connector_runs"]
+    ING -->|structure changed| GB["build_graph(k8s-discovery)<br/>rule-only, no LLM"]
+```
+
+- **What is collected**: Namespace, Deployment, StatefulSet, DaemonSet, Service, Ingress, Node, ConfigMap, Secret, PersistentVolumeClaim, PodDisruptionBudget, NetworkPolicy — plus owner-less (bare) pods as `K8s_Pod`. A pod that has an owner is only summarized into its workload's `pod_summary`.
+- **Partial never deletes**: a kind whose `kubectl get` fails, times out, exceeds `k8s_connector_max_output_bytes` or returns no item list is *partial*. Only a completely listed kind marks vanished objects `absent_since`; rows are never deleted.
+- **No secrets stored**: a Secret row keeps only its `type`, a ConfigMap only its key names and a hash, and no object keeps its annotations.
+- **Credentials**: see *Unified exec entry* above. The in-cluster chaos-lab account registers its service-account kubeconfig; that RBAC grants no read on secrets, so its Secret kind stays partial by design.
+- **See it**: `aiops connectors list` (switch, schedule, recent runs) · `aiops connectors run k8s [--account NAME]` (exits 1 unless the result is complete or partial) · `GET /api/connectors`. With `k8s_connector_enabled: false` no schedule is seeded and a run answers `disabled`.
+
+### Webhook intake auth
+
+With `AIOPS_WEBHOOK_SECRET` set, `POST /api/webhooks/alert` and `POST /api/webhooks/alert/{source}` take the shared token as `Authorization: Bearer <token>`, `X-AIOps-Token: <token>` or `?token=<token>` — or an HMAC signature: `X-AIOps-Timestamp: <unix seconds>` plus `X-AIOps-Signature: sha256=<hex HMAC-SHA256 of timestamp + "." + body>`, within `intake_signature_window_seconds` (300). Anything else is 401. With `api_auth_enabled` on, the middleware lets only those two POSTs through to this check; reading `/api/webhooks/alert/events` still needs a Bearer session. Unset, intake is unchecked and a startup WARNING says so.
+
+```yaml
+# Alertmanager
+receivers:
+  - name: agenticops
+    webhook_configs:
+      - url: http://<agenticops>:8000/api/webhooks/alert/prometheus
+        http_config:
+          authorization:
+            credentials: <AIOPS_WEBHOOK_SECRET>
+```
+
+SNS (CloudWatch alarms) cannot set headers: put `?token=<AIOPS_WEBHOOK_SECRET>` in the subscription URL. It will show up in access logs, so use a header wherever the sender allows one.
+
+**Identity hints**: parsers fill only what the source itself carries — `hints` (account / region / cluster / namespace / workload / pod / service), `observed_at` (the source's fault time, UTC) and `alarm_name` — and `alert_processor` hands them to the Signal Gate unchanged. Prometheus' `service` label is not a hint (it is usually the scrape target's Service); CloudWatch K8s hints come only from `ContainerInsights` dimensions, and its region only from `AlarmArn`.
+
+---
+
 ## CLI Slash Command Quick Reference
 
 | Command | Purpose |
@@ -1299,8 +1342,13 @@ curl -X POST $BASE/messaging/channels/feishu-ops/test
 curl $BASE/im-aliases
 
 # Submit webhook alert (Prometheus format)
-curl -X POST $BASE/webhooks/prometheus -H 'Content-Type: application/json' \
+curl -X POST $BASE/webhooks/alert/prometheus -H 'Content-Type: application/json' \
+  -H "X-AIOps-Token: $AIOPS_WEBHOOK_SECRET" \
   -d '{"alerts":[{"status":"firing","labels":{"alertname":"KubePodOOMKilled"}}]}'
+
+# Pull connectors: recent runs, run K8s discovery now
+curl "$BASE/connectors?limit=5"
+curl -X POST $BASE/connectors/k8s/run
 
 # Import skills from a URL / git repo / archive — everything lands as a draft
 curl -X POST $BASE/skills/import-source -H 'Content-Type: application/json' \
@@ -1335,10 +1383,12 @@ export AIOPS_NOTIFICATIONS_ENABLED=true         # Auto-notify on pipeline events
 # Features
 export AIOPS_SKILLS_ENABLED=true       # Enable agent skills (default: true)
 export AIOPS_EMBEDDING_ENABLED=true    # Enable vector embeddings (default: true)
+export AIOPS_K8S_CONNECTOR_ENABLED=true # K8s pull connector + k8s-discovery schedule (default: true)
 
 # Web & Auth
 export AIOPS_CORS_ORIGINS="http://localhost:3000,https://myapp.example.com"
 export AIOPS_API_AUTH_ENABLED=false     # API key auth middleware (default: false)
+export AIOPS_WEBHOOK_SECRET=YOUR_SECRET # Alert-webhook token (Bearer / X-AIOps-Token / ?token= / HMAC); unset = unchecked
 export AIOPS_DATABASE_URL="sqlite:///path/to/agenticops.db"
 
 # IM Bot
@@ -1420,7 +1470,7 @@ The **EKS Chaos E2E Harness** validates the AgenticOps 感知→分析→解决�
 ### Deploy the App In-Cluster
 ```bash
 cd infra/eks-chaos-lab/agenticops
-bash deploy-app.sh --admin-password YOUR_PASSWORD
+bash deploy-app.sh --admin-password YOUR_PASSWORD --webhook-secret YOUR_SECRET
 ```
 The app runs as a ClusterIP Service — never exposed publicly.
 
@@ -1429,6 +1479,7 @@ From the remote server (with network access to the cluster):
 ```bash
 cd infra/eks-chaos-lab/e2e
 export AIOPS_ADMIN_PASSWORD=YOUR_PASSWORD
+export AIOPS_WEBHOOK_SECRET=YOUR_SECRET     # same value as deploy-app.sh --webhook-secret
 
 # All scenarios (6 assert + 2 evidence)
 bash run-e2e.sh

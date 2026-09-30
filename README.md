@@ -112,7 +112,7 @@ Alert ─► HealthIssue ─► RCA ─► SRE ─► Auto-Approve (L0/L1) ─�
 
 | Pipeline | Flow | LLM Cost |
 |----------|------|----------|
-| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA pipeline | None |
+| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` (shared-token / HMAC check when `AIOPS_WEBHOOK_SECRET` is set; parsers fill identity hints + source fault time) → HealthIssue → RCA pipeline | None |
 | **IM Agent** | IM message → Main Agent (verification) → `create_health_issue` → same pipeline | Yes |
 
 A SHA-256 fingerprint dedups issues across both pipelines.
@@ -176,6 +176,7 @@ aiops run report --type daily
 | `aiops issues` / `aiops issue <id>` | List / show health issues |
 | `aiops get\|describe\|create\|update\|delete <entity>` | CRUD over accounts, resources, schedules, channels |
 | `aiops run scan\|detect\|analyze\|report\|schedule\|notify` | Run a pipeline step |
+| `aiops connectors list` / `aiops connectors run <name>` | Pull connectors (K8s discovery): recent runs, run now |
 
 In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, and more — type `/help`.
 
@@ -187,7 +188,7 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 
 ### API
 
-220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/settings`, `/api/auth`.
+220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/connectors`, `/api/settings`, `/api/auth`.
 
 ---
 
@@ -212,6 +213,8 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 | `AIOPS_CHANGE_AUTO_APPROVE_STANDARD` | `false` | Let a policy `auto_approve` decision approve a standard change without a human — the yaml rule and this flag must both agree |
 | `AIOPS_RBAC_ENFORCE` | `false` | `false` = shadow mode (denials audited as `authz.denied_shadow`, request allowed); `true` = 403 + SoD |
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | Tool-layer ledger of write-tier command attempts (`command_audits`); read-only commands are not recorded |
+| `AIOPS_K8S_CONNECTOR_ENABLED` | `true` | K8s pull connector (read-only `kubectl get`, account-scoped private kubeconfig) + the `k8s-discovery` schedule (`AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES`, default 10) |
+| `AIOPS_WEBHOOK_SECRET` | *(empty)* | Alert-webhook shared token: `POST /api/webhooks/alert*` then needs it (Bearer / `X-AIOps-Token` / `?token=`) or an `X-AIOps-Signature` HMAC, else 401. Empty = unchecked (startup warning). Never put it in `settings.yaml` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` (SQLite/files) or `cloud` (Postgres/S3) |
 
 ---
@@ -281,7 +284,7 @@ terraform apply -auto-approve
 Per-stack details: [`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md).
 
 ### Auth (all AWS deployments)
-On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`. Alert-webhook intake (`POST /api/webhooks/alert*`) instead takes the shared `AIOPS_WEBHOOK_SECRET` token or an HMAC signature — senders like Alertmanager or SNS cannot log in; unset, intake is unchecked and a startup warning says so.
 
 More: [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 
@@ -318,6 +321,7 @@ src/agenticops/
 ├── chat/         # Message preprocessing, file reader, /send_to, /channel
 ├── notify/  im/  # Multi-channel notifications + IM bots (Feishu/Slack)
 ├── integrations/ # Alert processor, source parsers
+├── connectors/   # Pull connectors (K8s discovery), deterministic ingest
 ├── pipeline/ scheduler/ monitor/ scanner/ scan/   # Pipelines, cron, metrics, scanning
 ├── auth/ audit/  # JWT/API-key auth, audit trail
 ├── models.py     # SQLAlchemy ORM models
