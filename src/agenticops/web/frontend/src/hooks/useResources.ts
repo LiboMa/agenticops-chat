@@ -9,6 +9,7 @@ interface ResourceFilters {
   search?: string;
   limit?: number;
   offset?: number;
+  includeAbsent?: boolean;
 }
 
 export function useResources(filters: ResourceFilters = {}, enabled = true) {
@@ -19,6 +20,7 @@ export function useResources(filters: ResourceFilters = {}, enabled = true) {
   if (filters.search) params.set("q", filters.search);
   if (filters.limit) params.set("limit", String(filters.limit));
   if (filters.offset) params.set("offset", String(filters.offset));
+  if (filters.includeAbsent) params.set("include_absent", "true");
   const qs = params.toString();
 
   return useQuery({

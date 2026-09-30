@@ -15,6 +15,7 @@ from agenticops.models import (
     get_db_session,
     get_session,
 )
+from agenticops.services.inventory import PRESENT
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,11 @@ class ReportGenerator:
 
         try:
             # Gather data
-            resource_count = session.query(CloudResource).count()
+            resource_count = session.query(CloudResource).filter(PRESENT).count()
             if self.account:
                 resource_count = (
                     session.query(CloudResource)
+                    .filter(PRESENT)
                     .filter_by(account_id=self.account.id)
                     .count()
                 )
@@ -185,7 +187,7 @@ class ReportGenerator:
             type_query = session.query(
                 CloudResource.resource_type,
                 func.count(CloudResource.id).label("count"),
-            )
+            ).filter(PRESENT)
             if self.account:
                 type_query = type_query.filter_by(account_id=self.account.id)
             type_counts = type_query.group_by(CloudResource.resource_type).all()
@@ -314,7 +316,7 @@ class ReportGenerator:
         session = get_session()
 
         try:
-            query = session.query(CloudResource)
+            query = session.query(CloudResource).filter(PRESENT)
             if self.account:
                 query = query.filter_by(account_id=self.account.id)
 

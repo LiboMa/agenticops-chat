@@ -45,6 +45,7 @@ from agenticops.models import (
     get_session,
     get_db_session,
 )
+from agenticops.services.inventory import PRESENT
 
 # Import from new modular CLI components
 from agenticops.cli.formatters import (
@@ -378,7 +379,7 @@ def get_resources(
     session = get_session()
 
     try:
-        query = session.query(CloudResource)
+        query = session.query(CloudResource).filter(PRESENT)
         if type:
             query = query.filter_by(resource_type=type)
         if region:
@@ -1811,7 +1812,7 @@ def _slash_resource(ctx: ChatContext, args: list) -> str:
 
     try:
         if not args or args[0] == "list":
-            query = session.query(CloudResource)
+            query = session.query(CloudResource).filter(PRESENT)
             limit = settings.default_list_limit
 
             # Parse --type flag
@@ -2865,7 +2866,7 @@ Usage: /workflow <name> [options]"""
         session = get_session()
         try:
             issue_count = session.query(HealthIssue).filter_by(status="open").count()
-            resource_count = session.query(CloudResource).count()
+            resource_count = session.query(CloudResource).filter(PRESENT).count()
             results.append(f"  Resources: {resource_count}, Open issues: {issue_count}")
         finally:
             session.close()
@@ -2891,7 +2892,7 @@ Usage: /workflow <name> [options]"""
         session = get_session()
         try:
             accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
-            resources = session.query(CloudResource).count()
+            resources = session.query(CloudResource).filter(PRESENT).count()
             open_issues = session.query(HealthIssue).filter_by(status="open").count()
             critical = session.query(HealthIssue).filter_by(status="open", severity="critical").count()
             high = session.query(HealthIssue).filter_by(status="open", severity="high").count()
@@ -3192,7 +3193,7 @@ def _slash_status(ctx: ChatContext, args: list) -> str:
 
     try:
         accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         open_issues = session.query(HealthIssue).filter_by(status="open").count()
         investigating_issues = session.query(HealthIssue).filter_by(status="investigating").count()
 
@@ -3567,7 +3568,7 @@ Options:
 
     try:
         if entity == "resources":
-            resources = session.query(CloudResource).limit(100).all()
+            resources = session.query(CloudResource).filter(PRESENT).limit(100).all()
             data = [{"type": r.resource_type, "id": r.resource_id, "name": r.name,
                     "region": r.region, "status": r.status} for r in resources]
         elif entity in ("issues", "anomalies"):
@@ -3607,7 +3608,7 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
         accounts = session.query(CloudAccount).count()
         active_list = session.query(CloudAccount).filter_by(is_enabled=True).all()
         active_names = ", ".join(a.name for a in active_list) if active_list else "none"
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         anomalies = session.query(HealthIssue).filter_by(status="open").count()
 
         fmt = args[0] if args else "tree"
@@ -5001,7 +5002,7 @@ def export(
 
     try:
         if entity == "resources":
-            query = session.query(CloudResource)
+            query = session.query(CloudResource).filter(PRESENT)
             if type:
                 query = query.filter_by(resource_type=type)
             if region:
@@ -5080,7 +5081,7 @@ def arch(
         accounts = session.query(CloudAccount).count()
         active_accounts = session.query(CloudAccount).filter_by(is_enabled=True).all()
         active_names = ", ".join(a.name for a in active_accounts) if active_accounts else "none"
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         anomalies_open = session.query(HealthIssue).filter_by(status="open").count()
         anomalies_total = session.query(HealthIssue).count()
         reports = session.query(Report).count()

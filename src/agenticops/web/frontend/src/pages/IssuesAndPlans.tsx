@@ -350,8 +350,9 @@ function ResourcesView({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [showAbsent, setShowAbsent] = useState(false);
   const accounts = useAccounts();
-  const typeCounts = useResourceTypeCounts();
+  const typeCounts = useResourceTypeCounts(showAbsent);
 
   const offset = (page - 1) * pageSize;
 
@@ -362,6 +363,7 @@ function ResourcesView({
     search: search || undefined,
     limit: pageSize,
     offset,
+    includeAbsent: showAbsent,
   });
 
   const total = data?.total ?? 0;
@@ -422,7 +424,14 @@ function ResourcesView({
       header: "Resource ID",
       sortable: true,
       sortValue: (r) => r.resource_id,
-      render: (r) => <span className="font-mono text-sm">{r.resource_id}</span>,
+      render: (r) => (
+        <span
+          className={`font-mono text-sm${r.absent_since ? " line-through opacity-60" : ""}`}
+          title={r.absent_since ? t("resources.absent") : undefined}
+        >
+          {r.resource_id}
+        </span>
+      ),
     },
     {
       key: "resource_name",
@@ -492,6 +501,18 @@ function ResourcesView({
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showAbsent}
+              onChange={(e) => {
+                setShowAbsent(e.target.checked);
+                setPage(1);
+              }}
+              className="rounded border-border"
+            />
+            {t("resources.showAbsent")}
+          </label>
         </div>
 
         <div className="relative">

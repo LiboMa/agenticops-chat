@@ -49,6 +49,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
 from agenticops.services.executor_service import ExecutorService
+from agenticops.services.inventory import PRESENT
 from agenticops.web.session_manager import ChatSessionManager
 
 logger = logging.getLogger(__name__)
@@ -1401,7 +1402,7 @@ async def api_stats():
     """API endpoint for dashboard stats."""
     with get_db_session() as session:
         return {
-            "total_resources": session.query(CloudResource).count(),
+            "total_resources": session.query(CloudResource).filter(PRESENT).count(),
             "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
             "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
             "total_accounts": session.query(CloudAccount).count(),
@@ -1589,10 +1590,13 @@ async def api_list_resources(
     q: Optional[str] = Query(None, description="Search by resource ID, name, or type"),
     limit: Optional[int] = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
+    include_absent: bool = False,
 ):
     """List resources with filtering and optional pagination."""
     with get_db_session() as session:
         query = session.query(CloudResource)
+        if not include_absent:
+            query = query.filter(PRESENT)
 
         if resource_type:
             query = query.filter_by(resource_type=resource_type)
@@ -1622,11 +1626,14 @@ async def api_list_resources(
 
 
 @app.get("/api/resources/type-counts")
-async def api_resource_type_counts():
+async def api_resource_type_counts(include_absent: bool = False):
     """Resource counts grouped by type."""
     with get_db_session() as session:
+        query = session.query(CloudResource.resource_type, func.count())
+        if not include_absent:
+            query = query.filter(PRESENT)
         rows = (
-            session.query(CloudResource.resource_type, func.count())
+            query
             .group_by(CloudResource.resource_type)
             .order_by(func.count().desc())
             .all()
@@ -1842,6 +1849,7 @@ async def api_resource_related(resource_id: int):
                     session.query(CloudResource)
                     .filter(
                         CloudResource.id != resource.id,
+                        PRESENT,
                         func.json_extract(CloudResource.raw_data, f"$.{ref_key}") == resource.resource_id,
                     )
                     .limit(100)

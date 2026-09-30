@@ -27,7 +27,7 @@ from agenticops.models import (
     validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
-from agenticops.services.inventory import mark_seen
+from agenticops.services.inventory import PRESENT, mark_seen
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,7 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
             query = session.query(CloudResource).filter(
                 CloudResource.account_id.in_(account_ids),
                 CloudResource.managed == True,  # noqa: E712
+                PRESENT,
             )
             if resource_type:
                 query = query.filter_by(resource_type=resource_type)
@@ -532,6 +533,7 @@ def get_resource_by_id(resource_id: int) -> str:
             "status": resource.status,
             "managed": resource.managed,
             "tags": resource.tags,
+            "absent_since": resource.absent_since,
         }, default=str))
     finally:
         session.close()

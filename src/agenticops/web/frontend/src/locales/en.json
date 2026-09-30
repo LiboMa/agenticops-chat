@@ -440,6 +440,8 @@
   "resources.title": "Resources",
   "resources.back": "Resources",
   "resources.search": "Search by ID, name, or type...",
+  "resources.absent": "Not seen in the latest scan",
+  "resources.showAbsent": "Show absent",
   "schedules.title": "Schedules",
   "reports.title": "Reports",
   "common.loading": "Loading...",

@@ -440,6 +440,8 @@
   "resources.title": "资源",
   "resources.back": "资源",
   "resources.search": "搜索 ID、名称或类型...",
+  "resources.absent": "最近一次扫描未见",
+  "resources.showAbsent": "显示缺席资源",
   "schedules.title": "定时任务",
   "reports.title": "报告",
   "common.loading": "加载中...",

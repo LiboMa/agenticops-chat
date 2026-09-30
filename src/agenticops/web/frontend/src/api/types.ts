@@ -19,6 +19,8 @@ export interface Resource {
   tags: Record<string, string>;
   created_at: string;
   updated_at: string;
+  scanned_at?: string | null;
+  absent_since?: string | null; // set when the latest complete scan no longer saw it
 }
 
 export interface PaginatedResources {

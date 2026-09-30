@@ -54,7 +54,10 @@ export default function ResourceDetail() {
         <div className="px-5 py-4 border-b">
           <div className="flex items-center gap-3 mb-2">
             <Badge className="bg-primary-100 text-primary-700">{r.resource_type}</Badge>
-            <h1 className="text-lg font-semibold">{r.resource_name || r.resource_id}</h1>
+            <h1 className={`text-lg font-semibold${r.absent_since ? " line-through opacity-60" : ""}`}>
+              {r.resource_name || r.resource_id}
+            </h1>
+            {r.absent_since && <Badge className="bg-secondary text-muted-foreground">{t("resources.absent")}</Badge>}
           </div>
           <div className="flex items-center gap-6 text-sm text-muted-foreground">
             <span className="font-mono text-xs">{r.resource_id}</span>

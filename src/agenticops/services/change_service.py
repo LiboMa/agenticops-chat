@@ -26,6 +26,7 @@ from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / trans
     CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixPlan, InvalidStatusTransition,
     get_db_session, transition_change, transition_plan,
 )
+from agenticops.services.inventory import PRESENT
 from agenticops.services.notification_service import (  # noqa: F401  (pending_approval: approval stage)
     notify_change_pending_approval, notify_change_requested, notify_change_result,
 )
@@ -591,7 +592,7 @@ def ground_targets(cr_id: int) -> dict:
     with _session() as s:
         cr = _load(s, cr_id)
         require_live_review(cr, "targets can only be grounded during review")
-        q = s.query(CloudResource)
+        q = s.query(CloudResource).filter(PRESENT)  # an absent row is no evidence the target exists today
         if cr.account_id:
             q = q.filter(CloudResource.account_id == cr.account_id)
         rows = q.all()

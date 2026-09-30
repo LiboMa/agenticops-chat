@@ -75,6 +75,8 @@ class ResourceResponse(BaseModel):
     tags: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+    scanned_at: Optional[datetime] = None
+    absent_since: Optional[datetime] = None  # set when the latest complete scan no longer saw the row
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,6 +98,8 @@ class ResourceResponse(BaseModel):
             tags=r.tags if isinstance(r.tags, dict) else {},
             created_at=r.created_at,
             updated_at=r.updated_at,
+            scanned_at=getattr(r, "scanned_at", None),
+            absent_since=getattr(r, "absent_since", None),
         )
 
 
