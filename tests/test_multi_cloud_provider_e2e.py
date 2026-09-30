@@ -473,7 +473,7 @@ class TestGraphApiUsesProvider:
         import inspect
         source = inspect.getsource(mod)
         fn_start = source.index("def _ensure_aws_session")
-        fn_end = source.index("def _build_vpc_graph")
+        fn_end = source.index("def _build_region_graph")
         fn_source = source[fn_start:fn_end]
         assert "import boto3" not in fn_source
 

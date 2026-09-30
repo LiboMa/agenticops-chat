@@ -57,6 +57,10 @@ ERR_AMBIGUOUS = (
 ERR_UNKNOWN_ACCOUNT = (
     "No enabled account matches '{ref}'. Enabled {provider} accounts: {names}."
 )
+ERR_VPC_AMBIGUOUS = (
+    "VPC {vpc_id} is in the inventory of several enabled accounts: {names}. "
+    "Specify which one with account='<name>'."
+)
 ERR_RESOLVE_FAILED = (
     "Credential resolution failed for registered account '{name}' ({provider}): "
     "provider returned False (see logs — common causes: expired keys, AssumeRole "
@@ -355,6 +359,36 @@ def find_cluster_account(
                 )
                 continue
     return None
+
+
+def find_vpc_account(vpc_id: str) -> SimpleNamespace | None:
+    """Locate the enabled AWS account owning a VPC, from inventory only (no probe).
+
+    One account → it; none → None (the caller falls back to resolve_default_account);
+    several — a shared VPC is in the owner's inventory and in every participant's —
+    → AccountResolutionError naming them, since guessing would query the wrong account.
+    """
+    from agenticops.models import CloudAccount, CloudResource, get_db_session
+
+    with get_db_session() as db:
+        accounts = [
+            _snapshot(acct)
+            for acct in (
+                db.query(CloudAccount)
+                .join(CloudResource, CloudResource.account_id == CloudAccount.id)
+                .filter(
+                    CloudAccount.is_enabled == True,  # noqa: E712
+                    CloudResource.provider == "aws",
+                    CloudResource.resource_type == "VPC",
+                    CloudResource.resource_id == vpc_id,
+                )
+                .all()
+            )
+        ]
+    if len(accounts) > 1:
+        names = ", ".join(sorted(a.name for a in accounts))
+        raise AccountResolutionError(ERR_VPC_AMBIGUOUS.format(vpc_id=vpc_id, names=names))
+    return accounts[0] if accounts else None
 
 
 def get_instance_ips(instance_id: str) -> dict | None:

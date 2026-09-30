@@ -47,8 +47,8 @@ Web Dashboard ──────┘         │
    降级 = 在错误账户上执行。`environment` 源类型是唯一合法的"用本地默认链"声明(经 provider 层解析 + GetCallerIdentity
    校验,属解析成功),除此之外**没有任何 ambient 回退路径**。
 3. **账户寻址执行(account-addressed),不再用隐式 ContextVar**:业务工具(`run_on_host`/`run_kubectl`/`run_aws_cli`、
-   `describe_*`、network/eks/cloudwatch/cloudtrail)都带显式 `account` 参数。解析顺序:显式 `account` → 按目标资源
-   反查库存(`run_on_host` 按 instance-id、`run_kubectl` 按 cluster-name)→ 单账户默认(`resolve_default_account`,
+   `describe_*`、network/graph(VPC·region 拓扑)/eks/cloudwatch/cloudtrail)都带显式 `account` 参数。解析顺序:显式 `account` → 按目标资源
+   反查库存(`run_on_host` 按 instance-id、`run_kubectl` 按 cluster-name、graph VPC 工具按 vpc-id;同一 VPC 在多个账户库存里时报错列出账户名)→ 单账户默认(`resolve_default_account`,
    恰一个启用账户)→ fail-closed 列出账户名。子进程注入前先 strip 所有 `AWS_*`,再只注入解析出账户的 frozen 凭证
    (+ 需要时回注 region)。统一入口:`credentials/resolver.get_subprocess_env_for_account(account[, region])` ——
    `run_aws_cli/_readonly`、`run_on_host(ssm)`、`aws eks update-kubeconfig` 都经它取目标账户 env。**无任何"无上下文回退

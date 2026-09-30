@@ -29,6 +29,7 @@ from agenticops.graph.algorithms import (
 )
 from agenticops.graph.engine import InfraGraph
 from agenticops.graph.serializers import to_reactflow
+from agenticops.graph.tools import _build_enriched_vpc_graph, _build_vpc_graph  # account-addressed
 from agenticops.graph.types import SerializedGraph
 
 logger = logging.getLogger(__name__)
@@ -58,26 +59,6 @@ def _ensure_aws_session(region: str) -> None:
         logger.debug("graph API: %s", e)
     except Exception:
         logger.debug("Failed to resolve AWS session for graph API", exc_info=True)
-
-
-def _build_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
-    """Build an InfraGraph from a VPC topology."""
-    _ensure_aws_session(region)
-    from agenticops.tools.network_tools import analyze_vpc_topology
-
-    raw = analyze_vpc_topology(region=region, vpc_id=vpc_id)
-    topo = json.loads(raw)
-    return InfraGraph().build_from_vpc_topology(topo)
-
-
-def _build_enriched_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
-    """Build VPC graph enriched with compute resources."""
-    graph = _build_vpc_graph(region, vpc_id)
-    from agenticops.graph.collectors import collect_vpc_compute
-
-    compute_data = collect_vpc_compute(region, vpc_id)
-    graph.enrich_with_compute(compute_data)
-    return graph
 
 
 def _build_region_graph(region: str) -> InfraGraph:

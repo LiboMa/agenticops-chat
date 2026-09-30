@@ -243,6 +243,35 @@ def test_find_cluster_inventory_hit(db_session):
     assert found is not None and found[0].name == "prod"
 
 
+# ── find_vpc_account ─────────────────────────────────────────────────────
+
+
+def test_find_vpc_inventory_hit(db_session):
+    a = _add_account(db_session, "prod", "111")
+    b = _add_account(db_session, "staging", "222")
+    _add_resource(db_session, a, "vpc-1", rtype="VPC")
+    _add_resource(db_session, b, "vpc-1", rtype="Subnet")  # same id, other type: not a VPC row
+    assert resolver.find_vpc_account("vpc-1").name == "prod"
+
+
+def test_find_vpc_miss_skips_disabled_accounts(db_session):
+    off = _add_account(db_session, "old", "333", enabled=False)
+    _add_resource(db_session, off, "vpc-1", rtype="VPC")
+    assert resolver.find_vpc_account("vpc-1") is None
+    assert resolver.find_vpc_account("vpc-2") is None
+
+
+def test_find_vpc_in_two_accounts_lists_names(db_session):
+    # a shared VPC is in the owner's inventory and in every participant's
+    a = _add_account(db_session, "prod", "111")
+    b = _add_account(db_session, "staging", "222")
+    _add_resource(db_session, a, "vpc-1", rtype="VPC")
+    _add_resource(db_session, b, "vpc-1", rtype="VPC")
+    with pytest.raises(resolver.AccountResolutionError) as e:
+        resolver.find_vpc_account("vpc-1")
+    assert "prod" in str(e.value) and "staging" in str(e.value)
+
+
 # ── get_instance_ips ─────────────────────────────────────────────────────
 
 
