@@ -296,6 +296,8 @@ rca_topology_window_after_minutes: 10
 # ── Pull connectors (MVP-2.6.1) ────────────────────────────────
 # kubectl runs with a private per-account/region/cluster kubeconfig under <data_dir>/kube/, never ~/.kube/config.
 k8s_kubeconfig_max_age_seconds: 3600
+# One kubectl call of the K8s connector may return at most this many bytes; above it the kind is partial.
+k8s_connector_max_output_bytes: 20000000
 
 # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
 security_review_enabled: true

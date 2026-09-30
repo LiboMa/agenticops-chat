@@ -222,6 +222,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `graph_query_max_depth` | `2` | Max neighborhood depth (`potential_impact` is fixed at 3) |
 | `rca_topology_window_before_minutes` / `…_after_minutes` | `30` / `10` | Time window around `observed_at or first_seen` — observed blast radius (A) and the RCA evidence pack (C) |
 | `k8s_kubeconfig_max_age_seconds` | `3600` | A generated private kubeconfig (`<data_dir>/kube/<account pk>/<credential fingerprint>/<region>/<cluster>.kubeconfig`) whose age is ≥ 0 and below this is reused; an older one, or one with a future mtime, is regenerated with `aws eks update-kubeconfig` under the target account's env |
+| `k8s_connector_max_output_bytes` | `20000000` | Byte cap on one `kubectl get <kind>` of the K8s connector; above it the kind is partial (never marked absent) |
 | `signal_gate_enabled` | `true` | Route all HealthIssue creation through the Signal Gate (false = legacy dedup only) |
 | `signal_gate_llm_enabled` | `true` | L2 gray-zone LLM merge judgment (cheap tier, merge-or-new only) |
 | `signal_gate_confidence_min` | `0.7` | Min LLM confidence to accept a gray-zone merge (below → promote) |

@@ -603,6 +603,11 @@ class Settings(BaseSettings):
         description="Reuse a generated private kubeconfig (<data_dir>/kube/...) younger than this; older is "
         "regenerated (AIOPS_K8S_KUBECONFIG_MAX_AGE_SECONDS)",
     )
+    k8s_connector_max_output_bytes: int = Field(
+        default=20000000,
+        description="Byte cap on one kubectl call of the K8s connector; a kind whose output exceeds it is partial "
+        "(AIOPS_K8S_CONNECTOR_MAX_OUTPUT_BYTES)",
+    )
 
     # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
     security_review_enabled: bool = Field(
