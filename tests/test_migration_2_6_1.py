@@ -165,8 +165,28 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert all("DATETIME" not in s for s in stmts)
 
 
+# The post-2.2.0 Signal ledger, with the row that created issue 1: its signal stated no account.
+LEDGER = """
+CREATE TABLE alert_events (id INTEGER PRIMARY KEY, source VARCHAR(50), external_id VARCHAR(200), severity VARCHAR(20),
+  title VARCHAR(500), description TEXT, resource_hint VARCHAR(500), raw_payload JSON, health_issue_id INTEGER,
+  status VARCHAR(30), received_at DATETIME, trace_id VARCHAR(20), kind VARCHAR(20), fingerprint VARCHAR(64),
+  resource_id VARCHAR(500), account_id VARCHAR(100), issue_type VARCHAR(40), disposition VARCHAR(20),
+  disposition_reason VARCHAR(200), gate_evidence JSON);
+INSERT INTO alert_events (id, source, external_id, severity, title, description, resource_hint, raw_payload,
+  health_issue_id, status, received_at, kind, resource_id, account_id, issue_type, disposition, disposition_reason,
+  gate_evidence)
+  VALUES (1, 'webhook_prometheus', 'e1', 'high', 't', '', '', '{}', 1, 'processed', '2026-09-01 12:00:00', 'alert',
+  'i-0abc', '', 'cpu_spike', 'promoted', 'new_issue', '{}');
+"""
+
+
 def test_backfill_anchors_existing_issues(old_db):
-    """Spec §4 backfill 2: issue 1 names i-0abc with no account; the only enabled account holds it."""
+    """Spec §4 backfill 2: issue 1 names i-0abc, and its signal stated no account; the only enabled account
+    holds it."""
+    con = sqlite3.connect(old_db)
+    con.executescript(LEDGER)
+    con.commit()
+    con.close()
     engine = _run_init_db(old_db)
     with engine.connect() as c:
         row = c.execute(text("SELECT resource_ref, anchor_status, account_id FROM health_issues WHERE id = 1")).one()

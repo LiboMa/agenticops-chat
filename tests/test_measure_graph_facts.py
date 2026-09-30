@@ -27,7 +27,7 @@ def _sha(path):
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     """A current-schema DB whose issues have never been through the resolver (anchor_status NULL)."""
-    from agenticops.models import Base, CloudAccount, CloudResource, HealthIssue, get_session
+    from agenticops.models import AlertEvent, Base, CloudAccount, CloudResource, HealthIssue, get_session
 
     db = tmp_path / "source.db"
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{db}")
@@ -58,6 +58,10 @@ def source(tmp_path, monkeypatch):
     ]:
         s.add(HealthIssue(resource_id=rid, account_id=acct.id if acct else None, severity="high", status=status,
                           source="test", title="t", description="d"))
+    s.flush()
+    shared = s.query(HealthIssue).filter_by(resource_id="shared-role").one()
+    s.add(AlertEvent(source="webhook_prometheus", external_id="e-shared", severity="high", title="t",
+                     health_issue_id=shared.id, account_id="", disposition="promoted"))  # stated no account
     s.commit()
     s.close()
     models_mod._engine.dispose()

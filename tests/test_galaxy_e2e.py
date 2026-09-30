@@ -45,7 +45,7 @@ def client(tmp_path, monkeypatch):
                       tags={"Project": "payments"},
                       raw_data={"VpcId": "vpc-a", "Purpose": "payments"}),
     ])
-    s.add(HealthIssue(resource_id="i-1", severity="critical", source="manual",
+    s.add(HealthIssue(resource_id="i-1", severity="critical", source="manual", account_id=acct.id,
                       title="api down", description="d", status="open"))
     s.commit(); s.close()
     yield TestClient(app)

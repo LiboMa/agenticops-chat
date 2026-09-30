@@ -268,7 +268,7 @@ def test_prune_keeps_running_llm_and_published_builds_with_their_relations(db):
 def test_completed_builds_reanchor_open_issues(db, seeded, monkeypatch, trigger, llm):
     monkeypatch.setattr(B, "_call_bedrock", _llm_returns([]))
     issue = HealthIssue(resource_id="i-2", severity="high", source="manual", title="api down",
-                        description="d", status="open", anchor_status="unanchored")
+                        description="d", status="open", anchor_status="unanchored", account_id=seeded)
     db.add(issue)
     db.commit()
     issue_id = issue.id

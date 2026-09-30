@@ -314,3 +314,61 @@ def test_nothing_matches(session):
 def test_a_named_account_is_kept_when_nothing_matches(session):
     a = _resolve(session, account_id="Agenticops-Global", resource_id="sa-malibo")
     assert (a.status, a.account_id) == (ir.UNANCHORED, GLOBAL)
+
+
+# ── search_all_accounts=False: a retry whose signal's account is unknown (final review I-1) ──
+
+
+def test_no_cross_account_search_when_the_caller_forbids_it(session):
+    _res(session, 70, CN, "EC2", "i-0only", region="cn-north-1")
+    a = _resolve(session, resource_id="i-0only", search_all_accounts=False)
+    assert (a.status, a.resource_ref, a.account_id, a.rule, a.candidates) == (
+        ir.UNANCHORED, None, None, "account_unknown", [])
+    assert _resolve(session, resource_id="i-0only").resource_ref == 70  # the default still searches
+
+
+@pytest.mark.parametrize("kw,expected", [
+    ({"resource_id": "arn:aws:ec2:us-east-1:533267047935:instance/i-0abc"}, (ir.ANCHORED, 10, GLOBAL)),
+    ({"resource_id": "533267047935-root"}, (ir.ACCOUNT_LEVEL, None, GLOBAL)),
+    ({"resource_id": "i-0abc", "hints": {"account": "Agenticops-Global"}}, (ir.ANCHORED, 10, GLOBAL)),
+    ({"resource_id": "i-0abc", "account_id": GLOBAL}, (ir.ANCHORED, 10, GLOBAL)),
+])
+def test_an_input_that_names_its_account_ignores_search_all_accounts(session, kw, expected):
+    _res(session, 10, GLOBAL, "EC2", "i-0abc")
+    a = _resolve(session, search_all_accounts=False, **kw)
+    assert (a.status, a.resource_ref, a.account_id) == expected
+
+
+# ── K8s: the cluster is disambiguated before any namespaced lookup (final review I-2) ──
+
+
+def _twin_lab_clusters(s):
+    """Two physical clusters named 'lab' in one account; K8s ids carry no region (spec §3.B.3)."""
+    from agenticops.galaxy.rules import k8s_resource_id
+
+    _res(s, 90, GLOBAL, "EKS_Cluster", "arn:aws:eks:us-east-1:533267047935:cluster/lab", region="us-east-1", name="lab")
+    _res(s, 91, GLOBAL, "EKS", "lab", region="us-west-2")
+    _res(s, 92, GLOBAL, "K8s_Deployment", k8s_resource_id("lab", "Deployment", "web", "default"), region="us-east-1",
+         name="web", provider="kubernetes")
+
+
+def test_same_named_clusters_make_a_namespaced_hint_ambiguous(session):
+    _twin_lab_clusters(session)
+    a = _resolve(session, hints={"cluster": "lab", "namespace": "default", "workload": "web"})
+    assert (a.status, a.resource_ref, a.account_id, a.rule) == (ir.AMBIGUOUS, None, GLOBAL, "k8s_hints")
+    assert [c["ref"] for c in a.candidates] == [90, 91]
+
+
+def test_a_region_hint_singles_out_the_cluster(session):
+    _twin_lab_clusters(session)
+    a = _resolve(session, hints={"cluster": "lab", "namespace": "default", "workload": "web", "region": "us-east-1"})
+    assert (a.status, a.resource_ref, a.account_id, a.rule) == (ir.ANCHORED, 92, GLOBAL, "k8s_hints")
+
+
+def test_one_physical_cluster_in_two_rows_still_anchors_namespaced_objects(session):
+    """The same cluster scanned as EKS and as EKS_Cluster is one physical cluster, not a twin."""
+    _res(session, 1355, GLOBAL, "EKS", CLUSTER)
+    _res(session, 1356, GLOBAL, "EKS_Cluster", f"arn:aws:eks:us-east-1:533267047935:cluster/{CLUSTER}", name=CLUSTER)
+    _k8s(session, 50, "Deployment", "checkout", "shop")
+    a = _resolve(session, hints={"cluster": CLUSTER, "namespace": "shop", "workload": "checkout"})
+    assert (a.status, a.resource_ref) == (ir.ANCHORED, 50)

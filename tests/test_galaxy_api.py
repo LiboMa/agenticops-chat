@@ -34,7 +34,7 @@ def client(tmp_path, monkeypatch):
                       resource_type="EC2", resource_id="i-1", name="web",
                       tags={"Project": "demo"}, raw_data={"NetworkInterfaces": [{"VpcId": "vpc-a"}]}),
     ])
-    s.add(HealthIssue(resource_id="i-1", severity="critical", source="manual",
+    s.add(HealthIssue(resource_id="i-1", severity="critical", source="manual", account_id=acct.id,
                       title="down", description="d", status="open"))
     s.commit(); s.close()
     yield TestClient(app)

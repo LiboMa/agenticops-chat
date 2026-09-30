@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agenticops.models import Base, CloudAccount, CloudResource, HealthIssue, get_session
+from agenticops.models import AlertEvent, Base, CloudAccount, CloudResource, HealthIssue, get_session
 from agenticops.services import identity_resolver as ir
 from agenticops.services import signal_gate as sg
 
@@ -153,6 +153,8 @@ def test_reanchor_never_downgrades(session):
     _seed_issue(session, 4, "i-late", status="resolved")                 # closed
     _seed_issue(session, 5, "i-late", status="dismissed")                # suppressed, not open
     _seed_issue(session, 6, "sa-malibo", anchor_status=None)             # backfill never reached it
+    session.add(AlertEvent(source="webhook_prometheus", external_id="e2", severity="high", title="t",
+                           health_issue_id=2, account_id="", disposition="promoted"))  # stated no account
     _res(session, 20, CN, "EC2", "i-late")
 
     assert ir.reanchor_open_issues(session) == 2
@@ -163,6 +165,7 @@ def test_reanchor_never_downgrades(session):
     assert got[3] == (ir.AMBIGUOUS, None, None)
     assert got[4] == got[5] == (ir.UNANCHORED, None, None)
     assert got[6] == (ir.UNANCHORED, None, None)
+    assert session.get(HealthIssue, 6).anchor_candidates["rule"] == "account_unknown"  # no ledger row
     assert session.get(HealthIssue, 3).anchor_candidates == {"rule": "seed", "candidates": []}
     assert ir.reanchor_open_issues(session) == 0  # idempotent
 

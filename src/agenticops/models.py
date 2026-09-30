@@ -1422,20 +1422,23 @@ def _statements_2_6_1(insp, dialect) -> list[str]:
 
 def _backfill_anchors_2_6_1(engine) -> None:
     """Spec §4 backfill 2: anchor every issue that has never been through the resolver. Column-level query and
-    UPDATE, so a later release's HealthIssue columns (added after this runs) cannot break it. Fail-soft: an
-    anchor is an enrichment — a failure logs and leaves anchor_status NULL for reanchor_open_issues."""
+    UPDATE, so a later release's HealthIssue columns (added after this runs) cannot break it. A NULL account
+    stays inside the account the issue's signal stated (issue_account_claim, as reanchor_open_issues does).
+    Fail-soft: an anchor is an enrichment — a failure logs and leaves anchor_status NULL for
+    reanchor_open_issues."""
     try:
-        from agenticops.services.identity_resolver import resolve
+        from agenticops.services.identity_resolver import issue_account_claim, resolve
 
         with Session(engine) as session:
             rows = session.query(
                 HealthIssue.id, HealthIssue.resource_id, HealthIssue.account_id, HealthIssue.provider,
-                HealthIssue.alarm_name, HealthIssue.metric_data,
+                HealthIssue.alarm_name, HealthIssue.metric_data, HealthIssue.anchor_candidates,
             ).filter(HealthIssue.anchor_status.is_(None)).all()
             for row in rows:
                 md = row.metric_data if isinstance(row.metric_data, dict) else {}
-                anchor = resolve(session, account_id=row.account_id, provider=row.provider,
-                                 resource_id=row.resource_id, hints=md.get("hints"), alarm_name=row.alarm_name)
+                claim, search_all = issue_account_claim(session, row.id, row.account_id, row.anchor_candidates)
+                anchor = resolve(session, account_id=claim, provider=row.provider, resource_id=row.resource_id,
+                                 hints=md.get("hints"), alarm_name=row.alarm_name, search_all_accounts=search_all)
                 values = {"resource_ref": anchor.resource_ref, "anchor_status": anchor.status,
                           "anchor_candidates": anchor.audit()}
                 if row.account_id is None and anchor.account_id is not None:

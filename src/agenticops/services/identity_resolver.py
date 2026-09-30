@@ -7,13 +7,15 @@ hints, an alarm name — to ONE physical cloud_resources row, or says honestly w
                  reason duplicate_of, not ambiguity)
   ambiguous      the first rule with a hit found two or more physical resources; all become candidates
   account_level  the subject is the account itself (root user, CIS control, account-wide setting)
-  unanchored     nothing matched, the input names an account we do not manage (rule unknown_account), or
-                 an ARN's account contradicts the stated account (rule account_conflict)
+  unanchored     nothing matched, the input names an account we do not manage (rule unknown_account), an
+                 ARN's account contradicts the stated account (rule account_conflict), or the input names no
+                 account and the caller forbids a search across accounts (rule account_unknown)
 
 Rules run in order; the first one with any hit decides. Every lookup stays inside one account. When the
 input names no account at all, each rule runs in every enabled account and only a single physical hit
-anchors (and backfills the account) — there is no "the only enabled account" guess. Inventory reads only:
-no LLM, no cloud calls.
+anchors (and backfills the account) — there is no "the only enabled account" guess. A retry of an existing
+issue first recovers the account its signal stated (issue_account_claim); when that is unknown it does not
+search across accounts at all. Inventory reads only: no LLM, no cloud calls.
 """
 from __future__ import annotations
 
@@ -221,10 +223,17 @@ def _pod_bases(pod: str) -> list:
 
 def _k8s_rows(session, account: int, region: Optional[str], hints: dict) -> list:
     """Rule 6, most specific first: workload, the pod's workload, a bare pod, service, namespace, the cluster.
-    Namespaced lookups need hints.namespace; nothing is guessed."""
+    Namespaced lookups need hints.namespace; nothing is guessed. A K8s id carries the cluster's name but no
+    region, so two same-named clusters (another region, same account) share every namespaced id: the cluster
+    is disambiguated first, and two or more physical clusters return the clusters themselves (ambiguous)."""
     from agenticops.models import CloudResource as R
 
     cluster, ns = hints["cluster"], hints.get("namespace")
+    rows = _rows(session, account, region, R.resource_type.in_(_CLUSTER_TYPES),
+                 or_(R.resource_id == cluster, R.name == cluster, _arn_rows_ending_in(cluster)))
+    clusters = [r for r in rows if cluster in (r["resource_id"], r["name"], short_id(r["resource_id"]))]
+    if len(dedup_physical(clusters, settings.identity_type_families)[0]) > 1:
+        return clusters
     lookups: list = []
     if ns:
         if hints.get("workload"):
@@ -240,9 +249,7 @@ def _k8s_rows(session, account: int, region: Optional[str], hints: dict) -> list
         rows = _rows(session, account, region, R.resource_id.in_(ids)) if ids else []
         if rows:
             return rows
-    rows = _rows(session, account, region, R.resource_type.in_(_CLUSTER_TYPES),
-                 or_(R.resource_id == cluster, R.name == cluster, _arn_rows_ending_in(cluster)))
-    return [r for r in rows if cluster in (r["resource_id"], r["name"], short_id(r["resource_id"]))]
+    return clusters
 
 
 def _alarm_hints(alarm_name: str, hints: dict) -> Optional[dict]:
@@ -298,12 +305,15 @@ def _decide(rule: str, rows: list, families: dict, known: Optional[int]) -> Anch
 
 
 def resolve(session, *, account_id=None, provider: Optional[str] = None, resource_id: Optional[str] = None,
-            hints: Optional[dict] = None, alarm_name: Optional[str] = None) -> Anchor:
+            hints: Optional[dict] = None, alarm_name: Optional[str] = None,
+            search_all_accounts: bool = True) -> Anchor:
     """Anchor one issue subject (the single entry point — Signal Gate, the 2.6.1 backfill and re-anchoring).
 
     account_id may be a cloud_accounts.id, an account name or a 12-digit number (account_pk maps it).
     provider belongs to the contract but is not a row filter: an EKS cluster's K8s rows live in the owning
-    AWS account under provider=kubernetes while the alert about them says aws."""
+    AWS account under provider=kubernetes while the alert about them says aws. search_all_accounts=False:
+    when the input names no account, return unanchored (rule account_unknown) instead of searching every
+    enabled account — an input that names its own account (ARN, account-level id) is unaffected."""
     from agenticops.models import CloudAccount
 
     rid = (resource_id or "").strip()
@@ -322,6 +332,8 @@ def resolve(session, *, account_id=None, provider: Optional[str] = None, resourc
             return Anchor(UNANCHORED, rule="account_conflict",
                           candidates=[{"account": str(claimed), "arn_account": conflict, "reason": "account_conflict"}])
         accounts, known = [pk], pk
+    elif not search_all_accounts:
+        return Anchor(UNANCHORED, rule="account_unknown")
     else:
         accounts = [row.id for row in session.query(CloudAccount.id)
                     .filter(CloudAccount.is_enabled.is_(True)).order_by(CloudAccount.id)]
@@ -339,18 +351,29 @@ def resolve(session, *, account_id=None, provider: Optional[str] = None, resourc
     return _decide(rule, rows, settings.identity_type_families, known)
 
 
-def _retry_account(issue):
-    """The account a retry must stay inside: the issue's own account, else the account claim its audit
-    recorded (candidates[0]["account"] — today unknown_account, account_conflict or a failed anchor).
-    None = the signal stated no account."""
-    if issue.account_id is not None:
-        return issue.account_id
-    audit = issue.anchor_candidates
-    candidates = audit.get("candidates") if isinstance(audit, dict) else None
+def issue_account_claim(session, issue_id, account_id, anchor_candidates) -> tuple:
+    """The account an existing issue's retry must stay inside, as (claim, search_all_accounts) for resolve().
+    Most trusted first: the issue's own account; the claim its audit recorded (candidates[0]["account"] —
+    unknown_account, account_conflict or a failed anchor); the account its earliest promoted Signal row stated
+    (merged / noise / error rows never are the claim). An empty ledger account means the signal stated none:
+    (None, True), the spec's search of every enabled account. No ledger row (pruned after
+    signal_retention_days, or never written) means the claim is unknown: (None, False). Plain arguments, so
+    the column-level 2.6.1 backfill can call it too."""
+    from agenticops.models import AlertEvent
+
+    if account_id is not None:
+        return account_id, False
+    candidates = anchor_candidates.get("candidates") if isinstance(anchor_candidates, dict) else None
     first = candidates[0] if isinstance(candidates, list) and candidates else None
     if isinstance(first, dict) and "account" in first:
-        return first["account"]
-    return None
+        return first["account"], False
+    ledger = (session.query(AlertEvent.account_id)
+              .filter(AlertEvent.health_issue_id == issue_id, AlertEvent.disposition == "promoted")
+              .order_by(AlertEvent.received_at, AlertEvent.id).first())
+    if ledger is None:
+        return None, False
+    stated = (ledger.account_id or "").strip()
+    return (stated, False) if stated else (None, True)
 
 
 def reanchor_open_issues(session) -> int:
@@ -358,8 +381,9 @@ def reanchor_open_issues(session) -> int:
 
     Forward only: an unanchored / ambiguous issue changes only when the new result is anchored or
     account_level, so a shrinking inventory never erases an earlier audit. anchor_status NULL (the backfill
-    or _promote failed) takes any result. The retry stays inside the account the signal stated (_retry_account).
-    Returns the number of issues changed; the caller commits."""
+    or _promote failed) takes any result. The retry stays inside the account the signal stated
+    (issue_account_claim); when no record of that account survives, it searches no other account
+    (unanchored, rule account_unknown). Returns the number of issues changed; the caller commits."""
     from agenticops.models import HealthIssue
     from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
 
@@ -371,8 +395,9 @@ def reanchor_open_issues(session) -> int:
     changed = 0
     for issue in issues:
         md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
-        anchor = resolve(session, account_id=_retry_account(issue), provider=issue.provider,
-                         resource_id=issue.resource_id, hints=md.get("hints"), alarm_name=issue.alarm_name)
+        claim, search_all = issue_account_claim(session, issue.id, issue.account_id, issue.anchor_candidates)
+        anchor = resolve(session, account_id=claim, provider=issue.provider, resource_id=issue.resource_id,
+                         hints=md.get("hints"), alarm_name=issue.alarm_name, search_all_accounts=search_all)
         if issue.anchor_status is not None and anchor.status not in (ANCHORED, ACCOUNT_LEVEL):
             continue
         issue.resource_ref = anchor.resource_ref
