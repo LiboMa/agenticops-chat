@@ -93,6 +93,9 @@ def process_alert(
             trace_id=trace_id,
             im_origin=im_meta,
             detected_by="webhook",
+            hints=dict(alert.hints or {}),
+            observed_at=alert.observed_at,
+            alarm_name=alert.alarm_name or "",
         ))
     except Exception as e:
         logger.exception("Signal gate failed for webhook alert")

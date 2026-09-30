@@ -412,7 +412,10 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         source=sig.source,
         title=(sig.title or "")[:300],
         description=sig.description or "",
-        alarm_name=(sig.alarm_name or None),
+        # CloudWatch allows 255 characters, the column 200: a cut name could re-anchor to the wrong cluster later
+        # (reanchor_open_issues reads the column), so it anchors once above, whole, and is not stored.
+        alarm_name=(sig.alarm_name if sig.alarm_name and len(sig.alarm_name) <= HealthIssue.alarm_name.type.length
+                    else None),
         metric_data=metric_data,
         related_changes=list(sig.related_changes or []),
         status="open",
