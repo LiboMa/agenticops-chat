@@ -223,6 +223,28 @@ class CloudResource(Base):
     account: Mapped["CloudAccount"] = relationship(back_populates="resources")
 
 
+class ConnectorRun(Base):
+    """One pull-connector run over one target (MVP-2.6.1 spec §3.B.2), written by connectors.ingest.
+
+    status: complete (every kind listed completely) | partial (some kind failed or hit the byte cap) |
+    failed (nothing collected). per_kind: {resource_type: {"complete": bool, "count": int}}."""
+
+    __tablename__ = "connector_runs"
+    __table_args__ = (Index("idx_connector_run_target", "connector", "account_id", "scope", "finished_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    connector: Mapped[str] = mapped_column(String(50))
+    account_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # cloud_accounts.id
+    scope: Mapped[str] = mapped_column(String(200), default="")      # e.g. the cluster name
+    trigger: Mapped[str] = mapped_column(String(20))                 # schedule | manual | rca
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[str] = mapped_column(String(10))
+    counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    per_kind: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 # ============================================================================
 # Monitoring Configuration (MONITOR)
 # ============================================================================
