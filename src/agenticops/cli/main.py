@@ -235,6 +235,7 @@ run_app = typer.Typer(help="Run operations (scan, detect, analyze)")
 logs_app = typer.Typer(help="View logs and audit trail")
 service_app = typer.Typer(help="Manage background services (web dashboard + IM WebSocket)")
 skills_app = typer.Typer(help="Manage Agent Skills (import from URL / git repo / zip)")
+connectors_app = typer.Typer(help="Pull connectors (K8s discovery): recent runs, run now")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -245,6 +246,7 @@ app.add_typer(run_app, name="run")
 app.add_typer(logs_app, name="logs")
 app.add_typer(service_app, name="service")
 app.add_typer(skills_app, name="skills")
+app.add_typer(connectors_app, name="connectors")
 
 
 # ============================================================================
@@ -5280,6 +5282,80 @@ def skills_import(
             )
 
     if not res.installed:
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Connectors
+# ============================================================================
+
+
+def _print_connector_run(status: str, where: str, run_id: int, counts: dict, error: str, extra: str = ""):
+    """One run line; `where` and `error` carry account names and kubectl stderr, so they are shown literally."""
+    color = {"complete": "green", "partial": "yellow"}.get(status, "red")
+    console.print(f"  [{color}]{status}[/{color}]  {_safe_text(where)}  run {run_id}  "
+                  f"[dim]{extra + '  ' if extra else ''}created {counts.get('created', 0)}, "
+                  f"updated {counts.get('updated', 0)}, absent {counts.get('absent', 0)}[/dim]")
+    if error:
+        console.print(f"    [dim]{_safe_text(error)}[/dim]")
+
+
+@connectors_app.command("list")
+def connectors_list(
+    limit: int = typer.Option(5, "--limit", "-l", help="Recent runs shown per connector"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw status as JSON"),
+):
+    """Show each connector's switch, discovery schedule and most recent runs."""
+    from agenticops.connectors import runner
+
+    data = [runner.connector_status(name, limit=limit) for name in sorted(runner.CONNECTORS)]
+    if as_json:
+        console.print_json(data=data)
+        return
+    for c in data:
+        state = "[green]enabled[/green]" if c["enabled"] else "[yellow]disabled[/yellow]"
+        sched = c["schedule"]
+        where = (f"schedule {sched['name']} ({sched['cron_expression']}{'' if sched['is_enabled'] else ', paused'})"
+                 if sched else "no schedule")
+        console.print(f"[bold]{c['name']}[/bold]  {state}  [dim]{where}{'  · running' if c['running'] else ''}[/dim]")
+        if not c["recent_runs"]:
+            console.print("  [dim]no runs yet[/dim]")
+        for r in c["recent_runs"]:
+            finished = (r["finished_at"] or "-")[:16].replace("T", " ")
+            _print_connector_run(r["status"], f"{r['account'] or '-'}/{r['scope']}", r["id"], r["counts"],
+                                 r["error"], f"{r['trigger']} · {finished} UTC")
+
+
+@connectors_app.command("run")
+def connectors_run(
+    name: str = typer.Argument(..., help="Connector name, e.g. k8s"),
+    account: str = typer.Option("", "--account", "-a", help="Only this account (name or cloud account id)"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw result as JSON"),
+):
+    """Run a connector now (trigger=manual) and print one line per target. Exit 1 when nothing was collected."""
+    from dataclasses import asdict
+
+    from agenticops.connectors import runner
+
+    try:
+        res = runner.run_connector(name, account=account, trigger="manual")
+    except runner.UnknownConnector as e:
+        console.print(f"[red]{_safe_text(e)}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        console.print_json(data=asdict(res))
+    elif res.status == "disabled":
+        console.print(f"[yellow]{runner.disabled_message(name)}[/yellow]")
+    elif res.status == "busy":
+        console.print(f"[yellow]connector {name} is already running[/yellow]")
+    elif res.status == "no_targets":
+        console.print(f"[yellow]no targets{_safe_text(f' for account {account!r}') if account else ''}[/yellow]")
+    else:
+        for t in res.targets:
+            _print_connector_run(t.status, f"{t.account}/{t.scope}", t.run_id, t.counts, t.error)
+        if res.graph_build_id:
+            console.print(f"[dim]graph refreshed (build {res.graph_build_id})[/dim]")
+    if res.status not in ("complete", "partial"):
         raise typer.Exit(1)
 
 

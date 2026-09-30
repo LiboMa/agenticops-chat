@@ -329,6 +329,8 @@ from agenticops.web.routers import changes as _changes_router
 app.include_router(_changes_router.router)
 from agenticops.web.routers import plans as _plans_router
 app.include_router(_plans_router.router)
+from agenticops.web.routers import connectors as _connectors_router
+app.include_router(_connectors_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()

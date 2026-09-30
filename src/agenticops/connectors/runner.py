@@ -18,7 +18,7 @@ from agenticops.config import settings
 from agenticops.connectors.base import CollectResult, Target
 from agenticops.connectors.ingest import ingest
 from agenticops.connectors.k8s import K8sConnector
-from agenticops.models import get_db_session
+from agenticops.models import CloudAccount, ConnectorRun, get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,15 @@ class ConnectorRunResult:
 
 def is_enabled(name: str) -> bool:
     return bool(getattr(settings, _ENABLED_FLAG[name]))
+
+
+def is_running(name: str) -> bool:
+    """A run of `name` is in progress in THIS process (the lock is per process)."""
+    return _LOCKS[name].locked()
+
+
+def disabled_message(name: str) -> str:
+    return f"connector {name} is disabled — set {_ENABLED_FLAG[name]}: true in config/settings.yaml"
 
 
 def check_known(name: str) -> None:
@@ -125,6 +134,32 @@ def _selected(target: Target, account: str, scope: str) -> bool:
     if account and account not in (target.account.name, str(target.account.credentials.get("account_id") or "")):
         return False
     return not scope or target.scope == scope
+
+
+def connector_status(name: str, *, limit: int = 10) -> dict:
+    """What CLI `aiops connectors list` and GET /api/connectors show: the switch, whether a run is in progress,
+    the discovery schedule row (None until seeded) and the newest `limit` runs, newest first."""
+    check_known(name)
+    from agenticops.scheduler.scheduler import Schedule
+
+    with get_db_session() as s:
+        names = dict(s.query(CloudAccount.id, CloudAccount.name).all())
+        rows = (s.query(ConnectorRun).filter_by(connector=name)
+                .order_by(ConnectorRun.id.desc()).limit(limit).all())
+        runs = [{"id": r.id, "account": names.get(r.account_id), "scope": r.scope, "trigger": r.trigger,
+                 "status": r.status, "started_at": _iso(r.started_at), "finished_at": _iso(r.finished_at),
+                 "counts": r.counts or {}, "error": r.error} for r in rows]
+        sched = s.query(Schedule).filter_by(name=SCHEDULE_NAME).first()
+        schedule = sched and {"name": sched.name, "cron_expression": sched.cron_expression,
+                              "is_enabled": bool(sched.is_enabled)}
+    return {"name": name, "enabled": is_enabled(name), "running": is_running(name), "schedule": schedule,
+            "recent_runs": runs}
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
 
 def seed_discovery_schedule() -> bool:
