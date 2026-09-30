@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 
 from agenticops.models import CloudAccount, CloudResource, get_session
 from agenticops.scan.services import AWS_SERVICES, AWSServiceDef, get_all_regions
+from agenticops.services.inventory import mark_seen
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,9 @@ class AWSScanner:
         """
         session = get_session()
         saved_count = 0
+        # Marks rows seen, never absent: this path keys ELB/ECS by ARN while scanner/engine keys them by
+        # name, so absent-marking here would mark live scanner/engine rows (Plan B deviation 36).
+        now = datetime.now(timezone.utc)
 
         try:
             # Track resource IDs added in this batch to avoid duplicate
@@ -364,6 +368,7 @@ class AWSScanner:
                             existing.status = resource_data.get("status", "unknown")
                             existing.raw_data = resource_data.get("metadata", {})
                             existing.tags = resource_data.get("tags", {})
+                            mark_seen(existing, now)
                         else:
                             resource = CloudResource(
                                 account_id=self.account.id,
@@ -376,6 +381,7 @@ class AWSScanner:
                                 raw_data=resource_data.get("metadata", {}),
                                 tags=resource_data.get("tags", {}),
                             )
+                            mark_seen(resource, now)
                             session.add(resource)
                             saved_count += 1
 

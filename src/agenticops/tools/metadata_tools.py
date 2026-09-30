@@ -27,6 +27,7 @@ from agenticops.models import (
     validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
+from agenticops.services.inventory import mark_seen
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,7 @@ def save_resources(resources_json: str, account_id: int = 0, provider: str = "")
                     existing.raw_data = res_data.get("raw_data", existing.raw_data)
                     existing.tags = res_data.get("tags", existing.tags)
                     existing.region = region
-                    existing.scanned_at = datetime.now(timezone.utc)
+                    mark_seen(existing, datetime.now(timezone.utc))  # a row seen again returns
                     updated += 1
                 else:
                     resource = CloudResource(
