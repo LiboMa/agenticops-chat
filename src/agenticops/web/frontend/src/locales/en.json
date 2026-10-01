@@ -237,8 +237,7 @@
   "changes.status.rejected": "Rejected",
   "changes.status.cancelled": "Cancelled",
   "changes.request": "Request",
-  "changes.review": "Review",
-  "changes.plan": "Change plan",
+  "changes.plan": "Implementation plan",
   "changes.approval": "Approval",
   "changes.execution": "Executions",
   "changes.timeline": "Timeline",
@@ -635,5 +634,9 @@
   "plans.form.error.noCommand": "Step {n} has a description but no command",
   "plans.form.error.badSystem": "System: 1–50 of a–z, 0–9, _ or -",
   "plans.form.error.noTicket": "An external ticket needs its ticket id",
-  "plans.form.error.badUrl": "The link must start with http:// or https://"
+  "plans.form.error.badUrl": "The link must start with http:// or https://",
+  "changes.tab.change": "Change",
+  "changes.openChange": "Open the change",
+  "changes.noPlanYet": "No implementation plan yet — the SRE review writes one",
+  "chat.contextPanel.checkChangePrompt": "Check the current status of C#{id}: summarize where the change stands, what it is waiting for, and suggest next steps"
 }

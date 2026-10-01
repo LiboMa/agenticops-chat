@@ -7,6 +7,7 @@ import { SuggestionChips } from "./SuggestionChips";
 import type { ChatMessage } from "@/api/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { renderMessageMarkdown } from "@/lib/markdownCache";
+import { contextRefFromPath, type ContextRef } from "@/lib/contextRef";
 
 interface Props {
   messages: ChatMessage[];
@@ -18,7 +19,7 @@ interface Props {
   isFetchingOlder?: boolean;
   onLoadOlder?: () => void;
   onSuggestionPick?: (text: string) => void;
-  onIssueRefClick?: (issueId: number) => void;
+  onContextRefClick?: (ref: ContextRef) => void; // I# / C# refs open the context panel instead of navigating
 }
 
 export function MessageList({
@@ -31,7 +32,7 @@ export function MessageList({
   isFetchingOlder,
   onLoadOlder,
   onSuggestionPick,
-  onIssueRefClick,
+  onContextRefClick,
 }: Props) {
   const navigate = useNavigate();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -41,9 +42,9 @@ export function MessageList({
     if (!anchor) return;
     e.preventDefault();
     const pathname = new URL(anchor.href).pathname;
-    const issueMatch = pathname.match(/^\/app\/issues\/(\d+)$/);
-    if (issueMatch && onIssueRefClick) {
-      onIssueRefClick(Number(issueMatch[1]));
+    const ref = contextRefFromPath(pathname);
+    if (ref && onContextRefClick) {
+      onContextRefClick(ref);
       return;
     }
     navigate(pathname);

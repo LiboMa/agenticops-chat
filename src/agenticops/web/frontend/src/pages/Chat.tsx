@@ -11,6 +11,7 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
+import type { ContextRef } from "@/lib/contextRef";
 import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
@@ -93,7 +94,7 @@ export default function Chat() {
 
   // Three-zone layout state
   const [flyoutOpen, setFlyoutOpen] = useState(false);
-  const [contextIssueId, setContextIssueId] = useState<number | null>(null);
+  const [contextRef, setContextRef] = useState<ContextRef | null>(null);
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
   // Flyout resizable width (px), persisted
@@ -180,7 +181,7 @@ export default function Chat() {
 
       {/* Center: Chat area */}
       <div
-        style={{ flex: contextIssueId ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
+        style={{ flex: contextRef ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
         className="flex flex-col min-w-0"
       >
         {showWelcome && !selectedId ? (
@@ -278,7 +279,7 @@ export default function Chat() {
               isFetchingOlder={isFetchingOlder}
               onLoadOlder={fetchOlder}
               onSuggestionPick={(text) => sendMessage(text)}
-              onIssueRefClick={setContextIssueId}
+              onContextRefClick={setContextRef}
             />
 
             {/* Error banner */}
@@ -301,7 +302,7 @@ export default function Chat() {
       </div>
 
       {/* Right: Context Panel (drag handle + panel) */}
-      {contextIssueId && (
+      {contextRef && (
         <>
           <DragHandle onResize={setSplitRatio} />
           <div
@@ -309,11 +310,11 @@ export default function Chat() {
             className="min-w-0"
           >
             <ContextPanel
-              issueId={contextIssueId}
-              onClose={() => setContextIssueId(null)}
+              subject={contextRef}
+              onClose={() => setContextRef(null)}
               onAgentCheck={() => {
-                if (contextIssueId == null) return;
-                sendMessage(t("chat.contextPanel.checkPrompt").replace("{id}", String(contextIssueId)));
+                const key = contextRef.kind === "issue" ? "chat.contextPanel.checkPrompt" : "chat.contextPanel.checkChangePrompt";
+                sendMessage(t(key).replace("{id}", String(contextRef.id)));
               }}
               agentCheckDisabled={streaming}
             />

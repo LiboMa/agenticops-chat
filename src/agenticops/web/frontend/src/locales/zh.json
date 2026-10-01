@@ -237,8 +237,7 @@
   "changes.status.rejected": "已拒绝",
   "changes.status.cancelled": "已取消",
   "changes.request": "申请",
-  "changes.review": "审核",
-  "changes.plan": "变更计划",
+  "changes.plan": "实施方案",
   "changes.approval": "审批",
   "changes.execution": "执行记录",
   "changes.timeline": "时间线",
@@ -635,5 +634,9 @@
   "plans.form.error.noCommand": "第 {n} 步有说明但没有命令",
   "plans.form.error.badSystem": "系统名：1–50 个 a–z、0–9、_ 或 -",
   "plans.form.error.noTicket": "外部工单需要填写工单号",
-  "plans.form.error.badUrl": "链接必须以 http:// 或 https:// 开头"
+  "plans.form.error.badUrl": "链接必须以 http:// 或 https:// 开头",
+  "changes.tab.change": "变更",
+  "changes.openChange": "打开变更单",
+  "changes.noPlanYet": "尚无实施方案——SRE 审核后生成",
+  "chat.contextPanel.checkChangePrompt": "检查 C#{id} 的当前状态,说明变更进展到哪一步、正在等待什么,并给出下一步建议"
 }
