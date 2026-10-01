@@ -157,3 +157,44 @@ def test_assume_role_prewarms_the_key_readers_compute(provider, monkeypatch):
     finally:
         db.close()
         engine.dispose()
+
+
+def test_a_role_arn_repointed_in_the_db_is_a_new_session_and_restoring_it_finds_the_original(provider, monkeypatch):
+    """The re-point of test_repointed_credential_is_a_new_session through a real account row: a reader that
+    addresses the account by name re-reads the row on every call, so an edited role_arn misses the cache."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    init_db(engine)
+    db = sessionmaker(bind=engine)()
+    row = CloudAccount(name="prod", provider="aws", is_enabled=True, credential_source_type="assume_role",
+                       credentials={"account_id": "111111111111", "role_arn": "arn:aws:iam::111111111111:role/Ops"},
+                       regions=["us-east-1"])
+    db.add(row)
+    db.commit()
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    monkeypatch.setattr("agenticops.models.get_db_session", fake_db)
+
+    def repoint(role):
+        row.credentials = {**row.credentials, "role_arn": f"arn:aws:iam::111111111111:role/{role}"}
+        db.commit()
+
+    try:
+        old = resolver.resolve_account_session("prod", "us-east-1")
+        assert resolver.resolve_account_session("prod", "us-east-1") is old
+        assert len(provider.built) == 1
+
+        repoint("OpsV2")
+        new = resolver.resolve_account_session("prod", "us-east-1")
+        assert new is not old
+        assert len(provider.built) == 2
+        assert provider.built[-1].credentials["role_arn"] == "arn:aws:iam::111111111111:role/OpsV2"
+
+        repoint("Ops")
+        assert resolver.resolve_account_session("prod", "us-east-1") is old
+        assert len(provider.built) == 2
+    finally:
+        db.close()
+        engine.dispose()
