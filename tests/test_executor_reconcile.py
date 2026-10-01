@@ -220,6 +220,9 @@ def test_the_plan_not_the_agent_names_the_issue_a_result_resolves(db, caplog):
     assert db.get(HealthIssue, other_id).status == "fix_approved"  # untouched
     post.assert_called_once_with(issue_id)
     assert notify.call_args.args[1] == issue_id and im_origin.call_args.args[0] == issue_id
+    assert notify.call_args.args[0] == f"I#{issue_id} fix plan v1"  # the plan, named the way people read it
+    assert im_origin.call_args.args[2] == (f"Execution SUCCEEDED (verification passed: all post-checks passed) "
+                                           f"for I#{issue_id} fix plan v1")
     events = db.query(PipelineEvent).filter_by(event_type="execution_completed").all()
     assert [e.health_issue_id for e in events] == [issue_id]
     assert f"HealthIssue #{issue_id} auto-resolved" in seen["saved"]

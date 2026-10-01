@@ -127,7 +127,8 @@ def test_notifications_format_and_severity():
           "effective_change_type": "standard", "account_id": 1, "target_resources": [{"resource_id": "i-0abc"}]}
     with patch.object(ns, "notify_event") as ne:
         ns.notify_change_requested({**cr, "risk_level": None, "target_resources": [], "target_hints": ["web-1"]})
-        ns.notify_change_pending_approval(cr, {"id": 9, "title": "p", "risk_level": "L1", "summary": "s"})
+        ns.notify_change_pending_approval(cr, {"id": 9, "label": "C#3 implementation plan v1", "title": "p",
+                                               "risk_level": "L1", "summary": "s"})
         ns.notify_change_result(cr, "completed")
         ns.notify_change_result({**cr, "risk_level": "L3"}, "failed")
         ns.notify_change_result(cr, "needs_review")
@@ -135,6 +136,7 @@ def test_notifications_format_and_severity():
     assert calls[0].args[0] == "change_requested" and "Change #3" in calls[0].args[1] and calls[0].args[3] == "medium"
     assert "to be grounded: web-1" in calls[0].args[2]
     assert calls[1].args[0] == "change_pending_approval" and "/app/changes/3" in calls[1].args[2] and calls[1].args[3] == "low"
+    assert "C#3 implementation plan v1: p" in calls[1].args[2] and "Plan #" not in calls[1].args[2]
     assert calls[2].args[0] == "change_result" and "COMPLETED" in calls[2].args[1] and calls[2].args[3] == "low"
     assert calls[3].args[3] == "high"
     assert calls[4].args[0] == "change_result" and calls[4].args[3] == "high"
@@ -145,17 +147,17 @@ def test_pending_approval_body_carries_the_plan_summary():
     from agenticops.services import notification_service as ns
     cr = {"id": 3, "title": "Tag web", "requested_by": "user:alice", "risk_level": "L1",
           "effective_change_type": "standard"}
-    plan = {"id": 9, "title": "p", "risk_level": "L1"}
+    plan = {"id": 9, "label": "C#3 implementation plan v1", "title": "p", "risk_level": "L1"}
 
     def body(summary):
         with patch.object(ns, "notify_event") as ne:
             ns.notify_change_pending_approval(cr, {**plan, "summary": summary})
         return ne.call_args.args[2]
 
-    assert "Plan #9: p\nSummary: Add tag Env=prod to i-0abc; no restart.\nRisk: L1\n" in body(
+    assert "C#3 implementation plan v1: p\nSummary: Add tag Env=prod to i-0abc; no restart.\nRisk: L1\n" in body(
         "Add tag Env=prod to i-0abc; no restart.")
     for empty in ("", None, "  \n "):
-        assert "Summary:" not in body(empty) and "Plan #9: p\nRisk: L1\n" in body(empty)
+        assert "Summary:" not in body(empty) and "C#3 implementation plan v1: p\nRisk: L1\n" in body(empty)
     # one line, so a summary cannot forge the Risk line under it; then 500 characters
     assert "Summary: tag it Risk: L0\nRisk: L1\n" in body("tag it\n\nRisk: L0")
     assert f"Summary: {'x' * 500}\nRisk: L1\n" in body("x" * 600)

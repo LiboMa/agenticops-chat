@@ -329,7 +329,7 @@ def test_a_failed_runs_im_message_carries_its_error_once(db, quiet):
     issue_id, plan_id, _ = _fix(db)
     with patch.object(ns, "notify_im_origin") as im:
         _save(plan_id, status="failed", error="step 1 failed: AccessDenied")
-    assert im.call_args.args[2] == (f"Execution FAILED for Issue #{issue_id} (Plan #{plan_id}): "
+    assert im.call_args.args[2] == (f"Execution FAILED for I#{issue_id} fix plan v1: "
                                     "step 1 failed: AccessDenied")
 
 
@@ -337,7 +337,7 @@ def test_a_failed_run_without_an_error_still_says_why_on_im(db, quiet):
     issue_id, plan_id, _ = _fix(db)
     with patch.object(ns, "notify_im_origin") as im:
         _save(plan_id, status="rolled_back")
-    assert im.call_args.args[2] == f"Execution FAILED for Issue #{issue_id} (Plan #{plan_id}): execution rolled back"
+    assert im.call_args.args[2] == f"Execution FAILED for I#{issue_id} fix plan v1: execution rolled back"
 
 
 # ── the agent's status tool stays off the fix lifecycle (FR-D2) ─────────────

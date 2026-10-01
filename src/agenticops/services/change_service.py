@@ -34,7 +34,7 @@ from agenticops.services.notification_service import (  # noqa: F401  (pending_a
 from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
 from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
 from agenticops.services.pipeline_events import log_event
-from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
+from agenticops.services.plan_content import approval_conflict, plan_label, stamp_approval, stamp_content
 
 logger = logging.getLogger(__name__)
 
@@ -910,6 +910,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         plan.risk_level = risk_level
         stamp_content(s, plan)  # the reviewed risk is part of the content an approval approves
         plan_dict["content_hash"] = plan.content_hash
+        plan_dict["label"] = plan_label(plan)  # "C#3 implementation plan v1" — how the approval notice names it
         cr.policy_rule = decision.rule_name
         cr.policy_action = decision.action
         cr.effective_change_type = _effective_change_type(decision, cr.requested_change_type)

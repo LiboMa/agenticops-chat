@@ -216,31 +216,31 @@ def notify_rca_completed(
 
 
 def notify_fix_planned(
-    issue_id: int, plan_id: int, risk_level: str, title: str
+    issue_id: int, label: str, risk_level: str, title: str
 ) -> None:
-    """Notify: fix plan generated."""
+    """Notify: fix plan generated. `label` is the plan as people read it — "I#12 fix plan v2" (plan_label)."""
     _buffer_or_send(
         issue_id=issue_id,
         event_type="fix_planned",
-        subject=f"Fix Plan #{plan_id} ({risk_level}) for Issue #{issue_id}",
+        subject=f"{label} generated ({risk_level})",
         body=(
             f"Fix plan generated for HealthIssue #{issue_id}.\n\n"
-            f"Plan #{plan_id}: {title}\n"
+            f"{label}: {title}\n"
             f"Risk Level: {risk_level}"
         ),
     )
 
 
 def notify_fix_approved(
-    plan_id: int, approved_by: str, risk_level: str, issue_id: int | None = None
+    label: str, approved_by: str, risk_level: str, issue_id: int | None = None
 ) -> None:
     """Notify: fix plan approved."""
     _buffer_or_send(
         issue_id=issue_id,
         event_type="fix_approved",
-        subject=f"Fix Plan #{plan_id} Approved ({risk_level})",
+        subject=f"{label} approved ({risk_level})",
         body=(
-            f"FixPlan #{plan_id} has been approved.\n\n"
+            f"{label} has been approved.\n\n"
             f"Approved by: {approved_by}\n"
             f"Risk Level: {risk_level}"
         ),
@@ -248,12 +248,12 @@ def notify_fix_approved(
 
 
 def notify_execution_result(
-    plan_id: int, issue_id: int, status: str, error: str = ""
+    label: str, issue_id: int, status: str, error: str = ""
 ) -> None:
     """Notify: fix execution completed (success or failure)."""
     severity = "high" if status != "succeeded" else None
     body = (
-        f"Execution result for FixPlan #{plan_id} (Issue #{issue_id}).\n\n"
+        f"Execution result for {label}.\n\n"
         f"Status: {status.upper()}"
     )
     if error:
@@ -261,7 +261,7 @@ def notify_execution_result(
     _buffer_or_send(
         issue_id=issue_id,
         event_type="execution_result",
-        subject=f"Execution {status.upper()}: Plan #{plan_id}",
+        subject=f"Execution {status.upper()}: {label}",
         body=body,
         severity=severity,
     )
@@ -305,7 +305,7 @@ def notify_change_pending_approval(cr: dict, plan: dict) -> None:
         "change_pending_approval",
         f"[CHANGE] Change #{cr['id']} awaits approval ({cr.get('risk_level') or '?'}, {cr.get('effective_change_type') or 'normal'})",
         (f"Change request #{cr['id']} '{cr['title']}' was reviewed by the SRE agent and needs approval.\n\n"
-         f"Plan #{plan.get('id')}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
+         f"{plan['label']}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
          f"Requested by: {cr['requested_by']}\n\nApprove or reject: {_change_link(cr['id'])}"),
         _change_severity(cr.get("risk_level")),
     )

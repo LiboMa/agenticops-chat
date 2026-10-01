@@ -413,3 +413,34 @@ def test_an_approved_plan_without_an_approved_hash_is_refused(db):
     assert out.startswith(f"REJECTED: I#{plan.health_issue_id} fix plan v1: content changed after approval "
                           f"(approved v?, now v1)"), out
     assert _fresh(FixPlan, plan.id).status == "rejected"
+
+
+# ── people read a plan by its label (MVP-2.6.1 Plan E) ──────────────────────
+
+def test_the_fix_notifications_carry_the_plan_label(db):
+    """save → planned, a content update → the next version, approve → approved: each names "I#N fix plan vK"."""
+    from agenticops.tools.metadata_tools import approve_fix_plan, save_fix_plan
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="root_cause_identified",
+                        resource_id="i-0abc")
+    db.add(issue); db.flush()
+    rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+    db.add(rca); db.commit()
+    args = dict(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="Reboot", summary="s",
+                steps=json.dumps([{"command": "aws ec2 reboot-instances"}]), rollback_plan=json.dumps({"steps": []}))
+    with patch("agenticops.services.pipeline_service.trigger_auto_approve"), \
+         patch("agenticops.services.notification_service.notify_fix_planned") as planned:
+        save_fix_plan(**args)
+        save_fix_plan(**{**args, "steps": json.dumps([{"command": "aws ec2 reboot-instances --dry-run"}])})
+    assert [c.args[1] for c in planned.call_args_list] == [f"I#{issue.id} fix plan v1", f"I#{issue.id} fix plan v2"]
+    plan = db.query(FixPlan).filter_by(health_issue_id=issue.id).one()
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute"), \
+         patch("agenticops.services.notification_service.notify_fix_approved") as approved:
+        approve_fix_plan(fix_plan_id=plan.id, approved_by="agent:main")
+    assert approved.call_args.args[0] == f"I#{issue.id} fix plan v2"
+
+
+def test_the_cli_shows_a_plan_by_its_label(db):
+    from agenticops.cli import main as cli
+    plan = _fix_plan(db)
+    out = cli._slash_fix(None, ["show", str(plan.id)])
+    assert f"I#{plan.health_issue_id} fix plan v1" in out and "Fix Plan #" not in out

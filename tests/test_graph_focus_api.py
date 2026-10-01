@@ -249,6 +249,88 @@ async def test_no_published_build(db, client):
     assert data["blast"] == {"structural": 0, "potential": 0, "observed": 0, "truncated": False}
 
 
+# ── edge time and related links (MVP-2.6.1 Plan E, spec §3.E.3) ───────
+
+
+@pytest.mark.asyncio
+async def test_edges_carry_when_they_were_observed(seed, client):
+    seed.query(ResourceRelation).filter_by(src_ref=5, dst_ref=3).update({"observed_at": OBSERVED})
+    seed.commit()
+    edges = (await client.get("/api/graph/focus?resource_id=3")).json()["edges"]
+    at = {(e["src"], e["dst"]): e["observed_at"] for e in edges}
+    assert at[(5, 3)] == OBSERVED.isoformat()
+    assert all(isinstance(v, str) for v in at.values())
+
+
+def _signal(s, resource_id, *, issue_id, disposition="merged", at=OBSERVED, n=1):
+    for k in range(n):
+        s.add(AlertEvent(source="test", external_id=f"{resource_id}-{disposition}-{issue_id}-{k}", severity="high",
+                         title="t", resource_id=resource_id, account_id="acct-a", received_at=at,
+                         disposition=disposition, health_issue_id=issue_id))
+
+
+@pytest.mark.asyncio
+async def test_related_merged_lists_the_other_resources_merged_in(seed, client):
+    iid = _issue(seed, 3, observed_at=OBSERVED)              # resource_id "r-3", anchored on EC2 i-1
+    _signal(seed, "db-1", issue_id=iid, n=2)                  # another resource, merged in twice
+    _signal(seed, "db-1", issue_id=iid, at=OBSERVED - timedelta(minutes=1))
+    _signal(seed, "ghost-1", issue_id=iid)                    # merged, but not in the inventory
+    _signal(seed, "r-3", issue_id=iid)                        # the issue's own resource id
+    _signal(seed, "i-1", issue_id=iid)                        # another name for the issue's own anchor
+    _signal(seed, "alb", issue_id=iid, disposition="promoted")  # not merged
+    _signal(seed, "sg-1", issue_id=iid + 1)                   # merged into another issue
+    seed.commit()
+    related = (await client.get(f"/api/graph/focus?issue_id={iid}")).json()["related"]
+    assert related["merged"] == [
+        {"resource_id": "db-1", "ref": 6, "type": "RDS", "name": "db-1", "anchor_status": "anchored",
+         "signals": 3, "last_at": OBSERVED.isoformat()},
+        {"resource_id": "ghost-1", "ref": None, "type": None, "name": None, "anchor_status": "unanchored",
+         "signals": 1, "last_at": OBSERVED.isoformat()},
+    ]
+    assert related["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_related_candidates_are_open_issues_two_hops_out_in_the_window(seed, client):
+    iid = _issue(seed, 3, observed_at=OBSERVED)
+    same = _issue(seed, 3, observed_at=OBSERVED + timedelta(minutes=1))       # the same anchor: 0 hops
+    sg = _issue(seed, 4, observed_at=OBSERVED - timedelta(minutes=20))        # 1 hop, in the window
+    rds = _issue(seed, 6, observed_at=OBSERVED + timedelta(minutes=5))        # 2 hops (via the SG)
+    _issue(seed, 5, observed_at=OBSERVED - timedelta(hours=2))                # before the window
+    closed = _issue(seed, 2, observed_at=OBSERVED)
+    seed.get(HealthIssue, closed).status = "resolved"                        # not open
+    _issue(seed, 7, acct=2, observed_at=OBSERVED)                             # another account's resource
+    seed.commit()
+    related = (await client.get(f"/api/graph/focus?issue_id={iid}")).json()["related"]
+    assert [(c["issue_id"], c["ref"], c["hops"]) for c in related["candidates"]] == [
+        (same, 3, 0), (sg, 4, 1), (rds, 6, 2)]
+    assert related["candidates"][1] == {"issue_id": sg, "ref": 4, "hops": 1, "severity": "high", "title": "t",
+                                        "status": "open",
+                                        "signal_at": (OBSERVED - timedelta(minutes=20)).isoformat()}
+
+
+@pytest.mark.asyncio
+async def test_related_lists_are_capped_and_say_so(seed, client, monkeypatch):
+    from agenticops.graph import api
+    monkeypatch.setattr(api, "_RELATED_CAP", 1)
+    iid = _issue(seed, 3, observed_at=OBSERVED)
+    _issue(seed, 4, observed_at=OBSERVED)
+    _issue(seed, 6, observed_at=OBSERVED)
+    seed.commit()
+    related = (await client.get(f"/api/graph/focus?issue_id={iid}")).json()["related"]
+    assert len(related["candidates"]) == 1 and related["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_only_an_issue_has_related_links(seed, client):
+    _issue(seed, 4, observed_at=OBSERVED)
+    crid = _cr(seed, [{"resource_id": "i-1", "db_id": 3}])
+    seed.commit()
+    for query in ("resource_id=3", f"change_request_id={crid}"):
+        data = (await client.get(f"/api/graph/focus?{query}")).json()
+        assert data["related"] == {"merged": [], "candidates": [], "truncated": False}
+
+
 # ── node endpoints ───────────────────────────────────────────────────
 
 

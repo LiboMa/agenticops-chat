@@ -293,6 +293,11 @@ class HealthIssueResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
     issue_type: str = "other"
+    # The anchor (MVP-2.6.1): the resource it resolved to, or why not — IssueDetail's anchor badge reads these
+    resource_ref: Optional[int] = None
+    anchor_status: Optional[str] = None
+    anchor_candidates: Optional[dict] = None
+    observed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -321,6 +326,10 @@ class HealthIssueResponse(BaseModel):
             account_id=issue.account_id,
             account_name=account_name,
             issue_type=getattr(issue, "issue_type", "other") or "other",
+            resource_ref=issue.resource_ref,
+            anchor_status=issue.anchor_status,
+            anchor_candidates=issue.anchor_candidates,
+            observed_at=issue.observed_at,
         )
 
 

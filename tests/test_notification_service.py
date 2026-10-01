@@ -27,6 +27,12 @@ from agenticops.services.notification_service import (
 )
 
 
+def _assert_named(kwargs, label):
+    """A plan is named the way people read it (spec §3.D.1): its label in both subject and body, never "Plan #N"."""
+    assert label in kwargs["subject"] and label in kwargs["body"], kwargs
+    assert "Plan #" not in kwargs["subject"] + kwargs["body"], kwargs
+
+
 # ---------------------------------------------------------------------------
 # notify_event — disabled path
 # ---------------------------------------------------------------------------
@@ -150,27 +156,30 @@ class TestConvenienceFunctions:
 
     @patch("agenticops.services.notification_service._buffer_or_send")
     def test_notify_fix_planned(self, mock_buf):
-        notify_fix_planned(3, 10, "medium", "Scale up ASG")
+        notify_fix_planned(3, "I#3 fix plan v2", "medium", "Scale up ASG")
         mock_buf.assert_called_once()
-        assert "fix_planned" in str(mock_buf.call_args)
+        assert mock_buf.call_args.kwargs["event_type"] == "fix_planned"
+        _assert_named(mock_buf.call_args.kwargs, "I#3 fix plan v2")
 
     @patch("agenticops.services.notification_service._buffer_or_send")
     def test_notify_fix_approved(self, mock_buf):
-        notify_fix_approved(10, "admin@example.com", "low", issue_id=3)
+        notify_fix_approved("I#3 fix plan v2", "admin@example.com", "low", issue_id=3)
         mock_buf.assert_called_once()
-        assert "fix_approved" in str(mock_buf.call_args)
+        assert mock_buf.call_args.kwargs["event_type"] == "fix_approved"
+        _assert_named(mock_buf.call_args.kwargs, "I#3 fix plan v2")
 
     @patch("agenticops.services.notification_service._buffer_or_send")
     @patch("agenticops.services.notification_service.flush_consolidated")
     def test_notify_execution_result_success(self, mock_flush, mock_buf):
-        notify_execution_result(10, 3, "succeeded")
+        notify_execution_result("I#3 fix plan v2", 3, "succeeded")
         mock_buf.assert_called_once()
         mock_flush.assert_called_once_with(3)
+        _assert_named(mock_buf.call_args.kwargs, "I#3 fix plan v2")
 
     @patch("agenticops.services.notification_service._buffer_or_send")
     @patch("agenticops.services.notification_service.flush_consolidated")
     def test_notify_execution_result_failure_sets_severity(self, mock_flush, mock_buf):
-        notify_execution_result(10, 3, "failed", error="timeout")
+        notify_execution_result("I#3 fix plan v2", 3, "failed", error="timeout")
         mock_buf.assert_called_once()
         # severity should be "high" for non-succeeded
         assert "high" in str(mock_buf.call_args)

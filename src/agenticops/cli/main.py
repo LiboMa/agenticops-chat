@@ -2236,6 +2236,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
         except ValueError:
             return "[red]Invalid plan ID.[/red]"
 
+        from agenticops.services.plan_content import plan_label
         init_db()
         session = get_session()
         try:
@@ -2247,7 +2248,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
             rc = risk_colors.get(plan.risk_level, "white")
 
             lines = [
-                f"[bold]Fix Plan #{plan.id}[/bold]",
+                f"[bold]{plan_label(plan)}[/bold] (plan #{plan.id})",
                 f"  Title:    {plan.title}",
                 f"  Risk:     [{rc}]{plan.risk_level}[/{rc}]",
                 f"  Status:   {plan.status.replace('_', ' ')}",

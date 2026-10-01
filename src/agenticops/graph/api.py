@@ -345,6 +345,65 @@ def _blast_count(subs: list, starts: list) -> int:
     return len({n["ref"] for sub in subs for n in sub.nodes} - set(starts))
 
 
+_RELATED_CAP = 50  # per related list; a longer list is cut and says so
+
+
+def _related(s, issue_id, starts, structural, window) -> dict:
+    """An issue's related links (spec §3.E.3), each list capped at _RELATED_CAP. merged: the other resources
+    whose signals the Signal Gate merged into the issue, each resolved through the identity resolver (one naming
+    the issue's own anchor is not "other"); candidates: other open issues on a resource within the structural
+    2 hops whose signal falls in the RCA topology window — nearer first, then earlier. Only an issue has them."""
+    from sqlalchemy import and_, func, select
+
+    from agenticops.graph import query_service as qs
+    from agenticops.models import AlertEvent, CloudResource, HealthIssue
+    from agenticops.services import identity_resolver as ir
+    from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
+
+    if issue_id is None:
+        return {"merged": [], "candidates": [], "truncated": False}
+    issue = s.get(HealthIssue, issue_id)
+    merged = []
+    for rid, n, last in s.execute(
+            select(AlertEvent.resource_id, func.count(), func.max(AlertEvent.received_at))
+            .where(AlertEvent.health_issue_id == issue_id, AlertEvent.disposition == "merged",
+                   AlertEvent.resource_id != "", AlertEvent.resource_id != (issue.resource_id or ""))
+            .group_by(AlertEvent.resource_id).order_by(AlertEvent.resource_id)):
+        a = ir.resolve(s, account_id=issue.account_id, resource_id=rid)
+        ref = a.resource_ref if a.status == ir.ANCHORED else None
+        if ref is not None and ref in starts:
+            continue  # another name for the issue's own anchor
+        merged.append({"resource_id": rid, "ref": ref, "anchor_status": a.status, "signals": n,
+                       "last_at": last.isoformat() if last else None})
+        if len(merged) > _RELATED_CAP:
+            break
+    rows = {r: (t, name) for r, t, name in s.execute(
+        select(CloudResource.id, CloudResource.resource_type, CloudResource.name)
+        .where(CloudResource.id.in_([m["ref"] for m in merged if m["ref"] is not None])))}
+    for m in merged:
+        m["type"], m["name"] = rows.get(m["ref"], (None, None))
+
+    hops: dict[int, int] = {}
+    for sub in structural:
+        for node in sub.nodes:
+            hops[node["ref"]] = min(node["hops"], hops.get(node["ref"], node["hops"]))
+    seen = func.coalesce(*qs._issue_seen())
+    candidates = sorted(
+        ({"issue_id": iid, "ref": ref, "hops": hops[ref], "severity": severity, "title": title, "status": status,
+          "signal_at": at.isoformat()}
+         for iid, ref, severity, title, status, at in s.execute(
+             select(HealthIssue.id, HealthIssue.resource_ref, HealthIssue.severity, HealthIssue.title,
+                    HealthIssue.status, seen)
+             # the account match, as in health_overlay: a stale resource_ref may name another account's row
+             .join(CloudResource, and_(CloudResource.id == HealthIssue.resource_ref,
+                                       CloudResource.account_id == HealthIssue.account_id))
+             .where(HealthIssue.resource_ref.in_(list(hops)), HealthIssue.id != issue_id,
+                    HealthIssue.status.in_(OPEN_ISSUE_STATUSES), seen.between(*window)))),
+        key=lambda c: (c["hops"], qs._ts(c["signal_at"]), c["issue_id"]))
+    truncated = len(merged) > _RELATED_CAP or len(candidates) > _RELATED_CAP
+    return {"merged": merged[:_RELATED_CAP], "candidates": candidates[:_RELATED_CAP], "truncated": truncated}
+
+
 def _focus_subject(s, issue_id, resource_id, change_request_id):
     """(starts, anchor, window_center, issue_type, subject_account_id), or a 404 response."""
     from datetime import datetime, timezone
@@ -397,7 +456,8 @@ def get_focus(
     inferred_group). Blast radius, three layers (spec §3.E.3): structural = every rule
     relation within 2 hops both ways; potential = potential_impact; observed = observed_impact over the
     RCA topology window. Counts exclude the starts. A start whose row is gone or belongs to another
-    account than the subject is dropped (SQLite does not enforce ON DELETE SET NULL)."""
+    account than the subject is dropped (SQLite does not enforce ON DELETE SET NULL). related: an issue's
+    merged-in resources and nearby open issues (_related)."""
     from datetime import timedelta
 
     from sqlalchemy import select
@@ -437,6 +497,7 @@ def get_focus(
                                               edge_cap=qs.EDGE_CAP_MAX, session=s))
             potential.append(qs.potential_impact(ref, session=s))
             observed.append(qs.observed_impact(ref, window=window, session=s))
+        related = _related(s, issue_id, starts, structural, window)
         build_id = qs.published_build_id(s)
     union = _union(display)
     union.build_id = build_id
@@ -445,7 +506,7 @@ def get_focus(
                       "potential": _blast_count(potential, starts),
                       "observed": _blast_count(observed, starts),
                       "truncated": any(sub.truncated for sub in structural + potential + observed)},
-            "window": {"start": window[0].isoformat(), "end": window[1].isoformat()}}
+            "window": {"start": window[0].isoformat(), "end": window[1].isoformat()}, "related": related}
 
 
 @router.get("/stats")

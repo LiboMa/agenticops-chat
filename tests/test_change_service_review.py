@@ -375,6 +375,7 @@ class TestSubmitReview:
         db.refresh(plan)
         assert plan.status == "pending_approval"
         notify.assert_called_once()
+        assert notify.call_args.args[1]["label"] == f"C#{cr_id} implementation plan v1"
 
     def test_auto_approve_when_flag_and_rule_agree(self, db):
         from agenticops.config import settings

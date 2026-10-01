@@ -1021,7 +1021,7 @@ def save_fix_plan(
         # Auto-notify
         try:
             from agenticops.services.notification_service import notify_fix_planned
-            notify_fix_planned(health_issue_id, plan.id, risk_level, title)
+            notify_fix_planned(health_issue_id, plan_label(plan), risk_level, title)
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
@@ -1366,7 +1366,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         # Auto-notify
         try:
             from agenticops.services.notification_service import notify_fix_approved
-            notify_fix_approved(fix_plan_id, actor.key, plan.risk_level)
+            notify_fix_approved(plan_label(plan), actor.key, plan.risk_level)
         except Exception:
             logger.debug("Notification trigger failed", exc_info=True)
 
@@ -1572,6 +1572,7 @@ def save_execution_result(
         change_request_id = plan.change_request_id
         # The plan names the issue its result belongs to — never the agent's argument (a typo is logged, not fatal).
         issue_id = None if is_change else plan.health_issue_id
+        label = plan_label(plan)  # what the notifications call it — read before the commit expires the plan
         if health_issue_id is not None and health_issue_id != issue_id:
             logger.warning("save_execution_result: ignoring health_issue_id=%s — FixPlan #%d belongs to HealthIssue #%s",
                            health_issue_id, fix_plan_id, issue_id)
@@ -1707,12 +1708,12 @@ def save_execution_result(
         else:
             try:
                 from agenticops.services.notification_service import notify_execution_result, notify_im_origin
-                notify_execution_result(fix_plan_id, issue_id, status, error_message)
+                notify_execution_result(label, issue_id, status, error_message)
                 notify_im_origin(
                     issue_id, "execution_completed",
                     f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'}"
                     + (f" (verification {verdict}: {why})" if status == "succeeded" else "")  # a failed run's why is its error
-                    + f" for Issue #{issue_id} (Plan #{fix_plan_id})"
+                    + f" for {label}"
                     + (f": {error_message[:200]}" if error_message
                        else f": {why}" if status != "succeeded" else ""),
                 )

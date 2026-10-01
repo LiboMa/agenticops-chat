@@ -42,7 +42,7 @@ class Subgraph:
     build_id: Optional[int]
     # {ref, type, name, account_id, region, absent, hops, health, issue_ids, anomalous, signal_at}
     nodes: list = field(default_factory=list)
-    # {src, dst, relation_type, provenance, evidence, direction_label}
+    # {src, dst, relation_type, provenance, evidence, direction_label, observed_at}
     edges: list = field(default_factory=list)
     truncated: bool = False
     truncated_reason: Optional[str] = None  # "+"-joined: expansion_cap, node_cap, edge_cap
@@ -62,7 +62,7 @@ class Subgraph:
 class _Topology:
     hops: dict    # ref -> hops from the start (start = 0)
     via: dict     # ref -> frozenset of refs one hop closer that reached it
-    edges: tuple  # (id, src, dst, relation_type, provenance, evidence_text), ascending id
+    edges: tuple  # (id, src, dst, relation_type, provenance, evidence_text, observed_at), ascending id
     capped: bool
 
 
@@ -186,7 +186,8 @@ def _expand(session, bid: int, ref: int, depth: int, direction: str,
     hops, via, rows = {ref: 0}, {ref: frozenset()}, {}
     frontier, capped = {ref}, False
     for hop in range(1, depth + 1):
-        q = select(RR.id, RR.src_ref, RR.dst_ref, RR.relation_type, RR.provenance, RR.evidence).where(
+        q = select(RR.id, RR.src_ref, RR.dst_ref, RR.relation_type, RR.provenance, RR.evidence,
+                   RR.observed_at).where(
             RR.build_id == bid, RR.account_id == start_account,
             or_(RR.src_ref.in_(frontier), RR.dst_ref.in_(frontier)))
         if not include_llm:
@@ -194,14 +195,14 @@ def _expand(session, bid: int, ref: int, depth: int, direction: str,
         if relation_types is not None:
             q = q.where(RR.relation_type.in_(relation_types))
         found: dict[int, set] = {}
-        for rid, src, dst, rtype, prov, evidence in session.execute(q.order_by(RR.id)):
+        for rid, src, dst, rtype, prov, evidence, observed in session.execute(q.order_by(RR.id)):
             for near, far, near_is_src in ((src, dst, True), (dst, src, False)):
                 if near not in frontier:
                     continue
                 down, up = step(rtype, frontier_is_src=near_is_src)
                 if (direction == "up" and not up) or (direction == "down" and not down):
                     continue
-                rows[rid] = (rid, src, dst, rtype, prov, _evidence_text(evidence))
+                rows[rid] = (rid, src, dst, rtype, prov, _evidence_text(evidence), observed)
                 if far not in hops:
                     found.setdefault(far, set()).add(near)
         new = sorted(found)
@@ -238,11 +239,12 @@ def _node(row: dict, hops: int) -> dict:
 
 def _edge(e: tuple, nodes: dict) -> dict:
     """direction_label: how the end farther from the start relates to the nearer one (dst on a tie)."""
-    _, src, dst, rtype, prov, evidence = e
+    _, src, dst, rtype, prov, evidence, observed = e
     down, up = step(rtype, frontier_is_src=nodes[src]["hops"] <= nodes[dst]["hops"])
     label = "both" if down and up else "downstream" if down else "upstream" if up else "none"
     return {"src": src, "dst": dst, "relation_type": rtype, "provenance": prov, "evidence": evidence,
-            "direction_label": label}
+            "direction_label": label,
+            "observed_at": observed.isoformat() if isinstance(observed, datetime) else observed}
 
 
 def _assemble(bid: int, start: int, topo: _Topology, live: dict, node_cap: int, edge_cap: int) -> Subgraph:
