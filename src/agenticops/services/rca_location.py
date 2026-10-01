@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+from sqlalchemy import case, func
 
 from agenticops.galaxy.models import GalaxyBuild, ResourceRelation
 from agenticops.graph import query_service as qs
-from agenticops.models import CloudResource, HealthIssue
+from agenticops.models import CloudResource, HealthIssue, RCAResult
 from agenticops.services import identity_resolver as ir
 
 VALID, PARTIAL, INVALID, ABSENT = "valid", "partial", "invalid", "absent"
@@ -157,3 +160,45 @@ def validate_location(session, issue: HealthIssue, location, evidence_count: int
     path = _path(session, issue, location.get("path"), build_id, dropped)
     status = INVALID if not candidates else PARTIAL if dropped else VALID
     return {"candidates": candidates, "path": path, "dropped": dropped}, status, build_id
+
+
+def location_stats(session, days: int) -> dict:
+    """GET /api/rca/location-stats (spec §3.C.4): the RCAs created in the last `days` days — their location
+    status and the human verdicts on their location — and how the issues detected in that window were
+    anchored. top1 = correct / judged (a "partial" verdict is not a top-1 hit); anchoring_rate = (anchored +
+    account_level) / issues that name a resource_id. Both are None when there is nothing to divide by.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    location_counts = dict.fromkeys(LOCATION_STATUSES, 0)
+    verdicts = dict.fromkeys(LOCATION_VERDICTS, 0)
+    for status, verdict, n in (session.query(RCAResult.location_status, RCAResult.location_verdict,
+                                             func.count(RCAResult.id))
+                               .filter(RCAResult.created_at >= since)
+                               .group_by(RCAResult.location_status, RCAResult.location_verdict)):
+        location_counts[status if status in location_counts else ABSENT] += n
+        if verdict in verdicts:
+            verdicts[verdict] += n
+
+    anchor_counts = dict.fromkeys((ir.ANCHORED, ir.ACCOUNT_LEVEL, ir.AMBIGUOUS, ir.UNANCHORED), 0)
+    named, anchored_named = 0, 0
+    has_ref = HealthIssue.resource_ref.isnot(None)
+    has_id = case((func.coalesce(HealthIssue.resource_id, "") != "", 1), else_=0)
+    for status, ref, with_id, n in (session.query(HealthIssue.anchor_status, has_ref, has_id,
+                                                  func.count(HealthIssue.id))
+                                    .filter(HealthIssue.detected_at >= since)
+                                    .group_by(HealthIssue.anchor_status, has_ref, has_id)):
+        # A legacy issue without anchor_status counts as anchored when it has a ref, as in the topology evidence.
+        status = status or (ir.ANCHORED if ref else ir.UNANCHORED)
+        anchor_counts[status] = anchor_counts.get(status, 0) + n
+        if with_id:
+            named += n
+            anchored_named += n if status in (ir.ANCHORED, ir.ACCOUNT_LEVEL) else 0
+
+    judged = sum(verdicts.values())
+    return {"days": days,
+            "top1": round(verdicts["correct"] / judged, 4) if judged else None,
+            "judged": judged,
+            "anchoring_rate": round(anchored_named / named, 4) if named else None,
+            "issues_with_resource_id": named,
+            "anchor_status_counts": anchor_counts,
+            "location_status_counts": location_counts}
