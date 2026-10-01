@@ -31,15 +31,19 @@ from agenticops.config import settings
 logger = logging.getLogger(__name__)
 
 # Canonical status sets (signal_gate is the single owner; metadata_tools aliases these)
-ACTIVE_ISSUE_STATUSES = (
+# A repeat of the same fingerprint merges into an issue in one of these — dismissed included, on purpose:
+# merging into a dismissed issue is how a false positive stays quiet (spec §3.D.6)
+SUPPRESSING_ISSUE_STATUSES = (
     "open", "investigating", "acknowledged",
     "root_cause_identified", "fix_planned",
     "fix_approved", "fix_executing", "fix_executed",
     "dismissed",
 )
+ACTIVE_ISSUE_STATUSES = SUPPRESSING_ISSUE_STATUSES  # the pre-2.6.1 name
 RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_identified")
-# Unresolved problems someone still owns — dismissed suppresses re-alerts but is not open (spec §3.D.6)
-OPEN_ISSUE_STATUSES = tuple(s for s in ACTIVE_ISSUE_STATUSES if s != "dismissed")
+# Unresolved problems someone still owns — dismissed suppresses re-alerts but is not open: gray-zone
+# candidates, open counts, node colours and re-anchoring use this one
+OPEN_ISSUE_STATUSES = tuple(s for s in SUPPRESSING_ISSUE_STATUSES if s != "dismissed")
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _MERGED_ALERTS_CAP = 50
@@ -241,13 +245,14 @@ def _jaccard(a: str, b: str) -> float:
 
 
 def _gray_zone_candidates(session, sig: SignalInput, now: datetime) -> list:
-    """Active issues that make this signal ambiguous (L2 triggers, spec §2.4)."""
+    """Open issues that make this signal ambiguous (L2 triggers, spec §2.4). A dismissed issue is not one:
+    the L2 judge must not fold a new problem into a false positive."""
     from agenticops.models import HealthIssue
 
     window_start = now - timedelta(minutes=settings.noise_flap_window_minutes)
     active = (
         session.query(HealthIssue)
-        .filter(HealthIssue.status.in_(ACTIVE_ISSUE_STATUSES))
+        .filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES))
         .order_by(HealthIssue.detected_at.desc())
         .limit(50)
         .all()
@@ -489,7 +494,7 @@ def process_signal(sig: SignalInput) -> GateDecision:
                 target = (
                     session.query(HealthIssue)
                     .filter(HealthIssue.fingerprint == fingerprint,
-                            HealthIssue.status.in_(ACTIVE_ISSUE_STATUSES))
+                            HealthIssue.status.in_(SUPPRESSING_ISSUE_STATUSES))
                     .order_by(HealthIssue.detected_at.desc())
                     .first()
                 )
@@ -527,7 +532,7 @@ def process_signal(sig: SignalInput) -> GateDecision:
             existing = (
                 session.query(HealthIssue)
                 .filter(HealthIssue.fingerprint == fingerprint,
-                        HealthIssue.status.in_(ACTIVE_ISSUE_STATUSES))
+                        HealthIssue.status.in_(SUPPRESSING_ISSUE_STATUSES))
                 .order_by(HealthIssue.detected_at.desc())
                 .first()
             )
