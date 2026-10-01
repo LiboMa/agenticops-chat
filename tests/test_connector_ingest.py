@@ -114,6 +114,27 @@ def test_content_change_is_a_structure_change(db):
     assert res.changed is True
 
 
+def test_content_changed_at_moves_only_with_the_content_hash(db):
+    """Plan C reads content_changed_at as "changed in the RCA window": set when an existing row's hash moves,
+    never on create, never for volatile churn (pod_summary, created_at)."""
+    same = _row(db, "Deployment", "same")
+    moved = _row(db, "Deployment", "moved")
+    churn = _row(db, "Deployment", "churn")
+    raw_moved = {"cluster": "lab", "namespace": "default", "selector": {"app": "moved"}}
+    raw_churn = {"cluster": "lab", "namespace": "default", "pod_summary": {"ready": 0},
+                 "created_at": "2026-09-29T09:00:00Z"}
+    ingest(CONN, _target(), CollectResult(
+        entities=[_obs("Deployment", "same"), _obs("Deployment", "moved", raw=raw_moved),
+                  _obs("Deployment", "churn", raw=raw_churn), _obs("Deployment", "new")],
+        completeness=_complete("Deployment")), trigger="schedule")
+    assert _get(db, same).content_changed_at is None
+    assert _get(db, churn).content_changed_at is None
+    changed_at = _get(db, moved).content_changed_at
+    assert datetime.now(timezone.utc).replace(tzinfo=None) - changed_at < timedelta(minutes=1)
+    new = db.query(CloudResource).filter_by(resource_id="lab/Deployment/default/new").one()
+    assert new.content_changed_at is None
+
+
 def test_complete_kind_marks_unseen_rows_absent_and_never_deletes(db):
     gone = _row(db, "Deployment", "old")
     res = ingest(CONN, _target(), CollectResult(entities=[_obs("Deployment", "web")],

@@ -33,7 +33,8 @@ INSERT INTO health_issues (id, resource_id, provider, severity, source, title, d
 
 _NEW_HEALTH_COLUMNS = {"resource_ref", "anchor_status", "anchor_candidates", "observed_at"}
 _MIGRATION_DDL = re.compile(
-    r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since|rules_published_at)"
+    r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since"
+    r"|content_changed_at|rules_published_at)"
     r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status",
     re.I,
 )
@@ -97,7 +98,7 @@ class _StubInspector:
 def test_adds_columns_indexes_and_relation_table(old_db):
     engine = _run_init_db(old_db)
     assert _NEW_HEALTH_COLUMNS <= _cols(engine, "health_issues")
-    assert "absent_since" in _cols(engine, "cloud_resources")
+    assert {"absent_since", "content_changed_at"} <= _cols(engine, "cloud_resources")
     assert "rules_published_at" in _cols(engine, "galaxy_builds")
     assert {"idx_health_issue_resource_ref", "idx_health_issue_anchor_status"} <= _index_names(engine, "health_issues")
     assert {"idx_resource_relation_src", "idx_resource_relation_dst", "idx_resource_relation_build"} <= _index_names(
@@ -160,6 +161,7 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert f"ALTER TABLE health_issues ADD COLUMN IF NOT EXISTS {ref_ddl}" in stmts
     assert "ALTER TABLE galaxy_builds ADD COLUMN IF NOT EXISTS rules_published_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE cloud_resources ADD COLUMN IF NOT EXISTS absent_since TIMESTAMP WITHOUT TIME ZONE" in stmts
+    assert "ALTER TABLE cloud_resources ADD COLUMN IF NOT EXISTS content_changed_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
     assert all("DATETIME" not in s for s in stmts)

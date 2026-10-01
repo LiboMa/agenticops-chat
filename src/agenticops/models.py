@@ -219,6 +219,9 @@ class CloudResource(Base):
     # MVP-2.6.1: set by connectors/ingest or scanner/engine when a complete listing no longer sees the row;
     # cleared when a writer sees it again (services/inventory.mark_seen). Rows are never deleted.
     absent_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1: set by connectors/ingest when an existing row's content hash moves (never on create); read by
+    # graph/evidence as "changed in the RCA window". Rows written only by the scan path stay NULL.
+    content_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     account: Mapped["CloudAccount"] = relationship(back_populates="resources")
@@ -1412,7 +1415,7 @@ _ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
         "anchor_candidates": None,
         "observed_at": None,
     },
-    "cloud_resources": {"absent_since": None},
+    "cloud_resources": {"absent_since": None, "content_changed_at": None},
     "galaxy_builds": {"rules_published_at": None},
 }
 

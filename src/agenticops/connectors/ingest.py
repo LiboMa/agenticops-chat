@@ -1,7 +1,8 @@
 """The only writer for pull-connector observations (MVP-2.6.1 spec §3.B.2). Deterministic, no LLM.
 
 - entities: upsert into cloud_resources by (account_id, provider, resource_id); scanned_at = now,
-  absent_since cleared. The build-written raw_data["unresolved_refs"] survives the overwrite.
+  absent_since cleared. The build-written raw_data["unresolved_refs"] survives the overwrite. An existing row
+  whose content hash moved gets content_changed_at = now (the RCA evidence reads it; Plan C).
 - absent: only for a (scope, kind) the connector listed completely, rows of that kind under the scope that
   were not seen get absent_since = now. Never deletes; a partial kind is never touched, and neither is a row some
   writer touched after this run's listing began (scanned_at >= started_at): the seen set is stale for it.
@@ -107,6 +108,7 @@ def ingest(connector: Connector, target: Target, result: CollectResult, *, trigg
                 changed = True
             if before != after:
                 changed = True
+                row.content_changed_at = now
             row.resource_type, row.name, row.region = e.resource_type, e.name, e.region
             row.tags, row.raw_data, row.status = dict(e.tags), raw, e.status
             mark_seen(row, now)

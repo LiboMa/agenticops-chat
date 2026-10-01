@@ -10,8 +10,9 @@ VOLATILE_KEYS = frozenset({
     "LaunchTime", "AttachTime", "CreateTime", "CreatedTime", "createDate",
     "LastModified", "lastModified", "updatedAt", "UpdateTime",
     "AvailableIpAddressCount", "ClientToken", "RequesterId",
-    # K8s (MVP-2.6.1): rolled-up pod status changes every collection; unresolved_refs is written by the build.
-    "pod_summary", "unresolved_refs",
+    # K8s (MVP-2.6.1): rolled-up pod status changes every collection; unresolved_refs is written by the build;
+    # created_at (metadata.creationTimestamp) is read on its own by the RCA evidence, like CreateTime above.
+    "pod_summary", "unresolved_refs", "created_at",
 })
 
 _HASH_FIELDS = ("resource_type", "resource_id", "name", "tags", "raw_data")

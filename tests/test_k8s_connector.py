@@ -209,6 +209,15 @@ def test_every_kind_becomes_a_whitelisted_row():
     assert rows["lab/DaemonSet/shop/agent"].raw_data["replicas"] == 2
 
 
+def test_created_at_is_the_creation_timestamp_only_when_present():
+    listing = _listing()
+    listing["deployments.apps"][0]["metadata"]["creationTimestamp"] = "2026-09-29T09:55:00Z"
+    result, _, _ = _collect(_FakeKubectl(listing))
+    rows = _by_id(result)
+    assert rows["lab/Deployment/shop/web"].raw_data["created_at"] == "2026-09-29T09:55:00Z"
+    assert "created_at" not in rows["lab/Service/shop/web"].raw_data
+
+
 def test_secret_rows_never_carry_data_or_annotations():
     result, _, _ = _collect()
     secret = _by_id(result)["lab/Secret/shop/db-creds"]

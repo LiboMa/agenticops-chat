@@ -225,7 +225,8 @@ def _aws_relations(rtype: str, raw: dict, self_node: str, ref) -> Iterator[tuple
 # K8S_RAW_DATA_CONTRACT — the raw_data keys Plan B's K8s connector writes (a whitelist: nothing else is
 # stored) and the only keys the K8s rules below read. A missing key means "not observed": no edge.
 #   every K8s row        cluster: str; namespace: str | None (None for K8s_Namespace and K8s_Node);
-#                        labels: {str: str}
+#                        labels: {str: str}; created_at: str  metadata.creationTimestamp, only when present
+#                                                     (volatile: not in the content hash; no rule reads it)
 #   workloads            K8s_Deployment / K8s_StatefulSet / K8s_DaemonSet, and a bare K8s_Pod (no owner):
 #                        template_labels: {str: str}  spec.template.metadata.labels; a bare Pod's own labels
 #                        selector: {str: str}         spec.selector.matchLabels (display only)

@@ -272,6 +272,8 @@ def _build(scope: str, region: str, listings: dict, errors: list) -> CollectResu
                 continue
             ns = None if kind in _CLUSTER_SCOPED else md.get("namespace")
             raw = {"cluster": scope, "namespace": ns, "labels": dict(md.get("labels") or {}), **_fields(kind, obj)}
+            if md.get("creationTimestamp"):
+                raw["created_at"] = str(md["creationTimestamp"])
             if summarise.get(kind):
                 raw["pod_summary"] = _pod_summary(owned.get((ns, kind, name), []), raw["replicas"])
             # K8s allows 253-char names, cloud_resources.name holds 200; resource_id keeps the full name
