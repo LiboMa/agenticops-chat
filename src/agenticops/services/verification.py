@@ -97,11 +97,12 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
     """A human's verdict on an execution pending acceptance: `accepted` or `rejected`, with a reason.
 
     Identity is the caller's authenticated actor. Authorized as the approval of the plan's kind
-    (plan.approve / change.approve), so webhook:* is refused even in shadow mode. Returns
+    (plan.approve / change.approve), so webhook:* is refused even in shadow mode — and before the run's
+    state is checked (404 → 403 → 409), so a caller who may not accept learns nothing about it. Returns
     {"execution_id", "decision", "kind", "status"} — status is the issue's or the change request's.
     """
     from agenticops.auth import authz
-    from agenticops.models import FixExecution, FixPlan, get_session
+    from agenticops.models import ChangeRequest, FixExecution, FixPlan, get_session
 
     if decision not in ("accepted", "rejected"):
         raise AcceptanceInvalid("decision must be accepted or rejected")
@@ -114,19 +115,22 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
         plan = session.get(FixPlan, execution.fix_plan_id) if execution is not None else None
         if plan is None:
             raise AcceptanceNotFound(f"Execution #{execution_id} not found")
+        if plan.plan_kind == "change":
+            cr_id = plan.change_request_id
+            cr = session.get(ChangeRequest, cr_id) if cr_id is not None else None
+            if cr is None:
+                raise AcceptanceNotFound(f"Execution #{execution_id}'s change plan names no change request")
+            permission, subject = "change.approve", cr  # as resolve_review checks it
+        else:
+            cr_id, permission, subject = None, "plan.approve", plan
+        try:
+            authz.check(actor, permission, subject=subject)
+        except authz.AuthzDenied as e:
+            raise AcceptanceForbidden(str(e)) from e
         if execution.verification_status != PENDING:
             raise AcceptanceError(f"Execution #{execution_id} is not pending acceptance "
                                   f"(verification: {execution.verification_status or 'none'})")
-        if plan.plan_kind == "change":
-            cr_id = plan.change_request_id
-            if cr_id is None:
-                raise AcceptanceNotFound(f"Execution #{execution_id}'s change plan names no change request")
-        else:
-            cr_id = None
-            try:
-                authz.check(actor, "plan.approve", subject=plan)
-            except authz.AuthzDenied as e:
-                raise AcceptanceForbidden(str(e)) from e
+        if cr_id is None:
             status = _accept_fix(session, execution, plan, actor=actor, decision=decision, reason=reason)
     finally:
         session.close()
@@ -146,11 +150,21 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
 def _accept_fix(session, execution, plan, *, actor: Actor, decision: str, reason: str) -> str:
     """Stamp the execution and move its issue from fix_executed, in one transaction; returns the issue status."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
-    from agenticops.models import FixExecution, InvalidStatusTransition
+    from sqlalchemy import func
+
+    from agenticops.models import FixExecution, FixPlan, InvalidStatusTransition
     from agenticops.services.issue_state import transition_issue
     from agenticops.tools.metadata_tools import dispute_rca, log_rca_disputed
 
     issue_id = plan.health_issue_id
+    # Only the issue's latest run speaks for it: an older run left pending when the issue was re-fixed
+    # still finds it at fix_executed, and must not close it on the old fix.
+    latest = (session.query(func.max(FixExecution.id)).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
+              .filter(FixPlan.health_issue_id == issue_id).scalar())
+    if latest != execution.id:
+        session.rollback()
+        raise AcceptanceError(f"Execution #{execution.id} is not the latest run for HealthIssue #{issue_id} "
+                              f"(latest: #{latest}); accept that one")
     target = "resolved" if decision == "accepted" else "root_cause_identified"
     stamped = (
         session.query(FixExecution)

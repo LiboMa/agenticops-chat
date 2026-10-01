@@ -323,6 +323,136 @@ def test_the_im_result_message_carries_the_verdict(db, quiet):
     assert "verification failed: post-check 1 failed" in im.call_args.args[2]
 
 
+def test_a_failed_runs_im_message_carries_its_error_once(db, quiet):
+    """The verdict clause is for a succeeded run; a failed run's reason IS its error, already the tail."""
+    issue_id, plan_id, _ = _fix(db)
+    with patch.object(ns, "notify_im_origin") as im:
+        _save(plan_id, status="failed", error="step 1 failed: AccessDenied")
+    assert im.call_args.args[2] == (f"Execution FAILED for Issue #{issue_id} (Plan #{plan_id}): "
+                                    "step 1 failed: AccessDenied")
+
+
+# ── the agent's status tool stays off the fix lifecycle (FR-D2) ─────────────
+
+def _status_moves(db, issue_id):
+    db.expire_all()
+    return db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="status_changed").count()
+
+
+def _driven_by_the_fix(issue_id, status):
+    return (f"HealthIssue #{issue_id} is '{status}': that status is driven by its fix plan and run. A human "
+            f"accepts or rejects the run (Web, or CLI /accept I{issue_id} yes|no <reason>), or resolves / sends "
+            "the issue back (Web issue page, CLI /resolve).")
+
+
+def test_the_status_tool_cannot_resolve_a_run_pending_acceptance(db, quiet):
+    """The reviewer's scenario: no post-checks → fix_executed + pending_acceptance; an agent 'resolving' it
+    would close the issue on an unverified run, behind the human acceptance's back."""
+    from agenticops.tools.metadata_tools import update_health_issue_status
+    issue_id, _, _, ex_id = _pending_fix(db)
+    moves = _status_moves(db, issue_id)
+    assert update_health_issue_status(issue_id, "resolved", note="looks fine") == _driven_by_the_fix(
+        issue_id, "fix_executed")
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    assert _fresh(FixExecution, ex_id).verification_status == PENDING
+    assert _status_moves(db, issue_id) == moves
+    quiet["post"].assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["fix_approved", "fix_executing"])
+def test_the_status_tool_refuses_every_fix_lifecycle_status(db, status):
+    from agenticops.tools.metadata_tools import update_health_issue_status
+    issue_id, *_ = _fix(db, issue_status=status)
+    for target in ("resolved", "root_cause_identified", "fix_executed", "dismissed"):
+        assert update_health_issue_status(issue_id, target) == _driven_by_the_fix(issue_id, status)
+    assert _fresh(HealthIssue, issue_id).status == status
+    assert _status_moves(db, issue_id) == 0
+
+
+def test_the_status_tool_still_moves_an_issue_before_a_fix(db):
+    from agenticops.tools.metadata_tools import update_health_issue_status
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="open", resource_id="r")
+    db.add(issue); db.commit()
+    assert update_health_issue_status(issue.id, "investigating") == f"HealthIssue #{issue.id} status: open -> investigating"
+    assert _fresh(HealthIssue, issue.id).status == "investigating"
+
+
+# ── mark_fix_failed: only its own issue, only while that issue is on the fix (FR-D4) ──
+
+def _failed_run(db, plan_id):
+    """A run closed as failed (a crash or the watchdog) — no save_execution_result moved its issue."""
+    ex = FixExecution(fix_plan_id=plan_id, status="failed", executed_by="agent:executor")
+    db.add(ex); db.commit()
+    return ex.id
+
+
+def _event_types(db, issue_id):
+    db.expire_all()
+    return [e.event_type for e in db.query(PipelineEvent).filter_by(health_issue_id=issue_id)]
+
+
+@pytest.mark.parametrize("issue_status", ["open", "acknowledged"])
+def test_a_stale_failed_run_neither_moves_nor_disputes_an_issue_that_moved_off_its_fix(db, issue_status):
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, plan_id, rca_id = _fix(db, issue_status=issue_status, plan_status="failed")
+    ex_id = _failed_run(db, plan_id)
+    out = mark_fix_failed(issue_id, ex_id, reason="step 1 failed")
+    assert out.startswith(f"HealthIssue #{issue_id} stays '{issue_status}': it has moved off this fix."), out
+    assert _fresh(HealthIssue, issue_id).status == issue_status
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    events = _event_types(db, issue_id)
+    assert "status_changed" not in events and "rca_disputed" not in events
+
+
+def test_mark_fix_failed_refuses_a_run_of_another_issue_or_a_change(db):
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_a, _, rca_a = _fix(db, issue_status="fix_executing", plan_status="executing")
+    issue_b, plan_b, rca_b = _fix(db, issue_status="fix_executing", plan_status="failed")
+    ex_b = _failed_run(db, plan_b)
+    assert mark_fix_failed(issue_a, ex_b, reason="x") == (
+        f"REJECTED: FixExecution #{ex_b} belongs to HealthIssue #{issue_b}, not #{issue_a}; nothing marked.")
+    cr_id, _, cr_ex = _change(db)
+    assert mark_fix_failed(issue_a, cr_ex, reason="x") == (
+        f"REJECTED: FixExecution #{cr_ex} belongs to change request C#{cr_id}, not HealthIssue #{issue_a}; "
+        "nothing marked.")
+    for issue_id, rca_id in ((issue_a, rca_a), (issue_b, rca_b)):
+        assert _fresh(HealthIssue, issue_id).status == "fix_executing"
+        assert _fresh(RCAResult, rca_id).critic_verdict is None
+        assert _event_types(db, issue_id) == []
+
+
+def test_a_failed_run_sends_its_issue_back_and_is_disputed_once(db, quiet):
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    # save_execution_result moved it and disputed the RCA; the executor's mark_fix_failed after it adds nothing
+    issue_id, plan_id, rca_id = _fix(db)
+    _save(plan_id, status="failed", error="step 1 failed")
+    ex_id = _only_execution(plan_id).id
+    assert "is back at 'root_cause_identified'" in mark_fix_failed(issue_id, ex_id, reason="step 1 failed")
+    assert _fresh(HealthIssue, issue_id).status == "root_cause_identified"
+    assert _event_types(db, issue_id).count("rca_disputed") == 1
+    # a run closed without a result (crash / watchdog): the issue is still on the fix, so this call moves it
+    crashed_issue, crashed_plan, crashed_rca = _fix(db, issue_status="fix_executing", plan_status="failed")
+    crashed_ex = _failed_run(db, crashed_plan)
+    out = mark_fix_failed(crashed_issue, crashed_ex, reason="executor crashed")
+    assert out.startswith(f"HealthIssue #{crashed_issue} is back at 'root_cause_identified'"), out
+    assert _fresh(HealthIssue, crashed_issue).status == "root_cause_identified"
+    assert _fresh(RCAResult, crashed_rca).critic_verdict == "disputed_by_execution"
+    assert _event_types(db, crashed_issue).count("rca_disputed") == 1
+    assert mark_fix_failed(crashed_issue, crashed_ex, reason="executor crashed").startswith(
+        f"HealthIssue #{crashed_issue} is back at 'root_cause_identified'")
+    assert _event_types(db, crashed_issue).count("rca_disputed") == 1
+
+
+def test_a_run_aborted_before_it_started_still_disputes_its_rca(db):
+    """2.2.0 execution-failure feedback kept: the issue stays at fix_approved (retry), its RCA is disputed."""
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, plan_id, rca_id = _fix(db)
+    _save(plan_id, status="aborted", steps=(), error="pre-check failed")
+    mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="pre-check failed")
+    assert _fresh(HealthIssue, issue_id).status == "fix_approved"
+    assert _fresh(RCAResult, rca_id).critic_verdict == "disputed_by_execution"
+
+
 # ── a fix: the human acceptance ─────────────────────────────────────────────
 
 def _pending_fix(db, **kw):
@@ -429,6 +559,52 @@ def test_a_concurrent_decision_wins_and_the_second_is_refused(db):
     ex = _fresh(FixExecution, ex_id)
     assert (ex.verification_status, ex.acceptance_note, _fresh(HealthIssue, issue_id).status) == (
         PASSED, "first", "resolved")
+
+
+def test_only_the_latest_run_of_an_issue_can_be_accepted(db, quiet):
+    """FR-D3: run 1 pending, the issue sent back and re-fixed by a human, run 2 pending — both leave the issue at
+    fix_executed, so only the latest-run check stops run 1's acceptance from closing it on the old fix."""
+    from agenticops.services.issue_state import transition_issue
+    issue_id, _, rca_id, run1 = _pending_fix(db)
+    db.expire_all()
+    for status in ("root_cause_identified", "fix_planned", "fix_approved"):
+        transition_issue(db, issue_id, status, actor="user:carol", reason="a second fix")
+    plan2 = FixPlan(health_issue_id=issue_id, rca_result_id=rca_id, risk_level="L1", title="p2", summary="s",
+                    steps=[{"command": "aws ec2 start-instances --instance-ids i-0abc"}], post_checks=[],
+                    status="approved", approved_by="user:alice")
+    db.add(plan2); db.flush()
+    pc.stamp_content(db, plan2)
+    pc.stamp_approval(db, plan2)
+    db.commit()
+    _save(plan2.id)
+    run2 = _only_execution(plan2.id).id
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    with pytest.raises(vf.AcceptanceError) as e:
+        vf.accept_execution(run1, actor=BOB, decision="accepted", reason="r")
+    assert (e.value.status_code, str(e.value)) == (
+        409, f"Execution #{run1} is not the latest run for HealthIssue #{issue_id} (latest: #{run2}); accept that one")
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    assert (_fresh(FixExecution, run1).verification_status, _fresh(FixExecution, run2).verification_status) == (
+        PENDING, PENDING)
+    quiet["post"].assert_not_called()
+    assert vf.accept_execution(run2, actor=BOB, decision="accepted", reason="r")["status"] == "resolved"
+
+
+def test_an_unauthorized_acceptance_is_403_whatever_the_run_state(db, quiet):
+    """FR-D6: authorization comes before the state check — a caller who may not accept learns nothing about
+    the run; a decided fix run and a decided change run are both 403 for a webhook, not 409."""
+    issue_id, plan_id, _ = _fix(db)
+    _save(plan_id, post=[OK])
+    fix_ex = _only_execution(plan_id).id
+    cr_id, change_plan, change_ex = _change(db)
+    _save_change(cr_id, change_plan, change_ex, post=[OK])
+    assert (_fresh(FixExecution, fix_ex).verification_status, _fresh(ChangeRequest, cr_id).status) == (
+        PASSED, "completed")
+    with patch("agenticops.audit.service.AuditService.log"):
+        for ex_id in (fix_ex, change_ex):
+            with pytest.raises(vf.AcceptanceForbidden) as e:
+                vf.accept_execution(ex_id, actor=webhook_actor("jira"), decision="accepted", reason="r")
+            assert e.value.status_code == 403
 
 
 # ── a change: the same verdict, the change's own terminal writers ───────────

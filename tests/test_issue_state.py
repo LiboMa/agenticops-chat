@@ -180,3 +180,18 @@ def test_advance_returns_the_refusal_instead_of_raising(db):
     assert refusal and "resolved" in refusal
     assert _status(issue.id) == "resolved"
     assert advance_issue(db, 999, "fix_planned", actor="system", reason="x") == "HealthIssue #999 not found"
+
+
+def test_a_long_actor_key_is_stored_to_the_column_width(db):
+    """PipelineEvent.actor is String(100): a longer actor key (an im:/webhook: id) still moves the issue."""
+    issue = _issue(db)
+    transition_issue(db, issue.id, "investigating", actor="im:feishu:" + "u" * 140, reason="x")
+    db.commit()
+    assert _status(issue.id) == "investigating"
+    assert _events(issue.id)[0][2] == ("im:feishu:" + "u" * 140)[:100]
+
+
+def test_an_advance_refusal_names_the_status_the_issue_is_in(db):
+    issue = _issue(db, status="open")
+    refusal = advance_issue(db, issue.id, "fix_approved", actor="agent:auto-pipeline", reason="approved")
+    assert "'open'" in refusal and "'investigating'" not in refusal

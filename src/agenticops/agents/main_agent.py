@@ -100,7 +100,7 @@ METADATA TOOLS (local database queries ONLY — no AWS calls):
 - get_managed_resources: List resources in the inventory, filtered by type/region.
 - get_health_issue / list_health_issues: Get health issue details or list.
 - get_resource_by_id: Get a specific AWS resource by its database ID.
-- update_health_issue_status: Update issue status (open -> investigating -> resolved).
+- update_health_issue_status: Update issue status before a fix exists (e.g. open -> investigating -> resolved); fix_approved / fix_executing / fix_executed are moved by the fix plan, its run and the human acceptance, not by this tool.
 - get_rca_result: Get the latest RCA analysis result for a health issue.
 - get_fix_plan: Get the latest fix plan for a health issue.
 - get_plan: Get one plan (fix or change) by id, any status — full text, version, content hash, approval.

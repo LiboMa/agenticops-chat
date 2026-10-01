@@ -2566,14 +2566,20 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
     it is audited (details.claimed_name) but never stored as the approver. The L2/L3 agent ceiling
     is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor.
     content_hash is required (422 without it): it is the plan the approver reviewed, and a plan whose
-    content has changed since is refused (409). The approval records the hash and version it approved."""
+    content has changed since is refused (409). The approval records the hash and version it approved.
+    Checks run 404 → 403 → state 409 → hash 409: a caller who may not approve learns nothing about the plan."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.issue_state import closed_issue_refusal
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "approved")
         if refusal:
@@ -2583,10 +2589,9 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
             raise HTTPException(status_code=409, detail="Fix plan is already approved")
         if plan.status == "rejected":
             raise HTTPException(status_code=409, detail="Fix plan was rejected. Create a new plan instead")
-        try:
-            authz.check(actor, "plan.approve", subject=plan)
-        except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+        closed = closed_issue_refusal(session, plan.health_issue_id)
+        if closed:
+            raise HTTPException(status_code=409, detail=closed)
         conflict = approval_conflict(session, plan, data.content_hash)
         if conflict:
             raise HTTPException(status_code=409, detail=conflict)

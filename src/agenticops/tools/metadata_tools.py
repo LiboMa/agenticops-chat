@@ -26,7 +26,7 @@ from agenticops.models import (
     transition_plan,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
-from agenticops.services.issue_state import advance_issue, transition_issue
+from agenticops.services.issue_state import advance_issue, closed_issue_refusal, transition_issue
 from agenticops.services.plan_content import (
     CONTENT_CHANGED, approval_drift, plan_label, stamp_approval, stamp_content,
 )
@@ -614,9 +614,8 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
     - acknowledged -> investigating | root_cause_identified | fix_planned | resolved
     - root_cause_identified -> fix_planned | resolved
     - fix_planned -> fix_approved | resolved
-    - fix_approved -> fix_executing | root_cause_identified | resolved
-    - fix_executing -> fix_executed | root_cause_identified | resolved
-    - fix_executed -> root_cause_identified | resolved
+    - fix_approved / fix_executing / fix_executed are moved by the fix plan, its run and the human acceptance,
+      not by this tool
 
     Args:
         issue_id: The HealthIssue ID to update
@@ -633,6 +632,10 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             return f"HealthIssue #{issue_id} not found."
+        if issue.status in ("fix_approved", "fix_executing", "fix_executed"):
+            return (f"HealthIssue #{issue_id} is '{issue.status}': that status is driven by its fix plan and run. "
+                    f"A human accepts or rejects the run (Web, or CLI /accept I{issue_id} yes|no <reason>), or "
+                    "resolves / sends the issue back (Web issue page, CLI /resolve).")
 
         try:
             old_status = transition_issue(session, issue_id, new_status, actor=_tool_actor(),
@@ -1304,6 +1307,10 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
         if plan.status == "rejected":
             return f"FixPlan #{fix_plan_id} was rejected. Create a new plan instead."
 
+        closed = closed_issue_refusal(session, plan.health_issue_id)
+        if closed:
+            return closed
+
         try:
             authz.check(actor, "plan.approve", subject=plan, details=denial_details)
             if ceiling is not None:
@@ -1699,7 +1706,9 @@ def save_execution_result(
                 notify_execution_result(fix_plan_id, issue_id, status, error_message)
                 notify_im_origin(
                     issue_id, "execution_completed",
-                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} (verification {verdict}: {why}) for Issue #{issue_id} (Plan #{fix_plan_id})"
+                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'}"
+                    + (f" (verification {verdict}: {why})" if status == "succeeded" else "")  # a failed run's why is its error
+                    + f" for Issue #{issue_id} (Plan #{fix_plan_id})"
                     + (f": {error_message[:200]}" if error_message else ""),
                 )
             except Exception:
@@ -1863,19 +1872,36 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             return f"FixExecution #{execution_id} not found."
 
         plan = session.query(FixPlan).filter_by(id=execution.fix_plan_id).first()
+        if plan is not None and plan.health_issue_id != health_issue_id:
+            owner = (f"HealthIssue #{plan.health_issue_id}" if plan.health_issue_id
+                     else f"change request C#{plan.change_request_id}")
+            return (f"REJECTED: FixExecution #{execution_id} belongs to {owner}, not "
+                    f"{'#' if plan.health_issue_id else 'HealthIssue #'}{health_issue_id}; nothing marked.")
+
+        # Only an issue still on a fix is moved or disputed — one that was resolved, dismissed or reopened since
+        # has moved off this run, and a stale result must not pull it back.
+        seen = issue.status
+        on_fix = seen in ("fix_approved", "fix_executing", "fix_executed")
         # An ended plan, or a run whose verification failed (an executed plan with a failed post-check)
         if plan is not None and (plan.status in ("failed", "rejected")
                                  or (plan.status == "executed" and execution.verification_status == "failed")):
-            refusal = advance_issue(session, issue.id, "root_cause_identified", actor=_tool_actor(),
-                                    reason=f"Execution #{execution_id} failed" + (f": {reason}" if reason else ""))
-            outcome = (f"stays '{issue.status}' ({refusal})" if refusal
-                       else "is back at 'root_cause_identified' (a new fix plan can be made)")
+            if on_fix:
+                try:
+                    transition_issue(session, issue.id, "root_cause_identified", actor=_tool_actor(), expected=seen,
+                                     reason=f"Execution #{execution_id} failed" + (f": {reason}" if reason else ""))
+                    outcome = "is back at 'root_cause_identified' (a new fix plan can be made)"
+                except InvalidStatusTransition as e:  # moved concurrently
+                    outcome, on_fix = f"is left where it is ({e})", False
+            elif seen == "root_cause_identified":  # save_execution_result already sent it back
+                outcome = "is back at 'root_cause_identified' (a new fix plan can be made)"
+            else:
+                outcome = f"stays '{seen}': it has moved off this fix"
         else:
             state = plan.status if plan else "missing"
-            outcome = (f"stays '{issue.status}' (FixPlan #{execution.fix_plan_id} is "
+            outcome = (f"stays '{seen}' (FixPlan #{execution.fix_plan_id} is "
                        f"'{state}'{'; retry allowed' if state == 'approved' else ''})")
 
-        rca = dispute_rca(session, health_issue_id, execution_id, reason)
+        rca = dispute_rca(session, health_issue_id, execution_id, reason) if on_fix else None
         session.commit()
         if rca is not None:
             log_rca_disputed(health_issue_id, rca.id, execution_id, reason)

@@ -58,7 +58,7 @@ def transition_issue(session, issue_id: int, new_status: str, *, actor: str, rea
     session.add(PipelineEvent(
         health_issue_id=issue_id, event_type="status_changed", stage="issue", status="completed",
         detail=json.dumps({"from": current, "to": new_status, "reason": (reason or "")[:500]}),
-        actor=actor, trace_id=issue.trace_id,
+        actor=actor[:100] if actor else actor, trace_id=issue.trace_id,  # the column is String(100)
     ))
     return current
 
@@ -76,9 +76,22 @@ def advance_issue(session, issue_id: int, new_status: str, *, actor: str, reason
         if issue is None:
             raise IssueNotFound(f"HealthIssue #{issue_id} not found")
         if issue.status == "open" and new_status not in _ISSUE_TRANSITIONS["open"] | {"open"}:
-            validate_status_transition("investigating", new_status)  # hop only when the hop gets there
+            try:  # hop only when the hop gets there
+                validate_status_transition("investigating", new_status)
+            except InvalidStatusTransition:
+                validate_status_transition(issue.status, new_status)  # the refusal names the issue's real status
+                raise
             transition_issue(session, issue_id, "investigating", actor=actor, reason=reason)
         transition_issue(session, issue_id, new_status, actor=actor, reason=reason)
         return None
     except (IssueNotFound, InvalidStatusTransition) as e:
         return str(e)
+
+
+def closed_issue_refusal(session, issue_id: Optional[int]) -> Optional[str]:
+    """Why a plan of this issue may not be approved: a resolved or dismissed issue is reopened first, so no
+    approval (human, agent or auto) puts a fix in motion for it. None = approvable (or a change plan)."""
+    issue = session.get(HealthIssue, issue_id) if issue_id else None
+    if issue is not None and issue.status in ("resolved", "dismissed"):
+        return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before approving its plan"
+    return None

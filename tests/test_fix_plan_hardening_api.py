@@ -120,6 +120,31 @@ def test_approve_without_body_is_422(client):
     assert _plan_state(pid)[0] == "pending_approval" and _audit_rows("plan.approved") == []
 
 
+def test_an_unauthorized_approver_is_403_before_any_state_or_hash_conflict(client):
+    """FR-D6: load → 404 → authz 403 → state / hash 409 — a caller who may not approve learns nothing about the
+    plan's state or content; a missing plan is still 404."""
+    from unittest.mock import patch
+    from agenticops.auth.actor import Actor
+    from agenticops.config import settings
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    reader = Actor("user", "reader", 9, ("read",))
+    approved = _plan(status="approved", approved_by="user:alice")
+    pending = _plan()
+    app.dependency_overrides[deps.current_actor] = lambda: reader
+    try:
+        with patch.object(settings, "rbac_enforce", True), \
+             patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+            assert client.put(f"/api/fix-plans/{approved}/approve", json={"content_hash": "any"}).status_code == 403
+            assert client.put(f"/api/fix-plans/{pending}/approve", json={"content_hash": "stale"}).status_code == 403
+            assert client.put("/api/fix-plans/999/approve", json={"content_hash": "any"}).status_code == 404
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    trigger.assert_not_called()
+    assert (_plan_state(approved)[0], _plan_state(pending)[0]) == ("approved", "pending_approval")
+    assert _audit_rows("plan.approved") == []
+
+
 def test_reject_endpoint_requires_reason(client):
     pid = _plan()
     r = client.post(f"/api/fix-plans/{pid}/reject", json={})

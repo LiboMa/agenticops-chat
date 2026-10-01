@@ -132,6 +132,12 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            from agenticops.services.issue_state import closed_issue_refusal
+            closed = closed_issue_refusal(session, plan.health_issue_id)
+            if closed:
+                logger.info("Auto-approve: FixPlan #%d skipped — %s", fix_plan_id, closed)
+                return
+
             if settings.policy_engine_enabled:
                 decision = _evaluate_policy_for_plan(session, plan)
                 if decision.action != "auto_approve":

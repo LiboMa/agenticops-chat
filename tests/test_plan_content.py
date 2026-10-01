@@ -210,6 +210,35 @@ def test_the_web_approval_binds_to_the_content_it_was_shown(db, client):
     _assert_bound(plan.id, version=2)
 
 
+@pytest.mark.parametrize("closed", ["resolved", "dismissed"])
+def test_no_path_approves_the_plan_of_a_closed_issue(db, client, monkeypatch, closed):
+    """FR-D5: Web, the agent tool, the CLI and the auto-approval all refuse a closed issue's plan — nothing is
+    approved or bound, nothing runs, and the issue stays closed."""
+    from agenticops.cli import main as cli
+    from agenticops.config import settings
+    from agenticops.services.pipeline_service import trigger_auto_approve
+    from agenticops.tools.metadata_tools import approve_fix_plan
+    for key, value in (("auto_fix_enabled", True), ("executor_auto_approve_l0_l1", True),
+                       ("policy_engine_enabled", False)):
+        monkeypatch.setattr(settings, key, value)
+    web, tool, slash = (_fix_plan(db, issue_status=closed) for _ in range(3))
+    auto = _fix_plan(db, status="draft", issue_status=closed)
+    refusal = "HealthIssue #{} is '%s'; reopen it before approving its plan" % closed
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger, \
+         patch("agenticops.services.notification_service.notify_fix_approved"):
+        r = client.put(f"/api/fix-plans/{web.id}/approve", json={"content_hash": web.content_hash})
+        assert (r.status_code, r.json()["detail"]) == (409, refusal.format(web.health_issue_id))
+        assert approve_fix_plan(fix_plan_id=tool.id, approved_by="agent:main") == refusal.format(tool.health_issue_id)
+        assert refusal.format(slash.health_issue_id) in cli._slash_approve(None, [str(slash.id), "looks", "fine"])
+        trigger_auto_approve(auto.id)
+    trigger.assert_not_called()
+    for plan, status in ((web, "pending_approval"), (tool, "pending_approval"), (slash, "pending_approval"),
+                         (auto, "draft")):
+        row = _fresh(FixPlan, plan.id)
+        assert (row.status, row.approved_by, row.approved_hash) == (status, None, None)
+        assert _fresh(HealthIssue, plan.health_issue_id).status == closed
+
+
 def test_the_change_approval_binds_to_the_implementation_plan(db, client):
     from agenticops.services import change_service as cs
     cr_id, plan = _change_plan(db)

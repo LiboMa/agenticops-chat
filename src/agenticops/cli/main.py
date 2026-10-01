@@ -2574,6 +2574,10 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return "[yellow]Fix plan was rejected. Create a new plan instead.[/yellow]"
         if plan.status not in ("draft", "pending_approval"):
             return f"[yellow]Fix plan status is '{plan.status}', cannot approve.[/yellow]"
+        from agenticops.services.issue_state import closed_issue_refusal
+        closed = closed_issue_refusal(session, plan.health_issue_id)
+        if closed:
+            return f"[yellow]{_safe_text(closed)}[/yellow]"
 
         try:
             authz.check(actor, "plan.approve", subject=plan)
