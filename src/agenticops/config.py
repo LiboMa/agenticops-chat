@@ -596,6 +596,17 @@ class Settings(BaseSettings):
         description="Evidence window end, minutes after observed_at/first_seen "
         "(AIOPS_RCA_TOPOLOGY_WINDOW_AFTER_MINUTES)",
     )
+    rca_k8s_recollect_min_age_seconds: int = Field(
+        default=120,
+        description="get_topology_evidence recollects a K8s-side anchor's cluster when its last successful "
+        "collection is older than this; also rate-limits RCAs on one cluster "
+        "(AIOPS_RCA_K8S_RECOLLECT_MIN_AGE_SECONDS)",
+    )
+    rca_k8s_recollect_timeout_seconds: int = Field(
+        default=60,
+        description="Time budget of that recollect; past it the evidence is stale and the RCA goes on "
+        "(AIOPS_RCA_K8S_RECOLLECT_TIMEOUT_SECONDS)",
+    )
 
     # ── Pull connectors (MVP-2.6.1 Plan B) ─────────────────────────
     k8s_kubeconfig_max_age_seconds: int = Field(
