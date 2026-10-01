@@ -355,6 +355,25 @@ def test_never_collected_cluster_with_a_failed_recollect(seed, monkeypatch):
                      "reason": "recollect of cluster prod was failed — no kubeconfig; cluster prod never collected"}
 
 
+def test_anchor_without_an_account_row_is_never_recollected(seed, monkeypatch):
+    _res(seed, 20, 3, "K8s_Pod", "prod/default/Pod/orphan", provider="kubernetes", raw_data={"cluster": "prod"})
+    seed.flush()
+    iid = _issue(seed, 20, acct=3, issue_type="availability", observed_at=NOW)
+    seed.commit()
+    calls = []
+
+    def _boom(name, **kwargs):
+        calls.append(kwargs)
+        raise AssertionError("no recollect expected")
+
+    monkeypatch.setattr("agenticops.connectors.runner.run_connector", _boom)
+    fresh = ev.build_evidence(iid)["freshness"]
+    assert calls == []
+    assert fresh == {"status": "stale", "collected_at": None,
+                     "reason": "recollect of cluster prod skipped — the anchor row has no account; "
+                               "cluster prod never collected"}
+
+
 # ── the tool ──────────────────────────────────────────────────────────
 
 

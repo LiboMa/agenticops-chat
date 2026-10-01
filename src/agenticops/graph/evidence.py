@@ -106,6 +106,8 @@ def _recollect(row: dict, scope: str) -> tuple[Optional[datetime], str]:
     if last is not None and (datetime.now(timezone.utc) - last).total_seconds() < \
             settings.rca_k8s_recollect_min_age_seconds:
         return last, ""
+    if not row["account_name"]:  # run_connector reads account="" as every account
+        return last, f"recollect of cluster {scope} skipped — the anchor row has no account"
     try:
         res = runner.run_connector(K8S_CONNECTOR, account=row["account_name"], scope=scope, trigger="rca",
                                    timeout_seconds=settings.rca_k8s_recollect_timeout_seconds)
