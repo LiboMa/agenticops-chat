@@ -83,7 +83,10 @@ async def api_intake_change(request: Request, response: Response):
                                  window_seconds=settings.intake_signature_window_seconds):
         raise HTTPException(status_code=401, detail="valid X-AIOps-Signature and X-AIOps-Timestamp required")
     try:  # validated only once signed: an unsigned caller learns nothing about the body shape
-        data = ChangeIntakeBody.model_validate_json(body)
+        data = ChangeIntakeBody.model_validate_json(body.decode("utf-8"))  # the 422 echoes it, so it must be text
+    except UnicodeDecodeError as e:
+        raise RequestValidationError([{"type": "json_invalid", "loc": ("body",),
+                                       "msg": f"body is not UTF-8 (byte {e.start})"}]) from e
     except ValidationError as e:
         raise RequestValidationError([{**err, "loc": ("body", *err["loc"])}
                                       for err in e.errors(include_url=False, include_context=False)]) from e

@@ -40,6 +40,7 @@ _RULE_TYPES = {"actor_must_differ_from_field", "actor_must_match_field_unless_ad
                "deny_actor_kind"}
 _TOP_LEVEL_KEYS = {"version", "permissions", "subjects", "rules"}
 _RULE_KEYS = {"name", "type", "permission", "field", "actor_kind", "risk_levels", "enforce"}
+_ACTOR_KINDS = ("agent", "cli", "im", "user", "web", "webhook")  # the six kinds of auth/actor.py
 
 DEFAULT_POLICY: dict = {
     "version": 1,
@@ -227,8 +228,13 @@ def validate_rbac(data: Any) -> list[str]:
         if rtype in ("actor_must_differ_from_field", "actor_must_match_field_unless_admin") and not (isinstance(rule.get("field"), str) and rule.get("field")):
             errors.append(f"{label}: 'field' (string) is required")
         if rtype in ("deny_actor_kind_when_risk_in", "deny_actor_kind"):
-            if not (isinstance(rule.get("actor_kind"), str) and rule.get("actor_kind")):
+            kind = rule.get("actor_kind")
+            if not (isinstance(kind, str) and kind):
                 errors.append(f"{label}: 'actor_kind' (string) is required")
+            elif kind not in _ACTOR_KINDS:  # a misspelt kind matches no actor: the deny would silently never fire
+                errors.append(f"{label}: unknown actor_kind {kind!r} (expected one of {', '.join(_ACTOR_KINDS)})")
+            if "field" in rule:
+                errors.append(f"{label}: 'field' does not apply to {rtype}")
         if rtype == "deny_actor_kind_when_risk_in":
             if not rule.get("risk_levels") or not _is_str_list(rule.get("risk_levels")):
                 errors.append(f"{label}: 'risk_levels' (non-empty list of strings) is required")

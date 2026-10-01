@@ -1021,6 +1021,9 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) ->
             raise ChangeStateError("no active change plan to approve")
         conflict = approval_conflict(s, plan, content_hash)
         if conflict:
+            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                stamp_content(s, plan)
+                s.commit()
             raise ChangeStateError(conflict)
         if not _claim(s, cr_id, "planned", "approved"):
             raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")

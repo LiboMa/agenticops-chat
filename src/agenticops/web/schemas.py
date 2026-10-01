@@ -360,8 +360,9 @@ class FixPlanUpdate(BaseModel):
 
 
 class FixPlanApproveBody(BaseModel):
-    content_hash: str = Field(..., min_length=1, max_length=64,
-                              description="content_hash of the plan as reviewed; a plan changed since is refused (409)")
+    content_hash: str = Field(..., max_length=64,
+                              description="content_hash of the plan as reviewed; a plan changed since (or an empty "
+                                          "hash) is refused (409)")
     approved_by: Optional[str] = Field(None, max_length=100, description="Legacy claimed name; audited, never trusted")
     reason: Optional[str] = Field(None, max_length=2000)
 
@@ -944,8 +945,9 @@ class ChangeReasonBody(BaseModel):
 
 
 class ChangeApproveBody(ChangeReasonBody):
-    content_hash: str = Field(..., min_length=1, max_length=64,
-                              description="content_hash of the implementation plan as reviewed (409 when it changed)")
+    content_hash: str = Field(..., max_length=64,
+                              description="content_hash of the implementation plan as reviewed (409 when it changed "
+                                          "or is empty)")
 
 
 class ChangeClarifyBody(BaseModel):

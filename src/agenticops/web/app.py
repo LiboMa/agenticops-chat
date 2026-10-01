@@ -2594,6 +2594,9 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
             raise HTTPException(status_code=409, detail=closed)
         conflict = approval_conflict(session, plan, data.content_hash)
         if conflict:
+            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                stamp_content(session, plan)
+                session.commit()
             raise HTTPException(status_code=409, detail=conflict)
         old = plan.status
         try:

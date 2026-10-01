@@ -124,6 +124,7 @@ def test_the_same_open_ticket_returns_the_same_request(client, db):
     (json.dumps({**BODY, "proposed_steps": [{"action": "tag", "command": ""}]}).encode(),
      ["body", "proposed_steps", 0, "command"]),
     (b"{not json", ["body"]),
+    (json.dumps(BODY).encode().replace(b"tag web", b"tag \xff web"), ["body"]),  # not UTF-8
 ])
 def test_a_signed_but_invalid_body_is_422(client, db, raw, where):
     r = _post(client, raw=raw)
@@ -230,5 +231,13 @@ def test_the_rule_type_is_validated_strictly_and_the_shipped_file_matches_the_de
         "r: 'actor_kind' (string) is required"]
     assert "does not apply to deny_actor_kind" in authz.validate_rbac(
         {**base, "rules": [{**rule, "risk_levels": ["L3"]}]})[0]
+    # a misspelt kind would silently disable an always-deny; a stray field reads as if it narrowed the rule
+    risk_rule = {**rule, "type": "deny_actor_kind_when_risk_in", "risk_levels": ["L3"]}
+    for r in (rule, risk_rule):
+        assert authz.validate_rbac({**base, "rules": [{**r, "actor_kind": "webhooks"}]}) == [
+            "r: unknown actor_kind 'webhooks' (expected one of agent, cli, im, user, web, webhook)"]
+        assert authz.validate_rbac({**base, "rules": [{**r, "field": "requested_by"}]}) == [
+            f"r: 'field' does not apply to {r['type']}"]
     shipped = yaml.safe_load((PROJECT_ROOT / "config" / "rbac.yaml").read_text(encoding="utf-8"))
+    assert authz.validate_rbac(shipped) == []
     assert shipped["rules"] == authz.DEFAULT_POLICY["rules"]

@@ -153,6 +153,31 @@ def test_an_issue_anchored_to_its_account_is_new_plan_content(db, monkeypatch):
     assert _fresh(FixPlan, done.id).plan_version == 1  # a terminal plan is history, not restamped
 
 
+
+def test_the_anchor_backfill_restamps_a_plan_hashed_before_its_issue_had_an_account(db, monkeypatch):
+    """M-4: an issue the 2.6.1 backfill anchors after its plans were hashed has its live plans restamped (else a
+    Web approval 409s and no reload clears it); an unhashed plan is left to the hash backfill, which also records
+    an approved plan's approved hash, so it can still run."""
+    import agenticops.models as models_mod
+    import agenticops.services.identity_resolver as ir
+    acct = _account(db)
+    live, done = _fix_plan(db), _fix_plan(db, status="rejected")
+    unhashed = _fix_plan(db, status="approved", issue_status="fix_approved", stamp=False)
+    live_id, live_hash, done_id, done_hash, unhashed_id = (live.id, live.content_hash, done.id, done.content_hash,
+                                                           unhashed.id)
+    monkeypatch.setattr(ir, "resolve", lambda *a, **k: ir.Anchor(ir.ACCOUNT_LEVEL, account_id=acct,
+                                                                  rule=ir.ACCOUNT_LEVEL))
+    models_mod._backfill_anchors_2_6_1(models_mod.get_engine())
+    models_mod._backfill_plan_hashes_2_6_1(models_mod.get_engine())
+    moved = _fresh(FixPlan, live_id)
+    assert _fresh(HealthIssue, moved.health_issue_id).account_id == acct
+    assert moved.content_hash != live_hash
+    assert (moved.plan_version, moved.content_hash) == (2, pc.current_hash(get_session(), moved))
+    assert _fresh(FixPlan, done_id).content_hash == done_hash  # a terminal plan is history, not restamped
+    runnable = _fresh(FixPlan, unhashed_id)
+    assert runnable.approved_hash == runnable.content_hash == pc.current_hash(get_session(), runnable)
+
+
 # ── every approval records what it approved ─────────────────────────────────
 
 def _assert_bound(plan_id, version=1):
@@ -237,6 +262,43 @@ def test_no_path_approves_the_plan_of_a_closed_issue(db, client, monkeypatch, cl
         row = _fresh(FixPlan, plan.id)
         assert (row.status, row.approved_by, row.approved_hash) == (status, None, None)
         assert _fresh(HealthIssue, plan.health_issue_id).status == closed
+
+
+def _clear_hash(plan_id):
+    s = get_session()
+    try:
+        s.query(FixPlan).filter_by(id=plan_id).update({"content_hash": None}, synchronize_session=False)
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_an_empty_or_unstamped_hash_is_the_reload_409(db, client):
+    """FR-D8: the UI sends `content_hash ?? ""` — an empty hash is the 409 that says reload, not a 422; a plan
+    stored without a hash is stamped by that request, so the reload shows the hash to approve."""
+    fix = _fix_plan(db)
+    unstamped = _fix_plan(db, stamp=False)
+    cr_id, change = _change_plan(db)
+    _clear_hash(change.id)
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+        for plan_id in (fix.id, unstamped.id):
+            r = client.put(f"/api/fix-plans/{plan_id}/approve", json={"content_hash": ""})
+            assert r.status_code == 409 and "reload it and review it again" in r.json()["detail"], r.text
+            assert _fresh(FixPlan, plan_id).status == "pending_approval"
+        shown = client.get(f"/api/fix-plans/{unstamped.id}").json()
+        assert shown["content_hash"] == pc.current_hash(get_session(), _fresh(FixPlan, unstamped.id))
+        r = client.put(f"/api/fix-plans/{unstamped.id}/approve", json={"content_hash": shown["content_hash"]})
+        assert r.status_code == 200, r.text
+    assert trigger.call_count == 1
+    _assert_bound(unstamped.id)
+    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": ""})
+    assert r.status_code == 409 and "reload it and review it again" in r.json()["detail"], r.text
+    assert _fresh(ChangeRequest, cr_id).status == "planned"
+    shown = client.get(f"/api/changes/{cr_id}").json()["plans"][0]["content_hash"]
+    assert shown and shown == pc.current_hash(get_session(), _fresh(FixPlan, change.id))
+    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": shown})
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    _assert_bound(change.id)
 
 
 def test_the_change_approval_binds_to_the_implementation_plan(db, client):

@@ -61,9 +61,12 @@ if [[ -n "$FIX_INFO" ]]; then
     FIX_LEVEL=$(echo "$FIX_INFO" | cut -d'|' -f3 | tr -d ' ')
     if [[ "$FIX_STATUS" == "planned" && ("$FIX_LEVEL" == "L2" || "$FIX_LEVEL" == "L3") ]]; then
         report_info "Fix plan is ${FIX_LEVEL} (requires human approval) — auto-approving for validation..."
+        # An approval names the plan content it approves (the hash as loaded); a changed plan answers 409
+        CONTENT_HASH=$(curl -s "${AGENTICOPS_URL}/api/fix-plans/${FIX_PLAN_ID}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('content_hash') or '')" 2>/dev/null || echo "")
         APPROVE_RESP=$(curl -s -X PUT "${AGENTICOPS_URL}/api/fix-plans/${FIX_PLAN_ID}/approve" \
             -H "Content-Type: application/json" \
-            -d '{"approved_by": "validation-script"}')
+            -d "{\"approved_by\": \"validation-script\", \"content_hash\": \"${CONTENT_HASH}\"}")
         report_info "Approve response: ${APPROVE_RESP}"
         sleep 5
     fi

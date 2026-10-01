@@ -1511,9 +1511,29 @@ def _backfill_anchors_2_6_1(engine) -> None:
                 if row.account_id is None and anchor.account_id is not None:
                     values["account_id"] = anchor.account_id
                 session.query(HealthIssue).filter(HealthIssue.id == row.id).update(values, synchronize_session=False)
+                if "account_id" in values:
+                    _restamp_hashed_plans_2_6_1(session, row.id, anchor.account_id)
             session.commit()
     except Exception as exc:
         logger.warning("MVP-2.6.1 anchor backfill skipped: %s", exc)
+
+
+def _restamp_hashed_plans_2_6_1(session, issue_id: int, account_id: int) -> None:
+    """plan_content.restamp_issue_plans, column-level like the backfills: the account is plan content, so a live
+    plan hashed before its issue had one gets the next version. An unhashed plan is left to
+    _backfill_plan_hashes_2_6_1 (it hashes with this account, and gives an approved plan its approved hash)."""
+    from agenticops.services.plan_content import content_hash
+
+    rows = session.query(FixPlan.id, FixPlan.plan_version, FixPlan.content_hash, FixPlan.steps, FixPlan.rollback_plan,
+                         FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level).filter(
+        FixPlan.health_issue_id == issue_id, FixPlan.content_hash.isnot(None),
+        FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES)).all()
+    for row in rows:
+        digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                              post_checks=row.post_checks, account_id=account_id, risk_level=row.risk_level)
+        if digest != row.content_hash:
+            session.query(FixPlan).filter(FixPlan.id == row.id).update(
+                {"content_hash": digest, "plan_version": (row.plan_version or 1) + 1}, synchronize_session=False)
 
 
 def _backfill_location_status_2_6_1(engine) -> None:

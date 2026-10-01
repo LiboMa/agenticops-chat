@@ -110,12 +110,13 @@ def test_approve_with_only_the_content_hash_uses_actor(client):
 
 
 def test_approve_without_body_is_422(client):
-    """MVP-2.6.1: an approval must name the plan content it approves — a bare PUT no longer approves."""
+    """MVP-2.6.1: an approval must name the plan content it approves — a bare PUT no longer approves. An empty
+    hash is a stale one (FR-D8): the 409 that says reload, not a 422."""
     from unittest.mock import patch
     pid = _plan()
     with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
         assert client.put(f"/api/fix-plans/{pid}/approve").status_code == 422
-        assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": ""}).status_code == 422
+        assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": ""}).status_code == 409
     trigger.assert_not_called()
     assert _plan_state(pid)[0] == "pending_approval" and _audit_rows("plan.approved") == []
 
