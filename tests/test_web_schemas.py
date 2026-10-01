@@ -204,8 +204,7 @@ class TestFixPlanBodies:
     def test_approve_body_requires_only_the_content_hash(self):
         with pytest.raises(ValidationError):
             FixPlanApproveBody()
-        with pytest.raises(ValidationError):
-            FixPlanApproveBody(content_hash="")
+        assert FixPlanApproveBody(content_hash="").content_hash == ""  # a stale hash: the service's 409, not a 422
         b = FixPlanApproveBody(content_hash="ab12")
         assert b.approved_by is None and b.reason is None
 
