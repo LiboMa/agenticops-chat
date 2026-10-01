@@ -3,6 +3,7 @@
  * schedule, the newest runs with their counts, and a Run-now button (POST /api/connectors/{name}/run).
  * The switch itself lives in config/settings.yaml — the card shows it, it does not flip it.
  */
+import { useEffect, useRef } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -44,6 +45,14 @@ function ConnectorRow({ c }: { c: ConnectorStatus }) {
   const { t } = useLocale();
   const run = useRunConnector();
   const blocker = runBlocker(c);
+  const { reset } = run;
+  const wasRunning = useRef(c.running);
+
+  // A run that has finished retires this row's "accepted" line and any 409 it caused.
+  useEffect(() => {
+    if (wasRunning.current && !c.running) reset();
+    wasRunning.current = c.running;
+  }, [c.running, reset]);
 
   return (
     <div className="space-y-3">
