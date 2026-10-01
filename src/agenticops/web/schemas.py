@@ -301,6 +301,13 @@ class HealthIssueResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("anchor_candidates", mode="before")
+    @classmethod
+    def _candidates_or_none(cls, value):
+        """A non-dict value (a legacy or hand-edited row) reads as None, as graph/api and graph/evidence read it —
+        one such row must not 500 every issue list. On the model, so model_validate callers get it too."""
+        return value if isinstance(value, dict) else None
+
     @classmethod
     def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
         """Build response, extracting merged_alerts from metric_data."""

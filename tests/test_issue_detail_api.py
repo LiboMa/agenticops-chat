@@ -68,3 +68,17 @@ def test_an_issue_never_anchored_reads_as_nulls(client):
 def test_the_list_carries_the_anchor_too(client):
     rows = {r["id"]: r for r in client.get("/api/health-issues").json()}
     assert _anchor(rows[1])["anchor_status"] == "anchored" and rows[2]["anchor_status"] == "ambiguous"
+
+
+def test_a_non_dict_candidates_value_reads_as_null(client):
+    """A row whose anchor_candidates is not a dict (a legacy or hand-edited value) reads as null — one such row
+    must not 500 the whole list."""
+    s = get_session()
+    s.add(HealthIssue(id=4, resource_id="x", anchor_candidates=["x"], severity="low", source="test", title="odd",
+                      description="d", status="open"))
+    s.commit()
+    s.close()
+    resp = client.get("/api/health-issues")
+    assert resp.status_code == 200, resp.text
+    rows = {r["id"]: r for r in resp.json()}
+    assert rows[4]["anchor_candidates"] is None and rows[2]["anchor_candidates"] == CANDIDATES

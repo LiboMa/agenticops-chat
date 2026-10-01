@@ -309,6 +309,42 @@ async def test_related_candidates_are_open_issues_two_hops_out_in_the_window(see
                                         "signal_at": (OBSERVED - timedelta(minutes=20)).isoformat()}
 
 
+async def _candidate_ids(client, iid):
+    return [c["issue_id"] for c in (await client.get(f"/api/graph/focus?issue_id={iid}")).json()["related"]["candidates"]]
+
+
+@pytest.mark.asyncio
+async def test_a_stale_ref_into_another_account_is_not_a_candidate(seed, client):
+    """An acct-b issue whose resource_ref names acct-a's SG (a stale ref, 1 hop out) is not acct-a's neighbor."""
+    iid = _issue(seed, 3, observed_at=OBSERVED)
+    sg = _issue(seed, 4, observed_at=OBSERVED)
+    _issue(seed, 4, acct=2, observed_at=OBSERVED)
+    seed.commit()
+    assert await _candidate_ids(client, iid) == [sg]
+
+
+@pytest.mark.asyncio
+async def test_an_issue_three_hops_out_is_not_a_candidate(seed, client):
+    """Subnet(8) sits in VPC(1): EC2(3) → Subnet(2) → VPC(1) → Subnet(8) is 3 hops, past the structural 2."""
+    _res(seed, 8, 1, "Subnet", "subnet-8")
+    _rel(seed, 1, 8, "contains")
+    iid = _issue(seed, 3, observed_at=OBSERVED)
+    vpc = _issue(seed, 1, observed_at=OBSERVED)
+    _issue(seed, 8, observed_at=OBSERVED)
+    seed.commit()
+    assert await _candidate_ids(client, iid) == [vpc]
+
+
+@pytest.mark.asyncio
+async def test_an_issue_after_the_window_is_not_a_candidate(seed, client):
+    """The window ends rca_topology_window_after_minutes (10) after the issue's signal; 30 minutes on is outside."""
+    iid = _issue(seed, 3, observed_at=OBSERVED)
+    sg = _issue(seed, 4, observed_at=OBSERVED + timedelta(minutes=10))
+    _issue(seed, 6, observed_at=OBSERVED + timedelta(minutes=30))
+    seed.commit()
+    assert await _candidate_ids(client, iid) == [sg]
+
+
 @pytest.mark.asyncio
 async def test_related_lists_are_capped_and_say_so(seed, client, monkeypatch):
     from agenticops.graph import api

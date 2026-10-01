@@ -963,7 +963,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             try:
                 notify_change_pending_approval(snap, plan_dict)
             except Exception:
-                logger.debug("notify_change_pending_approval failed", exc_info=True)
+                logger.warning("notify_change_pending_approval failed", exc_info=True)
             return get_change(cr_id)
         try:
             globals()["request_execution"](cr_id, actor=auto)
@@ -983,7 +983,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
     try:
         notify_change_pending_approval(snap, plan_dict)
     except Exception:
-        logger.debug("notify_change_pending_approval failed", exc_info=True)
+        logger.warning("notify_change_pending_approval failed", exc_info=True)
     return snap
 
 
