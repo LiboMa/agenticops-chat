@@ -44,8 +44,8 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Monitor & Detect** | CloudWatch alarms/metrics, Z-score anomaly detection, Prometheus/CloudWatch/Datadog webhook intake |
 | **Signal Gate** | Every issue-creation path (webhook, agent, REST) passes one gate: deterministic dedup (fingerprint-v2, flapping, cooldown, resource+type merge) plus a cheap-LLM gray-zone judge that may only *merge* — never discard. One auditable Signal row per event, promotable by hand |
 | **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, infrastructure graph, and Knowledge Base search; a post-RCA quality gate (evidence check → adversarial critic → confidence threshold) sends weak or refuted conclusions to `needs_review` instead of auto-fix. RCA pulls topology evidence from the published relation graph on demand and names a root-cause location (≤ 3 ranked resources + a causal path), validated fail-closed against inventory and the graph and judged by humans separately (observed only — never drives a fix) |
-| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — autonomous for low-risk fixes |
-| **Change Management** *(ITSM)* | Routine changes (tag edits, scaling, config) flow **Main → SRE legitimacy review → approval → Executor** with **no HealthIssue** — the ITSM counterpart to the incident pipeline. One Plan table, two origins (`plan_kind` = fix \| change) + a `change_requests` ticket; a 12-state change state machine; RBAC **shadow mode** (identity-bound approvers + SoD, off by default); two ledgers (`audit_logs` decisions + `command_audits` write commands). `/app/plans`, `/api/changes/*`, CLI `/change` |
+| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Verify → Resolve — autonomous for low-risk fixes; a run whose post-checks do not prove success waits for a human acceptance |
+| **Change Management** *(ITSM)* | Routine changes (tag edits, scaling, config) flow **Main → SRE legitimacy review → approval → Executor** with **no HealthIssue** — the ITSM counterpart to the incident pipeline. One Plan table, two origins (`plan_kind` = fix \| change) + a `change_requests` ticket; a 12-state change state machine; RBAC **shadow mode** (identity-bound approvers + SoD, off by default); two ledgers (`audit_logs` decisions + `command_audits` write commands). A request may carry its own steps and an external ticket (ITSM systems open one via HMAC-signed `POST /api/changes/intake`); approval is bound to the plan's content hash. `/app/plans`, `/api/changes/*`, CLI `/change` |
 | **Cloud Security Review** | Dual-frequency posture engine: hourly deterministic snapshots (IAM, S3, logging, VPC/EC2, EBS) scored against CIS by a **pure, reproducible** scorer; NACL-aware **three-state** ingress reachability (`reachable` / `not_reachable` / `undetermined` — never a false "safe"); 10-minute incremental polls of GuardDuty / Security Hub / CloudTrail; an evidence-grounded LLM advisor that is **fail-closed** (ungrounded or refuted → dropped). `/app/security`, `/api/security/*`, `security-review` report |
 | **Self-Optimizing Memory** | File-based agent memory that learns from each operation; agent self-curation, never-delete archival, prompt-cache-safe injection |
 | **Autonomous Skills** | 16 domain skills the agents can create, improve, and merge — published only through a security-gated, human-auditable workflow. **Wide loading**: import skill packages from a URL, a git repo or a zip/tar.gz — via CLI, API, or the Skills page's «URL / Git repo» importer with a per-package result manifest and an *Imported* badge. Everything lands as a draft; the whole bundle (`.sh`/`.py` included) is scanned before promotion; packaged scripts run only in a restricted **sandbox** (no credentials, no network; off by default) |
@@ -107,6 +107,7 @@ Alert ─► HealthIssue ─► RCA ─► SRE ─► Auto-Approve (L0/L1) ─�
 - **One issue → one active fix plan**: draft = update-in-place, locked = reject, terminal = allow new
 - **9-state HealthIssue lifecycle**, enforced by a state machine (invalid transitions → 409):
   `open → investigating → acknowledged → root_cause_identified → fix_planned → fix_approved → fix_executing → fix_executed → resolved`
+  — one write path (`transition_issue`, compare-and-set); a failed run or a rejected acceptance sends the issue back to `root_cause_identified` for a new plan
 
 ### Dual Alert Intake
 
@@ -178,7 +179,7 @@ aiops run report --type daily
 | `aiops run scan\|detect\|analyze\|report\|schedule\|notify` | Run a pipeline step |
 | `aiops connectors list` / `aiops connectors run <name>` | Pull connectors (K8s discovery): recent runs, run now |
 
-In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, and more — type `/help`.
+In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, `/accept` (a human verdict on a run pending acceptance), and more — type `/help`.
 
 ### Web Dashboard
 
@@ -188,7 +189,7 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 
 ### API
 
-220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/connectors`, `/api/settings`, `/api/auth`.
+220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/fix-executions` (+ `/{id}/accept`), `/api/changes` (+ `/api/changes/intake`), `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/connectors`, `/api/settings`, `/api/auth`.
 
 ---
 
@@ -215,6 +216,7 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | Tool-layer ledger of write-tier command attempts (`command_audits`); read-only commands are not recorded |
 | `AIOPS_K8S_CONNECTOR_ENABLED` | `true` | K8s pull connector (read-only `kubectl get`, account-scoped private kubeconfig) + the `k8s-discovery` schedule (`AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES`, default 10) |
 | `AIOPS_WEBHOOK_SECRET` | *(empty)* | Alert-webhook shared token: `POST /api/webhooks/alert*` then needs it (Bearer / `X-AIOps-Token` / `?token=`) or an `X-AIOps-Signature` HMAC, else 401. Empty = unchecked (startup warning). Never put it in `settings.yaml` |
+| `AIOPS_CHANGE_INTAKE_SECRET` | *(empty)* | HMAC secret for external change intake `POST /api/changes/intake` (`X-AIOps-Signature` over timestamp + body, else 401). Empty = the endpoint is 404. Never put it in `settings.yaml` |
 | `AIOPS_POLICY_GRAPH_IMPACT_ENFORCE` | `false` | Policy blast radius from the published graph: `false` = shadow (recorded on the decision as `shadow_blast_radius`, rules never see it); `true` = it feeds `blast-radius-escalation` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` (SQLite/files) or `cloud` (Postgres/S3) |
 
@@ -285,7 +287,7 @@ terraform apply -auto-approve
 Per-stack details: [`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md).
 
 ### Auth (all AWS deployments)
-On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`. Alert-webhook intake (`POST /api/webhooks/alert*`) instead takes the shared `AIOPS_WEBHOOK_SECRET` token or an HMAC signature — senders like Alertmanager or SNS cannot log in; unset, intake is unchecked and a startup warning says so.
+On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`. Alert-webhook intake (`POST /api/webhooks/alert*`) instead takes the shared `AIOPS_WEBHOOK_SECRET` token or an HMAC signature — senders like Alertmanager or SNS cannot log in; unset, intake is unchecked and a startup warning says so. Change intake (`POST /api/changes/intake`) takes only an HMAC signature by `AIOPS_CHANGE_INTAKE_SECRET` and is 404 while that is unset; its requester is `webhook:<system>`, which can never approve or execute.
 
 More: [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 

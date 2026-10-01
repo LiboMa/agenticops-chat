@@ -212,12 +212,15 @@ stateDiagram-v2
 
     root_cause_identified --> fix_planned : Auto-SRE generates plan (daemon thread)
 
-    fix_planned --> fix_approved : L0/L1 auto-approved OR human approves L2/L3
-    fix_planned --> acknowledged : User defers fix
+    fix_planned --> fix_approved : L0/L1 auto-approved OR human approves L2/L3 (bound to the content hash)
 
-    fix_approved --> resolved : Auto-execute succeeds (daemon thread)
-    fix_approved --> fix_failed : Execution failed (rollback attempted)
-    fix_failed --> fix_planned : Retry with new plan
+    fix_approved --> fix_executing : Executor starts the run (daemon thread)
+    fix_approved --> root_cause_identified : Plan changed after approval (run refused)
+    fix_executing --> resolved : Verdict passed (executor_auto_resolve)
+    fix_executing --> fix_executed : Verdict pending_acceptance
+    fix_executing --> root_cause_identified : Run or verification failed (RCA disputed)
+    fix_executed --> resolved : Human accepts
+    fix_executed --> root_cause_identified : Human rejects (RCA disputed)
 
     resolved --> [*] : KB case study + SOP saved
 
@@ -238,8 +241,12 @@ stateDiagram-v2
         7-step protocol:
         Verify → Gate → Pre-check → Execute
         → Post-check → Rollback → Finalize
+        then the platform's verdict:
+        passed / failed / pending_acceptance
     end note
 ```
+
+Every status write goes through one function, `services/issue_state.transition_issue` (see *Issue & Change Logic* below). `dismissed` (a false positive) is left out of the diagram: any unresolved state can move to it, it keeps suppressing repeats of its fingerprint, and `dismissed → open` reopens it.
 
 ---
 
@@ -312,8 +319,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["Executor Agent receives plan_id"] --> VERIFY["1. VERIFY<br/>get_approved_fix_plan"]
-    VERIFY -->|"REJECTED"| STOP["STOP immediately"]
+    START["Executor Agent receives plan_id"] --> VERIFY["1. VERIFY<br/>get_approved_fix_plan<br/>(recomputes the content hash)"]
+    VERIFY -->|"REJECTED: not approved, or content changed<br/>(run recorded aborted, plan withdrawn)"| STOP["STOP immediately"]
     VERIFY -->|"Approved"| GATE["2. GATE<br/>Check executor_enabled"]
     GATE -->|"Disabled"| STOP2["STOP + report"]
     GATE -->|"Enabled"| PRE["3. PRE-CHECK<br/>Execute plan.pre_checks"]
@@ -328,7 +335,14 @@ flowchart TD
     ROLLBACK -->|"Rollback fails"| FINAL_FAIL["FINALIZE<br/>status: failed<br/>(rollback also failed)"]
 
     POST --> FINAL_OK["7. FINALIZE<br/>status: succeeded"]
-    FINAL_OK --> RESOLVE["Auto-resolve issue<br/>+ save KB case study"]
+    FINAL_OK --> VERDICT{"8. VERDICT (the platform, not the agent)<br/>verification.evaluate"}
+    VERDICT -->|"passed: every post-check passed"| RESOLVE["Resolve issue<br/>+ save KB case study"]
+    VERDICT -->|"pending_acceptance: no / missing / warning results"| ACCEPT["fix_executed<br/>notify execution_pending_acceptance<br/>human accepts or rejects"]
+    VERDICT -->|"failed: a post-check failed"| REPLAN["root_cause_identified<br/>RCA disputed · new plan"]
+    FINAL_RB -->|"verdict failed"| REPLAN
+    FINAL_FAIL -->|"verdict failed"| REPLAN
+    ACCEPT -->|"accepted"| RESOLVE
+    ACCEPT -->|"rejected"| REPLAN
 
     style STOP fill:#f66
     style STOP2 fill:#f66
@@ -337,6 +351,8 @@ flowchart TD
     style FINAL_RB fill:#f96
     style FINAL_OK fill:#6f6
     style RESOLVE fill:#6f6
+    style ACCEPT fill:#f96
+    style REPLAN fill:#f96
 ```
 
 ---
@@ -365,14 +381,18 @@ flowchart TD
 
     HUMAN -->|API/Chat approve| EXEC
 
-    EXEC --> RESOLVE["⑧ Resolved<br/>KB case study + SOP update<br/>+ Notification sent"]
+    EXEC --> VERIFYV{"⑧ Verdict"}
+    VERIFYV -->|passed| RESOLVE["⑨ Resolved<br/>KB case study + SOP update<br/>+ Notification sent"]
+    VERIFYV -->|pending_acceptance| HACCEPT["⏸ Human acceptance<br/>/accept or POST /api/fix-executions/{id}/accept"]
+    HACCEPT -->|accepted| RESOLVE
 
     style AUTO fill:#6f6
     style HUMAN fill:#f96
+    style HACCEPT fill:#f96
     style RESOLVE fill:#6f6
 ```
 
-**Code path**: `app.py:_process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → resolved.
+**Code path**: `app.py:_process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → `verification.evaluate()` → resolved (passed) / fix_executed (pending acceptance) / root_cause_identified (failed).
 
 **Prevention hooks (graph engine, zero LLM)**:
 
@@ -404,27 +424,29 @@ The change plan is a `FixPlan` with `plan_kind="change"` (never a HealthIssue).
 
 ```mermaid
 flowchart TD
-    REQ["① Request<br/>Chat /change · Web POST /api/changes · CLI"] --> CREATE["change_service.create_change_request<br/>authz change.request · CR=draft<br/>audit change.requested · notify"]
+    REQ["① Request<br/>Chat /change · Web POST /api/changes · CLI<br/>(optional proposed_steps + external_ref)"] --> CREATE["change_service.create_change_request<br/>authz change.request · CR=draft<br/>audit change.requested · notify"]
+    INTAKE["External system<br/>POST /api/changes/intake (HMAC)<br/>actor webhook:&lt;system&gt;"] -->|"new ticket"| CREATE
+    INTAKE -->|"same ticket still open"| SAME["200 + the existing request"]
     CREATE --> REVIEW["② SRE Review (Mode C, READ-ONLY)<br/>CR=under_review · watchdog"]
 
     REVIEW --> GROUND{"③ Ground targets<br/>(fail-closed)"}
     GROUND -->|"Any target unprovable"| CLARIFY["needs_clarification<br/>(requester clarifies → re-review)"]
-    GROUND -->|"All grounded"| PLAN["④ Risk L0–L3 + policy<br/>save change plan<br/>(rollback + post_checks REQUIRED)"]
+    GROUND -->|"All grounded"| PLAN["④ Risk L0–L3 + policy<br/>save change plan (validates proposed_steps)<br/>(rollback + post_checks REQUIRED)<br/>code computes steps_diff"]
 
     PLAN --> VERDICT{"⑤ submit_change_review<br/>(code re-runs policy)"}
-    VERDICT -->|"policy block"| REJECTED["rejected"]
+    VERDICT -->|"policy block, or a blocked command<br/>in the proposed or planned steps"| REJECTED["rejected"]
     VERDICT -->|"planned"| AUTO{"auto_approve rule<br/>AND change_auto_approve_standard?"}
 
     AUTO -->|"yes"| APPROVED["Auto-approved ✓<br/>actor agent:auto-pipeline"]
     AUTO -->|"no (default)"| PENDING["⑥ pending_approval<br/>notify change_pending_approval (deep link)"]
 
-    PENDING -->|"Web/CLI approve<br/>authz change.approve + SoD · reason REQUIRED"| APPROVED
+    PENDING -->|"Web/CLI approve<br/>authz change.approve + SoD · reason REQUIRED<br/>bound to the plan's content_hash"| APPROVED
     APPROVED --> QUEUE["⑦ request_execution<br/>FixExecution(pending) → Executor queue"]
     QUEUE --> EXEC["executor_agent(fix_plan_id)<br/>(unchanged gate)"]
     EXEC --> RESULT{"⑧ on_execution_result<br/>(only writer of CR terminal state)"}
 
-    RESULT -->|"post_checks all pass"| COMPLETED["CR=completed<br/>audit + notify change_result"]
-    RESULT -->|"results missing/partial"| NEEDSREVIEW["CR=needs_review<br/>(human verdict; redo = NEW change)"]
+    RESULT -->|"verdict passed"| COMPLETED["CR=completed<br/>audit + notify change_result"]
+    RESULT -->|"succeeded, verdict pending_acceptance<br/>or a post-check failed"| NEEDSREVIEW["CR=needs_review + needs_review_reason<br/>(human verdict: resolve-review or /accept C&lt;id&gt;;<br/>redo = NEW change)"]
     RESULT -->|"step failed"| FAILED["CR=failed"]
     RESULT -->|"rolled back"| ROLLEDBACK["CR=rolled_back"]
 
@@ -449,6 +471,7 @@ flowchart TD
 
 **Invariants:** the CR terminal state is written only by `on_execution_result`; an unprovable target
 yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag.
+A `webhook:*` requester (change intake) never approves or executes, even in shadow mode.
 
 ---
 
@@ -1279,6 +1302,7 @@ SNS (CloudWatch alarms) cannot set headers: put `?token=<AIOPS_WEBHOOK_SECRET>` 
 | `/fix list` | List fix plans |
 | `/approve <ID>` | Approve fix plan |
 | `/execute <ID>` | Execute fix plan |
+| `/accept <I<id>\|C<id>> yes\|no <reason>` | Accept or reject a run pending acceptance |
 | `/report list` | List reports |
 | `/context set <key> <val>` | Set chat context |
 | `/channel list\|show\|test\|set` | Manage notification channels (YAML-backed) |
@@ -1391,6 +1415,54 @@ flowchart LR
 - **Policy blast radius (shadow)**: fix plans (the issue's anchored resource) and change requests (their widest target) get `estimate_blast_radius` = how many resources depend on the target in the published graph (downstream, rule relations, ≤ 3 hops). With `policy_graph_impact_enforce: false` (default) the count is only recorded on the decision as `shadow_blast_radius` and `blast_radius_gte` rules never see it. With `true` it feeds `blast-radius-escalation`. The old graph-store path always counted nothing.
 - **Gate**: `rca_topology_context_enabled` — off means RCA sees neither the tool nor its prompt section.
 - **Eval**: 13 chaos cases with declared ground truth, run once with the gate off and once with it on (AC@1 / AC@3 / MRR, `located`, graph recall). See *Chaos E2E Runbook* below and the [report](MVP-2.6.1-LOCATION-EVAL-REPORT.md).
+
+---
+
+## Issue & Change Logic (MVP-2.6.1)
+
+What a plan is, who may move an issue, and when a run counts as done. All of it is code — no LLM decides a status or a verdict.
+
+- **One status write path**: `services/issue_state.transition_issue(session, issue_id, new, actor=, reason=, expected=)` is the only writer of `HealthIssue.status`. It checks the edge, moves the row with `UPDATE … WHERE status=:expected` (0 rows → 409, a concurrent writer won) and adds a `status_changed` timeline event in the caller's transaction. `tests/test_issue_status_writes.py` scans `src/` and fails on any other write. New back-edges to `root_cause_identified` (from `fix_approved`, `fix_executing`, `fix_executed`) replace the old dead end where a failed fix had nowhere to go.
+- **Dismissed**: a repeat of a dismissed issue's fingerprint still merges into it (that is how a false positive stays quiet — `SUPPRESSING_ISSUE_STATUSES`), but dismissed is not open: gray-zone candidates, open counts, node colours and re-anchoring use `OPEN_ISSUE_STATUSES`.
+- **Plan version + content hash**: `content_hash` is sha256 over the canonical JSON of what a run would do — steps, rollback, pre/post checks, the target account and the risk level (title/summary/impact are prose and left out). A content write restamps it; a changed hash bumps `plan_version`. Plans are named `I#<issue> fix plan v<N>` and `C#<change> implementation plan v<N>`. Approval must quote the hash the approver saw (`PUT /api/fix-plans/{id}/approve`, `POST /api/changes/{id}/approve`: 422 without it, 409 when the plan changed) and records `approved_hash` / `approved_version`. The execution gate recomputes the hash: a plan changed after approval is not run — the attempt is recorded `aborted` ("content changed after approval"), the plan withdrawn, a fix issue goes back to `root_cause_identified` and a change request fails.
+- **A change request's own steps**: `proposed_steps` (`[{action, command}]`, ≤ 50) and `external_ref` (`{system, ticket_id, url?, requested_by?}`) ride on `POST /api/changes`, the `request_change` tool and intake. The SRE review validates the steps instead of writing its own; code then stores `steps_diff` (added / removed / modified / unchanged, by command). A blocked-tier command in the proposed OR the planned steps rejects the request (`policy_rule=blocked_command`).
+- **External intake** (`POST /api/changes/intake`): off (404) until `AIOPS_CHANGE_INTAKE_SECRET` is set. The raw body must be signed like the alert webhook — `X-AIOps-Timestamp` + `X-AIOps-Signature: sha256=<hex HMAC-SHA256 of timestamp + "." + body>`, within `intake_signature_window_seconds` — else 401. The requester is `webhook:<external_ref.system>`, which can never approve or execute (rbac `no-webhook-approve-or-execute`, enforced even in shadow mode). A redelivery while the same ticket is still open returns that request with 200. No UI: external systems call it; the request shows on the existing change pages.
+
+```bash
+BODY='{"title":"Tag web-1 Env=prod","description":"CHG0031: add the Env tag","account":"dev",
+"target_hints":["i-0abc"],"proposed_steps":[{"action":"tag","command":"aws ec2 create-tags --resources i-0abc --tags Key=Env,Value=prod"}],
+"external_ref":{"system":"servicenow","ticket_id":"CHG0031","url":"https://sn.example.com/CHG0031"},"requested_by":"carol"}'
+TS=$(date +%s)
+SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$AIOPS_CHANGE_INTAKE_SECRET" | sed 's/^.* //')
+curl -X POST http://localhost:8000/api/changes/intake -H "Content-Type: application/json" \
+  -H "X-AIOps-Timestamp: $TS" -H "X-AIOps-Signature: sha256=$SIG" --data-binary "$BODY"
+```
+
+- **Intake limits** (known, not fixed):
+  - The signature binds the timestamp to a ±`intake_signature_window_seconds` (300 s) window but carries no nonce, so a captured request can be replayed inside that window. Dedup on `(system, ticket_id)` makes the replay a 200 that returns the existing request, not a second change request — but only while that request is still open (the lookup skips closed ones, and its lock is per process): once it has closed, e.g. rejected, a replay inside the window opens a new one.
+  - The shared secret authenticates the caller, not the `system` it claims: anyone holding the secret can open requests as any `webhook:<system>`.
+  - Use different values for `webhook_secret` and `change_intake_secret`. Both endpoints use the same signature scheme and headers, so with one value whoever can send alerts can also open change requests; nothing checks that they differ.
+  - A webhook-created request that lands in `needs_clarification` has no forward path for the webhook actor (intake is its only endpoint, and a redelivery returns the request unchanged): a human must clarify or cancel it — with `rbac_enforce` on, an admin (rule `requester-or-admin`).
+
+- **One verdict per run** (`services/verification.evaluate`, pure): stored on `fix_executions.verification_status` / `verification_reason`. The business status, the execution status and the verdict are three separate facts — `failed` does not mean rolled back (`rollback_results` says that). A missing result is never a pass. Every input first goes through `verification.as_results`, the one shape normaliser for `post_checks`, post-check results and step results: a list is kept, a dict is one entry, a JSON string is parsed first, anything else is no entries — so a `post_checks` or post-check result of the wrong shape counts as missing and the verdict is pending, never passed (step results of the wrong shape are no step reports, which alone do not hold a pass back). `save_execution_result` moves a fix's issue only when it is in `fix_approved`, `fix_executing` or `fix_executed`, with a compare-and-set on the status it read: a stale run leaves an issue that has moved off its fix where it is — no hop and no RCA dispute.
+
+| Verdict | When | Fix issue | Change request |
+|---------|------|-----------|----------------|
+| `passed` | the run succeeded and every declared post-check passed | `resolved` (`fix_executed` with `executor_auto_resolve=false`) | `completed` |
+| `pending_acceptance` | succeeded, but no post-checks, missing/incomplete results, a warning, or a step that did not report success | `fix_executed` + `execution_pending_acceptance` notification | `needs_review` + `needs_review_reason` + the same notification |
+| `failed` | the run did not succeed, or a post-check failed | `root_cause_identified`, the RCA disputed | `failed` / `rolled_back`; a succeeded run with a failed post-check → `needs_review` |
+
+- **Human acceptance**: only a `pending_acceptance` run can be accepted or rejected, with a reason, as the session actor (a body name is ignored), authorized as the approval of the plan's kind — `webhook:*` is 403 even in shadow mode. Accepting a fix resolves its issue; rejecting sends it back to `root_cause_identified` and disputes the RCA. A change goes through `resolve_review`, still the only human writer of its terminal state. Both the run and the issue move with a compare-and-set, so a second decision, or an issue that moved on since the run, is 409. The accept button is Plan E; today it is the API and the CLI.
+
+```bash
+curl -X POST http://localhost:8000/api/fix-executions/42/accept -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"decision":"accepted","reason":"checked the tag by hand"}'
+# in aiops chat
+/accept I17 yes checked the tag by hand        # the issue's latest run pending acceptance
+/accept C5 no the tag went on the wrong instance   # a change's needs_review verdict
+```
+
+- **Main's read tools**: `get_plan(plan_id)` (either origin, any status: full text, version, content hash, approval, rejection) and `get_execution_result(execution_id=, plan_id=)` (a run's step / check / rollback results, verdict and acceptance; `execution_id` wins, `plan_id` = that plan's latest run). `get_change_request` now returns the whole current plan, `proposed_steps`, `steps_diff`, `needs_review_reason` and the latest run's verdict, untruncated. Main can explain why a run is pending; accepting it stays a human action.
 
 ---
 
