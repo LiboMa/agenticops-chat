@@ -28,10 +28,12 @@ export function ConfirmDialog({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // one ESC closes only this dialog, not the panel under it (as ReasonDialog, F7)
+      onCancel();
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [onCancel]);
 
   return createPortal(

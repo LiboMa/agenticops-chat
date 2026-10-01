@@ -71,16 +71,17 @@ export default function IssueDetail() {
 
   // The issue poll can land on fix_executed after the runs poll has stopped; the banner needs the verdict the
   // backend wrote to the run in the same transaction, so a status move refetches the runs (and the plan, whose
-  // badge moves with them).
+  // badge moves with them). Keyed by issue id: following a link to another issue reuses this page and is not a move.
   const qc = useQueryClient();
   const issueStatus = anomaly.data?.status;
-  const lastStatus = useRef(issueStatus);
+  const lastStatus = useRef({ id: issueId, status: issueStatus });
   useEffect(() => {
-    if (lastStatus.current !== undefined && lastStatus.current !== issueStatus) {
+    const prev = lastStatus.current;
+    if (prev.id === issueId && prev.status !== undefined && issueStatus !== undefined && prev.status !== issueStatus) {
       qc.invalidateQueries({ queryKey: ["issue-executions", issueId] });
       qc.invalidateQueries({ queryKey: ["fix-plans"] });
     }
-    lastStatus.current = issueStatus;
+    lastStatus.current = { id: issueId, status: issueStatus };
   }, [issueStatus, issueId, qc]);
 
   /* -- Local state ------------------------------------------------- */
