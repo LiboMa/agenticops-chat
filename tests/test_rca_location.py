@@ -33,8 +33,9 @@ def db(tmp_path):
 @pytest.fixture
 def seed(db):
     """acct-a: Subnet(2) contains EC2(3); EC2 secured_by SG(4) (rule); ELB(5) routes_to EC2 (llm).
-    acct-b: EC2(7), with a relation 7 routes_to 3 recorded under acct-b. Two acct-a relations reach past the
-    account: 7 uses 3 (a foreign endpoint) and 3 uses 999 (not in inventory). Build 1 is published, build 2 is not."""
+    acct-b: EC2(7), with a relation 7 routes_to 3 recorded under acct-b; so is 5 secured_by 4, though both its
+    ends are acct-a rows. Two acct-a relations reach past the account: 7 uses 3 (a foreign endpoint) and 3 uses
+    999 (not in inventory). Build 1 is published, build 2 is not."""
     db.add_all([CloudAccount(id=1, name="acct-a", provider="aws", credentials={}),
                 CloudAccount(id=2, name="acct-b", provider="aws", credentials={})])
     for rid, acct, rtype, name in [(2, 1, "Subnet", "subnet-1"), (3, 1, "EC2", "i-1"), (4, 1, "SecurityGroup", "sg-1"),
@@ -46,7 +47,8 @@ def seed(db):
     db.flush()
     for src, dst, rtype, prov, acct in [(2, 3, "contains", "rule", 1), (3, 4, "secured_by", "rule", 1),
                                         (5, 3, "routes_to", "llm", 1), (7, 3, "routes_to", "rule", 2),
-                                        (7, 3, "uses", "rule", 1), (3, 999, "uses", "rule", 1)]:
+                                        (7, 3, "uses", "rule", 1), (3, 999, "uses", "rule", 1),
+                                        (5, 4, "secured_by", "rule", 2)]:
         db.add(ResourceRelation(build_id=1, account_id=acct, src_ref=src, dst_ref=dst, relation_type=rtype,
                                 provenance=prov, evidence={}))
     db.add(HealthIssue(id=1, resource_id="i-1", resource_ref=3, anchor_status="anchored", account_id=1,
@@ -167,6 +169,8 @@ GOOD_EDGE = {"src_ref": 2, "dst_ref": 3, "relation_type": "contains"}
     {"src_ref": 3, "dst_ref": 5, "relation_type": "routes_to"},    # llm provenance, given in reverse
     {"src_ref": 7, "dst_ref": 3, "relation_type": "routes_to"},    # another account's relation
     {"src_ref": 3, "dst_ref": 7, "relation_type": "routes_to"},    # another account's relation, given in reverse
+    {"src_ref": 5, "dst_ref": 4, "relation_type": "secured_by"},   # own-account ends, relation under another account
+    {"src_ref": 4, "dst_ref": 5, "relation_type": "secured_by"},   # the same, given in reverse
     {"src_ref": "2", "dst_ref": 3, "relation_type": "contains"},   # not an id
     {"src_ref": 7, "dst_ref": 3, "relation_type": "uses"},         # an endpoint in another account
     {"src_ref": 3, "dst_ref": 999, "relation_type": "uses"},       # an endpoint not in inventory
@@ -190,6 +194,20 @@ def test_a_reversed_edge_is_stored_as_the_graph_holds_it(seed, given, stored):
     assert status == "valid" and location["dropped"] == []
     assert location["path"] == [{**stored, "provenance": "rule"},
                                 {**GOOD_EDGE, "src_name": "subnet-1", "dst_name": "i-1", "provenance": "rule"}]
+
+
+@pytest.mark.parametrize("given", [GOOD_EDGE, {"src_ref": 3, "dst_ref": 2, "relation_type": "contains"}])
+def test_a_duplicate_llm_row_does_not_mask_the_rule_edge(seed, given):
+    # Galaxy publishes llm edges into the same build, so an llm row can share a rule row's key. Re-adding the rule
+    # row after the llm one puts the llm row first in rowid order.
+    seed.query(ResourceRelation).filter_by(src_ref=2, dst_ref=3).delete()
+    for prov in ("llm", "rule"):
+        seed.add(ResourceRelation(build_id=1, account_id=1, src_ref=2, dst_ref=3, relation_type="contains",
+                                  provenance=prov, evidence={}))
+        seed.flush()
+    seed.commit()
+    location, status, _ = _check(seed, {"candidates": [_cand(2, 1)], "path": [given]})
+    assert status == "valid" and [e["provenance"] for e in location["path"]] == ["rule"]
 
 
 def test_path_is_checked_against_the_given_build(seed):

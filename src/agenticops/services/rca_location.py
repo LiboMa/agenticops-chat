@@ -94,9 +94,10 @@ def _candidates(session, issue: HealthIssue, raw, evidence_count: int, dropped: 
 
 def _relation(session, build_id: int, src: int, dst: int, rtype: str, account_id: int):
     """The rule/observed relation src → dst of the build in the account, or None."""
-    rel = session.query(ResourceRelation).filter_by(build_id=build_id, src_ref=src, dst_ref=dst,
-                                                    relation_type=rtype).first()
-    return rel if rel is not None and rel.provenance in PATH_PROVENANCE and rel.account_id == account_id else None
+    return (session.query(ResourceRelation)
+            .filter_by(build_id=build_id, src_ref=src, dst_ref=dst, relation_type=rtype)
+            .filter(ResourceRelation.provenance.in_(PATH_PROVENANCE), ResourceRelation.account_id == account_id)
+            .first())
 
 
 def _path(session, issue: HealthIssue, raw, build_id: Optional[int], dropped: list) -> list[dict]:

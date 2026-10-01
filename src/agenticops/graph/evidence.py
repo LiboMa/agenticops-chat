@@ -280,7 +280,7 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
         ranked.sort(key=lambda n: n["ref"] == row["ref"])
     if row["ref"] in views:
         anchor.update({k: views[row["ref"]][k] for k in ("health", "issue_ids", "changes", "absent")})
-    # Bounded, decision-relevant keys first: the RCA agent's context offloader keeps only the head of a large
+    # Small, decision-relevant keys first: the RCA agent's context offloader keeps only the head of a large
     # result (~3,000 chars), and the edges and neighbors grow with the neighborhood.
     return {
         "available": True,
@@ -309,13 +309,13 @@ def get_topology_evidence(issue_id: int, depth: Optional[int] = None, window_min
     """Topology evidence around an issue's anchored resource, read from the published relation graph.
 
     Returns JSON: the anchor, freshness, truncated, build_id and the ranked root-cause candidates with their
-    reasons first; then edges with direction_label (upstream = the far end is something the anchor depends
-    on; downstream = the far end depends on or is contained by the anchor; for a container anchor — a
-    cluster, namespace or network — the cause is usually a contained, downstream member); then neighbors with
-    their own open issues, signals and changes (created / content_changed / absent / our executions) inside
-    the time window. Cite an edge or a candidate in save_rca_result as evidence type "graph" with its
-    evidence_ref as the ref, and pass location.build_id = build_id. available=false says why the graph cannot
-    speak for this issue — it never means "no problem found".
+    reasons first; then edges with direction_label (upstream = the far end is something the near end (the end
+    closer to the anchor) depends on; downstream = the far end depends on or is contained by the near end; for
+    a container anchor — a cluster, namespace or network — the cause is usually a contained, downstream
+    member); then neighbors with their own open issues, signals and changes (created / content_changed /
+    absent / our executions) inside the time window. Cite an edge or a candidate in save_rca_result as
+    evidence type "graph" with its evidence_ref as the ref, and pass location.build_id = build_id.
+    available=false says why the graph cannot speak for this issue — it never means "no problem found".
 
     Args:
         issue_id: The HealthIssue id.
