@@ -1109,3 +1109,83 @@ export interface CommandAudit {
   fix_plan_id: number | null;
   change_request_id: number | null;
 }
+
+// ── Local graph: GET /api/graph/focus (MVP-2.6.1 spec §3.E.3) ──
+
+export type AnchorStatus = "anchored" | "ambiguous" | "account_level" | "unanchored";
+
+export interface FocusNode {
+  ref: number;
+  type: string;
+  name: string;
+  account_id: number;
+  region: string | null;
+  absent: boolean;
+  hops: number;
+  health: GalaxyHealth;
+  issue_ids: number[];
+  anomalous: boolean;
+  signal_at: string | null;
+}
+
+export interface FocusEdge {
+  src: number;
+  dst: number;
+  relation_type: string;
+  provenance: string; // rule | llm
+  evidence: string;
+  direction_label: "downstream" | "upstream" | "both" | "none";
+  observed_at: string | null;
+}
+
+// Another resource whose signals the Signal Gate merged into the issue
+export interface FocusMerged {
+  resource_id: string;
+  ref: number | null;
+  type: string | null;
+  name: string | null;
+  anchor_status: AnchorStatus;
+  signals: number;
+  last_at: string | null;
+}
+
+// Another open issue within 2 structural hops whose signal falls in the window
+export interface FocusCandidate {
+  issue_id: number;
+  ref: number;
+  hops: number;
+  severity: string;
+  title: string;
+  status: string;
+  signal_at: string;
+}
+
+export interface GraphFocus {
+  build_id: number | null;
+  nodes: FocusNode[];
+  edges: FocusEdge[];
+  truncated: boolean;
+  truncated_reason: string | null;
+  depth: number;
+  anchor: {
+    kind: "issue" | "resource" | "change_request";
+    id: number;
+    status: AnchorStatus;
+    rule: string | null;
+    candidates: Record<string, unknown>[];
+    refs: number[];
+  };
+  blast: { structural: number; potential: number; observed: number; truncated: boolean };
+  window: { start: string; end: string };
+  related: { merged: FocusMerged[]; candidates: FocusCandidate[]; truncated: boolean };
+}
+
+// One edge of an RCA result's location.path (services/rca_location._path)
+export interface LocationPathEdge {
+  src_ref: number;
+  dst_ref: number;
+  relation_type: string;
+  src_name?: string;
+  dst_name?: string;
+  provenance?: string;
+}
