@@ -109,6 +109,22 @@ def test_a_disabled_or_unknown_schedule_account_is_an_error(db, monkeypatch, nam
     assert calls == []
 
 
+def test_an_account_the_scan_has_no_commands_for_is_not_swept(db, monkeypatch):
+    """M-3: a kubernetes account (the K8s connector's) or any other provider without a command map is neither
+    scanned nor reported as an error or a credential failure."""
+    db.add_all([CloudAccount(id=4, name="onprem", provider="kubernetes", is_enabled=True,
+                             credentials={"cluster_name": "edge", "kubeconfig_path": "/k"}),
+                CloudAccount(id=5, name="az", provider="azure", is_enabled=True, credentials={})])
+    db.commit()
+    calls = _fake_scan(monkeypatch, [(1, "global", 0, []), (2, "cn", 0, [])])
+    execution = _dispatch(db)
+    assert calls == [[1, 2]]
+    assert (execution.status, execution.error) == ("completed", None)
+    assert (execution.result["errors"], execution.result["skipped_accounts"]) == (0, [])
+    with pytest.raises(ValueError, match="'onprem' not found, disabled or of a provider the scan cannot list"):
+        scheduled.run_scheduled_scan("onprem")
+
+
 def test_no_enabled_account_scans_nothing(db, monkeypatch):
     db.query(CloudAccount).update({"is_enabled": False})
     db.commit()

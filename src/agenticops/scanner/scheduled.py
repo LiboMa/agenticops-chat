@@ -6,7 +6,7 @@ import logging
 
 from agenticops.config import settings
 from agenticops.models import CloudAccount, get_db_session
-from agenticops.scanner.engine import scan_accounts_parallel
+from agenticops.scanner.engine import PROVIDER_COMMANDS, scan_accounts_parallel
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +30,18 @@ def seed_scan_schedule() -> bool:
 
 
 def run_scheduled_scan(account_name: str | None = None) -> dict:
-    """One W2 scan of every enabled account, or only the schedule's own account. Runs on the scheduler thread,
-    which has no event loop. `skipped_accounts` names each selected account whose credentials failed: its rows
-    were neither refreshed nor marked this run."""
+    """One W2 scan of every enabled account of a provider the scan has commands for (a kubernetes account is
+    the K8s connector's), or only the schedule's own account. Runs on the scheduler thread, which has no event
+    loop. `skipped_accounts` names each selected account whose credentials failed: its rows were neither
+    refreshed nor marked this run."""
     with get_db_session() as s:
-        q = s.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.is_enabled == True)  # noqa: E712
+        q = s.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.is_enabled == True,  # noqa: E712
+                                                               CloudAccount.provider.in_(list(PROVIDER_COMMANDS)))
         if account_name:
             q = q.filter(CloudAccount.name == account_name)
         selected = q.order_by(CloudAccount.id).all()
     if account_name and not selected:
-        raise ValueError(f"account '{account_name}' not found or disabled")
+        raise ValueError(f"account '{account_name}' not found, disabled or of a provider the scan cannot list")
     if not selected:
         return {"pipeline": PIPELINE_NAME, "accounts": 0, "total_found": 0, "total_updated": 0,
                 "resources_absent": 0, "errors": 0, "skipped_accounts": []}

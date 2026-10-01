@@ -206,7 +206,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `acp_kiro_command` / `acp_kiro_args` | `kiro-cli` / `["acp","--trust-all-tools"]` | Kiro CLI ACP launch (uses kiro's own login) |
 | `acp_codex_command` / `acp_codex_args` | `npx` / `["-y","@zed-industries/codex-acp"]` | Codex ACP launch (needs `OPENAI_API_KEY`) |
 | `scan_focus` | `all` | Resource categories filter |
-| `resource_scan_interval_minutes` | `60` | Interval of the `resource-scan` schedule (pipeline `ResourceScan`), seeded once at startup — an existing row, even one a user edited or disabled, is never overwritten. It runs the `POST /api/scan` scan of every enabled account; a run where any account's credentials failed is `failed` and names the account |
+| `resource_scan_interval_minutes` | `60` | Interval of the `resource-scan` schedule (pipeline `ResourceScan`), seeded once at startup — an existing row, even one a user edited or disabled, is never overwritten. It runs the `POST /api/scan` scan of every enabled account whose provider the scan has commands for (`aws`; a kubernetes account is the K8s connector's, never swept or reported as failed); a run where any account's credentials failed is `failed` and names the account |
 | `patrol_graph_checks_enabled` | `true` | SPOF + capacity-risk graph analysis step in health patrol (prevention; findings create HealthIssues with auto_rca off) |
 | `rca_topology_context_enabled` | `true` | Gate for the RCA `get_topology_evidence` tool (MVP-2.6.1 Plan C). The pre-fetched TOPOLOGY CONTEXT prompt block was retired in 2.6.1; until Plan C lands this flag has no effect |
 | `galaxy_enabled` | `true` | Enable Galaxy graph build pipeline + `/api/galaxy` + post-scan/hourly triggers |
