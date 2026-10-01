@@ -36,9 +36,14 @@ export interface IssueStatuses {
   pending: FixExecution | null; // the newest run, while it waits for a human to accept or reject it
 }
 
-/** The newest run, by created_at then id (the API already sends newest first; this does not rely on it). */
+/** Runs newest first, by created_at then id (the API already sends them so; this does not rely on it). */
+export function newestFirst(executions: FixExecution[] | undefined): FixExecution[] {
+  return [...(executions ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+}
+
+/** The newest run. */
 export function latestExecution(executions: FixExecution[] | undefined): FixExecution | null {
-  return [...(executions ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)[0] ?? null;
+  return newestFirst(executions)[0] ?? null;
 }
 
 /** Business status from the issue; execution and verification from its newest run. Acceptance is offered only

@@ -1,6 +1,6 @@
 import React from "react";
 import { useLocale } from "@/i18n/LocaleContext";
-import { changeStepState, CHANGE_STEP_KEYS, type ChangeStepInput } from "@/lib/changeStepper";
+import { changeStepState, CHANGE_STEP_KEYS, stepLabelKey, type ChangeStepInput } from "@/lib/changeStepper";
 
 export const ChangeStepper = React.memo(function ChangeStepper({
   cr,
@@ -24,8 +24,6 @@ export const ChangeStepper = React.memo(function ChangeStepper({
     return "bg-secondary text-muted-foreground";
   };
   const showCheck = (i: number) => i < index || (i === index && tone === "done");
-  // Current step reads the human status when it needs attention; otherwise the step name.
-  const currentLabel = tone === "warn" || tone === "bad" ? t(`changes.status.${cr.status}`) : t(CHANGE_STEP_KEYS[index]);
 
   if (compact) {
     return (
@@ -44,7 +42,7 @@ export const ChangeStepper = React.memo(function ChangeStepper({
         <li key={key} className="flex items-center gap-2">
           <span className={`w-6 h-6 rounded-full flex items-center justify-center font-semibold ${colorFor(i)}`}>{showCheck(i) ? "✓" : i + 1}</span>
           <span className={i <= index ? "text-foreground font-medium" : "text-muted-foreground"}>
-            {i === index ? currentLabel : t(key)}
+            {t(stepLabelKey(cr, i))}
           </span>
           {i < CHANGE_STEP_KEYS.length - 1 && <span className="w-6 h-px bg-border" />}
         </li>

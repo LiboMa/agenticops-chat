@@ -1108,6 +1108,30 @@ export interface ChangeRequest {
   chat_session_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+  proposed_steps: ChangeProposedStep[] | null; // the requester's own steps (MVP-2.6.1)
+  external_ref: ChangeExternalRef | null; // the ticket in another system it came from
+  steps_diff: ChangeStepsDiff | null; // the plan against proposed_steps (services/change_steps.diff_steps)
+  needs_review_reason: string | null; // why it waits for a human verdict
+}
+
+export interface ChangeProposedStep {
+  action: string;
+  command: string;
+}
+
+export interface ChangeExternalRef {
+  system: string;
+  ticket_id: string;
+  url?: string | null;
+  requested_by?: string | null;
+}
+
+/** Step numbers are 1-based; commands are whitespace-normalized. */
+export interface ChangeStepsDiff {
+  added: { plan_step: number; command: string }[];
+  removed: { proposed_step: number; command: string }[];
+  modified: { proposed_step: number; plan_step: number; proposed: string; plan: string }[];
+  unchanged: number;
 }
 
 export interface ChangeRequestDetail extends ChangeRequest {
@@ -1133,6 +1157,8 @@ export interface ChangeRequestCreate {
   targets: string[];
   requested_change_type: "normal" | "emergency";
   justification?: string;
+  proposed_steps?: ChangeProposedStep[];
+  external_ref?: ChangeExternalRef;
 }
 
 export interface PlanStats {

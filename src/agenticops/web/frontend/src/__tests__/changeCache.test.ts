@@ -45,7 +45,7 @@ describe("ChangeActionArgs is a discriminated union (M1)", () => {
   it("accepts the body each action expects", () => {
     const approve: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok", content_hash: "ab12" } };
     const clarify: ChangeActionArgs = { id: 1, action: "clarify", body: { message: "why?" } };
-    const resolve: ChangeActionArgs = { id: 1, action: "resolve-review", body: { outcome: "completed" } };
+    const resolve: ChangeActionArgs = { id: 1, action: "resolve-review", body: { outcome: "completed", reason: "verified" } };
     const execute: ChangeActionArgs = { id: 1, action: "execute" };
     expect([approve, clarify, resolve, execute]).toHaveLength(4);
   });

@@ -649,6 +649,8 @@ async def api_get_settings():
         "change_management_enabled": settings.change_management_enabled,
         "change_auto_approve_standard": settings.change_auto_approve_standard,
         "rbac_enforce": settings.rbac_enforce,
+        # Read-only: whether the graph's potential impact feeds the change policy or is shadow-recorded (MVP-2.6.1)
+        "policy_graph_impact_enforce": settings.policy_graph_impact_enforce,
     }
 
 

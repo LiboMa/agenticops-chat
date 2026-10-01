@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { changeStepState, CHANGE_STEP_KEYS, type ChangeStepInput, type StepTone } from "@/lib/changeStepper";
+import { changeStepState, CHANGE_STEP_KEYS, stepLabelKey, type ChangeStepInput, type StepTone } from "@/lib/changeStepper";
 import type { ChangeStatus } from "@/api/types";
 
 // One row per line of R6's table: status -> { index, tone }. review_verdict "approved_for_planning" means the
@@ -15,7 +15,8 @@ const rows: Row[] = [
   ["approved", { status: "approved", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 3, "progress"],
   ["executing", { status: "executing", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 4, "progress"],
   ["completed", { status: "completed", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 5, "done"],
-  ["needs_review", { status: "needs_review", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 5, "warn"],
+  // executed, not yet accepted: the Executed step waits (amber); Completed is not reached
+  ["needs_review", { status: "needs_review", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 4, "warn"],
   ["failed", { status: "failed", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 4, "bad"],
   ["rolled_back", { status: "rolled_back", approved_at: "2026-09-20T00:00:00Z", review_verdict: PLAN_OK }, 4, "bad"],
   // rejected, branch 1: a human rejected the plan (review had approved it for planning)
@@ -42,5 +43,23 @@ describe("changeStepState (M16)", () => {
       "changes.step.requested", "changes.step.reviewed", "changes.step.planned",
       "changes.step.approved", "changes.step.executed", "changes.step.completed",
     ]);
+  });
+});
+
+describe("stepLabelKey", () => {
+  it("the current step reads the change's status — under review is not yet Reviewed", () => {
+    const cr: ChangeStepInput = { status: "under_review", approved_at: null, review_verdict: null };
+    expect(stepLabelKey(cr, 1)).toBe("changes.status.under_review");
+    expect(stepLabelKey(cr, 0)).toBe("changes.step.requested");
+    expect(stepLabelKey(cr, 2)).toBe("changes.step.planned");
+  });
+
+  it("an executing change reads Executing on the Executed step; a completed one reads Completed", () => {
+    expect(stepLabelKey({ status: "executing", approved_at: "x", review_verdict: PLAN_OK }, 4))
+      .toBe("changes.status.executing");
+    expect(stepLabelKey({ status: "completed", approved_at: "x", review_verdict: PLAN_OK }, 5))
+      .toBe("changes.status.completed");
+    expect(stepLabelKey({ status: "needs_review", approved_at: "x", review_verdict: PLAN_OK }, 4))
+      .toBe("changes.status.needs_review");
   });
 });

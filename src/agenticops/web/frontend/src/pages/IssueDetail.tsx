@@ -33,12 +33,13 @@ import { CheckItem } from "@/components/plans/CheckItem";
 import { RollbackPlan } from "@/components/plans/RollbackPlan";
 import { ExecutionsTable } from "@/components/plans/ExecutionsTable";
 import { ExecutionEvidence } from "@/components/plans/ExecutionEvidence";
+import { VerificationChip } from "@/components/plans/VerificationChip";
 import { LocalGraph } from "@/components/graph/LocalGraph";
 import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { planLabel, shortHash } from "@/lib/plans";
 import {
-  anchorBadge, issueFacts, issueStatuses, latestExecution, parseIssueTab, ISSUE_TABS, type IssueTab,
+  anchorBadge, issueFacts, issueStatuses, latestExecution, newestFirst, parseIssueTab, ISSUE_TABS, type IssueTab,
 } from "@/lib/issueDetail";
 import { apiFetch } from "@/api/client";
 import type {
@@ -844,22 +845,6 @@ function StatusLabel({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-const VERIFICATION_CHIP: Record<string, string> = {
-  passed: "bg-green-500/20 text-green-600 dark:text-green-400",
-  failed: "bg-red-500/20 text-red-600 dark:text-red-400",
-  pending_acceptance: "bg-amber-500/20 text-amber-600 dark:text-amber-400",
-};
-
-function VerificationChip({ status }: { status: string | null }) {
-  const { t } = useLocale();
-  if (!status) return <span className="text-xs text-muted-foreground">—</span>;
-  return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${VERIFICATION_CHIP[status] ?? "bg-secondary text-muted-foreground"}`}>
-      {t(`verification.${status}`)}
-    </span>
-  );
-}
-
 /** Accept / reject a run pending acceptance; both need a reason, and the identity is the session's. */
 function AcceptanceActions({ execution }: { execution: FixExecution }) {
   const { t } = useLocale();
@@ -1013,7 +998,7 @@ function ExecutionTab({ executions, cancelExecMut, setActionMsg, t }: {
   if (executions.isLoading) return <Spinner label={t("common.loading")} />;
   // a failed fetch must not read as "no executions"
   if (executions.error) return <ErrorBanner message={executions.error.message} onRetry={() => executions.refetch()} />;
-  const runs = executions.data ?? [];
+  const runs = newestFirst(executions.data);
   if (runs.length === 0) {
     return (
       <Card>
@@ -1040,7 +1025,7 @@ function ExecutionTab({ executions, cancelExecMut, setActionMsg, t }: {
           />
         </CardBody>
       </Card>
-      {/* newest first, as the API returns them; the newest opens by default */}
+      {/* newest first (newestFirst), whatever order the API returns them in; the newest opens by default */}
       {runs.map((ex, i) => (
         <Card key={ex.id}>
           <CardBody>
@@ -1070,6 +1055,7 @@ function VerificationTab({ executions, pending, t }: {
   pending: FixExecution | null;
   t: (key: string) => string;
 }) {
+  if (executions.isLoading) return <Spinner label={t("common.loading")} />;
   // a failed fetch must not read as "not executed"
   if (executions.error) return <ErrorBanner message={executions.error.message} onRetry={() => executions.refetch()} />;
   const runs = executions.data ?? [];

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
-import { anchorBadge, issueFacts, issueStatuses, parseIssueTab, resultRow, resultSummary } from "@/lib/issueDetail";
+import { anchorBadge, issueFacts, issueStatuses, newestFirst, parseIssueTab, resultRow, resultSummary } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
   return {
@@ -71,6 +71,14 @@ describe("issueStatuses", () => {
   it("an issue never executed has no execution or verification status", () => {
     expect(issueStatuses(issue({ status: "open" }), undefined))
       .toEqual({ business: "open", execution: null, verification: null, latest: null, pending: null });
+  });
+});
+
+describe("newestFirst", () => {
+  it("orders runs by created_at, then id, whatever order they came in", () => {
+    const runs = [execution(1, "2026-09-28T01:00:00"), execution(3, "2026-09-28T02:00:00"), execution(2, "2026-09-28T02:00:00")];
+    expect(newestFirst(runs).map((e) => e.id)).toEqual([3, 2, 1]);
+    expect(newestFirst(undefined)).toEqual([]);
   });
 });
 

@@ -38,7 +38,8 @@ export function changeStepState(cr: ChangeStepInput): ChangeStepState {
     case "completed":
       return { index: 5, tone: "done" };
     case "needs_review":
-      return { index: 5, tone: "warn" };
+      // Executed, waiting for acceptance: the Executed step is what waits — Completed is not reached yet
+      return { index: 4, tone: "warn" };
     case "failed":
     case "rolled_back":
       return { index: 4, tone: "bad" };
@@ -54,4 +55,10 @@ export function changeStepState(cr: ChangeStepInput): ChangeStepState {
     default:
       return { index: 0, tone: "progress" };
   }
+}
+
+/** Label key for step `i`: the current step reads the change's own status ("Under review", not "Reviewed" — that
+ *  step is not done yet); every other step reads its name. */
+export function stepLabelKey(cr: ChangeStepInput, i: number): string {
+  return i === changeStepState(cr).index ? `changes.status.${cr.status}` : CHANGE_STEP_KEYS[i];
 }

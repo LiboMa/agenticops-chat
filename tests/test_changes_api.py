@@ -399,6 +399,16 @@ def test_settings_security_toggle_applies_persists_and_audits(client, settings_i
     assert _settings_audits() == [("update", "rbac_enforce", "web:anonymous", {"rbac_enforce": False}, {"rbac_enforce": True})]
 
 
+def test_settings_expose_graph_impact_enforce_read_only(client, settings_io):
+    """The ChangeDetail approval card labels the impact graph "for reference only" while it is shadow-recorded."""
+    from agenticops.config import settings
+    with patch.object(settings, "policy_graph_impact_enforce", False):
+        assert client.get("/api/settings").json()["policy_graph_impact_enforce"] is False
+        r = client.patch("/api/settings", json={"policy_graph_impact_enforce": True})
+        assert r.status_code == 400 and settings.policy_graph_impact_enforce is False
+    settings_io.assert_not_called()
+
+
 def test_settings_toggle_yaml_failure_applies_nothing_and_a_retry_heals(client, settings_io):
     """The audit rows are written, then the yaml, then the rows commit, all BEFORE the in-memory flip: a failed
     yaml write rolls the rows back and leaves the old value live, so an identical retry still sees the change
