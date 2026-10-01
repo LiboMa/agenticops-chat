@@ -155,6 +155,30 @@ def test_a_raising_collector_is_a_failed_run_and_the_next_target_still_runs(db, 
     assert (row.status, row.error) == ("failed", "bad not collected — collector raised KeyError: 'items'")
 
 
+def test_an_ingest_error_rolls_its_target_back_records_it_failed_and_the_next_target_still_runs(db, monkeypatch,
+                                                                                                 builds):
+    """M-2: a DB error writing one target (on PostgreSQL, e.g. a value over a column length) must not skip the
+    targets after it or leave the failed one without a run row."""
+    unwritable = EntityObservation(provider="kubernetes", resource_type="K8s_ConfigMap",
+                                   resource_id="bad/ConfigMap/default/cfg", name="cfg", region="us-east-1",
+                                   raw_data={"cluster": "bad", "keys": {"not", "json"}}, tags={}, status="active")
+    bad = CollectResult(entities=[_deployment("bad"), unwritable],
+                        completeness={("bad", "K8s_Deployment"): True, ("bad", "K8s_ConfigMap"): True})
+    _install(monkeypatch, _Fake([Target(GLOBAL, "bad", "us-east-1"), Target(GLOBAL, "lab", "us-east-1")],
+                                {"bad": bad, "lab": _complete("lab")}))
+
+    res = runner.run_connector("k8s")
+
+    assert [(t.scope, t.status) for t in res.targets] == [("bad", "failed"), ("lab", "complete")]
+    assert res.status == "partial"
+    assert res.targets[0].error.startswith("bad not ingested — StatementError: ")
+    row = db.get(ConnectorRun, res.targets[0].run_id)
+    assert (row.status, row.scope, row.error) == ("failed", "bad", res.targets[0].error)
+    db.expire_all()
+    assert [r.resource_id for r in db.query(CloudResource).order_by(CloudResource.resource_id)] == [
+        "lab/Deployment/default/web"]                    # target 1 rolled back whole, target 2 written
+
+
 def test_status_rolls_up_over_targets(db, monkeypatch, builds):
     failed = CollectResult(errors=["cluster x not collected — no kubeconfig"])
     _install(monkeypatch, _Fake([Target(GLOBAL, "a", "r"), Target(GLOBAL, "b", "r")], {"a": failed, "b": failed}))

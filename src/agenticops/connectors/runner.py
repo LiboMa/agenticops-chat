@@ -111,7 +111,12 @@ def _run(name: str, account: str, scope: str, trigger: str, deadline: Optional[f
             logger.exception("connector %s: collect(%s) raised", name, target.scope)
             result = CollectResult(errors=[f"{target.scope} not collected — collector raised "
                                            f"{type(exc).__name__}: {exc}"])
-        res = ingest(connector, target, result, trigger=trigger, started_at=started)
+        try:
+            res = ingest(connector, target, result, trigger=trigger, started_at=started)
+        except Exception as exc:  # the write rolled back whole; record the target failed, go on with the next
+            logger.warning("connector %s: ingest(%s) raised: %s", name, target.scope, exc)
+            result = CollectResult(errors=[f"{target.scope} not ingested — {type(exc).__name__}: {exc}"])
+            res = ingest(connector, target, result, trigger=trigger, started_at=started)
         runs.append(TargetRun(account=target.account.name, scope=target.scope, run_id=res.run_id,
                               status=res.status, changed=res.changed, counts=res.counts,
                               error="; ".join(result.errors)))

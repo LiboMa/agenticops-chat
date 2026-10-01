@@ -242,6 +242,14 @@ def test_owned_pods_roll_up_and_only_a_bare_pod_is_stored():
     assert rows["lab/Pod/shop/stress-test"].status == "Running"
 
 
+def test_a_253_char_name_is_cut_to_the_200_char_column_and_the_id_keeps_it_whole():
+    long = "a" * 253   # a DNS-subdomain name: K8s allows 253, cloud_resources.name is String(200)
+    result, _, _ = _collect(_FakeKubectl(listing={"configmaps": [{"metadata": _md(long, "shop"), "data": {}}]}))
+    (row,) = result.entities
+    assert row.name == "a" * 200
+    assert row.resource_id == f"lab/ConfigMap/shop/{long}"
+
+
 def test_failed_or_oversized_kind_is_partial_and_its_error_survives_redaction():
     fake = _FakeKubectl(fail={
         "secrets": (1, b"", 'Error from server (Forbidden): secrets is forbidden: User "system:serviceaccount:'

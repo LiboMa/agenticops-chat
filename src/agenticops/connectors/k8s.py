@@ -245,9 +245,10 @@ def _build(scope: str, region: str, listings: dict, errors: list) -> CollectResu
             raw = {"cluster": scope, "namespace": ns, "labels": dict(md.get("labels") or {}), **_fields(kind, obj)}
             if summarise.get(kind):
                 raw["pod_summary"] = _pod_summary(owned.get((ns, kind, name), []), raw["replicas"])
+            # K8s allows 253-char names, cloud_resources.name holds 200; resource_id keeps the full name
             result.entities.append(EntityObservation(
                 provider=PROVIDER, resource_type=K8S_KIND_TYPES[kind],
-                resource_id=k8s_resource_id(scope, kind, name, ns), name=name, region=region, raw_data=raw,
+                resource_id=k8s_resource_id(scope, kind, name, ns), name=name[:200], region=region, raw_data=raw,
                 tags={}, status=_status(kind, obj)))
     return result
 
