@@ -468,7 +468,7 @@ def review_change(change_request_id: int) -> str:
 
     USE FOR: right after request_change, or "review change", "review CR", "change request" + C#N.
     READ-ONLY: never executes — the SRE grounds targets, classifies risk, evaluates policy and saves
-    the plan; approval is a separate human step (Web Plans & Changes, or /approve C<N> in the CLI).
+    the plan; approval is a separate human step (Web Changes page, or /approve C<N> in the CLI).
     NOT FOR: incident fix plans (sre_agent) or executing (execute_change).
 
     Args:

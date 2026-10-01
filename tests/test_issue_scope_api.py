@@ -2,6 +2,8 @@
 
 The scope filters on the server: the list is paged (default 50), so filtering a page on the client would leave the
 ops view nearly empty whenever security findings dominate the newest rows."""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -42,10 +44,27 @@ def test_ops_scope_is_everything_else(client, path):
     assert _sources(client.get(f"{path}?scope=ops")) == ["cloudwatch_alarm", "securityXpoll", "vuln_scan"]
 
 
+@pytest.mark.parametrize("path", ["/api/issues", "/api/anomalies"])
 @pytest.mark.parametrize("query", ["", "?scope=all"])
-def test_all_scope_is_the_default(client, query):
-    assert len(_sources(client.get(f"/api/issues{query}"))) == 5
+def test_all_scope_is_the_default(client, path, query):
+    assert len(_sources(client.get(f"{path}{query}"))) == 5
 
 
-def test_unknown_scope_is_422(client):
-    assert client.get("/api/issues?scope=bogus").status_code == 422
+@pytest.mark.parametrize("path", ["/api/issues", "/api/anomalies"])
+def test_unknown_scope_is_422(client, path):
+    assert client.get(f"{path}?scope=bogus").status_code == 422
+
+
+def test_scope_filters_before_the_page_is_cut(client):
+    # Newest first: security, ops, security. Unfiltered, offset 1 is the ops row; scoped, it is the 2nd security one.
+    now = datetime.now(timezone.utc)
+    s = get_session()
+    for hours, source in ((3, "security_poll"), (2, "cloudwatch_alarm"), (1, "security_posture")):
+        s.add(HealthIssue(resource_id=f"page-{hours}", severity="high", source=source, title=source,
+                          description="d", status="open", detected_at=now + timedelta(hours=hours)))
+    s.commit()
+    s.close()
+    page = client.get("/api/issues?limit=1&offset=1")
+    assert page.status_code == 200 and [i["resource_id"] for i in page.json()] == ["page-2"]
+    page = client.get("/api/issues?scope=security&limit=1&offset=1")
+    assert page.status_code == 200 and [i["resource_id"] for i in page.json()] == ["page-1"]

@@ -91,8 +91,8 @@ class TestChangeRequiredMatch:
             on = change_required_refusal(cmd, "aws rds modify-")
         with patch.object(settings, "change_management_enabled", False):
             off = change_required_refusal(cmd, "aws rds modify-")
-        assert "/change" in on and "Plans & Changes" in on
-        assert "/change" not in off and "Plans & Changes" not in off and "change request" not in off.lower()
+        assert "/change" in on and "Changes → New change request" in on
+        assert "/change" not in off and "Changes → New change request" not in off and "change request" not in off.lower()
         for out in (on, off):
             assert "change_required" in out and "approved plan" in out and out.endswith(f"Command: {cmd}")
 

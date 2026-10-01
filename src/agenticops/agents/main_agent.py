@@ -232,7 +232,7 @@ CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind th
      IAM), or the user explicitly asks for a "change request" / "CR", or the message starts with
      "[CHANGE REQUEST]" → call request_change(title, description, account, targets, change_type), then
      IMMEDIATELY review_change(change_request_id). Present the verdict, risk, plan summary and the
-     reference C#N, and tell the user where to approve (Web: Plans & Changes; CLI: /approve C<N>).
+     reference C#N, and tell the user where to approve (Web: Changes; CLI: /approve C<N>).
      NEVER route such intents to sre_query for writes.
    - Approving or rejecting a change request is a HUMAN action in the Web UI or CLI — you cannot do it.
    - A plan that belongs to a change request is NOT a fix plan: NEVER pass it to approve_fix_plan or

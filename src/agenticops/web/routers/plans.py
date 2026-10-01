@@ -1,4 +1,4 @@
-"""Plans & Changes statistics API (MVP-2.6.0).
+"""Plan statistics API (MVP-2.6.0).
 
 An audit surface: the stats aggregate the decision ledger (who approved / was denied) and the command
 ledger, so the endpoint takes the /api/audit/stats read gate. It is NOT gated by change_management_enabled —
