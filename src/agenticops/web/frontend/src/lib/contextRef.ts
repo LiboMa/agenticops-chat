@@ -4,9 +4,9 @@
  */
 export type ContextRef = { kind: "issue"; id: number } | { kind: "change"; id: number };
 
-/** `/app/issues/N` → the issue, `/app/changes/N` → the change; any other route navigates instead. */
+/** `/app/issues/N` → the issue, `/app/changes/N` → the change (N a positive integer); any other route navigates instead. */
 export function contextRefFromPath(pathname: string): ContextRef | null {
-  const m = pathname.match(/^\/app\/(issues|changes)\/(\d+)$/);
+  const m = pathname.match(/^\/app\/(issues|changes)\/([1-9]\d*)$/);
   if (!m) return null;
   return { kind: m[1] === "issues" ? "issue" : "change", id: Number(m[2]) };
 }

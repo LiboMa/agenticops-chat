@@ -24,7 +24,7 @@ import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useLocale } from "@/i18n/LocaleContext";
 import { refLabel, type ContextRef } from "@/lib/contextRef";
-import { activeChangePlan, changeHeadline, toPipelineEvents } from "@/lib/changeDetail";
+import { activeChangePlan, changeHeadline, isHintResolved, toPipelineEvents } from "@/lib/changeDetail";
 import { planLabel, shortHash } from "@/lib/plans";
 import type { PipelineEvent, FixPlan } from "@/api/types";
 
@@ -56,6 +56,9 @@ const STATUS_ICONS: Record<string, string> = {
 
 export function ContextPanel({ subject, onClose, onAgentCheck, agentCheckDisabled }: Props) {
   const { t } = useLocale();
+  // with change management off Main has no change tools, so a change check prompt could not be answered
+  const settings = useSettings();
+  const canCheck = subject?.kind !== "change" || settings.data?.change_management_enabled === true;
 
   // House rule: side panels close on ESC (and slide in from the right).
   useEffect(() => {
@@ -80,7 +83,7 @@ export function ContextPanel({ subject, onClose, onAgentCheck, agentCheckDisable
           {refLabel(subject)}
         </span>
         <div className="flex items-center gap-1">
-          {onAgentCheck && (
+          {onAgentCheck && canCheck && (
             <button
               onClick={onAgentCheck}
               disabled={agentCheckDisabled}
@@ -357,7 +360,15 @@ function ChangeBody({ changeId }: { changeId: number }) {
         <div className="grid grid-cols-2 gap-3 text-xs">
           <MetaField label={t("plans.requestedBy")} value={cr.requested_by} mono />
           <MetaField label={t("plans.type")} value={t(`plans.changeType.${cr.effective_change_type ?? cr.requested_change_type}`)} />
-          <MetaField label={t("changes.targets")} value={cr.target_resources.map((x) => x.resource_id).join(", ") || "-"} mono />
+          <MetaField
+            label={t("changes.targets")}
+            // resolved targets, then the requester's hints review has not resolved yet (as ChangeDetail's "hint?" chips)
+            value={[
+              ...cr.target_resources.map((x) => x.resource_id),
+              ...cr.target_hints.filter((h) => !isHintResolved(h, cr.target_resources)).map((h) => `${h}?`),
+            ].join(", ") || "-"}
+            mono
+          />
           <MetaField label={t("issues.created")} value={formatShortDate(cr.requested_at ?? cr.created_at)} />
         </div>
         <Link
@@ -370,7 +381,13 @@ function ChangeBody({ changeId }: { changeId: number }) {
 
       <Tabs.Content value="plan" className="flex-1 overflow-y-auto p-4 space-y-4">
         {plan ? (
-          <FixPlanCard fp={plan} />
+          <>
+            <FixPlanCard fp={plan} />
+            {/* read-only here: approval and execution happen on the change page */}
+            <Link to={`/app/changes/${cr.id}`} className="block text-center text-xs text-primary hover:underline">
+              {t("changes.openChange")}
+            </Link>
+          </>
         ) : (
           <div className="text-center py-8">
             <p className="text-xs text-muted-foreground">{t("changes.noPlanYet")}</p>

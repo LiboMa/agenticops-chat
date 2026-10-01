@@ -11,6 +11,8 @@ describe("contextRefFromPath", () => {
     expect(contextRefFromPath("/app/resources/7")).toBeNull();
     expect(contextRefFromPath("/app/changes")).toBeNull();
     expect(contextRefFromPath("/app/changes/3/timeline")).toBeNull();
+    expect(contextRefFromPath("/app/changes/0")).toBeNull();
+    expect(contextRefFromPath("/app/issues/007")).toBeNull();
   });
 });
 
