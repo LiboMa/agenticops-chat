@@ -49,6 +49,19 @@ describe("buildLocalGraph", () => {
     expect(shown.links.find((l) => l.id === "s:3>6:references")).toMatchObject({ llm: true, kind: "structural" });
   });
 
+  it("drops an llm edge that twins a rule edge, drawn or not: one link per id, the twin never counted as hidden", () => {
+    // the builder publishes an llm row next to the rule row for the same relation; the llm twin comes first here
+    const edges = [edge(2, 3, "contains"), edge(3, 4, "secured_by", "llm"), edge(3, 4, "secured_by"),
+                   edge(3, 6, "references", "llm")];
+    expect(buildLocalGraph(focus({ edges })).hiddenLlm).toBe(1);
+    const shown = buildLocalGraph(focus({ edges }), { showLlm: true });
+    const ids = shown.links.map((l) => l.id);
+    expect(ids).toEqual(["s:2>3:contains", "s:3>4:secured_by", "s:3>6:references"]);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(shown.links.find((l) => l.id === "s:3>4:secured_by")).toMatchObject({ llm: false, provenance: "rule" });
+    expect(shown.hiddenLlm).toBe(0);
+  });
+
   it("highlights the RCA causal chain on its edges and nodes", () => {
     const m = buildLocalGraph(focus(), { path: [{ src_ref: 2, dst_ref: 3, relation_type: "contains" }] });
     expect(m.links.filter((l) => l.onPath).map((l) => l.id)).toEqual(["s:2>3:contains"]);
@@ -95,6 +108,24 @@ describe("buildLocalGraph", () => {
     expect(links.map((l) => [l.source, l.target])).toEqual([["r:3", "r:4"], ["r:3", "c:7"]]);
     expect(m.nodes.find((n) => n.id === "c:7")).toMatchObject({
       kind: "candidate", ref: 7, hops: 2, health: "critical", issueIds: [12, 13], label: "I#12, I#13" });
+  });
+
+  it("a resource outside the graph is one node, carrying every merged name and candidate issue on it", () => {
+    // two merged names (short id and ARN) the identity resolver anchors to the same resource, plus a candidate on it
+    const merged = [
+      { resource_id: "db-9", ref: 60, type: "RDS", name: "db-9", anchor_status: "anchored" as const,
+        signals: 1, last_at: null },
+      { resource_id: "arn:db-9", ref: 60, type: "RDS", name: "db-9", anchor_status: "anchored" as const,
+        signals: 2, last_at: null },
+    ];
+    const candidates = [{ issue_id: 12, ref: 60, hops: 2, severity: "critical", title: "t12", status: "open",
+                          signal_at: "2026-09-28T01:00:00" }];
+    const m = buildLocalGraph(focus({ related: { merged, candidates, truncated: false } }));
+    expect(m.nodes.filter((n) => n.ref === 60).map((n) => n.id)).toEqual(["m:db-9"]);
+    expect(m.nodes.find((n) => n.id === "m:db-9")).toMatchObject({
+      kind: "merged", label: "db-9", hops: 2, health: "critical", issueIds: [12], merged, candidates });
+    expect(m.links.filter((l) => l.kind !== "structural").map((l) => [l.id, l.source, l.target]))
+      .toEqual([["m:db-9", "m:db-9", "r:3"], ["m:arn:db-9", "m:db-9", "r:3"], ["c:60", "r:3", "m:db-9"]]);
   });
 
   it("cuts a larger answer to the node limit, anchors kept and nearest first, and says so", () => {

@@ -22,7 +22,7 @@ export function focusPath(subject: FocusSubject, opts: { includeLlm?: boolean } 
 }
 
 // "r:<ref>" a resource the API drew; "m:<resource_id>" a merged-in resource outside it; "c:<ref>" a
-// candidate issue's resource outside it; "i:<id>" the issue itself when it has no anchor to stand on.
+// candidate issue's resource outside it, not merged-in; "i:<id>" the issue itself when it has no anchor to stand on.
 export interface LgNode {
   id: string;
   kind: "resource" | "merged" | "candidate" | "issue";
@@ -94,16 +94,21 @@ export function buildLocalGraph(focus: GraphFocus,
     });
   }
 
+  // An llm edge that twins a rule edge (same src, dst and type) adds nothing: the rule layer wins, and the
+  // twin is neither drawn nor counted as hidden
+  const edgeKey = (e: { src: number; dst: number; relation_type: string }) => `${e.src}>${e.dst}:${e.relation_type}`;
+  const ruleKeys = new Set(focus.edges.filter((e) => e.provenance !== "llm").map(edgeKey));
   const links: LgLink[] = [];
   let hiddenLlm = 0;
   for (const e of focus.edges) {
     const llm = e.provenance === "llm";
+    const key = edgeKey(e);
+    if (llm && ruleKeys.has(key)) continue;
     if (llm && !opts.showLlm) {
       hiddenLlm++;
       continue;
     }
     if (!nodes.has(`r:${e.src}`) || !nodes.has(`r:${e.dst}`)) continue;
-    const key = `${e.src}>${e.dst}:${e.relation_type}`;
     links.push({ id: `s:${key}`, kind: "structural", source: `r:${e.src}`, target: `r:${e.dst}`, llm,
                  onPath: pathKeys.has(key), relationType: e.relation_type, provenance: e.provenance,
                  evidence: e.evidence, observedAt: e.observed_at });
@@ -118,11 +123,13 @@ export function buildLocalGraph(focus: GraphFocus,
   }
   const hub = anchorIds[0];
 
+  const outside = new Map<number, LgNode>(); // a resource outside the graph is one node, merged-in or a candidate's
   for (const m of merged) {
-    let n = m.ref != null ? nodes.get(`r:${m.ref}`) : undefined;
+    let n = m.ref != null ? nodes.get(`r:${m.ref}`) ?? outside.get(m.ref) : undefined;
     if (!n) {
       n = { ...blank(`m:${m.resource_id}`, "merged", m.name || m.resource_id), ref: m.ref, type: m.type };
       nodes.set(n.id, n);
+      if (m.ref != null) outside.set(m.ref, n);
     }
     n.merged.push(m);
     if (hub && n.id !== hub) {
@@ -134,12 +141,15 @@ export function buildLocalGraph(focus: GraphFocus,
   const byRef = new Map<number, FocusCandidate[]>();
   for (const c of candidates) byRef.set(c.ref, [...(byRef.get(c.ref) ?? []), c]);
   for (const [ref, cs] of byRef) {
-    let n = nodes.get(`r:${ref}`);
+    let n = nodes.get(`r:${ref}`) ?? outside.get(ref);
     if (!n) {
-      n = { ...blank(`c:${ref}`, "candidate", cs.map((c) => `I#${c.issue_id}`).join(", ")), ref, hops: cs[0].hops,
-            issueIds: cs.map((c) => c.issue_id) };
-      n.health = cs.reduce((h, c) => worst(h, SEVERITY_HEALTH[c.severity?.toLowerCase()] ?? "notice"), n.health);
+      n = { ...blank(`c:${ref}`, "candidate", cs.map((c) => `I#${c.issue_id}`).join(", ")), ref };
       nodes.set(n.id, n);
+    }
+    if (n.kind !== "resource") { // outside the graph the API sent no state for it: its candidate issues are that
+      n.hops = cs[0].hops;
+      n.issueIds = cs.map((c) => c.issue_id);
+      n.health = cs.reduce((h, c) => worst(h, SEVERITY_HEALTH[c.severity?.toLowerCase()] ?? "notice"), n.health);
     }
     n.candidates.push(...cs);
     if (hub && n.id !== hub) {

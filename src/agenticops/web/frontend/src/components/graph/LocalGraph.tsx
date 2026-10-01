@@ -170,6 +170,7 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
         {model.links.map((l) => {
           const [a, b] = [pos.get(l.source)!, pos.get(l.target)!];
           const st = linkStyle(l);
+          const picked = sel?.kind === "link" && sel.id === l.id; // a node and its link can share an id
           const d = linkPath(a, b, l.kind !== "structural");
           const arrow = l.kind !== "structural" ? undefined
             : `url(#${uid}-${l.onPath ? "arrow-path" : l.llm ? "arrow-llm" : "arrow"})`;
@@ -177,7 +178,7 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
           return (
             <g key={l.id} role="button" tabIndex={0} aria-label={label} className="cursor-pointer outline-none"
                {...onActivate(() => setSel({ kind: "link", id: l.id }))}>
-              <path d={d} fill="none" stroke={st.stroke} strokeWidth={sel?.id === l.id ? st.width + 1.5 : st.width}
+              <path d={d} fill="none" stroke={st.stroke} strokeWidth={picked ? st.width + 1.5 : st.width}
                     strokeDasharray={st.dash} strokeLinecap="round" markerEnd={arrow} />
               <path d={d} fill="none" stroke="transparent" strokeWidth={10} />
             </g>
@@ -188,6 +189,7 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
           const p = pos.get(n.id)!;
           const r = n.anchor ? 12 : 8;
           const outside = n.kind !== "resource";
+          const picked = sel?.kind === "node" && sel.id === n.id;
           return (
             <g key={n.id} transform={`translate(${p.x},${p.y})`} role="button" tabIndex={0}
                aria-label={`${n.label} ${t(`galaxy.health.${n.health}`)}`} className="cursor-pointer outline-none"
@@ -196,7 +198,7 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
                 ? <rect x={-r} y={-r} width={2 * r} height={2 * r} rx={3} fill={HEALTH_FILL[n.health]} />
                 : <circle r={r} fill={HEALTH_FILL[n.health]} />}
               <circle r={r + 3} fill="none"
-                      stroke={n.onPath ? PATH_EDGE : sel?.id === n.id || n.anchor ? "currentColor" : "transparent"}
+                      stroke={n.onPath ? PATH_EDGE : picked || n.anchor ? "currentColor" : "transparent"}
                       strokeWidth={n.onPath ? 2.5 : 1.5} strokeDasharray={outside || n.absent ? "3 2" : undefined}
                       className="text-foreground" />
               {n.issueIds.length > 0 && (
