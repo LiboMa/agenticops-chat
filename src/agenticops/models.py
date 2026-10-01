@@ -418,9 +418,11 @@ _ISSUE_TRANSITIONS: dict[str, set[str]] = {
     # investigating back-edge: legal RCA re-run on an already-analyzed issue
     "root_cause_identified":  {"investigating", "fix_planned", "resolved", "dismissed"},
     "fix_planned":            {"fix_approved", "resolved", "dismissed"},
-    "fix_approved":           {"fix_executing", "resolved", "dismissed"},
-    "fix_executing":          {"fix_executed", "resolved", "dismissed"},
-    "fix_executed":           {"resolved", "dismissed"},
+    # root_cause_identified back-edges (MVP-2.6.1): the fix never ran (content changed after approval), the run
+    # failed, or verification failed / acceptance was rejected — the issue can get a new fix plan
+    "fix_approved":           {"fix_executing", "root_cause_identified", "resolved", "dismissed"},
+    "fix_executing":          {"fix_executed", "root_cause_identified", "resolved", "dismissed"},
+    "fix_executed":           {"root_cause_identified", "resolved", "dismissed"},
     "resolved":               set(),  # terminal state
     "dismissed":              {"open"},  # can reopen
 }
