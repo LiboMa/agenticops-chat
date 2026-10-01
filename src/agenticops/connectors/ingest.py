@@ -3,7 +3,8 @@
 - entities: upsert into cloud_resources by (account_id, provider, resource_id); scanned_at = now,
   absent_since cleared. The build-written raw_data["unresolved_refs"] survives the overwrite.
 - absent: only for a (scope, kind) the connector listed completely, rows of that kind under the scope that
-  were not seen get absent_since = now. Never deletes; a partial kind is never touched.
+  were not seen get absent_since = now. Never deletes; a partial kind is never touched, and neither is a row some
+  writer touched after this run's listing began (scanned_at >= started_at): the seen set is stale for it.
 - signals: each through signal_gate.process_signal (fail-soft per signal).
 - one connector_runs row per call.
 """
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from agenticops.connectors.base import CollectResult, Connector, Target
 from agenticops.galaxy.hashing import content_hash
@@ -106,12 +107,14 @@ def ingest(connector: Connector, target: Target, result: CollectResult, *, trigg
             counts["updated"] += 1
 
         prefix = f"{target.scope}/"
+        listed_from = started_at or now
         for (scope, kind), complete in result.completeness.items():
             if not complete or scope != target.scope:
                 continue
             marked = mark_unseen_absent(
                 s, account_id=acct, provider=connector.provider, resource_type=kind, seen=obs, now=now,
-                criteria=(func.substr(CloudResource.resource_id, 1, len(prefix)) == prefix,))
+                criteria=(func.substr(CloudResource.resource_id, 1, len(prefix)) == prefix,
+                          or_(CloudResource.scanned_at.is_(None), CloudResource.scanned_at < listed_from)))
             counts["absent"] += marked
             if marked > 0:
                 changed = True

@@ -133,6 +133,20 @@ def test_partial_kind_never_marks_absent(db):
     assert _get(db, unlisted).absent_since is None
 
 
+def test_a_row_touched_after_the_run_began_is_not_marked(db):
+    """PF-e, as in the W2 scan: another writer saw this row after this run's listing began, so the run's seen set
+    is stale for it."""
+    started = datetime.now(timezone.utc)
+    touched, gone = _row(db, "Deployment", "new"), _row(db, "Deployment", "old")
+    db.query(CloudResource).filter_by(id=touched).update({"scanned_at": started + timedelta(seconds=1)})
+    db.commit()
+    res = ingest(CONN, _target(), CollectResult(entities=[], completeness=_complete("Deployment")),
+                 trigger="schedule", started_at=started)
+    assert res.counts["absent"] == 1
+    assert _get(db, touched).absent_since is None
+    assert _get(db, gone).absent_since is not None
+
+
 def test_absent_marking_stays_inside_account_provider_and_scope(db):
     other_cluster = _row(db, "Deployment", "web", scope="lab-2")   # "lab" is a string prefix of "lab-2"
     underscore = _row(db, "Deployment", "web", scope="laXb")       # LIKE would treat "_" as a wildcard
