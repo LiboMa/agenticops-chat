@@ -513,7 +513,6 @@
   "graph.blast.observed": "Observed",
   "graph.blast.truncatedHint": "The graph was cut off, so the real number may be higher",
   "graph.showLlm": "Show LLM-inferred relations",
-  "graph.hiddenLlm": "{n} LLM-inferred relations hidden",
   "graph.truncatedPrefix": "Truncated:",
   "graph.truncated.expansion_cap": "expansion limit reached",
   "graph.truncated.node_cap": "node limit reached",

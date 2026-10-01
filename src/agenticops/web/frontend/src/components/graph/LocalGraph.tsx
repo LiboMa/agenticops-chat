@@ -57,7 +57,8 @@ function viewBox(pos: Map<string, Pos>): string {
   const pad = 40;
   const [x0, x1] = [Math.min(...xs) - pad, Math.max(...xs) + pad];
   const [y0, y1] = [Math.min(...ys) - pad, Math.max(...ys) + pad];
-  return `${x0} ${y0} ${Math.max(x1 - x0, 160)} ${Math.max(y1 - y0, 120)}`;
+  const [w, h] = [Math.max(x1 - x0, 160), Math.max(y1 - y0, 120)]; // a small graph is widened around its centre
+  return `${(x0 + x1 - w) / 2} ${(y0 + y1 - h) / 2} ${w} ${h}`;
 }
 
 // Merged and candidate lines bend a little, so one never hides a structural edge between the same two nodes
@@ -104,45 +105,50 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
   const uid = useId().replace(/:/g, "");
   const [showLlm, setShowLlm] = useState(false);
   const [sel, setSel] = useState<Selected>(null);
-  const { data: focus, isLoading, isError, isPlaceholderData } = useGraphFocus(subject, showLlm);
+  const { data: focus, isLoading, isError, error, isPlaceholderData } = useGraphFocus(subject, showLlm);
 
   const model = useMemo(() => (focus ? buildLocalGraph(focus, { showLlm, path }) : null), [focus, showLlm, path]);
   const pos = useMemo(() => (model && model.nodes.length ? layout(model) : null), [model]);
 
   if (isLoading) return <Spinner label={t("common.loading")} />;
-  if (isError || !focus || !model) return <p className="text-sm text-destructive">{t("common.error")}</p>;
+  if (isError || !focus || !model) {
+    return (
+      <p className="text-sm text-destructive">
+        {t("common.error")}{error && <span className="text-muted-foreground"> {error.message}</span>}
+      </p>
+    );
+  }
 
   const plus = focus.blast.truncated ? "+" : "";
   const node = sel?.kind === "node" ? model.nodes.find((n) => n.id === sel.id) : undefined;
   const link = sel?.kind === "link" ? model.links.find((l) => l.id === sel.id) : undefined;
   const nodeName = (id: string) => model.nodes.find((n) => n.id === id)?.label ?? id;
+  const a = focus.anchor;
+  const anchorLine = a.status === "anchored" ? null : t(`anchor.${a.status}`) + (a.status === "ambiguous"
+    ? ` — ${t("anchor.candidatesN").replace("{n}", String(a.candidates.length))}` : "");
 
   const header = (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       <span title={focus.blast.truncated ? t("graph.blast.truncatedHint") : undefined}>
         {t("graph.blast.structural")} <b className="text-foreground">{focus.blast.structural}{plus}</b>
         {" · "}{t("graph.blast.potential")} <b className="text-foreground">{focus.blast.potential}{plus}</b>
-        {" · "}{t("graph.blast.observed")} <b className="text-foreground">{focus.blast.observed}</b>
+        {" · "}{t("graph.blast.observed")} <b className="text-foreground">{focus.blast.observed}{plus}</b>
       </span>
+      {anchorLine && <span>{anchorLine}</span>}
       {note && <span className="rounded bg-muted px-1.5 py-0.5">{note}</span>}
       <label className="ml-auto flex items-center gap-1.5">
         <input type="checkbox" checked={showLlm} onChange={(e) => setShowLlm(e.target.checked)} />
         {t("graph.showLlm")}
       </label>
-      {model.hiddenLlm > 0 && <span>{t("graph.hiddenLlm").replace("{n}", String(model.hiddenLlm))}</span>}
     </div>
   );
 
-  if (focus.build_id == null || !pos) {
-    const a = focus.anchor;
-    const why = focus.build_id == null ? t("graph.noBuild")
-      : a.status === "anchored" ? t("graph.empty")
-      : t(`anchor.${a.status}`) + (a.status === "ambiguous"
-        ? ` — ${t("anchor.candidatesN").replace("{n}", String(a.candidates.length))}` : "");
+  if (!pos) { // nothing to draw; an anchor that is not anchored is already explained in the header
+    const why = focus.build_id == null ? t("graph.noBuild") : a.status === "anchored" ? t("graph.empty") : null;
     return (
       <div className="space-y-2">
         {header}
-        <p className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">{why}</p>
+        {why && <p className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">{why}</p>}
       </div>
     );
   }

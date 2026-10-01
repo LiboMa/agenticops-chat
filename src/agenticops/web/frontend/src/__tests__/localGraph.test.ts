@@ -43,23 +43,20 @@ describe("buildLocalGraph", () => {
     expect(m.anchorIds).toEqual(["r:3"]);
     expect(m.nodes.find((n) => n.id === "r:3")).toMatchObject({ anchor: true, health: "warning", issueIds: [9] });
     expect(m.links.map((l) => l.id)).toEqual(["s:2>3:contains", "s:3>4:secured_by"]);
-    expect(m.hiddenLlm).toBe(1);
     const shown = buildLocalGraph(focus(), { showLlm: true });
-    expect(shown.hiddenLlm).toBe(0);
     expect(shown.links.find((l) => l.id === "s:3>6:references")).toMatchObject({ llm: true, kind: "structural" });
   });
 
-  it("drops an llm edge that twins a rule edge, drawn or not: one link per id, the twin never counted as hidden", () => {
+  it("drops an llm edge that twins a rule edge, llm shown or not: one link per id, the rule edge drawn", () => {
     // the builder publishes an llm row next to the rule row for the same relation; the llm twin comes first here
     const edges = [edge(2, 3, "contains"), edge(3, 4, "secured_by", "llm"), edge(3, 4, "secured_by"),
                    edge(3, 6, "references", "llm")];
-    expect(buildLocalGraph(focus({ edges })).hiddenLlm).toBe(1);
+    expect(buildLocalGraph(focus({ edges })).links.map((l) => l.id)).toEqual(["s:2>3:contains", "s:3>4:secured_by"]);
     const shown = buildLocalGraph(focus({ edges }), { showLlm: true });
     const ids = shown.links.map((l) => l.id);
     expect(ids).toEqual(["s:2>3:contains", "s:3>4:secured_by", "s:3>6:references"]);
     expect(new Set(ids).size).toBe(ids.length);
     expect(shown.links.find((l) => l.id === "s:3>4:secured_by")).toMatchObject({ llm: false, provenance: "rule" });
-    expect(shown.hiddenLlm).toBe(0);
   });
 
   it("highlights the RCA causal chain on its edges and nodes", () => {

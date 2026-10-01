@@ -58,7 +58,6 @@ export interface LocalGraphModel {
   nodes: LgNode[];
   links: LgLink[];
   anchorIds: string[];
-  hiddenLlm: number; // llm edges in the answer that are not drawn
   truncated: string[]; // expansion_cap / node_cap / edge_cap (the API's, in order), then "related"
 }
 
@@ -94,20 +93,15 @@ export function buildLocalGraph(focus: GraphFocus,
     });
   }
 
-  // An llm edge that twins a rule edge (same src, dst and type) adds nothing: the rule layer wins, and the
-  // twin is neither drawn nor counted as hidden
+  // An llm edge that twins a rule edge (same src, dst and type) adds nothing: the rule layer wins
   const edgeKey = (e: { src: number; dst: number; relation_type: string }) => `${e.src}>${e.dst}:${e.relation_type}`;
   const ruleKeys = new Set(focus.edges.filter((e) => e.provenance !== "llm").map(edgeKey));
   const links: LgLink[] = [];
-  let hiddenLlm = 0;
   for (const e of focus.edges) {
     const llm = e.provenance === "llm";
     const key = edgeKey(e);
     if (llm && ruleKeys.has(key)) continue;
-    if (llm && !opts.showLlm) {
-      hiddenLlm++;
-      continue;
-    }
+    if (llm && !opts.showLlm) continue;
     if (!nodes.has(`r:${e.src}`) || !nodes.has(`r:${e.dst}`)) continue;
     links.push({ id: `s:${key}`, kind: "structural", source: `r:${e.src}`, target: `r:${e.dst}`, llm,
                  onPath: pathKeys.has(key), relationType: e.relation_type, provenance: e.provenance,
@@ -159,5 +153,5 @@ export function buildLocalGraph(focus: GraphFocus,
   }
 
   if (focus.related.truncated) truncated.push("related");
-  return { nodes: [...nodes.values()], links, anchorIds, hiddenLlm, truncated };
+  return { nodes: [...nodes.values()], links, anchorIds, truncated };
 }
