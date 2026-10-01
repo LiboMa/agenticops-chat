@@ -43,6 +43,8 @@ type Pending = {
   confirmText: string;
   variant?: "default" | "destructive";
   extra?: { outcome: "completed" | "failed" };
+  // approve: the hash the dialog shows is the hash it sends, even if a poll replaces the plan while it is open
+  contentHash?: string;
 };
 
 // Join the present, non-empty parts of a header line with " · " (no dangling separators).
@@ -129,7 +131,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
       pending.action === "resolve-review"
         ? { id: cr.id, action: "resolve-review", body: { outcome: pending.extra?.outcome ?? "completed", reason } }
         : pending.action === "approve"
-          ? { id: cr.id, action: "approve", body: { reason, content_hash: plan?.content_hash ?? "" } }
+          ? { id: cr.id, action: "approve", body: { reason, content_hash: pending.contentHash ?? "" } }
           : { id: cr.id, action: pending.action, body: { reason } };
     act.mutate(args, { onSuccess: () => setPending(null) });
   };
@@ -144,6 +146,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
       title: `${t("plans.approveTitle")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
       description: plan ? `${t("plans.hash")} ${shortHash(plan.content_hash)}` : undefined,
       confirmText: t("issues.approve"),
+      contentHash: plan?.content_hash ?? "",
     });
   const openAccept = (outcome: "completed" | "failed") =>
     openDialog({
