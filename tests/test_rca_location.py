@@ -162,10 +162,11 @@ GOOD_EDGE = {"src_ref": 2, "dst_ref": 3, "relation_type": "contains"}
 
 
 @pytest.mark.parametrize("bad", [
-    {"src_ref": 3, "dst_ref": 2, "relation_type": "contains"},     # reversed: no such relation
-    {"src_ref": 2, "dst_ref": 3, "relation_type": "routes_to"},    # wrong type
+    {"src_ref": 2, "dst_ref": 3, "relation_type": "routes_to"},    # wrong type: no relation either way round
     {"src_ref": 5, "dst_ref": 3, "relation_type": "routes_to"},    # llm provenance
+    {"src_ref": 3, "dst_ref": 5, "relation_type": "routes_to"},    # llm provenance, given in reverse
     {"src_ref": 7, "dst_ref": 3, "relation_type": "routes_to"},    # another account's relation
+    {"src_ref": 3, "dst_ref": 7, "relation_type": "routes_to"},    # another account's relation, given in reverse
     {"src_ref": "2", "dst_ref": 3, "relation_type": "contains"},   # not an id
     {"src_ref": 7, "dst_ref": 3, "relation_type": "uses"},         # an endpoint in another account
     {"src_ref": 3, "dst_ref": 999, "relation_type": "uses"},       # an endpoint not in inventory
@@ -176,6 +177,19 @@ def test_one_bad_edge_drops_the_whole_path(seed, bad):
     assert status == "partial" and stored["path"] == [] and [c["ref"] for c in stored["candidates"]] == [2]
     assert stored["dropped"][0].startswith("path: edge ") and "is not a rule/observed relation of build 1" in \
         stored["dropped"][0]
+
+
+@pytest.mark.parametrize("given,stored", [
+    ({"src_ref": 3, "dst_ref": 2, "relation_type": "contains"},
+     {"src_ref": 2, "src_name": "subnet-1", "dst_ref": 3, "dst_name": "i-1", "relation_type": "contains"}),
+    ({"src_ref": 4, "dst_ref": 3, "relation_type": "secured_by"},
+     {"src_ref": 3, "src_name": "i-1", "dst_ref": 4, "dst_name": "sg-1", "relation_type": "secured_by"}),
+])
+def test_a_reversed_edge_is_stored_as_the_graph_holds_it(seed, given, stored):
+    location, status, _ = _check(seed, {"candidates": [_cand(4, 1)], "path": [given, GOOD_EDGE]})
+    assert status == "valid" and location["dropped"] == []
+    assert location["path"] == [{**stored, "provenance": "rule"},
+                                {**GOOD_EDGE, "src_name": "subnet-1", "dst_name": "i-1", "provenance": "rule"}]
 
 
 def test_path_is_checked_against_the_given_build(seed):

@@ -142,7 +142,8 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    inventory resources (their db ids) ranked by likelihood, each with the labels
    of the evidence items that support or refute it ("E<n>" = item n of your
    evidence list), and the causal path from the root cause to the issue's
-   resource — only edges given to you as topology evidence, else leave it empty.
+   resource — only edges given to you as topology evidence (src_ref/dst_ref =
+   the edge's src/dst), else leave it empty.
    The location is checked against the inventory and the graph; what fails is
    dropped, so never guess an id.
    An INCIDENT MEMORY block may be present in your task prompt (prior conclusions
@@ -201,9 +202,11 @@ RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE
 TOPOLOGY_EVIDENCE_PROMPT = """
 TOPOLOGY EVIDENCE (the published relation graph around the issue's resource):
 - After step 2 (READ ISSUE), call get_topology_evidence(issue_id). It returns the anchored
-  resource, the edges around it (upstream = something it depends on, the root-cause side;
-  downstream = the blast side), each neighbor's own issues, signals and changes inside the
-  time window, and ranked root-cause candidates with their reasons.
+  resource, the edges around it (upstream = the far end is something the anchor depends on;
+  downstream = the far end depends on or is contained by the anchor; for a container anchor
+  — a cluster, namespace or network — the cause is usually a contained, downstream member),
+  each neighbor's own issues, signals and changes inside the time window, and ranked
+  root-cause candidates with their reasons.
 - Candidates are leads, not conclusions: confirm or rule out each one with your other tools.
 - Cite an edge or a candidate you rely on as evidence type "graph" with its evidence_ref as
   the ref. In save_rca_result's location, set build_id to the returned build_id and build the

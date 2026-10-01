@@ -181,6 +181,62 @@ def test_a_changed_anchor_outranks_an_unchanged_anomalous_neighbor(seed, no_reco
     assert [c["ref"] for c in ev.build_evidence(1)["candidates"]] == [3, 4]
 
 
+def test_the_subject_issue_reads_as_this_issue(seed, no_recollect):
+    _issue(seed, 3, severity="critical")
+    _issue(seed, 4, first_seen=NOW - timedelta(minutes=20))
+    seed.commit()
+    out = ev.build_evidence(1)
+    assert out["anchor"]["issue_ids"] == [1, 2]
+    reasons = {c["ref"]: c["reasons"] for c in out["candidates"]}
+    assert reasons[3][0] == "open issue this issue #1, #2 (critical)"
+    assert reasons[4][0] == "open issue #3 (warning)"
+
+
+def _busy_cluster(s, quiet=49):
+    """EKS cluster prod(10) contains `quiet` quiet ConfigMaps (100…), Deployment web(11) (seeded: created in the
+    window, pods waiting) and Deployment api(150) with its own open issue. The returned issue is on the cluster,
+    signalled before api's, so by rank_key alone the cluster would rank above api."""
+    for i in range(quiet):
+        _res(s, 100 + i, 1, "K8s_ConfigMap", f"prod/default/ConfigMap/settings-{i}", provider="kubernetes",
+             raw_data={"cluster": "prod"})
+    _res(s, 150, 1, "K8s_Deployment", "prod/default/Deployment/api", provider="kubernetes",
+         raw_data={"cluster": "prod"})
+    s.flush()
+    for ref in [*range(100, 100 + quiet), 150]:
+        _rel(s, 10, ref, "contains")
+    _issue(s, 150, severity="critical", observed_at=NOW - timedelta(minutes=2))
+    iid = _issue(s, 10, issue_type="availability", observed_at=NOW - timedelta(minutes=5))
+    s.commit()
+    _run(s, datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30))
+    return iid
+
+
+def test_a_container_anchor_is_the_last_candidate(seed, no_recollect):
+    out = ev.build_evidence(_busy_cluster(seed, quiet=2))
+    assert [(c["rank"], c["ref"]) for c in out["candidates"]] == [(1, 11), (2, 150), (3, 10)]
+    assert out["candidates"][-1]["reasons"][-1] == "the anchor itself"
+    # A non-container anchor keeps its natural rank: anomalous before a merely changed neighbor.
+    seed.get(CloudResource, 5).content_changed_at = NOW - timedelta(minutes=3)
+    seed.commit()
+    assert [(c["rank"], c["ref"]) for c in ev.build_evidence(1)["candidates"]] == [(1, 3), (2, 5)]
+
+
+@pytest.mark.parametrize("issue_type", ["availability", "connectivity"])
+def test_a_workload_anchor_reaches_its_config_and_network_policy(seed, no_recollect, issue_type):
+    for rid, rtype, name in [(12, "K8s_ConfigMap", "prod/default/ConfigMap/web-config"),
+                             (13, "K8s_NetworkPolicy", "prod/default/NetworkPolicy/deny-all")]:
+        _res(seed, rid, 1, rtype, name, provider="kubernetes", raw_data={"cluster": "prod"})
+    seed.flush()
+    _rel(seed, 11, 12, "uses")
+    _rel(seed, 13, 11, "restricts")
+    iid = _issue(seed, 11, issue_type=issue_type, observed_at=NOW)
+    seed.commit()
+    _run(seed, datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30))
+    out = ev.build_evidence(iid)
+    assert {12, 13} <= {n["ref"] for n in out["neighbors"]}
+    assert {"graph:edge:11>12:uses", "graph:edge:13>11:restricts"} <= {e["evidence_ref"] for e in out["edges"]}
+
+
 def test_changes_inside_the_window_only(seed, no_recollect):
     seed.get(CloudResource, 5).content_changed_at = NOW - timedelta(minutes=3)
     seed.get(CloudResource, 4).absent_since = NOW - timedelta(minutes=1)
@@ -306,7 +362,7 @@ def test_old_collection_triggers_a_bounded_recollect_and_a_rule_only_refresh(see
     assert out["freshness"]["reason"] == "recollect of cluster prod was partial — secrets: forbidden"
     anchor = out["candidates"][0]
     assert anchor["ref"] == 11 and anchor["reasons"][:3] == [
-        "open issue #2 (warning)", "pods waiting: ImagePullBackOff", "1/3 pods ready"]
+        "open issue this issue #2 (warning)", "pods waiting: ImagePullBackOff", "1/3 pods ready"]
     assert f"created at {(NOW - timedelta(minutes=4)).isoformat()}" in anchor["reasons"]
 
 
@@ -409,6 +465,17 @@ def test_anchor_without_an_account_row_is_never_recollected(seed, monkeypatch):
 def test_tool_returns_json(seed, no_recollect):
     out = json.loads(ev.get_topology_evidence._tool_func(issue_id=1))
     assert out["available"] and out["anchor"]["ref"] == 3
+
+
+def test_the_decision_keys_lead_the_json_the_agent_sees(seed, no_recollect):
+    # Strands' auto ContextOffloader replaces a large tool result with a ~3,000-char preview of its head.
+    text = ev.get_topology_evidence._tool_func(issue_id=_busy_cluster(seed))
+    pack = json.loads(text)
+    assert list(pack) == ["available", "anchor", "freshness", "truncated", "truncated_reason", "build_id", "depth",
+                          "window", "candidates", "edges", "neighbors"]
+    assert len(text) > 6000 and len(pack["neighbors"]) == 51 and not pack["truncated"]
+    assert [c["ref"] for c in pack["candidates"]] == [11, 150, 10]
+    assert text.index('"edges"') < 3000
 
 
 def test_tool_turns_an_exception_into_unavailable(monkeypatch):

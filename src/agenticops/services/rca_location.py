@@ -4,10 +4,10 @@ The RCA agent may name up to three ranked candidate resources and a causal path 
 the symptom's anchor. Everything is checked against the database, fail-closed: a candidate that is not
 an inventory row of the issue's own account is dropped; so is an evidence label that is not one of this
 RCA's evidence items; one path edge that is not a rule/observed relation of the checked build, between two
-inventory rows of the issue's account, drops the whole path; a given build that is not a published
-graph build is replaced by the published one. The stored location keeps only what survived, with both ends' names inline, so it reads the
-same after the build is pruned. It is observed only — the critic, the confidence gate and auto-fix never
-read it.
+inventory rows of the issue's account, drops the whole path (an edge given in reverse is stored as the
+graph holds it); a given build that is not a published graph build is replaced by the published one. The
+stored location keeps only what survived, with both ends' names inline, so it reads the same after the
+build is pruned. It is observed only — the critic, the confidence gate and auto-fix never read it.
 """
 from __future__ import annotations
 
@@ -92,8 +92,17 @@ def _candidates(session, issue: HealthIssue, raw, evidence_count: int, dropped: 
     return sorted(out, key=lambda c: c["rank"])
 
 
+def _relation(session, build_id: int, src: int, dst: int, rtype: str, account_id: int):
+    """The rule/observed relation src → dst of the build in the account, or None."""
+    rel = session.query(ResourceRelation).filter_by(build_id=build_id, src_ref=src, dst_ref=dst,
+                                                    relation_type=rtype).first()
+    return rel if rel is not None and rel.provenance in PATH_PROVENANCE and rel.account_id == account_id else None
+
+
 def _path(session, issue: HealthIssue, raw, build_id: Optional[int], dropped: list) -> list[dict]:
-    """The whole path, or [] when any edge fails (spec: one bad edge drops the path)."""
+    """The whole path, or [] when any edge fails (spec: one bad edge drops the path). Causal order often runs
+    against the stored one (a reverse relation, a member of a container), so an edge given in reverse is
+    stored as the graph holds it."""
     if not raw:
         return []
     if not isinstance(raw, list):
@@ -116,16 +125,16 @@ def _path(session, issue: HealthIssue, raw, build_id: Optional[int], dropped: li
         rtype = e.get("relation_type") if isinstance(e, dict) else None
         rel, ends = None, {}
         if src is not None and dst is not None and isinstance(rtype, str):
-            rel = session.query(ResourceRelation).filter_by(build_id=build_id, src_ref=src, dst_ref=dst,
-                                                            relation_type=rtype).first()
+            rel = _relation(session, build_id, src, dst, rtype, issue.account_id) or \
+                _relation(session, build_id, dst, src, rtype, issue.account_id)
             # Relation endpoints carry no foreign key: both ends must still be the issue's own inventory rows.
             ends = {r.id: (r.name or "", r.account_id)
                     for r in session.query(CloudResource).filter(CloudResource.id.in_([src, dst]))}
-        if rel is None or rel.provenance not in PATH_PROVENANCE or rel.account_id != issue.account_id \
-                or any(ends.get(ref, (None, None))[1] != issue.account_id for ref in (src, dst)):
+        if rel is None or any(ends.get(ref, (None, None))[1] != issue.account_id for ref in (src, dst)):
             dropped.append(f"path: edge {e!r} is not a rule/observed relation of build {build_id} in the "
                            "issue's account")
             return []
+        src, dst = rel.src_ref, rel.dst_ref
         out.append({"src_ref": src, "src_name": ends[src][0], "dst_ref": dst, "dst_name": ends[dst][0],
                     "relation_type": rtype, "provenance": rel.provenance})
     return out

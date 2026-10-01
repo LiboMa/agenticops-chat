@@ -188,10 +188,11 @@ def _changes(fact: dict, executions: list, start: datetime, end: datetime) -> li
     return sorted(out + executions, key=lambda c: (c["at"], c["kind"]))
 
 
-def _reasons(node: dict, fact: dict, changes: list, observed: bool) -> list[str]:
+def _reasons(node: dict, fact: dict, changes: list, observed: bool, subject_id: int) -> list[str]:
     out = []
-    if node["issue_ids"]:
-        out.append(f"open issue {', '.join(f'#{i}' for i in node['issue_ids'])} ({node['health']})")
+    if node["issue_ids"]:  # the issue under investigation is no corroboration of itself
+        ids = ", ".join(f"this issue #{i}" if i == subject_id else f"#{i}" for i in node["issue_ids"])
+        out.append(f"open issue {ids} ({node['health']})")
     pods = fact.get("pod_summary")
     if isinstance(pods, dict):
         if pods.get("waiting_reasons"):
@@ -275,27 +276,31 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
                            "evidence_ref": node_ref(n["ref"])}
     ranked = sorted((n for n in sub.nodes if n["anomalous"] or n["ref"] in changed or n["ref"] in observed),
                     key=lambda n: qs.rank_key(n, frozenset(changed)))
+    if row["type"] in CONTAINER_TYPES:  # an aggregate alert's cause is a contained member, not the container
+        ranked.sort(key=lambda n: n["ref"] == row["ref"])
     if row["ref"] in views:
         anchor.update({k: views[row["ref"]][k] for k in ("health", "issue_ids", "changes", "absent")})
+    # Bounded, decision-relevant keys first: the RCA agent's context offloader keeps only the head of a large
+    # result (~3,000 chars), and the edges and neighbors grow with the neighborhood.
     return {
         "available": True,
         "anchor": anchor,
+        "freshness": freshness,
+        "truncated": sub.truncated,
+        "truncated_reason": sub.truncated_reason,
         "build_id": sub.build_id,
         "depth": depth,
         "window": window,
+        "candidates": [{"rank": i, "ref": n["ref"], "type": n["type"], "name": n["name"], "absent": n["absent"],
+                        "reasons": _reasons(n, facts.get(n["ref"], {}), views[n["ref"]]["changes"],
+                                            n["ref"] in observed, issue_id),
+                        "evidence_ref": node_ref(n["ref"])} for i, n in enumerate(ranked, 1)],
         "edges": [{"src": e["src"], "src_name": names.get(e["src"], ""), "dst": e["dst"],
                    "dst_name": names.get(e["dst"], ""), "relation_type": e["relation_type"],
                    "direction_label": e["direction_label"], "provenance": e["provenance"],
                    "evidence": e["evidence"], "evidence_ref": edge_ref(e["src"], e["dst"], e["relation_type"])}
                   for e in sub.edges],
         "neighbors": [v for r, v in views.items() if r != row["ref"]],
-        "candidates": [{"rank": i, "ref": n["ref"], "type": n["type"], "name": n["name"], "absent": n["absent"],
-                        "reasons": _reasons(n, facts.get(n["ref"], {}), views[n["ref"]]["changes"],
-                                            n["ref"] in observed),
-                        "evidence_ref": node_ref(n["ref"])} for i, n in enumerate(ranked, 1)],
-        "truncated": sub.truncated,
-        "truncated_reason": sub.truncated_reason,
-        "freshness": freshness,
     }
 
 
@@ -303,13 +308,14 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
 def get_topology_evidence(issue_id: int, depth: Optional[int] = None, window_minutes: Optional[int] = None) -> str:
     """Topology evidence around an issue's anchored resource, read from the published relation graph.
 
-    Returns JSON: the anchor; edges with direction_label (upstream = the far end is something the near end
-    depends on, i.e. the root-cause side; downstream = the blast side); neighbors with their own open issues,
-    signals and changes (created / content_changed / absent / our executions) inside the time window; ranked
-    root-cause candidates with reasons; build_id, truncated and freshness. Cite an edge or a candidate in
-    save_rca_result as evidence type "graph" with its evidence_ref as the ref, and pass
-    location.build_id = build_id. available=false says why the graph cannot speak for this issue — it never
-    means "no problem found".
+    Returns JSON: the anchor, freshness, truncated, build_id and the ranked root-cause candidates with their
+    reasons first; then edges with direction_label (upstream = the far end is something the anchor depends
+    on; downstream = the far end depends on or is contained by the anchor; for a container anchor — a
+    cluster, namespace or network — the cause is usually a contained, downstream member); then neighbors with
+    their own open issues, signals and changes (created / content_changed / absent / our executions) inside
+    the time window. Cite an edge or a candidate in save_rca_result as evidence type "graph" with its
+    evidence_ref as the ref, and pass location.build_id = build_id. available=false says why the graph cannot
+    speak for this issue — it never means "no problem found".
 
     Args:
         issue_id: The HealthIssue id.

@@ -57,9 +57,9 @@ def test_step_is_relative_to_the_frontier_end():
 
 
 def test_default_relations_by_issue_class():
-    assert set(R.default_relations("network_flap")) == {"contains", "secured_by", "routes_to"}
+    assert set(R.default_relations("network_flap")) == {"contains", "secured_by", "routes_to", "restricts", "uses"}
     assert set(R.default_relations("cpu_spike")) == {
-        "contains", "secured_by", "routes_to", "attached_to", "manages", "runs_on", "same_as"
+        "contains", "secured_by", "routes_to", "restricts", "uses", "attached_to", "manages", "runs_on", "same_as"
     }
     assert set(R.default_relations("cpu_spike", anchor_type="RDS")) == {"contains", "secured_by", "uses"}
     assert set(R.default_relations("something_new")) == R.RULE_RELATION_TYPES

@@ -35,7 +35,8 @@ PROPAGATION: dict[str, str] = {
 # Types the rule layer may emit and that take part in propagation.
 RULE_RELATION_TYPES: frozenset[str] = frozenset(t for t, p in PROPAGATION.items() if p != NONE)
 
-_NETWORK = ("contains", "secured_by", "routes_to")
+# restricts / uses reach the K8s causes of a workload's fault: its NetworkPolicy / PDB, its ConfigMap / Secret / PVC.
+_NETWORK = ("contains", "secured_by", "routes_to", "restricts", "uses")
 DEFAULT_RELATIONS_BY_CLASS: dict[str, tuple[str, ...]] = {
     "network": _NETWORK,
     "compute": _NETWORK + ("attached_to", "manages", "runs_on", "same_as"),

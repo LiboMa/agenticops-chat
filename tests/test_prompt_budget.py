@@ -17,7 +17,7 @@ BASE_PROMPT_GOLDENS = {
     "main": 12_100,
     "sre": 11_900,
     "detect": 8_900,
-    "rca": 10_500,  # MVP-2.6.1: + save_rca_result location + topology evidence
+    "rca": 10_700,  # MVP-2.6.1: + save_rca_result location + topology evidence + final-review path/direction wording
     "executor": 5_000,
     "reporter": 3_800,
     "scan": 2_000,

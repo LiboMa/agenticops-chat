@@ -696,9 +696,11 @@ def save_rca_result(
             <id>, "relation_type": "<type>"}], "build_id": <graph build id>}.
             At most 3 candidates with distinct ranks 1-3; path runs from the root
             cause to the issue's anchored resource, using only edges returned by
-            the topology evidence (leave it empty when the issue is not
-            anchored). Checked against the inventory and the graph: whatever
-            fails is dropped and the rest is kept. Empty = no location.
+            the topology evidence (src_ref/dst_ref = the returned edge's
+            src/dst; an edge given in reverse is stored as the graph holds it;
+            leave it empty when the issue is not anchored). Checked against the
+            inventory and the graph: whatever fails is dropped and the rest is
+            kept. Empty = no location.
 
     Returns:
         Confirmation with the new RCAResult ID.
