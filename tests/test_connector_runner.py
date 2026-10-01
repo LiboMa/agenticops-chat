@@ -267,13 +267,31 @@ def test_scheduler_dispatches_k8s_discovery(db, monkeypatch, status, expected):
     Scheduler()._execute_schedule_by_info({"id": 9, "name": "k8s-discovery", "pipeline_name": "K8sDiscovery",
                                            "account_name": None, "config": {}})
 
-    assert calls == [("k8s", {"trigger": "schedule"})]
+    assert calls == [("k8s", {"account": "", "trigger": "schedule"})]   # no account_name: every account
     execution = db.query(ScheduleExecution).filter_by(schedule_id=9).one()
     assert execution.status == expected and execution.completed_at is not None
     assert execution.result == {"pipeline": "K8sDiscovery", "status": status,
                                 "targets": 0 if status == "disabled" else 1, "changed": False,
                                 "graph_build_id": None}
     assert execution.error == ("cluster lab not collected — no kubeconfig" if status == "failed" else None)
+
+
+def test_a_discovery_schedule_scoped_to_one_account_runs_only_its_targets(db, monkeypatch, builds):
+    """M-5: the schedule row's account_name reaches run_connector."""
+    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution, Scheduler
+
+    _install(monkeypatch, _Fake([Target(GLOBAL, "lab", "us-east-1"), Target(CN, "prod", "cn-north-1")],
+                                {"lab": _complete("lab"), "prod": _complete("prod")}))
+    db.add(Schedule(id=9, name="k8s-discovery-cn", pipeline_name="K8sDiscovery", cron_expression="*/10 * * * *",
+                    account_name="cn", config={}))
+    db.commit()
+
+    Scheduler()._execute_schedule_by_info({"id": 9, "name": "k8s-discovery-cn", "pipeline_name": "K8sDiscovery",
+                                           "account_name": "cn", "config": {}})
+
+    assert [(r.account_id, r.scope) for r in db.query(ConnectorRun)] == [(2, "prod")]
+    execution = db.query(ScheduleExecution).filter_by(schedule_id=9).one()
+    assert (execution.status, execution.result["targets"]) == ("completed", 1)
 
 
 def test_pipeline_options_include_k8s_discovery(db):

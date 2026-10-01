@@ -366,11 +366,12 @@ class Scheduler:
                         execution.error = str(e)
             return
 
-        # K8sDiscovery: every K8s connector target — account-addressed inside the connector, run once.
+        # K8sDiscovery: every K8s connector target (only the schedule's account's when it names one) —
+        # account-addressed inside the connector, run once.
         if pipeline_name == "K8sDiscovery":
             from agenticops.connectors import runner as connector_runner
             try:
-                res = connector_runner.run_connector("k8s", trigger="schedule")
+                res = connector_runner.run_connector("k8s", account=account_name or "", trigger="schedule")
                 errors = "; ".join(t.error for t in res.targets if t.error)
                 with get_db_session() as session:
                     execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
