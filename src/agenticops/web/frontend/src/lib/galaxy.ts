@@ -4,7 +4,10 @@
  */
 import type { GalaxyBuildInfo } from "@/api/types";
 
-/** `?focus=` → a resource node id. Takes a cloud_resources id as `12`, `R12`, `R#12` or the node id `res:12`. */
+/**
+ * `?focus=` → a resource node id. Takes a cloud_resources id as `12`, `R12`, `R#12` or the node id `res:12`.
+ * In a URL `R#12` must be percent-encoded (`R%2312`): a raw `#` starts the fragment, so the param would read `R`.
+ */
 export function focusNodeId(v: string | null): string | null {
   const m = (v ?? "").trim().match(/^(?:res:|R#?)?(\d+)$/i);
   return m ? `res:${m[1]}` : null;
