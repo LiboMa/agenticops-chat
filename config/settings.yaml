@@ -304,6 +304,9 @@ rca_topology_window_after_minutes: 10
 # is assembled when its last successful collection is older than this; the recollect has this time budget.
 rca_k8s_recollect_min_age_seconds: 120
 rca_k8s_recollect_timeout_seconds: 60
+# Policy blast radius (MVP-2.6.1 Plan C): the published graph's potential-impact count. false = shadow mode —
+# recorded on the policy decision as shadow_blast_radius, never fed to blast_radius_gte rules.
+policy_graph_impact_enforce: false
 
 # ── Pull connectors (MVP-2.6.1) ────────────────────────────────
 # kubectl runs with a private per-account/region/cluster kubeconfig under <data_dir>/kube/, never ~/.kube/config.

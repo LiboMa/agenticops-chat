@@ -691,25 +691,28 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
 def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
     """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius).
     Only during THIS review (require_live_review): a stale run is refused before its policy_decision event."""
-    from agenticops.services.policy_engine import estimate_blast_radius, get_policy_engine
+    from agenticops.services.policy_engine import get_policy_engine, policy_blast_radius
     with _session() as s:
         cr = _load(s, cr_id)
         require_live_review(cr, "policy is evaluated only during review")
-        provider = native_account = None
+        provider = None
         if cr.account_id:
             acct = s.get(CloudAccount, cr.account_id)
             if acct:
                 provider = acct.provider
-                native_account = (acct.credentials or {}).get("account_id") or None
         targets = list(cr.target_resources or [])
         emergency = cr.requested_change_type == "emergency"
         trace_id = cr.trace_id
+        # The widest target sets the blast radius, so one small first target cannot hide a wide change.
+        blast_radius, shadow_blast_radius = policy_blast_radius(
+            [t.get("db_id") for t in targets], cr.account_id, session=s)
     first = targets[0]["resource_id"] if targets else None
     decision = get_policy_engine().evaluate(
         risk_level=risk_level, provider=provider, resource_id=first,
-        blast_radius=estimate_blast_radius(first, native_account), plan_kind="change",
+        blast_radius=blast_radius, plan_kind="change",
         emergency=emergency, action_type=action_type,
     )
+    decision.shadow_blast_radius = shadow_blast_radius
     _event(cr_id, "policy_decision", "approval", decision.action,
            detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},
            actor="policy-engine", trace_id=trace_id)

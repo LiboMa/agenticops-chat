@@ -66,6 +66,8 @@ class PolicyDecision:
     itsm_change_type: Optional[str] = None
     effective_risk_level: Optional[str] = None
     escalated_from: Optional[str] = None
+    # The graph's potential-impact count when policy_graph_impact_enforce is off: recorded, never matched.
+    shadow_blast_radius: Optional[int] = None
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +77,7 @@ class PolicyDecision:
             "itsm_change_type": self.itsm_change_type,
             "effective_risk_level": self.effective_risk_level,
             "escalated_from": self.escalated_from,
+            "shadow_blast_radius": self.shadow_blast_radius,
         }
 
 
@@ -850,29 +853,36 @@ def _find_graph_node(resource_id: str, account_id: Optional[str] = None) -> Opti
     return hits[0]["id"]
 
 
-def estimate_blast_radius(
-    resource_id: Optional[str], account_id: Optional[str] = None
-) -> Optional[int]:
-    """Count downstream-affected nodes for a resource via the infra graph.
+def estimate_blast_radius(ref: Optional[int], account_id: Optional[int], session=None) -> Optional[int]:
+    """How many resources depend on inventory row `ref` in the published relationship graph — downstream,
+    rule relations only, at most 3 hops, `ref` itself not counted (GraphQueryService.potential_impact).
 
-    Returns None when the graph is unavailable or the resource isn't in it —
-    policy rules using blast_radius_gte simply don't match in that case.
+    `account_id` is our CloudAccount id; a ref outside it counts as unknown. None when there is nothing to
+    count (no ref, wrong account, no published build, any error) — blast_radius_gte rules then don't match.
     """
-    if not resource_id:
+    if not isinstance(ref, int) or isinstance(ref, bool) or account_id is None:
         return None
     try:
-        from agenticops.graph.store import GraphStore
-        from agenticops.graph.algorithms import impact_analysis
+        from agenticops.graph import query_service as qs
 
-        node_id = _find_graph_node(resource_id, account_id)
-        if not node_id:
+        sub = qs.potential_impact(ref, session=session)
+        start = next((n for n in sub.nodes if n["ref"] == ref), None)
+        if sub.build_id is None or start is None or start["account_id"] != account_id:
             return None
-        neighborhood = GraphStore().get_node_neighborhood(node_id, depth=3)
-        result = impact_analysis(neighborhood, node_id)
-        return len(result.affected_nodes)
+        return len(sub.nodes) - 1
     except Exception:
-        logger.debug("blast-radius estimation unavailable for %s", resource_id, exc_info=True)
+        logger.debug("blast-radius estimation unavailable for resource #%s", ref, exc_info=True)
         return None
+
+
+def policy_blast_radius(refs, account_id: Optional[int], session=None) -> tuple[Optional[int], Optional[int]]:
+    """(blast_radius for evaluate(), shadow_blast_radius for the decision): the largest count over `refs`,
+    fed to the rules only when policy_graph_impact_enforce is on."""
+    from agenticops.config import settings
+
+    counts = [c for c in (estimate_blast_radius(r, account_id, session=session) for r in refs) if c is not None]
+    count = max(counts) if counts else None
+    return (count, None) if settings.policy_graph_impact_enforce else (None, count)
 
 
 def simulate_fix_impact(

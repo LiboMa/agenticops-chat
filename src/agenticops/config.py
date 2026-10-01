@@ -607,6 +607,11 @@ class Settings(BaseSettings):
         description="Time budget of that recollect; past it the evidence is stale and the RCA goes on "
         "(AIOPS_RCA_K8S_RECOLLECT_TIMEOUT_SECONDS)",
     )
+    policy_graph_impact_enforce: bool = Field(
+        default=False,
+        description="Feed the graph's potential-impact count to blast_radius_gte policy rules; false = shadow "
+        "mode, the count is only recorded as shadow_blast_radius (AIOPS_POLICY_GRAPH_IMPACT_ENFORCE)",
+    )
 
     # ── Pull connectors (MVP-2.6.1 Plan B) ─────────────────────────
     k8s_kubeconfig_max_age_seconds: int = Field(

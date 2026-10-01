@@ -6,12 +6,14 @@ from agenticops.config import PROJECT_ROOT, settings
 KEYS = (
     "rca_k8s_recollect_min_age_seconds",
     "rca_k8s_recollect_timeout_seconds",
+    "policy_graph_impact_enforce",
 )
 
 
 def test_defaults():
     assert settings.rca_k8s_recollect_min_age_seconds == 120
     assert settings.rca_k8s_recollect_timeout_seconds == 60
+    assert settings.policy_graph_impact_enforce is False
 
 
 def test_yaml_carries_the_values_not_only_the_schema():

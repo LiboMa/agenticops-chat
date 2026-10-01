@@ -219,24 +219,29 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
 def _evaluate_policy_for_plan(session, plan):
     """Build policy-engine inputs from the plan's issue context and evaluate.
 
-    Runs an account-scoped blast-radius estimate AND a pre-execution impact
-    simulation (graph engine, zero AWS calls) so policies can gate on what
-    the fix would break, not just how risky the change class is. Both are
-    fail-soft: no graph data → None → simulation rules simply don't match.
+    Runs an account-scoped blast-radius estimate (the published relationship
+    graph's potential impact of the issue's anchor; shadow mode by default,
+    see policy_blast_radius) AND a pre-execution impact simulation (graph
+    engine, zero AWS calls) so policies can gate on what the fix would break,
+    not just how risky the change class is. Both are fail-soft: no graph
+    data → None → those rules simply don't match.
     """
     from agenticops.models import CloudAccount, HealthIssue
     from agenticops.services.policy_engine import (
-        estimate_blast_radius,
         get_policy_engine,
+        policy_blast_radius,
         simulate_fix_impact,
     )
 
     severity = provider = resource_id = native_account_id = None
+    blast_radius = shadow_blast_radius = None
     issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
     if issue:
         severity = issue.severity
         provider = issue.provider
         resource_id = issue.resource_id
+        blast_radius, shadow_blast_radius = policy_blast_radius(
+            [issue.resource_ref], issue.account_id, session=session)
         # Graph nodes are keyed by the cloud-native account number, not our FK
         if issue.account_id:
             account = session.query(CloudAccount).filter_by(id=issue.account_id).first()
@@ -249,9 +254,10 @@ def _evaluate_policy_for_plan(session, plan):
         severity=severity,
         provider=provider,
         resource_id=resource_id,
-        blast_radius=estimate_blast_radius(resource_id, native_account_id),
+        blast_radius=blast_radius,
         impact_severity=impact["severity"] if impact else None,
     )
+    decision.shadow_blast_radius = shadow_blast_radius
     if impact:
         decision.reasons.append(
             f"pre-execution simulation: {impact['affected_nodes']} nodes affected, "
