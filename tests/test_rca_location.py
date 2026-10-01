@@ -33,7 +33,8 @@ def db(tmp_path):
 @pytest.fixture
 def seed(db):
     """acct-a: Subnet(2) contains EC2(3); EC2 secured_by SG(4) (rule); ELB(5) routes_to EC2 (llm).
-    acct-b: EC2(7), with a relation 7 routes_to 3 recorded under acct-b. Build 1 is published."""
+    acct-b: EC2(7), with a relation 7 routes_to 3 recorded under acct-b. Two acct-a relations reach past the
+    account: 7 uses 3 (a foreign endpoint) and 3 uses 999 (not in inventory). Build 1 is published, build 2 is not."""
     db.add_all([CloudAccount(id=1, name="acct-a", provider="aws", credentials={}),
                 CloudAccount(id=2, name="acct-b", provider="aws", credentials={})])
     for rid, acct, rtype, name in [(2, 1, "Subnet", "subnet-1"), (3, 1, "EC2", "i-1"), (4, 1, "SecurityGroup", "sg-1"),
@@ -44,7 +45,8 @@ def seed(db):
                 GalaxyBuild(id=2, status="completed", trigger="manual")])
     db.flush()
     for src, dst, rtype, prov, acct in [(2, 3, "contains", "rule", 1), (3, 4, "secured_by", "rule", 1),
-                                        (5, 3, "routes_to", "llm", 1), (7, 3, "routes_to", "rule", 2)]:
+                                        (5, 3, "routes_to", "llm", 1), (7, 3, "routes_to", "rule", 2),
+                                        (7, 3, "uses", "rule", 1), (3, 999, "uses", "rule", 1)]:
         db.add(ResourceRelation(build_id=1, account_id=acct, src_ref=src, dst_ref=dst, relation_type=rtype,
                                 provenance=prov, evidence={}))
     db.add(HealthIssue(id=1, resource_id="i-1", resource_ref=3, anchor_status="anchored", account_id=1,
@@ -134,6 +136,18 @@ def test_no_candidate_left_is_invalid(seed):
     assert _check(seed, {"candidates": "4"})[1] == "invalid"
 
 
+def test_a_ref_no_column_can_hold_is_dropped_alone(seed):
+    stored, status, _ = _check(seed, {"candidates": [_cand(3, 1), _cand(10 ** 20, 2)]})
+    assert status == "partial" and [c["ref"] for c in stored["candidates"]] == [3]
+    assert stored["dropped"] == [f"candidate {10 ** 20}: ref is not a resource id"]
+
+
+def test_a_ref_is_a_candidate_once(seed):
+    stored, status, _ = _check(seed, {"candidates": [_cand(4, 1), _cand(4, 2)]})
+    assert status == "partial" and [(c["rank"], c["ref"]) for c in stored["candidates"]] == [(1, 4)]
+    assert stored["dropped"] == ["candidate 4: already a candidate"]
+
+
 def test_an_issue_without_an_account_keeps_no_candidate(seed):
     seed.get(HealthIssue, 1).account_id = None
     seed.commit()
@@ -153,6 +167,8 @@ GOOD_EDGE = {"src_ref": 2, "dst_ref": 3, "relation_type": "contains"}
     {"src_ref": 5, "dst_ref": 3, "relation_type": "routes_to"},    # llm provenance
     {"src_ref": 7, "dst_ref": 3, "relation_type": "routes_to"},    # another account's relation
     {"src_ref": "2", "dst_ref": 3, "relation_type": "contains"},   # not an id
+    {"src_ref": 7, "dst_ref": 3, "relation_type": "uses"},         # an endpoint in another account
+    {"src_ref": 3, "dst_ref": 999, "relation_type": "uses"},       # an endpoint not in inventory
     "2>3",
 ])
 def test_one_bad_edge_drops_the_whole_path(seed, bad):
@@ -163,10 +179,29 @@ def test_one_bad_edge_drops_the_whole_path(seed, bad):
 
 
 def test_path_is_checked_against_the_given_build(seed):
+    seed.get(GalaxyBuild, 2).rules_published_at = datetime(2026, 8, 1)  # published, but not the latest
+    seed.commit()
     stored, status, build = _check(seed, {"candidates": [_cand(2, 1)], "path": [GOOD_EDGE], "build_id": 2})
     assert (status, build, stored["path"]) == ("partial", 2, [])
     stored, status, build = _check(seed, {"candidates": [_cand(2, 1)], "path": [GOOD_EDGE], "build_id": True})
     assert (status, build, len(stored["path"])) == ("valid", 1, 1)
+
+
+@pytest.mark.parametrize("given", [424242, 2])  # no such build; a build that was never published
+def test_a_given_build_must_be_a_published_one(seed, given):
+    stored, status, build = _check(seed, {"candidates": [_cand(2, 1)], "path": [GOOD_EDGE], "build_id": given})
+    assert (status, build, len(stored["path"])) == ("partial", 1, 1)
+    assert stored["dropped"] == [f"build_id {given}: not a published graph build"]
+
+
+def test_an_issue_without_an_account_has_no_path(seed):
+    seed.get(HealthIssue, 1).account_id = None
+    seed.query(ResourceRelation).filter_by(src_ref=2, dst_ref=3).update({"account_id": None})
+    seed.commit()
+    stored, status, _ = _check(seed, {"candidates": [_cand(2, 1)], "path": [GOOD_EDGE]})
+    assert (status, stored["path"]) == ("invalid", [])
+    assert stored["dropped"] == ["candidate 2: not in the issue's account",
+                                 "path: the issue has no account, so it has no path"]
 
 
 def test_no_published_build_drops_the_path(seed):
@@ -234,6 +269,19 @@ def test_a_failed_check_never_loses_the_rca(seed, monkeypatch):
     rca = seed.query(RCAResult).one()
     assert (rca.location_status, rca.location) == (
         "invalid", {"candidates": [], "path": [], "dropped": ["location check failed — RuntimeError"]})
+
+
+def test_a_check_that_fails_mid_transaction_never_loses_the_rca(seed, monkeypatch):
+    def poison(session, *a):
+        session.add(RCAResult(health_issue_id=1, root_cause=None))  # violates NOT NULL
+        session.flush()
+
+    monkeypatch.setattr(rl, "validate_location", poison)
+    msg = _save(location='{"candidates": [{"ref": 4, "rank": 1}]}')
+    assert "saved" in msg and "Location: invalid." in msg
+    rca = seed.query(RCAResult).one()
+    assert (rca.root_cause, rca.location_status, rca.location["dropped"]) == (
+        "sg change", "invalid", ["location check failed — IntegrityError"])
 
 
 def test_rca_response_carries_the_location(seed):

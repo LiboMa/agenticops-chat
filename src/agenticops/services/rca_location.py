@@ -3,8 +3,9 @@
 The RCA agent may name up to three ranked candidate resources and a causal path from the root cause to
 the symptom's anchor. Everything is checked against the database, fail-closed: a candidate that is not
 an inventory row of the issue's own account is dropped; so is an evidence label that is not one of this
-RCA's evidence items; one path edge that is not a rule/observed relation of the checked build drops the
-whole path. The stored location keeps only what survived, with both ends' names inline, so it reads the
+RCA's evidence items; one path edge that is not a rule/observed relation of the checked build, between two
+inventory rows of the issue's account, drops the whole path; a given build that is not a published
+graph build is replaced by the published one. The stored location keeps only what survived, with both ends' names inline, so it reads the
 same after the build is pruned. It is observed only — the critic, the confidence gate and auto-fix never
 read it.
 """
@@ -14,7 +15,7 @@ import json
 import re
 from typing import Optional
 
-from agenticops.galaxy.models import ResourceRelation
+from agenticops.galaxy.models import GalaxyBuild, ResourceRelation
 from agenticops.graph import query_service as qs
 from agenticops.models import CloudResource, HealthIssue
 from agenticops.services import identity_resolver as ir
@@ -25,10 +26,13 @@ LOCATION_VERDICTS = ("correct", "partial", "incorrect")
 MAX_CANDIDATES = 3
 PATH_PROVENANCE = frozenset({"rule", "observed"})
 _LABEL = re.compile(r"E(\d+)")
+_INT64 = 2 ** 63
 
 
 def _int(value) -> Optional[int]:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+    if isinstance(value, int) and not isinstance(value, bool) and -_INT64 <= value < _INT64:
+        return value
+    return None  # a bool, a non-int, or an id no database column can hold
 
 
 def _labels(value, evidence_count: int, where: str, dropped: list) -> list[str]:
@@ -53,7 +57,7 @@ def _candidates(session, issue: HealthIssue, raw, evidence_count: int, dropped: 
         if raw is not None:
             dropped.append("candidates: not a list")
         return []
-    out, ranks = [], set()
+    out, ranks, refs = [], set(), set()
     for c in raw:
         if not isinstance(c, dict):
             dropped.append(f"candidate {c!r}: not an object")
@@ -65,6 +69,9 @@ def _candidates(session, issue: HealthIssue, raw, evidence_count: int, dropped: 
         if rank is None or not 1 <= rank <= MAX_CANDIDATES or rank in ranks:
             dropped.append(f"candidate {ref}: rank {c.get('rank')!r} is not a free rank 1..{MAX_CANDIDATES}")
             continue
+        if ref in refs:
+            dropped.append(f"candidate {ref}: already a candidate")
+            continue
         row = session.get(CloudResource, ref)
         if row is None:
             dropped.append(f"candidate {ref}: no such resource")
@@ -73,6 +80,7 @@ def _candidates(session, issue: HealthIssue, raw, evidence_count: int, dropped: 
             dropped.append(f"candidate {ref}: not in the issue's account")
             continue
         ranks.add(rank)
+        refs.add(ref)
         out.append({"ref": ref, "rank": rank, "type": row.resource_type, "name": row.name or "",
                     "resource_id": row.resource_id,
                     "supporting": _labels(c.get("supporting"), evidence_count, f"candidate {ref} supporting",
@@ -93,6 +101,9 @@ def _path(session, issue: HealthIssue, raw, build_id: Optional[int], dropped: li
             or not issue.resource_ref:
         dropped.append("path: the issue is not anchored, so it has no path")
         return []
+    if issue.account_id is None:
+        dropped.append("path: the issue has no account, so it has no path")
+        return []
     if build_id is None:
         dropped.append("path: no published graph build to check it against")
         return []
@@ -100,16 +111,19 @@ def _path(session, issue: HealthIssue, raw, build_id: Optional[int], dropped: li
     for e in raw:
         src, dst = (_int(e.get("src_ref")), _int(e.get("dst_ref"))) if isinstance(e, dict) else (None, None)
         rtype = e.get("relation_type") if isinstance(e, dict) else None
-        rel = None
+        rel, ends = None, {}
         if src is not None and dst is not None and isinstance(rtype, str):
             rel = session.query(ResourceRelation).filter_by(build_id=build_id, src_ref=src, dst_ref=dst,
                                                             relation_type=rtype).first()
-        if rel is None or rel.provenance not in PATH_PROVENANCE or rel.account_id != issue.account_id:
+            # Relation endpoints carry no foreign key: both ends must still be the issue's own inventory rows.
+            ends = {r.id: (r.name or "", r.account_id)
+                    for r in session.query(CloudResource).filter(CloudResource.id.in_([src, dst]))}
+        if rel is None or rel.provenance not in PATH_PROVENANCE or rel.account_id != issue.account_id \
+                or any(ends.get(ref, (None, None))[1] != issue.account_id for ref in (src, dst)):
             dropped.append(f"path: edge {e!r} is not a rule/observed relation of build {build_id} in the "
                            "issue's account")
             return []
-        names = {r.id: r.name or "" for r in session.query(CloudResource).filter(CloudResource.id.in_([src, dst]))}
-        out.append({"src_ref": src, "src_name": names.get(src, ""), "dst_ref": dst, "dst_name": names.get(dst, ""),
+        out.append({"src_ref": src, "src_name": ends[src][0], "dst_ref": dst, "dst_name": ends[dst][0],
                     "relation_type": rtype, "provenance": rel.provenance})
     return out
 
@@ -133,6 +147,10 @@ def validate_location(session, issue: HealthIssue, location, evidence_count: int
         return {"candidates": [], "path": [], "dropped": ["location: not an object"]}, INVALID, None
     dropped: list[str] = []
     build_id = _int(location.get("build_id"))
+    if build_id is not None and session.query(GalaxyBuild.id).filter(
+            GalaxyBuild.id == build_id, GalaxyBuild.rules_published_at.isnot(None)).first() is None:
+        dropped.append(f"build_id {build_id}: not a published graph build")
+        build_id = None
     if build_id is None:
         build_id = qs.published_build_id(session)
     candidates = _candidates(session, issue, location.get("candidates"), evidence_count, dropped)

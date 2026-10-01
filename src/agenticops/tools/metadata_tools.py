@@ -751,10 +751,12 @@ def save_rca_result(
             evidence=evidence_parsed,
         )
         from agenticops.services.rca_location import INVALID, validate_location
+        # nothing is pending yet — the RCA is added below, so a rollback here loses nothing
         try:
             rca.location, rca.location_status, rca.location_build_id = validate_location(
                 session, issue, location, len(evidence_parsed))
         except Exception as exc:  # the location is observed only: a failed check never loses the RCA
+            session.rollback()  # clears an aborted transaction so the commit below can still land
             logger.warning("location check failed for issue #%s: %s", health_issue_id, exc)
             rca.location, rca.location_status, rca.location_build_id = (
                 {"candidates": [], "path": [], "dropped": [f"location check failed — {type(exc).__name__}"]},
