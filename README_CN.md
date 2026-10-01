@@ -43,7 +43,7 @@
 | **扫描 (Scan)** | 20+ 种 AWS 服务类型(EC2、Lambda、RDS、S3、ECS、EKS、DynamoDB、SQS/SNS、VPC/子网/安全组、NAT/TGW、负载均衡器) |
 | **监控与检测 (Monitor & Detect)** | CloudWatch 告警/指标、Z-score 异常检测、Prometheus/CloudWatch/Datadog webhook 接入 |
 | **信号门 (Signal Gate)** | 所有建问题的路径(webhook、智能体、REST)都过同一道门:确定性去重(fingerprint-v2、抖动、冷却、资源+类型合并)+ 一个只允许*合并*、绝不丢弃的廉价 LLM 灰区裁判。每个事件一条可审计的 Signal 记录,可人工提升为问题 |
-| **根因分析 (RCA)** | LLM 驱动的 RCA,结合 CloudTrail 关联、基础设施图、知识库检索;RCA 后的质量门(证据检查 → 对抗式 critic → 置信度阈值)把薄弱或被驳回的结论送进 `needs_review`,而不是自动修复 |
+| **根因分析 (RCA)** | LLM 驱动的 RCA,结合 CloudTrail 关联、基础设施图、知识库检索;RCA 后的质量门(证据检查 → 对抗式 critic → 置信度阈值)把薄弱或被驳回的结论送进 `needs_review`,而不是自动修复。RCA 按需从已发布的关系图取拓扑证据,并给出根因定位(≤ 3 个排序资源 + 因果路径),定位对照库存与关系图 fail-closed 校验、由人单独评判(只观测 —— 从不驱动修复) |
 | **自动修复流水线** | HealthIssue → RCA → SRE → 审批(L0/L1) → 执行 → 解决 —— 低风险问题自主完成 |
 | **变更管理** *(ITSM)* | 日常变更(改 tag、扩缩容、改配置)走 **Main → SRE 合法性审核 → 审批 → Executor**,**不需要 HealthIssue** —— 与事件修复流并列的 ITSM 对应物。一张 Plan 表两种来源(`plan_kind` = fix \| change)+ 一张 `change_requests` 工单;12 态变更状态机;RBAC **影子模式**(审批人身份绑定 + SoD,默认关);两本账(`audit_logs` 决策 + `command_audits` 命令)。`/app/plans`、`/api/changes/*`、CLI `/change` |
 | **云安全审查** | 双频姿态引擎:每小时一次确定性快照(IAM、S3、日志、VPC/EC2、EBS),由**纯函数、可复现**的评分器按 CIS 打分;含 NACL 的**三态**入口可达性(`reachable` / `not_reachable` / `undetermined` —— 绝不给假的"安全");每 10 分钟增量拉取 GuardDuty / Security Hub / CloudTrail;证据接地的 LLM 建议器 **fail-closed**(未接地或被驳回 → 丢弃)。`/app/security`、`/api/security/*`、`security-review` 报告 |
@@ -87,7 +87,7 @@ IM Bots ────────────┘        │                  SRE 
 | **Main** | Opus 5 | **路由 / 编排。** 唯一与用户对话的智能体;对每个请求分类,并把它作为工具分派给正确的专家,再组合各专家的输出。自身不持有任何运维工具 —— 纯控制流,使路由保持廉价且可审计。 |
 | **Scan** | Sonnet 4.6 | **清单发现。** 通过 provider CLI 跨账号/区域枚举资源(20+ 种 AWS 服务类型),归一化后 upsert 进元数据库。为所有下游智能体 + 图/Galaxy 构建器供数。高吞吐、只读。一次完整列出之后,消失的资源标为缺席(从不删除);所有计数只算存在的资源。resource-scan 调度(启动时种一次,间隔 resource_scan_interval_minutes,默认 60 分钟)定时跑这次扫描:即使没人手动扫描,被完整列出的类型和区域里消失的资源,也会在一个间隔加一次扫描耗时之内被标为缺席。任一账户凭证失败的那次运行记为失败,并写明账户名。 |
 | **Detect** | Sonnet 4.6 | **健康监控与异常检测。** 拉取 CloudWatch 告警/指标,运行 Z-score 异常检测,接入 Prometheus/CloudWatch/Datadog webhook,并开出去重后的 `HealthIssue`(SHA-256 指纹)。同时执行主动巡检(SPOF + 容量风险图检查)。只读。 |
-| **RCA** | Opus 4.6 | **根因分析。** 针对一个未决问题,关联 CloudTrail 变更事件、基础设施图(邻居 + 爆炸半径)、知识库案例和领域技能,产出有据可循的根因 + 置信度。只读调查;写入 `RCAResult`,永不触碰基础设施。 |
+| **RCA** | Opus 4.6 | **根因分析。** 针对一个未决问题,关联 CloudTrail 变更事件、已发布关系图的拓扑证据(`get_topology_evidence`:邻居、方向、爆炸半径)、知识库案例和领域技能,产出有据可循的根因 + 置信度 + 经校验的根因定位。只读调查;写入 `RCAResult`,永不触碰基础设施。 |
 | **SRE** | Fable 5.1 | **修复方案生成 —— 只规划,不动手。** 把 RCA 转化为具体的、按风险分级(L0–L3)的修复方案,含精确步骤 + 回滚。严格**只读**:它只提议;只有 Executor 能执行,且必须先过审批门。强制"一问题 → 一活跃方案"。 |
 | **Executor** | Opus 4.6 | **唯一改动基础设施的智能体。** 执行*已审批*的修复方案,跨后端 —— AWS CLI、SSM(→SSH 兜底)、`kubectl` —— 采用账号寻址的凭证解析(fail-closed,绝不用 ambient)。审批后自动跑 L0/L1;L2/L3 需人工。推动 9 态问题生命周期直到 `resolved`。 |
 | **Reporter** | Sonnet 4.6 | **报告与知识沉淀。** 生成日报/周报/事件/清单报告(Markdown/HTML/PDF,本地或 S3),并把已解决事件蒸馏为可复用的知识库 SOP,让后续 RCA 更快。对运维数据只读。 |
@@ -215,6 +215,7 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | 工具层写级命令账本(`command_audits`);只读命令不记录 |
 | `AIOPS_K8S_CONNECTOR_ENABLED` | `true` | K8s 拉取式连接器(只读 `kubectl get`,按账户的私有 kubeconfig)+ `k8s-discovery` 调度(`AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES`,默认 10) |
 | `AIOPS_WEBHOOK_SECRET` | *(空)* | 告警 webhook 共享 token:设了之后 `POST /api/webhooks/alert*` 必须带它(Bearer / `X-AIOps-Token` / `?token=`)或 `X-AIOps-Signature` HMAC,否则 401。为空 = 不校验(启动告警)。不要写进 `settings.yaml` |
+| `AIOPS_POLICY_GRAPH_IMPACT_ENFORCE` | `false` | 基于已发布关系图的策略爆炸半径:`false` = 影子模式(只作为 `shadow_blast_radius` 记在决策上,规则看不到);`true` = 喂给 `blast-radius-escalation` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local`(SQLite/文件)或 `cloud`(Postgres/S3) |
 
 ---
@@ -313,7 +314,7 @@ src/agenticops/
 ├── memory/       # 自优化的文件式智能体记忆 + Curator
 ├── skills/       # 技能加载器, 整包安全扫描, 广域来源导入 (sources), 脚本沙箱, Curator, promote/rollback
 ├── security/     # 云安全审查: collectors, 纯函数 CIS 评分, 含 NACL 的可达性, fail-closed 建议器
-├── graph/        # 基础设施图引擎 + SRE 算法
+├── graph/        # 基础设施图引擎 + SRE 算法、关系查询、RCA 拓扑证据
 ├── galaxy/       # Galaxy 关系图 (LLM 混合, fail-closed): rules + builder + api
 ├── kb/           # 知识库 (向量库: SQLite/pgvector/S3)
 ├── cli/          # CLI 入口 + chat + init 向导

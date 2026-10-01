@@ -1352,6 +1352,11 @@ curl -X POST $BASE/webhooks/alert/prometheus -H 'Content-Type: application/json'
 curl "$BASE/connectors?limit=5"
 curl -X POST $BASE/connectors/k8s/run
 
+# RCA root-cause location: judge it; quality over the last 30 days
+curl -X POST $BASE/health-issues/{id}/rca-feedback -H 'Content-Type: application/json' \
+  -d '{"location_verdict": "correct"}'
+curl "$BASE/rca/location-stats?days=30"
+
 # Import skills from a URL / git repo / archive — everything lands as a draft
 curl -X POST $BASE/skills/import-source -H 'Content-Type: application/json' \
   -d '{"uri": "git+https://github.com/org/skills.git@main#skills", "names": ["log-triage"]}'
@@ -1359,6 +1364,33 @@ curl -X POST $BASE/skills/import-source -H 'Content-Type: application/json' \
 # Cloud Security Review summary (per-account scores, reachable paths, open findings)
 curl $BASE/security/summary
 ```
+
+---
+
+## RCA Topology Evidence & Root-Cause Location (MVP-2.6.1)
+
+RCA reads the published relation graph on demand and names *where* the root cause is, not only *what* it is. The graph side is deterministic (no LLM); the location is checked against the database before it is stored, and nothing downstream acts on it.
+
+```mermaid
+flowchart LR
+    RCA["RCA agent"] -->|get_topology_evidence| EV["graph/evidence.build_evidence"]
+    EV -->|K8s anchor, cluster collected too long ago| RC["one bounded K8s connector run<br/>(trigger rca) + rule-only refresh"]
+    EV --> PACK["edges + direction · neighbors' issues / signals / changes<br/>· ranked candidates + reasons · evidence refs"]
+    PACK --> RCA
+    RCA -->|save_rca_result location| VAL["services/rca_location.validate_location<br/>fail-closed"]
+    VAL --> ST["location_status<br/>valid / partial / invalid / absent"]
+    HUMAN["human"] -->|rca-feedback location_verdict| ST
+    ST --> STATS["GET /api/rca/location-stats"]
+```
+
+- **The evidence pack** (`get_topology_evidence(issue_id)`): the anchored resource, the rule/observed edges around it with direction labels (upstream = what it depends on, the root-cause side; downstream = the blast side), each neighbor's own open issues, signals and changes inside the RCA window, and deterministic root-cause candidates with their reasons. Containers (cluster, namespace, VPC) default to two hops, so a workload is in reach. Every edge and node carries an evidence ref — `graph:edge:<src>><dst>:<type>`, `graph:node:<ref>` — which the RCA cites as evidence type `graph`, so the post-RCA evidence check grounds it in this tool's output. `freshness: stale` = the graph may lag reality; `truncated: true` = a missing neighbor proves nothing; `available: false` says why the graph cannot speak for this issue and never means "no problem found".
+- **Recollect before reading**: a K8s-side anchor whose cluster was last collected more than `rca_k8s_recollect_min_age_seconds` (120) ago gets one K8s connector run for that cluster (trigger `rca`, `rca_k8s_recollect_timeout_seconds` 60), then a rule-only graph refresh when the structure changed. The min age also rate-limits RCAs on one cluster. Failure marks the evidence `stale`; the RCA goes on.
+- **The location** (`save_rca_result(..., location=…)`): up to three ranked candidates plus a causal path from the root cause to the anchor. A candidate that is not an inventory row of the issue's account is dropped, and so is an `E<n>` evidence label that is not one of this RCA's evidence items. One path edge that is not a rule/observed relation of the cited build drops the whole path. The result is `valid` (nothing dropped), `partial` (something dropped, a candidate left), `invalid` (no candidate left, or the check itself failed — the RCA is still saved) or `absent` (not given). Names are stored inline, so the location reads the same after the build is pruned. **Observed only**: the critic, the confidence gate and auto-fix never read it.
+- **Self-grounding fix**: the evidence check no longer counts `save_rca_result`'s own input as tool output; before, an RCA could ground its claims in the text it was saving.
+- **Human verdict + stats**: `POST /api/health-issues/{id}/rca-feedback` takes `verdict` (the conclusion) and/or `location_verdict` (`correct` / `partial` / `incorrect`, the location only). The judge is the session actor, never the request body. A `location_verdict` is refused (409) when the latest RCA has no `valid`/`partial` location to judge. `GET /api/rca/location-stats?days=30` returns the location-status counts, `top1` = correct / judged (a `partial` verdict is not a hit), and the anchoring rate over issues that name a resource. No UI yet (Plan E).
+- **Policy blast radius (shadow)**: fix plans (the issue's anchored resource) and change requests (their widest target) get `estimate_blast_radius` = how many resources depend on the target in the published graph (downstream, rule relations, ≤ 3 hops). With `policy_graph_impact_enforce: false` (default) the count is only recorded on the decision as `shadow_blast_radius` and `blast_radius_gte` rules never see it. With `true` it feeds `blast-radius-escalation`. The old graph-store path always counted nothing.
+- **Gate**: `rca_topology_context_enabled` — off means RCA sees neither the tool nor its prompt section.
+- **Eval**: 13 chaos cases with declared ground truth, run once with the gate off and once with it on (AC@1 / AC@3 / MRR, `located`, graph recall). See *Chaos E2E Runbook* below and the [report](MVP-2.6.1-LOCATION-EVAL-REPORT.md).
 
 ---
 
@@ -1491,6 +1523,10 @@ bash run-e2e.sh --assert-only
 
 # Chat + report capture only
 bash run-e2e.sh --evidence-only
+
+# Root-cause location eval, one batch per run (off, then on; ~1¾ h each)
+LOCATION_BATCH=off bash run-e2e.sh --location-only
+LOCATION_BATCH=on  bash run-e2e.sh --location-only
 ```
 
 ### Interpret Results
@@ -1501,6 +1537,7 @@ bash run-e2e.sh --evidence-only
   - **分析 (Analyze)**: RCAResult attached
   - **解决 (Resolve)**: issue → `resolved`, FixPlan executed, cluster end-state fixed
   - **记录 (Record)**: pipeline timeline contains fix/resolve events
+- **Location eval**: `results/location-<utc>.json` per batch; `python location_eval.py <off>.json <on>.json` prints the tables for the [report](MVP-2.6.1-LOCATION-EVAL-REPORT.md)
 
 ### Safety Guarantees
 - App is ClusterIP-only; sole ingress is the `kubectl port-forward` tunnel opened by `run-e2e.sh`.
