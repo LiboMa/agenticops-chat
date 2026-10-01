@@ -2,7 +2,7 @@
 
 > Version: 2.6.1 · Branch: `MVP-2.6.1` · Date: 2026-09-29（草稿日期；push 时按主人确认日期回填） · 主题：问题锚到图上的资源，RCA 在图上定位根因、由人评判；审批绑定内容、执行后有验收；界面拆成 问题 / 变更 / 审计
 >
-> **状态：计划 A–E 已全部实现，作为 `MVP-2.6.1` 分支上的本地提交存在（未 push）；全量 pytest 与前端 `tsc` / `vitest` / `vite build` / locale-parity 四道门的结果由控制器在执行时据实填入；联合 live E2E（含 26 次定位评测）尚待与主人一起跑。** 依主人铁律，只有联合 E2E 通过且当面确认后才 `git push --no-verify`。测量数字（测试计数、锚定率、查询 p95、评测指标）由控制器据实填入或引用实测文件 —— 本文不预填未验证的数字。
+> **状态：计划 A–E 已全部实现，作为 `MVP-2.6.1` 分支上的本地提交存在（未 push）。最终门禁（2026-10-02）全部通过：全量 pytest 6347 passed / 85 skipped、0 次真实 AWS 调用（在 0c745cc 上跑，其后只有前端改动）；前端在 c7630e7 上 `tsc --noEmit` 0 错误、`vitest run src` 27 个文件 / 279 个测试全过（含 locale-parity 测试 `locales.test.ts`）、`vite build` 成功。联合 live E2E（含 26 次定位评测）尚待与主人一起跑。** 依主人铁律，只有联合 E2E 通过且当面确认后才 `git push --no-verify`。锚定率与查询性能见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`（下文验收 1–2）；评测指标（验收 3–5）只在联合 E2E 后据实填入 —— 本文不预填未验证的数字。
 >
 > 设计：`docs/superpowers/specs/2026-09-28-mvp-2.6.1-graph-rca-loop-and-issue-change-design.md`
 > 计划：`docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-{a,b,c,d,e}-*.md`
@@ -179,8 +179,8 @@
 
 | # | 标准 | 状态 |
 |---|---|---|
-| 1 | 锚定率 `(anchored + account_level) / 总数` ≥ 95%（达不到则报告原因分布，不放宽规则）；36 组跨账户重复 id 一次都不错配 | 实测见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`；控制器据实填入 |
-| 2 | 2 跳邻域 SQL ≤ 5；本地库 p95 < 200 ms | 同上 |
+| 1 | 锚定率 `(anchored + account_level) / 总数` ≥ 95%（达不到则报告原因分布，不放宽规则）；36 组跨账户重复 id 一次都不错配 | 锚定率 **未达标**：（562 + 25）/ 888 = 66.1%。原因分布：库存里找不到这个资源 291（多为没有扫描器列举的类型，id 形态前几位是 `arn:cloudformation` 39、`arn:elasticloadbalancing` 38、`arn:iam` 35、`arn:rds` 25）、Issue 无账户也无信号记录 6、同规则命中多个资源 4；按设计不放宽规则。跨账户重复 id **达标**：36 组，指向它们的未关闭 Issue 错配 0；`resolve()` 探测 72/72 锚到持有账户、不给账户时锚定 0 次。实测见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md` |
+| 2 | 2 跳邻域 SQL ≤ 5；本地库 p95 < 200 ms | **达标**：457 个锚定资源 × 3 轮共 1371 次调用（每次清缓存），SQL 最多 4 条；p50 4.1 ms、p95 6.1 ms、最大 43.3 ms；截断 0 次。实测同上 |
 | 3 | 图召回率 ≥ 12/13（硬门槛） | 联合 E2E（`MVP-2.6.1-LOCATION-EVAL-REPORT.md`） |
 | 4 | on 批次 `location_status ∈ {valid, partial}` ≥ 90%；无效引用绝不记成 valid | 校验分支有单测；比例待联合 E2E |
 | 5 | AC@1 / AC@3 / MRR 的 off / on 对照如实报告，不设门槛 | 联合 E2E |
@@ -191,7 +191,7 @@
 | 10 | 规则关系行数 = rule_graph 资源到资源的边数；方向测试通过，锁反向的旧测试已删 | 单测覆盖 |
 | 11 | `pending_acceptance` 时 IssueDetail 与 ChangeDetail 顶部显示同一条原因 | 前端 vitest 覆盖；联合 E2E 走查 |
 | 12 | intake：签名错 401、未配置 404、同一工单重复提交得到同一张变更单；`webhook:*` 批准在影子模式下也 403 | 单测覆盖；联合 E2E 复核 |
-| 13 | 全量测试 + 前端四道门通过；联合 live E2E 跑完并经主人确认后才 push | 门禁结果由控制器填入；E2E 待跑 |
+| 13 | 全量测试 + 前端四道门通过；联合 live E2E 跑完并经主人确认后才 push | 门禁 **通过**：pytest 6347 passed / 85 skipped；`tsc` 0 错误；vitest 27 个文件 / 279 个测试；`vite build` 成功；locale-parity 测试通过。联合 E2E 待跑，未 push |
 
 ## 联合 live E2E 清单（设计 §7，和主人一起跑 —— 尚未执行）
 
@@ -325,6 +325,11 @@ Datadog / 观测云 / ServiceNow CMDB 连接器与 MCP 声明式连接器；Chat
    - **E-T7**：ResourceDetail 的 tab 标签除了新的「局部关系图」都是硬编码英文（既有）；没有 `focus` 参数时，Galaxy 的 `exitFocus` 也会做一次无意义的 URL 替换。
    - **E-T8**：连接器卡片的轮询间隔（运行中 5 秒 / 空闲 30 秒）写死在 `useConnectors` 里，没有测试。
    - **E-13**：局部关系图图例与定位卡的「因果链」改成与 C-1 一致的说法。
+   - **E-F2 / I-1 后端根因（主人决定）**：Issue 转为 `resolved` / `dismissed` 时，它名下未终结的修复方案不会被撤回（变更侧有撤回，`change_service`）。界面已不再给这类方案显示「批准」（94530d0），但方案仍停在 `pending_approval`；要在同一事务里撤回，属于行为变更。
+   - **E-F2 / M-4**：`/app/plans` 的旧链接重定向没看 `change_management_enabled`：关闭变更管理时，不带 `tab` 的旧书签落到 Changes 页的「已关闭」状态，而不是 Issues。
+   - **E-F2 / M-5**：这条重定向只保留 `tab`，丢掉其他查询参数（目前没有旧链接带别的参数，无影响）。
+   - **E-F2 / M-7**：做了定位评判之后，AgentMetrics 的定位统计卡最多滞后 60 秒（`rca-location-stats` 的 staleTime，没有在评判时失效）。
+   - **E-F6**：Chat ContextPanel 里的方案徽标在运行结束后可能仍显示 `executing`（面板不轮询方案）；Execute 的确认对话框文字是硬编码英文；运行列表的轮询会跟着一条 `running` 行一直轮下去，而进程重启后没有任何东西回收这种行。
 
 ## Future（后续期）
 
