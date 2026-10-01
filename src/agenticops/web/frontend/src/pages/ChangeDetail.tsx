@@ -66,8 +66,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const tl = useChangeTimeline(qId, q.data?.status);
 
   const backLink = (
-    <Link to="/app/plans?tab=changes" className="text-sm text-muted-foreground hover:text-foreground">
-      ← {t("plans.title")}
+    <Link to="/app/changes" className="text-sm text-muted-foreground hover:text-foreground">
+      ← {t("nav.changes")}
     </Link>
   );
   const notFoundNotice = (

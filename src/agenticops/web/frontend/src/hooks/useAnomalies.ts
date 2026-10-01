@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { Anomaly } from "@/api/types";
+import type { IssueScope } from "@/lib/issueScope";
 
 interface AnomalyFilters {
   severity?: string;
   status?: string;
   resource_type?: string;
   account_id?: number;
+  scope?: IssueScope;
 }
 
 export function useAnomalies(filters: AnomalyFilters = {}) {
@@ -15,6 +17,7 @@ export function useAnomalies(filters: AnomalyFilters = {}) {
   if (filters.status) params.set("status", filters.status);
   if (filters.resource_type) params.set("resource_type", filters.resource_type);
   if (filters.account_id) params.set("account_id", String(filters.account_id));
+  if (filters.scope) params.set("scope", filters.scope);
   const qs = params.toString();
 
   return useQuery({

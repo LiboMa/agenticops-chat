@@ -12,6 +12,7 @@ import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { ISSUE_SCOPES, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
 import type { Anomaly, Resource } from "@/api/types";
 
 /* ── Issues helpers ─────────────────────────────────────────────── */
@@ -143,7 +144,11 @@ function IssuesView({
   const [severity, setSeverity] = useState<Severity>("all");
   const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
-  const { data, isLoading, error, refetch } = useAnomalies();
+  // The view lives in the URL (ops events by default) and filters on the server: the list is paged.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scope = resolveIssueScope(searchParams.get("scope"));
+  const setScope = (s: IssueScope) => setSearchParams(s === "ops" ? {} : { scope: s });
+  const { data, isLoading, error, refetch } = useAnomalies({ scope });
 
   const allIssues = data ?? [];
 
@@ -195,6 +200,20 @@ function IssuesView({
 
       {/* Filter bar */}
       <div className="space-y-3">
+        {/* Scope toggle: ops events / security findings / all */}
+        <div className="flex bg-secondary rounded-lg p-0.5 w-fit">
+          {ISSUE_SCOPES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setScope(s)}
+              className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                scope === s ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t(`issues.scope.${s}`)}
+            </button>
+          ))}
+        </div>
         {/* Phase chips row */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">

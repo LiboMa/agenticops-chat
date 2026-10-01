@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, planRef, planRoute, resolvePlansTab, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planRef, planRoute, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -54,9 +54,9 @@ describe("terminal sets are typed (M3)", () => {
 describe("planRoute / planRef (R2)", () => {
   it.each([
     { plan_kind: "change" as PlanKind, change_request_id: 7, health_issue_id: null, route: "/app/changes/7", ref: "C#7" },
-    { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=changes", ref: "-" },
+    { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/changes", ref: "-" },
     { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/issues/3", ref: "I#3" },
-    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=fix", ref: "-" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/issues", ref: "-" },
   ])("$plan_kind change=$change_request_id issue=$health_issue_id -> $route / $ref", (row) => {
     const fp = { plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
     expect(planRoute(fp)).toBe(row.route);
@@ -64,15 +64,14 @@ describe("planRoute / planRef (R2)", () => {
   });
 });
 
-describe("resolvePlansTab", () => {
+describe("legacyPlansRedirect", () => {
   it.each([
-    { requested: null, changesOn: true, result: "changes" },
-    { requested: null, changesOn: false, result: "fix" },
-    { requested: "changes", changesOn: false, result: "fix" },
-    { requested: "audit", changesOn: false, result: "audit" },
-    { requested: "fix", changesOn: true, result: "fix" },
-    { requested: "bogus", changesOn: true, result: "changes" },
-  ])("$requested with changesOn=$changesOn -> $result", ({ requested, changesOn, result }) => {
-    expect(resolvePlansTab(requested, changesOn)).toBe(result);
+    { tab: null, to: "/app/changes" },
+    { tab: "changes", to: "/app/changes" },
+    { tab: "audit", to: "/app/audit" },
+    { tab: "fix", to: "/app/issues" },
+    { tab: "bogus", to: "/app/changes" },
+  ])("/app/plans?tab=$tab -> $to", ({ tab, to }) => {
+    expect(legacyPlansRedirect(tab)).toBe(to);
   });
 });

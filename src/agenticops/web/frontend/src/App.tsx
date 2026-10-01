@@ -1,16 +1,18 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
+import { legacyPlansRedirect } from "@/lib/plans";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
 const IssueDetail = lazy(() => import("@/pages/IssueDetail"));
-const PlansAndChanges = lazy(() => import("@/pages/PlansAndChanges"));
+const Changes = lazy(() => import("@/pages/Changes"));
+const Audit = lazy(() => import("@/pages/Audit"));
 const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
@@ -28,6 +30,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = getAuthToken();
   if (!token) return <Navigate to="/app/login" replace />;
   return <>{children}</>;
+}
+
+/** `/app/plans` was split into Changes + Audit (MVP-2.6.1); an old bookmark lands on the page that replaced its tab. */
+function LegacyPlansRedirect() {
+  const [params] = useSearchParams();
+  return <Navigate to={legacyPlansRedirect(params.get("tab"))} replace />;
 }
 
 const queryClient = new QueryClient({
@@ -93,11 +101,12 @@ export default function App() {
                 </Suspense>
               }
             />
+            <Route path="plans" element={<LegacyPlansRedirect />} />
             <Route
-              path="plans"
+              path="changes"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <PlansAndChanges />
+                  <Changes />
                 </Suspense>
               }
             />
@@ -106,6 +115,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <ChangeDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="audit"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Audit />
                 </Suspense>
               }
             />

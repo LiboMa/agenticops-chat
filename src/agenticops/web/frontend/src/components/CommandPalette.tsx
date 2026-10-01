@@ -30,7 +30,7 @@ function entityRoute(item: SearchResultItem): string {
     case "change_request":
       return `/app/changes/${item.id}`;
     case "change_plan":
-      return item.parent_id != null ? `/app/changes/${item.parent_id}` : "/app/plans?tab=changes";
+      return item.parent_id != null ? `/app/changes/${item.parent_id}` : "/app/changes";
   }
 }
 

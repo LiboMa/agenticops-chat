@@ -14,6 +14,13 @@ describe("reorderNavIds", () => {
   it("empty stored → current as-is", () => {
     expect(reorderNavIds([], ["a", "b"])).toEqual(["a", "b"]);
   });
+  it("a renamed id takes its successors into the old slot", () => {
+    expect(reorderNavIds(["b", "old", "a"], ["a", "new1", "b", "new2"], { old: ["new1", "new2"] }))
+      .toEqual(["b", "new1", "new2", "a"]);
+  });
+  it("a successor already stored is not listed twice", () => {
+    expect(reorderNavIds(["new1", "old"], ["new1", "new2"], { old: ["new1", "new2"] })).toEqual(["new1", "new2"]);
+  });
 });
 
 describe("moveId", () => {

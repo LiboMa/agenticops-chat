@@ -1895,6 +1895,10 @@ async def api_resource_related(resource_id: int):
 # Anomaly API Endpoints (Legacy — backed by HealthIssue)
 # ============================================================================
 
+# Issues the security review engine creates carry a `security_*` source (security_poll / security_posture); the
+# issue list's `scope` splits them from ops events on the server, because the list is paged.
+SECURITY_SOURCE_PREFIX = "security_"
+
 
 
 
@@ -1906,8 +1910,9 @@ async def api_list_anomalies(
     account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
 ):
-    """List anomalies (backed by HealthIssue)."""
+    """List anomalies (backed by HealthIssue). `scope` splits ops events from security findings."""
     with get_db_session() as session:
         query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
 
@@ -1921,6 +1926,9 @@ async def api_list_anomalies(
             query = query.filter(
                 HealthIssue.metric_data["resource_type"].as_string() == resource_type
             )
+        if scope != "all":  # `_` is a LIKE wildcard, so the prefix is escaped
+            is_security = HealthIssue.source.like(SECURITY_SOURCE_PREFIX.replace("_", "\\_") + "%", escape="\\")
+            query = query.filter(is_security if scope == "security" else ~is_security)
 
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
@@ -2018,9 +2026,10 @@ async def api_list_issues(
     account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
 ):
     """List issues."""
-    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset)
+    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset, scope)
 
 
 @app.get("/api/issues/{issue_id}", response_model=AnomalyResponse)

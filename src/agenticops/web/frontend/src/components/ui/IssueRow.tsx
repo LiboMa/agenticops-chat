@@ -1,10 +1,13 @@
 import React, { useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { PipelineStepper } from "./PipelineStepper";
 import { SeverityBadge } from "./SeverityBadge";
 import { useConfirm } from "./ConfirmDialog";
 import { formatShortDate } from "@/lib/formatDate";
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueFeedback } from "@/hooks/useAgentMemory";
+import { useLocale } from "@/i18n/LocaleContext";
+import { isSecurityIssue } from "@/lib/issueScope";
 import type { Anomaly, IssueStatus } from "@/api/types";
 
 interface Props {
@@ -54,6 +57,7 @@ export const IssueRow = React.memo(function IssueRow({ issue, onClick }: Props) 
   const isDismissed = issue.status === "dismissed";
   const isCritical = issue.severity === "critical" && !isResolved && !isDismissed;
   const canAct = ACTIONABLE.has(issue.status);
+  const { t } = useLocale();
 
   const statusMut = useUpdateIssueStatus();
   const feedbackMut = useIssueFeedback();
@@ -141,6 +145,11 @@ export const IssueRow = React.memo(function IssueRow({ issue, onClick }: Props) 
               shortResourceRef(issue.resource_type, issue.resource_id),
               formatShortDate(issue.detected_at),
             ].filter(Boolean).join(" · ")}
+            {isSecurityIssue(issue.anomaly_type) && (
+              <Link to="/app/security" onClick={(e) => e.stopPropagation()} className="ml-2 text-primary hover:underline">
+                {t("issues.openSecurity")} →
+              </Link>
+            )}
           </div>
         </div>
 

@@ -11,7 +11,8 @@ export const NAV_ITEMS = [
   { id: "dashboard", to: "/app", icon: "grid", labelKey: "nav.dashboard", end: true },
   { id: "chat", to: "/app/chat", icon: "chat", labelKey: "nav.chat", end: false },
   { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", end: false, badge: true },
-  { id: "plans", to: "/app/plans", icon: "clipboard", labelKey: "nav.plans", end: false },
+  { id: "changes", to: "/app/changes", icon: "clipboard", labelKey: "nav.changes", end: false },
+  { id: "audit", to: "/app/audit", icon: "audit", labelKey: "nav.audit", end: false },
   { id: "schedules", to: "/app/schedules", icon: "calendar", labelKey: "nav.schedules", end: false },
   { id: "reports", to: "/app/reports", icon: "file", labelKey: "nav.reports", end: false },
   { id: "agent-metrics", to: "/app/agent-metrics", icon: "barchart", labelKey: "nav.agentMetrics", end: false },
@@ -20,11 +21,15 @@ export const NAV_ITEMS = [
   { id: "security", to: "/app/security", icon: "shield", labelKey: "nav.security", end: false },
 ] as const;
 
+// MVP-2.6.1 split the old Plans & Changes page into Changes + Audit; both take its slot in a stored order.
+const NAV_RENAMES: Record<string, string[]> = { plans: ["changes", "audit"] };
+
 export const ICON_PATHS: Record<string, string> = {
   grid: "M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z",
   chat: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
   clock: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
   clipboard: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
+  audit: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
   calendar: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
   file: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
   barchart: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
@@ -49,7 +54,7 @@ export function NavItems({ expanded }: { expanded: boolean }) {
 
   const currentIds = NAV_ITEMS.map((i) => i.id as string);
   const [storedOrder, setStoredOrder] = usePersistedState<string[]>("aiops-nav-order", currentIds);
-  const order = reorderNavIds(storedOrder, currentIds);
+  const order = reorderNavIds(storedOrder, currentIds, NAV_RENAMES);
   const items = order.map((id) => NAV_ITEMS.find((i) => i.id === id)!);
 
   const [dragId, setDragId] = useState<string | null>(null);
