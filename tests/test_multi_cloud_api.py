@@ -92,15 +92,16 @@ def test_test_account_connection(client):
         "credentials": {"profile_name": "default"}, "regions": ["us-east-1"],
     })
     account_id = resp.json()["id"]
-    # Test endpoint — will attempt to resolve credentials
-    with patch("agenticops.providers.get_provider") as mock_gp:
-        mock_provider = MagicMock()
-        mock_provider.resolve_credentials.return_value = True
-        mock_gp.return_value = mock_provider
+    # The endpoint goes through SessionFactory.test_connection: stub the session it builds, so the STS
+    # GetCallerIdentity never leaves the machine.
+    session = MagicMock()
+    session.client.return_value.get_caller_identity.return_value = {
+        "Arn": "arn:aws:iam::111111111111:user/t", "Account": "111111111111"}
+    with patch("agenticops.credentials.session_factory.SessionFactory.get_session", return_value=session):
         resp = client.post(f"/api/accounts/{account_id}/test")
     assert resp.status_code == 200
     data = resp.json()
-    assert "success" in data
+    assert (data["success"], data["account_id"]) == (True, "111111111111")
     assert data["provider"] == "aws"
 
 

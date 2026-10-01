@@ -96,7 +96,9 @@ channels:
 """
     yaml_path = tmp_path / "channels.yaml"
     yaml_path.write_text(yaml_content)
-    settings.channels_config = yaml_path
+    # monkeypatch, so it is undone: a leaked path kept this sns-report channel live for every later test
+    # (S3 uploads to test-bucket and SNS publishes from the notifier's executor threads)
+    monkeypatch.setattr(settings, "channels_config", yaml_path)
 
     # Invalidate cache
     im_mod._channels_cache = None
