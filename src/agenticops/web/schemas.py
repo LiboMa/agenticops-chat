@@ -839,6 +839,20 @@ class AuditLogResponse(BaseModel):
 # ============================================================================
 
 
+class ChangeProposedStep(BaseModel):
+    """One of the requester's own steps (the fix_plans.steps shape; caps mirror services/change_steps)."""
+    action: str = Field("", max_length=500)
+    command: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeExternalRef(BaseModel):
+    """The ticket in another system a request came from (caps mirror change_service._external_ref)."""
+    system: str = Field(..., pattern="^[a-z0-9_-]{1,50}$")
+    ticket_id: str = Field(..., min_length=1, max_length=200)
+    url: Optional[str] = Field(None, max_length=1000, pattern="^[Hh][Tt][Tt][Pp][Ss]?://")
+    requested_by: Optional[str] = Field(None, max_length=255)
+
+
 class ChangeRequestCreate(BaseModel):
     # Caps mirror change_service.create_change_request so an over-cap body is 422 at validation, before
     # the service is entered (title 300 / description 8000 / justification 2000 / 20 targets, 200 chars each).
@@ -848,6 +862,8 @@ class ChangeRequestCreate(BaseModel):
     targets: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
     requested_change_type: str = Field("normal", pattern="^(normal|emergency)$")
     justification: str = Field("", max_length=2000)
+    proposed_steps: Optional[List[ChangeProposedStep]] = Field(None, max_length=50)
+    external_ref: Optional[ChangeExternalRef] = None
 
 
 class ChangeRequestResponse(BaseModel):
@@ -886,6 +902,10 @@ class ChangeRequestResponse(BaseModel):
     chat_session_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    proposed_steps: Optional[list] = None
+    external_ref: Optional[dict] = None
+    steps_diff: Optional[dict] = None
+    needs_review_reason: Optional[str] = None
 
 
 class ChangeRequestDetail(ChangeRequestResponse):

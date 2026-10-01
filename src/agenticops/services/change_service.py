@@ -30,6 +30,7 @@ from agenticops.services.inventory import PRESENT
 from agenticops.services.notification_service import (  # noqa: F401  (pending_approval: approval stage)
     notify_change_pending_approval, notify_change_requested, notify_change_result,
 )
+from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
 from agenticops.services.pipeline_events import log_event
 from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
 
@@ -160,6 +161,8 @@ def to_dict(cr: ChangeRequest) -> dict:
         "approval_reason": cr.approval_reason, "rejected_by": cr.rejected_by, "rejected_at": _iso(cr.rejected_at),
         "rejection_reason": cr.rejection_reason, "closed_at": _iso(cr.closed_at), "trace_id": cr.trace_id,
         "chat_session_id": cr.chat_session_id, "created_at": _iso(cr.created_at), "updated_at": _iso(cr.updated_at),
+        "proposed_steps": cr.proposed_steps, "external_ref": cr.external_ref, "steps_diff": cr.steps_diff,
+        "needs_review_reason": cr.needs_review_reason,
     }
 
 
@@ -237,9 +240,13 @@ def change_execution_refusal(plan: Optional[FixPlan]) -> Optional[str]:
 def create_change_request(
     *, source: str, actor: Actor, title: str, description: str, account_name: Optional[str] = None,
     targets: Optional[list[str]] = None, requested_change_type: str = "normal", justification: str = "",
-    chat_session_id: Optional[str] = None, start_review: bool = True,
+    chat_session_id: Optional[str] = None, start_review: bool = True, proposed_steps: Optional[list] = None,
+    external_ref: Optional[dict] = None,
 ) -> dict:
-    """Unified intake for chat / web / cli / im / (P2 webhook). Returns the CR snapshot."""
+    """Unified intake for chat / web / cli / im / webhook. Returns the CR snapshot.
+
+    `proposed_steps` are the requester's own commands (the review validates them instead of authoring new
+    ones); `external_ref` is the ticket in the system the request came from (spec §3.D.2)."""
     _require_enabled()
     _check(actor, "change.request")
     if source not in CHANGE_SOURCES:
@@ -262,6 +269,11 @@ def create_change_request(
         raise ChangeValidationError("too many targets (max 20)")
     if any(len(h) > 200 for h in hints):
         raise ChangeValidationError("target too long (max 200 characters each)")
+    try:
+        steps = normalize_steps(proposed_steps)
+    except ValueError as exc:
+        raise ChangeValidationError(str(exc)) from exc
+    ref = _external_ref(external_ref)
 
     trace_id = get_trace_id() or generate_trace_id()
     with _session() as s:
@@ -275,12 +287,14 @@ def create_change_request(
             title=title[:300], description=description, justification=justification or "", source=source,
             requested_by=actor.key, requester_user_id=actor.user_id, account_id=account_id, target_hints=hints,
             target_resources=[], requested_change_type=requested_change_type, status="draft", trace_id=trace_id,
-            chat_session_id=chat_session_id,
+            chat_session_id=chat_session_id, proposed_steps=steps, external_ref=ref,
+            external_system=ref["system"] if ref else None, external_ticket_id=ref["ticket_id"] if ref else None,
         )
         s.add(cr)
         s.flush()
         _audit(s, Actions.CHANGE_REQUESTED, cr, actor,
-               details={"source": source, "requested_change_type": requested_change_type, "targets": hints},
+               details={"source": source, "requested_change_type": requested_change_type, "targets": hints,
+                        "proposed_steps": len(steps or []), "external_ref": ref},
                new_status="draft")
         snap = to_dict(cr)
     _event(snap["id"], "change_requested", "intake", detail={"source": source, "targets": hints}, actor=actor.key, trace_id=trace_id)
@@ -297,6 +311,35 @@ def create_change_request(
             logger.warning("start_review failed for new ChangeRequest #%s — it stays a draft",
                            snap["id"], exc_info=True)
     return snap
+
+
+_EXTERNAL_SYSTEM = re.compile(r"[a-z0-9_-]{1,50}")
+
+
+def _external_ref(raw) -> Optional[dict]:
+    """The external ticket a request came from, as stored: {system, ticket_id, url?, requested_by?}."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ChangeValidationError("external_ref must be an object {system, ticket_id, url?, requested_by?}")
+    system = str(raw.get("system") or "").strip()
+    ticket = str(raw.get("ticket_id") or "").strip()
+    url = str(raw.get("url") or "").strip()
+    requested_by = str(raw.get("requested_by") or "").strip()
+    if not _EXTERNAL_SYSTEM.fullmatch(system):
+        raise ChangeValidationError("external_ref.system must be 1-50 of a-z, 0-9, '_' or '-'")
+    if not ticket or len(ticket) > 200:
+        raise ChangeValidationError("external_ref.ticket_id is required (max 200 characters)")
+    if url and (len(url) > 1000 or not re.match(r"https?://", url, re.IGNORECASE)):
+        raise ChangeValidationError("external_ref.url must be an http(s) URL (max 1000 characters)")
+    if len(requested_by) > 255:
+        raise ChangeValidationError("external_ref.requested_by too long (max 255 characters)")
+    ref = {"system": system, "ticket_id": ticket}
+    if url:
+        ref["url"] = url
+    if requested_by:
+        ref["requested_by"] = requested_by
+    return ref
 
 
 # ── Review lifecycle ──────────────────────────────────────────────────
@@ -691,8 +734,10 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
 
 def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
     """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius).
-    Only during THIS review (require_live_review): a stale run is refused before its policy_decision event."""
-    from agenticops.services.policy_engine import get_policy_engine, policy_blast_radius
+    Only during THIS review (require_live_review): a stale run is refused before its policy_decision event.
+    A requested or planned command its execution tool refuses outright blocks the change before any rule
+    is consulted (spec §3.D.2) — no risk reading can pass it."""
+    from agenticops.services.policy_engine import PolicyDecision, get_policy_engine, policy_blast_radius
     with _session() as s:
         cr = _load(s, cr_id)
         require_live_review(cr, "policy is evaluated only during review")
@@ -709,12 +754,18 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
         # shadow mode stays zero-impact.
         blast_radius, shadow_blast_radius = policy_blast_radius(
             [t.get("db_id") for t in targets], cr.account_id)
+        plan = active_plan_for(s, cr_id)
+        blocked = blocked_commands(cr.proposed_steps, plan.steps if plan else None)
     first = targets[0]["resource_id"] if targets else None
-    decision = get_policy_engine().evaluate(
-        risk_level=risk_level, provider=provider, resource_id=first,
-        blast_radius=blast_radius, plan_kind="change",
-        emergency=emergency, action_type=action_type,
-    )
+    if blocked:
+        decision = PolicyDecision(action="block", rule_name="blocked_command",
+                                  reasons=[f"blocked command: {c[:200]}" for c in blocked][:5])
+    else:
+        decision = get_policy_engine().evaluate(
+            risk_level=risk_level, provider=provider, resource_id=first,
+            blast_radius=blast_radius, plan_kind="change",
+            emergency=emergency, action_type=action_type,
+        )
     decision.shadow_blast_radius = shadow_blast_radius
     _event(cr_id, "policy_decision", "approval", decision.action,
            detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},
@@ -808,6 +859,8 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             raise ChangeStateError("the change plan must have a non-empty rollback_plan and non-empty post_checks")
         plan_id = plan.id
         plan_dict = {"id": plan.id, "title": plan.title, "risk_level": risk_level, "summary": plan.summary}
+        # what the plan changed relative to the request, by code (spec §3.D.2) — None when nothing was proposed
+        steps_diff = diff_steps(cr.proposed_steps, plan.steps) if cr.proposed_steps else None
 
     decision = evaluate_policy(cr_id, risk_level, action_type)
     with _session() as s:
@@ -820,6 +873,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         cr.review_verdict = verdict
         cr.risk_level = risk_level
         cr.action_type = action_type
+        cr.steps_diff = steps_diff
         plan.risk_level = risk_level
         stamp_content(s, plan)  # the reviewed risk is part of the content an approval approves
         plan_dict["content_hash"] = plan.content_hash
@@ -1113,6 +1167,8 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
             s.refresh(cr)
             return to_dict(cr)
         _transition(cr, new_status)
+        if new_status == "needs_review":
+            cr.needs_review_reason = reason  # what the human verdict is about, read at the top of the page
         from agenticops.run_context import get_run_context
         actor_key = get_run_context().actor if get_run_context().actor != "system" else "agent:executor"
         action = {"completed": Actions.CHANGE_COMPLETED, "needs_review": Actions.CHANGE_NEEDS_REVIEW,

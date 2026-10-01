@@ -50,7 +50,8 @@ def _plan_summary(cr_id: int) -> dict | None:
 
 @tool
 def request_change(title: str, description: str, account: str = "", targets: str = "",
-                   change_type: str = "normal", justification: str = "") -> str:
+                   change_type: str = "normal", justification: str = "", proposed_steps: str = "",
+                   external_ref: str = "") -> str:
     """Open a CHANGE REQUEST (ITSM change) for a modification the user asks for — tagging, scaling,
     configuration, network or IAM changes that are NOT fixing an incident.
 
@@ -65,6 +66,11 @@ def request_change(title: str, description: str, account: str = "", targets: str
         targets: Comma-separated resource ids / ARNs / names the change touches.
         change_type: normal (default) or emergency.
         justification: Business reason, if the user gave one.
+        proposed_steps: Only when the user gave the exact commands to run: a JSON array of
+            {"action": "...", "command": "..."} in their order. The review then validates these commands
+            instead of writing its own. Omit when the user only described the outcome.
+        external_ref: Only when the request comes from a ticket in another system: a JSON object
+            {"system": "...", "ticket_id": "...", "url": "..."}.
 
     Returns:
         Confirmation with the change reference C#N, or the reason it could not be opened.
@@ -73,17 +79,25 @@ def request_change(title: str, description: str, account: str = "", targets: str
     ctx = get_run_context()
     hints = [t.strip() for t in (targets or "").split(",") if t.strip()]
     try:
+        steps = json.loads(proposed_steps) if (proposed_steps or "").strip() else None
+        ref = json.loads(external_ref) if (external_ref or "").strip() else None
+    except json.JSONDecodeError as e:
+        return f"Change request could not be opened: proposed_steps / external_ref must be valid JSON ({e})"
+    try:
         cr = cs.create_change_request(
             source=_SOURCE_BY_KIND.get(actor.kind, "api"), actor=actor, title=title, description=description,
             account_name=account or None, targets=hints, requested_change_type=(change_type or "normal").lower(),
             justification=justification or "", chat_session_id=ctx.chat_session_id, start_review=False,
+            proposed_steps=steps, external_ref=ref,
         )
     except cs.ChangeError as e:
         return f"Change request could not be opened: {e}"
     # The review is NOT started here: in chat the Main agent calls review_change (sync) right after this,
     # which would otherwise race an async review. Web/CLI intakes start their own review.
+    steps_note = f", {len(cr['proposed_steps'])} proposed steps" if cr["proposed_steps"] else ""
     return (f"Change request C#{cr['id']} opened ({cr['requested_change_type']}, requested by {cr['requested_by']}, "
-            f"targets: {', '.join(hints) or 'none given'}). Next: call review_change({cr['id']}) to run the SRE review.")
+            f"targets: {', '.join(hints) or 'none given'}{steps_note}). "
+            f"Next: call review_change({cr['id']}) to run the SRE review.")
 
 
 @tool

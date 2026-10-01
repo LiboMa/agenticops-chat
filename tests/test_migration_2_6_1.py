@@ -42,6 +42,8 @@ _NEW_HEALTH_COLUMNS = {"resource_ref", "anchor_status", "anchor_candidates", "ob
 _NEW_RCA_COLUMNS = {"location", "location_status", "location_build_id", "location_verdict", "location_verdict_by",
                     "location_verdict_at"}
 _NEW_PLAN_COLUMNS = {"plan_version", "content_hash", "approved_hash", "approved_version"}
+_NEW_CHANGE_COLUMNS = {"proposed_steps", "external_ref", "external_system", "external_ticket_id", "steps_diff",
+                       "needs_review_reason"}
 
 # A 2.6.0 fix_plans table (no plan-identity columns): plan 1 approved before the upgrade, plan 2 still a draft
 OLD_PLANS = """
@@ -55,10 +57,25 @@ INSERT INTO fix_plans (id, plan_kind, health_issue_id, rca_result_id, risk_level
   VALUES (1, 'fix', 1, 1, 'L1', 'p1', 's', '[{"command": "echo a"}]', '{}', '', '[]', '[]', 'approved', 'user:bob'),
          (2, 'fix', 1, 1, 'L1', 'p2', 's', '[{"command": "echo b"}]', '{}', '', '[]', '[]', 'draft', NULL);
 """
+# A 2.6.0 change_requests table (no proposed steps, no external ticket) with one request in flight
+OLD_CHANGES = """
+CREATE TABLE change_requests (id INTEGER PRIMARY KEY, title VARCHAR(300), description TEXT, justification TEXT,
+  source VARCHAR(20), requested_by VARCHAR(255), requester_user_id INTEGER, requested_at DATETIME, account_id INTEGER,
+  target_hints JSON, target_resources JSON, requested_change_type VARCHAR(20), effective_change_type VARCHAR(20),
+  risk_level VARCHAR(20), action_type VARCHAR(20), status VARCHAR(30), review_verdict VARCHAR(30), review_reasons JSON,
+  review_attempt INTEGER DEFAULT 0, reviewed_by VARCHAR(255), reviewed_at DATETIME, policy_rule VARCHAR(100),
+  policy_action VARCHAR(30), approved_by VARCHAR(255), approver_user_id INTEGER, approved_at DATETIME,
+  approval_reason TEXT, rejected_by VARCHAR(255), rejected_at DATETIME, rejection_reason TEXT, closed_at DATETIME,
+  trace_id VARCHAR(20), chat_session_id VARCHAR(64), created_at DATETIME, updated_at DATETIME);
+INSERT INTO change_requests (id, title, description, justification, source, requested_by, account_id, target_hints,
+  target_resources, requested_change_type, status, review_reasons, review_attempt)
+  VALUES (1, 'tag web', 'add Env=prod', '', 'web', 'user:alice', 1, '["i-0abc"]', '[]', 'normal', 'planned', '[]', 1);
+"""
 _MIGRATION_DDL = re.compile(
     r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since"
-    r"|content_changed_at|rules_published_at|location\w*|plan_version|content_hash|approved_hash|approved_version)"
-    r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status",
+    r"|content_changed_at|rules_published_at|location\w*|plan_version|content_hash|approved_hash|approved_version"
+    r"|proposed_steps|external_ref|external_system|external_ticket_id|steps_diff|needs_review_reason)"
+    r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status|idx_change_request_external",
     re.I,
 )
 
@@ -178,7 +195,7 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     pg = postgresql.dialect()
     stub = _StubInspector(
         {"health_issues": [{"name": "id"}], "cloud_resources": [{"name": "id"}], "galaxy_builds": [{"name": "id"}],
-         "rca_results": [{"name": "id"}], "fix_plans": [{"name": "id"}]},
+         "rca_results": [{"name": "id"}], "fix_plans": [{"name": "id"}], "change_requests": [{"name": "id"}]},
         {},
     )
     stmts = _statements_2_6_1(stub, pg)
@@ -191,8 +208,13 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "ALTER TABLE rca_results ADD COLUMN IF NOT EXISTS location_verdict_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE fix_plans ADD COLUMN IF NOT EXISTS plan_version INTEGER NOT NULL DEFAULT 1" in stmts
     assert "ALTER TABLE fix_plans ADD COLUMN IF NOT EXISTS approved_hash VARCHAR(64)" in stmts
+    assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS proposed_steps JSON" in stmts
+    assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS external_system VARCHAR(50)" in stmts
+    assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS needs_review_reason TEXT" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
+    assert ("CREATE INDEX IF NOT EXISTS idx_change_request_external ON change_requests(external_system, "
+            "external_ticket_id)") in stmts
     assert all("DATETIME" not in s for s in stmts)
 
 
@@ -273,3 +295,27 @@ def test_backfill_hashes_existing_plans_and_keeps_an_approval_runnable(old_db_wi
         assert approval_drift(s, approved) is None
         assert draft.content_hash == current_hash(s, draft) and draft.content_hash != approved.content_hash
         assert (draft.approved_hash, draft.approved_version) == (None, None)
+
+
+@pytest.fixture
+def old_db_with_changes(old_db):
+    con = sqlite3.connect(old_db)
+    con.executescript(OLD_CHANGES)
+    con.commit()
+    con.close()
+    return old_db
+
+
+def test_adds_the_change_request_columns_and_keeps_the_request(old_db_with_changes):
+    """Spec §3.D.2: a 2.6.0 change request gains the proposed-steps / external-ticket / diff / reason columns
+    (all empty) and the external-ticket dedup index; the request itself is untouched."""
+    from agenticops.models import _statements_2_6_1
+
+    engine = _run_init_db(old_db_with_changes)
+    assert _NEW_CHANGE_COLUMNS <= _cols(engine, "change_requests")
+    assert "idx_change_request_external" in _index_names(engine, "change_requests")
+    with engine.connect() as c:
+        row = c.execute(text("SELECT title, status, proposed_steps, external_ref, external_system, "
+                             "external_ticket_id, steps_diff, needs_review_reason FROM change_requests")).one()
+    assert tuple(row) == ("tag web", "planned", None, None, None, None, None, None)
+    assert _statements_2_6_1(inspect(engine), engine.dialect) == []

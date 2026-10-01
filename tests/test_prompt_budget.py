@@ -15,7 +15,7 @@ import pytest
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
     "main": 12_100,
-    "sre": 11_900,
+    "sre": 12_600,  # MVP-2.6.1: + Mode C validation mode for a request's own proposed_steps
     "detect": 8_900,
     "rca": 10_800,  # MVP-2.6.1: + save_rca_result location + topology evidence + final-review path/direction wording
     "executor": 5_000,

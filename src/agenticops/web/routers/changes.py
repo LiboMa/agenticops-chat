@@ -51,7 +51,9 @@ async def api_create_change(data: ChangeRequestCreate, request: Request, actor: 
     source = "api" if getattr(request.state, "api_key", None) is not None else "web"
     return _call(cs.create_change_request, source=source, actor=actor, title=data.title, description=data.description,
                  account_name=data.account_name, targets=data.targets, requested_change_type=data.requested_change_type,
-                 justification=data.justification, start_review=True)
+                 justification=data.justification, start_review=True,
+                 proposed_steps=[step.model_dump() for step in data.proposed_steps] if data.proposed_steps else None,
+                 external_ref=data.external_ref.model_dump(exclude_none=True) if data.external_ref else None)
 
 
 @router.get("", response_model=List[ChangeRequestResponse])

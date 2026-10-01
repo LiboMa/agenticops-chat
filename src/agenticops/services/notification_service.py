@@ -313,11 +313,13 @@ def notify_change_pending_approval(cr: dict, plan: dict) -> None:
 
 def notify_change_result(cr: dict, outcome: str) -> None:
     """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
-    rejected / needs_clarification / review_failed / execution_not_queued)."""
+    rejected / needs_clarification / review_failed / execution_not_queued). A needs_review result says why."""
+    reason = " ".join(str(cr.get("needs_review_reason") or "").split())[:500] if outcome == "needs_review" else ""
+    reason_line = f"Reason: {reason}\n" if reason else ""
     notify_event(
         "change_result",
         f"[CHANGE] Change #{cr['id']} {outcome.upper()}: {cr['title']}",
-        (f"Change request #{cr['id']} is now {outcome}.\n\nRequested by: {cr['requested_by']}\n"
+        (f"Change request #{cr['id']} is now {outcome}.\n\n{reason_line}Requested by: {cr['requested_by']}\n"
          f"Risk: {cr.get('risk_level') or '?'}\n{_change_link(cr['id'])}"),
         _change_severity(cr.get("risk_level"), outcome),
     )

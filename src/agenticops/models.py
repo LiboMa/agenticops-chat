@@ -527,6 +527,7 @@ class ChangeRequest(Base):
         Index("idx_change_request_requested_by", "requested_by"),
         Index("idx_change_request_account", "account_id"),
         Index("idx_change_request_created", "created_at"),
+        Index("idx_change_request_external", "external_system", "external_ticket_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -564,6 +565,14 @@ class ChangeRequest(Base):
     chat_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1 (spec §3.D.2): the requester's own steps (fix_plans.steps shape) and where the request came from.
+    # external_system / external_ticket_id are external_ref split out for the dedup lookup (indexed together).
+    proposed_steps: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    external_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {system, ticket_id, url?, requested_by?}
+    external_system: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    external_ticket_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    steps_diff: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # code-computed at review, never by an LLM
+    needs_review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # why it waits for a human verdict
 
     # Relationships
     plans: Mapped[list["FixPlan"]] = relationship(back_populates="change_request")
@@ -1436,11 +1445,14 @@ _ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
                     "location_verdict_by": None, "location_verdict_at": None},
     "fix_plans": {"plan_version": "NOT NULL DEFAULT 1", "content_hash": None, "approved_hash": None,
                   "approved_version": None},
+    "change_requests": {"proposed_steps": None, "external_ref": None, "external_system": None,
+                        "external_ticket_id": None, "steps_diff": None, "needs_review_reason": None},
 }
 
 _INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)
     ("health_issues", "idx_health_issue_resource_ref", "resource_ref"),
     ("health_issues", "idx_health_issue_anchor_status", "anchor_status"),
+    ("change_requests", "idx_change_request_external", "external_system, external_ticket_id"),
 )
 
 _migrated_2_6_1_urls: set[str] = set()
