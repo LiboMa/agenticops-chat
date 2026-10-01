@@ -61,7 +61,7 @@ Web Dashboard ──────┘         │
    的凭证的 sha256 前 16 位 —— 账户被 PUT 改指向或主键被复用时,不会复用旧账户的文件);kubernetes 账户用它自己显式配置的
    `kubeconfig_path`(必填,不设默认)。`~/.kube/config` 与进程的 `KUBECONFIG` 从不被隐式使用、也不作回退,不切换
    current-context;失败抛 `KubeconfigError` / `AccountResolutionError`,没有回退(MVP-2.6.1)。
-4. **缓存 key 必须含 account**:`credentials/resolver` 双写 `{provider}:{name}:{region}` 与 `{account_id}:{region}`,
+4. **缓存 key 必须含 account**:`credentials/resolver` 双写 `{provider}:{name}:{region}:{凭证指纹}` 与 `{account_id}:{region}:{凭证指纹}`(指纹 = `credential_fingerprint`:凭证来源类型 + 去掉 `kubeconfigs` 的凭证的 sha256 前 16 位,与私有 kubeconfig 路径同一函数 —— 账户凭证被改指向后 key 随之改变,不会复用旧会话;无需失效钩子,跨进程同样成立),
    禁止 region-only 取 session。会话缓存单一归属:`aws_tools._session_cache` 即 `providers/base._session_cache`(同一
    dict,线程安全);`SessionFactory._cache` 仅服务 Bedrock 控制面 + test-connection,另属一类。
 5. **AssumeRole 会话自动刷新**:`providers/aws._build_assume_role_session` 用 botocore 原生

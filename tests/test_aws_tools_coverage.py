@@ -126,8 +126,8 @@ class TestAssumeRole:
 class TestGetSession:
     def test_session_found_via_default_account(self, monkeypatch):
         mock_session = MagicMock()
-        _session_cache["123:us-east-1"] = mock_session
-        _register_single_account(monkeypatch)
+        snap = _register_single_account(monkeypatch)
+        _session_cache[resolver.session_cache_keys(snap, "us-east-1")[1]] = mock_session
         assert _get_session("us-east-1") is mock_session
 
     def test_fail_closed_when_no_accounts(self, monkeypatch):
@@ -147,8 +147,8 @@ class TestGetClient:
         mock_session = MagicMock()
         mock_client = MagicMock()
         mock_session.client.return_value = mock_client
-        _session_cache["123:us-east-1"] = mock_session
-        _register_single_account(monkeypatch)
+        snap = _register_single_account(monkeypatch)
+        _session_cache[resolver.session_cache_keys(snap, "us-east-1")[1]] = mock_session
 
         result = _get_client("ec2", "us-east-1")
         assert result is mock_client

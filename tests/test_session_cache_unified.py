@@ -19,12 +19,12 @@ def test_caches_are_the_same_object():
 def test_provider_write_visible_to_agent_cache(monkeypatch):
     provider_base.clear_session_cache()
     sentinel = object()
-    provider_base.set_cached_session("111111111111:us-east-1", sentinel)
     snap = SimpleNamespace(
         id=1, name="acct", provider="aws",
         credentials={"account_id": "111111111111"}, regions=["us-east-1"], labels={},
         credential_source_type="assume_role",
     )
+    provider_base.set_cached_session(resolver.session_cache_keys(snap, "us-east-1")[1], sentinel)
     monkeypatch.setattr(resolver, "get_account_snapshot", lambda ref, provider="": snap)
     try:
         # explicit account → resolve_account_session finds the provider-written session

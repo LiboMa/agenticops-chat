@@ -41,15 +41,17 @@ def _inject_session(region="us-east-1", account_id="111111111111"):
     """Register a single enabled account and seed its cached session."""
     from types import SimpleNamespace
     import agenticops.tools.aws_tools as mod
+    from agenticops.credentials.resolver import session_cache_keys
 
     session = MagicMock()
-    # resolve_account_session looks up {account_id}:{region} as a fallback key.
-    mod._session_cache[f"{account_id}:{region}"] = session
     _DEFAULT_ACCOUNT["snap"] = SimpleNamespace(
         id=1, name="acct", provider="aws",
         credentials={"account_id": account_id}, regions=[region], labels={},
         credential_source_type="assume_role",
     )
+    # resolve_account_session looks up {account_id}:{region}:{fp} as a fallback key.
+    _, id_key = session_cache_keys(_DEFAULT_ACCOUNT["snap"], region)
+    mod._session_cache[id_key] = session
     return session
 
 
@@ -130,14 +132,19 @@ class TestAssumeRole:
         mock_account.credentials = {"role_arn": "arn:aws:iam::111111111111:role/Test", "account_id": "111111111111"}
         mock_account.regions = ["us-east-1"]
         mock_account.labels = {}
+        mock_account.credential_source_type = "assume_role"
         mock_account.is_enabled = True
         mock_db = MagicMock()
         mock_db.query.return_value.filter_by.return_value.all.return_value = [mock_account]
         mock_get_db_session.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
 
-        # Pre-inject a session into cache; resolver finds it without re-resolving.
-        _inject_session(region="us-east-1", account_id="111111111111")
+        # Pre-inject a session under the account's {account_id}:{region}:{fp} key; resolver finds it
+        # without re-resolving.
+        import agenticops.tools.aws_tools as mod
+        from agenticops.credentials import resolver
+        _, id_key = resolver.session_cache_keys(resolver._snapshot(mock_account), "us-east-1")
+        mod._session_cache[id_key] = MagicMock()
 
         with patch("agenticops.providers.get_provider") as mock_get_provider:
             result = self.fn(

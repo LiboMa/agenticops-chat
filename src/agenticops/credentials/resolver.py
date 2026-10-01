@@ -19,6 +19,8 @@ to use the local default chain — and that path is still identity-validated by
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import threading
@@ -144,14 +146,37 @@ def _coerce_snapshot(account_ref: str | SimpleNamespace, provider: str = "aws") 
     return snap
 
 
+def credential_fingerprint(snap: SimpleNamespace) -> str:
+    """16 hex chars over the credential source type and credentials. kubeconfigs is left out: registering a
+    kubeconfig for one cluster does not change whose credentials a session carries. credentials/kube keys its
+    private kubeconfig paths with this same function."""
+    material = {"source": snap.credential_source_type,
+                "credentials": {k: v for k, v in snap.credentials.items() if k != "kubeconfigs"}}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def session_cache_keys(snap: SimpleNamespace, region: str | None) -> tuple[str, str]:
+    """(name_key, id_key) for an account's cached session: ``{provider}:{name}:{region}:{fp}`` and
+    ``{account_id}:{region}:{fp}`` (id_key is "" without an account_id), fp = credential_fingerprint(snap)."""
+    fp = credential_fingerprint(snap)
+    account_id = str(snap.credentials.get("account_id") or "")
+    region_key = region or (snap.regions[0] if snap.regions else "")
+    name_key = f"{snap.provider}:{snap.name}:{region_key}:{fp}"
+    id_key = f"{account_id}:{region_key}:{fp}" if account_id else ""
+    return name_key, id_key
+
+
 def resolve_account_session(account_ref: str | SimpleNamespace, region: str | None = None) -> Any:
     """Return an authenticated boto3 Session for a registered account.
 
     Fail-closed: a missing account or a provider that fails credential
     resolution raises AccountResolutionError — NEVER ambient credentials.
-    Caches under both ``{provider}:{name}:{region}`` and
-    ``{account_id}:{region}`` so every reader (CLI/exec/graph) shares one
-    auto-refreshing session.
+    Caches under both ``{provider}:{name}:{region}:{fp}`` and
+    ``{account_id}:{region}:{fp}`` so every reader (CLI/exec/graph) shares one
+    auto-refreshing session. ``fp`` is ``credential_fingerprint``: the snapshot
+    is re-read on every call, so an account whose credentials were re-pointed
+    (role ARN, keys, profile, source type) is a different key and never reuses
+    the old session — no invalidation hook, in any process.
     """
     snap = _coerce_snapshot(account_ref)
 
@@ -168,11 +193,7 @@ def resolve_account_session(account_ref: str | SimpleNamespace, region: str | No
         )
 
     provider = snap.provider
-    account_id = str(snap.credentials.get("account_id") or "")
-    region_key = region or (snap.regions[0] if snap.regions else "")
-
-    name_key = f"{provider}:{snap.name}:{region_key}"
-    id_key = f"{account_id}:{region_key}" if account_id else ""
+    name_key, id_key = session_cache_keys(snap, region)
 
     cached = get_cached_session(name_key)
     if cached is None and id_key:

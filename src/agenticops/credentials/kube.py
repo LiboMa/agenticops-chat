@@ -18,8 +18,6 @@ fallback.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import re
 import subprocess
@@ -29,7 +27,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agenticops.config import settings
-from agenticops.credentials.resolver import AccountResolutionError, get_subprocess_env_for_account
+from agenticops.credentials.resolver import (AccountResolutionError, credential_fingerprint,
+                                              get_subprocess_env_for_account)
 
 UPDATE_TIMEOUT = 15
 _SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")  # fullmatch: "lab\n" is refused
@@ -52,11 +51,9 @@ def kubeconfig_path(account: SimpleNamespace, region: str, cluster: str) -> Path
 
 
 def _fingerprint(account: SimpleNamespace) -> str:
-    """16 hex chars over the credential source and credentials. kubeconfigs is left out: registering a kubeconfig
-    for one cluster does not change whose credentials a generated file was made with."""
-    material = {"source": account.credential_source_type,
-                "credentials": {k: v for k, v in account.credentials.items() if k != "kubeconfigs"}}
-    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    """resolver.credential_fingerprint: the same key the account's cached session is stored under, so a generated
+    file and the session that writes it always belong to the same credentials."""
+    return credential_fingerprint(account)
 
 
 def kubectl_env_for_cluster(account: SimpleNamespace, cluster: str, region: str) -> dict:

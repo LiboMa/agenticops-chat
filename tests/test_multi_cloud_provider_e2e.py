@@ -351,8 +351,10 @@ class TestAssumeRoleUsesProvider:
                 region="us-east-1",
             )
 
-        assert "111:us-east-1" in tools_mod._session_cache
-        assert tools_mod._session_cache["111:us-east-1"] is mock_session
+        from agenticops.credentials import resolver
+        _, id_key = resolver.session_cache_keys(resolver._snapshot(two_aws_accounts[0]), "us-east-1")
+        assert id_key in tools_mod._session_cache
+        assert tools_mod._session_cache[id_key] is mock_session
 
     def test_no_direct_boto3_in_aws_tools(self):
         """aws_tools.py must not import boto3 at module level."""
@@ -449,8 +451,10 @@ class TestGraphApiUsesProvider:
 
         mock_provider.resolve_credentials.assert_called_once()
         # Resolver caches under the account-addressed keys, NOT a "web:" key.
+        from agenticops.credentials import resolver
         assert not any(k.startswith("web:") for k in tools_mod._session_cache)
-        assert any(k.endswith(":us-east-1") for k in tools_mod._session_cache)
+        assert set(resolver.session_cache_keys(resolver._snapshot(one_aws_account), "us-east-1")) <= set(
+            tools_mod._session_cache)
 
     def test_ensure_aws_session_ambiguous_degrades(self, db_session, two_aws_accounts):
         # Two enabled accounts → default resolution is ambiguous; the pre-warm

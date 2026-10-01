@@ -152,7 +152,7 @@ flowchart TD
     VALID -->|"ok"| IDCHECK{"credentials.account_id set?"}
 
     IDCHECK -->|"yes & MISMATCH"| FAILID["✗ FAIL-CLOSED<br/>resolved Account ≠ expected<br/>refuse credentials"]
-    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>keys = {provider}:{name}:{region}<br/>AND {account_id}:{region}"]
+    IDCHECK -->|"yes & match / not set"| CACHE["Cache session<br/>aws_tools._session_cache<br/>= providers/base._session_cache<br/>(single shared dict)<br/>keys = {provider}:{name}:{region}:{fp}<br/>AND {account_id}:{region}:{fp}<br/>(fp = credential fingerprint: a re-pointed<br/>account is a new key, never the old session)"]
 
     CACHE --> READY["✓ Ready: describe/cli/exec resolve the<br/>account explicitly (param → inventory →<br/>single-account default), fail-closed"]
 

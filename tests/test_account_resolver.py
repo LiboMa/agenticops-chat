@@ -110,8 +110,9 @@ def test_resolve_session_by_name(db_session, monkeypatch):
     out = resolver.resolve_account_session("prod", "us-east-1")
     assert out is sess
     # cached under both key shapes
-    assert _session_cache.get("aws:prod:us-east-1") is sess
-    assert _session_cache.get("111:us-east-1") is sess
+    name_key, id_key = resolver.session_cache_keys(resolver.get_account_snapshot("prod"), "us-east-1")
+    assert _session_cache.get(name_key) is sess
+    assert _session_cache.get(id_key) is sess
 
 
 def test_resolve_session_by_account_id(db_session, monkeypatch):
@@ -147,7 +148,7 @@ def test_resolve_session_fail_closed_when_provider_false(db_session, monkeypatch
 def test_resolve_session_cache_hit_skips_provider(db_session, monkeypatch):
     _add_account(db_session, "prod", "111")
     sess = _fake_session()
-    _session_cache["aws:prod:us-east-1"] = sess
+    _session_cache[resolver.session_cache_keys(resolver.get_account_snapshot("prod"), "us-east-1")[0]] = sess
     prov = MagicMock()
     monkeypatch.setattr("agenticops.providers.get_provider", lambda snap: prov)
 
