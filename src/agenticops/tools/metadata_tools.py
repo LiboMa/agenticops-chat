@@ -1143,6 +1143,99 @@ def get_fix_plan(health_issue_id: int) -> str:
         session.close()
 
 
+def _iso(v) -> Optional[str]:
+    return v.isoformat() if isinstance(v, datetime) else v
+
+
+def plan_dict(plan: FixPlan) -> dict:
+    """Everything one plan says — either origin, any status (get_plan, get_change_request)."""
+    return {
+        "id": plan.id, "label": plan_label(plan), "plan_kind": plan.plan_kind,
+        "health_issue_id": plan.health_issue_id, "rca_result_id": plan.rca_result_id,
+        "change_request_id": plan.change_request_id, "status": plan.status, "risk_level": plan.risk_level,
+        "title": plan.title, "summary": plan.summary, "steps": plan.steps, "rollback_plan": plan.rollback_plan,
+        "estimated_impact": plan.estimated_impact, "pre_checks": plan.pre_checks, "post_checks": plan.post_checks,
+        "plan_version": plan.plan_version, "content_hash": plan.content_hash,
+        "approved_by": plan.approved_by, "approved_at": _iso(plan.approved_at),
+        "approved_version": plan.approved_version, "approved_hash": plan.approved_hash,
+        "rejected_by": plan.rejected_by, "rejected_at": _iso(plan.rejected_at),
+        "rejection_reason": plan.rejection_reason, "created_at": _iso(plan.created_at),
+        "updated_at": _iso(plan.updated_at),
+    }
+
+
+def execution_dict(execution: FixExecution) -> dict:
+    """One run: what it did, what the platform concluded, and who accepted it (get_execution_result)."""
+    return {
+        "id": execution.id, "fix_plan_id": execution.fix_plan_id, "health_issue_id": execution.health_issue_id,
+        "status": execution.status, "executed_by": execution.executed_by,
+        "started_at": _iso(execution.started_at), "completed_at": _iso(execution.completed_at),
+        "duration_ms": execution.duration_ms, "pre_check_results": execution.pre_check_results,
+        "step_results": execution.step_results, "post_check_results": execution.post_check_results,
+        "rollback_results": execution.rollback_results, "error_message": execution.error_message,
+        "verification_status": execution.verification_status,
+        "verification_reason": execution.verification_reason, "accepted_by": execution.accepted_by,
+        "accepted_at": _iso(execution.accepted_at), "acceptance_note": execution.acceptance_note,
+    }
+
+
+@tool
+def get_plan(plan_id: int) -> str:
+    """Get one plan by its id — a fix plan or a change plan, in any status (draft, approved, executed,
+    rejected, ...): its full steps, rollback and checks, its version and content hash, and who approved or
+    rejected it. Use it for a plan id you already have; get_fix_plan finds the latest one for an issue.
+
+    Args:
+        plan_id: The plan id.
+
+    Returns:
+        JSON object with the whole plan, or a message if there is no such plan.
+    """
+    session = get_session()
+    try:
+        plan = session.get(FixPlan, plan_id)
+        if plan is None:
+            return f"Plan #{plan_id} not found."
+        return json.dumps(plan_dict(plan), default=str)
+    finally:
+        session.close()
+
+
+@tool
+def get_execution_result(execution_id: Optional[int] = None, plan_id: Optional[int] = None) -> str:
+    """Get what an execution did and what the platform concluded: its step, pre-check, post-check and
+    rollback results, its verification verdict (passed / failed / pending_acceptance) with the reason, and
+    the human acceptance if there was one.
+
+    Args:
+        execution_id: The execution id. Takes precedence over plan_id.
+        plan_id: A plan id — returns that plan's latest execution.
+
+    Returns:
+        JSON object with the execution and its plan's label, or a message if there is none.
+    """
+    if not execution_id and not plan_id:
+        return "Give an execution_id or a plan_id."
+    session = get_session()
+    try:
+        if execution_id:
+            execution = session.get(FixExecution, execution_id)
+            missing = f"Execution #{execution_id} not found."
+        else:
+            execution = (session.query(FixExecution).filter_by(fix_plan_id=plan_id)
+                         .order_by(FixExecution.id.desc()).first())
+            missing = f"Plan #{plan_id} has no execution."
+        if execution is None:
+            return missing
+        plan = session.get(FixPlan, execution.fix_plan_id)
+        data = execution_dict(execution)
+        data["plan_label"] = plan_label(plan) if plan is not None else None
+        data["change_request_id"] = plan.change_request_id if plan is not None else None
+        return json.dumps(data, default=str)
+    finally:
+        session.close()
+
+
 # Agent identities a context-less approve_fix_plan call may record as the approver (M-6). Any other
 # "agent:<name>" the LLM supplies is stored as agent:unattributed — attribution among agents is not LLM-chosen.
 _KNOWN_AGENT_IDS = frozenset(AGENT_NAMES) | {"auto-pipeline"}

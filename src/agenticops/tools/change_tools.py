@@ -34,18 +34,22 @@ def _actor_from_context() -> Actor:
     return actor_from_run_context(ctx)
 
 
-def _plan_summary(cr_id: int) -> dict | None:
+def _plan_and_latest_run(cr_id: int) -> tuple[dict | None, dict | None]:
+    """The request's current plan in full (the active one, else the newest) and its latest run's verdict."""
+    from agenticops.models import FixExecution, FixPlan
+    from agenticops.tools.metadata_tools import plan_dict
     with cs._session() as s:
         plan = cs.active_plan_for(s, cr_id)
         if plan is None:
-            from agenticops.models import FixPlan
             plan = (s.query(FixPlan).filter_by(change_request_id=cr_id, plan_kind="change")
                     .order_by(FixPlan.created_at.desc()).first())
-        if plan is None:
-            return None
-        return {"id": plan.id, "status": plan.status, "risk_level": plan.risk_level, "title": plan.title,
-                "steps": len(plan.steps or []), "has_rollback": bool(plan.rollback_plan),
-                "post_checks": len(plan.post_checks or [])}
+        run = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
+               .filter(FixPlan.change_request_id == cr_id).order_by(FixExecution.id.desc()).first())
+        latest = None if run is None else {
+            "execution_id": run.id, "fix_plan_id": run.fix_plan_id, "status": run.status,
+            "verification_status": run.verification_status, "verification_reason": run.verification_reason,
+            "accepted_by": run.accepted_by, "accepted_at": run.accepted_at}
+        return (plan_dict(plan) if plan is not None else None), latest
 
 
 @tool
@@ -102,13 +106,16 @@ def request_change(title: str, description: str, account: str = "", targets: str
 
 @tool
 def get_change_request(change_request_id: int) -> str:
-    """Get a change request (C#N) with its current plan summary. Args: change_request_id: The C# number."""
+    """Get a change request (C#N): the request with its proposed steps, the steps diff and why it needs
+    review, its current plan in full, and the verdict of its latest execution (details: get_execution_result).
+
+    Args: change_request_id: The C# number."""
     try:
         data = cs.get_change(change_request_id)
     except cs.ChangeError as e:
         return str(e)
-    data["plan"] = _plan_summary(change_request_id)
-    return json.dumps(data, default=str)[:6000]
+    data["plan"], data["latest_execution"] = _plan_and_latest_run(change_request_id)
+    return json.dumps(data, default=str)
 
 
 @tool

@@ -14,7 +14,7 @@ import pytest
 # Base prompt size goldens (chars), ±25% tolerance. Re-baseline deliberately
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
-    "main": 12_100,
+    "main": 12_850,  # MVP-2.6.1: + get_plan / get_execution_result and the human-acceptance rule
     "sre": 12_600,  # MVP-2.6.1: + Mode C validation mode for a request's own proposed_steps
     "detect": 8_900,
     "rca": 10_800,  # MVP-2.6.1: + save_rca_result location + topology evidence + final-review path/direction wording

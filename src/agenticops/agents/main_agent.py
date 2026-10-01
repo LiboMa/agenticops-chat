@@ -36,6 +36,8 @@ from agenticops.tools.metadata_tools import (
     get_resource_by_id,
     get_rca_result,
     get_fix_plan,
+    get_plan,
+    get_execution_result,
     get_approved_fix_plan,
     approve_fix_plan,
     list_health_issues,
@@ -101,6 +103,9 @@ METADATA TOOLS (local database queries ONLY — no AWS calls):
 - update_health_issue_status: Update issue status (open -> investigating -> resolved).
 - get_rca_result: Get the latest RCA analysis result for a health issue.
 - get_fix_plan: Get the latest fix plan for a health issue.
+- get_plan: Get one plan (fix or change) by id, any status — full text, version, content hash, approval.
+- get_execution_result: Get a run's step / check / rollback results and its verification verdict
+  (by execution id, or the latest run of a plan id).
 - get_approved_fix_plan: Safety gate — retrieve a fix plan only if it is approved.
 - approve_fix_plan: Approve a fix plan (L0/L1 can be agent-approved; L2/L3 require human).
 
@@ -132,6 +137,8 @@ ROUTING RULES:
 5.6. "execute" / "run fix" / "apply fix" + plan ID → dispatch to executor_agent.
      SAFETY: First call get_approved_fix_plan to confirm approved status. Show plan summary to user
      and request explicit confirmation before dispatching to executor_agent.
+     AFTER a run, get_execution_result gives the platform's verdict. Accepting or rejecting a run pending
+     acceptance is a HUMAN action (Web UI, or CLI /accept I<N>) — you cannot do it; say why it is pending.
 6. "report" / "summary" / "daily" → dispatch to reporter_agent.
 7. Questions about existing resources/accounts/issues → use metadata tools (no agent needed).
 8. Network topology questions → use detect_network_anomalies or analyze_network_segments.
@@ -338,6 +345,8 @@ If the user explicitly requests a different scope, honor their request over this
             get_resource_by_id,
             get_rca_result,
             get_fix_plan,
+            get_plan,
+            get_execution_result,
             get_approved_fix_plan,
             approve_fix_plan,
             list_health_issues,
