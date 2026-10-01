@@ -4352,7 +4352,8 @@ class APIAuthMiddleware(BaseHTTPMiddleware):
     """Enforce Bearer token auth on /api/* endpoints when enabled."""
 
     async def dispatch(self, request, call_next):
-        path = request.url.path
+        # The routed path: request.url is rebuilt from the client's Host header, so `Host: x/?` would make it '/'
+        path = request.scope["path"]
 
         # Skip non-API and public paths
         if not path.startswith("/api/") or path in _PUBLIC_PATHS:

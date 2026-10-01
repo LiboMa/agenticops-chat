@@ -161,6 +161,29 @@ def test_the_middleware_lets_only_a_signed_intake_through(guarded, monkeypatch):
     assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required")
 
 
+@pytest.mark.parametrize("host", ["x/?", "evil/?a="])
+def test_a_host_header_carrying_a_path_cannot_skip_the_bearer_check(guarded, db, host):
+    """request.url is rebuilt from the Host header (`http://x/?/api/changes` has path '/'); routing uses
+    scope['path'], so the middleware must decide on that too — else every protected route is open."""
+    r = guarded.get("/api/changes", headers={"host": host})
+    assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required"), r.text
+    raw = json.dumps(BODY).encode()
+    r = guarded.post("/api/changes", content=raw, headers={"host": host, "Content-Type": "application/json"})
+    assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required"), r.text
+    assert db.query(ChangeRequest).count() == 0
+
+
+def test_only_the_exact_intake_route_is_exempt(guarded, db):
+    """A trailing slash or a GET is not the intake: a valid signature does not lift the Bearer check there."""
+    raw = json.dumps(BODY).encode()
+    ts = str(int(time.time()))
+    signed = {"X-AIOps-Timestamp": ts, "X-AIOps-Signature": sign(SECRET, ts, raw), "Content-Type": "application/json"}
+    for r in (guarded.post("/api/changes/intake/", content=raw, headers=signed),
+              guarded.get("/api/changes/intake", headers=signed)):
+        assert r.status_code == 401 and r.json()["detail"].startswith("Authentication required"), r.text
+    assert db.query(ChangeRequest).count() == 0
+
+
 # ── the webhook actor's ceiling ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("permission", ["plan.approve", "change.approve", "plan.execute", "change.execute"])
