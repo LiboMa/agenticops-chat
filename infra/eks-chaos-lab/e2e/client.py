@@ -44,9 +44,11 @@ class AgenticOpsClient:
         r.raise_for_status()
         return r.json()
 
-    def post(self, path: str, json: Optional[dict] = None, headers: Optional[dict] = None) -> Any:
+    def post(self, path: str, json: Optional[dict] = None, headers: Optional[dict] = None,
+             timeout: Optional[int] = None) -> Any:
+        """timeout: seconds for this call only (a synchronous scan or graph build outlasts the default)."""
         r = requests.post(f"{self.base_url}{path}", headers={**self._headers(), **(headers or {})},
-                          json=json or {}, timeout=self.timeout)
+                          json=json or {}, timeout=timeout or self.timeout)
         r.raise_for_status()
         return r.json() if r.content else {}
 

@@ -104,3 +104,15 @@ def test_ensure_account_registers_the_cluster_kubeconfig(monkeypatch):
     c.ensure_account("chaos-lab", "111111111111", ["us-east-1"], kubeconfigs=kc)
     c.ensure_account("chaos-lab", "111111111111", ["us-east-1"])
     assert calls == []
+
+
+def test_post_takes_a_per_call_timeout(monkeypatch):
+    """MVP-2.6.1 location eval: a synchronous scan or graph build outlasts the default timeout."""
+    c = AgenticOpsClient("http://x")
+    seen = []
+    monkeypatch.setattr(client_mod.requests, "post",
+                        lambda url, headers, json, timeout: seen.append(timeout) or
+                        types.SimpleNamespace(content=b"", raise_for_status=lambda: None))
+    c.post("/api/scan", json={})
+    c.post("/api/scan", json={}, timeout=1800)
+    assert seen == [30, 1800]

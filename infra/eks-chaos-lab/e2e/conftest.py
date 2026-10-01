@@ -44,11 +44,15 @@ def client() -> AgenticOpsClient:
     return c
 
 
-def run_chaos(rel_cmd: str) -> None:
+def run_chaos(rel_cmd: str, capture: bool = False) -> str:
+    """Run a lab script; with capture=True its stdout is returned (and still printed), else ''."""
     parts = rel_cmd.split()
     script = CHAOS_LAB_DIR / parts[0]
-    subprocess.run(["bash", str(script), *parts[1:]], check=True,
-                   cwd=str(CHAOS_LAB_DIR), timeout=300)
+    out = subprocess.run(["bash", str(script), *parts[1:]], check=True,
+                         cwd=str(CHAOS_LAB_DIR), timeout=300, capture_output=capture, text=True)
+    if capture:
+        print(out.stdout, end="")
+    return out.stdout or ""
 
 
 def kubectl_json(args: str) -> dict:

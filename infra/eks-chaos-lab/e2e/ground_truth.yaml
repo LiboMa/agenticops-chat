@@ -1,0 +1,140 @@
+# Root-cause ground truth for the location eval (MVP-2.6.1 spec §3.C.6), 13 scenarios.
+#
+# root_cause:         the accept list — any of these objects is the root cause. {kind, namespace, name}: kind is the
+#                     Kubernetes kind (the Kind segment of a K8s resource_id); a cluster-scoped object has no namespace.
+# root_cause_dynamic: objects named only after the injection — from_stdout is matched against the inject script's
+#                     output, from_pod_node is the node a pod ("<namespace>/<name>") runs on.
+# scenario:           reuse inject / restore and, unless `alert` is given here, perceive.alert from scenarios.yaml.
+# settle_s:           seconds between the injection and the alert (default 10, as in the assert scenarios).
+#
+# Declared alerts have the same CloudWatch shape as the synthetic ones in scenarios.yaml and no Dimensions, so
+# every issue anchors on the cluster (the alarm name) and the root cause is 2 hops away (a Node is 1).
+- id: scale-to-zero
+  scenario: scale-to-zero
+  fault_type: scale_to_zero
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: frontend }
+    - { kind: Deployment, namespace: chaos-lab, name: backend }
+
+- id: bad-image
+  scenario: bad-image
+  fault_type: bad_image
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: frontend }
+
+- id: crashloop-config
+  scenario: crashloop-config
+  fault_type: bad_config
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: frontend }
+    - { kind: ConfigMap, namespace: chaos-lab, name: nginx-config }
+
+- id: node-drained
+  scenario: node-drained
+  fault_type: node_drained
+  root_cause_dynamic:
+    - { kind: Node, from_stdout: 'Target node: (\S+)' }
+
+- id: resource-stress
+  scenario: resource-stress
+  fault_type: resource_stress
+  root_cause:
+    - { kind: Pod, namespace: chaos-lab, name: stress-test }
+  root_cause_dynamic:
+    - { kind: Node, from_pod_node: chaos-lab/stress-test }
+
+- id: netpol-block
+  scenario: netpol-block
+  fault_type: network_policy
+  root_cause:
+    - { kind: NetworkPolicy, namespace: chaos-lab, name: chaos-block-backend }
+    - { kind: Deployment, namespace: chaos-lab, name: backend }
+
+- id: coredns-down
+  scenario: coredns-down
+  fault_type: dns_down
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-APIServer-HighLatency"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: API server request latency above threshold in cluster agenticops-chaos-lab"
+    Trigger: { MetricName: "apiserver_request_duration_seconds", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: Deployment, namespace: kube-system, name: coredns }
+
+- id: service-deleted
+  scenario: service-deleted
+  fault_type: service_deleted
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-RunningPods-Low"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: running pod count below threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_running_pods", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: Service, namespace: chaos-lab, name: backend }    # absent after the delete
+
+- id: l2-payment-svc
+  fault_type: oom
+  inject:  "faults-l2/l2-faults.sh inject oom"
+  restore: "faults-l2/l2-faults.sh restore oom"
+  settle_s: 60
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-PodRestarts-High"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: container restart count above threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_container_restarts", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: payment-svc }
+
+- id: l2-checkout-api
+  fault_type: liveness_probe
+  inject:  "faults-l2/l2-faults.sh inject liveness"
+  restore: "faults-l2/l2-faults.sh restore liveness"
+  settle_s: 60
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-PodRestarts-High"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: container restart count above threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_container_restarts", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: checkout-api }
+
+- id: l2-session-store
+  fault_type: missing_secret
+  inject:  "faults-l2/l2-faults.sh inject secret"
+  restore: "faults-l2/l2-faults.sh restore secret"
+  settle_s: 60
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-RunningPods-Low"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: running pod count below threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_running_pods", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: Deployment, namespace: chaos-lab, name: session-store }  # its unresolved_refs name the Secret
+
+- id: l2-inventory-db
+  fault_type: pvc_pending
+  inject:  "faults-l2/l2-faults.sh inject pvc"
+  restore: "faults-l2/l2-faults.sh restore pvc"
+  settle_s: 60
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-RunningPods-Low"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: running pod count below threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_running_pods", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: PersistentVolumeClaim, namespace: chaos-lab, name: inventory-db-data }
+    - { kind: Deployment, namespace: chaos-lab, name: inventory-db }
+
+- id: l2-notification-worker
+  fault_type: pdb_deadlock
+  inject:  "faults-l2/l2-faults.sh inject pdb"
+  restore: "faults-l2/l2-faults.sh restore pdb"
+  settle_s: 60
+  alert:
+    AlarmName: "EKS-agenticops-chaos-lab-RunningPods-Low"
+    NewStateValue: "ALARM"
+    NewStateReason: "Threshold Crossed: running pod count below threshold in chaos-lab"
+    Trigger: { MetricName: "pod_number_of_running_pods", Namespace: "ContainerInsights" }
+  root_cause:
+    - { kind: PodDisruptionBudget, namespace: chaos-lab, name: notification-worker-pdb }
+    - { kind: Deployment, namespace: chaos-lab, name: notification-worker }
