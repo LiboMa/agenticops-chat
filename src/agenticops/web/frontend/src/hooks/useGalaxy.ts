@@ -1,14 +1,28 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { GalaxyStatus, GalaxyOverview, GalaxyExpand, GalaxyGraph } from "@/api/types";
+import type { GalaxyBuildInfo, GalaxyStatus, GalaxyGraph } from "@/api/types";
+import { buildLanded } from "@/lib/galaxy";
 
+/** Build status; when a build completes (a rebuild, the hourly schedule or a rule-only refresh) the drawn graphs refetch. */
 export function useGalaxyStatus() {
-  return useQuery({
+  const qc = useQueryClient();
+  const q = useQuery({
     queryKey: ["galaxy-status"],
     queryFn: () => apiFetch<GalaxyStatus>("/galaxy/status"),
     refetchInterval: (q) =>
       q.state.data?.build?.status === "running" ? 5_000 : 60_000,
   });
+  const prev = useRef<GalaxyBuildInfo | null | undefined>(undefined);
+  useEffect(() => {
+    if (!q.data) return;
+    if (buildLanded(prev.current, q.data.build)) {
+      qc.invalidateQueries({ queryKey: ["galaxy-graph"] });
+      qc.invalidateQueries({ queryKey: ["graph-focus"] });
+    }
+    prev.current = q.data.build;
+  }, [q.data, qc]);
+  return q;
 }
 
 export function useGalaxyGraph() {
@@ -19,35 +33,12 @@ export function useGalaxyGraph() {
   });
 }
 
-export function useGalaxyOverview() {
-  return useQuery({
-    queryKey: ["galaxy-overview"],
-    queryFn: () => apiFetch<GalaxyOverview>("/galaxy/overview"),
-    staleTime: 30_000,
-  });
-}
-
-export function useGalaxyExpand(group: string | null, types: string[], worstOnly: boolean) {
-  const params = new URLSearchParams();
-  if (group) params.set("group", group);
-  if (types.length) params.set("types", types.join(","));
-  params.set("health", worstOnly ? "worst" : "all");
-  return useQuery({
-    queryKey: ["galaxy-expand", group, types.join(","), worstOnly],
-    queryFn: () => apiFetch<GalaxyExpand>(`/galaxy/expand?${params.toString()}`),
-    enabled: !!group,
-  });
-}
-
 export function useGalaxyRebuild() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (full: boolean) =>
       apiFetch<{ build_id: number }>(`/galaxy/rebuild?full=${full}`, { method: "POST" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["galaxy-status"] });
-      qc.invalidateQueries({ queryKey: ["galaxy-overview"] });
-      qc.invalidateQueries({ queryKey: ["galaxy-expand"] });
-    },
+    // the status refetch sees the new build land, and useGalaxyStatus refreshes the graphs
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["galaxy-status"] }),
   });
 }

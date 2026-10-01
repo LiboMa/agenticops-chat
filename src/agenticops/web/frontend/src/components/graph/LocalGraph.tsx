@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useGraphFocus } from "@/hooks/useGraphFocus";
 import { useLocale } from "@/i18n/LocaleContext";
 import { cn } from "@/lib/cn";
+import { galaxyFocusPath } from "@/lib/galaxy";
 import { buildLocalGraph, type FocusSubject, type LgLink, type LgNode, type LocalGraphModel } from "@/lib/localGraph";
 
 // Galaxy's NEBULA palette, so a resource reads the same colour on both pages
@@ -346,7 +347,10 @@ function NodeDetail({ node: n }: { node: LgNode }) {
         {n.absent && ` · ${t("galaxy.absent")}`}
       </p>
       {n.ref != null && (
-        <Link to={`/app/resources/${n.ref}`} className="text-primary hover:underline">{t("galaxy.openResource")}</Link>
+        <p className="flex gap-3">
+          <Link to={`/app/resources/${n.ref}`} className="text-primary hover:underline">{t("galaxy.openResource")}</Link>
+          <Link to={galaxyFocusPath(n.ref)} className="text-primary hover:underline">{t("galaxy.openInGalaxy")}</Link>
+        </p>
       )}
       {n.issueIds.length > 0 && <p>{t("galaxy.openIssues")}: <IssueLinks ids={n.issueIds} /></p>}
       {n.merged.map((m) => <p key={m.resource_id}>{t("graph.legend.merged")}: <MergedLine m={m} /></p>)}

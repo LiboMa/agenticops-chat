@@ -917,31 +917,6 @@ export interface FixPlanWithExecutions {
 // Four values, worst open issue first; `unknown` = no open issue (not "healthy"). See lib/galaxyHealth.ts.
 export type GalaxyHealth = "unknown" | "notice" | "warning" | "critical";
 
-export interface GalaxyNode {
-  id: string;
-  kind: "account" | "group" | "resource";
-  name: string;
-  resource_type?: string;
-  region?: string;
-  provider?: string;
-  account_id?: number | null;
-  resource_count?: number;
-  open_issues?: number;
-  health?: GalaxyHealth;
-  types?: Record<string, number>;
-  group_kind?: string;
-  member_count?: number;
-}
-
-export interface GalaxyEdge {
-  source: string;
-  target: string;
-  relation_type: string;
-  provenance: "rule" | "llm";
-  evidence?: string;
-  confidence?: number;
-}
-
 export interface GalaxyBuildInfo {
   id: number;
   status: "running" | "completed" | "failed";
@@ -961,18 +936,6 @@ export interface GalaxyBuildInfo {
 export interface GalaxyStatus {
   build: GalaxyBuildInfo | null;
   next_check_minutes: number;
-}
-
-export interface GalaxyOverview {
-  nodes: GalaxyNode[];
-  edges: GalaxyEdge[];
-  build_id: number | null;
-}
-
-export interface GalaxyExpand {
-  nodes: GalaxyNode[];
-  edges: GalaxyEdge[];
-  truncated: boolean;
 }
 
 // Full starfield payload (slim). Node/edge keys are shortened server-side.

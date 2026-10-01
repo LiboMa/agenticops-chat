@@ -6,11 +6,13 @@ import {
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
+import { useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useGalaxyStatus, useGalaxyGraph, useGalaxyRebuild } from "@/hooks/useGalaxy";
 import type { GalaxyGraphNode } from "@/api/types";
 import { GalaxyNodePanel } from "@/components/galaxy/GalaxyNodePanel";
 import { healthCounts, isHot, normalizeHealth } from "@/lib/galaxyHealth";
+import { focusNodeId } from "@/lib/galaxy";
 
 // ── palette (Nebula Violet — the single Galaxy theme, validated via dataviz) ──
 interface Palette {
@@ -38,12 +40,16 @@ function hexA(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 function shortGrp(s: string) { return s.length > 18 ? s.slice(0, 18) + "…" : s; }
+const FOCUS_SCALE = 1.6; // camera zoom on a ?focus= deep link
 
 export default function Galaxy() {
   const { t } = useLocale();
   const status = useGalaxyStatus();
   const graph = useGalaxyGraph();
   const rebuild = useGalaxyRebuild();
+  const [params, setParams] = useSearchParams();
+  const focusRef = params.get("focus");
+  const focusId = focusNodeId(focusRef);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -58,6 +64,7 @@ export default function Galaxy() {
     adj: new Map<string, Set<string>>(), byId: new Map<string, SimNode>(),
     hover: null as SimNode | null, selectedId: null as string | null,
     focusSet: null as Set<string> | null,
+    followId: null as string | null, // the camera tracks this node until the layout settles or the user zooms
     tx: 0, ty: 0, scale: 0.85, t: 0,
   });
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
@@ -67,6 +74,7 @@ export default function Galaxy() {
 
   // node health tallies shown in the legend box
   const counts = useMemo(() => healthCounts(data?.nodes ?? []), [data]);
+  const focusMissing = !!focusRef && !!data && !data.nodes.some((n) => n.id === focusId);
 
   // ── build sim + render loop when graph data arrives ──────────────────
   useEffect(() => {
@@ -123,7 +131,10 @@ export default function Galaxy() {
     // zoom / pan
     const zoomB: ZoomBehavior<HTMLCanvasElement, unknown> = d3zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.15, 6])
-      .on("zoom", (ev) => { S.tx = ev.transform.x; S.ty = ev.transform.y; S.scale = ev.transform.k; });
+      .on("zoom", (ev) => {
+        if (ev.sourceEvent) S.followId = null; // the user took the camera
+        S.tx = ev.transform.x; S.ty = ev.transform.y; S.scale = ev.transform.k;
+      });
     select(canvas).call(zoomB).call(zoomB.transform, zoomIdentity.translate(W / 2, H / 2).scale(0.85));
 
     // drag to pin
@@ -152,6 +163,12 @@ export default function Galaxy() {
     function draw() {
       const P = NEBULA;
       S.t += 0.05;
+      if (S.followId) {
+        const f = byId.get(S.followId);
+        if (f) select(canvas).call(zoomB.transform,
+          zoomIdentity.translate(W / 2 - f.x! * FOCUS_SCALE, H / 2 - f.y! * FOCUS_SCALE).scale(FOCUS_SCALE));
+        if (!f || sim.alpha() < sim.alphaMin()) S.followId = null;
+      }
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.fillStyle = P.surface; ctx.fillRect(0, 0, W, H);
       ctx.save(); ctx.translate(S.tx, S.ty); ctx.scale(S.scale, S.scale);
@@ -266,7 +283,22 @@ export default function Galaxy() {
     };
   }, [data]);
 
-  const exitFocus = useCallback(() => { stateRef.current.focusSet = null; setFocusLabel(null); }, []);
+  // ?focus=<ref>: select the resource, focus it with its neighbours and bring the camera to it (after the
+  // effect above, so the node map is this data's)
+  useEffect(() => {
+    const S = stateRef.current;
+    const n = data && focusId ? S.byId.get(focusId) : undefined;
+    if (!n) return;
+    S.selectedId = n.id; setSelected({ ...n });
+    const fs = new Set<string>([n.id]); S.adj.get(n.id)?.forEach((id) => fs.add(id));
+    S.focusSet = fs; setFocusLabel(shortGrp(n.name));
+    S.followId = n.id;
+  }, [data, focusId]);
+
+  const exitFocus = useCallback(() => {
+    stateRef.current.focusSet = null; stateRef.current.followId = null; setFocusLabel(null);
+    setParams((p) => { p.delete("focus"); return p; }, { replace: true });
+  }, [setParams]);
   const closePanel = useCallback(() => { stateRef.current.selectedId = null; setSelected(null); }, []);
 
   useEffect(() => {
@@ -299,6 +331,9 @@ export default function Galaxy() {
           </span>
         ) : <span className="text-[#9691a8]">{t("galaxy.noBuild")}</span>}
         {b?.status === "failed" && <span className="text-red-400">{b.error}</span>}
+        {focusMissing && (
+          <span className="text-amber-300">{t("galaxy.focusMissing").replace("{ref}", focusRef ?? "")}</span>
+        )}
 
         <span className="ml-auto text-[#9691a8]">{t("galaxy.nextCheck")}: {status.data?.next_check_minutes}m</span>
         {focusLabel && (

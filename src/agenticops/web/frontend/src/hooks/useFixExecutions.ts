@@ -6,7 +6,7 @@ export function useFixExecutions(planId: number) {
   return useQuery({
     queryKey: ["fix-executions", planId],
     queryFn: () =>
-      apiFetch<FixExecution[]>(`/fix-plans/${planId}/executions`),
+      apiFetch<FixExecution[]>(`/fix-executions?fix_plan_id=${planId}`),
     enabled: planId > 0,
     staleTime: 15_000,
   });

@@ -9,6 +9,7 @@ import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatShortDate } from "@/lib/formatDate";
+import { LocalGraph } from "@/components/graph/LocalGraph";
 import type { Anomaly, FixPlanWithExecutions, RelatedResourceItem } from "@/api/types";
 
 const INFRA_TYPES = new Set([
@@ -16,7 +17,7 @@ const INFRA_TYPES = new Set([
   "InternetGateway", "NATGateway", "TransitGateway",
 ]);
 
-type Tab = "overview" | "issues" | "fix-plans" | "network" | "tags";
+type Tab = "overview" | "issues" | "fix-plans" | "network" | "graph" | "tags";
 
 export default function ResourceDetail() {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +43,7 @@ export default function ResourceDetail() {
     { key: "issues", label: "Issues" },
     { key: "fix-plans", label: "Fix Plans" },
     { key: "network", label: networkTabLabel },
+    { key: "graph", label: t("graph.title") },
     { key: "tags", label: "Tags" },
   ];
 
@@ -87,6 +89,7 @@ export default function ResourceDetail() {
           {tab === "issues" && <IssuesTab data={issues.data} isLoading={issues.isLoading} />}
           {tab === "fix-plans" && <FixPlansTab data={fixPlans.data} isLoading={fixPlans.isLoading} />}
           {tab === "network" && <NetworkTab data={related.data} isLoading={related.isLoading} isInfra={isInfra} />}
+          {tab === "graph" && <LocalGraph subject={{ resourceId }} />}
           {tab === "tags" && <TagsTab tags={r.tags} />}
         </CardBody>
       </Card>
