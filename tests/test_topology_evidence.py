@@ -146,7 +146,8 @@ def test_edges_carry_direction_and_evidence_refs(seed, no_recollect):
     out = ev.build_evidence(1)
     assert out["available"] and out["build_id"] == 1 and out["depth"] == 1
     assert out["anchor"] == {"ref": 3, "type": "EC2", "name": "i-1", "anchor_status": "anchored",
-                             "evidence_ref": "graph:node:3", "health": "warning", "issue_ids": [1], "changes": []}
+                             "evidence_ref": "graph:node:3", "health": "warning", "issue_ids": [1], "changes": [],
+                             "absent": False}
     edges = {e["evidence_ref"]: (e["direction_label"], e["src_name"], e["dst_name"]) for e in out["edges"]}
     assert edges == {"graph:edge:2>3:contains": ("upstream", "subnet-1", "i-1"),
                      "graph:edge:3>4:secured_by": ("upstream", "i-1", "sg-1"),
@@ -319,6 +320,7 @@ def test_unchanged_recollect_skips_the_graph_refresh(seed, monkeypatch):
     monkeypatch.setattr("agenticops.connectors.runner.run_connector", _fake_run)
     monkeypatch.setattr("agenticops.galaxy.builder.build_graph",
                         lambda **kw: (_ for _ in ()).throw(AssertionError("no refresh expected")))
+    monkeypatch.setattr(settings, "galaxy_enabled", True)
     fresh = ev.build_evidence(iid)["freshness"]
     assert (fresh["status"], fresh["reason"]) == ("fresh", "")
 
@@ -342,6 +344,33 @@ def test_failed_recollect_marks_the_evidence_stale_and_goes_on(seed, monkeypatch
     assert out["freshness"]["status"] == "stale"
     assert out["freshness"]["reason"].startswith(
         "recollect of cluster prod failed — RuntimeError: kubectl timed out; cluster prod last collected at ")
+
+
+@pytest.mark.parametrize("result,reason", [
+    (RuntimeError("kubectl timed out"), "recollect of cluster prod failed — RuntimeError: kubectl timed out"),
+    (ConnectorRunResult(connector="k8s", status="busy"), "recollect of cluster prod was busy"),
+    (ConnectorRunResult(connector="k8s", status="failed", targets=[
+        TargetRun(account="acct-a", scope="prod", run_id=2, status="failed", changed=False, counts={},
+                  error="no kubeconfig")]), "recollect of cluster prod was failed — no kubeconfig"),
+    (ConnectorRunResult(connector="k8s", status="complete", changed=True),
+     "graph refresh after the recollect failed — build locked"),
+], ids=["raises", "busy", "failed", "refresh-fails"])
+def test_a_failed_recollect_is_stale_even_with_a_recent_prior_run(seed, monkeypatch, result, reason):
+    prior = NOW - timedelta(minutes=5)  # inside the window, older than the min age
+    _run(seed, prior)
+    iid = _k8s_issue(seed)
+
+    def _fake_run(name, **kwargs):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr("agenticops.connectors.runner.run_connector", _fake_run)
+    monkeypatch.setattr("agenticops.galaxy.builder.build_graph",
+                        lambda **kw: (_ for _ in ()).throw(RuntimeError("build locked")))
+    monkeypatch.setattr(settings, "galaxy_enabled", True)
+    assert ev.build_evidence(iid)["freshness"] == {"status": "stale", "reason": reason,
+                                                    "collected_at": prior.isoformat()}
 
 
 def test_never_collected_cluster_with_a_failed_recollect(seed, monkeypatch):

@@ -96,28 +96,31 @@ def _k8s_scope(row: dict) -> Optional[str]:
     return None
 
 
-def _recollect(row: dict, scope: str) -> tuple[Optional[datetime], str]:
-    """(last successful collection of the cluster, note). Runs the connector only when that collection is
-    older than rca_k8s_recollect_min_age_seconds — which also rate-limits RCAs on the same cluster."""
+def _recollect(row: dict, scope: str) -> tuple[Optional[datetime], str, bool]:
+    """(last successful collection of the cluster, note, ok). Runs the connector only when that collection is
+    older than rca_k8s_recollect_min_age_seconds — which also rate-limits RCAs on the same cluster. ok = the
+    data is current: that collection was recent enough, or the recollect was complete or partial and any graph
+    refresh after it succeeded. Otherwise the evidence is stale, however recent the last success was."""
     from agenticops.connectors import ingest, runner
 
     with get_db_session() as s:
         last = ingest.last_success_at(s, K8S_CONNECTOR, row["account_id"], scope)
     if last is not None and (datetime.now(timezone.utc) - last).total_seconds() < \
             settings.rca_k8s_recollect_min_age_seconds:
-        return last, ""
+        return last, "", True
     if not row["account_name"]:  # run_connector reads account="" as every account
-        return last, f"recollect of cluster {scope} skipped — the anchor row has no account"
+        return last, f"recollect of cluster {scope} skipped — the anchor row has no account", False
     try:
         res = runner.run_connector(K8S_CONNECTOR, account=row["account_name"], scope=scope, trigger="rca",
                                    timeout_seconds=settings.rca_k8s_recollect_timeout_seconds)
     except Exception as exc:  # the RCA goes on with the data at hand
         logger.warning("rca recollect of cluster %s failed: %s", scope, exc)
-        note = f"recollect of cluster {scope} failed — {type(exc).__name__}: {exc}"
+        note, ok = f"recollect of cluster {scope} failed — {type(exc).__name__}: {exc}", False
     else:
         errors = "; ".join(t.error for t in res.targets if t.error)
         note = "" if res.status == "complete" else \
             f"recollect of cluster {scope} was {res.status}" + (f" — {errors}" if errors else "")
+        ok = res.status in ("complete", "partial")
         if res.changed and settings.galaxy_enabled:
             try:
                 from agenticops.galaxy.builder import build_graph
@@ -126,8 +129,9 @@ def _recollect(row: dict, scope: str) -> tuple[Optional[datetime], str]:
             except Exception as exc:
                 logger.warning("rca recollect graph refresh failed: %s", exc)
                 note = "; ".join(filter(None, [note, f"graph refresh after the recollect failed — {exc}"]))
+                ok = False
     with get_db_session() as s:
-        return ingest.last_success_at(s, K8S_CONNECTOR, row["account_id"], scope), note
+        return ingest.last_success_at(s, K8S_CONNECTOR, row["account_id"], scope), note, ok
 
 
 def _freshness(collected_at, window_start: datetime, note: str, what: str) -> dict:
@@ -234,8 +238,10 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
     end = center + timedelta(minutes=settings.rca_topology_window_after_minutes)
     scope = _k8s_scope(row)
     if scope is not None:
-        collected_at, note = _recollect(row, scope)
+        collected_at, note, ok = _recollect(row, scope)
         freshness = _freshness(collected_at, start, note, f"cluster {scope}")
+        if not ok:
+            freshness["status"] = "stale"
     else:
         freshness = _freshness(row["scanned_at"], start, "", "the anchored resource")
     if depth is None:
@@ -270,7 +276,7 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
     ranked = sorted((n for n in sub.nodes if n["anomalous"] or n["ref"] in changed or n["ref"] in observed),
                     key=lambda n: qs.rank_key(n, frozenset(changed)))
     if row["ref"] in views:
-        anchor.update({k: views[row["ref"]][k] for k in ("health", "issue_ids", "changes")})
+        anchor.update({k: views[row["ref"]][k] for k in ("health", "issue_ids", "changes", "absent")})
     return {
         "available": True,
         "anchor": anchor,
@@ -283,7 +289,7 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
                    "evidence": e["evidence"], "evidence_ref": edge_ref(e["src"], e["dst"], e["relation_type"])}
                   for e in sub.edges],
         "neighbors": [v for r, v in views.items() if r != row["ref"]],
-        "candidates": [{"rank": i, "ref": n["ref"], "type": n["type"], "name": n["name"],
+        "candidates": [{"rank": i, "ref": n["ref"], "type": n["type"], "name": n["name"], "absent": n["absent"],
                         "reasons": _reasons(n, facts.get(n["ref"], {}), views[n["ref"]]["changes"],
                                             n["ref"] in observed),
                         "evidence_ref": node_ref(n["ref"])} for i, n in enumerate(ranked, 1)],
