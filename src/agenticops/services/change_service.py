@@ -704,8 +704,10 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
         emergency = cr.requested_change_type == "emergency"
         trace_id = cr.trace_id
         # The widest target sets the blast radius, so one small first target cannot hide a wide change.
+        # Own session: a failed graph read must not poison the caller's transaction (PostgreSQL aborts it);
+        # shadow mode stays zero-impact.
         blast_radius, shadow_blast_radius = policy_blast_radius(
-            [t.get("db_id") for t in targets], cr.account_id, session=s)
+            [t.get("db_id") for t in targets], cr.account_id)
     first = targets[0]["resource_id"] if targets else None
     decision = get_policy_engine().evaluate(
         risk_level=risk_level, provider=provider, resource_id=first,

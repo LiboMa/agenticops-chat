@@ -199,3 +199,61 @@ def test_change_path_enforce_mode_escalates(seed, monkeypatch):
     d = cs.evaluate_policy(_change(seed, [4]), "L1", "tag")
     # L1 tag would be change-standard-low-risk; one tier up it is change-normal-human.
     assert (d.action, d.rule_name, d.escalated_from) == ("require_human", "change-normal-human", "L1")
+
+
+# ── containment ───────────────────────────────────────────────────────
+
+
+def test_a_cross_account_relation_never_counts(seed):
+    baseline = pe.estimate_blast_radius(4, 1, session=seed)
+    # acct-b's EC2 7 secured_by our SG 4: one row tagged with our account (dropped when its node is assembled),
+    # one tagged with acct-b (never read by the hop query)
+    _rel(seed, 7, 4, "secured_by", acct=1)
+    _rel(seed, 7, 4, "secured_by", acct=2)
+    seed.commit()
+    qs.clear_cache()
+    assert pe.estimate_blast_radius(4, 1, session=seed) == baseline == 3
+
+
+def _run_fix_path(s):
+    _evaluate_fix(s, _fix_plan(s, 4))
+
+
+def _run_change_path(s):
+    from agenticops.services import change_service as cs
+    cs.evaluate_policy(_change(s, [4]), "L1", "tag")
+
+
+@pytest.mark.parametrize("run", [_run_fix_path, _run_change_path], ids=["fix", "change"])
+def test_the_graph_read_never_runs_in_the_callers_session(seed, run):
+    with patch.object(qs, "potential_impact", wraps=qs.potential_impact) as spy:
+        run(seed)
+    assert spy.call_count >= 1
+    assert [c.kwargs.get("session") for c in spy.call_args_list] == [None] * spy.call_count
+
+
+def test_a_failed_graph_read_does_not_block_auto_approve(seed, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from agenticops.services import pipeline_service
+
+    def pg_abort(s):
+        # PostgreSQL aborts the transaction on a failed statement; an invalidated connection is the same to the
+        # session that ran it: every later statement fails until a rollback.
+        s.connection().invalidate()
+        raise OperationalError("SELECT published build", {}, Exception("server closed the connection"))
+
+    for flag in ("auto_fix_enabled", "executor_auto_approve_l0_l1", "policy_engine_enabled"):
+        monkeypatch.setattr(settings, flag, True)
+    monkeypatch.setattr(settings, "policy_graph_impact_enforce", False)
+    plan = _fix_plan(seed, 4)
+    with patch.object(qs, "published_build_id", side_effect=pg_abort), \
+            patch.object(pe, "simulate_fix_impact", return_value=None), \
+            patch.object(pipeline_service, "trigger_auto_execute") as execute:
+        pipeline_service.trigger_auto_approve(plan.id)
+    seed.expire_all()
+    assert seed.get(FixPlan, plan.id).status == "approved"
+    execute.assert_called_once()
+    event = (seed.query(PipelineEvent)
+             .filter_by(health_issue_id=plan.health_issue_id, event_type="fix_approved").one())
+    assert json.loads(event.detail)["policy_decision"]["shadow_blast_radius"] is None

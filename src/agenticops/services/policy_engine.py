@@ -859,6 +859,9 @@ def estimate_blast_radius(ref: Optional[int], account_id: Optional[int], session
 
     `account_id` is our CloudAccount id; a ref outside it counts as unknown. None when there is nothing to
     count (no ref, wrong account, no published build, any error) — blast_radius_gte rules then don't match.
+
+    `session=None` (what the policy paths pass) reads in a session of its own, so "any error → None" also
+    holds for the caller: a failed read in a given session aborts that session's transaction on PostgreSQL.
     """
     if not isinstance(ref, int) or isinstance(ref, bool) or account_id is None:
         return None
@@ -877,7 +880,10 @@ def estimate_blast_radius(ref: Optional[int], account_id: Optional[int], session
 
 def policy_blast_radius(refs, account_id: Optional[int], session=None) -> tuple[Optional[int], Optional[int]]:
     """(blast_radius for evaluate(), shadow_blast_radius for the decision): the largest count over `refs`,
-    fed to the rules only when policy_graph_impact_enforce is on."""
+    fed to the rules only when policy_graph_impact_enforce is on.
+
+    Both policy paths leave `session` None so the graph read runs outside their transaction (see
+    estimate_blast_radius): a failed estimate is then only None, never a failed approval."""
     from agenticops.config import settings
 
     counts = [c for c in (estimate_blast_radius(r, account_id, session=session) for r in refs) if c is not None]

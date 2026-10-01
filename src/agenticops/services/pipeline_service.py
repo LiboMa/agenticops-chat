@@ -240,8 +240,9 @@ def _evaluate_policy_for_plan(session, plan):
         severity = issue.severity
         provider = issue.provider
         resource_id = issue.resource_id
-        blast_radius, shadow_blast_radius = policy_blast_radius(
-            [issue.resource_ref], issue.account_id, session=session)
+        # Own session: a failed graph read must not poison the caller's transaction (PostgreSQL aborts it);
+        # shadow mode stays zero-impact.
+        blast_radius, shadow_blast_radius = policy_blast_radius([issue.resource_ref], issue.account_id)
         # Graph nodes are keyed by the cloud-native account number, not our FK
         if issue.account_id:
             account = session.query(CloudAccount).filter_by(id=issue.account_id).first()
