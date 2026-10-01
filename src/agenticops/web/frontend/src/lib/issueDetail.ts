@@ -89,7 +89,7 @@ function text(v: unknown): string {
 
 /** One pre-check / step / post-check / rollback result, its outcome read the way verification._outcome reads it. */
 export function resultRow(item: unknown): ResultRow {
-  const obj = item !== null && typeof item === "object" ? (item as Record<string, unknown>) : null;
+  const obj = item !== null && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
   const status = obj ? ("status" in obj ? obj.status : "result" in obj ? obj.result : obj.passed) : item;
   const value = status == null ? null : String(status).trim().toLowerCase();
   const outcome: ResultOutcome = value == null ? "missing" : PASS.has(value) ? "pass" : WARN.has(value) ? "warning" : "fail";

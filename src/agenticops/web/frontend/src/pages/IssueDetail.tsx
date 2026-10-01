@@ -225,7 +225,8 @@ export default function IssueDetail() {
             <strong>{t("verification.pendingBanner")}</strong>
             {statuses.pending.verification_reason && `: ${statuses.pending.verification_reason}`}
           </span>
-          <AcceptanceActions execution={statuses.pending} />
+          {/* the Verification tab carries its own copy */}
+          {tab !== "verification" && <AcceptanceActions execution={statuses.pending} />}
         </div>
       )}
 
@@ -288,7 +289,7 @@ export default function IssueDetail() {
       {tab === "execution" && (
         <ExecutionTab executions={executions} cancelExecMut={cancelExecMut} setActionMsg={setActionMsg} t={t} />
       )}
-      {tab === "verification" && <VerificationTab executions={executions.data} pending={statuses.pending} t={t} />}
+      {tab === "verification" && <VerificationTab executions={executions} pending={statuses.pending} t={t} />}
       {tab === "timeline" && (
         <TimelineTab
           timeline={timeline}
@@ -1010,6 +1011,8 @@ function ExecutionTab({ executions, cancelExecMut, setActionMsg, t }: {
 }) {
   const { confirm, dialog } = useConfirm();
   if (executions.isLoading) return <Spinner label={t("common.loading")} />;
+  // a failed fetch must not read as "no executions"
+  if (executions.error) return <ErrorBanner message={executions.error.message} onRetry={() => executions.refetch()} />;
   const runs = executions.data ?? [];
   if (runs.length === 0) {
     return (
@@ -1063,11 +1066,13 @@ function ExecutionTab({ executions, cancelExecMut, setActionMsg, t }: {
 /** The newest run's verdict. Accept / reject is offered only for `pending` — the same item the page banner shows
  *  (issueStatuses), never recomputed here from the run's own verification_status. */
 function VerificationTab({ executions, pending, t }: {
-  executions: FixExecution[] | undefined;
+  executions: ReturnType<typeof useIssueExecutions>;
   pending: FixExecution | null;
   t: (key: string) => string;
 }) {
-  const runs = executions ?? [];
+  // a failed fetch must not read as "not executed"
+  if (executions.error) return <ErrorBanner message={executions.error.message} onRetry={() => executions.refetch()} />;
+  const runs = executions.data ?? [];
   const latest = latestExecution(runs);
   if (!latest) {
     return (

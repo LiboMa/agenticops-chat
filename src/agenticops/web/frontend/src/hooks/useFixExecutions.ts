@@ -37,7 +37,7 @@ export function useAcceptExecution() {
       ),
     onSuccess: () => {
       // accepted resolves the issue; rejected returns it to root_cause_identified and disputes the RCA
-      for (const key of ["issue-executions", "fix-executions", "anomaly", "anomaly-rca", "issue-timeline", "fix-plans"]) {
+      for (const key of ["issue-executions", "fix-executions", "anomaly", "anomalies", "anomaly-rca", "issue-timeline", "fix-plans"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
     },

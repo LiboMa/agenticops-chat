@@ -104,6 +104,8 @@ describe("resultRow", () => {
     // `status` present but null wins over `result`, as dict.get does
     expect(resultRow({ status: null, result: "pass" }).outcome).toBe("missing");
     expect(resultRow("succeeded").outcome).toBe("pass");
+    // a list is not a dict there (isinstance(item, dict)): it takes the non-object path and fails, not "missing"
+    expect(resultRow(["x"]).outcome).toBe("fail");
   });
 
   it("titles a result by what it checked and keeps its whole output", () => {
