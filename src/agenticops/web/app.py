@@ -1943,9 +1943,11 @@ async def api_get_anomaly(anomaly_id: int):
 
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
-async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
+async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate,
+                                    actor: Actor = Depends(current_actor)):
     """Update anomaly status (backed by HealthIssue) with state machine enforcement."""
-    from agenticops.models import InvalidStatusTransition, validate_status_transition
+    from agenticops.models import InvalidStatusTransition
+    from agenticops.services.issue_state import transition_issue
 
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
@@ -1953,15 +1955,11 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
             raise HTTPException(status_code=404, detail="Anomaly not found")
 
         try:
-            validate_status_transition(issue.status, update.status)
+            transition_issue(session, issue.id, update.status, actor=actor.key, reason="anomaly status update")
         except InvalidStatusTransition as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-
-        issue.status = update.status
-        if update.status == "resolved" and issue.resolved_at is None:
-            issue.resolved_at = datetime.now(timezone.utc)
 
         # Auto-learn: dismissed issues create detect agent memory
         if update.status == "dismissed":
@@ -2145,9 +2143,10 @@ async def api_create_health_issue(data: HealthIssueCreate):
 
 
 @app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
-async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
+async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate, actor: Actor = Depends(current_actor)):
     """Update a health issue with state machine enforcement on status transitions."""
-    from agenticops.models import InvalidStatusTransition, validate_status_transition
+    from agenticops.models import InvalidStatusTransition
+    from agenticops.services.issue_state import transition_issue
 
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
@@ -2155,23 +2154,17 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
             raise HTTPException(status_code=404, detail="Health issue not found")
 
         update_data = data.model_dump(exclude_unset=True)
-
-        # Validate status transition if status is being changed
-        new_status = update_data.get("status")
-        if new_status and new_status != issue.status:
+        new_status = update_data.pop("status", None)  # the status goes through transition_issue, never setattr
+        transitioning_to_resolved = False
+        if new_status:
             try:
-                validate_status_transition(issue.status, new_status)
+                old_status = transition_issue(session, issue.id, new_status, actor=actor.key,
+                                              reason="edited via the API")
             except InvalidStatusTransition as e:
                 raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-
-        # Auto-set resolved_at when status transitions to resolved
-        transitioning_to_resolved = (
-            new_status == "resolved" and issue.status != "resolved"
-        )
-        if transitioning_to_resolved:
-            update_data["resolved_at"] = datetime.now(timezone.utc)
+            transitioning_to_resolved = new_status == "resolved" and old_status != "resolved"
 
         for key, value in update_data.items():
             setattr(issue, key, value)
@@ -2598,9 +2591,10 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
         # Sync HealthIssue status (change plans have no issue)
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
-        if issue:
-            issue.status = "fix_approved"
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_approved", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} approved")
         details = {"reason": data.reason, "risk_level": plan.risk_level, "plan_kind": plan.plan_kind}
         if data.approved_by and actor.kind == "web":
             details["claimed_name"] = data.approved_by
@@ -2690,8 +2684,12 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
 
-        # Mark plan as executing (status verified 'approved' above — cannot raise)
+        # Mark plan as executing (status verified 'approved' above — cannot raise); the issue moves with it
         transition_plan(plan, "executing")
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} executing")
 
         execution = FixExecution(
             fix_plan_id=plan_id,
@@ -4999,7 +4997,7 @@ class AgentMemoryUpdateRequest(BaseModel):
 
 
 @app.post("/api/health-issues/{issue_id}/feedback", status_code=201)
-async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
+async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest, actor: Actor = Depends(current_actor)):
     """Record user feedback on a health issue (false positive / confirmed).
 
     For false_positive: creates agent memory for detect agent + dismisses issue.
@@ -5048,11 +5046,14 @@ async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
             related_issue_id=issue_id,
         )
 
-        # Dismiss the issue
+        # Dismiss the issue (an already resolved one keeps its status)
+        from agenticops.models import InvalidStatusTransition
+        from agenticops.services.issue_state import IssueNotFound, transition_issue
         with get_db_session() as session:
-            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-            if issue and issue.status not in ("resolved",):
-                issue.status = "resolved"
+            try:
+                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive")
+            except (IssueNotFound, InvalidStatusTransition):
+                logger.info("false-positive feedback: HealthIssue #%d keeps its status", issue_id)
 
         return {
             "status": "recorded",

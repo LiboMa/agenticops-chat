@@ -24,9 +24,9 @@ from agenticops.models import (
     RCAResult,
     get_session,
     transition_plan,
-    validate_status_transition,
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
+from agenticops.services.issue_state import advance_issue, transition_issue
 from agenticops.services.inventory import PRESENT, mark_seen
 
 logger = logging.getLogger(__name__)
@@ -590,6 +590,17 @@ def list_health_issues(
         session.close()
 
 
+def _tool_actor() -> str:
+    """The actor key a tool records a status change under: the run's actor (a context-less call: system)."""
+    from agenticops.run_context import get_run_context
+    return get_run_context().actor
+
+
+# An RCA moves the issue to root_cause_identified only from before a fix exists. Later statuses have a plan in
+# flight (or done) — a re-run RCA must not pull the issue back past it.
+_RCA_ENTRY_STATUSES = frozenset({"open", "investigating", "acknowledged", "root_cause_identified"})
+
+
 @tool
 def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -> str:
     """Update the status of a health issue with state machine enforcement.
@@ -600,9 +611,9 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
     - acknowledged -> investigating | root_cause_identified | fix_planned | resolved
     - root_cause_identified -> fix_planned | resolved
     - fix_planned -> fix_approved | resolved
-    - fix_approved -> fix_executing | resolved
-    - fix_executing -> fix_executed | resolved
-    - fix_executed -> resolved
+    - fix_approved -> fix_executing | root_cause_identified | resolved
+    - fix_executing -> fix_executed | root_cause_identified | resolved
+    - fix_executed -> root_cause_identified | resolved
 
     Args:
         issue_id: The HealthIssue ID to update
@@ -620,17 +631,11 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         if not issue:
             return f"HealthIssue #{issue_id} not found."
 
-        old_status = issue.status
         try:
-            validate_status_transition(old_status, new_status)
+            old_status = transition_issue(session, issue_id, new_status, actor=_tool_actor(),
+                                          reason=note or "update_health_issue_status")
         except (InvalidStatusTransition, ValueError) as e:
             return f"Status transition rejected: {e}"
-
-        issue.status = new_status
-
-        if new_status == "resolved":
-            issue.resolved_at = datetime.now(timezone.utc)
-
         session.commit()
 
         msg = f"HealthIssue #{issue_id} status: {old_status} -> {new_status}"
@@ -765,21 +770,16 @@ def save_rca_result(
                 INVALID, None)
         session.add(rca)
 
-        # Status via the state machine (no more silent bypass). If the agent
-        # skipped the 'investigating' step, hop through it (both hops legal);
-        # a genuinely illegal transition keeps the current status.
+        # Status via the state machine: an `open` issue hops through 'investigating' (both hops legal); an issue
+        # already past root-cause analysis keeps its status.
         status_note = ""
-        try:
-            from agenticops.models import validate_status_transition
-            try:
-                validate_status_transition(issue.status, "root_cause_identified")
-                issue.status = "root_cause_identified"
-            except ValueError:
-                validate_status_transition(issue.status, "investigating")
-                validate_status_transition("investigating", "root_cause_identified")
-                issue.status = "root_cause_identified"
-        except ValueError as e:
-            status_note = f" (status unchanged: {e})"
+        if issue.status in _RCA_ENTRY_STATUSES:
+            refusal = advance_issue(session, issue.id, "root_cause_identified", actor=_tool_actor(),
+                                    reason=f"root cause saved (confidence {rca.confidence:.0%})")
+            if refusal:
+                status_note = f" (status unchanged: {refusal})"
+        else:
+            status_note = f" (status unchanged: the issue is '{issue.status}', past root-cause analysis)"
         session.commit()
 
         # Log pipeline event
@@ -988,7 +988,8 @@ def save_fix_plan(
             session.add(plan)
             event_type = "fix_plan_created"
 
-        issue.status = "fix_planned"
+        refusal = advance_issue(session, issue.id, "fix_planned", actor=_tool_actor(),
+                                reason=f"fix plan {'updated' if is_update else 'saved'}")
         session.commit()
 
         # Log pipeline event
@@ -1017,7 +1018,7 @@ def save_fix_plan(
         return (
             f"FixPlan #{plan.id} {action} for HealthIssue #{health_issue_id}. "
             f"Risk: {risk_level}. Title: {title}. "
-            f"Issue status updated to 'fix_planned'."
+            + (f"Issue status unchanged: {refusal}" if refusal else "Issue status updated to 'fix_planned'.")
         )
     except Exception as e:
         session.rollback()
@@ -1229,8 +1230,8 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
         # Sync HealthIssue status (change plans have no issue)
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
-        if issue:
-            issue.status = "fix_approved"
+        issue_refusal = (advance_issue(session, issue.id, "fix_approved", actor=actor.key,
+                                       reason=f"FixPlan #{plan.id} approved") if issue else None)
 
         details = {"risk_level": plan.risk_level, "plan_kind": plan.plan_kind, "via": "agent_tool"}
         if claimed:
@@ -1256,7 +1257,9 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 
         return (
             f"FixPlan #{fix_plan_id} approved by {actor.key}. "
-            f"Risk: {plan.risk_level}. HealthIssue status updated to 'fix_approved'."
+            f"Risk: {plan.risk_level}. "
+            + (f"HealthIssue status unchanged: {issue_refusal}" if issue_refusal
+               else "HealthIssue status updated to 'fix_approved'.")
         )
     except Exception as e:
         session.rollback()
@@ -1448,24 +1451,28 @@ def save_execution_result(
         # Update FixPlan status through the state machine (approved → executing → terminal).
         # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
         terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
+        ran = bool(terminal) or plan.status == "executing"
         if terminal:
             if plan.status == "approved":
                 transition_plan(plan, "executing")
             transition_plan(plan, terminal)
         elif plan.status == "executing":
             transition_plan(plan, "failed")  # aborted mid-run: an executing plan can never run again
+        if ran and not is_change and issue_id:
+            # A chat / auto-pipeline run has no execute call that moved the issue with its plan: catch it up.
+            advance_issue(session, issue_id, "fix_executing", actor=_tool_actor(),
+                          reason=f"FixPlan #{fix_plan_id} executing")
 
         # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
-        # DESIGN NOTE: Successful execution transitions directly from fix_approved → resolved,
+        # DESIGN NOTE: Successful execution transitions directly from fix_executing → resolved,
         # intentionally skipping fix_executed. The FixExecution table tracks execution detail,
         # while HealthIssue.status tracks the lifecycle. Controlled by executor_auto_resolve flag.
         auto_resolved = False
         if status == "succeeded" and settings.executor_auto_resolve and not is_change:
             issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-            if issue and issue.status in ("fix_approved", "fix_executed"):
-                issue.status = "resolved"
-                issue.resolved_at = datetime.now(timezone.utc)
-                auto_resolved = True
+            if issue and issue.status in ("fix_approved", "fix_executing", "fix_executed"):
+                auto_resolved = advance_issue(session, issue_id, "resolved", actor=_tool_actor(),
+                                              reason=f"FixPlan #{fix_plan_id} executed") is None
 
         session.commit()
 
@@ -1575,7 +1582,15 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
                 f"Execution #{execution_id} recorded. No status change needed."
             )
 
-        issue.status = "fix_executed"
+        try:
+            if old_status == "fix_approved":  # a run no execute call started: the issue catches up with its plan
+                transition_issue(session, issue.id, "fix_executing", actor=_tool_actor(),
+                                 reason=f"FixPlan #{plan.id} executing")
+            transition_issue(session, issue.id, "fix_executed", actor=_tool_actor(),
+                             reason=f"Execution #{execution_id} succeeded")
+        except InvalidStatusTransition as e:
+            session.rollback()
+            return f"HealthIssue #{health_issue_id} status unchanged: {e}"
         session.commit()
 
         return (
@@ -1591,7 +1606,11 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
 
 @tool
 def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: str = "") -> str:
-    """Record that a fix execution failed. Keeps HealthIssue in fix_approved state to allow retry.
+    """Record that a fix execution failed, and dispute the RCA it was based on.
+
+    A run that ended its plan (failed, or aborted mid-run) sends the HealthIssue back to root_cause_identified,
+    where a new fix plan can be made. A run aborted before it started leaves the plan approved and the issue
+    where it is, so the same plan can be retried.
 
     Args:
         health_issue_id: The HealthIssue ID.
@@ -1613,19 +1632,26 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
         if not execution:
             return f"FixExecution #{execution_id} not found."
 
-        # Keep status at fix_approved so a retry or new plan is possible
-        if issue.status != "fix_approved":
-            issue.status = "fix_approved"
+        plan = session.query(FixPlan).filter_by(id=execution.fix_plan_id).first()
+        if plan is not None and plan.status in ("failed", "rejected"):
+            refusal = advance_issue(session, issue.id, "root_cause_identified", actor=_tool_actor(),
+                                    reason=f"Execution #{execution_id} failed" + (f": {reason}" if reason else ""))
+            outcome = (f"stays '{issue.status}' ({refusal})" if refusal
+                       else "is back at 'root_cause_identified' (a new fix plan can be made)")
+        else:
+            outcome = (f"stays '{issue.status}' (FixPlan #{execution.fix_plan_id} is "
+                       f"'{plan.status if plan else 'missing'}'; retry allowed)")
 
         # Execution-failure feedback (MVP-2.2.0): a failed fix disputes the
-        # RCA it was based on — surface that on the RCAResult for review.
+        # RCA it was based on — surface that on the RCAResult for review. Once per execution.
         rca = (
             session.query(RCAResult)
             .filter_by(health_issue_id=health_issue_id)
             .order_by(RCAResult.created_at.desc())
             .first()
         )
-        if rca is not None:
+        disputed = rca is not None and f"Fix execution #{execution_id} failed" not in (rca.critic_notes or "")
+        if disputed:
             rca.critic_verdict = "disputed_by_execution"
             note = f"Fix execution #{execution_id} failed"
             if reason:
@@ -1633,7 +1659,7 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             rca.critic_notes = ((rca.critic_notes + "\n") if rca.critic_notes else "") + note
         session.commit()
 
-        if rca is not None:
+        if disputed:
             try:
                 from agenticops.services.pipeline_events import log_event
                 log_event(health_issue_id, "rca_disputed", "rca",
@@ -1642,10 +1668,7 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             except Exception:
                 pass
 
-        msg = (
-            f"HealthIssue #{health_issue_id} remains in 'fix_approved' (retry allowed). "
-            f"Execution #{execution_id} failed"
-        )
+        msg = f"HealthIssue #{health_issue_id} {outcome}. Execution #{execution_id} failed"
         if reason:
             msg += f": {reason}"
         return msg

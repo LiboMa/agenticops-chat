@@ -187,9 +187,10 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                     resolved_tid = issue.trace_id
 
             # Update HealthIssue status
-            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
-            if issue:
-                issue.status = "fix_approved"
+            from agenticops.services.issue_state import advance_issue
+            if health_issue_id:
+                advance_issue(session, health_issue_id, "fix_approved", actor="agent:auto-pipeline",
+                              reason=f"FixPlan #{fix_plan_id} auto-approved")
 
             # get_db_session auto-commits on exit
 

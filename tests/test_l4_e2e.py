@@ -306,8 +306,9 @@ class TestL4Lifecycle:
         session.refresh(plan)
         assert plan.status == "executed"
 
-    def test_execution_failure_keeps_retry(self, seed_data):
-        """Test that failed execution keeps issue in fix_approved for retry."""
+    def test_execution_failure_sends_the_issue_back_for_a_new_plan(self, seed_data):
+        """A failed run moves the issue with its plan (fix_executing); mark_fix_failed then sends it back to
+        root_cause_identified, where a new fix plan can be made (MVP-2.6.1)."""
         session = seed_data["session"]
         plan = seed_data["plan"]
         issue = seed_data["issue"]
@@ -335,10 +336,18 @@ class TestL4Lifecycle:
 
         session.refresh(issue)
         # Issue should NOT be auto-resolved on failure
-        assert issue.status == "fix_approved"
+        assert issue.status == "fix_executing"
 
         session.refresh(plan)
         assert plan.status == "failed"
+
+        from agenticops.tools.metadata_tools import mark_fix_failed
+
+        execution = session.query(FixExecution).filter_by(fix_plan_id=plan.id).one()
+        result = mark_fix_failed(issue.id, execution.id, reason="instance not found")
+        assert "back at 'root_cause_identified'" in result
+        session.refresh(issue)
+        assert issue.status == "root_cause_identified"
 
 
 class TestRAGPipeline:

@@ -972,25 +972,26 @@ def update_issue(
             console.print(f"[red]Health issue #{issue_id} not found.[/red]")
             raise typer.Exit(1)
 
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services.issue_state import transition_issue
+        actor = cli_actor().key
+
         if investigate:
             if item.status != "open":
                 console.print(f"[yellow]Issue is already {item.status}.[/yellow]")
                 return
-            item.status = "investigating"
+            transition_issue(session, item.id, "investigating", actor=actor, reason="aiops issue update --investigate")
             console.print(f"[green]issue/{issue_id} investigating[/green]")
 
         if resolve:
             if item.status == "resolved":
                 console.print("[yellow]Issue is already resolved.[/yellow]")
                 return
-            item.status = "resolved"
-            item.resolved_at = datetime.now(timezone.utc)
+            transition_issue(session, item.id, "resolved", actor=actor, reason="aiops issue update --resolve")
             console.print(f"[green]issue/{issue_id} resolved[/green]")
 
         if status:
-            item.status = status
-            if status == "resolved":
-                item.resolved_at = datetime.now(timezone.utc)
+            transition_issue(session, item.id, status, actor=actor, reason="aiops issue update --status")
             console.print(f"[green]issue/{issue_id} status set to {status}[/green]")
 
         session.commit()
@@ -2105,7 +2106,9 @@ def _slash_acknowledge(ctx: ChatContext, args: list) -> str:
         if item.status != "open":
             return f"[yellow]Issue is already {item.status}.[/yellow]"
 
-        item.status = "investigating"
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services.issue_state import transition_issue
+        transition_issue(session, item.id, "investigating", actor=cli_actor().key, reason="/investigate")
         session.commit()
 
         return f"[green]Issue #{issue_id} is now investigating.[/green]"
@@ -2134,8 +2137,13 @@ def _slash_resolve(ctx: ChatContext, args: list) -> str:
         if item.status == "resolved":
             return "[yellow]Issue is already resolved.[/yellow]"
 
-        item.status = "resolved"
-        item.resolved_at = datetime.now(timezone.utc)
+        from agenticops.auth.actor import cli_actor
+        from agenticops.models import InvalidStatusTransition
+        from agenticops.services.issue_state import transition_issue
+        try:
+            transition_issue(session, item.id, "resolved", actor=cli_actor().key, reason="/resolve")
+        except InvalidStatusTransition as e:
+            return f"[red]{e}[/red]"
         session.commit()
 
         return f"[green]Issue #{issue_id} resolved.[/green]"
@@ -2545,9 +2553,10 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         plan.approved_at = datetime.now(timezone.utc)
 
         # Sync HealthIssue status (change plans have no issue)
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
-        if issue:
-            issue.status = "fix_approved"
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_approved", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} approved")
 
         AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
                          details={"reason": reason or None, "risk_level": plan.risk_level,
@@ -2645,6 +2654,10 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             started_at=datetime.now(timezone.utc),
         )
         transition_plan(plan, "executing")
+        if plan.health_issue_id:  # the issue moves with its plan
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} executing")
         session.add(execution)
         session.flush()
         AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
