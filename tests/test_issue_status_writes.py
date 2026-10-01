@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-SRC =pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops"
+SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops"
 ALLOWED = {"services/issue_state.py"}
 ISSUE_NAMES = {"issue", "health_issue"}
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
