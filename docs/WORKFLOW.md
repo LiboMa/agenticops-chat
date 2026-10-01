@@ -844,6 +844,8 @@ scan EC2 and RDS in us-east-1 and us-west-2
 
 Main Agent → routes to **Scan Agent** → calls `assume_role` → loops through services (`describe_ec2`, `describe_rds`, ...) → saves to SQLite → returns summary.
 
+**Resources that disappear.** A scan never deletes a row. When one resource type in one region is listed completely (the CLI call did not fail, the output was not truncated, and no page token came back), every AWS row of that type and region that this scan did not see gets `absent_since`. ARN rows are never marked, and neither is a row that another writer saw after this scan's listing began. The scan summary shows the count (`N absent`), and `POST /api/scan` returns it per account as `resources_absent`. A row seen again by any later scan returns: `absent_since` is cleared. Every count and list (`/resource list`, `/status`, the Dashboard, `/api/resources`, reports) counts present rows only, so the numbers agree. The Resources list has a **Show absent** toggle, and an absent resource's page shows a "Not seen in the latest scan" badge. Lookups by id and the Galaxy graph still show absent rows.
+
 ---
 
 ### Tutorial 2: Health Check — Detect Issues
