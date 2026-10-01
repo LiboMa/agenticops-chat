@@ -9,7 +9,9 @@ import ast
 import pathlib
 import re
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops"
+import pytest
+
+SRC =pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops"
 ALLOWED = {"services/issue_state.py"}
 ISSUE_NAMES = {"issue", "health_issue"}
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
@@ -221,3 +223,47 @@ def test_only_transition_issue_writes_a_health_issue_status():
             continue
         found += [f"{rel}:{ln}: {code}" for ln, code in status_writes(path.read_text())]
     assert found == [], "write HealthIssue.status through services.issue_state.transition_issue:\n" + "\n".join(found)
+
+
+# ── save_rca_result never pulls an issue back past root-cause analysis ───
+
+_RCA_ENTRY = ["open", "investigating", "acknowledged", "root_cause_identified"]
+_PAST_RCA = ["fix_planned", "fix_approved", "fix_executing", "fix_executed", "resolved", "dismissed"]
+
+
+@pytest.mark.parametrize("status", _RCA_ENTRY + _PAST_RCA)
+def test_save_rca_result_only_advances_from_an_rca_entry_status(tmp_path, monkeypatch, status):
+    import agenticops.models as models_mod
+    from agenticops.config import settings
+    from agenticops.models import Base, HealthIssue, get_session
+    from agenticops.services import pipeline_events
+    from agenticops.tools import metadata_tools
+
+    monkeypatch.setattr(models_mod, "_engine", None)
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/rca_guard.db")
+    monkeypatch.setattr(pipeline_events, "_notify_subscribers", lambda *a, **kw: None)
+    Base.metadata.create_all(models_mod.get_engine())
+    s = get_session()
+    try:
+        issue = HealthIssue(title="t", description="d", severity="low", source="test", status=status, resource_id="r")
+        s.add(issue)
+        s.commit()
+        issue_id = issue.id
+    finally:
+        s.close()
+
+    reply = metadata_tools.save_rca_result._tool_func(
+        health_issue_id=issue_id, root_cause="rc", confidence=0.8, contributing_factors="[]", recommendations="[]")
+
+    s = get_session()
+    try:
+        after = s.get(HealthIssue, issue_id).status
+    finally:
+        s.close()
+    assert "saved" in reply
+    if status in _RCA_ENTRY:
+        assert after == "root_cause_identified"
+        assert "past root-cause analysis" not in reply
+    else:
+        assert after == status
+        assert "past root-cause analysis" in reply
