@@ -14,6 +14,7 @@ import { MessagingTab } from "@/components/settings/MessagingTab";
 import { AuditTab } from "@/components/settings/AuditTab";
 import { KBTab } from "@/components/settings/KBTab";
 import { SkillsTab } from "@/components/settings/SkillsTab";
+import { ConnectorsCard } from "@/components/settings/ConnectorsCard";
 import {
   useAccounts,
   useCreateAccount,
@@ -1356,6 +1357,9 @@ export default function Settings() {
 
       {/* ── Galaxy Build Model ───────────────────────────────── */}
       <GalaxyModelCard />
+
+      {/* ── Pull connectors (k8s discovery) ──────────────────── */}
+      <ConnectorsCard />
 
       {/* ── IM Connections (read-only status) ────────────────── */}
       {s && <IMConnectionsCard feishuActive={s.feishu_ws_active} slackActive={s.slack_ws_active} />}

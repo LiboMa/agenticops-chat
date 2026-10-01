@@ -1243,3 +1243,37 @@ export interface LocationPathEdge {
   dst_name?: string;
   provenance?: string;
 }
+
+// ── Pull connectors (GET /api/connectors, MVP-2.6.1 spec §3.B.6) ──
+export type ConnectorRunStatus = "complete" | "partial" | "failed";
+
+export interface ConnectorRun {
+  id: number;
+  account: string | null;
+  scope: string; // e.g. the cluster name
+  trigger: "schedule" | "manual" | "rca";
+  status: ConnectorRunStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  counts: Record<string, number>; // created / updated / absent / returned / signals / signal_errors
+  error: string | null;
+}
+
+export interface ConnectorStatus {
+  name: string;
+  enabled: boolean;
+  running: boolean;
+  schedule: { name: string; cron_expression: string; is_enabled: boolean } | null;
+  recent_runs: ConnectorRun[];
+}
+
+// ── RCA location stats (GET /api/rca/location-stats, spec §3.C.4) ──
+export interface RcaLocationStats {
+  days: number;
+  top1: number | null; // correct / judged; null when nothing is judged
+  judged: number;
+  anchoring_rate: number | null; // (anchored + account_level) / issues naming a resource_id
+  issues_with_resource_id: number;
+  anchor_status_counts: Record<AnchorStatus, number>;
+  location_status_counts: Record<LocationStatus, number>;
+}

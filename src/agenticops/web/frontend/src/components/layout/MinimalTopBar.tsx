@@ -11,6 +11,10 @@ const ROUTE_LABELS: Record<string, string> = {
   "/app/audit": "nav.audit",
   "/app/schedules": "nav.schedules",
   "/app/reports": "nav.reports",
+  "/app/agent-metrics": "nav.agentMetrics",
+  "/app/skills": "nav.skills",
+  "/app/galaxy": "nav.galaxy",
+  "/app/security": "nav.security",
   "/app/settings": "nav.settings",
 };
 
