@@ -2,7 +2,8 @@
 
 - targets(): one per physical cluster — every present EKS / EKS_Cluster inventory row of an enabled aws account,
   collapsed by galaxy.rules.dedup_physical, plus every enabled kubernetes account. K8s ids carry no region, so an
-  account with two same-named clusters in different regions is refused rather than merged into one scope.
+  account with two same-named clusters in different regions is refused rather than merged into one scope. A
+  cluster the W2 scan proved gone that still has present K8s rows gets a tombstone target instead (_tombstones).
 - collect(): one `kubectl get <kind> -o json` per kind, under credentials.kube.kubectl_env_for_cluster (only the
   target account's credentials, a private kubeconfig). A kind is complete only when kubectl exited 0, stayed under
   k8s_connector_max_output_bytes and returned an item list; anything else makes it partial, and ingest never marks
@@ -29,6 +30,7 @@ from typing import Optional
 
 from agenticops.config import settings
 from agenticops.connectors.base import CollectResult, EntityObservation, Target
+from agenticops.connectors.ingest import in_scope
 from agenticops.credentials import kube
 from agenticops.credentials.resolver import AccountResolutionError, list_enabled_accounts
 from agenticops.galaxy.rules import K8S_KIND_TYPES, dedup_physical, k8s_resource_id, physical_key
@@ -91,6 +93,7 @@ class K8sConnector:
                 refused = (f"cluster {cluster} not collected — account '{aws[acct_id].name}' has {len(found)} "
                            f"clusters by that name ({', '.join(found)}) and K8s ids carry no region")
             out += [Target(account=aws[acct_id], scope=cluster, region=r, refused=refused) for r in found]
+        out += _tombstones(session, aws, regions, families)
         for acct in list_enabled_accounts("kubernetes"):
             out.append(Target(account=acct, scope=str(acct.credentials.get("cluster_name") or acct.name),
                               region=(acct.regions or [""])[0]))
@@ -102,6 +105,8 @@ class K8sConnector:
     def collect(self, target: Target, *, timeout_seconds: Optional[float] = None) -> CollectResult:
         if target.refused:
             return CollectResult(errors=[target.refused])
+        if target.tombstone:  # the cluster is gone: nothing to ask, no credentials to resolve
+            return _build(target.scope, target.region, {kind: [] for kind, _resource in _CALLS}, [])
         scope = target.scope
         try:
             env = kube.kubectl_env_for_cluster(target.account, scope, target.region)
@@ -197,6 +202,30 @@ def _list(args: list, env: dict, timeout: float, cap: int) -> tuple[list, str]:
     if not isinstance(items, list):
         return [], "kubectl returned no item list"
     return [i for i in items if isinstance(i, dict)], ""
+
+
+def _tombstones(session, aws: dict, present: dict, families: dict) -> list[Target]:
+    """One tombstone target per cluster the W2 scan proved gone — an absent EKS / EKS_Cluster row of an enabled
+    aws account and no present row of that name in the account — that still has present K8s rows under its
+    scope. Its collect() lists nothing, so ingest marks those rows absent (never deletes them). A cluster that
+    comes back is present again, gets a normal target and mark_seen revives its rows."""
+    if not aws:
+        return []
+    gone: dict[tuple, set] = {}
+    for r in session.query(CloudResource.account_id, CloudResource.region, CloudResource.resource_id,
+                           CloudResource.resource_type).filter(CloudResource.account_id.in_(list(aws)),
+                                                               CloudResource.resource_type.in_(_CLUSTER_TYPES),
+                                                               CloudResource.absent_since.isnot(None)):
+        acct_id, region, cluster, _family = physical_key(dict(r._mapping), families)
+        if (acct_id, cluster) not in present:
+            gone.setdefault((acct_id, cluster), set()).add(region)
+    out = []
+    for (acct_id, cluster), found in gone.items():
+        if session.query(CloudResource.id).filter(CloudResource.account_id == acct_id,
+                                                  CloudResource.provider == PROVIDER, in_scope(cluster),
+                                                  PRESENT).first():
+            out.append(Target(account=aws[acct_id], scope=cluster, region=min(found), tombstone=True))
+    return out
 
 
 # ── observations ──────────────────────────────────────────────────────────────

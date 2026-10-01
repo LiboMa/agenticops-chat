@@ -45,6 +45,8 @@ class Target:
     region: str
     refused: str = ""  # non-empty: targets() already knows this unit cannot be collected; collect() returns
     #                    this reason as its only error, so the run is recorded as failed
+    tombstone: bool = False  # the scope's container was proven gone by a complete listing: collect() reports
+    #                          every kind complete and empty without contacting anything, so its rows go absent
 
 
 @dataclass

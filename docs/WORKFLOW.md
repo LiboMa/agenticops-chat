@@ -1238,7 +1238,7 @@ flowchart LR
 ```
 
 - **What is collected**: Namespace, Deployment, StatefulSet, DaemonSet, Service, Ingress, Node, ConfigMap, Secret, PersistentVolumeClaim, PodDisruptionBudget, NetworkPolicy — plus owner-less (bare) pods as `K8s_Pod`. A pod that has an owner is only summarized into its workload's `pod_summary`.
-- **Partial never deletes**: a kind whose `kubectl get` fails, times out, exceeds `k8s_connector_max_output_bytes` or returns no item list is *partial*. Only a completely listed kind marks vanished objects `absent_since`; rows are never deleted.
+- **Partial never deletes**: a kind whose `kubectl get` fails, times out, exceeds `k8s_connector_max_output_bytes` or returns no item list is *partial*. Only a completely listed kind marks vanished objects `absent_since`; rows are never deleted. If the AWS scan has proved a cluster gone (its `EKS` / `EKS_Cluster` row is marked absent), the next discovery run marks that cluster's K8s rows absent through a tombstone target that runs no kubectl and resolves no credentials, and the rows come back if the cluster does.
 - **No secrets stored**: a Secret row keeps only its `type`, a ConfigMap only its key names and a hash, and no object keeps its annotations.
 - **Credentials**: see *Unified exec entry* above. The in-cluster chaos-lab account registers its service-account kubeconfig; that RBAC grants no read on secrets, so its Secret kind stays partial by design.
 - **See it**: `aiops connectors list` (switch, schedule, recent runs) · `aiops connectors run k8s [--account NAME]` (exits 1 unless the result is complete or partial) · `GET /api/connectors`. With `k8s_connector_enabled: false` no schedule is seeded and a run answers `disabled`.

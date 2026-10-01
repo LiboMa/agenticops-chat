@@ -47,6 +47,12 @@ def _hash(rtype: str, rid: str, name: str, tags: dict, raw: dict) -> str:
     return content_hash({"resource_type": rtype, "resource_id": rid, "name": name, "tags": tags, "raw_data": raw})
 
 
+def in_scope(scope: str):
+    """resource_id starts with '<scope>/'. substr, not LIKE: a '_' or '%' in a scope is literal."""
+    prefix = f"{scope}/"
+    return func.substr(CloudResource.resource_id, 1, len(prefix)) == prefix
+
+
 def run_status(result: CollectResult) -> str:
     kinds = result.completeness.values()
     if not any(kinds) and not result.entities:
@@ -106,14 +112,13 @@ def ingest(connector: Connector, target: Target, result: CollectResult, *, trigg
             mark_seen(row, now)
             counts["updated"] += 1
 
-        prefix = f"{target.scope}/"
         listed_from = started_at or now
         for (scope, kind), complete in result.completeness.items():
             if not complete or scope != target.scope:
                 continue
             marked = mark_unseen_absent(
                 s, account_id=acct, provider=connector.provider, resource_type=kind, seen=obs, now=now,
-                criteria=(func.substr(CloudResource.resource_id, 1, len(prefix)) == prefix,
+                criteria=(in_scope(target.scope),
                           or_(CloudResource.scanned_at.is_(None), CloudResource.scanned_at < listed_from)))
             counts["absent"] += marked
             if marked > 0:

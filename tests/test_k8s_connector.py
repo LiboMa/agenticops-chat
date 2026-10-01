@@ -7,10 +7,11 @@ import sys
 import time
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
+import agenticops.connectors.runner as runner
 from agenticops.config import settings
 from agenticops.connectors.base import Target
 from agenticops.connectors.ingest import ingest, run_status
@@ -456,3 +457,121 @@ def test_partial_kind_is_never_marked_absent_end_to_end(db):
     assert rows["lab/Deployment/shop/web"].raw_data["pod_summary"]["desired"] == 2
     run = db.get(ConnectorRun, res.run_id)
     assert run.status == "partial" and run.error == "K8s_Secret not collected — kubectl exit 1: secrets is forbidden"
+
+
+# ── tombstone targets: a cluster W2 proved gone takes its K8s rows with it ────────
+
+GONE_AT = datetime(2026, 9, 1, 12, 0)
+
+
+def _cluster(db, acct, rid, rtype="EKS", region="us-east-1", absent=True):
+    db.add(CloudResource(account_id=acct, provider="aws", region=region, resource_type=rtype, resource_id=rid,
+                         name=rid, tags={}, raw_data={}, absent_since=GONE_AT if absent else None))
+
+
+def _k8s(db, acct, scope, *names):
+    db.add_all([CloudResource(account_id=acct, provider="kubernetes", region="us-east-1",
+                              resource_type="K8s_Deployment", resource_id=f"{scope}/Deployment/shop/{n}", name=n,
+                              tags={}, raw_data={"cluster": scope, "namespace": "shop"}) for n in names])
+
+
+def _k8s_absent(db):
+    db.expire_all()
+    return {r.resource_id: r.absent_since is not None
+            for r in db.query(CloudResource).filter_by(provider="kubernetes")}
+
+
+@pytest.fixture
+def no_cluster_access(db, monkeypatch):
+    """Every way into a cluster or an account's credentials, recorded. A tombstone must reach none of them; a
+    normal target fails here at its credentials, before any kubectl."""
+    fakes = {"kubectl_env_for_cluster": Mock(side_effect=KubeconfigError("no cluster access in this test")),
+             "_run_capped": Mock(side_effect=AssertionError("kubectl called")),
+             "get_provider": Mock(side_effect=AssertionError("provider built"))}
+    monkeypatch.setattr("agenticops.credentials.kube.kubectl_env_for_cluster", fakes["kubectl_env_for_cluster"])
+    monkeypatch.setattr("agenticops.connectors.k8s._run_capped", fakes["_run_capped"])
+    monkeypatch.setattr("agenticops.providers.get_provider", fakes["get_provider"])
+    monkeypatch.setattr(settings, "k8s_connector_enabled", True)
+    monkeypatch.setattr("agenticops.galaxy.builder.build_graph", lambda *a, **k: None)
+    return fakes
+
+
+def test_a_cluster_proven_gone_gets_its_k8s_rows_marked_absent_without_kubectl_or_credentials(db, no_cluster_access):
+    _cluster(db, 1, "gone")
+    _cluster(db, 1, "arn:aws:eks:us-east-1:111111111111:cluster/gone", rtype="EKS_Cluster")  # same cluster
+    _k8s(db, 1, "gone", "web", "api")
+    db.commit()
+    (t,) = [t for t in K8sConnector().targets(db) if t.scope == "gone"]
+    assert (t.account.id, t.region, t.tombstone, t.refused) == (1, "us-east-1", True, "")
+    result = K8sConnector().collect(t)
+    assert (result.entities, result.errors) == ([], [])
+    assert result.completeness == {("gone", k): True for k in TYPES}
+
+    res = runner.run_connector("k8s", scope="gone")
+
+    assert [(r.scope, r.status, r.counts["absent"]) for r in res.targets] == [("gone", "complete", 2)]
+    assert _k8s_absent(db) == {"gone/Deployment/shop/web": True, "gone/Deployment/shop/api": True}
+    assert db.query(CloudResource).filter_by(provider="kubernetes").count() == 2   # marked, never deleted
+    assert [name for name, fake in no_cluster_access.items() if fake.called] == []
+    assert "gone" not in {t.scope for t in K8sConnector().targets(db)}   # nothing present left: no more tombstone
+
+
+def test_a_disabled_or_kubernetes_accounts_gone_cluster_is_left_alone(db, no_cluster_access):
+    db.query(CloudResource).filter_by(account_id=2, resource_id="retired").update({"absent_since": GONE_AT})
+    _k8s(db, 2, "retired", "web")
+    _cluster(db, 3, "edge")      # W2 never lists a kubernetes account, so no row of it is proof of anything
+    _k8s(db, 3, "edge", "web")
+    db.commit()
+    targets = {t.scope: t for t in K8sConnector().targets(db)}
+    assert "retired" not in targets and targets["edge"].tombstone is False
+    runner.run_connector("k8s")
+    assert _k8s_absent(db) == {"retired/Deployment/shop/web": False, "edge/Deployment/shop/web": False}
+
+
+def test_k8s_rows_without_any_cluster_row_are_left_alone(db, no_cluster_access):
+    _k8s(db, 1, "ghost", "web")
+    db.commit()
+    assert "ghost" not in {t.scope for t in K8sConnector().targets(db)}
+    runner.run_connector("k8s")
+    assert _k8s_absent(db) == {"ghost/Deployment/shop/web": False}
+
+
+def test_a_cluster_with_any_present_row_gets_a_normal_target(db, no_cluster_access):
+    _cluster(db, 1, "solo", region="us-west-2")                      # the short-id row is gone, but the
+    _cluster(db, 1, "arn:aws:eks:us-east-1:111111111111:cluster/solo", rtype="EKS_Cluster", absent=False)  # ARN not
+    _k8s(db, 1, "solo", "web")
+    _k8s(db, 1, "lab", "web")
+    db.commit()
+    got = [(t.scope, t.region, t.tombstone) for t in K8sConnector().targets(db) if t.scope in ("lab", "solo")]
+    assert got == [("lab", "us-east-1", False), ("solo", "us-east-1", False)]
+
+
+def test_a_gone_cluster_that_comes_back_is_collected_normally_and_its_rows_revive(db, no_cluster_access):
+    _cluster(db, 1, "gone")
+    _k8s(db, 1, "gone", "web")
+    db.commit()
+    runner.run_connector("k8s", scope="gone")
+    assert _k8s_absent(db) == {"gone/Deployment/shop/web": True}
+
+    db.query(CloudResource).filter_by(provider="aws", resource_id="gone").update({"absent_since": None})
+    db.commit()                                                          # W2 sees the cluster again
+    (t,) = [t for t in K8sConnector().targets(db) if t.scope == "gone"]
+    assert t.tombstone is False
+    result, fake, _ = _collect(target=t)
+    assert fake.calls
+    ingest(K8sConnector(), t, result, trigger="manual")
+    assert _k8s_absent(db)["gone/Deployment/shop/web"] is False
+
+
+def test_account_and_scope_filters_apply_to_tombstones(db, no_cluster_access):
+    _cluster(db, 1, "gone")
+    _k8s(db, 1, "gone", "web")
+    db.commit()
+    assert [t.scope for t in runner.run_connector("k8s", scope="lab").targets] == ["lab"]
+    assert [t.scope for t in runner.run_connector("k8s", account="onprem").targets] == ["edge"]
+    assert _k8s_absent(db) == {"gone/Deployment/shop/web": False}
+    assert [c.args[1] for c in no_cluster_access["kubectl_env_for_cluster"].call_args_list] == ["lab", "edge"]
+
+    res = runner.run_connector("k8s", account="global", scope="gone")
+    assert [(t.scope, t.status) for t in res.targets] == [("gone", "complete")]
+    assert _k8s_absent(db) == {"gone/Deployment/shop/web": True}
