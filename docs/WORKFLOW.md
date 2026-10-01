@@ -954,13 +954,18 @@ Open `http://localhost:8000/app/dashboard` and explore:
 |------|----------------|
 | **Dashboard** | Overview stats, recent issues |
 | **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history |
-| **Resources** / **Resource Detail** | Browse all scanned AWS resources with filters; drill into one resource |
-| **Issues & Plans** / **Issue Detail** | View health issues + fix plans, click through to RCA, approve, trigger execution |
+| **Issues** | Three views in `?scope=` — ops events (default) / security findings (`security_*` sources) / all — plus the **Resources** and **Signals** tabs |
+| **Issue Detail** | Business / execution / verification chips, the anchor badge (resource link, unanchored, ambiguous with its candidates, account-level) and an acceptance banner while a run is pending; five tabs in `?tab=`: Investigate (RCA, root-cause location + your verdict, local graph), Fix plan (`I#N fix plan vN` + content hash, approve), Execution (step / pre / post / rollback evidence), Verification, Timeline |
+| **Resource Detail** | One resource: overview, its issues and fix plans, network / contains, tags — and the **Local graph** tab with its neighbourhood |
+| **Changes** / **Change Detail** | Change requests (`/app/changes`, **New change request** with optional steps + external ticket); the detail page leads with status · reason · next step · one primary action, then the request, `C#N implementation plan vN` with `steps_diff`, approval (policy advice apart from the actual approval), execution evidence and acceptance |
+| **Audit** | Decision ledger, command ledger and the plan KPIs (`/app/audit`) |
+| **Galaxy** | The resource starfield; `?focus=<resource id>` opens it centred on one resource |
+| **Security** | Posture scores and 30-day trend, category scores, findings, recommendations, exposure paths |
 | **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports |
 | **Schedules** / **Schedule Detail** | Set up cron-based automated scans/detections |
 | **Skills** / **Skill Detail** | Browse the 16 domain skills; import packages from a URL / git repo / zip (result manifest, *Imported* badge); view/promote/rollback drafts |
-| **Agent Metrics** | Per-agent token/latency/usage metrics |
-| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend |
+| **Agent Metrics** | Per-agent token/latency/usage metrics; the **RCA root-cause location** card (7 / 30 / 90 days: Top-1, judged, anchoring rate) |
+| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend; **Pull connectors** card on General (Run now, recent runs) |
 
 > **Note:** Settings consolidates account management, messaging channels, MCP servers, and the optional Enhanced Backend selector. The standalone Network topology page was removed (the graph engine remains as agent tools — see Tutorial 7).
 
@@ -1172,10 +1177,11 @@ aiops chat "/execute C7"
 #      and the CR moves to completed (needs_review if the post-check result is missing)
 ```
 
-On the web: **Plans** (`/app/plans`) → **Change Plans** tab → **New change request**, then open
-`/app/changes/:id` to review, approve (reason required), execute, and read the timeline. The **Audit**
-tab shows the decision/command ledgers and `GET /api/plans/stats` KPIs. `C#N` anywhere in chat
-auto-links to the change page.
+On the web: **Changes** (`/app/changes`) → **New change request** (optionally your own steps and an
+external ticket), then open `/app/changes/:id` to review, approve (the dialog shows the plan's content
+hash; reason required), execute, accept, and read the timeline. **Audit** (`/app/audit`) shows the
+decision/command ledgers and `GET /api/plans/stats` KPIs. `C#N` in chat opens the change in the side
+panel. The old `/app/plans` redirects to `/app/changes`.
 
 **When a direct write is refused:** if you ask an agent to run a high-risk command
 (e.g. `aws ec2 modify-security-group-rules …`) with no approved plan behind it, the tool layer refuses
@@ -1240,7 +1246,7 @@ flowchart TD
 | `GET /api/galaxy/expand?group=&types=&health=` | Drill into a group: member resource nodes + rule/llm edges (with provenance), health-colored, capped at `galaxy_expand_node_cap` |
 | `GET /api/galaxy/graph` | Full slim payload (all nodes + rule/llm edges, health overlay) — feeds the client-side starfield layout |
 
-Frontend (`pages/Galaxy.tsx`, **Experimental**): a **Canvas starfield** — d3-force lays out the whole inventory at once (~1300 nodes) on a fixed Nebula-Violet dark canvas; node colour is the worst open issue anchored on the resource (`resource_ref`) — `unknown` (no open issue; the legend says *no alert ≠ healthy*) / `notice` (medium, low) / `warning` (high) / `critical` — and warning/critical nodes pulse; a resource the latest scan no longer saw (`absent_since`) is greyed with a struck-through label; rule edges solid / llm edges dashed. Scroll-zoom, drag-pan, double-click a cluster to focus, hover to highlight neighbors. **Single-click a node → right-side key-info panel** (status, open issues with `IssueStatusBadge`); click an issue → a centered **Dialog** (RCA/metrics, ESC to dismiss and check the next); "view raw_data" → a **second right-side panel** rendering the nested JSON as a collapsible, searchable `JsonTree` (`components/galaxy/{GalaxyNodePanel,GalaxyIssueDialog,GalaxyRawDataPanel,JsonTree}.tsx`). House rule: detail → right slide panels; transient data → dialogs. Live health tallies sit in the bottom-left legend.
+Frontend (`pages/Galaxy.tsx`, **Experimental**): a **Canvas starfield** — d3-force lays out the whole inventory at once (~1300 nodes) on a fixed Nebula-Violet dark canvas; node colour is the worst open issue anchored on the resource (`resource_ref`) — `unknown` (no open issue; the legend says *no alert ≠ healthy*) / `notice` (medium, low) / `warning` (high) / `critical` — and warning/critical nodes pulse; a resource the latest scan no longer saw (`absent_since`) is greyed with a struck-through label; rule edges solid / llm edges dashed. Scroll-zoom, drag-pan, double-click a cluster to focus, hover to highlight neighbors. **Single-click a node → right-side key-info panel** (status, open issues with `IssueStatusBadge`); click an issue → a centered **Dialog** (RCA/metrics, ESC to dismiss and check the next); "view raw_data" → a **second right-side panel** rendering the nested JSON as a collapsible, searchable `JsonTree` (`components/galaxy/{GalaxyNodePanel,GalaxyIssueDialog,GalaxyRawDataPanel,JsonTree}.tsx`). House rule: detail → right slide panels; transient data → dialogs. Live health tallies sit in the bottom-left legend. **Deep link**: `/app/galaxy?focus=<resource id>` (a `cloud_resources` id, written `12`, `R12`, `R%2312` or `res:12`) selects that node, focuses it with its neighbours and follows it until the layout settles (a zoom or pan hands the camera back); a resource missing from the latest build shows a notice; «Back to overview» drops the parameter. The local graph's «Open in Galaxy» lands here. The page refetches when a new build lands (manual, hourly or rule-only).
 
 ---
 
@@ -1264,7 +1270,7 @@ flowchart LR
 - **Partial never deletes**: a kind whose `kubectl get` fails, times out, exceeds `k8s_connector_max_output_bytes` or returns no item list is *partial*. Only a completely listed kind marks vanished objects `absent_since`; rows are never deleted. If the AWS scan has proved a cluster gone (its `EKS` / `EKS_Cluster` row is marked absent), the next discovery run marks that cluster's K8s rows absent through a tombstone target that runs no kubectl and resolves no credentials, and the rows come back if the cluster does.
 - **No secrets stored**: a Secret row keeps only its `type`, a ConfigMap only its key names and a hash, and no object keeps its annotations.
 - **Credentials**: see *Unified exec entry* above. The in-cluster chaos-lab account registers its service-account kubeconfig; that RBAC grants no read on secrets, so its Secret kind stays partial by design.
-- **See it**: `aiops connectors list` (switch, schedule, recent runs) · `aiops connectors run k8s [--account NAME]` (exits 1 unless the result is complete or partial) · `GET /api/connectors`. With `k8s_connector_enabled: false` no schedule is seeded and a run answers `disabled`.
+- **See it**: `aiops connectors list` (switch, schedule, recent runs) · `aiops connectors run k8s [--account NAME]` (exits 1 unless the result is complete or partial) · `GET /api/connectors` · Settings → General → **Pull connectors** (switch, schedule, Running badge, **Run now**, the newest runs with their counts and error). With `k8s_connector_enabled: false` no schedule is seeded and a run answers `disabled`.
 
 ### Webhook intake auth
 
@@ -1411,7 +1417,7 @@ flowchart LR
 - **Recollect before reading**: a K8s-side anchor whose cluster was last collected more than `rca_k8s_recollect_min_age_seconds` (120) ago gets one K8s connector run for that cluster (trigger `rca`, `rca_k8s_recollect_timeout_seconds` 60), then a rule-only graph refresh when the structure changed. The min age also rate-limits RCAs on one cluster. Failure marks the evidence `stale`; the RCA goes on.
 - **The location** (`save_rca_result(..., location=…)`): up to three ranked candidates plus a causal path from the root cause to the anchor. A candidate that is not an inventory row of the issue's account is dropped, and so is an `E<n>` evidence label that is not one of this RCA's evidence items. One path edge that is not a rule/observed relation of the cited build drops the whole path; an edge given in reverse is stored as the graph holds it. The result is `valid` (nothing dropped), `partial` (something dropped, a candidate left), `invalid` (no candidate left, or the check itself failed — the RCA is still saved) or `absent` (not given). Names are stored inline, so the location reads the same after the build is pruned. **Observed only**: the critic, the confidence gate and auto-fix never read it.
 - **Self-grounding fix**: the evidence check no longer counts `save_rca_result`'s own input as tool output; before, an RCA could ground its claims in the text it was saving.
-- **Human verdict + stats**: `POST /api/health-issues/{id}/rca-feedback` takes `verdict` (the conclusion) and/or `location_verdict` (`correct` / `partial` / `incorrect`, the location only). The judge is the session actor, never the request body. A `location_verdict` is refused (409) when the latest RCA has no `valid`/`partial` location to judge. `GET /api/rca/location-stats?days=30` returns the location-status counts, `top1` = correct / judged (a `partial` verdict is not a hit), and the anchoring rate over issues that name a resource. No UI yet (Plan E).
+- **Human verdict + stats**: `POST /api/health-issues/{id}/rca-feedback` takes `verdict` (the conclusion) and/or `location_verdict` (`correct` / `partial` / `incorrect`, the location only). The judge is the session actor, never the request body. A `location_verdict` is refused (409) when the latest RCA has no `valid`/`partial` location to judge. `GET /api/rca/location-stats?days=30` returns the location-status counts, `top1` = correct / judged (a `partial` verdict is not a hit), and the anchoring rate over issues that name a resource. On the web: Issue Detail → Investigate shows the location card (candidates, causal path) with the correct / partial / incorrect buttons, and Agent Metrics has the **RCA root-cause location** card (7 / 30 / 90 days).
 - **Policy blast radius (shadow)**: fix plans (the issue's anchored resource) and change requests (their widest target) get `estimate_blast_radius` = how many resources depend on the target in the published graph (downstream, rule relations, ≤ 3 hops). With `policy_graph_impact_enforce: false` (default) the count is only recorded on the decision as `shadow_blast_radius` and `blast_radius_gte` rules never see it. With `true` it feeds `blast-radius-escalation`. The old graph-store path always counted nothing.
 - **Gate**: `rca_topology_context_enabled` — off means RCA sees neither the tool nor its prompt section.
 - **Eval**: 13 chaos cases with declared ground truth, run once with the gate off and once with it on (AC@1 / AC@3 / MRR, `located`, graph recall). See *Chaos E2E Runbook* below and the [report](MVP-2.6.1-LOCATION-EVAL-REPORT.md).
@@ -1453,7 +1459,7 @@ curl -X POST http://localhost:8000/api/changes/intake -H "Content-Type: applicat
 | `pending_acceptance` | succeeded, but no post-checks, missing/incomplete results, a warning, or a step that did not report success | `fix_executed` + `execution_pending_acceptance` notification | `needs_review` + `needs_review_reason` + the same notification |
 | `failed` | the run did not succeed, or a post-check failed | `root_cause_identified`, the RCA disputed | `failed` / `rolled_back`; a succeeded run with a failed post-check → `needs_review` |
 
-- **Human acceptance**: only a `pending_acceptance` run can be accepted or rejected, with a reason, as the session actor (a body name is ignored), authorized as the approval of the plan's kind — `webhook:*` is 403 even in shadow mode. Accepting a fix resolves its issue; rejecting sends it back to `root_cause_identified` and disputes the RCA. A change goes through `resolve_review`, still the only human writer of its terminal state. Both the run and the issue move with a compare-and-set, so a second decision, or an issue that moved on since the run, is 409. Only the issue's latest run can be accepted: once a re-plan has run again, accepting the older run is 409 and names the latest. The Web/API fix and change approve routes and acceptance check in one order — 404 (no such plan or run), then authz 403, then the state and content-hash 409s — so an unauthorized caller there gets 403 whatever the state; CLI `/approve` and the agent tool `approve_fix_plan` still check the state before authz. The accept button is Plan E; today it is the API and the CLI.
+- **Human acceptance**: only a `pending_acceptance` run can be accepted or rejected, with a reason, as the session actor (a body name is ignored), authorized as the approval of the plan's kind — `webhook:*` is 403 even in shadow mode. Accepting a fix resolves its issue; rejecting sends it back to `root_cause_identified` and disputes the RCA. A change goes through `resolve_review`, still the only human writer of its terminal state. Both the run and the issue move with a compare-and-set, so a second decision, or an issue that moved on since the run, is 409. Only the issue's latest run can be accepted: once a re-plan has run again, accepting the older run is 409 and names the latest. The Web/API fix and change approve routes and acceptance check in one order — 404 (no such plan or run), then authz 403, then the state and content-hash 409s — so an unauthorized caller there gets 403 whatever the state; CLI `/approve` and the agent tool `approve_fix_plan` still check the state before authz. On the web: the Issue Detail banner and Verification tab (fix), the Change Detail **Acceptance** card (change) — each asks for the reason. The UI offers acceptance only on the issue's newest run while the issue is at `fix_executed`, the same rule the API applies (409 otherwise).
 
 ```bash
 curl -X POST http://localhost:8000/api/fix-executions/42/accept -H "Authorization: Bearer $TOKEN" \
@@ -1464,6 +1470,13 @@ curl -X POST http://localhost:8000/api/fix-executions/42/accept -H "Authorizatio
 ```
 
 - **Main's read tools**: `get_plan(plan_id)` (either origin, any status: full text, version, content hash, approval, rejection) and `get_execution_result(execution_id=, plan_id=)` (a run's step / check / rollback results, verdict and acceptance; `execution_id` wins, `plan_id` = that plan's latest run). `get_change_request` now returns the whole current plan, `proposed_steps`, `steps_diff`, `needs_review_reason` and the latest run's verdict, untruncated. Main can explain why a run is pending; accepting it stays a human action.
+
+### Issue & Change UI (MVP-2.6.1)
+
+- **Navigation**: Issues / Changes / Audit. `/app/plans` redirects to `/app/changes` (`?tab=fix` → `/app/issues`, since a fix plan lives under its issue; `?tab=audit` → `/app/audit`).
+- **Local graph** (`components/graph/LocalGraph.tsx`, on Issue Detail, Resource Detail and the Change Detail approval card) reads `GET /api/graph/focus`. Four kinds of relation: rule relations (solid; LLM-inferred ones dashed and hidden until you ask), the RCA causal path (legend «RCA causal chain»: each edge is checked against the graph, the chain as a whole is not), merged signals, and candidate related issues. The Structural / Potential / Observed blast-radius numbers are the API's, not recounted in the browser. A keyboard-reachable list view sits under the canvas, and a cut-off graph says why (node / edge / expansion limit, related list capped). While `policy_graph_impact_enforce` is false, the approval card marks the potential-impact count and its graph *for reference only*.
+- **One reason, two pages**: while a run is `pending_acceptance`, Issue Detail and Change Detail show the same `verification_reason` at the top.
+- **Chat**: a bare `I#N` or `C#N` opens the context side panel (ESC closes); the plan card there is titled like `I#12 fix plan v2` with a short hash. A change's plan is read-only in the panel — approve and accept it on Change Detail.
 
 ---
 

@@ -45,7 +45,7 @@
 | **信号门 (Signal Gate)** | 所有建问题的路径(webhook、智能体、REST)都过同一道门:确定性去重(fingerprint-v2、抖动、冷却、资源+类型合并)+ 一个只允许*合并*、绝不丢弃的廉价 LLM 灰区裁判。每个事件一条可审计的 Signal 记录,可人工提升为问题 |
 | **根因分析 (RCA)** | LLM 驱动的 RCA,结合 CloudTrail 关联、基础设施图、知识库检索;RCA 后的质量门(证据检查 → 对抗式 critic → 置信度阈值)把薄弱或被驳回的结论送进 `needs_review`,而不是自动修复。RCA 按需从已发布的关系图取拓扑证据,并给出根因定位(≤ 3 个排序资源 + 因果路径),定位对照库存与关系图 fail-closed 校验、由人单独评判(只观测 —— 从不驱动修复) |
 | **自动修复流水线** | HealthIssue → RCA → SRE → 审批(L0/L1) → 执行 → 验证 → 解决 —— 低风险问题自主完成;post-check 不能证明成功的执行等人工验收 |
-| **变更管理** *(ITSM)* | 日常变更(改 tag、扩缩容、改配置)走 **Main → SRE 合法性审核 → 审批 → Executor**,**不需要 HealthIssue** —— 与事件修复流并列的 ITSM 对应物。一张 Plan 表两种来源(`plan_kind` = fix \| change)+ 一张 `change_requests` 工单;12 态变更状态机;RBAC **影子模式**(审批人身份绑定 + SoD,默认关);两本账(`audit_logs` 决策 + `command_audits` 命令)。变更单可自带步骤与外部工单(ITSM 系统经 HMAC 签名的 `POST /api/changes/intake` 提单);审批绑定方案的内容哈希。`/app/plans`、`/api/changes/*`、CLI `/change` |
+| **变更管理** *(ITSM)* | 日常变更(改 tag、扩缩容、改配置)走 **Main → SRE 合法性审核 → 审批 → Executor**,**不需要 HealthIssue** —— 与事件修复流并列的 ITSM 对应物。一张 Plan 表两种来源(`plan_kind` = fix \| change)+ 一张 `change_requests` 工单;12 态变更状态机;RBAC **影子模式**(审批人身份绑定 + SoD,默认关);两本账(`audit_logs` 决策 + `command_audits` 命令)。变更单可自带步骤与外部工单(ITSM 系统经 HMAC 签名的 `POST /api/changes/intake` 提单);审批绑定方案的内容哈希。`/app/changes`、`/app/audit`、`/api/changes/*`、CLI `/change` |
 | **云安全审查** | 双频姿态引擎:每小时一次确定性快照(IAM、S3、日志、VPC/EC2、EBS),由**纯函数、可复现**的评分器按 CIS 打分;含 NACL 的**三态**入口可达性(`reachable` / `not_reachable` / `undetermined` —— 绝不给假的"安全");每 10 分钟增量拉取 GuardDuty / Security Hub / CloudTrail;证据接地的 LLM 建议器 **fail-closed**(未接地或被驳回 → 丢弃)。`/app/security`、`/api/security/*`、`security-review` 报告 |
 | **自优化记忆** | 基于文件的智能体记忆,每次运维中学习;智能体自策展、永不删除的归档、prompt-cache 安全的注入 |
 | **自主技能** | 16 个领域技能,智能体可创建/改进/合并 —— 仅经安全门禁、人类可审计的流程发布。**广域加载**:从 URL、Git 仓库或 zip/tar.gz 导入技能包 —— 经 CLI、API,或 Skills 页的「URL / Git 仓库」导入器(逐包结果清单 + *已导入* 徽标)。一切先落为草稿;发布前扫描**整包**(含 `.sh`/`.py`);包内脚本只在受限**沙箱**里运行(无凭证、无网络;默认关闭) |
@@ -56,7 +56,7 @@
 | **消息 (Messaging)** | 统一的 Settings → Messaging 页:机器人应用(飞书/Slack/钉钉/企微 凭据)、通道(Slack/Email/SES/SNS/飞书/钉钉/企微/Webhook)、投递日志 —— schema 驱动、密钥脱敏,经 `/api/messaging/*` |
 | **MCP 服务器** | 兼容 Claude Desktop 的 MCP 集成 —— 经 Chat/CLI/Web 管理,热重载 |
 | **图引擎 (Graph Engine)** | NetworkX 基础设施图:SPOF 检测、容量风险、依赖链、变更模拟(智能体工具) |
-| **Galaxy** *(实验性)* | `/galaxy` 全清单关系图 —— 每个资源作为 Canvas 星云中的星点,按健康态着色、异常脉冲。机械关系边由代码推导(`provenance=rule`);语义边由 LLM 提议但经**fail-closed 校验**(端点必须存在 + 证据能在 `raw_data` 中回验),幻觉绝不作为事实入图。内容哈希增量构建(无变化时 $0) |
+| **Galaxy** *(实验性)* | `/galaxy` 全清单关系图 —— 每个资源作为 Canvas 星云中的星点,按健康态着色、异常脉冲。机械关系边由代码推导(`provenance=rule`);语义边由 LLM 提议但经**fail-closed 校验**(端点必须存在 + 证据能在 `raw_data` 中回验),幻觉绝不作为事实入图。内容哈希增量构建(无变化时 $0)。`/app/galaxy?focus=<资源 id>` 直接以某个资源为中心打开 |
 
 ---
 
@@ -183,7 +183,7 @@ aiops run report --type daily
 
 ### Web 看板
 
-React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localhost:8000` 提供。15 个页面(+ 登录):Dashboard、Chat、Issues & Plans、Issue Detail、Resource Detail、Schedules、Schedule Detail、Reports、Report Detail、Agent Metrics、Skills、Skill Detail、**Security** *(姿态评分、发现、暴露路径)*、Settings、**Galaxy** *(实验性关系图)*。
+React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localhost:8000` 提供。18 个页面(+ 登录):Dashboard、Chat、**Issues** *(运维事件 / 安全发现 / 全部,另含 Resources 与 Signals)*、Issue Detail *(调查 · 修复方案 · 执行记录 · 验证 · 时间线,带局部关系图)*、**Changes**、Change Detail、**Audit**、Resource Detail、Schedules、Schedule Detail、Reports、Report Detail、Agent Metrics、Skills、Skill Detail、**Security** *(姿态评分、发现、暴露路径)*、Settings、**Galaxy** *(实验性关系图)*。问题、变更、审计是侧栏里的三个入口;旧的 `/app/plans` 重定向到 `/app/changes`。
 
 **Chat** 页支持多会话并发流式输出(后台流式、秒开)—— 见 [v1.1.1 说明](docs/MVP-1.1.1-RELEASE.md)。
 
@@ -210,7 +210,7 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 | `AIOPS_SKILLS_IMPORT_ENABLED` | `true` | 允许从 URL / git / zip 导入技能包(CLI、API、Skills 页) |
 | `AIOPS_SKILLS_SANDBOX_ENABLED` | `false` | 允许 executor 在无凭证、无网络的沙箱里运行已发布技能自带的脚本 |
 | `AIOPS_SECURITY_REVIEW_ENABLED` | `true` | 云安全审查引擎(双频采集 + CIS 评分 + 可达性) |
-| `AIOPS_CHANGE_MANAGEMENT_ENABLED` | `true` | ITSM 变更流:Main 上的变更工具、`/api/changes`、CLI `/change`、Web `/app/plans` 的 Changes tab |
+| `AIOPS_CHANGE_MANAGEMENT_ENABLED` | `true` | ITSM 变更流:Main 上的变更工具、`/api/changes`、CLI `/change`、Web `/app/changes` 页面 |
 | `AIOPS_CHANGE_AUTO_APPROVE_STANDARD` | `false` | 让策略的 `auto_approve` 判定免人工批准 standard 变更 —— yaml 规则与此开关必须同时满足 |
 | `AIOPS_RBAC_ENFORCE` | `false` | `false` = 影子模式(拒绝记为 `authz.denied_shadow`,请求放行);`true` = 403 + SoD |
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | 工具层写级命令账本(`command_audits`);只读命令不记录 |
@@ -345,7 +345,8 @@ docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
 
 | 版本 | 日期 | 亮点 |
 |------|------|------|
-| **[2.6.0](docs/MVP-2.6.0-RELEASE.md)** | 2026-09-26 | **变更管理 (ITSM)** —— 日常变更走 Main → SRE 合法性审核 → 审批 → Executor,**不需要 HealthIssue**;一张 Plan 表两种来源(`plan_kind` fix \| change)+ `change_requests` 工单;12 态变更状态机;**RBAC 影子模式**(审批人身份绑定 + SoD);两本审计账(`audit_logs` + `command_audits`)+ `/api/plans/stats`;`/app/plans`(Fix Plans / Change Plans / Audit)+ `/app/changes/:id`;CLI `/change` `/changes`。后端 + 前端已实现;**真实 live E2E 待与主人联合验证** |
+| **[2.6.1](docs/MVP-2.6.1-RELEASE.md)** | 2026-09-29 | **图事实 + RCA 定位闭环** —— 未关闭 Issue 锚定到已发布关系图(`resource_ref`,fail-closed,跨账户安全);K8s **拉取式连接器**(只读,按账户隔离的 kubeconfig);RCA 给出 ≤ 3 个排序根因资源 + 因果路径(路径的每条边对照关系图 fail-closed 校验),由人评判(只观测);Issue 状态单一写入口(CAS + 回退边);审批绑定内容哈希、执行**验收**、HMAC 签名的变更**提单**;Web 信息架构拆成**问题 / 变更 / 审计**,带局部关系图与 Galaxy `?focus=`。已实现,门禁全绿;**真实 live E2E 待与主人联合验证**([评测模板](docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md)) |
+| **[2.6.0](docs/MVP-2.6.0-RELEASE.md)** | 2026-09-26 | **变更管理 (ITSM)** —— 日常变更走 Main → SRE 合法性审核 → 审批 → Executor,**不需要 HealthIssue**;一张 Plan 表两种来源(`plan_kind` fix \| change)+ `change_requests` 工单;12 态变更状态机;**RBAC 影子模式**(审批人身份绑定 + SoD);两本审计账(`audit_logs` + `command_audits`)+ `/api/plans/stats`;`/app/plans`(Fix Plans / Change Plans / Audit)+ `/app/changes/:id`;CLI `/change` `/changes`。2026-09-26 在 dev 上跑完真实 live E2E([报告](docs/MVP-2.6.0-E2E-REPORT.md)):七步全部通过;发现的 3 个 UI/API 缺陷已修复(dev 待重新部署复验) |
 | **[2.5.0](docs/MVP-2.5.0-RELEASE.md)** | 2026-08-31 | **云安全审查** —— 双频姿态引擎(每小时确定性快照 + 每 10 分钟 GuardDuty / Security Hub / CloudTrail 增量拉取)、**纯函数可复现的 CIS 评分**、含 NACL 的**三态可达性**、证据接地的 **fail-closed 建议器**、`/app/security` —— 在两个真实账号只读验证([E2E](docs/MVP-2.5.0-E2E-REPORT.md)) · *2026-09-08 追加:* **技能广域加载**(URL / git / zip → 草稿,整包安全扫描)、**脚本沙箱**(无凭证、无网络,默认关)、Skills 页**导入器**与溯源、`web/routers/` 拆分 |
 | **[2.2.1](docs/MVP-2.2.1-RELEASE.md)** | 2026-07-27 | **Effort / thinking 策略** —— 后端对高严重级别与重跑的 RCA 自动升档扩展思考预算;按对话会话覆盖 effort(`off … max`,NULL = Auto) |
 | **[2.2.0](docs/MVP-2.2.0-RELEASE.md)** | 2026-07-21 | **Signal Gate** 降噪 —— 所有建问题路径过同一道可审计的门(fingerprint-v2、抖动、冷却、合并;LLM 灰区裁判只合并不丢弃) · **RCA 质量五件套**(证据检查 → critic → 置信度门 → 事件记忆 → 看门狗) · 在 [L1](docs/MVP-2.2.0-CHAOS-E2E-REPORT.md) / [L2](docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md) 混沌报告中实地验证 |
