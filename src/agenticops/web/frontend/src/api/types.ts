@@ -92,6 +92,56 @@ export interface Anomaly {
   issue_type?: string;
 }
 
+/** GET /api/health-issues/{id} (HealthIssueResponse) — IssueDetail's source; the legacy /issues shape drops
+ *  trace_id and merged_alerts. */
+export interface HealthIssue {
+  id: number;
+  resource_id: string;
+  provider: string | null;
+  severity: Anomaly["severity"];
+  source: string;
+  title: string;
+  description: string;
+  alarm_name: string | null;
+  metric_data: Record<string, unknown>;
+  related_changes: unknown[];
+  status: IssueStatus;
+  detected_at: string;
+  detected_by: string;
+  resolved_at: string | null;
+  trace_id: string | null;
+  occurrence_count: number;
+  merged_alerts: MergedAlert[];
+  account_id: number | null;
+  account_name: string | null;
+  issue_type: string;
+  // The anchor (MVP-2.6.1): the resource it resolved to, or why not; all null before the resolver reaches it
+  resource_ref: number | null;
+  anchor_status: AnchorStatus | null;
+  anchor_candidates: { rule?: string | null; candidates?: { ref: number; account_id: number; reason: string }[] } | null;
+  observed_at: string | null;
+}
+
+/** RCA root-cause location (MVP-2.6.1): ranked candidates, each cited by evidence ids, and the causal path. */
+export interface RcaLocationCandidate {
+  ref: number;
+  rank: number;
+  type: string | null;
+  name: string | null;
+  resource_id: string | null;
+  supporting: string[];
+  refuting: string[];
+}
+
+export interface RcaLocation {
+  candidates: RcaLocationCandidate[];
+  path: (LocationPathEdge & { src_name?: string | null; dst_name?: string | null; provenance?: string })[];
+  dropped: string[];
+}
+
+export type LocationStatus = "valid" | "partial" | "invalid" | "absent";
+export type LocationVerdict = "correct" | "partial" | "incorrect";
+
 export interface RCAResult {
   id: number;
   anomaly_id: number;
@@ -102,7 +152,7 @@ export interface RCAResult {
   contributing_factors: string[];
   recommendations: string[];
   related_resources: string[];
-  llm_model: string;
+  model_id: string;
   created_at: string;
   // RCA quality (MVP-2.2.0)
   evidence?: { type: string; ref: string; summary: string }[];
@@ -110,6 +160,13 @@ export interface RCAResult {
   critic_verdict?: string | null;
   critic_notes?: string | null;
   human_verdict?: "correct" | "incorrect" | null;
+  // Root-cause location (MVP-2.6.1); a location verdict is accepted only while the status is valid or partial
+  location?: RcaLocation | null;
+  location_status?: LocationStatus | null;
+  location_build_id?: number | null;
+  location_verdict?: LocationVerdict | null;
+  location_verdict_by?: string | null;
+  location_verdict_at?: string | null;
 }
 
 export interface Report {
@@ -193,8 +250,16 @@ export interface FixExecution {
   rollback_results: unknown[];
   error_message: string | null;
   duration_ms: number;
+  // Verification (MVP-2.6.1): passed | failed | pending_acceptance; null = the run closed without a verdict
+  verification_status: VerificationStatus | null;
+  verification_reason: string | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  acceptance_note: string | null;
   created_at: string;
 }
+
+export type VerificationStatus = "passed" | "failed" | "pending_acceptance";
 
 /* ------------------------------------------------------------------ */
 /*  Account                                                            */

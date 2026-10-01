@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { Signal } from "@/api/types";
+import type { LocationVerdict, Signal } from "@/api/types";
 
 export function useSignals(filters: { disposition?: string; kind?: string } = {}) {
   const params = new URLSearchParams();
@@ -32,7 +32,8 @@ export function usePromoteSignal() {
 export function useRcaFeedback(issueId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { verdict: "correct" | "incorrect"; note?: string }) =>
+    // at least one of the two verdicts; a location verdict needs a valid or partial location (409 otherwise)
+    mutationFn: (payload: { verdict?: "correct" | "incorrect"; location_verdict?: LocationVerdict; note?: string }) =>
       apiFetch<{ rca_id: number }>(`/health-issues/${issueId}/rca-feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { useIssueFeedback } from "@/hooks/useAgentMemory";
-import type { IssueStatus, Anomaly, RCAResult, FixPlan } from "@/api/types";
+import type { IssueStatus, HealthIssue, RCAResult, FixPlan } from "@/api/types";
 
 interface IssueActionBarProps {
-  issue: Anomaly;
+  issue: Pick<HealthIssue, "id" | "status" | "resolved_at">;
   rca: RCAResult | null | undefined;
   fixPlans: FixPlan[] | undefined;
   rcaLoading: boolean;

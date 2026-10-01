@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planRef, planRoute, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -73,5 +73,21 @@ describe("legacyPlansRedirect", () => {
     { tab: "bogus", to: "/app/changes" },
   ])("/app/plans?tab=$tab -> $to", ({ tab, to }) => {
     expect(legacyPlansRedirect(tab)).toBe(to);
+  });
+});
+
+describe("planLabel / shortHash", () => {
+  // the words come from the locale; the shape mirrors services/plan_content.plan_label
+  const t = (k: string) => ({ "plans.fixPlan": "fix plan", "plans.implementationPlan": "implementation plan" })[k] ?? k;
+  it.each([
+    { plan_kind: "fix" as PlanKind, health_issue_id: 12, change_request_id: null, plan_version: 2, label: "I#12 fix plan v2" },
+    { plan_kind: "change" as PlanKind, health_issue_id: null, change_request_id: 3, plan_version: 1, label: "C#3 implementation plan v1" },
+    { plan_kind: "fix" as PlanKind, health_issue_id: 4, change_request_id: null, plan_version: 0, label: "I#4 fix plan v1" },
+  ])("$label", ({ label, ...fp }) => {
+    expect(planLabel(fp, t)).toBe(label);
+  });
+  it("shortens a content hash to 8 characters; no hash is an em dash", () => {
+    expect(shortHash("0123456789abcdef")).toBe("01234567");
+    expect(shortHash(null)).toBe("—");
   });
 });

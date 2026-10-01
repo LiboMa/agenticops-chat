@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { formatFullDate } from "@/lib/formatDate";
+import { useLocale } from "@/i18n/LocaleContext";
 import type { PipelineEvent } from "@/api/types";
 
 /* ================================================================== */
@@ -84,14 +86,7 @@ export function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
                 {ev.detail && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {Object.entries(ev.detail).map(([k, v]) =>
-                      v != null ? (
-                        <span
-                          key={k}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-[10px] text-muted-foreground font-mono"
-                        >
-                          {k}: {typeof v === "object" ? JSON.stringify(v) : String(v).slice(0, 80)}
-                        </span>
-                      ) : null,
+                      v != null ? <DetailChip key={k} name={k} value={v} /> : null,
                     )}
                   </div>
                 )}
@@ -105,5 +100,23 @@ export function PipelineTimeline({ events }: { events: PipelineEvent[] }) {
         })}
       </div>
     </div>
+  );
+}
+
+const CHIP_CLIP = 80;
+
+/** One detail value: shown whole when short; a long one opens to its full text instead of being cut off. */
+function DetailChip({ name, value }: { name: string; value: unknown }) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  const chip = "px-1.5 py-0.5 rounded bg-secondary text-[10px] text-muted-foreground font-mono";
+  if (text.length <= CHIP_CLIP) return <span className={`inline-flex items-center ${chip}`}>{name}: {text}</span>;
+  return (
+    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+            title={open ? t("issues.collapse") : t("issues.expand")}
+            className={`${chip} text-left hover:bg-accent ${open ? "w-full whitespace-pre-wrap break-all" : ""}`}>
+      {name}: {open ? text : `${text.slice(0, CHIP_CLIP)}…`}
+    </button>
   );
 }

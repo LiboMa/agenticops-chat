@@ -30,6 +30,15 @@ export function planRef(fp: PlanLink): string {
   return fp.health_issue_id != null ? `I#${fp.health_issue_id}` : "-";
 }
 
+/** How a plan is named to people — "I#12 fix plan v2" / "C#3 implementation plan v1"; mirrors
+ *  services/plan_content.plan_label, with the words from the locale. */
+export function planLabel(fp: PlanLink & { plan_version?: number | null }, t: (key: string) => string): string {
+  const noun = t(fp.plan_kind === "change" ? "plans.implementationPlan" : "plans.fixPlan");
+  return `${planRef(fp)} ${noun} v${fp.plan_version || 1}`;
+}
+/** The first 8 characters of a content hash, "—" when there is none. */
+export const shortHash = (h: string | null | undefined) => (h ? h.slice(0, 8) : "—");
+
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 

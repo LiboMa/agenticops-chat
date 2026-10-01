@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useAnomaly } from "@/hooks/useAnomaly";
+import { issueFacts } from "@/lib/issueDetail";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useFixPlans, useApproveFixPlan, useRejectFixPlan, useExecuteFixPlan } from "@/hooks/useFixPlans";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
@@ -205,7 +206,7 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
         {/* Metadata grid */}
         <div className="grid grid-cols-2 gap-3 text-xs">
           <MetaField label={t("issues.resource")} value={a.resource_id} mono />
-          <MetaField label={t("issues.region")} value={a.region} />
+          <MetaField label={t("issues.region")} value={issueFacts(a).region ?? "-"} />
           <MetaField label={t("issues.account")} value={a.account_name ?? "-"} />
           <MetaField label={t("issues.detected")} value={formatShortDate(a.detected_at)} />
         </div>
