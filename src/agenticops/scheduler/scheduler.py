@@ -391,6 +391,29 @@ class Scheduler:
                         execution.error = str(e)
             return
 
+        # ResourceScan: the W2 scan of POST /api/scan on a timer — account-addressed inside the engine.
+        if pipeline_name == "ResourceScan":
+            from agenticops.scanner.scheduled import run_scheduled_scan
+            try:
+                res = run_scheduled_scan(account_name)
+                skipped = res["skipped_accounts"]
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed" if skipped else "completed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.result = res
+                        execution.error = "credentials failed: " + ", ".join(skipped) if skipped else None
+            except Exception as e:
+                logger.error(f"ResourceScan schedule '{schedule_name}' failed: {e}")
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.error = str(e)
+            return
+
         # SecurityPostureSnapshot / SecurityIncrementalPoll: account-agnostic
         # system jobs (like GalaxyBuild) — resolve accounts internally.
         if pipeline_name in ("SecurityPostureSnapshot", "SecurityIncrementalPoll"):

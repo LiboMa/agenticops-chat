@@ -717,6 +717,10 @@ class Settings(BaseSettings):
         default="all",
         description="Default resource focus for scan/detect: computing,networking,databases,storage,security,billing,all (AIOPS_SCAN_FOCUS)",
     )
+    resource_scan_interval_minutes: int = Field(
+        default=60,
+        description="Interval of the seeded resource-scan schedule (AIOPS_RESOURCE_SCAN_INTERVAL_MINUTES)",
+    )
 
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(

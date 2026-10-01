@@ -151,6 +151,10 @@ notifications_enabled: true
 notifications_consolidated: false
 issue_exclude_patterns: []
 scan_focus: all
+# The resource-scan schedule (seeded once at startup) runs the POST /api/scan scan this often, so a resource gone
+# from a completely listed type and region is marked absent within one interval. Edit or disable the row in
+# Schedules; a changed value here only applies to a fresh seed.
+resource_scan_interval_minutes: 60
 alert_pipeline_mode: both
 # Alert-webhook token (MVP-2.6.1). Set the real value via AIOPS_WEBHOOK_SECRET — never commit one here.
 # Empty = POST /api/webhooks/alert* is not token-checked (startup WARNING).

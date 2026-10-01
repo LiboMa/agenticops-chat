@@ -181,6 +181,11 @@ async def lifespan(app: FastAPI):
             seed_discovery_schedule()   # no-op while k8s_connector_enabled is false or the row exists
         except Exception:
             logger.debug("k8s: discovery schedule seed skipped", exc_info=True)
+        try:
+            from agenticops.scanner.scheduled import seed_scan_schedule
+            seed_scan_schedule()   # no-op when the row exists
+        except Exception:
+            logger.debug("scan: resource-scan schedule seed skipped", exc_info=True)
         if settings.security_review_enabled:
             try:
                 from agenticops.scheduler.scheduler import Scheduler as _SSched, Schedule as _SSchedule
