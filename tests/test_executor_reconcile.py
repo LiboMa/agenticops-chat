@@ -78,7 +78,7 @@ def _change_run(db, *, account=True, plan_status="executing", cr_status="executi
     return cr.id, plan.id, ex_id
 
 
-def _fix_run(db, plan_status="executing", ticket_status="running", *, account_id=None):
+def _fix_run(db, plan_status="executing", ticket_status="running", *, account_id=None, post_checks=None):
     """A fix plan and its ticket, the tests/test_run_context_entrypoints.py::_approved_plan shapes →
     (issue_id, plan_id, ex_id). ticket_status=None inserts no ticket (ex_id None)."""
     issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved",
@@ -87,7 +87,7 @@ def _fix_run(db, plan_status="executing", ticket_status="running", *, account_id
     rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
     db.add(rca); db.flush()
     plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s",
-                   status=plan_status, approved_by="user:alice")
+                   status=plan_status, approved_by="user:alice", post_checks=post_checks or [])
     db.add(plan); db.flush()
     _as_approved(db, plan)
     ex_id = None
@@ -205,9 +205,9 @@ def test_a_fix_run_closes_its_own_ticket_in_place(db):
 
 def test_the_plan_not_the_agent_names_the_issue_a_result_resolves(db, caplog):
     from agenticops.models import PipelineEvent
-    issue_id, pid, ex_id = _fix_run(db)
+    issue_id, pid, ex_id = _fix_run(db, post_checks=[{"check": "c"}])  # a passing post-check resolves it
     other_id, _, _ = _fix_run(db, plan_status="approved", ticket_status=None)  # another fix_approved issue
-    fake, seen = _recorder("succeeded", health_issue_id=other_id)  # the agent names the wrong issue
+    fake, seen = _recorder("succeeded", health_issue_id=other_id, post_check_results=PASSED)  # the wrong issue
     with caplog.at_level(logging.WARNING, logger="agenticops.tools.metadata_tools"), \
          patch("agenticops.services.resolution_service.trigger_post_resolution") as post, \
          patch("agenticops.services.notification_service.notify_execution_result") as notify, \
@@ -629,15 +629,16 @@ def test_after_a_recorded_result_a_cancel_and_a_timeout_write_nothing(db):
 def test_two_overlapping_mapper_calls_leave_one_terminal_and_one_audit_row(db, caplog):
     from agenticops.services import change_service
     cr_id, pid, _ = _change_run(db)
-    real = change_service._post_checks_passed
+    real = change_service.evaluate
 
-    def a_failure_lands_meanwhile(post_checks, results):  # the 1st call has read the request as executing
-        verdict = real(post_checks, results)
-        change_service.on_execution_result(pid, "failed", error="Execution timed out after 7s")  # commits first
+    def a_failure_lands_meanwhile(*args):  # the 1st call has read the request as executing
+        verdict = real(*args)
+        if args[0] == "succeeded":
+            change_service.on_execution_result(pid, "failed", error="Execution timed out after 7s")  # commits first
         return verdict
 
     with caplog.at_level(logging.WARNING, logger="agenticops.services.change_service"), \
-         patch.object(change_service, "_post_checks_passed", side_effect=a_failure_lands_meanwhile):
+         patch.object(change_service, "evaluate", side_effect=a_failure_lands_meanwhile):
         snap = change_service.on_execution_result(pid, "succeeded",
                                                   post_check_results=[{"check": "c", "status": "pass"}])
     db.expire_all()

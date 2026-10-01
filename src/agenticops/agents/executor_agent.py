@@ -91,7 +91,7 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
 5. POST-CHECK
    For each item in the plan's post_checks list:
    - Execute the verification using the appropriate read-only tool.
-   - Record the result.
+   - Record one result per post-check, in order, with status passed / failed / warning.
    - Post-check failures do NOT trigger rollback, but must be reported.
 
 6. ROLLBACK (only if step 4 failed)
@@ -101,7 +101,7 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
 
 7. FINALIZE
    Call save_execution_result with all collected results:
-   - status: "succeeded" (all steps + post-checks passed)
+   - status: "succeeded" (every step succeeded; the platform verifies the post-check results)
             "failed" (step failed, rollback attempted)
             "rolled_back" (step failed, rollback succeeded)
             "aborted" (pre-check failed)

@@ -181,11 +181,17 @@ class TestTerminalMapper:
     def test_mapping(self, db, status, results, expected):
         from agenticops.services import change_service as cs
         cr_id, plan_id = _executing(db)
-        with patch.object(cs, "notify_change_result") as notify:
+        with patch.object(cs, "notify_change_result") as notify, \
+             patch.object(cs, "notify_execution_pending_acceptance") as pending:
             out = cs.on_execution_result(plan_id, status, post_check_results=results)
         assert out["status"] == expected
-        notify.assert_called_once()
-        assert notify.call_args.args[1] == expected
+        if status == "succeeded" and not results:  # pending acceptance: its own notification, not change_result
+            notify.assert_not_called()
+            assert pending.call_args.args[1] == "post-check results missing or incomplete"
+        else:
+            pending.assert_not_called()
+            notify.assert_called_once()
+            assert notify.call_args.args[1] == expected
         if expected in ("completed", "failed", "rolled_back"):
             assert out["closed_at"] is not None
 

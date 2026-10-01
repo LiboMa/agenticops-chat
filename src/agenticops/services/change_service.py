@@ -23,13 +23,15 @@ from agenticops.auth.actor import Actor, agent_actor, webhook_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
-    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixPlan, InvalidStatusTransition,
-    get_db_session, transition_change, transition_plan,
+    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixExecution, FixPlan,
+    InvalidStatusTransition, get_db_session, transition_change, transition_plan,
 )
 from agenticops.services.inventory import PRESENT
 from agenticops.services.notification_service import (  # noqa: F401  (pending_approval: approval stage)
     notify_change_pending_approval, notify_change_requested, notify_change_result,
+    notify_execution_pending_acceptance,
 )
+from agenticops.services.verification import FAILED, PASSED, PENDING, evaluate
 from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
 from agenticops.services.pipeline_events import log_event
 from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
@@ -1147,29 +1149,13 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
     return {"execution_id": execution_id, "fix_plan_id": plan_id, "change": snap}
 
 
-_PASS_VALUES = {"pass", "passed", "ok", "succeeded", "success", "true"}
-
-
-def _post_checks_passed(post_checks: list, results: Optional[list]) -> Optional[bool]:
-    """True = all pass, False = a failure, None = results missing/incomplete (→ needs_review)."""
-    if not post_checks:
-        return None
-    results = results or []
-    if len(results) < len(post_checks):
-        return None
-    for item in results:
-        if isinstance(item, dict):
-            status = item.get("status", item.get("result", item.get("passed")))
-        else:
-            status = item
-        if str(status).lower() not in _PASS_VALUES:
-            return False
-    return True
-
-
 def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_results: Optional[list] = None,
-                        error: str = "") -> Optional[dict]:
+                        step_results: Optional[list] = None, error: str = "") -> Optional[dict]:
     """The ONLY writer of completed / needs_review / failed / rolled_back. Deterministic; no LLM input.
+
+    The verdict is verification.evaluate's: passed → completed; a run that did not succeed keeps its 2.6.0
+    mapping (rolled_back / failed); a succeeded run with a failed post-check, or one pending acceptance, →
+    needs_review with the verification reason (the latter notifies execution_pending_acceptance).
 
     An IDEMPOTENT executor callback, not a human action: no _check, but a _claim of executing → the terminal.
     The `!= executing` guard returns the current snapshot (never raises) so a re-delivered callback is a safe
@@ -1183,15 +1169,13 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
         if cr.status != "executing":
             logger.warning("on_execution_result: CR #%d is '%s', ignoring result %s", cr.id, cr.status, execution_status)
             return to_dict(cr)
-        if execution_status == "succeeded":
-            verdict = _post_checks_passed(list(plan.post_checks or []), post_check_results)
-            new_status = "completed" if verdict is True else "needs_review"
-            reason = "all post-checks passed" if verdict is True else (
-                "post-check failed" if verdict is False else "post-check results missing or incomplete")
-        elif execution_status == "rolled_back":
-            new_status, reason = "rolled_back", error or "execution rolled back"
-        else:  # failed | aborted | anything else
-            new_status, reason = "failed", error or f"execution {execution_status}"
+        verdict, reason = evaluate(execution_status, plan.post_checks, post_check_results, step_results, error)
+        if verdict == PASSED:
+            new_status = "completed"
+        elif execution_status == "succeeded":  # a failed post-check or pending acceptance: a human decides
+            new_status = "needs_review"
+        else:  # rolled_back | failed | aborted | anything else
+            new_status = "rolled_back" if execution_status == "rolled_back" else "failed"
         if not _claim(s, cr.id, "executing", new_status):
             logger.warning("on_execution_result: CR #%d lost the executing claim to a concurrent result, "
                            "ignoring result %s", cr.id, execution_status)
@@ -1209,12 +1193,18 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
                                   "post_check_results": (post_check_results or [])[:20]},
                          old_values={"status": "executing"}, new_values={"status": new_status}, session=s)
         snap = to_dict(cr)
+        execution_id = (s.query(FixExecution.id).filter_by(fix_plan_id=fix_plan_id)
+                        .order_by(FixExecution.id.desc()).limit(1).scalar())
     _event(snap["id"], "execution_completed", "execution", new_status,
-           detail={"plan_id": fix_plan_id, "execution_status": execution_status, "reason": reason}, actor=actor_key, trace_id=snap["trace_id"])
+           detail={"plan_id": fix_plan_id, "execution_status": execution_status, "reason": reason,
+                   "verification": verdict}, actor=actor_key, trace_id=snap["trace_id"])
     try:
-        notify_change_result(snap, new_status)
+        if verdict == PENDING and execution_id is not None:
+            notify_execution_pending_acceptance(execution_id, reason, cr=snap)
+        else:
+            notify_change_result(snap, new_status)
     except Exception:
-        logger.debug("notify_change_result failed", exc_info=True)
+        logger.debug("change result notification failed", exc_info=True)
     return snap
 
 
@@ -1232,8 +1222,17 @@ def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> di
         if not _claim(s, cr_id, "needs_review", outcome):
             raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
         _transition(cr, outcome)
+        # The human verdict is also the acceptance of the run it reviewed (one transaction with the terminal)
+        pending = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
+                   .filter(FixPlan.change_request_id == cr_id, FixExecution.verification_status == PENDING)
+                   .order_by(FixExecution.id.desc()).first())
+        if pending is not None:
+            pending.verification_status = PASSED if outcome == "completed" else FAILED
+            pending.accepted_by, pending.accepted_at, pending.acceptance_note = (
+                actor.key, datetime.now(timezone.utc), reason)
         action = Actions.CHANGE_COMPLETED if outcome == "completed" else Actions.CHANGE_FAILED
-        _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True},
+        _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True,
+                                              "execution_id": pending.id if pending is not None else None},
                old_status="needs_review", new_status=outcome)
         snap = to_dict(cr)
     _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])

@@ -436,9 +436,20 @@ class FixExecutionResponse(BaseModel):
     rollback_results: list
     error_message: Optional[str]
     duration_ms: int
+    verification_status: Optional[str] = None
+    verification_reason: Optional[str] = None
+    accepted_by: Optional[str] = None
+    accepted_at: Optional[datetime] = None
+    acceptance_note: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExecutionAcceptBody(BaseModel):
+    """A human's verdict on an execution pending acceptance; the identity is the authenticated session."""
+    decision: str = Field(..., pattern="^(accepted|rejected)$")
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 # ============================================================================

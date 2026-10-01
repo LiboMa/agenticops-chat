@@ -1655,6 +1655,7 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
   /fix show <plan_id>              Show fix plan details
   /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
   /execute <plan_id|C<id>>         Execute an approved fix plan or change
+  /accept <I<id>|C<id>> yes|no <reason...>  Accept or reject a run pending acceptance as cli:<user>
 
 [cyan]Changes:[/cyan]
   /change <description> [--account NAME] [--emergency]  Open a change request; SRE reviews it now
@@ -2453,6 +2454,46 @@ def _slash_reject(ctx: ChatContext, args: list) -> str:
     except cs.ChangeError as e:
         return f"[red]{_safe_text(e)}[/red]"
     return f"[green]Change C#{cr_id} rejected ({out['status']}).[/green]"
+
+
+def _slash_accept(ctx: ChatContext, args: list) -> str:
+    """Handle /accept <I<id>|C<id>> yes|no <reason...> — a human verdict on a run pending acceptance.
+
+    I<id>: the issue's latest execution pending acceptance (the issue → resolved | root_cause_identified).
+    C<id>: the change's needs_review verdict (→ completed | failed), the same path as resolve-review.
+    The actor is the OS user (cli:<user>); the reason is required and audited.
+    """
+    from agenticops.auth.actor import cli_actor
+    ref = args[0].strip().upper() if args else ""
+    decision = {"yes": "accepted", "no": "rejected"}.get(args[1].lower()) if len(args) > 1 else None
+    reason = " ".join(args[2:]).strip()
+    usage = "[yellow]Usage: /accept <I<id>|C<id>> yes|no <reason...>[/yellow]"
+    if not re.fullmatch(r"[IC]#?\d+", ref, re.ASCII) or decision is None or not reason:
+        return usage
+    ref_id = int(ref.lstrip("IC#"))
+    init_db()
+    if ref.startswith("C"):
+        if not settings.change_management_enabled:
+            return _CHANGE_DISABLED
+        from agenticops.services import change_service as cs
+        try:
+            out = cs.resolve_review(ref_id, actor=cli_actor(), reason=reason,
+                                    outcome="completed" if decision == "accepted" else "failed")
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        return f"[green]Change C#{ref_id} {decision} ({out['status']}).[/green]"
+    from agenticops.services.verification import PENDING, AcceptanceError, accept_execution
+    with get_db_session() as s:
+        execution_id = (s.query(FixExecution.id)
+                        .filter_by(health_issue_id=ref_id, verification_status=PENDING)
+                        .order_by(FixExecution.id.desc()).limit(1).scalar())
+    if execution_id is None:
+        return f"[yellow]Issue I#{ref_id} has no execution pending acceptance.[/yellow]"
+    try:
+        out = accept_execution(execution_id, actor=cli_actor(), decision=decision, reason=reason)
+    except AcceptanceError as e:
+        return f"[red]{_safe_text(e)}[/red]"
+    return f"[green]Execution #{execution_id} {decision}; issue I#{ref_id} is {out['status']}.[/green]"
 
 
 def _slash_approve(ctx: ChatContext, args: list) -> str:
@@ -3740,6 +3781,7 @@ SLASH_COMMANDS = {
     "fixplan": _slash_fix,
     "fixplans": _slash_fix,
     "approve": _slash_approve,
+    "accept": _slash_accept,
     "execute": _slash_execute,
     "exec": _slash_execute,
 

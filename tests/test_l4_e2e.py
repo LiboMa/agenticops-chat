@@ -307,8 +307,8 @@ class TestL4Lifecycle:
         assert plan.status == "executed"
 
     def test_execution_failure_sends_the_issue_back_for_a_new_plan(self, seed_data):
-        """A failed run moves the issue with its plan (fix_executing); mark_fix_failed then sends it back to
-        root_cause_identified, where a new fix plan can be made (MVP-2.6.1)."""
+        """A failed run fails verification and sends the issue back to root_cause_identified, where a new fix
+        plan can be made; the executor's mark_fix_failed afterwards is a no-op (MVP-2.6.1)."""
         session = seed_data["session"]
         plan = seed_data["plan"]
         issue = seed_data["issue"]
@@ -335,8 +335,8 @@ class TestL4Lifecycle:
         assert "failed" in result.lower()
 
         session.refresh(issue)
-        # Issue should NOT be auto-resolved on failure
-        assert issue.status == "fix_executing"
+        # Issue should NOT be auto-resolved on failure: verification failed sends it back for a new plan
+        assert issue.status == "root_cause_identified"
 
         session.refresh(plan)
         assert plan.status == "failed"

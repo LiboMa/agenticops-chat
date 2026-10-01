@@ -2858,6 +2858,20 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
 
+@app.post("/api/fix-executions/{execution_id}/accept", response_model=FixExecutionResponse)
+async def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Actor = Depends(current_actor)):
+    """Accept or reject an execution pending acceptance (MVP-2.6.1): a fix moves its issue (fix_executed →
+    resolved | root_cause_identified), a change goes through the change's resolve-review. The identity is the
+    session's actor; authorized as the plan kind's approval, so a webhook actor is 403 even in shadow mode."""
+    from agenticops.services.verification import AcceptanceError, accept_execution
+    try:
+        accept_execution(execution_id, actor=actor, decision=data.decision, reason=data.reason)
+    except AcceptanceError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    with get_db_session() as session:
+        return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
+
+
 @app.get("/api/executor/status")
 async def api_executor_status():
     """Get executor service status."""

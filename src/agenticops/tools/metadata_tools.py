@@ -1409,7 +1409,11 @@ def save_execution_result(
     duration_ms: int = 0,
     executed_by: str = "executor_agent",
 ) -> str:
-    """Create a FixExecution record and update FixPlan status.
+    """Create a FixExecution record, update FixPlan status and verify the result.
+
+    The verification verdict (passed / failed / pending_acceptance) is computed from the results and the plan's
+    post-checks, and moves the HealthIssue: passed → resolved, pending_acceptance → fix_executed (a human
+    accepts or rejects it), failed → root_cause_identified.
 
     Args:
         fix_plan_id: The FixPlan ID that was executed.
@@ -1468,16 +1472,23 @@ def save_execution_result(
             logger.warning("save_execution_result: ignoring health_issue_id=%s — FixPlan #%d belongs to HealthIssue #%s",
                            health_issue_id, fix_plan_id, issue_id)
 
+        # Verification (spec §3.D.4): one verdict from the run's own results and the plan's post-checks
+        from agenticops.services.verification import FAILED, PASSED, PENDING, evaluate
+        parsed_steps, parsed_post = _parse_json(step_results, []), _parse_json(post_check_results, [])
+        verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message)
+
         now = datetime.now(timezone.utc)
         fields = dict(
             status=status,
             completed_at=now,
             pre_check_results=_parse_json(pre_check_results, []),
-            step_results=_parse_json(step_results, []),
-            post_check_results=_parse_json(post_check_results, []),
+            step_results=parsed_steps,
+            post_check_results=parsed_post,
             rollback_results=_parse_json(rollback_results, []),
             error_message=error_message or None,
             duration_ms=duration_ms,
+            verification_status=verdict,
+            verification_reason=why,
         )
         # The queued run's own ticket (ExecutorService claimed it pending→running and named it in the Run
         # Context) is closed IN PLACE — one row per queued execution; it keeps executed_by (the requester),
@@ -1512,6 +1523,7 @@ def save_execution_result(
                 **fields,
             )
             session.add(execution)
+            session.flush()  # its id names the result (and a dispute) below
 
         # Update FixPlan status through the state machine (approved → executing → terminal).
         # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
@@ -1523,28 +1535,33 @@ def save_execution_result(
             transition_plan(plan, terminal)
         elif plan.status == "executing":
             transition_plan(plan, "failed")  # aborted mid-run: an executing plan can never run again
+        # The verdict moves the issue: passed → resolved (executor_auto_resolve; otherwise it waits at
+        # fix_executed), pending_acceptance → fix_executed for a human, failed → root_cause_identified (a new
+        # plan can be made) with its RCA disputed. A run that never started its plan moves nothing (retry).
+        issue_status, disputed = None, None
         if ran and not is_change and issue_id:
             # A chat / auto-pipeline run has no execute call that moved the issue with its plan: catch it up.
             advance_issue(session, issue_id, "fix_executing", actor=_tool_actor(),
                           reason=f"FixPlan #{fix_plan_id} executing")
-
-        # Auto-resolve HealthIssue on success and trigger post-resolution pipeline.
-        # DESIGN NOTE: Successful execution transitions directly from fix_executing → resolved,
-        # intentionally skipping fix_executed. The FixExecution table tracks execution detail,
-        # while HealthIssue.status tracks the lifecycle. Controlled by executor_auto_resolve flag.
-        auto_resolved = False
-        if status == "succeeded" and settings.executor_auto_resolve and not is_change:
-            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-            if issue and issue.status in ("fix_approved", "fix_executing", "fix_executed"):
-                auto_resolved = advance_issue(session, issue_id, "resolved", actor=_tool_actor(),
-                                              reason=f"FixPlan #{fix_plan_id} executed") is None
+            target = {PASSED: "resolved" if settings.executor_auto_resolve else "fix_executed",
+                      PENDING: "fix_executed", FAILED: "root_cause_identified"}[verdict]
+            if advance_issue(session, issue_id, target, actor=_tool_actor(),
+                             reason=f"verification {verdict}: {why}") is None:
+                issue_status = target
+            if verdict == FAILED:
+                disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
+        execution_ref = rc.execution_id or execution.id
+        auto_resolved = issue_status == "resolved"
 
         session.commit()
+        if disputed is not None:
+            log_rca_disputed(issue_id, disputed.id, execution_ref, why)
 
         # Log pipeline event (against the CR for a change plan, else the issue)
         try:
             from agenticops.services.pipeline_events import log_event
-            detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved}
+            detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved,
+                      "verification": verdict}
             if is_change:
                 log_event(None, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms,
                           change_request_id=change_request_id)
@@ -1567,8 +1584,7 @@ def save_execution_result(
         if is_change:
             try:
                 from agenticops.services.change_service import on_execution_result
-                on_execution_result(fix_plan_id, status,
-                                    post_check_results=_parse_json(post_check_results, []),
+                on_execution_result(fix_plan_id, status, post_check_results=parsed_post, step_results=parsed_steps,
                                     error=error_message)
             except Exception:
                 logger.warning("change on_execution_result failed for FixPlan #%d", fix_plan_id, exc_info=True)
@@ -1581,15 +1597,22 @@ def save_execution_result(
                     f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{issue_id} (Plan #{fix_plan_id})"
                     + (f": {error_message[:200]}" if error_message else ""),
                 )
+                if verdict == PENDING and issue_status == "fix_executed":
+                    from agenticops.services.notification_service import notify_execution_pending_acceptance
+                    notify_execution_pending_acceptance(execution_ref, why, issue_id=issue_id)
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
 
         msg = (
-            f"FixExecution #{execution.id if execution is not None else rc.execution_id} saved for FixPlan #{fix_plan_id}. "
-            f"Status: {status}. FixPlan status updated to '{plan.status}'."
+            f"FixExecution #{execution_ref} saved for FixPlan #{fix_plan_id}. "
+            f"Status: {status}. FixPlan status updated to '{plan.status}'. Verification: {verdict} ({why})."
         )
         if auto_resolved:
             msg += f" HealthIssue #{issue_id} auto-resolved. Post-resolution pipeline triggered."
+        elif issue_status == "fix_executed" and verdict == PENDING:
+            msg += f" HealthIssue #{issue_id} is fix_executed, awaiting human acceptance."
+        elif issue_status == "root_cause_identified":
+            msg += f" HealthIssue #{issue_id} is back at root_cause_identified (a new fix plan can be made)."
         return msg
     except Exception as e:
         session.rollback()
@@ -1639,6 +1662,9 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
                     f"#{health_issue_id}'s executed plan marks it fix_executed.")
 
         old_status = issue.status
+        if execution.verification_status == "failed":
+            return (f"HealthIssue #{health_issue_id} stays '{old_status}': Execution #{execution_id} failed "
+                    f"verification ({execution.verification_reason}). No status change.")
 
         # If already auto-resolved by save_execution_result(), don't overwrite
         if old_status == "resolved":
@@ -1658,15 +1684,45 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
             return f"HealthIssue #{health_issue_id} status unchanged: {e}"
         session.commit()
 
-        return (
-            f"HealthIssue #{health_issue_id} status: {old_status} -> fix_executed. "
-            f"Execution #{execution_id} recorded."
-        )
+        msg = (f"HealthIssue #{health_issue_id} status: {old_status} -> fix_executed. "
+               f"Execution #{execution_id} recorded.")
+        if execution.verification_status == "pending_acceptance":
+            msg += f" Awaiting human acceptance: {execution.verification_reason}."
+        return msg
     except Exception as e:
         session.rollback()
         return f"Error marking fix executed: {e}"
     finally:
         session.close()
+
+
+def dispute_rca(session, health_issue_id: int, execution_id: int, reason: str = "") -> Optional[RCAResult]:
+    """Execution-failure feedback (MVP-2.2.0): a failed fix disputes the RCA it was based on — surfaced on the
+    latest RCAResult for review, once per execution. Returns the disputed RCA (None = none, or already noted);
+    the caller commits, then calls log_rca_disputed."""
+    rca = (
+        session.query(RCAResult)
+        .filter_by(health_issue_id=health_issue_id)
+        .order_by(RCAResult.created_at.desc())
+        .first()
+    )
+    note = f"Fix execution #{execution_id} failed"
+    if rca is None or note in (rca.critic_notes or ""):
+        return None
+    rca.critic_verdict = "disputed_by_execution"
+    if reason:
+        note += f": {reason}"
+    rca.critic_notes = ((rca.critic_notes + "\n") if rca.critic_notes else "") + note
+    return rca
+
+
+def log_rca_disputed(health_issue_id: int, rca_id: int, execution_id: int, reason: str = "") -> None:
+    try:
+        from agenticops.services.pipeline_events import log_event
+        log_event(health_issue_id, "rca_disputed", "rca",
+                  detail={"rca_id": rca_id, "execution_id": execution_id, "reason": (reason or "")[:200]})
+    except Exception:
+        pass
 
 
 @tool
@@ -1698,40 +1754,22 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             return f"FixExecution #{execution_id} not found."
 
         plan = session.query(FixPlan).filter_by(id=execution.fix_plan_id).first()
-        if plan is not None and plan.status in ("failed", "rejected"):
+        # An ended plan, or a run whose verification failed (an executed plan with a failed post-check)
+        if plan is not None and (plan.status in ("failed", "rejected")
+                                 or (plan.status == "executed" and execution.verification_status == "failed")):
             refusal = advance_issue(session, issue.id, "root_cause_identified", actor=_tool_actor(),
                                     reason=f"Execution #{execution_id} failed" + (f": {reason}" if reason else ""))
             outcome = (f"stays '{issue.status}' ({refusal})" if refusal
                        else "is back at 'root_cause_identified' (a new fix plan can be made)")
         else:
+            state = plan.status if plan else "missing"
             outcome = (f"stays '{issue.status}' (FixPlan #{execution.fix_plan_id} is "
-                       f"'{plan.status if plan else 'missing'}'; retry allowed)")
+                       f"'{state}'{'; retry allowed' if state == 'approved' else ''})")
 
-        # Execution-failure feedback (MVP-2.2.0): a failed fix disputes the
-        # RCA it was based on — surface that on the RCAResult for review. Once per execution.
-        rca = (
-            session.query(RCAResult)
-            .filter_by(health_issue_id=health_issue_id)
-            .order_by(RCAResult.created_at.desc())
-            .first()
-        )
-        disputed = rca is not None and f"Fix execution #{execution_id} failed" not in (rca.critic_notes or "")
-        if disputed:
-            rca.critic_verdict = "disputed_by_execution"
-            note = f"Fix execution #{execution_id} failed"
-            if reason:
-                note += f": {reason}"
-            rca.critic_notes = ((rca.critic_notes + "\n") if rca.critic_notes else "") + note
+        rca = dispute_rca(session, health_issue_id, execution_id, reason)
         session.commit()
-
-        if disputed:
-            try:
-                from agenticops.services.pipeline_events import log_event
-                log_event(health_issue_id, "rca_disputed", "rca",
-                          detail={"rca_id": rca.id, "execution_id": execution_id,
-                                  "reason": (reason or "")[:200]})
-            except Exception:
-                pass
+        if rca is not None:
+            log_rca_disputed(health_issue_id, rca.id, execution_id, reason)
 
         msg = f"HealthIssue #{health_issue_id} {outcome}. Execution #{execution_id} failed"
         if reason:

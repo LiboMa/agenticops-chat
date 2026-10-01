@@ -73,6 +73,8 @@ class Actions:
     PLAN_EDITED = "plan.edited"
     PLAN_EXECUTE_REQUESTED = "plan.execute_requested"
     PLAN_EXECUTION_CANCELLED = "plan.execution_cancelled"
+    EXECUTION_ACCEPTED = "execution.accepted"  # MVP-2.6.1: a human accepted / rejected a fix result
+    EXECUTION_REJECTED = "execution.rejected"
     AUTHZ_DENIED = "authz.denied"
     AUTHZ_DENIED_SHADOW = "authz.denied_shadow"
 

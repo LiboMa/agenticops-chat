@@ -758,6 +758,14 @@ class FixExecution(Base):
     rollback_results: Mapped[list] = mapped_column(JSON, default=list)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(default=0)
+    # MVP-2.6.1 verification (services/verification.py): passed | failed | pending_acceptance, and why.
+    # NULL = no verdict (a run closed without a result: cancel / watchdog / crash, or a pre-2.6.1 row).
+    verification_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    verification_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The human acceptance of a pending_acceptance run (the identity-bound actor key, when, and why)
+    accepted_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    acceptance_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -1447,6 +1455,8 @@ _ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
                   "approved_version": None},
     "change_requests": {"proposed_steps": None, "external_ref": None, "external_system": None,
                         "external_ticket_id": None, "steps_diff": None, "needs_review_reason": None},
+    "fix_executions": {"verification_status": None, "verification_reason": None, "accepted_by": None,
+                       "accepted_at": None, "acceptance_note": None},
 }
 
 _INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)

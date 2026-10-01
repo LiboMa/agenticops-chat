@@ -325,6 +325,24 @@ def notify_change_result(cr: dict, outcome: str) -> None:
     )
 
 
+def notify_execution_pending_acceptance(execution_id: int, reason: str, *, issue_id: Optional[int] = None,
+                                        cr: Optional[dict] = None) -> None:
+    """Notify: a run succeeded but its verification could not pass it — a human accepts or rejects it
+    (MVP-2.6.1). One of `issue_id` (a fix) / `cr` (a change snapshot) names what the run belongs to."""
+    reason = " ".join(str(reason or "").split())[:500]
+    if cr is not None:
+        owner, link = f"Change #{cr['id']}", _change_link(cr["id"])
+    else:
+        owner, link = f"Issue #{issue_id}", f"{settings.web_base_url.rstrip('/')}/app/issues/{issue_id}"
+    notify_event(
+        "execution_pending_acceptance",
+        f"[ACCEPTANCE] {owner}: execution #{execution_id} needs acceptance",
+        (f"Execution #{execution_id} of {owner} succeeded, but its verification is pending.\n\n"
+         f"Reason: {reason}\nAccept or reject: {link}"),
+        "high",
+    )
+
+
 def notify_report_saved(
     report_id: int, report_type: str, title: str
 ) -> None:

@@ -44,6 +44,8 @@ _NEW_RCA_COLUMNS = {"location", "location_status", "location_build_id", "locatio
 _NEW_PLAN_COLUMNS = {"plan_version", "content_hash", "approved_hash", "approved_version"}
 _NEW_CHANGE_COLUMNS = {"proposed_steps", "external_ref", "external_system", "external_ticket_id", "steps_diff",
                        "needs_review_reason"}
+_NEW_EXECUTION_COLUMNS = {"verification_status", "verification_reason", "accepted_by", "accepted_at",
+                          "acceptance_note"}
 
 # A 2.6.0 fix_plans table (no plan-identity columns): plan 1 approved before the upgrade, plan 2 still a draft
 OLD_PLANS = """
@@ -71,10 +73,20 @@ INSERT INTO change_requests (id, title, description, justification, source, requ
   target_resources, requested_change_type, status, review_reasons, review_attempt)
   VALUES (1, 'tag web', 'add Env=prod', '', 'web', 'user:alice', 1, '["i-0abc"]', '[]', 'normal', 'planned', '[]', 1);
 """
+# A 2.6.0 fix_executions table (no verification columns) with one finished run
+OLD_EXECUTIONS = """
+CREATE TABLE fix_executions (id INTEGER PRIMARY KEY, fix_plan_id INTEGER, health_issue_id INTEGER, status VARCHAR(30),
+  started_at DATETIME, completed_at DATETIME, executed_by VARCHAR(255), pre_check_results JSON, step_results JSON,
+  post_check_results JSON, rollback_results JSON, error_message TEXT, duration_ms INTEGER, created_at DATETIME);
+INSERT INTO fix_executions (id, fix_plan_id, health_issue_id, status, executed_by, pre_check_results, step_results,
+  post_check_results, rollback_results, duration_ms)
+  VALUES (1, 1, 1, 'succeeded', 'executor_agent', '[]', '[]', '[]', '[]', 1200);
+"""
 _MIGRATION_DDL = re.compile(
     r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since"
     r"|content_changed_at|rules_published_at|location\w*|plan_version|content_hash|approved_hash|approved_version"
-    r"|proposed_steps|external_ref|external_system|external_ticket_id|steps_diff|needs_review_reason)"
+    r"|proposed_steps|external_ref|external_system|external_ticket_id|steps_diff|needs_review_reason"
+    r"|verification_status|verification_reason|accepted_by|accepted_at|acceptance_note)"
     r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status|idx_change_request_external",
     re.I,
 )
@@ -195,7 +207,8 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     pg = postgresql.dialect()
     stub = _StubInspector(
         {"health_issues": [{"name": "id"}], "cloud_resources": [{"name": "id"}], "galaxy_builds": [{"name": "id"}],
-         "rca_results": [{"name": "id"}], "fix_plans": [{"name": "id"}], "change_requests": [{"name": "id"}]},
+         "rca_results": [{"name": "id"}], "fix_plans": [{"name": "id"}], "change_requests": [{"name": "id"}],
+         "fix_executions": [{"name": "id"}]},
         {},
     )
     stmts = _statements_2_6_1(stub, pg)
@@ -211,6 +224,9 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS proposed_steps JSON" in stmts
     assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS external_system VARCHAR(50)" in stmts
     assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS needs_review_reason TEXT" in stmts
+    assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS verification_status VARCHAR(30)" in stmts
+    assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP WITHOUT TIME ZONE" in stmts
+    assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS acceptance_note TEXT" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
     assert ("CREATE INDEX IF NOT EXISTS idx_change_request_external ON change_requests(external_system, "
@@ -318,4 +334,27 @@ def test_adds_the_change_request_columns_and_keeps_the_request(old_db_with_chang
         row = c.execute(text("SELECT title, status, proposed_steps, external_ref, external_system, "
                              "external_ticket_id, steps_diff, needs_review_reason FROM change_requests")).one()
     assert tuple(row) == ("tag web", "planned", None, None, None, None, None, None)
+    assert _statements_2_6_1(inspect(engine), engine.dialect) == []
+
+
+@pytest.fixture
+def old_db_with_executions(old_db):
+    con = sqlite3.connect(old_db)
+    con.executescript(OLD_EXECUTIONS)
+    con.commit()
+    con.close()
+    return old_db
+
+
+def test_adds_the_verification_columns_and_keeps_the_run(old_db_with_executions):
+    """Spec §3.D.4: a 2.6.0 run gains the verification / acceptance columns, all NULL (no verdict — it is
+    never re-judged); the run itself is untouched."""
+    from agenticops.models import _statements_2_6_1
+
+    engine = _run_init_db(old_db_with_executions)
+    assert _NEW_EXECUTION_COLUMNS <= _cols(engine, "fix_executions")
+    with engine.connect() as c:
+        row = c.execute(text("SELECT status, duration_ms, verification_status, verification_reason, accepted_by, "
+                             "accepted_at, acceptance_note FROM fix_executions")).one()
+    assert tuple(row) == ("succeeded", 1200, None, None, None, None, None)
     assert _statements_2_6_1(inspect(engine), engine.dialect) == []

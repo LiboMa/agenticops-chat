@@ -210,6 +210,7 @@ def test_needs_review_records_why_and_the_notification_says_it(db):
     with patch.object(ns, "notify_event") as sent:
         out = cs.on_execution_result(plan_id, "succeeded", post_check_results=[])
     assert (out["status"], out["needs_review_reason"]) == ("needs_review", "post-check results missing or incomplete")
+    assert sent.call_args.args[0] == "execution_pending_acceptance"  # pending acceptance says why too (§3.D.4)
     body = sent.call_args.args[2]
     assert "Reason: post-check results missing or incomplete\n" in body
 
