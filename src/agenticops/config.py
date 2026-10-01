@@ -830,6 +830,11 @@ class Settings(BaseSettings):
         default=600,
         description="SRE change-review watchdog; on timeout the request returns to draft with a review_failed event (AIOPS_CHANGE_REVIEW_TIMEOUT_SECONDS)",
     )
+    change_intake_secret: str = Field(
+        default="",
+        description="HMAC secret for POST /api/changes/intake (external systems); empty = the endpoint is 404 "
+                    "(AIOPS_CHANGE_INTAKE_SECRET)",
+    )
 
     # ── ITSM Bridge (MVP-2.0.0) ─────────────────────────────────────
     itsm_enabled: bool = Field(

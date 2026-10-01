@@ -4351,6 +4351,9 @@ class APIAuthMiddleware(BaseHTTPMiddleware):
         # Alert intake carries its own shared-token / HMAC check once webhook_secret is set
         if settings.webhook_secret and _webhooks_router.is_webhook_intake(request.method, path):
             return await call_next(request)
+        # Change intake's HMAC is its authentication once change_intake_secret is set (unset, it is a 404)
+        if settings.change_intake_secret and _changes_router.is_change_intake(request.method, path):
+            return await call_next(request)
 
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):

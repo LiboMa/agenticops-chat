@@ -866,6 +866,19 @@ class ChangeRequestCreate(BaseModel):
     external_ref: Optional[ChangeExternalRef] = None
 
 
+class ChangeIntakeBody(BaseModel):
+    """POST /api/changes/intake (spec §3.D.3). `requested_by` is the external requester's claimed name, kept as
+    external_ref.requested_by — never an identity (the requester is webhook:<external_ref.system>)."""
+    title: str = Field(..., min_length=1, max_length=300)
+    description: str = Field(..., min_length=1, max_length=8000)
+    justification: str = Field("", max_length=2000)
+    account: Optional[str] = None
+    target_hints: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
+    proposed_steps: Optional[List[ChangeProposedStep]] = Field(None, max_length=50)
+    external_ref: ChangeExternalRef
+    requested_by: Optional[str] = Field(None, max_length=255)
+
+
 class ChangeRequestResponse(BaseModel):
     """Snapshot of a change request (from change_service.to_dict — timestamps are ISO strings)."""
     id: int

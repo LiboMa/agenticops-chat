@@ -5,20 +5,30 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from agenticops.auth.actor import Actor
+from agenticops.auth.signatures import verify_hmac_signature
 from agenticops.config import settings
 from agenticops.models import VALID_CHANGE_STATUSES, FixExecution, FixPlan, get_db_session
 from agenticops.services import change_service as cs
 from agenticops.services.pipeline_events import get_timeline
 from agenticops.web.deps import current_actor
 from agenticops.web.schemas import (
-    ChangeApproveBody, ChangeClarifyBody, ChangeReasonBody, ChangeRequestCreate, ChangeRequestDetail, ChangeRequestResponse,
+    ChangeApproveBody, ChangeClarifyBody, ChangeIntakeBody, ChangeReasonBody, ChangeRequestCreate, ChangeRequestDetail,
+    ChangeRequestResponse,
     ChangeResolveReviewBody, ChangeTimelineEntry, FixExecutionResponse, FixPlanResponse,
 )
 
 _PERIOD = {"7d": timedelta(days=7), "30d": timedelta(days=30), "90d": timedelta(days=90)}
+_INTAKE_PATH = "/api/changes/intake"
+
+
+def is_change_intake(method: str, path: str) -> bool:
+    """POST /api/changes/intake: its HMAC is its authentication, so APIAuthMiddleware lets it through."""
+    return method == "POST" and path == _INTAKE_PATH
 
 
 def _enabled() -> None:
@@ -54,6 +64,36 @@ async def api_create_change(data: ChangeRequestCreate, request: Request, actor: 
                  justification=data.justification, start_review=True,
                  proposed_steps=[step.model_dump() for step in data.proposed_steps] if data.proposed_steps else None,
                  external_ref=data.external_ref.model_dump(exclude_none=True) if data.external_ref else None)
+
+
+@router.post("/intake", response_model=ChangeRequestResponse, status_code=201,
+             responses={200: {"description": "The still-open request for the same external ticket"}})
+async def api_intake_change(request: Request, response: Response):
+    """An external system opens a change here (spec §3.D.3) — no UI by design; the request shows on the change pages.
+
+    404 until change_intake_secret is set. The raw body must be signed: X-AIOps-Signature: sha256=<hex HMAC-SHA256
+    of X-AIOps-Timestamp + "." + body>, the timestamp inside intake_signature_window_seconds — else 401. The
+    requester is webhook:<external_ref.system>; a still-open request for the same ticket comes back with 200."""
+    secret = settings.change_intake_secret
+    if not secret:
+        raise HTTPException(status_code=404, detail="Change intake is not configured (change_intake_secret)")
+    body = await request.body()
+    if not verify_hmac_signature(secret, request.headers.get("x-aiops-timestamp", ""),
+                                 request.headers.get("x-aiops-signature", ""), body,
+                                 window_seconds=settings.intake_signature_window_seconds):
+        raise HTTPException(status_code=401, detail="valid X-AIOps-Signature and X-AIOps-Timestamp required")
+    try:  # validated only once signed: an unsigned caller learns nothing about the body shape
+        data = ChangeIntakeBody.model_validate_json(body)
+    except ValidationError as e:
+        raise RequestValidationError([{**err, "loc": ("body", *err["loc"])}
+                                      for err in e.errors(include_url=False, include_context=False)]) from e
+    cr, created = _call(cs.intake_change, title=data.title, description=data.description,
+                        account_name=data.account, targets=data.target_hints, justification=data.justification,
+                        proposed_steps=[step.model_dump() for step in data.proposed_steps] if data.proposed_steps else None,
+                        external_ref=data.external_ref.model_dump(exclude_none=True), requested_by=data.requested_by)
+    if not created:
+        response.status_code = 200
+    return cr
 
 
 @router.get("", response_model=List[ChangeRequestResponse])

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 from agenticops.auth import authz
-from agenticops.auth.actor import Actor, agent_actor
+from agenticops.auth.actor import Actor, agent_actor, webhook_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
@@ -340,6 +340,37 @@ def _external_ref(raw) -> Optional[dict]:
     if requested_by:
         ref["requested_by"] = requested_by
     return ref
+
+
+_intake_lock = threading.Lock()
+
+
+def intake_change(*, title: str, description: str, external_ref: dict, account_name: Optional[str] = None,
+                  targets: Optional[list[str]] = None, justification: str = "", proposed_steps: Optional[list] = None,
+                  requested_by: Optional[str] = None) -> tuple[dict, bool]:
+    """An external system's change request (spec §3.D.3), opened as the actor webhook:<external_ref.system>; its
+    review starts in the background. `requested_by` is who the external system says asked — a claimed name, never
+    an identity — and is kept as external_ref.requested_by.
+
+    Returns (snapshot, created). A still-open request for the same external ticket is returned instead of a second
+    one (created=False)."""
+    _require_enabled()
+    if not external_ref:
+        raise ChangeValidationError("external_ref is required for intake")
+    ref = _external_ref({**external_ref, **({"requested_by": requested_by} if requested_by else {})})
+    with _intake_lock:  # a redelivery racing the first delivery in this process waits for it, then finds it
+        with _session() as s:
+            open_cr = (s.query(ChangeRequest)
+                       .filter(ChangeRequest.external_system == ref["system"],
+                               ChangeRequest.external_ticket_id == ref["ticket_id"],
+                               ChangeRequest.status.notin_(CHANGE_TERMINAL_STATUSES))
+                       .order_by(ChangeRequest.id).first())
+            if open_cr is not None:
+                return to_dict(open_cr), False
+        return create_change_request(source="webhook", actor=webhook_actor(ref["system"]), title=title,
+                                     description=description, account_name=account_name, targets=targets,
+                                     justification=justification, start_review=True, proposed_steps=proposed_steps,
+                                     external_ref=ref), True
 
 
 # ── Review lifecycle ──────────────────────────────────────────────────

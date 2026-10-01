@@ -5,15 +5,17 @@
 # subjects:    default flags for actors that have no users row.
 #              `anonymous` (web with api_auth_enabled=false) is deliberately all-powerful — it is
 #              exactly what an unauthenticated deployment allows today.
-# rules:       structured deny rules, evaluated after the matrix. Three types exist:
+# rules:       structured deny rules, evaluated alongside the matrix. Four types exist:
 #                actor_must_differ_from_field        — str(actor) != getattr(subject, field)      (SoD)
 #                actor_must_match_field_unless_admin — actor.key == getattr(subject, field), unless the actor
 #                                                      has admin (ownership: only the requester or an admin may act)
 #                deny_actor_kind_when_risk_in        — actor.kind == actor_kind and subject.risk_level in risk_levels
+#                deny_actor_kind                     — actor.kind == actor_kind (no subject needed)
 #              The two field rules are skipped for the anonymous web actor (they need identities).
 #              `enforce: always` makes a rule bite even in shadow mode (rbac_enforce=false).
 #              Every rule bearing on a permission is evaluated and an `enforce: always` deny wins over a
-#              shadow deny; such a permission REQUIRES a subject — without one the call is denied (fail-closed).
+#              shadow deny and over a missing permission flag; a subject-reading rule REQUIRES a subject —
+#              without one the call is denied (fail-closed).
 #              This file is validated strictly: any error rejects the WHOLE file and the built-in defaults apply.
 version: 1
 
@@ -57,3 +59,10 @@ rules:
     actor_kind: agent
     risk_levels: [L2, L3]
     enforce: always
+
+  - name: no-webhook-approve-or-execute
+    permission: [plan.approve, change.approve, plan.execute, change.execute]
+    type: deny_actor_kind
+    actor_kind: webhook
+    enforce: always
+    # an external system may open a change (POST /api/changes/intake) but never approve or run one

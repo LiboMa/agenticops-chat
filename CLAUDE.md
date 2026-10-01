@@ -259,6 +259,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `change_management_enabled` | `true` | Enable the ITSM change flow: change tools on the main agent, `/api/changes`, CLI `/change`, and the Web `/app/plans` Changes tab + `/app/changes/:id` |
 | `change_auto_approve_standard` | `false` | Let a policy `auto_approve` decision approve a change WITHOUT a human. Both the yaml rule and this flag must agree |
 | `change_review_timeout_seconds` | `600` | SRE change-review watchdog; on timeout the request returns to `draft` with a `review_failed` event |
+| `change_intake_secret` | `''` (real value only via `AIOPS_CHANGE_INTAKE_SECRET`) | HMAC secret for external change intake `POST /api/changes/intake` (`X-AIOps-Signature: sha256=<hmac>` over `X-AIOps-Timestamp` + "." + body, inside `intake_signature_window_seconds`, else 401). Empty = the endpoint is 404. Set: APIAuthMiddleware lets only that POST through to the HMAC check; the requester is `webhook:<external_ref.system>` (rbac `no-webhook-approve-or-execute`: never approve/execute, even in shadow mode) |
 
 ## HealthIssue State Machine
 
