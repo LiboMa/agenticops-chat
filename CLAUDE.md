@@ -308,8 +308,9 @@ a change's acceptance goes through `resolve_review`, still the only human writer
 approval hash is the same 409 "reload" (a plan stored without one is stamped by it). No path approves the plan of a
 `resolved` / `dismissed` issue (reopen it first). `mark_fix_failed` takes `save_execution_result`'s origin gate plus an
 ownership check (a run of another issue, or of a change, is refused), and refuses a run that succeeded unless its
-verification failed. Only an issue's latest run can be accepted (an older one is 409). Approve and accept check
-404 → authz 403 → state 409 → hash 409.
+verification failed. Only an issue's latest run can be accepted (an older one is 409). The Web/API fix and change
+approve routes and acceptance check 404 → authz 403 → state 409 → hash 409; CLI `/approve` and the agent tool
+`approve_fix_plan` still check the state before authz.
 
 ## Build & Run
 

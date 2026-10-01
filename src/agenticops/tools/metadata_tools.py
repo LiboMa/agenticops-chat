@@ -1713,7 +1713,8 @@ def save_execution_result(
                     f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'}"
                     + (f" (verification {verdict}: {why})" if status == "succeeded" else "")  # a failed run's why is its error
                     + f" for Issue #{issue_id} (Plan #{fix_plan_id})"
-                    + (f": {error_message[:200]}" if error_message else ""),
+                    + (f": {error_message[:200]}" if error_message
+                       else f": {why}" if status != "succeeded" else ""),
                 )
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)

@@ -59,7 +59,8 @@ if [[ -n "$FIX_INFO" ]]; then
     FIX_PLAN_ID=$(echo "$FIX_INFO" | cut -d'|' -f1 | tr -d ' ')
     FIX_STATUS=$(echo "$FIX_INFO" | cut -d'|' -f2 | tr -d ' ')
     FIX_LEVEL=$(echo "$FIX_INFO" | cut -d'|' -f3 | tr -d ' ')
-    if [[ "$FIX_STATUS" == "planned" && ("$FIX_LEVEL" == "L2" || "$FIX_LEVEL" == "L3") ]]; then
+    if [[ ("$FIX_STATUS" == "draft" || "$FIX_STATUS" == "pending_approval") \
+          && ("$FIX_LEVEL" == "L2" || "$FIX_LEVEL" == "L3") ]]; then
         report_info "Fix plan is ${FIX_LEVEL} (requires human approval) — auto-approving for validation..."
         # An approval names the plan content it approves (the hash as loaded); a changed plan answers 409
         CONTENT_HASH=$(curl -s "${AGENTICOPS_URL}/api/fix-plans/${FIX_PLAN_ID}" \
