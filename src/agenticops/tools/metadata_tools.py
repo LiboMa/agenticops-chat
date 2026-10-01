@@ -644,6 +644,14 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
         session.close()
 
 
+def _location_note(status: str, location: Optional[dict]) -> str:
+    if status == "absent":
+        return ""
+    dropped = (location or {}).get("dropped") or []
+    more = f" (+{len(dropped) - 3} more)" if len(dropped) > 3 else ""
+    return f" Location: {status}." + (f" Dropped: {'; '.join(dropped[:3])}{more}." if dropped else "")
+
+
 @tool
 def save_rca_result(
     health_issue_id: int,
@@ -657,6 +665,7 @@ def save_rca_result(
     similar_cases: str = "[]",
     model_id: str = "",
     evidence: str = "[]",
+    location: str = "",
 ) -> str:
     """Persist the RCA analysis result and set the issue to 'root_cause_identified'.
 
@@ -676,10 +685,20 @@ def save_rca_result(
         similar_cases: JSON array of similar case references
         model_id: LLM model ID used for analysis
         evidence: JSON array of evidence items you actually gathered this run:
-            [{"type": "cloudtrail|metric|log|kb|trace|cli", "ref": "<exact event
-            name / metric name / log snippet / case id you cited>", "summary":
-            "<one line>"}]. Each ref is verified against your real tool calls —
-            uncited or fabricated refs reduce the stored confidence.
+            [{"type": "cloudtrail|metric|log|kb|trace|cli|graph", "ref": "<exact event
+            name / metric name / log snippet / case id / graph evidence_ref you
+            cited>", "summary": "<one line>"}]. Each ref is verified against your
+            real tool calls — uncited or fabricated refs reduce the stored
+            confidence. Item n of this list is evidence label "E<n>" (1-based).
+        location: Optional JSON object naming where the root cause is:
+            {"candidates": [{"ref": <resource db id>, "rank": 1, "supporting":
+            ["E1"], "refuting": ["E3"]}], "path": [{"src_ref": <id>, "dst_ref":
+            <id>, "relation_type": "<type>"}], "build_id": <graph build id>}.
+            At most 3 candidates with distinct ranks 1-3; path runs from the root
+            cause to the issue's anchored resource, using only edges returned by
+            the topology evidence (leave it empty when the issue is not
+            anchored). Checked against the inventory and the graph: whatever
+            fails is dropped and the rest is kept. Empty = no location.
 
     Returns:
         Confirmation with the new RCAResult ID.
@@ -731,6 +750,15 @@ def save_rca_result(
             model_id=model_id,
             evidence=evidence_parsed,
         )
+        from agenticops.services.rca_location import INVALID, validate_location
+        try:
+            rca.location, rca.location_status, rca.location_build_id = validate_location(
+                session, issue, location, len(evidence_parsed))
+        except Exception as exc:  # the location is observed only: a failed check never loses the RCA
+            logger.warning("location check failed for issue #%s: %s", health_issue_id, exc)
+            rca.location, rca.location_status, rca.location_build_id = (
+                {"candidates": [], "path": [], "dropped": [f"location check failed — {type(exc).__name__}"]},
+                INVALID, None)
         session.add(rca)
 
         # Status via the state machine (no more silent bypass). If the agent
@@ -762,6 +790,7 @@ def save_rca_result(
             f"RCAResult #{rca.id} saved for HealthIssue #{health_issue_id}. "
             f"Root cause: {root_cause[:100]}... Confidence: {rca.confidence:.0%}. "
             f"Issue status updated to 'root_cause_identified'.{status_note}"
+            f"{_location_note(rca.location_status, rca.location)}"
         )
     except Exception as e:
         session.rollback()

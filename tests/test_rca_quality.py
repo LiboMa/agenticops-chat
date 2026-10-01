@@ -193,6 +193,22 @@ class TestEvidenceGate:
         assert rca.evidence_verified is False
         assert rca.confidence == pytest.approx(0.54)  # 0.9 * 0.6
 
+    def test_save_rca_result_input_does_not_ground_itself(self, db_session, rca_settings):
+        """The evidence list rides in save_rca_result's own input; it must not count as a tool trace."""
+        issue_id = _seed_issue(db_session)
+        evidence = [{"type": "graph", "ref": "graph:edge:9>8:routes_to", "summary": "made up"}]
+        _save_rca(db_session, issue_id, confidence=0.9, evidence=evidence)
+        messages = _messages_with_tool_trace("No events found in the window.") + [
+            {"role": "assistant", "content": [
+                {"toolUse": {"toolUseId": "t2", "name": "save_rca_result",
+                             "input": {"health_issue_id": issue_id, "evidence": json.dumps(evidence)}}},
+            ]},
+        ]
+        _run_pipeline(issue_id, messages)
+        rca = db_session.query(RCAResult).one()
+        db_session.refresh(rca)
+        assert rca.evidence_verified is False
+
 
 class TestConfidenceGateAndCritic:
     def test_low_confidence_no_autofix(self, db_session, rca_settings):

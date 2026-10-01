@@ -1,6 +1,6 @@
-"""init_db adds the MVP-2.6.1 graph-anchoring columns to an existing database in place: rows preserved,
-indexes added, idempotent (once per process per URL, and no DDL left once migrated), PostgreSQL DDL
-guarded with IF NOT EXISTS and typed for the dialect."""
+"""init_db adds the MVP-2.6.1 graph-anchoring and RCA-location columns to an existing database in place:
+rows preserved, indexes added, idempotent (once per process per URL, and no DDL left once migrated),
+PostgreSQL DDL guarded with IF NOT EXISTS and typed for the dialect."""
 import re
 import sqlite3
 
@@ -22,6 +22,10 @@ CREATE TABLE galaxy_builds (id INTEGER PRIMARY KEY, status VARCHAR(20), "trigger
   started_at DATETIME, finished_at DATETIME, model_id VARCHAR(200), prompt_version VARCHAR(50), input_tokens INTEGER,
   output_tokens INTEGER, cost_usd FLOAT, node_count INTEGER, edge_count INTEGER, dropped_edge_count INTEGER,
   rule_graph JSON, llm_graph JSON, error TEXT);
+CREATE TABLE rca_results (id INTEGER PRIMARY KEY, health_issue_id INTEGER, root_cause TEXT, confidence FLOAT,
+  contributing_factors JSON, recommendations JSON, fix_plan JSON, fix_risk_level VARCHAR(20), sop_used VARCHAR(200),
+  similar_cases JSON, model_id VARCHAR(100), created_at DATETIME, evidence JSON, evidence_verified BOOLEAN,
+  critic_verdict VARCHAR(30), critic_notes TEXT, human_verdict VARCHAR(10), human_note TEXT, verified_at DATETIME);
 INSERT INTO cloud_accounts (id, name, provider, is_enabled, credential_source_type, credentials, regions, labels)
   VALUES (1, 'prod', 'aws', 1, 'environment', '{"account_id": "111111111111"}', '[]', '{}');
 INSERT INTO cloud_resources (id, account_id, provider, region, resource_type, resource_id, name, tags, raw_data, status, managed)
@@ -29,12 +33,17 @@ INSERT INTO cloud_resources (id, account_id, provider, region, resource_type, re
 INSERT INTO health_issues (id, resource_id, provider, severity, source, title, description, metric_data, related_changes,
   status, detected_by, issue_type, occurrence_count, account_id)
   VALUES (1, 'i-0abc', 'aws', 'high', 'test', 't', 'd', '{}', '[]', 'open', 'test', 'cpu_spike', 1, NULL);
+INSERT INTO rca_results (id, health_issue_id, root_cause, confidence, contributing_factors, recommendations, fix_plan,
+  fix_risk_level, similar_cases, model_id, evidence)
+  VALUES (1, 1, 'rc', 0.8, '[]', '[]', '{}', 'unknown', '[]', '', '[]');
 """
 
 _NEW_HEALTH_COLUMNS = {"resource_ref", "anchor_status", "anchor_candidates", "observed_at"}
+_NEW_RCA_COLUMNS = {"location", "location_status", "location_build_id", "location_verdict", "location_verdict_by",
+                    "location_verdict_at"}
 _MIGRATION_DDL = re.compile(
     r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since"
-    r"|content_changed_at|rules_published_at)"
+    r"|content_changed_at|rules_published_at|location\w*)"
     r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status",
     re.I,
 )
@@ -100,6 +109,7 @@ def test_adds_columns_indexes_and_relation_table(old_db):
     assert _NEW_HEALTH_COLUMNS <= _cols(engine, "health_issues")
     assert {"absent_since", "content_changed_at"} <= _cols(engine, "cloud_resources")
     assert "rules_published_at" in _cols(engine, "galaxy_builds")
+    assert _NEW_RCA_COLUMNS <= _cols(engine, "rca_results")
     assert {"idx_health_issue_resource_ref", "idx_health_issue_anchor_status"} <= _index_names(engine, "health_issues")
     assert {"idx_resource_relation_src", "idx_resource_relation_dst", "idx_resource_relation_build"} <= _index_names(
         engine, "resource_relations"
@@ -153,7 +163,8 @@ def test_pg_statements_are_guarded_and_dialect_typed():
 
     pg = postgresql.dialect()
     stub = _StubInspector(
-        {"health_issues": [{"name": "id"}], "cloud_resources": [{"name": "id"}], "galaxy_builds": [{"name": "id"}]},
+        {"health_issues": [{"name": "id"}], "cloud_resources": [{"name": "id"}], "galaxy_builds": [{"name": "id"}],
+         "rca_results": [{"name": "id"}]},
         {},
     )
     stmts = _statements_2_6_1(stub, pg)
@@ -162,6 +173,8 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "ALTER TABLE galaxy_builds ADD COLUMN IF NOT EXISTS rules_published_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE cloud_resources ADD COLUMN IF NOT EXISTS absent_since TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE cloud_resources ADD COLUMN IF NOT EXISTS content_changed_at TIMESTAMP WITHOUT TIME ZONE" in stmts
+    assert "ALTER TABLE rca_results ADD COLUMN IF NOT EXISTS location JSON" in stmts
+    assert "ALTER TABLE rca_results ADD COLUMN IF NOT EXISTS location_verdict_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
     assert all("DATETIME" not in s for s in stmts)
@@ -206,3 +219,11 @@ def test_backfill_failure_does_not_block_init_db(old_db, monkeypatch):
     with engine.connect() as c:
         assert c.execute(text("SELECT anchor_status FROM health_issues WHERE id = 1")).scalar() is None
     assert _NEW_HEALTH_COLUMNS <= _cols(engine, "health_issues")
+
+
+def test_backfill_marks_existing_rcas_location_absent(old_db):
+    """Spec §4 backfill 3: an RCA saved before 2.6.1 gave no location."""
+    engine = _run_init_db(old_db)
+    with engine.connect() as c:
+        row = c.execute(text("SELECT location, location_status, location_build_id FROM rca_results WHERE id = 1")).one()
+    assert tuple(row) == (None, "absent", None)

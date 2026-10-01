@@ -152,6 +152,13 @@ class RCAResponse(BaseModel):
     critic_verdict: Optional[str] = None
     critic_notes: Optional[str] = None
     human_verdict: Optional[str] = None
+    # Root-cause location (MVP-2.6.1)
+    location: Optional[dict] = None
+    location_status: Optional[str] = None
+    location_build_id: Optional[int] = None
+    location_verdict: Optional[str] = None
+    location_verdict_by: Optional[str] = None
+    location_verdict_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

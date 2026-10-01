@@ -385,6 +385,13 @@ class RCAResult(Base):
     human_verdict: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # correct|incorrect
     human_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # ── Root-cause location (MVP-2.6.1) — observed only: the critic, the gate and auto-fix never read it ──
+    location: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # validated candidates + inline path
+    location_status: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="absent")  # valid|partial|invalid|absent
+    location_build_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # the graph build the path was checked against
+    location_verdict: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # correct|partial|incorrect
+    location_verdict_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    location_verdict_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     health_issue: Mapped["HealthIssue"] = relationship(back_populates="rca_results")
@@ -1417,6 +1424,8 @@ _ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
     },
     "cloud_resources": {"absent_since": None, "content_changed_at": None},
     "galaxy_builds": {"rules_published_at": None},
+    "rca_results": {"location": None, "location_status": None, "location_build_id": None, "location_verdict": None,
+                    "location_verdict_by": None, "location_verdict_at": None},
 }
 
 _INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)
@@ -1475,6 +1484,15 @@ def _backfill_anchors_2_6_1(engine) -> None:
         logger.warning("MVP-2.6.1 anchor backfill skipped: %s", exc)
 
 
+def _backfill_location_status_2_6_1(engine) -> None:
+    """Spec §4 backfill 3: an RCA saved before 2.6.1 gave no location. Fail-soft like the anchor backfill."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE rca_results SET location_status = 'absent' WHERE location_status IS NULL"))
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 location_status backfill skipped: %s", exc)
+
+
 def _run_migrate_2_6_1(engine) -> None:
     stmts = _statements_2_6_1(inspect(engine), engine.dialect)
     if stmts:
@@ -1483,6 +1501,7 @@ def _run_migrate_2_6_1(engine) -> None:
                 conn.execute(text(stmt))
     # Backfills (spec §4), each fail-soft. Plans B/C/D append theirs after this line.
     _backfill_anchors_2_6_1(engine)
+    _backfill_location_status_2_6_1(engine)
 
 
 def _migrate_2_6_1(engine) -> None:

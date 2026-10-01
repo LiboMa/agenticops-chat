@@ -163,7 +163,10 @@ def run_post_rca_pipeline(issue_id: int, messages: list, started_at: datetime) -
 
 
 def _tool_trace_text(messages: list) -> str:
-    """Flatten every toolUse input and toolResult content in the run to text."""
+    """Flatten every toolUse input and toolResult content in the run to text.
+
+    save_rca_result's own input is left out: it carries the evidence list being checked, and would
+    otherwise ground every ref it cites (MVP-2.6.1)."""
     chunks: list[str] = []
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None
@@ -172,7 +175,7 @@ def _tool_trace_text(messages: list) -> str:
         for block in content:
             if not isinstance(block, dict):
                 continue
-            if "toolUse" in block:
+            if "toolUse" in block and block["toolUse"].get("name") != "save_rca_result":
                 try:
                     chunks.append(json.dumps(block["toolUse"].get("input", {}), default=str))
                 except Exception:
