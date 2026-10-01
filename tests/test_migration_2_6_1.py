@@ -225,6 +225,8 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS external_system VARCHAR(50)" in stmts
     assert "ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS needs_review_reason TEXT" in stmts
     assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS verification_status VARCHAR(30)" in stmts
+    assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS verification_reason TEXT" in stmts
+    assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS accepted_by VARCHAR(255)" in stmts
     assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE fix_executions ADD COLUMN IF NOT EXISTS acceptance_note TEXT" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts

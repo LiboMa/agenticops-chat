@@ -1473,8 +1473,8 @@ def save_execution_result(
                            health_issue_id, fix_plan_id, issue_id)
 
         # Verification (spec §3.D.4): one verdict from the run's own results and the plan's post-checks
-        from agenticops.services.verification import FAILED, PASSED, PENDING, evaluate
-        parsed_steps, parsed_post = _parse_json(step_results, []), _parse_json(post_check_results, [])
+        from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
+        parsed_steps, parsed_post = as_results(step_results), as_results(post_check_results)
         verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message)
 
         now = datetime.now(timezone.utc)
@@ -1538,18 +1538,30 @@ def save_execution_result(
         # The verdict moves the issue: passed → resolved (executor_auto_resolve; otherwise it waits at
         # fix_executed), pending_acceptance → fix_executed for a human, failed → root_cause_identified (a new
         # plan can be made) with its RCA disputed. A run that never started its plan moves nothing (retry).
-        issue_status, disputed = None, None
+        # Only an issue still on this fix moves: one reopened or sent back meanwhile stays where it is (every
+        # non-terminal state has an edge to resolved), and each move is a CAS on the status read here.
+        issue_status, disputed, issue_note = None, None, ""
         if ran and not is_change and issue_id:
-            # A chat / auto-pipeline run has no execute call that moved the issue with its plan: catch it up.
-            advance_issue(session, issue_id, "fix_executing", actor=_tool_actor(),
-                          reason=f"FixPlan #{fix_plan_id} executing")
+            issue = session.get(HealthIssue, issue_id)
+            seen = issue.status if issue is not None else "missing"
             target = {PASSED: "resolved" if settings.executor_auto_resolve else "fix_executed",
                       PENDING: "fix_executed", FAILED: "root_cause_identified"}[verdict]
-            if advance_issue(session, issue_id, target, actor=_tool_actor(),
-                             reason=f"verification {verdict}: {why}") is None:
-                issue_status = target
-            if verdict == FAILED:
-                disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
+            if seen not in ("fix_approved", "fix_executing", "fix_executed"):
+                issue_note = (f" HealthIssue #{issue_id} stays '{seen}': it has moved off this fix, "
+                              f"so the result does not move it.")
+            else:
+                try:
+                    if seen == "fix_approved":  # a chat / auto-pipeline run: no execute call moved the issue
+                        transition_issue(session, issue_id, "fix_executing", actor=_tool_actor(),
+                                         reason=f"FixPlan #{fix_plan_id} executing", expected=seen)
+                        seen = "fix_executing"
+                    transition_issue(session, issue_id, target, actor=_tool_actor(), expected=seen,
+                                     reason=f"verification {verdict}: {why}")
+                    issue_status = target
+                except InvalidStatusTransition as e:  # moved concurrently: left where it is
+                    issue_note = f" HealthIssue #{issue_id} left where it is: {e}."
+                if issue_status is not None and verdict == FAILED:
+                    disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
         execution_ref = rc.execution_id or execution.id
         auto_resolved = issue_status == "resolved"
 
@@ -1594,14 +1606,18 @@ def save_execution_result(
                 notify_execution_result(fix_plan_id, issue_id, status, error_message)
                 notify_im_origin(
                     issue_id, "execution_completed",
-                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} for Issue #{issue_id} (Plan #{fix_plan_id})"
+                    f"Execution {'SUCCEEDED' if status == 'succeeded' else 'FAILED'} (verification {verdict}: {why}) for Issue #{issue_id} (Plan #{fix_plan_id})"
                     + (f": {error_message[:200]}" if error_message else ""),
                 )
-                if verdict == PENDING and issue_status == "fix_executed":
-                    from agenticops.services.notification_service import notify_execution_pending_acceptance
-                    notify_execution_pending_acceptance(execution_ref, why, issue_id=issue_id)
             except Exception:
                 logger.debug("Notification trigger failed", exc_info=True)
+            if verdict == PENDING and issue_status == "fix_executed":
+                try:  # its own block: a failed result notification never suppresses the acceptance notice
+                    from agenticops.services.notification_service import notify_execution_pending_acceptance
+                    notify_execution_pending_acceptance(execution_ref, why, issue_id=issue_id)
+                except Exception:
+                    logger.warning("Pending-acceptance notification failed for Execution #%s", execution_ref,
+                                   exc_info=True)
 
         msg = (
             f"FixExecution #{execution_ref} saved for FixPlan #{fix_plan_id}. "
@@ -1613,7 +1629,7 @@ def save_execution_result(
             msg += f" HealthIssue #{issue_id} is fix_executed, awaiting human acceptance."
         elif issue_status == "root_cause_identified":
             msg += f" HealthIssue #{issue_id} is back at root_cause_identified (a new fix plan can be made)."
-        return msg
+        return msg + issue_note
     except Exception as e:
         session.rollback()
         return f"Error saving execution result: {e}"

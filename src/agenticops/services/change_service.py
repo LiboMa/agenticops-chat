@@ -31,7 +31,7 @@ from agenticops.services.notification_service import (  # noqa: F401  (pending_a
     notify_change_pending_approval, notify_change_requested, notify_change_result,
     notify_execution_pending_acceptance,
 )
-from agenticops.services.verification import FAILED, PASSED, PENDING, evaluate
+from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
 from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
 from agenticops.services.pipeline_events import log_event
 from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
@@ -1190,7 +1190,7 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
                   "failed": Actions.CHANGE_FAILED, "rolled_back": Actions.CHANGE_ROLLED_BACK}[new_status]
         AuditService.log(action, EntityTypes.CHANGE_REQUEST, str(cr.id), entity_name=cr.title, actor=actor_key,
                          details={"execution_status": execution_status, "reason": reason, "plan_id": fix_plan_id,
-                                  "post_check_results": (post_check_results or [])[:20]},
+                                  "post_check_results": as_results(post_check_results)[:20]},
                          old_values={"status": "executing"}, new_values={"status": new_status}, session=s)
         snap = to_dict(cr)
         execution_id = (s.query(FixExecution.id).filter_by(fix_plan_id=fix_plan_id)

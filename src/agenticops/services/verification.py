@@ -11,6 +11,7 @@ accept_execution() records a human's verdict on a `pending_acceptance` execution
 stays the only human writer of a change's terminal state and stamps the execution in the same transaction.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -50,18 +51,33 @@ def _outcome(item) -> str:
     return "pass" if value in _PASS else "warning" if value in _WARN else "fail"
 
 
+def as_results(value) -> list:
+    """The one shape of a post_checks / results value: a list. A dict is one entry and a JSON string is parsed
+    first; anything else (a bool, a number, None, unparseable text) is no entries — missing, never a pass."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if isinstance(value, dict):
+        return [value]
+    return value if isinstance(value, list) else []
+
+
 def evaluate(execution_status: str, post_checks, post_check_results=None, step_results=None,
              error: str = "") -> tuple[str, str]:
     """The verdict on one execution: `passed` only when it succeeded and every post-check it declared passed.
 
     A run that did not succeed, or a post-check that failed, is `failed`. A succeeded run is otherwise
     `pending_acceptance` — no post-checks, missing or incomplete results, a warning, or a step that did not
-    report success — and a human accepts or rejects it; a missing result is never a pass.
+    report success — and a human accepts or rejects it; a missing result is never a pass. Every input goes
+    through as_results first, so a result of the wrong shape is missing rather than iterated.
     """
     if execution_status != "succeeded":
         default = "execution rolled back" if execution_status == "rolled_back" else f"execution {execution_status}"
         return FAILED, error or default
-    outcomes = [_outcome(r) for r in post_check_results or []]
+    post_checks = as_results(post_checks)
+    outcomes = [_outcome(r) for r in as_results(post_check_results)]
     if "fail" in outcomes:
         return FAILED, f"post-check {outcomes.index('fail') + 1} failed"
     if not post_checks:
@@ -70,7 +86,7 @@ def evaluate(execution_status: str, post_checks, post_check_results=None, step_r
         return PENDING, "post-check results missing or incomplete"
     if "warning" in outcomes:
         return PENDING, f"post-check {outcomes.index('warning') + 1} reported a warning"
-    steps = [_outcome(s) for s in step_results or []]
+    steps = [_outcome(s) for s in as_results(step_results)]
     unclear = next((i for i, o in enumerate(steps) if o != "pass"), None)
     if unclear is not None:
         return PENDING, f"step {unclear + 1} did not report success"
@@ -103,6 +119,8 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
                                   f"(verification: {execution.verification_status or 'none'})")
         if plan.plan_kind == "change":
             cr_id = plan.change_request_id
+            if cr_id is None:
+                raise AcceptanceNotFound(f"Execution #{execution_id}'s change plan names no change request")
         else:
             cr_id = None
             try:

@@ -118,6 +118,44 @@ def test_the_verdict_truth_table(status, checks, results, steps, expected):
     assert evaluate(status, checks, results, steps, "boom" if status == "failed" else "") == expected
 
 
+MISSING = (PENDING, "post-check results missing or incomplete")
+
+
+@pytest.mark.parametrize("checks,results,steps,expected", [
+    # a JSON object is one result, never iterated by its keys
+    ([CHECK], {"ok": False}, [], MISSING),
+    ([CHECK], {"success": False}, [], MISSING),
+    ([CHECK], {"passed": False}, [], (FAILED, "post-check 1 failed")),
+    ([CHECK], {"check": "healthy", "status": "passed"}, [], (PASSED, "all post-checks passed")),
+    ([CHECK], json.dumps(OK), [], (PASSED, "all post-checks passed")),
+    ([CHECK], json.dumps([OK]), [], (PASSED, "all post-checks passed")),
+    ([CHECK], [OK], {"success": False}, (PENDING, "step 1 did not report success")),
+    # a scalar or unreadable result is no result: missing, never a pass, never an exception
+    ([CHECK], "true", [], MISSING),
+    ([CHECK], "1", [], MISSING),
+    ([CHECK], True, [], MISSING),
+    ([CHECK], 1, [], MISSING),
+    ([CHECK], "not json", [], MISSING),
+    ([CHECK], '"passed"', [], MISSING),
+    ([CHECK], [OK], "true", (PASSED, "all post-checks passed")),  # the verdict rests on the post-checks
+    ([CHECK], [OK], "1", (PASSED, "all post-checks passed")),
+    # post_checks in the same shapes: a legacy JSON string is parsed, never measured with len()
+    ("[]", [OK, OK], [], (PENDING, "the plan has no post-checks")),
+    (json.dumps([CHECK]), [OK], [], (PASSED, "all post-checks passed")),
+    (CHECK, [OK], [], (PASSED, "all post-checks passed")),
+    ("not json", [OK, OK], [], (PENDING, "the plan has no post-checks")),
+])
+def test_a_result_of_any_shape_is_never_a_false_pass(checks, results, steps, expected):
+    assert evaluate("succeeded", checks, results, steps) == expected
+
+
+def test_as_results_is_the_one_shape():
+    assert vf.as_results([OK]) == [OK]
+    assert vf.as_results(OK) == [OK]
+    assert vf.as_results(json.dumps(OK)) == [OK]
+    assert [vf.as_results(v) for v in (None, True, 0, 1.5, "", "x", "null", "true", '"s"')] == [[]] * 9
+
+
 # ── a fix: the verdict moves the issue ──────────────────────────────────────
 
 def test_a_passing_run_resolves_the_issue(db, quiet):
@@ -216,6 +254,73 @@ def test_a_run_aborted_before_it_started_moves_nothing(db):
     # nor does the executor's mark_fix_failed after it: the approved plan can still be retried
     out = mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="pre-check failed")
     assert "retry allowed" in out and _fresh(HealthIssue, issue_id).status == "fix_approved"
+
+
+def _save_raw(plan_id, post, steps='[{"status": "succeeded"}]'):
+    """The agent's own strings, as the tool receives them."""
+    from agenticops.tools.metadata_tools import save_execution_result
+    return save_execution_result(fix_plan_id=plan_id, status="succeeded", post_check_results=post, step_results=steps)
+
+
+@pytest.mark.parametrize("post", ['{"ok": false}', '{"success": false}', "true", "1", "not json"])
+def test_a_result_that_is_not_a_list_never_resolves_the_issue(db, quiet, post):
+    issue_id, plan_id, rca_id = _fix(db)
+    out = _save_raw(plan_id, post)
+    assert "Error" not in out
+    ex = _only_execution(plan_id)
+    assert (ex.verification_status, ex.verification_reason) == MISSING
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    quiet["post"].assert_not_called()
+
+
+def test_a_single_passing_object_resolves_and_disputes_nothing(db, quiet):
+    issue_id, plan_id, rca_id = _fix(db)
+    _save_raw(plan_id, '{"check": "healthy", "status": "passed"}', steps='{"status": "succeeded"}')
+    assert _only_execution(plan_id).verification_status == PASSED
+    assert _fresh(HealthIssue, issue_id).status == "resolved"
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+
+
+@pytest.mark.parametrize("issue_status", ["open", "acknowledged", "root_cause_identified"])
+def test_a_passing_run_leaves_an_issue_that_moved_off_its_fix(db, quiet, issue_status):
+    """Reopened, or sent back by a human while the plan was still executing: every non-terminal state has an
+    edge to resolved, so only the fix-lifecycle origin check stops an old run from closing it."""
+    issue_id, plan_id, rca_id = _fix(db, issue_status=issue_status, plan_status="executing")
+    out = _save(plan_id, post=[OK])
+    assert _only_execution(plan_id).verification_status == PASSED
+    assert _fresh(FixPlan, plan_id).status == "executed"
+    assert _fresh(HealthIssue, issue_id).status == issue_status
+    assert f"HealthIssue #{issue_id} stays '{issue_status}'" in out and "auto-resolved" not in out
+    assert not db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="status_changed").count()
+    quiet["post"].assert_not_called()
+
+
+def test_a_failed_run_neither_hops_nor_disputes_an_issue_that_moved_off_its_fix(db, quiet):
+    issue_id, plan_id, rca_id = _fix(db, issue_status="open", plan_status="executing")
+    out = _save(plan_id, status="failed", error="step 1 failed")
+    assert _fresh(FixPlan, plan_id).status == "failed"
+    assert _fresh(HealthIssue, issue_id).status == "open"
+    assert f"HealthIssue #{issue_id} stays 'open'" in out and "root_cause_identified" not in out
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    events = [e.event_type for e in db.query(PipelineEvent).filter_by(health_issue_id=issue_id)]
+    assert "status_changed" not in events and "rca_disputed" not in events
+
+
+def test_a_failing_result_notification_does_not_suppress_the_pending_notice(db, quiet):
+    issue_id, plan_id, _ = _fix(db, post_checks=())
+    with patch.object(ns, "notify_im_origin", side_effect=RuntimeError("im down")), \
+         patch.object(ns, "notify_execution_result", side_effect=RuntimeError("smtp down")):
+        _save(plan_id)
+    ex = _only_execution(plan_id)
+    quiet["pending"].assert_called_once_with(ex.id, "the plan has no post-checks", issue_id=issue_id)
+
+
+def test_the_im_result_message_carries_the_verdict(db, quiet):
+    issue_id, plan_id, _ = _fix(db)
+    with patch.object(ns, "notify_im_origin") as im:
+        _save(plan_id, post=[{"status": "failed"}])
+    assert "verification failed: post-check 1 failed" in im.call_args.args[2]
 
 
 # ── a fix: the human acceptance ─────────────────────────────────────────────
@@ -382,6 +487,45 @@ def test_a_change_post_check_failure_needs_review_but_is_not_pending(db, quiet):
     assert _fresh(FixExecution, ex_id).verification_status == FAILED
     quiet["pending"].assert_not_called()
     with pytest.raises(vf.AcceptanceError, match="not pending acceptance"):
+        vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r")
+
+
+def test_a_change_result_object_is_one_result_and_is_audited(db, quiet):
+    from agenticops.audit.models import AuditLog
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    cr_id, plan_id, ex_id = _change(db)
+    token = set_run_context(RunContext(actor="agent:executor", agent_name="executor", fix_plan_id=plan_id,
+                                       change_request_id=cr_id, execution_id=ex_id))
+    try:
+        _save_raw(plan_id, '{"ok": false}')  # the run's own string: a dict once parsed
+    finally:
+        reset_run_context(token)
+    cr = _fresh(ChangeRequest, cr_id)
+    assert (cr.status, cr.needs_review_reason) == ("needs_review", "post-check results missing or incomplete")
+    assert _fresh(FixExecution, ex_id).verification_status == PENDING
+    db.expire_all()
+    row = db.query(AuditLog).filter_by(entity_id=str(cr_id), action="change.needs_review").one()
+    assert row.details["post_check_results"] == [{"ok": False}]
+
+
+def test_on_execution_result_takes_a_result_object(db, quiet):
+    cr_id, plan_id, _ = _change(db)
+    snap = cs.on_execution_result(plan_id, "succeeded", post_check_results={"check": "healthy", "status": "passed"},
+                                  step_results={"status": "succeeded"})
+    assert snap["status"] == "completed"
+
+
+def test_a_change_plan_without_a_change_request_is_not_found(db):
+    """Unreachable through the ORM (ck_fix_plans_origin); a raw row must still be a 404, not a NameError."""
+    import agenticops.models as models_mod
+    _, plan_id, _, ex_id = _pending_fix(db)
+    with models_mod.get_engine().connect() as c:
+        c.exec_driver_sql("PRAGMA ignore_check_constraints = ON")
+        c.exec_driver_sql("UPDATE fix_plans SET plan_kind = 'change', health_issue_id = NULL, "
+                          "change_request_id = NULL WHERE id = ?", (plan_id,))
+        c.commit()
+        c.exec_driver_sql("PRAGMA ignore_check_constraints = OFF")
+    with pytest.raises(vf.AcceptanceNotFound, match="no change request"):
         vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r")
 
 
