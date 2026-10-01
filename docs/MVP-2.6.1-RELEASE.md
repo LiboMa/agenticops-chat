@@ -23,7 +23,7 @@
 
 > 规则：**Web API 与 Web UI 永远是两行**，绝不合并成「Web」。
 
-- **CLI** — 做。`aiops connectors list` / `aiops connectors run <name> [--account A]`；REPL `/approve` 先显示方案版本 + 内容哈希再确认，提交时带上哈希；新增 `/accept <I<id>|C<id>> yes|no <理由>`（actor 固定 `cli:<os user>`）。**非目标**：定位判定、拓扑查看（走 Web）；自带步骤由 Chat 自然语言经 agent 映射，不另开 CLI 参数。
+- **CLI** — 做。`aiops connectors list` / `aiops connectors run <name> [--account A]`；REPL `/approve C<id>` 先显示实施方案版本 + 内容哈希再确认，提交时带上该哈希；`/approve <修复方案 id>` 确认前不显示哈希，按提交时的方案内容盖章（见加固清单 D T4-M2）；新增 `/accept <I<id>|C<id>> yes|no <理由>`（actor 固定 `cli:<os user>`）。**非目标**：定位判定、拓扑查看（走 Web）；自带步骤由 Chat 自然语言经 agent 映射，不另开 CLI 参数。
 - **Web API** — 做。
   - `GET /api/connectors`、`POST /api/connectors/{name}/run`（202 / 404 / 409）；
   - `GET /api/graph/focus?issue_id|resource_id|change_request_id&depth&node_cap`（含合并信号 `merged`、相邻问题 `candidates`，上限 50，边带 `observed_at`）；
@@ -234,6 +234,7 @@
 
 **连接器与告警入口（计划 B）**
 
+- **B-0**（Plan B 终审偏差 42）升级后每个部署每小时对所有启用的 AWS 账户跑一轮 W2 只读扫描并标缺席 —— 见「迁移」升级提示。
 - **B-1**（PARK-S2）凭证指纹看不到行以外的身份变化（`environment` 源没有 `account_id`；某个 profile 在 `~/.aws/config` 里的目标被改了），暴露窗口以 `k8s_kubeconfig_max_age_seconds` 为界。
 - **B-2**（PARK-S3 / F9）K8s `raw_data` 里键名像密钥的 label 入库时被打码，前后哈希每次都不同：没有真实变化，`content_changed_at` 也每次采集都会移动，该集群每次都触发一次 rule-only 刷新（无 LLM 费用），RCA 证据里的「有变化」候选因此偏多。
 - **B-3**（PARK-S4）设了 `webhook_secret` 之后，eks-lab 的 Alertmanager receiver 需要加 `http_config.authorization`（WORKFLOW 有示例）；`infra/eks-lab/monitoring/prometheus-values.yaml` 没改，实验室操作员设了密钥会先看到 401。
@@ -281,6 +282,7 @@ Datadog / 观测云 / ServiceNow CMDB 连接器与 MCP 声明式连接器；Chat
 1. **PARK-S5（Important，既有问题）**：`validate_api_key` 返回一个已脱离会话的 `User`，读它的列会抛错 —— 用 API key 调用的请求，在任何要解析 `current_actor` 的端点上很可能 500。需要主人知悉。
 2. **C-1 / P-1（Important，主人决定）**：APIAuthMiddleware 按 `request.url.path` 判路径，而这个值受 Host 头影响，可以绕过 API 鉴权。2.6.1 已由 3cb7b6e 修复（改为读 `request.scope["path"]`，即实际路由的路径）；但 origin/main 上还是旧代码（`src/agenticops/web/app.py:4313`），是否回移到 main 由主人决定。
 3. 其余：
+   - `pages/Schedules.tsx` 硬编码了 `PIPELINE_OPTIONS`，没人读 `/api/schedules/pipeline-options`：K8sDiscovery 与 ResourceScan 能作为行显示，但在 Pipeline 下拉里选不到。「其余」里最先做。
    - **PARK-S7**（既有）：ASGI `root_path` 可绕过 APIAuthMiddleware（潜在问题，目前没有部署设置它）。
    - **A N-1**：2.6.1 之后创建、信号没写账户的 Issue，一旦它那条 promoted 的 `alert_events` 行被清理（`signal_retention_days`），就不再跨账户重试（偏安全的方向）。修法：`_promote` / 回填把声明记进 `anchor_candidates`。
    - **A M-1**：`account_conflict` / `unknown_account` 会丢掉信号声明的受管账户（Issue 在列表和筛选里失去归属；下游 fail-closed，安全）。`unknown_account` 时保留声明的受管账户；`account_conflict` 保持为空，但在界面上显示声明。
@@ -292,7 +294,6 @@ Datadog / 观测云 / ServiceNow CMDB 连接器与 MCP 声明式连接器；Chat
    - `identity_type_families` 补上 ElastiCache 与 ECS 两族。
    - `alert_events` 加索引。
    - **PARK-T11-UI**：资源列表开「显示缺席」→ 选一个全是缺席的类型 → 再关掉，类型筛选保留一个下拉里已没有的值（取消再选即可恢复）。
-   - `pages/Schedules.tsx` 硬编码了 `PIPELINE_OPTIONS`，没人读 `/api/schedules/pipeline-options`：K8sDiscovery 与 ResourceScan 能作为行显示，但在 Pipeline 下拉里选不到。这是第一项。
    - **B M-4**：`connector_runs` 没有保留期清理。
    - Plan B Task 14 小项：跨区域预热丢了（首次多区域扫描时每个账户 N 次 STS 往返）；`tests/test_aws_tools_coverage.py` 里有失效的旧格式种子；`assume_role` 手抄了 `resolver._snapshot`。
    - `tests/test_multi_cloud_api.py` 往默认数据库里漏写行。

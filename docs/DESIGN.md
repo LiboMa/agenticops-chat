@@ -4,7 +4,7 @@
 
 AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM Multi-Agent 架构实现自动化的资源扫描、异常检测、根因分析、修复计划制定与执行，以及多渠道通知。支持 CLI、Web Dashboard、IM Bot（飞书/钉钉/企业微信）三入口。
 
-**版本**: 2.5.0（正文主体写于 2.0.1，之后的增量见第 0 节索引）
+**版本**: 2.6.1（正文主体写于 2.0.1，之后的增量见第 0 节索引）
 **技术栈**: Python 3.12, SQLAlchemy, FastAPI, Strands Agents SDK 1.45, AWS Bedrock（Claude 5 家族：Opus 5 / Sonnet 5 / Fable 5.1；Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5；OpenAI gpt-oss / GPT-5.x）
 
 ---
