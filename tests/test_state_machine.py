@@ -277,7 +277,7 @@ class TestUpdateHealthIssueStatusTool:
         from agenticops.tools.metadata_tools import update_health_issue_status
 
         issue_id = self._create_issue(db_session)
-        result = update_health_issue_status(issue_id, "fix_executed")
+        result = update_health_issue_status(issue_id, "fix_planned")  # the fix_* targets have their own refusal
         assert "Status transition rejected" in result
 
     def test_nonexistent_issue(self, db_session):

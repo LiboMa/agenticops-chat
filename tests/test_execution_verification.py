@@ -226,8 +226,9 @@ def test_the_executors_mark_fix_failed_after_it_is_a_no_op(db):
     # a run pending acceptance is the human's to reject, not the executor's
     pending_issue, pending_plan, _ = _fix(db, post_checks=())
     _save(pending_plan)
-    out = mark_fix_failed(pending_issue, _only_execution(pending_plan).id, reason="looks off")
-    assert f"stays 'fix_executed' (FixPlan #{pending_plan} is 'executed')" in out and "retry" not in out
+    pending_ex = _only_execution(pending_plan).id
+    out = mark_fix_failed(pending_issue, pending_ex, reason="looks off")
+    assert out.startswith(f"REJECTED: Execution #{pending_ex} succeeded and is pending acceptance"), out
     assert _fresh(HealthIssue, pending_issue).status == "fix_executed"
 
 
@@ -377,6 +378,31 @@ def test_the_status_tool_still_moves_an_issue_before_a_fix(db):
     assert _fresh(HealthIssue, issue.id).status == "investigating"
 
 
+@pytest.mark.parametrize("target", ["fix_approved", "fix_executing", "fix_executed", "FIX_Approved"])
+def test_the_status_tool_cannot_move_an_issue_into_the_fix_lifecycle(db, target):
+    """fix_planned → fix_approved is a legal edge, but only the plan's approval takes it: the tool would show an
+    issue as approved with no approved plan behind it."""
+    from agenticops.tools.metadata_tools import update_health_issue_status
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned",
+                        resource_id="r")
+    db.add(issue); db.commit()
+    assert update_health_issue_status(issue.id, target) == (
+        f"HealthIssue #{issue.id} cannot be moved to '{target.lower()}' by this tool: fix_approved / fix_executing / "
+        "fix_executed follow its fix plan and run (approve the plan on Web or CLI /approve).")
+    assert _fresh(HealthIssue, issue.id).status == "fix_planned"
+    assert _status_moves(db, issue.id) == 0
+
+
+def test_the_status_tool_still_resolves_a_planned_issue(db):
+    from agenticops.tools.metadata_tools import update_health_issue_status
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned",
+                        resource_id="r")
+    db.add(issue); db.commit()
+    assert update_health_issue_status(issue.id, "resolved") == f"HealthIssue #{issue.id} status: fix_planned -> resolved"
+    assert _fresh(HealthIssue, issue.id).status == "resolved"
+    assert _status_moves(db, issue.id) == 1
+
+
 # ── mark_fix_failed: only its own issue, only while that issue is on the fix (FR-D4) ──
 
 def _failed_run(db, plan_id):
@@ -451,6 +477,35 @@ def test_a_run_aborted_before_it_started_still_disputes_its_rca(db):
     mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="pre-check failed")
     assert _fresh(HealthIssue, issue_id).status == "fix_approved"
     assert _fresh(RCAResult, rca_id).critic_verdict == "disputed_by_execution"
+
+
+def test_mark_fix_failed_refuses_a_run_pending_acceptance(db, quiet):
+    """A pending run is the human's to accept or reject; the executor calling it failed must not dispute the RCA."""
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, _, rca_id, ex_id = _pending_fix(db)
+    events = _event_types(db, issue_id)
+    assert mark_fix_failed(issue_id, ex_id, reason="looks off") == (
+        f"REJECTED: Execution #{ex_id} succeeded and is pending acceptance; a human accepts or rejects it "
+        f"(Web, or CLI /accept I{issue_id} yes|no <reason>). Nothing marked.")
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    assert _fresh(FixExecution, ex_id).verification_status == PENDING
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    assert _event_types(db, issue_id) == events and "rca_disputed" not in events
+
+
+@pytest.mark.parametrize("verdict", [PASSED, None])  # None: a legacy row from before the verdict column
+def test_mark_fix_failed_refuses_a_run_that_succeeded_and_did_not_fail_verification(db, verdict):
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, plan_id, rca_id = _fix(db, issue_status="fix_executed", plan_status="executed")
+    ex = FixExecution(fix_plan_id=plan_id, status="succeeded", executed_by="agent:executor",
+                      verification_status=verdict)
+    db.add(ex); db.commit()
+    assert mark_fix_failed(issue_id, ex.id, reason="x") == (
+        f"REJECTED: Execution #{ex.id} succeeded (verification '{verdict or 'none'}'); nothing failed, "
+        "nothing marked.")
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    assert _event_types(db, issue_id) == []
 
 
 # ── a fix: the human acceptance ─────────────────────────────────────────────

@@ -613,7 +613,7 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
     - investigating -> acknowledged | root_cause_identified | fix_planned | resolved
     - acknowledged -> investigating | root_cause_identified | fix_planned | resolved
     - root_cause_identified -> fix_planned | resolved
-    - fix_planned -> fix_approved | resolved
+    - fix_planned -> resolved (fix_approved follows the plan's approval)
     - fix_approved / fix_executing / fix_executed are moved by the fix plan, its run and the human acceptance,
       not by this tool
 
@@ -636,6 +636,10 @@ def update_health_issue_status(issue_id: int, new_status: str, note: str = "") -
             return (f"HealthIssue #{issue_id} is '{issue.status}': that status is driven by its fix plan and run. "
                     f"A human accepts or rejects the run (Web, or CLI /accept I{issue_id} yes|no <reason>), or "
                     "resolves / sends the issue back (Web issue page, CLI /resolve).")
+        if new_status in ("fix_approved", "fix_executing", "fix_executed"):
+            return (f"HealthIssue #{issue_id} cannot be moved to '{new_status}' by this tool: fix_approved / "
+                    "fix_executing / fix_executed follow its fix plan and run (approve the plan on Web or "
+                    "CLI /approve).")
 
         try:
             old_status = transition_issue(session, issue_id, new_status, actor=_tool_actor(),
@@ -1877,6 +1881,14 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
                      else f"change request C#{plan.change_request_id}")
             return (f"REJECTED: FixExecution #{execution_id} belongs to {owner}, not "
                     f"{'#' if plan.health_issue_id else 'HealthIssue #'}{health_issue_id}; nothing marked.")
+
+        # A run that succeeded failed only if its verification did; a pending one is the human's to accept or reject
+        if execution.status == "succeeded" and execution.verification_status != "failed":
+            if execution.verification_status == "pending_acceptance":
+                return (f"REJECTED: Execution #{execution_id} succeeded and is pending acceptance; a human accepts or "
+                        f"rejects it (Web, or CLI /accept I{health_issue_id} yes|no <reason>). Nothing marked.")
+            return (f"REJECTED: Execution #{execution_id} succeeded (verification "
+                    f"'{execution.verification_status or 'none'}'); nothing failed, nothing marked.")
 
         # Only an issue still on a fix is moved or disputed — one that was resolved, dismissed or reopened since
         # has moved off this run, and a stale result must not pull it back.

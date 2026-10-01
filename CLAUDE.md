@@ -266,7 +266,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 
 9 states: `open` → `investigating` → `acknowledged` → `root_cause_identified` → `fix_planned` → `fix_approved` → `fix_executing` → `fix_executed` → `resolved`. Transitions enforced by `validate_status_transition()` (409 on invalid).
 
-**One write path (MVP-2.6.1)**: every status write goes through `services/issue_state.transition_issue(session, id, new, actor=, reason=, expected=)` — the edge is validated, the row moves with `UPDATE … WHERE status=:expected` (0 rows → `IssueStatusConflict`, 409), and a `status_changed` timeline event is added in the caller's transaction. `tests/test_issue_status_writes.py` scans `src/` and fails on any other write. Back-edges to `root_cause_identified`: from `fix_approved` (the plan changed after approval, the run never started), `fix_executing` (the run failed) and `fix_executed` (verification failed or acceptance was rejected) — the issue can get a new fix plan. The agent tool `update_health_issue_status` refuses an issue in `fix_approved` / `fix_executing` / `fix_executed`: the plan, its run and the human acceptance move those. `dismissed` suppresses repeats of its fingerprint but is not open (see `signal_gate` above); `dismissed → open` reopens.
+**One write path (MVP-2.6.1)**: every status write goes through `services/issue_state.transition_issue(session, id, new, actor=, reason=, expected=)` — the edge is validated, the row moves with `UPDATE … WHERE status=:expected` (0 rows → `IssueStatusConflict`, 409), and a `status_changed` timeline event is added in the caller's transaction. `tests/test_issue_status_writes.py` scans `src/` and fails on any other write. Back-edges to `root_cause_identified`: from `fix_approved` (the plan changed after approval, the run never started), `fix_executing` (the run failed) and `fix_executed` (verification failed or acceptance was rejected) — the issue can get a new fix plan. The agent tool `update_health_issue_status` moves an issue neither into nor out of `fix_approved` / `fix_executing` / `fix_executed`: the plan's approval, its run and the human acceptance move those. `dismissed` suppresses repeats of its fingerprint but is not open (see `signal_gate` above); `dismissed → open` reopens.
 
 ## Change / Plan State Machines (MVP-2.6.0)
 
@@ -307,8 +307,9 @@ with `needs_review_reason`. A pending verdict notifies `execution_pending_accept
 a change's acceptance goes through `resolve_review`, still the only human writer of its terminal state. An empty
 approval hash is the same 409 "reload" (a plan stored without one is stamped by it). No path approves the plan of a
 `resolved` / `dismissed` issue (reopen it first). `mark_fix_failed` takes `save_execution_result`'s origin gate plus an
-ownership check (a run of another issue, or of a change, is refused). Only an issue's latest run can be accepted (an
-older one is 409). Approve and accept check 404 → authz 403 → state 409 → hash 409.
+ownership check (a run of another issue, or of a change, is refused), and refuses a run that succeeded unless its
+verification failed. Only an issue's latest run can be accepted (an older one is 409). Approve and accept check
+404 → authz 403 → state 409 → hash 409.
 
 ## Build & Run
 
