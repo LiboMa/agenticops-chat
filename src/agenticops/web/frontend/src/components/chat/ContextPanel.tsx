@@ -509,7 +509,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
 
   return (
     <>
-      {blocked && <p className="text-[11px] text-muted-foreground">{t(`issue.approvalBlocked.${blocked}`)}</p>}
+      {blocked && <p className="text-[11px] text-muted-foreground">{t(`issues.approvalBlocked.${blocked}`)}</p>}
       <div className="flex gap-2">
         {canApprove && (
           <button

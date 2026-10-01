@@ -70,13 +70,15 @@ export default function IssueDetail() {
   const executeMut = useExecuteFixPlan();
 
   // The issue poll can land on fix_executed after the runs poll has stopped; the banner needs the verdict the
-  // backend wrote to the run in the same transaction, so a status move refetches the runs.
+  // backend wrote to the run in the same transaction, so a status move refetches the runs (and the plan, whose
+  // badge moves with them).
   const qc = useQueryClient();
   const issueStatus = anomaly.data?.status;
   const lastStatus = useRef(issueStatus);
   useEffect(() => {
     if (lastStatus.current !== undefined && lastStatus.current !== issueStatus) {
       qc.invalidateQueries({ queryKey: ["issue-executions", issueId] });
+      qc.invalidateQueries({ queryKey: ["fix-plans"] });
     }
     lastStatus.current = issueStatus;
   }, [issueStatus, issueId, qc]);
@@ -742,7 +744,7 @@ function FixPlanTab({
                 <strong>{fp.risk_level} {t("issues.approvalWarning")}</strong>
               </div>
             )}
-            {blocked && <p className="mb-4 text-sm text-muted-foreground">{t(`issue.approvalBlocked.${blocked}`)}</p>}
+            {blocked && <p className="mb-4 text-sm text-muted-foreground">{t(`issues.approvalBlocked.${blocked}`)}</p>}
 
             <div className="flex items-center gap-3">
               {needsApproval && (
