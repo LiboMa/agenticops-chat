@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
-import { anchorBadge, issueFacts, issueStatuses, newestFirst, parseIssueTab, resultRow, resultSummary } from "@/lib/issueDetail";
+import {
+  anchorBadge, approvalBlockedReason, canApprovePlan, hasRunInFlight, issueFacts, issueStatuses, ISSUE_IN_FLIGHT, newestFirst,
+  parseIssueTab, resultRow, resultSummary,
+} from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
   return {
@@ -130,5 +133,59 @@ describe("resultSummary", () => {
   it("counts each outcome", () => {
     expect(resultSummary([{ status: "ok" }, { status: "fail" }, { status: "ok" }, {}]))
       .toEqual({ pass: 2, warning: 0, fail: 1, missing: 1 });
+  });
+});
+
+describe("canApprovePlan", () => {
+  it("approves a draft or pending plan of an open issue", () => {
+    expect(canApprovePlan({ status: "draft" }, "fix_planned")).toBe(true);
+    expect(canApprovePlan({ status: "pending_approval" }, "fix_planned")).toBe(true);
+  });
+  it("not once the issue is resolved or dismissed: the approve endpoint 409s", () => {
+    for (const status of ["draft", "pending_approval"] as const) {
+      expect(canApprovePlan({ status }, "resolved")).toBe(false);
+      expect(canApprovePlan({ status }, "dismissed")).toBe(false);
+    }
+  });
+  it("never a plan past approval, whatever its issue's status", () => {
+    for (const status of ["approved", "executed"] as const) {
+      for (const issueStatus of ["fix_planned", "fix_approved", "resolved", "dismissed", undefined]) {
+        expect(canApprovePlan({ status }, issueStatus)).toBe(false);
+      }
+    }
+  });
+  it("a pending plan with no issue status to check is approvable", () => {
+    expect(canApprovePlan({ status: "pending_approval" }, undefined)).toBe(true);
+  });
+});
+
+describe("approvalBlockedReason", () => {
+  it("names the closed issue status that blocks an approvable plan", () => {
+    expect(approvalBlockedReason({ status: "pending_approval" }, "resolved")).toBe("resolved");
+    expect(approvalBlockedReason({ status: "draft" }, "dismissed")).toBe("dismissed");
+  });
+  it("null for an open issue, or a plan that is not approvable anyway", () => {
+    expect(approvalBlockedReason({ status: "pending_approval" }, "fix_planned")).toBeNull();
+    expect(approvalBlockedReason({ status: "approved" }, "resolved")).toBeNull();
+  });
+});
+
+describe("ISSUE_IN_FLIGHT", () => {
+  it("holds the statuses between approval and the run's verdict", () => {
+    expect([...ISSUE_IN_FLIGHT].sort()).toEqual(["fix_approved", "fix_executing"]);
+    expect(ISSUE_IN_FLIGHT.has("fix_executed")).toBe(false);
+    expect(ISSUE_IN_FLIGHT.has("fix_planned")).toBe(false);
+  });
+});
+
+describe("hasRunInFlight", () => {
+  it("true while a run is queued or claimed, false once every run has finished", () => {
+    expect(hasRunInFlight([execution(1, "2026-09-28T01:00:00", { status: "pending" })])).toBe(true);
+    expect(hasRunInFlight([execution(1, "2026-09-28T01:00:00", { status: "failed" }),
+                           execution(2, "2026-09-28T02:00:00", { status: "running" })])).toBe(true);
+    expect(hasRunInFlight([execution(1, "2026-09-28T01:00:00"), execution(2, "2026-09-28T02:00:00", { status: "rolled_back" })]))
+      .toBe(false);
+    expect(hasRunInFlight([])).toBe(false);
+    expect(hasRunInFlight(undefined)).toBe(false);
   });
 });

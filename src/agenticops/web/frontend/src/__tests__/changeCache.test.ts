@@ -23,6 +23,12 @@ describe("fixPlanMutationKeys (I2)", () => {
     expect(keys).toContainEqual(["fix-plan", 7]);
     expect(keys).toContainEqual(["plan-stats"]);
   });
+  it("also invalidates the issue, the issues list and the issue's runs, which approve and execute move", () => {
+    const keys = fixPlanMutationKeys(1);
+    for (const key of [["fix-plans"], ["fix-plan", 1], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"]]) {
+      expect(keys).toContainEqual(key);
+    }
+  });
 });
 
 // M1 — the change-action args are a discriminated union: each action carries the body the backend expects.

@@ -1,8 +1,8 @@
 /**
- * IssueDetail view logic (MVP-2.6.1 spec §3.E.2): the tab in the URL, the three status labels, the anchor badge
- * and the execution evidence rows. Pure, so node can test it.
+ * IssueDetail view logic (MVP-2.6.1 spec §3.E.2): the tab in the URL, the three status labels, the anchor badge,
+ * the execution evidence rows, when to poll and when a plan can be approved. Pure, so node can test it.
  */
-import type { FixExecution, HealthIssue, IssueStatus, VerificationStatus } from "@/api/types";
+import type { FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, VerificationStatus } from "@/api/types";
 
 export const ISSUE_TABS = ["investigate", "fixPlan", "execution", "verification", "timeline"] as const;
 export type IssueTab = (typeof ISSUE_TABS)[number];
@@ -58,6 +58,30 @@ export function issueStatuses(issue: Pick<HealthIssue, "status">, executions: Fi
     latest,
     pending: pending ? latest : null,
   };
+}
+
+/** The issue statuses a fix is in motion in: the page polls the issue until the run lands its verdict. */
+export const ISSUE_IN_FLIGHT: ReadonlySet<IssueStatus> = new Set<IssueStatus>(["fix_approved", "fix_executing"]);
+
+/** A run still queued (pending) or claimed (running); every other status is finished. */
+export function hasRunInFlight(executions: Pick<FixExecution, "status">[] | undefined): boolean {
+  return !!executions?.some((e) => e.status === "pending" || e.status === "running");
+}
+
+const APPROVABLE_PLAN: ReadonlySet<FixPlanStatus> = new Set<FixPlanStatus>(["draft", "pending_approval"]);
+
+/** Why an approvable plan cannot be approved: its issue is closed (the approve endpoint refuses it with 409,
+ *  issue_state.closed_issue_refusal). null when the plan is not approvable anyway or its issue is open. */
+export function approvalBlockedReason(
+  fp: Pick<FixPlan, "status">, issueStatus: string | undefined,
+): "resolved" | "dismissed" | null {
+  if (!APPROVABLE_PLAN.has(fp.status)) return null;
+  return issueStatus === "resolved" || issueStatus === "dismissed" ? issueStatus : null;
+}
+
+/** The backend approves a draft or pending plan, and not one whose issue is resolved or dismissed. */
+export function canApprovePlan(fp: Pick<FixPlan, "status">, issueStatus: string | undefined): boolean {
+  return APPROVABLE_PLAN.has(fp.status) && approvalBlockedReason(fp, issueStatus) === null;
 }
 
 export type AnchorBadge =

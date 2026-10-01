@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useAnomaly } from "@/hooks/useAnomaly";
-import { issueFacts, newestFirst } from "@/lib/issueDetail";
+import { approvalBlockedReason, canApprovePlan, issueFacts, newestFirst } from "@/lib/issueDetail";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useFixPlans, useApproveFixPlan, useRejectFixPlan, useExecuteFixPlan } from "@/hooks/useFixPlans";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
@@ -16,6 +16,7 @@ import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ChangeStatusBadge } from "@/components/plans/ChangeStatusBadge";
 import { ChangeStepper } from "@/components/plans/ChangeStepper";
 import { apiFetch } from "@/api/client";
@@ -295,7 +296,7 @@ function IssueBody({ issueId }: { issueId: number }) {
           </div>
         ) : (
           fixPlans.data.map((fp) => (
-            <FixPlanCard key={fp.id} fp={fp} actions={{ approveMut, rejectMut, executeMut }} />
+            <FixPlanCard key={fp.id} fp={fp} issueStatus={a.status} actions={{ approveMut, rejectMut, executeMut }} />
           ))
         )}
       </Tabs.Content>
@@ -441,8 +442,9 @@ type PlanActions = {
   executeMut: ReturnType<typeof useExecuteFixPlan>;
 };
 
-/** A plan, titled as the child of its I# or C# ("I#12 fix plan v2"). Without `actions` it is read-only. */
-function FixPlanCard({ fp, actions }: { fp: FixPlan; actions?: PlanActions }) {
+/** A plan, titled as the child of its I# or C# ("I#12 fix plan v2"). Without `actions` it is read-only; `issueStatus`
+ *  is its issue's, undefined for a change plan. */
+function FixPlanCard({ fp, issueStatus, actions }: { fp: FixPlan; issueStatus?: string; actions?: PlanActions }) {
   const { t } = useLocale();
 
   return (
@@ -488,41 +490,51 @@ function FixPlanCard({ fp, actions }: { fp: FixPlan; actions?: PlanActions }) {
       )}
 
       {/* Action buttons */}
-      {actions && <PlanActionButtons fp={fp} {...actions} />}
+      {actions && <PlanActionButtons fp={fp} issueStatus={issueStatus} {...actions} />}
     </div>
   );
 }
 
-function PlanActionButtons({ fp, approveMut, rejectMut, executeMut }: { fp: FixPlan } & PlanActions) {
+/** Only an issue's fix plans get actions (a change plan is approved on its change page), so this is the fix branch. */
+function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut }:
+  { fp: FixPlan; issueStatus?: string } & PlanActions) {
   const { t } = useLocale();
   const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
   const [claimedName, setClaimedName] = useState("");
   const { isAuthenticated } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const canApprove = canApprovePlan(fp, issueStatus);
+  // a plan of a resolved / dismissed issue can still be rejected, not approved
+  const blocked = approvalBlockedReason(fp, issueStatus);
 
   return (
     <>
+      {blocked && <p className="text-[11px] text-muted-foreground">{t(`issue.approvalBlocked.${blocked}`)}</p>}
       <div className="flex gap-2">
-        {fp.status === "pending_approval" && (
-          <>
-            <button
-              onClick={() => { approveMut.reset(); setDialog("approve"); }}
-              disabled={approveMut.isPending}
-              className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-            >
-              {t("issues.approve")}
-            </button>
-            <button
-              onClick={() => { rejectMut.reset(); setDialog("reject"); }}
-              disabled={rejectMut.isPending}
-              className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
-            >
-              {t("issues.reject")}
-            </button>
-          </>
+        {canApprove && (
+          <button
+            onClick={() => { approveMut.reset(); setDialog("approve"); }}
+            disabled={approveMut.isPending}
+            className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          >
+            {t("issues.approve")}
+          </button>
+        )}
+        {(canApprove || blocked) && (
+          <button
+            onClick={() => { rejectMut.reset(); setDialog("reject"); }}
+            disabled={rejectMut.isPending}
+            className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
+          >
+            {t("issues.reject")}
+          </button>
         )}
         {fp.status === "approved" && (
           <button
-            onClick={() => executeMut.mutate(fp.id)}
+            onClick={async () => {
+              if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
+              executeMut.mutate(fp.id);
+            }}
             disabled={executeMut.isPending}
             className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
@@ -530,6 +542,11 @@ function PlanActionButtons({ fp, approveMut, rejectMut, executeMut }: { fp: FixP
           </button>
         )}
       </div>
+      {/* one execute mutation serves every card of the issue: show its error on the plan it ran for */}
+      {executeMut.error && executeMut.variables === fp.id && (
+        <p role="alert" className="text-[11px] text-red-500">{executeMut.error.message}</p>
+      )}
+      {confirmDialog}
 
       {dialog && (
         <ReasonDialog

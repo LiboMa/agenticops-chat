@@ -132,6 +132,8 @@
   "issues.approval": "审批",
   "issues.approvalWarning": "计划 -- 需要人工审批后才能执行。",
   "issues.approverPlaceholder": "您的姓名",
+  "issue.approvalBlocked.dismissed": "重新打开该问题后才能批准此方案。",
+  "issue.approvalBlocked.resolved": "该问题已解决，此方案不能再被批准。",
   "issues.impact": "影响范围",
   "issues.created": "创建时间",
   "issues.approvedBy": "审批人",

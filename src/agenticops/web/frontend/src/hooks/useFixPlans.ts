@@ -3,8 +3,10 @@ import { apiFetch } from "@/api/client";
 import type { FixPlan, PlanKind } from "@/api/types";
 import { toQuery } from "@/lib/plans";
 
-/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
-export const fixPlanMutationKeys = (id: number): QueryKey[] => [["fix-plans"], ["fix-plan", id], ["plan-stats"]];
+/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read, and the
+ *  issue and its runs, which approve and execute move on the backend. */
+export const fixPlanMutationKeys = (id: number): QueryKey[] =>
+  [["fix-plans"], ["fix-plan", id], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"]];
 
 export type FixPlanFilters = {
   status?: string;
@@ -63,10 +65,7 @@ export function useExecuteFixPlan() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch<unknown>(`/fix-plans/${id}/execute`, { method: "POST" }),
-    onSuccess: (_data, id) => {
-      qc.invalidateQueries({ queryKey: ["fix-plans"] });
-      qc.invalidateQueries({ queryKey: ["fix-plan", id] });
-      qc.invalidateQueries({ queryKey: ["fix-executions", id] });
-    },
+    onSuccess: (_data, id) =>
+      [...fixPlanMutationKeys(id), ["fix-executions", id]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }

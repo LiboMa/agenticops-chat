@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAnomaly } from "@/hooks/useAnomaly";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useRcaFeedback } from "@/hooks/useSignals";
@@ -39,7 +40,8 @@ import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { planLabel, shortHash } from "@/lib/plans";
 import {
-  anchorBadge, issueFacts, issueStatuses, latestExecution, newestFirst, parseIssueTab, ISSUE_TABS, type IssueTab,
+  anchorBadge, approvalBlockedReason, canApprovePlan, issueFacts, issueStatuses, latestExecution, newestFirst, parseIssueTab,
+  ISSUE_TABS, type IssueTab,
 } from "@/lib/issueDetail";
 import { apiFetch } from "@/api/client";
 import type {
@@ -66,6 +68,18 @@ export default function IssueDetail() {
   const approveMut = useApproveFixPlan();
   const rejectMut = useRejectFixPlan();
   const executeMut = useExecuteFixPlan();
+
+  // The issue poll can land on fix_executed after the runs poll has stopped; the banner needs the verdict the
+  // backend wrote to the run in the same transaction, so a status move refetches the runs.
+  const qc = useQueryClient();
+  const issueStatus = anomaly.data?.status;
+  const lastStatus = useRef(issueStatus);
+  useEffect(() => {
+    if (lastStatus.current !== undefined && lastStatus.current !== issueStatus) {
+      qc.invalidateQueries({ queryKey: ["issue-executions", issueId] });
+    }
+    lastStatus.current = issueStatus;
+  }, [issueStatus, issueId, qc]);
 
   /* -- Local state ------------------------------------------------- */
   // The tab lives in the URL (?tab=), so a link can open the Verification tab directly
@@ -275,7 +289,7 @@ export default function IssueDetail() {
       {tab === "fixPlan" && (
         <FixPlanTab
           fixPlans={fixPlans}
-          executions={executions}
+          issueStatus={a.status}
           fixPlanLoading={fixPlanLoading}
           onGenerateFixPlan={triggerFixPlan}
           hasRca={!!rca.data}
@@ -559,7 +573,7 @@ function RcaSection({
 
 function FixPlanTab({
   fixPlans,
-  executions,
+  issueStatus,
   fixPlanLoading,
   onGenerateFixPlan,
   hasRca,
@@ -571,7 +585,7 @@ function FixPlanTab({
   t,
 }: {
   fixPlans: ReturnType<typeof useFixPlans>;
-  executions: ReturnType<typeof useIssueExecutions>;
+  issueStatus: IssueStatus;
   fixPlanLoading: boolean;
   onGenerateFixPlan: () => void;
   hasRca: boolean;
@@ -618,18 +632,14 @@ function FixPlanTab({
 
   /* Show the latest (most relevant) plan inline */
   const fp = latestPlan ?? plans[0];
-  const needsApproval = fp.status === "draft" || fp.status === "pending_approval";
+  const needsApproval = canApprovePlan(fp, issueStatus);
+  // a plan of a resolved / dismissed issue can still be rejected, not approved
+  const blocked = approvalBlockedReason(fp, issueStatus);
   const canExecute = fp.status === "approved";
 
   async function handleExecute() {
     if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
-    executeMut.mutate(fp.id, {
-      onSuccess: () => {
-        fixPlans.refetch();
-        executions.refetch();
-      },
-      onError: (err) => setActionMsg(`Execute failed: ${err.message}`),
-    });
+    executeMut.mutate(fp.id, { onError: (err) => setActionMsg(`Execute failed: ${err.message}`) });
   }
 
   return (
@@ -722,25 +732,28 @@ function FixPlanTab({
       )}
 
       {/* Approval workflow */}
-      {needsApproval && (
+      {(needsApproval || blocked) && (
         <Card>
           <CardBody>
             <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.approval")}</h3>
 
-            {(fp.risk_level === "L2" || fp.risk_level === "L3") && (
+            {needsApproval && (fp.risk_level === "L2" || fp.risk_level === "L3") && (
               <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-500">
                 <strong>{fp.risk_level} {t("issues.approvalWarning")}</strong>
               </div>
             )}
+            {blocked && <p className="mb-4 text-sm text-muted-foreground">{t(`issue.approvalBlocked.${blocked}`)}</p>}
 
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => { approveMut.reset(); setApprovalDialog("approve"); }}
-                disabled={approveMut.isPending}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-              >
-                {t("issues.approve")}
-              </button>
+              {needsApproval && (
+                <button
+                  onClick={() => { approveMut.reset(); setApprovalDialog("approve"); }}
+                  disabled={approveMut.isPending}
+                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  {t("issues.approve")}
+                </button>
+              )}
               <button
                 onClick={() => { rejectMut.reset(); setApprovalDialog("reject"); }}
                 disabled={rejectMut.isPending}
@@ -753,10 +766,10 @@ function FixPlanTab({
         </Card>
       )}
 
-      {needsApproval && approvalDialog && (
+      {(needsApproval || blocked) && approvalDialog && (
         <ReasonDialog
           title={`${t(approvalDialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} ${planLabel(fp, t)}`}
-          description={fp.title}
+          description={`${fp.title} · ${t("plans.hash")} ${shortHash(fp.content_hash)}`}
           confirmText={approvalDialog === "approve" ? t("issues.approve") : t("issues.reject")}
           variant={approvalDialog === "reject" ? "destructive" : "default"}
           required={approvalDialog === "reject"}
