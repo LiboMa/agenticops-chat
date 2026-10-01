@@ -707,7 +707,7 @@ function FixPlanTab({
             const done = { onSuccess: () => setApprovalDialog(null) };
             if (approvalDialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+              approveMut.mutate({ id: fp.id, content_hash: fp.content_hash ?? "", reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
             } else rejectMut.mutate({ id: fp.id, reason }, done);
           }}
           onClose={() => setApprovalDialog(null)}

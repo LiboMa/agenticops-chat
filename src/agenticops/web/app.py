@@ -49,6 +49,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
 from agenticops.services.executor_service import ExecutorService
+from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
 from agenticops.services.inventory import PRESENT
 from agenticops.web.session_manager import ChatSessionManager
 
@@ -2496,6 +2497,7 @@ async def api_create_fix_plan(data: FixPlanCreate):
             post_checks=data.post_checks,
         )
         session.add(plan)
+        stamp_content(session, plan)
         session.flush()
         return FixPlanResponse.model_validate(plan)
 
@@ -2553,16 +2555,18 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                              user_id=actor.user_id, details={"fields": sorted(changed_new)},
                              old_values=changed_old, new_values=changed_new, session=session)
             plan.updated_at = datetime.now(timezone.utc)  # bump only when content actually changed
+            stamp_content(session, plan)
         session.flush()
         return _fix_plan_response(session, plan)
 
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
-async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(default=FixPlanApproveBody()),
-                               actor: Actor = Depends(current_actor)):
+async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Actor = Depends(current_actor)):
     """Approve a plan as the authenticated actor. The body's approved_by is a legacy claimed name:
     it is audited (details.claimed_name) but never stored as the approver. The L2/L3 agent ceiling
-    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor."""
+    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor.
+    content_hash is required (422 without it): it is the plan the approver reviewed, and a plan whose
+    content has changed since is refused (409). The approval records the hash and version it approved."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.models import InvalidStatusTransition, transition_plan
@@ -2583,6 +2587,9 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
             authz.check(actor, "plan.approve", subject=plan)
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
+        conflict = approval_conflict(session, plan, data.content_hash)
+        if conflict:
+            raise HTTPException(status_code=409, detail=conflict)
         old = plan.status
         try:
             transition_plan(plan, "approved")
@@ -2590,6 +2597,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
             raise HTTPException(status_code=409, detail=str(e))
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
+        stamp_approval(session, plan)
         # Sync HealthIssue status (change plans have no issue)
         if plan.health_issue_id:
             from agenticops.services.issue_state import advance_issue

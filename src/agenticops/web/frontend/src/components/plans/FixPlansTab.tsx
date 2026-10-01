@@ -113,7 +113,7 @@ export function FixPlansTab() {
           busy={approve.isPending || reject.isPending}
           error={(pending.action === "approve" ? approve.error : reject.error)?.message ?? null}
           onConfirm={(reason) => {
-            if (pending.action === "approve") approve.mutate({ id: pending.plan.id, reason: reason || undefined }, { onSuccess: () => setPending(null) });
+            if (pending.action === "approve") approve.mutate({ id: pending.plan.id, content_hash: pending.plan.content_hash ?? "", reason: reason || undefined }, { onSuccess: () => setPending(null) });
             else reject.mutate({ id: pending.plan.id, reason }, { onSuccess: () => setPending(null) });
           }}
           onClose={() => setPending(null)}

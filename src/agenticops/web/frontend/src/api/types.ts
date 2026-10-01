@@ -172,6 +172,11 @@ export interface FixPlan {
   created_at: string;
   updated_at: string | null;
   account_id: number | null;
+  // Content identity (MVP-2.6.1): an approval sends content_hash back and is refused (409) if the plan changed
+  plan_version: number;
+  content_hash: string | null;
+  approved_hash: string | null;
+  approved_version: number | null;
 }
 
 export interface FixExecution {

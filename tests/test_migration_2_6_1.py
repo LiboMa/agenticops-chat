@@ -1,4 +1,4 @@
-"""init_db adds the MVP-2.6.1 graph-anchoring and RCA-location columns to an existing database in place:
+"""init_db adds the MVP-2.6.1 graph-anchoring, RCA-location and plan-identity columns to an existing database in place:
 rows preserved, indexes added, idempotent (once per process per URL, and no DDL left once migrated),
 PostgreSQL DDL guarded with IF NOT EXISTS and typed for the dialect."""
 import re
@@ -41,9 +41,23 @@ INSERT INTO rca_results (id, health_issue_id, root_cause, confidence, contributi
 _NEW_HEALTH_COLUMNS = {"resource_ref", "anchor_status", "anchor_candidates", "observed_at"}
 _NEW_RCA_COLUMNS = {"location", "location_status", "location_build_id", "location_verdict", "location_verdict_by",
                     "location_verdict_at"}
+_NEW_PLAN_COLUMNS = {"plan_version", "content_hash", "approved_hash", "approved_version"}
+
+# A 2.6.0 fix_plans table (no plan-identity columns): plan 1 approved before the upgrade, plan 2 still a draft
+OLD_PLANS = """
+CREATE TABLE fix_plans (id INTEGER PRIMARY KEY, plan_kind VARCHAR(10) DEFAULT 'fix', health_issue_id INTEGER,
+  rca_result_id INTEGER, change_request_id INTEGER, risk_level VARCHAR(20), title VARCHAR(300), summary TEXT,
+  steps JSON, rollback_plan JSON, estimated_impact TEXT, pre_checks JSON, post_checks JSON, status VARCHAR(30),
+  approved_by VARCHAR(255), approved_at DATETIME, rejected_by VARCHAR(255), rejected_at DATETIME,
+  rejection_reason TEXT, created_at DATETIME, updated_at DATETIME);
+INSERT INTO fix_plans (id, plan_kind, health_issue_id, rca_result_id, risk_level, title, summary, steps, rollback_plan,
+  estimated_impact, pre_checks, post_checks, status, approved_by)
+  VALUES (1, 'fix', 1, 1, 'L1', 'p1', 's', '[{"command": "echo a"}]', '{}', '', '[]', '[]', 'approved', 'user:bob'),
+         (2, 'fix', 1, 1, 'L1', 'p2', 's', '[{"command": "echo b"}]', '{}', '', '[]', '[]', 'draft', NULL);
+"""
 _MIGRATION_DDL = re.compile(
     r"ADD COLUMN (IF NOT EXISTS )?(resource_ref|anchor_status|anchor_candidates|observed_at|absent_since"
-    r"|content_changed_at|rules_published_at|location\w*)"
+    r"|content_changed_at|rules_published_at|location\w*|plan_version|content_hash|approved_hash|approved_version)"
     r"|idx_health_issue_resource_ref|idx_health_issue_anchor_status",
     re.I,
 )
@@ -164,7 +178,7 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     pg = postgresql.dialect()
     stub = _StubInspector(
         {"health_issues": [{"name": "id"}], "cloud_resources": [{"name": "id"}], "galaxy_builds": [{"name": "id"}],
-         "rca_results": [{"name": "id"}]},
+         "rca_results": [{"name": "id"}], "fix_plans": [{"name": "id"}]},
         {},
     )
     stmts = _statements_2_6_1(stub, pg)
@@ -175,6 +189,8 @@ def test_pg_statements_are_guarded_and_dialect_typed():
     assert "ALTER TABLE cloud_resources ADD COLUMN IF NOT EXISTS content_changed_at TIMESTAMP WITHOUT TIME ZONE" in stmts
     assert "ALTER TABLE rca_results ADD COLUMN IF NOT EXISTS location JSON" in stmts
     assert "ALTER TABLE rca_results ADD COLUMN IF NOT EXISTS location_verdict_at TIMESTAMP WITHOUT TIME ZONE" in stmts
+    assert "ALTER TABLE fix_plans ADD COLUMN IF NOT EXISTS plan_version INTEGER NOT NULL DEFAULT 1" in stmts
+    assert "ALTER TABLE fix_plans ADD COLUMN IF NOT EXISTS approved_hash VARCHAR(64)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_resource_ref ON health_issues(resource_ref)" in stmts
     assert "CREATE INDEX IF NOT EXISTS idx_health_issue_anchor_status ON health_issues(anchor_status)" in stmts
     assert all("DATETIME" not in s for s in stmts)
@@ -227,3 +243,33 @@ def test_backfill_marks_existing_rcas_location_absent(old_db):
     with engine.connect() as c:
         row = c.execute(text("SELECT location, location_status, location_build_id FROM rca_results WHERE id = 1")).one()
     assert tuple(row) == (None, "absent", None)
+
+
+@pytest.fixture
+def old_db_with_plans(old_db):
+    con = sqlite3.connect(old_db)
+    con.executescript(OLD_PLANS + LEDGER)  # LEDGER: the signal behind issue 1, so the anchor backfill places it
+    con.commit()
+    con.close()
+    return old_db
+
+
+def test_backfill_hashes_existing_plans_and_keeps_an_approval_runnable(old_db_with_plans):
+    """Spec §4 / §3.D.1: every pre-2.6.1 plan gets its hash (over the account the anchor backfill just gave its
+    issue); an approved one also gets it as its approved hash, so the execution gate still serves it."""
+    from sqlalchemy.orm import Session
+
+    from agenticops.models import FixPlan, HealthIssue
+    from agenticops.services.plan_content import approval_drift, current_hash
+
+    engine = _run_init_db(old_db_with_plans)
+    assert _NEW_PLAN_COLUMNS <= _cols(engine, "fix_plans")
+    with Session(engine) as s:
+        approved, draft = s.get(FixPlan, 1), s.get(FixPlan, 2)
+        assert s.get(HealthIssue, 1).account_id == 1
+        assert approved.content_hash == current_hash(s, approved)
+        assert (approved.approved_hash, approved.plan_version, approved.approved_version) == (
+            approved.content_hash, 1, 1)
+        assert approval_drift(s, approved) is None
+        assert draft.content_hash == current_hash(s, draft) and draft.content_hash != approved.content_hash
+        assert (draft.approved_hash, draft.approved_version) == (None, None)

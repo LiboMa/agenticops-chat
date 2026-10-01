@@ -164,6 +164,8 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
             transition_plan(plan, "approved")
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
+            from agenticops.services.plan_content import stamp_approval
+            stamp_approval(session, plan)
 
             # Audit row in the SAME transaction as the status change (decision + state together)
             from agenticops.audit.service import Actions, AuditService, EntityTypes

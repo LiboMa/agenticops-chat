@@ -200,6 +200,8 @@ IMPORTANT — YOUR BOUNDARIES:
 OUTPUT FORMATTING:
 - When referencing issues, use I#N notation (e.g., I#170). When referencing resources, use R#N notation (e.g., R#42).
   These references are auto-linked in the web UI and CLI.
+- Name a plan by what it belongs to and its version — "I#12 fix plan v2" (the `label` field of
+  get_fix_plan) — never a bare "Plan #N". A new version is new content: it needs its own approval.
 - End EVERY reply with exactly one line (no text after it):
   <<SUGGEST>>["<action 1>", "<action 2>", "<action 3>"]
   containing 2-3 short follow-up actions the user would likely take next, in the
@@ -233,7 +235,7 @@ CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind th
      a change request.
 CONTEXT: <referenced_change> blocks carry pre-fetched change requests — C#N references are resolved
 before reaching you. Reference change requests as C#N (e.g., C#7); they are auto-linked in the web UI
-and CLI.
+and CLI. Name a change's plan by its label — "C#3 implementation plan v1".
 """
 
 

@@ -18,6 +18,7 @@ from agenticops.models import (Base, ChangeRequest, CloudAccount, FixExecution, 
                                get_session)
 from agenticops.run_context import RunContext, reset_run_context, set_run_context
 from agenticops.services.executor_service import ExecutorService
+from agenticops.services.plan_content import stamp_approval
 from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly  # the executor's fallback tools
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -67,6 +68,7 @@ def _change_run(db, *, account=True, plan_status="executing", cr_status="executi
                    status=plan_status, approved_by="user:bob", rollback_plan={"steps": ["undo"]},
                    post_checks=[{"check": "c"}])
     db.add(plan); db.flush()
+    _as_approved(db, plan)
     ex_id = None
     if ticket_status:
         ex = FixExecution(fix_plan_id=plan.id, status=ticket_status, executed_by="user:bob", started_at=T0)
@@ -87,6 +89,7 @@ def _fix_run(db, plan_status="executing", ticket_status="running", *, account_id
     plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s",
                    status=plan_status, approved_by="user:alice")
     db.add(plan); db.flush()
+    _as_approved(db, plan)
     ex_id = None
     if ticket_status:
         ex = FixExecution(fix_plan_id=plan.id, health_issue_id=issue.id, status=ticket_status,
@@ -95,6 +98,12 @@ def _fix_run(db, plan_status="executing", ticket_status="running", *, account_id
         ex_id = ex.id
     db.commit()
     return issue.id, plan.id, ex_id
+
+
+def _as_approved(db, plan):
+    """An approved/executing plan carries the hash its approval was for (spec §3.D.1)."""
+    if plan.status in ("approved", "executing"):
+        stamp_approval(db, plan)
 
 
 def _audits(db, action):

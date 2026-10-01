@@ -405,5 +405,7 @@ def reanchor_open_issues(session) -> int:
         issue.anchor_candidates = anchor.audit()
         if issue.account_id is None and anchor.account_id is not None:
             issue.account_id = anchor.account_id
+            from agenticops.services.plan_content import restamp_issue_plans
+            restamp_issue_plans(session, issue.id)  # the account is plan content (spec §3.D.1)
         changed += 1
     return changed

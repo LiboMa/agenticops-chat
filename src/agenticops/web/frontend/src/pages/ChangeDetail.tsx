@@ -110,7 +110,9 @@ function ChangeDetailView({ crId }: { crId: number }) {
     const args: ChangeActionArgs =
       pending.action === "resolve-review"
         ? { id: cr.id, action: "resolve-review", body: { outcome: pending.extra?.outcome ?? "completed", reason } }
-        : { id: cr.id, action: pending.action, body: { reason } };
+        : pending.action === "approve"
+          ? { id: cr.id, action: "approve", body: { reason, content_hash: plan?.content_hash ?? "" } }
+          : { id: cr.id, action: pending.action, body: { reason } };
     act.mutate(args, { onSuccess: () => setPending(null) });
   };
   const onExecute = async () => {

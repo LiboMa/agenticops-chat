@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agenticops.models import Base, ChangeRequest, CloudAccount, FixExecution, FixPlan, HealthIssue, RCAResult, get_session
+from agenticops.services.plan_content import stamp_approval
 
 
 @pytest.fixture
@@ -42,7 +43,9 @@ def _change_plan(db, plan_status, cr_status, *, account_id=None):
     db.add(cr); db.flush()
     plan = FixPlan(plan_kind="change", change_request_id=cr.id, risk_level="L1", title="p", summary="s",
                    status=plan_status, rollback_plan={"steps": ["undo"]}, post_checks=[{"check": "c"}])
-    db.add(plan); db.commit()
+    db.add(plan); db.flush()
+    _as_approved(db, plan)
+    db.commit()
     return plan.id, cr.id
 
 
@@ -54,8 +57,16 @@ def _fix_plan(db, status):
     db.add(rca); db.flush()
     plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s",
                    status=status)
-    db.add(plan); db.commit()
+    db.add(plan); db.flush()
+    _as_approved(db, plan)
+    db.commit()
     return plan.id
+
+
+def _as_approved(db, plan):
+    """An approved/executing plan carries the hash its approval was for (spec §3.D.1), as the backfill leaves it."""
+    if plan.status in ("approved", "executing"):
+        stamp_approval(db, plan)
 
 
 def _audit_count():
@@ -230,7 +241,7 @@ def test_each_change_execution_condition_alone_refuses_both_gates(db, plan_statu
 _WEB_CALLS = {
     "edit": ("PUT", "/api/fix-plans/{pid}", {"title": "x"}),
     "reject-via-deprecated-put": ("PUT", "/api/fix-plans/{pid}", {"status": "rejected"}),
-    "approve": ("PUT", "/api/fix-plans/{pid}/approve", {}),
+    "approve": ("PUT", "/api/fix-plans/{pid}/approve", {"content_hash": "any"}),
     "reject": ("POST", "/api/fix-plans/{pid}/reject", {"reason": "no"}),
     "delete": ("DELETE", "/api/fix-plans/{pid}", None),
     "execute": ("POST", "/api/fix-plans/{pid}/execute", None),

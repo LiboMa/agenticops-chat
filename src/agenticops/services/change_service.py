@@ -31,6 +31,7 @@ from agenticops.services.notification_service import (  # noqa: F401  (pending_a
     notify_change_pending_approval, notify_change_requested, notify_change_result,
 )
 from agenticops.services.pipeline_events import log_event
+from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
 
 logger = logging.getLogger(__name__)
 
@@ -820,6 +821,8 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         cr.risk_level = risk_level
         cr.action_type = action_type
         plan.risk_level = risk_level
+        stamp_content(s, plan)  # the reviewed risk is part of the content an approval approves
+        plan_dict["content_hash"] = plan.content_hash
         cr.policy_rule = decision.rule_name
         cr.policy_action = decision.action
         cr.effective_change_type = _effective_change_type(decision, cr.requested_change_type)
@@ -861,7 +864,8 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
     if decision.action == "auto_approve" and settings.change_auto_approve_standard:
         auto = agent_actor("auto-pipeline")
         try:
-            globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)")
+            globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)",
+                                 content_hash=plan_dict["content_hash"])
         except Exception:
             # The auto-approve() itself failed (a lost claim, an audit-write error): the CR is still 'planned'.
             # Do not propagate — a review must not 500 because auto-approval could not fire. Fall back to the
@@ -913,9 +917,11 @@ def _require_reason(reason: Optional[str]) -> str:
     return reason[:2000]
 
 
-def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
+def approve(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) -> dict:
     """planned → approved (human gate). The claim + every field write share one transaction, so a
-    concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak."""
+    concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak.
+    `content_hash` is the hash of the implementation plan the approver reviewed; a plan that has changed
+    since is refused (409) and the approval records the hash and version it approved (spec §3.D.1)."""
     _require_enabled()
     reason = _require_reason(reason)
     with _session() as s:
@@ -926,6 +932,9 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
         plan = active_plan_for(s, cr_id)
         if plan is None:
             raise ChangeStateError("no active change plan to approve")
+        conflict = approval_conflict(s, plan, content_hash)
+        if conflict:
+            raise ChangeStateError(conflict)
         if not _claim(s, cr_id, "planned", "approved"):
             raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
         _transition(cr, "approved")
@@ -933,6 +942,7 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
         cr.approved_by, cr.approver_user_id, cr.approved_at, cr.approval_reason = actor.key, actor.user_id, now, reason
         _transition_plan(plan, "approved")
         plan.approved_by, plan.approved_at = actor.key, now
+        stamp_approval(s, plan)
         _audit(s, Actions.CHANGE_APPROVED, cr, actor,
                details={"reason": reason, "risk_level": cr.risk_level, "policy_rule": cr.policy_rule, "plan_id": plan.id},
                old_status="planned", new_status="approved")

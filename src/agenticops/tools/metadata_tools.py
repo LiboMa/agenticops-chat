@@ -27,6 +27,9 @@ from agenticops.models import (
 )
 from agenticops.notify.im_config import load_channels as _load_yaml_channels
 from agenticops.services.issue_state import advance_issue, transition_issue
+from agenticops.services.plan_content import (
+    CONTENT_CHANGED, approval_drift, plan_label, stamp_approval, stamp_content,
+)
 from agenticops.services.inventory import PRESENT, mark_seen
 
 logger = logging.getLogger(__name__)
@@ -988,6 +991,7 @@ def save_fix_plan(
             session.add(plan)
             event_type = "fix_plan_created"
 
+        stamp_content(session, plan)
         refusal = advance_issue(session, issue.id, "fix_planned", actor=_tool_actor(),
                                 reason=f"fix plan {'updated' if is_update else 'saved'}")
         session.commit()
@@ -1016,7 +1020,7 @@ def save_fix_plan(
 
         action = "UPDATED" if is_update else "saved"
         return (
-            f"FixPlan #{plan.id} {action} for HealthIssue #{health_issue_id}. "
+            f"{plan_label(plan)} (FixPlan #{plan.id}) {action} for HealthIssue #{health_issue_id}. "
             f"Risk: {risk_level}. Title: {title}. "
             + (f"Issue status unchanged: {refusal}" if refusal else "Issue status updated to 'fix_planned'.")
         )
@@ -1074,6 +1078,7 @@ def _save_change_plan(change_request_id, risk_level, title, summary, steps, roll
                            pre_checks=pre, post_checks=post, status="draft")
             session.add(plan)
             event_type = "fix_plan_created"
+        stamp_content(session, plan)
         session.commit()
         try:
             from agenticops.services.pipeline_events import log_event
@@ -1082,7 +1087,7 @@ def _save_change_plan(change_request_id, risk_level, title, summary, steps, roll
         except Exception:
             pass
         action = "UPDATED" if is_update else "saved"
-        return (f"Change plan #{plan.id} {action} for ChangeRequest #{change_request_id} (risk {risk_level}). "
+        return (f"{plan_label(plan)} (FixPlan #{plan.id}) {action} for ChangeRequest #{change_request_id} (risk {risk_level}). "
                 f"Now call submit_change_review to deliver your verdict.")
     except Exception as e:
         session.rollback()
@@ -1127,6 +1132,11 @@ def get_fix_plan(health_issue_id: int) -> str:
             "status": plan.status,
             "approved_by": plan.approved_by,
             "approved_at": str(plan.approved_at) if plan.approved_at else None,
+            "label": plan_label(plan),
+            "plan_version": plan.plan_version,
+            "content_hash": plan.content_hash,
+            "approved_version": plan.approved_version,
+            "approved_hash": plan.approved_hash,
             "created_at": str(plan.created_at),
         }, default=str))
     finally:
@@ -1227,6 +1237,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
             return str(e)
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
+        stamp_approval(session, plan)
 
         # Sync HealthIssue status (change plans have no issue)
         issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
@@ -1256,7 +1267,7 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
             logger.debug("Notification trigger failed", exc_info=True)
 
         return (
-            f"FixPlan #{fix_plan_id} approved by {actor.key}. "
+            f"{plan_label(plan)} (FixPlan #{fix_plan_id}) approved by {actor.key}. "
             f"Risk: {plan.risk_level}. "
             + (f"HealthIssue status unchanged: {issue_refusal}" if issue_refusal
                else "HealthIssue status updated to 'fix_approved'.")
@@ -1271,6 +1282,51 @@ def approve_fix_plan(fix_plan_id: int, approved_by: str) -> str:
 # ============================================================================
 # Executor tools (L4 Auto Operation)
 # ============================================================================
+
+
+def _abort_drifted_plan(session, plan, drift: str) -> str:
+    """The plan is not the content that was approved (spec §3.D.1): record this attempt as an aborted execution and
+    withdraw the plan. A fix plan's issue goes back to root_cause_identified for a new plan; a change plan's
+    request is failed by the change mapper, with the reason."""
+    from sqlalchemy import update
+    from agenticops.run_context import get_run_context
+    rc = get_run_context()
+    now = datetime.now(timezone.utc)
+    if rc.execution_id:  # the queued run's own ticket, closed with the same compare-and-set as save_execution_result
+        closed = session.execute(
+            update(FixExecution)
+            .where(FixExecution.id == rc.execution_id, FixExecution.fix_plan_id == plan.id,
+                   FixExecution.status == "running")
+            .values(status="aborted", completed_at=now, error_message=CONTENT_CHANGED)
+        )
+        if closed.rowcount != 1:
+            session.rollback()
+            return (f"REJECTED: {drift}. Execution #{rc.execution_id} is no longer running — "
+                    f"it was cancelled, timed out or already recorded.")
+        session.refresh(plan)
+    else:
+        session.add(FixExecution(fix_plan_id=plan.id, health_issue_id=plan.health_issue_id, status="aborted",
+                                 started_at=now, completed_at=now, error_message=CONTENT_CHANGED,
+                                 executed_by=_tool_actor()))
+    if plan.status == "approved":  # withdrawn before it ran
+        transition_plan(plan, "rejected")
+        plan.rejected_by, plan.rejected_at, plan.rejection_reason = _tool_actor(), now, CONTENT_CHANGED
+    elif plan.status == "executing":
+        transition_plan(plan, "failed")
+    is_change = plan.plan_kind == "change"
+    if not is_change and plan.health_issue_id:
+        advance_issue(session, plan.health_issue_id, "root_cause_identified", actor=_tool_actor(), reason=drift)
+    plan_id = plan.id
+    session.commit()
+    if is_change:
+        try:
+            from agenticops.services.change_service import on_execution_result
+            on_execution_result(plan_id, "aborted", error=CONTENT_CHANGED)
+        except Exception:
+            logger.warning("change on_execution_result failed for FixPlan #%d", plan_id, exc_info=True)
+    return (f"REJECTED: {drift}. The execution was recorded as aborted and the plan withdrawn — "
+            + ("the change request is failed; open a new one." if is_change
+               else "the issue is back at 'root_cause_identified' for a new fix plan."))
 
 
 @tool
@@ -1308,6 +1364,10 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
                 f"Only approved plans can be executed."
             )
 
+        drift = approval_drift(session, plan)
+        if drift:
+            return _abort_drifted_plan(session, plan, drift)
+
         return _truncate(json.dumps({
             "id": plan.id,
             "health_issue_id": plan.health_issue_id,
@@ -1325,6 +1385,11 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
             "status": plan.status,
             "approved_by": plan.approved_by,
             "approved_at": str(plan.approved_at) if plan.approved_at else None,
+            "label": plan_label(plan),
+            "plan_version": plan.plan_version,
+            "content_hash": plan.content_hash,
+            "approved_version": plan.approved_version,
+            "approved_hash": plan.approved_hash,
             "created_at": str(plan.created_at),
         }, default=str))
     finally:

@@ -28,17 +28,22 @@ describe("fixPlanMutationKeys (I2)", () => {
 // M1 — the change-action args are a discriminated union: each action carries the body the backend expects.
 describe("ChangeActionArgs is a discriminated union (M1)", () => {
   it("rejects an approve with no body at compile time", () => {
-    // @ts-expect-error M1: approve requires { reason }
+    // @ts-expect-error M1: approve requires { reason, content_hash }
     const noBody: ChangeActionArgs = { id: 1, action: "approve" };
     expect(noBody).toBeDefined();
   });
   it("rejects an approve carrying the wrong body at compile time", () => {
-    // @ts-expect-error M1: approve's body is { reason }, not { message }
+    // @ts-expect-error M1: approve's body is { reason, content_hash }, not { message }
     const wrongBody: ChangeActionArgs = { id: 1, action: "approve", body: { message: "x" } };
     expect(wrongBody).toBeDefined();
   });
+  it("rejects an approve that does not name the plan content at compile time", () => {
+    // @ts-expect-error MVP-2.6.1: approve binds to the plan content it was shown
+    const noHash: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok" } };
+    expect(noHash).toBeDefined();
+  });
   it("accepts the body each action expects", () => {
-    const approve: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok" } };
+    const approve: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok", content_hash: "ab12" } };
     const clarify: ChangeActionArgs = { id: 1, action: "clarify", body: { message: "why?" } };
     const resolve: ChangeActionArgs = { id: 1, action: "resolve-review", body: { outcome: "completed" } };
     const execute: ChangeActionArgs = { id: 1, action: "execute" };

@@ -201,8 +201,12 @@ class TestFixPlanUpdate:
 
 
 class TestFixPlanBodies:
-    def test_approve_body_is_fully_optional(self):
-        b = FixPlanApproveBody()
+    def test_approve_body_requires_only_the_content_hash(self):
+        with pytest.raises(ValidationError):
+            FixPlanApproveBody()
+        with pytest.raises(ValidationError):
+            FixPlanApproveBody(content_hash="")
+        b = FixPlanApproveBody(content_hash="ab12")
         assert b.approved_by is None and b.reason is None
 
     def test_reject_body_requires_non_empty_reason(self):

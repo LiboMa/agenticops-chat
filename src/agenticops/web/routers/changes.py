@@ -14,7 +14,7 @@ from agenticops.services import change_service as cs
 from agenticops.services.pipeline_events import get_timeline
 from agenticops.web.deps import current_actor
 from agenticops.web.schemas import (
-    ChangeClarifyBody, ChangeReasonBody, ChangeRequestCreate, ChangeRequestDetail, ChangeRequestResponse,
+    ChangeApproveBody, ChangeClarifyBody, ChangeReasonBody, ChangeRequestCreate, ChangeRequestDetail, ChangeRequestResponse,
     ChangeResolveReviewBody, ChangeTimelineEntry, FixExecutionResponse, FixPlanResponse,
 )
 
@@ -85,8 +85,8 @@ async def api_get_change(cr_id: int):
 
 
 @router.post("/{cr_id}/approve", response_model=ChangeRequestResponse)
-async def api_approve_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
-    return _call(cs.approve, cr_id, actor=actor, reason=body.reason)
+async def api_approve_change(cr_id: int, body: ChangeApproveBody, actor: Actor = Depends(current_actor)):
+    return _call(cs.approve, cr_id, actor=actor, reason=body.reason, content_hash=body.content_hash)
 
 
 @router.post("/{cr_id}/reject", response_model=ChangeRequestResponse)

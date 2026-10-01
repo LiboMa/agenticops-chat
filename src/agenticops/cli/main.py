@@ -2476,9 +2476,14 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return f"[red]{_safe_text(e)}[/red]"
         if cr["status"] != "planned":
             return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only a planned change can be approved.[/yellow]"
+        from agenticops.services.plan_content import current_hash, plan_label
+        with get_db_session() as s:  # the approval is bound to the implementation plan shown here
+            plan = cs.active_plan_for(s, cr_id)
+            seen = (plan_label(plan), current_hash(s, plan)) if plan is not None else ("no active plan", "")
         console.print(f"[bold]Approve change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
                       f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level') or '-'}\n"
-                      f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}")
+                      f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}\n"
+                      f"  Plan: {seen[0]} (content {(seen[1] or '-')[:12]})")
         reason = " ".join(args[1:]).strip()
         if not reason:
             reason = Prompt.ask("Approval reason (required)").strip()
@@ -2488,7 +2493,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return "[dim]Approval cancelled.[/dim]"
         actor = cli_actor()
         try:
-            out = cs.approve(cr_id, actor=actor, reason=reason)
+            out = cs.approve(cr_id, actor=actor, reason=reason, content_hash=seen[1] or "")
         except cs.ChangeError as e:
             return f"[red]{_safe_text(e)}[/red]"
         return f"[green]Change C#{cr_id} approved by {actor.key} ({out['status']}). Execute with: /execute C{cr_id}[/green]"
@@ -2506,6 +2511,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
     from agenticops.auth import authz
     from agenticops.auth.actor import cli_actor
     from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.plan_content import plan_label, stamp_approval
 
     actor = cli_actor()
     init_db()
@@ -2538,6 +2544,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             console.print(
                 f"[bold yellow]Warning:[/bold yellow] This is a [bold]{plan.risk_level}[/bold] fix plan "
                 f"— requires human approval.\n"
+                f"  Plan: {plan_label(plan)}\n"
                 f"  Title: {plan.title}\n"
                 f"  Impact: {plan.estimated_impact or 'N/A'}"
             )
@@ -2551,6 +2558,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return f"[red]{e}[/red]"
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
+        stamp_approval(session, plan)
 
         # Sync HealthIssue status (change plans have no issue)
         if plan.health_issue_id:
@@ -2565,7 +2573,8 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         session.commit()  # decision + state + audit row in one transaction
 
         # No auto-chain into execution from the CLI: the operator runs /execute explicitly
-        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green] Execute with: /execute {plan_id}"
+        return (f"[green]{plan_label(plan)} (plan #{plan_id}, content {plan.approved_hash[:12]}) approved by "
+                f"{actor.key}.[/green] Execute with: /execute {plan_id}")
     finally:
         session.close()
 

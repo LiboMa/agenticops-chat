@@ -34,11 +34,13 @@ export function useFixPlan(id: number) {
 export function useApproveFixPlan() {
   const qc = useQueryClient();
   return useMutation({
-    // approved_by is the legacy claimed name: the backend audits it but never trusts it
-    mutationFn: ({ id, reason, approved_by }: { id: number; reason?: string; approved_by?: string }) =>
+    // approved_by is the legacy claimed name: the backend audits it but never trusts it.
+    // content_hash is the plan content the approver was shown; the backend refuses (409) if it changed since.
+    mutationFn: ({ id, content_hash, reason, approved_by }:
+      { id: number; content_hash: string; reason?: string; approved_by?: string }) =>
       apiFetch<FixPlan>(`/fix-plans/${id}/approve`, {
         method: "PUT",
-        body: JSON.stringify({ reason, approved_by }),
+        body: JSON.stringify({ content_hash, reason, approved_by }),
       }),
     onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });

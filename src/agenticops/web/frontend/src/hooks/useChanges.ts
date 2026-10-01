@@ -38,8 +38,10 @@ export function useCreateChange() {
 }
 
 // Each action carries exactly the body the backend expects; review/execute take none.
+// An approve names the implementation plan content it approves (409 if that plan changed since).
 export type ChangeActionArgs =
-  | { id: number; action: "approve" | "reject" | "cancel"; body: { reason: string } }
+  | { id: number; action: "approve"; body: { reason: string; content_hash: string } }
+  | { id: number; action: "reject" | "cancel"; body: { reason: string } }
   | { id: number; action: "clarify"; body: { message: string } }
   | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason?: string } }
   | { id: number; action: "review" }

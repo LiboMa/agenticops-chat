@@ -423,7 +423,7 @@ function FixPlanCard({
             const done = { onSuccess: () => setDialog(null) };
             if (dialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+              approveMut.mutate({ id: fp.id, content_hash: fp.content_hash ?? "", reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
             } else rejectMut.mutate({ id: fp.id, reason }, done);
           }}
           onClose={() => setDialog(null)}

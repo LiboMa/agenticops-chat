@@ -612,6 +612,12 @@ class FixPlan(Base):
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Content identity (MVP-2.6.1, services/plan_content): the version moves when the executable content changes;
+    # an approval records the hash and version it approved, and a plan that no longer matches them is not run
+    plan_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    approved_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    approved_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Relationships
     health_issue: Mapped[Optional["HealthIssue"]] = relationship(back_populates="fix_plans")
@@ -1428,6 +1434,8 @@ _ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
     "galaxy_builds": {"rules_published_at": None},
     "rca_results": {"location": None, "location_status": None, "location_build_id": None, "location_verdict": None,
                     "location_verdict_by": None, "location_verdict_at": None},
+    "fix_plans": {"plan_version": "NOT NULL DEFAULT 1", "content_hash": None, "approved_hash": None,
+                  "approved_version": None},
 }
 
 _INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)
@@ -1495,6 +1503,36 @@ def _backfill_location_status_2_6_1(engine) -> None:
         logger.warning("MVP-2.6.1 location_status backfill skipped: %s", exc)
 
 
+def _backfill_plan_hashes_2_6_1(engine) -> None:
+    """Spec §4 / §3.D.1: hash every plan saved before 2.6.1; an approved or executing one also gets that hash as
+    its approved hash, so it can still run. Fail-soft like the backfills above — a plan left without an approved
+    hash is refused at the execution gate (fail-closed) and needs a new approval."""
+    try:
+        from agenticops.services.plan_content import content_hash
+
+        with Session(engine) as session:
+            rows = (
+                session.query(FixPlan.id, FixPlan.status, FixPlan.plan_version, FixPlan.steps, FixPlan.rollback_plan,
+                              FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level,
+                              HealthIssue.account_id.label("issue_account"),
+                              ChangeRequest.account_id.label("change_account"))
+                .outerjoin(HealthIssue, HealthIssue.id == FixPlan.health_issue_id)
+                .outerjoin(ChangeRequest, ChangeRequest.id == FixPlan.change_request_id)
+                .filter(FixPlan.content_hash.is_(None)).all()
+            )
+            for row in rows:
+                digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                                      post_checks=row.post_checks, risk_level=row.risk_level,
+                                      account_id=row.change_account if row.change_account is not None else row.issue_account)
+                values = {"content_hash": digest}
+                if row.status in ("approved", "executing"):
+                    values.update(approved_hash=digest, approved_version=row.plan_version or 1)
+                session.query(FixPlan).filter(FixPlan.id == row.id).update(values, synchronize_session=False)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 plan hash backfill skipped: %s", exc)
+
+
 def _run_migrate_2_6_1(engine) -> None:
     stmts = _statements_2_6_1(inspect(engine), engine.dialect)
     if stmts:
@@ -1504,6 +1542,7 @@ def _run_migrate_2_6_1(engine) -> None:
     # Backfills (spec §4), each fail-soft. Plans B/C/D append theirs after this line.
     _backfill_anchors_2_6_1(engine)
     _backfill_location_status_2_6_1(engine)
+    _backfill_plan_hashes_2_6_1(engine)
 
 
 def _migrate_2_6_1(engine) -> None:

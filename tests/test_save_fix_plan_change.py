@@ -5,6 +5,7 @@ import pytest
 
 from agenticops.auth.actor import Actor
 from agenticops.models import Base, ChangeRequest, CloudAccount, FixExecution, FixPlan, PipelineEvent, get_session
+from agenticops.services.plan_content import stamp_approval
 
 
 @pytest.fixture
@@ -129,7 +130,9 @@ def test_get_approved_fix_plan_reports_kind_and_accepts_executing(db):
     cr.status = "executing"
     plan = FixPlan(plan_kind="change", change_request_id=cr_id, risk_level="L1", title="p", summary="s", status="executing",
                    rollback_plan={"x": 1}, post_checks=[{"check": "c"}])
-    db.add(plan); db.commit()
+    db.add(plan); db.flush()
+    stamp_approval(db, plan)  # the hash its approval was for (spec §3.D.1)
+    db.commit()
     token = set_run_context(RunContext(actor="agent:executor", agent_name="executor", fix_plan_id=plan.id,
                                        change_request_id=cr_id))
     try:

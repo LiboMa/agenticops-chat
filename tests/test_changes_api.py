@@ -50,6 +50,18 @@ def settings_io():
         yield save
 
 
+def _seen(cr_id):
+    """The content hash of the change's implementation plan, as the approver is shown it (spec §3.D.1)."""
+    from agenticops.services.plan_content import current_hash
+    s = get_session()
+    try:
+        plan = (s.query(FixPlan).filter_by(change_request_id=cr_id, plan_kind="change")
+                .order_by(FixPlan.id.desc()).first())
+        return current_hash(s, plan)
+    finally:
+        s.close()
+
+
 def _account_id(name):
     s = get_session()
     try:
@@ -195,9 +207,9 @@ def test_disabled_returns_404(client):
 def test_approve_requires_reason_and_binds_identity(client):
     cr_id = _planned()
     assert client.post(f"/api/changes/{cr_id}/approve", json={}).status_code == 422
-    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed"})
+    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed", "content_hash": _seen(cr_id)})
     assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "web:anonymous"
-    assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again"}).status_code == 409
+    assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again", "content_hash": _seen(cr_id)}).status_code == 409
 
 
 def test_sod_403_when_enforced(client):
@@ -222,14 +234,14 @@ def test_sod_403_when_enforced(client):
     app.dependency_overrides[deps.current_actor] = lambda: ALICE
     try:
         with patch.object(settings, "rbac_enforce", True):
-            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self"})
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self", "content_hash": _seen(cr2['id'])})
         assert r.status_code == 403
         with patch.object(settings, "rbac_enforce", False):
-            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)"})
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)", "content_hash": _seen(cr2['id'])})
         assert r.status_code == 200 and r.json()["approved_by"] == "user:alice"  # shadow mode: allowed, audited
         app.dependency_overrides[deps.current_actor] = lambda: bob
         with patch.object(settings, "rbac_enforce", True):
-            r = client.post(f"/api/changes/{control}/approve", json={"reason": "four eyes"})
+            r = client.post(f"/api/changes/{control}/approve", json={"reason": "four eyes", "content_hash": _seen(control)})
         assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "user:bob"
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
@@ -265,7 +277,7 @@ def test_reject_cancel_clarify_review(client):
 def test_execute_and_timeline(client):
     from agenticops.config import settings
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
     with patch.object(settings, "executor_enabled", True):
         r = client.post(f"/api/changes/{cr_id}/execute")
     assert r.status_code == 202 and r.json()["status"] == "pending" and r.json()["executed_by"] == "web:anonymous"
@@ -292,7 +304,7 @@ def test_resolve_review(client):
     from agenticops.config import settings
     from agenticops.services import change_service as cs
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
     with patch.object(settings, "executor_enabled", True):
         plan_id = client.post(f"/api/changes/{cr_id}/execute").json()["fix_plan_id"]
     with patch.object(cs, "notify_change_result"):
