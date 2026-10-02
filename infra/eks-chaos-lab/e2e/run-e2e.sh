@@ -51,7 +51,10 @@ EVAL_ENV_KEYS=(AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED AIOPS_DEDUP_RESOLVED_COOLDOWN_
                AIOPS_AUTO_FIX_ENABLED AIOPS_RAG_PIPELINE_ENABLED)
 PF_PID=""
 cleanup() {
-  [[ -n "${PF_PID}" ]] && kill "${PF_PID}" 2>/dev/null || true
+  if [[ -n "${PF_PID}" ]]; then
+    kill "${PF_PID}" 2>/dev/null || true  # the supervisor first, so it cannot re-bind the tunnel
+    pkill -f "port-forward svc/agenticops -n ${NS} ${LOCAL_PORT}:8000" 2>/dev/null || true
+  fi
   bash "${CHAOS_LAB_DIR}/chaos/restore-all.sh" || true
   if [[ -n "${LOCATION}" ]]; then
     bash "${CHAOS_LAB_DIR}/faults-l2/l2-faults.sh" restore all || true
@@ -77,8 +80,15 @@ if [[ -n "${LOCATION}" ]]; then
   kubectl rollout status deployment/agenticops -n "${NS}" --timeout=300s
 fi
 
-echo "[tunnel] kubectl port-forward svc/agenticops ${LOCAL_PORT}:8000"
-kubectl port-forward "svc/agenticops" -n "${NS}" "${LOCAL_PORT}:8000" >/tmp/agenticops-pf.log 2>&1 &
+echo "[tunnel] kubectl port-forward svc/agenticops ${LOCAL_PORT}:8000 (supervised)"
+# A port-forward dies with the container it is bound to. Unsupervised, one app restart voided every later case
+# (joint E2E 2026-10-02: 7 of 13), so the loop re-binds it.
+: >/tmp/agenticops-pf.log
+( while true; do
+    kubectl port-forward "svc/agenticops" -n "${NS}" "${LOCAL_PORT}:8000" >>/tmp/agenticops-pf.log 2>&1
+    echo "[tunnel] port-forward exited; re-binding" >>/tmp/agenticops-pf.log
+    sleep 2
+  done ) &
 PF_PID=$!
 
 # Wait for the tunnel + app health.
