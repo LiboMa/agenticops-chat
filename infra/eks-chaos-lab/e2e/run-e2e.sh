@@ -113,4 +113,15 @@ echo "[run] pytest"
 cd "${SCRIPT_DIR}"
 python -m pytest ${SELECT} -v --junitxml=results/junit.xml "$@" || true
 
+if [[ -n "${LOCATION}" ]]; then
+  # The batch's Bedrock cost (report «Cost / time»): the restart above emptied the database, so the summary is this
+  # batch alone. Saved here because the cleanup's restart empties it again.
+  COST_FILE="results/cost-location-${LOCATION_BATCH}-$(date -u +%Y%m%dT%H%M%SZ).json"
+  TOKEN=$(curl -sf -X POST "${AGENTICOPS_URL}/api/auth/login" -H 'Content-Type: application/json' \
+      -d "{\"email\":\"${AIOPS_ADMIN_EMAIL:-admin}\",\"password\":\"${AIOPS_ADMIN_PASSWORD:-aiops2026}\"}" \
+      | python -c 'import json, sys; print(json.load(sys.stdin)["token"])') \
+    && curl -sf -H "Authorization: Bearer ${TOKEN}" "${AGENTICOPS_URL}/api/cost/summary" >"${COST_FILE}" \
+    && echo "[cost] ${COST_FILE}" || echo "[cost] summary not captured"
+fi
+
 echo "[done] artifacts under ${SCRIPT_DIR}/results/"
