@@ -13,6 +13,10 @@ spec:
       labels: { app: agenticops }
     spec:
       serviceAccountName: agenticops
+      # The observer must not share the fault domain it observes: with the cluster's CoreDNS down (coredns-down)
+      # a ClusterFirst pod loses Bedrock, STS and the API server at once. The node's (VPC) resolver keeps them;
+      # the kubeconfig below addresses the API server by IP, so no cluster name is resolved at all.
+      dnsPolicy: Default
       nodeSelector:
         role: agenticops-app
       tolerations:
@@ -45,7 +49,7 @@ spec:
               clusters:
               - name: in-cluster
                 cluster:
-                  server: https://kubernetes.default.svc
+                  server: https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}
                   certificate-authority: ${CA}
               contexts:
               - name: in-cluster
@@ -77,8 +81,10 @@ spec:
             httpGet: { path: /api/health, port: 8000 }
             initialDelaySeconds: 15
             periodSeconds: 10
+          # Liveness = the process answers on its port. /api/health calls AWS (STS); as the liveness probe it
+          # turned a DNS outage into a SIGKILL of the observer (found live 2026-10-02). Readiness keeps it.
           livenessProbe:
-            httpGet: { path: /api/health, port: 8000 }
+            tcpSocket: { port: 8000 }
             initialDelaySeconds: 40
             periodSeconds: 20
           resources:
