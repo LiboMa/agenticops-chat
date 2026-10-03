@@ -133,7 +133,9 @@ describe("changeHeadline", () => {
     expect(changeHeadline(cr({ status: "draft" }), null)).toEqual({ reason: null, todo: "startReview", action: "review" });
     expect(changeHeadline(cr({ status: "under_review" }), null)).toEqual({ reason: null, todo: "review", action: null });
     expect(changeHeadline(cr({ status: "planned" }), null)).toEqual({ reason: null, todo: "approve", action: "approve" });
-    expect(changeHeadline(cr({ status: "approved" }), null)).toEqual({ reason: null, todo: "execute", action: "execute" });
+    // approving runs the change (owner ruling 2026-10-03): a change still at approved is one whose run could
+    // not be queued, and the header offers the retry
+    expect(changeHeadline(cr({ status: "approved" }), null)).toEqual({ reason: null, todo: "notQueued", action: "execute" });
     expect(changeHeadline(cr({ status: "executing" }), null)).toEqual({ reason: null, todo: "executing", action: null });
   });
 

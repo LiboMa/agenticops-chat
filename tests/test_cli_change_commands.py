@@ -123,6 +123,22 @@ def test_slash_approve_reject_execute_changes(db):
             assert "approved" in cli._slash_approve(None, ["C4", "again"])
 
 
+def test_slash_approve_change_runs_it(db):
+    """Owner ruling 2026-10-03: /approve C<id> approves AND queues the run; /execute C<id> is only the retry."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
+         patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "executing"}) as ae:
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert ae.call_args.kwargs["actor"].key == "cli:malibo" and ae.call_args.kwargs["reason"] == "looks good"
+        assert "approved" in out and "queued for execution" in out and "/execute" not in out
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "approved"}):
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert "could not be queued" in out and "/execute C4" in out
+
+
 def test_slash_changes_lists(db):
     from agenticops.cli import main as cli
     from agenticops.services import change_service as cs

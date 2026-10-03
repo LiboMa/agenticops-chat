@@ -385,6 +385,25 @@ class TestAutoApproveDurability:
         assert [c.args[1] for c in result.call_args_list] == ["execution_not_queued"]
         pending.assert_not_called()
 
+    def test_enabled_executor_queues_exactly_one_run(self, db):
+        """The auto-approve goes through the same approve-then-queue path as a human approval: one run, no
+        execution_not_queued (a second queue attempt after the first would raise and notify it wrongly)."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _under_review_with_draft_l1_plan(db)
+        with patch.object(settings, "change_auto_approve_standard", True), \
+             patch.object(settings, "executor_enabled", True), \
+             patch.object(cs, "notify_change_pending_approval") as pending, \
+             patch.object(cs, "notify_change_result") as result:
+            out = cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
+                                   reasons=["ok"], actor=agent_actor("sre"))
+        assert out["status"] == "executing" and out["approved_by"] == "agent:auto-pipeline"
+        db.expire_all()
+        runs = db.query(FixExecution).filter_by(fix_plan_id=plan_id).all()
+        assert len(runs) == 1 and runs[0].executed_by == "agent:auto-pipeline"
+        result.assert_not_called()
+        pending.assert_not_called()
+
     def test_failed_auto_approve_falls_back_to_the_human_gate(self, db):
         from agenticops.config import settings
         from agenticops.services import change_service as cs
@@ -403,3 +422,53 @@ class TestAutoApproveDurability:
         assert db.query(FixExecution).count() == 0
         pending.assert_called_once()                        # fell back to the pending-approval notification
         result.assert_not_called()
+
+
+class TestApproveAndExecute:
+    """Owner ruling 2026-10-03 (joint E2E): a human approval of a change runs it — no separate Execute click,
+    as a fix plan already runs on approval. approve() stays the pure state move; approve_and_execute() is the
+    one approve-then-queue path (Web API, CLI, the policy auto-approve)."""
+
+    def test_approval_queues_the_run_as_the_approver(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _planned(db)
+        with patch.object(settings, "executor_enabled", True), patch.object(cs, "notify_change_result") as result:
+            out = cs.approve_and_execute(cr_id, actor=BOB, reason="reviewed", content_hash=_seen(cr_id))
+        assert out["status"] == "executing" and out["approved_by"] == BOB.key
+        db.expire_all()
+        runs = db.query(FixExecution).filter_by(fix_plan_id=plan_id).all()
+        assert len(runs) == 1 and runs[0].status == "pending" and runs[0].executed_by == BOB.key
+        assert db.get(FixPlan, plan_id).status == "executing"
+        assert [a.actor for a in _audits(db, "change.approved")] == [BOB.key]
+        assert [a.actor for a in _audits(db, "change.execution_started")] == [BOB.key]
+        result.assert_not_called()
+
+    def test_a_run_that_cannot_be_queued_keeps_the_approval_and_notifies(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _planned(db)
+        with patch.object(settings, "executor_enabled", False), patch.object(cs, "notify_change_result") as result:
+            out = cs.approve_and_execute(cr_id, actor=BOB, reason="reviewed", content_hash=_seen(cr_id))
+        assert out["status"] == "approved" and out["approved_by"] == BOB.key   # the approval is durable
+        db.expire_all()
+        assert db.query(FixExecution).count() == 0
+        assert db.get(FixPlan, plan_id).status == "approved"
+        assert [c.args[1] for c in result.call_args_list] == ["execution_not_queued"]
+        # the retry path is the existing manual one, still open while the change waits at approved
+        with patch.object(settings, "executor_enabled", True):
+            assert cs.request_execution(cr_id, actor=BOB)["change"]["status"] == "executing"
+
+    def test_a_refused_approval_queues_nothing_and_raises(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _planned(db, requester=ALICE)
+        with patch.object(settings, "executor_enabled", True), patch.object(settings, "rbac_enforce", True), \
+             patch.object(cs, "request_execution") as execute:
+            with pytest.raises(cs.ChangeForbidden):     # SoD: the requester may not approve
+                cs.approve_and_execute(cr_id, actor=ALICE, reason="self", content_hash=_seen(cr_id))
+            with pytest.raises(cs.ChangeStateError):    # a plan other than the one reviewed
+                cs.approve_and_execute(cr_id, actor=BOB, reason="stale", content_hash="0" * 64)
+        execute.assert_not_called()
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "planned" and db.query(FixExecution).count() == 0

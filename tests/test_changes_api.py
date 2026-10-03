@@ -289,6 +289,32 @@ def test_execute_and_timeline(client):
     assert client.get("/api/changes/9999/timeline").status_code == 404
 
 
+def test_approve_runs_the_change(client):
+    """Owner ruling 2026-10-03: approving a change runs it (a fix plan already does); /execute is only the retry."""
+    from agenticops.config import settings
+    cr_id = _planned()
+    with patch.object(settings, "executor_enabled", True):
+        r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
+    assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "web:anonymous"
+    d = client.get(f"/api/changes/{cr_id}").json()
+    assert len(d["executions"]) == 1 and d["executions"][0]["executed_by"] == "web:anonymous"
+    with patch.object(settings, "executor_enabled", True):
+        assert client.post(f"/api/changes/{cr_id}/execute").status_code == 409   # already running
+
+
+def test_approve_with_the_executor_off_waits_for_the_retry(client):
+    from agenticops.config import settings
+    cr_id = _planned()
+    with patch.object(settings, "executor_enabled", False), \
+         patch("agenticops.services.change_service.notify_change_result") as result:
+        r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    assert [c.args[1] for c in result.call_args_list] == ["execution_not_queued"]
+    with patch.object(settings, "executor_enabled", True):
+        r = client.post(f"/api/changes/{cr_id}/execute")
+    assert r.status_code == 202 and r.json()["executed_by"] == "web:anonymous"
+
+
 def test_detail_carries_the_last_policy_decision(client):
     from agenticops.services.pipeline_events import log_event
     cr_id = _planned()
