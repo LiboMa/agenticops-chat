@@ -304,7 +304,8 @@ graph_query_max_depth: 2
 rca_topology_window_before_minutes: 30
 rca_topology_window_after_minutes: 10
 # RCA evidence recollect (MVP-2.6.1 Plan C): a K8s-side anchor's cluster is re-collected before the evidence
-# is assembled when its last successful collection is older than this; the recollect has this time budget.
+# is assembled when its last successful collection is older than this or than the issue's onset (a collection
+# from before the fault cannot show it, however recent); the recollect has this time budget.
 rca_k8s_recollect_min_age_seconds: 120
 rca_k8s_recollect_timeout_seconds: 60
 # Policy blast radius (MVP-2.6.1 Plan C): the published graph's potential-impact count. false = shadow mode —

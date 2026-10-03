@@ -7,10 +7,10 @@ and deterministic root-cause candidates with their reasons. Every edge and node 
 `graph`, so the post-RCA evidence check grounds it in this tool's output.
 
 A K8s-side anchor (a cluster row or a K8s entity) whose cluster was last collected more than
-rca_k8s_recollect_min_age_seconds ago is recollected first: one bounded K8s connector run for that cluster
-(trigger rca), then a rule-only graph refresh when the structure changed. The anchor is read, and the
-evidence assembled, in two separate sessions around it — an open read transaction would hold SQLite's
-shared lock against the recollect's writes. A failed recollect marks the evidence stale and goes on with
+rca_k8s_recollect_min_age_seconds ago, or before the issue's onset, is recollected first: one bounded K8s
+connector run for that cluster (trigger rca), then a rule-only graph refresh when the structure changed. The
+anchor is read, and the evidence assembled, in two separate sessions around it — an open read transaction would
+hold SQLite's shared lock against the recollect's writes. A failed recollect marks the evidence stale and goes on with
 the data at hand. No LLM; nothing else is written.
 """
 from __future__ import annotations
@@ -96,17 +96,19 @@ def _k8s_scope(row: dict) -> Optional[str]:
     return None
 
 
-def _recollect(row: dict, scope: str) -> tuple[Optional[datetime], str, bool]:
-    """(last successful collection of the cluster, note, ok). Runs the connector only when that collection is
-    older than rca_k8s_recollect_min_age_seconds — which also rate-limits RCAs on the same cluster. ok = the
-    data is current: that collection was recent enough, or the recollect was complete or partial and any graph
-    refresh after it succeeded. Otherwise the evidence is stale, however recent the last success was."""
+def _recollect(row: dict, scope: str, onset: datetime) -> tuple[Optional[datetime], str, bool]:
+    """(last successful collection of the cluster, note, ok). Skips the connector only when that collection is
+    younger than rca_k8s_recollect_min_age_seconds and no earlier than the issue's onset (naive UTC): a
+    collection from before the fault cannot show it, however recent. The min age also rate-limits RCAs on the
+    same incident. ok = the data is current: that collection was recent enough, or the recollect was complete
+    or partial and any graph refresh after it succeeded. Otherwise the evidence is stale, however recent the
+    last success was."""
     from agenticops.connectors import ingest, runner
 
     with get_db_session() as s:
         last = ingest.last_success_at(s, K8S_CONNECTOR, row["account_id"], scope)
-    if last is not None and (datetime.now(timezone.utc) - last).total_seconds() < \
-            settings.rca_k8s_recollect_min_age_seconds:
+    if last is not None and qs._naive_utc(last) >= onset and \
+            (datetime.now(timezone.utc) - last).total_seconds() < settings.rca_k8s_recollect_min_age_seconds:
         return last, "", True
     if not row["account_name"]:  # run_connector reads account="" as every account
         return last, f"recollect of cluster {scope} skipped — the anchor row has no account", False
@@ -239,7 +241,7 @@ def build_evidence(issue_id: int, *, depth: Optional[int] = None, window_minutes
     end = center + timedelta(minutes=settings.rca_topology_window_after_minutes)
     scope = _k8s_scope(row)
     if scope is not None:
-        collected_at, note, ok = _recollect(row, scope)
+        collected_at, note, ok = _recollect(row, scope, center)
         freshness = _freshness(collected_at, start, note, f"cluster {scope}")
         if not ok:
             freshness["status"] = "stale"

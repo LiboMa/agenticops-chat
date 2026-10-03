@@ -98,7 +98,7 @@
 
 ## 计划 C — RCA 定位闭环与评测
 
-- **证据**：`get_topology_evidence` 按 Issue 类别取有方向的局部图 + 时间窗（`rca_topology_window_before_minutes` / `…_after_minutes`）内的变化；K8s 锚点可触发一次定向重采（`rca_k8s_recollect_min_age_seconds` / `…_timeout_seconds`），失败则 `freshness: stale` + 原因、用已有数据继续。`rca_topology_context_enabled` 的语义改为「注入这个工具」。证据包的决策字段（anchor、freshness、truncated、candidates）排在 JSON 最前面，保证经过 Strands 上下文卸载器的预览后仍然可见。
+- **证据**：`get_topology_evidence` 按 Issue 类别取有方向的局部图 + 时间窗（`rca_topology_window_before_minutes` / `…_after_minutes`）内的变化；K8s 锚点可触发一次定向重采（`rca_k8s_recollect_min_age_seconds` / `…_timeout_seconds`；集群上次成功采集早于最小间隔、或早于 Issue 的故障起点时触发——故障前的采集再新也看不到故障），失败则 `freshness: stale` + 原因、用已有数据继续。`rca_topology_context_enabled` 的语义改为「注入这个工具」。证据包的决策字段（anchor、freshness、truncated、candidates）排在 JSON 最前面，保证经过 Strands 上下文卸载器的预览后仍然可见。
 - **定位**：`save_rca_result(location=…)` 接收 ≤ 3 个排序的候选资源 + 因果路径；`services/rca_location.validate_location` 对照库存与已发布关系图 **fail-closed** 校验，丢弃不合法的部分，`location_status` 取 valid / partial / invalid / absent（历史 RCA 回填为 `absent`）。无效引用绝不会被记成 valid。**存下来的路径是一组逐条校验过的边，不是一条验证过的因果链**：每条边单独核对（构建、来源、账户、两端），不核对它们是否连通、是否触到锚点或候选。agent 反向给出的边也接受，按图自己的方向存。
 - **判定与统计**：人对定位下 correct / partial / incorrect（仅当最新 RCA 的定位为 valid / partial 时可判，否则 409），统计走 `GET /api/rca/location-stats`（Top-1、已判定数、锚定率、分布）。
 - **策略影子模式**：`estimate_blast_radius`（下游、rule 关系、≤ 3 跳、不含自身；变更取最宽的目标）记在决策的 `shadow_blast_radius` 上，`policy_graph_impact_enforce=false` 时 `blast_radius_gte` 规则看不到它。
@@ -147,7 +147,7 @@
 | `resource_scan_interval_minutes` | `60` | `resource-scan` 调度间隔（只在首次种子化时生效；已有的行在 Schedules 里改） |
 | `rca_topology_context_enabled` | `true`（已有） | 语义改为「注入 `get_topology_evidence` 工具」 |
 | `rca_topology_window_before_minutes` / `…_after_minutes` | `30` / `10` | 证据包时间窗 |
-| `rca_k8s_recollect_min_age_seconds` / `…_timeout_seconds` | `120` / `60` | RCA 定向重采的最小间隔与超时 |
+| `rca_k8s_recollect_min_age_seconds` / `…_timeout_seconds` | `120` / `60` | RCA 定向重采的最小间隔与超时；早于故障起点的采集不受最小间隔保护 |
 | `policy_graph_impact_enforce` | `false` | 潜在影响是否真正参与策略规则（false = 影子模式）；GET /api/settings 只读可见 |
 | `webhook_secret` | `''` | 告警 webhook 共享令牌 / HMAC 密钥；为空 = 不校验。**真实密钥绝不提交** |
 | `change_intake_secret` | `''` | 变更 intake 的 HMAC 密钥；为空时接口 404。**真实密钥绝不提交** |
