@@ -84,10 +84,16 @@ def _run(db, at, status="complete", acct=1, scope="prod"):
 
 @pytest.fixture
 def no_recollect(monkeypatch):
+    # _recollect turns any exception into stale evidence, so the raise alone would pass silently.
+    calls = []
+
     def _boom(*args, **kwargs):
+        calls.append(kwargs)
         raise AssertionError("no recollect expected")
 
     monkeypatch.setattr("agenticops.connectors.runner.run_connector", _boom)
+    yield
+    assert calls == [], f"unexpected recollect: {calls}"
 
 
 # ── unavailable ───────────────────────────────────────────────────────
@@ -231,7 +237,7 @@ def test_a_workload_anchor_reaches_its_config_and_network_policy(seed, no_recoll
     _rel(seed, 13, 11, "restricts")
     iid = _issue(seed, 11, issue_type=issue_type, observed_at=NOW)
     seed.commit()
-    _run(seed, datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30))
+    _run(seed, datetime.now(timezone.utc).replace(tzinfo=None))
     out = ev.build_evidence(iid)
     assert {12, 13} <= {n["ref"] for n in out["neighbors"]}
     assert {"graph:edge:11>12:uses", "graph:edge:13>11:restricts"} <= {e["evidence_ref"] for e in out["edges"]}
@@ -381,10 +387,31 @@ def test_unchanged_recollect_skips_the_graph_refresh(seed, monkeypatch):
     assert (fresh["status"], fresh["reason"]) == ("fresh", "")
 
 
-def test_recent_collection_is_not_recollected(seed, no_recollect):
-    _run(seed, datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30))
-    out = ev.build_evidence(_k8s_issue(seed))
+def test_recent_collection_after_the_fault_is_not_recollected(seed, no_recollect):
+    iid = _k8s_issue(seed)  # onset NOW
+    _run(seed, datetime.now(timezone.utc).replace(tzinfo=None))
+    out = ev.build_evidence(iid)
     assert out["available"] and out["freshness"]["status"] == "fresh"
+
+
+def test_recent_collection_from_before_the_fault_is_recollected(seed, monkeypatch):
+    # A collection younger than the min age that predates the fault cannot show it (MVP-2.6.1 joint E2E: a
+    # discovery run just before an injection hid the injected object from the RCA).
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    _run(seed, now - timedelta(seconds=60))
+    iid = _issue(seed, 11, issue_type="availability", observed_at=now - timedelta(seconds=10))
+    seed.commit()
+    calls = []
+
+    def _fake_run(name, **kwargs):
+        calls.append(kwargs["trigger"])
+        _run(seed, datetime.now(timezone.utc).replace(tzinfo=None))
+        return ConnectorRunResult(connector=name, status="complete", changed=False)
+
+    monkeypatch.setattr("agenticops.connectors.runner.run_connector", _fake_run)
+    fresh = ev.build_evidence(iid)["freshness"]
+    assert calls == ["rca"]
+    assert (fresh["status"], fresh["reason"]) == ("fresh", "")
 
 
 def test_failed_recollect_marks_the_evidence_stale_and_goes_on(seed, monkeypatch):
