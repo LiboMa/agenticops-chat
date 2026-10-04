@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/i18n/LocaleContext";
 import type { IssueStatus } from "@/api/types";
 
 const STYLES: Record<IssueStatus, { dot: string; text: string }> = {
@@ -16,30 +17,18 @@ const STYLES: Record<IssueStatus, { dot: string; text: string }> = {
   dismissed: { dot: "bg-muted-foreground/50", text: "text-muted-foreground" },
 };
 
-const LABELS: Record<IssueStatus, string> = {
-  open: "Open",
-  investigating: "Investigating",
-  root_cause_identified: "RCA Complete",
-  fix_planned: "Fix Planned",
-  fix_approved: "Fix Approved",
-  fix_executing: "Executing",
-  fix_executed: "Fix Executed",
-  resolved: "Resolved",
-  acknowledged: "Acknowledged",
-  dismissed: "Dismissed",
-};
-
 export const IssueStatusBadge = React.memo(function IssueStatusBadge({
   status,
 }: {
   status: IssueStatus;
 }) {
+  const { t } = useLocale();
   const s = STYLES[status] ?? STYLES.open;
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={cn("h-2 w-2 rounded-full", s.dot)} />
       <span className={cn("text-xs font-medium", s.text)}>
-        {LABELS[status] ?? status}
+        {t(`issues.status.${status}`)}
       </span>
     </span>
   );
