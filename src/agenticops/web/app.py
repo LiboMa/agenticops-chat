@@ -651,6 +651,8 @@ async def api_get_settings():
         "rbac_enforce": settings.rbac_enforce,
         # Read-only: whether the graph's potential impact feeds the change policy or is shadow-recorded (MVP-2.6.1)
         "policy_graph_impact_enforce": settings.policy_graph_impact_enforce,
+        # Read-only: the post-RCA gate's threshold, so IssueDetail can say why auto-fix paused (2026-10-04 spec §8)
+        "rca_min_confidence_for_autofix": settings.rca_min_confidence_for_autofix,
     }
 
 

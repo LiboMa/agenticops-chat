@@ -438,6 +438,16 @@ def test_settings_expose_graph_impact_enforce_read_only(client, settings_io):
     settings_io.assert_not_called()
 
 
+def test_settings_expose_rca_autofix_threshold_read_only(client, settings_io):
+    """IssueDetail explains a paused auto-fix with the same threshold the post-RCA gate uses."""
+    from agenticops.config import settings
+    with patch.object(settings, "rca_min_confidence_for_autofix", 0.6):
+        assert client.get("/api/settings").json()["rca_min_confidence_for_autofix"] == 0.6
+        r = client.patch("/api/settings", json={"rca_min_confidence_for_autofix": 0.1})
+        assert r.status_code == 400 and settings.rca_min_confidence_for_autofix == 0.6
+    settings_io.assert_not_called()
+
+
 def test_settings_toggle_yaml_failure_applies_nothing_and_a_retry_heals(client, settings_io):
     """The audit rows are written, then the yaml, then the rows commit, all BEFORE the in-memory flip: a failed
     yaml write rolls the rows back and leaves the old value live, so an identical retry still sees the change
