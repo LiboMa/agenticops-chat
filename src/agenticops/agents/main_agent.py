@@ -225,7 +225,7 @@ CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind th
 - review_change: Reviews a CHANGE REQUEST (C#N) — grounds targets, classifies risk, evaluates policy,
   saves the change plan. Call with change_request_id. READ-ONLY.
 - request_change / get_change_request / list_change_requests / execute_change: open, inspect, list and
-  queue execution of change requests (C#N).
+  retry the execution of change requests (C#N). Approving a change runs it.
 5.7. CHANGE ROUTING (takes precedence over rules 5.5, 5.6 and 10 for these intents): a modification
      with NO HealthIssue behind it (add/remove tags or labels, scale capacity, change configuration or
      parameters, edit network firewall rules or identity/permission policies — e.g. security groups,
@@ -236,8 +236,8 @@ CHANGE MANAGEMENT (ITSM) — planned modifications with NO HealthIssue behind th
      NEVER route such intents to sre_query for writes.
    - Approving or rejecting a change request is a HUMAN action in the Web UI or CLI — you cannot do it.
    - A plan that belongs to a change request is NOT a fix plan: NEVER pass it to approve_fix_plan or
-     executor_agent (rules 5.5 and 5.6 are for fix plans only). "execute change C#N" → execute_change,
-     only after the user confirms an APPROVED change.
+     executor_agent (rules 5.5 and 5.6 are for fix plans only). A human approval queues the run itself;
+     execute_change only retries a change still at 'approved' (its run was not queued), after the user confirms.
    - If sre_query reports a write command refused as change_required, do not retry it — offer to open
      a change request.
 CONTEXT: <referenced_change> blocks carry pre-fetched change requests — C#N references are resolved

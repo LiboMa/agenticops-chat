@@ -952,8 +952,9 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
     if decision.action == "auto_approve" and settings.change_auto_approve_standard:
         auto = agent_actor("auto-pipeline")
         try:
-            globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)",
-                                 content_hash=plan_dict["content_hash"])
+            return globals()["approve_and_execute"](
+                cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)",
+                content_hash=plan_dict["content_hash"])
         except Exception:
             # The auto-approve() itself failed (a lost claim, an audit-write error): the CR is still 'planned'.
             # Do not propagate — a review must not 500 because auto-approval could not fire. Fall back to the
@@ -965,20 +966,6 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             except Exception:
                 logger.warning("notify_change_pending_approval failed", exc_info=True)
             return get_change(cr_id)
-        try:
-            globals()["request_execution"](cr_id, actor=auto)
-        except Exception:
-            # Approved but not enqueued (executor disabled, a lost claim): the APPROVAL is durable — never roll
-            # it back. The change waits at 'approved' for an enabled executor / a human execute, and we surface
-            # the gap as an attention-needing notification rather than losing the approval to an exception.
-            logger.warning("auto-approved ChangeRequest #%s but could not enqueue execution — it waits at approved",
-                           cr_id, exc_info=True)
-            try:
-                notify_change_result(get_change(cr_id), "execution_not_queued")
-            except Exception:
-                logger.debug("notify_change_result failed", exc_info=True)
-            return get_change(cr_id)
-        return get_change(cr_id)
 
     try:
         notify_change_pending_approval(snap, plan_dict)
@@ -988,7 +975,7 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
 
 
 # ── Approval + execution handoff ──────────────────────────────────────
-# submit_review's auto-approve branch reaches approve()/request_execution() via globals()[...] (deferred
+# submit_review's auto-approve branch reaches approve_and_execute() via globals()[...] (deferred
 # lookup). Every HUMAN CR transition here is a conditional claim (_claim) then _transition, in ONE session,
 # exactly the submit_review pattern: a lost claim rolls back every field write so a concurrent transition
 # can never leave the row in a state neither transaction validated. Terminal states are written only by
@@ -1151,6 +1138,25 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
            detail={"plan_id": plan_id, "execution_id": execution_id, "executor": "agent:executor"},
            actor=actor.key, trace_id=snap["trace_id"])
     return {"execution_id": execution_id, "fix_plan_id": plan_id, "change": snap}
+
+
+def approve_and_execute(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) -> dict:
+    """approve() then request_execution() as the same actor — approving a change runs it, as approving a fix
+    plan does (owner ruling 2026-10-03). The one approve-then-queue path: Web API, CLI and the policy
+    auto-approve. A refused approval raises unchanged and queues nothing. A run that cannot be queued
+    (executor disabled, a lost claim) never undoes the approval: the change waits at 'approved' for the
+    manual retry (request_execution) and the gap is notified as execution_not_queued."""
+    approve(cr_id, actor=actor, reason=reason, content_hash=content_hash)
+    try:
+        request_execution(cr_id, actor=actor)
+    except Exception:
+        logger.warning("approved ChangeRequest #%s but could not enqueue execution — it waits at approved",
+                       cr_id, exc_info=True)
+        try:
+            notify_change_result(get_change(cr_id), "execution_not_queued")
+        except Exception:
+            logger.debug("notify_change_result failed", exc_info=True)
+    return get_change(cr_id)
 
 
 def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_results: Optional[list] = None,

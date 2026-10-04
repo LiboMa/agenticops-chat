@@ -27,6 +27,8 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "change_management_enabled", True)
     monkeypatch.setattr(settings, "api_auth_enabled", False)
     monkeypatch.setattr(settings, "rbac_enforce", False)
+    # approving a change queues its run: pin the executor on so that does not depend on the local settings.yaml
+    monkeypatch.setattr(settings, "executor_enabled", True)
     Base.metadata.create_all(models_mod.get_engine())
     s = get_session()
     yield s
@@ -180,9 +182,9 @@ def test_the_anchor_backfill_restamps_a_plan_hashed_before_its_issue_had_an_acco
 
 # ── every approval records what it approved ─────────────────────────────────
 
-def _assert_bound(plan_id, version=1):
+def _assert_bound(plan_id, version=1, status="approved"):
     plan = _fresh(FixPlan, plan_id)
-    assert plan.status == "approved"
+    assert plan.status == status
     assert plan.approved_hash == plan.content_hash == pc.current_hash(get_session(), plan)
     assert plan.approved_version == plan.plan_version == version
 
@@ -297,8 +299,8 @@ def test_an_empty_or_unstamped_hash_is_the_reload_409(db, client):
     shown = client.get(f"/api/changes/{cr_id}").json()["plans"][0]["content_hash"]
     assert shown and shown == pc.current_hash(get_session(), _fresh(FixPlan, change.id))
     r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": shown})
-    assert r.status_code == 200 and r.json()["status"] == "approved"
-    _assert_bound(change.id)
+    assert r.status_code == 200 and r.json()["status"] == "executing"  # approving a change runs it
+    _assert_bound(change.id, status="executing")
 
 
 def test_the_change_approval_binds_to_the_implementation_plan(db, client):
@@ -312,8 +314,8 @@ def test_the_change_approval_binds_to_the_implementation_plan(db, client):
     assert _fresh(ChangeRequest, cr_id).status == "planned"
     shown = client.get(f"/api/changes/{cr_id}").json()["plans"][0]["content_hash"]
     r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": shown})
-    assert r.status_code == 200 and r.json()["status"] == "approved"
-    _assert_bound(plan.id)
+    assert r.status_code == 200 and r.json()["status"] == "executing"  # approving a change runs it
+    _assert_bound(plan.id, status="executing")
 
 
 # ── the execution gate ──────────────────────────────────────────────────────

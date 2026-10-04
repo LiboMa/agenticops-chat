@@ -131,7 +131,9 @@ async def api_get_change(cr_id: int):
 
 @router.post("/{cr_id}/approve", response_model=ChangeRequestResponse)
 async def api_approve_change(cr_id: int, body: ChangeApproveBody, actor: Actor = Depends(current_actor)):
-    return _call(cs.approve, cr_id, actor=actor, reason=body.reason, content_hash=body.content_hash)
+    """Approve the reviewed implementation plan and queue its run (a change runs on approval, as a fix plan does);
+    a run that cannot be queued leaves the change approved — POST /execute is the retry."""
+    return _call(cs.approve_and_execute, cr_id, actor=actor, reason=body.reason, content_hash=body.content_hash)
 
 
 @router.post("/{cr_id}/reject", response_model=ChangeRequestResponse)

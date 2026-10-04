@@ -441,7 +441,8 @@ flowchart TD
     AUTO -->|"no (default)"| PENDING["⑥ pending_approval<br/>notify change_pending_approval (deep link)"]
 
     PENDING -->|"Web/CLI approve<br/>authz change.approve + SoD · reason REQUIRED<br/>bound to the plan's content_hash"| APPROVED
-    APPROVED --> QUEUE["⑦ request_execution<br/>FixExecution(pending) → Executor queue"]
+    APPROVED -->|"same request: approving runs it<br/>(approve_and_execute, as the approver)"| QUEUE["⑦ request_execution<br/>FixExecution(pending) → Executor queue"]
+    APPROVED -.->|"run not queued (executor off):<br/>stays approved · notify execution_not_queued<br/>retry: /execute C&lt;id&gt; · Retry execution"| QUEUE
     QUEUE --> EXEC["executor_agent(fix_plan_id)<br/>(unchanged gate)"]
     EXEC --> RESULT{"⑧ on_execution_result<br/>(only writer of CR terminal state)"}
 
@@ -1168,18 +1169,22 @@ aiops chat "/change add tag ChangeTest=2026-09 to i-0abc123 --account prod"
 aiops chat "/changes"
 aiops chat "/changes pending_approval"
 
-# 3. Approve it — the approver must differ from the requester; a reason is required
+# 3. Approve it — the approver must differ from the requester; a reason is required.
+#    Approving a change runs it (as approving a fix plan does): the run is queued to the Executor
+#    as the approver, and the CR moves to executing
 aiops chat "/approve C7 approved for the tagging rollout"
-
-# 4. Execute the approved change (queued to the Executor)
-aiops chat "/execute C7"
 #    → Executor applies create-tags, the post-check runs aws ec2 describe-tags,
 #      and the CR moves to completed (needs_review if the post-check result is missing)
+
+# 4. Only if the run could not be queued (e.g. the executor was disabled): the CR waits at
+#    approved, a change_result "execution_not_queued" notification goes out, and you retry with
+aiops chat "/execute C7"
 ```
 
 On the web: **Changes** (`/app/changes`) → **New change request** (optionally your own steps and an
-external ticket), then open `/app/changes/:id` to review, approve (the dialog shows the plan's content
-hash; reason required), execute, accept, and read the timeline. **Audit** (`/app/audit`) shows the
+external ticket), then open `/app/changes/:id` to review, approve and run («Approve & run» — the dialog shows the plan's
+content hash; reason required; «Retry execution» appears only when the run could not be queued), accept, and
+read the timeline. **Audit** (`/app/audit`) shows the
 decision/command ledgers and `GET /api/plans/stats` KPIs. `C#N` in chat opens the change in the side
 panel. The old `/app/plans` redirects to `/app/changes`.
 

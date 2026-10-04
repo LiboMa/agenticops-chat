@@ -81,7 +81,7 @@ const NEXT: Partial<Record<ChangeStatus, [todo: string, action: ChangeNextAction
   under_review: ["review", null],
   needs_clarification: ["clarify", "clarify"],
   planned: ["approve", "approve"],
-  approved: ["execute", "execute"],
+  approved: ["notQueued", "execute"], // approving runs it; still approved = the run was not queued → retry
   executing: ["executing", null],
   needs_review: ["accept", "accept"],
 };

@@ -34,6 +34,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "rbac_enforce", False)
     # _planned() must stop at 'planned' whatever the local settings.yaml says
     monkeypatch.setattr(settings, "change_auto_approve_standard", False)
+    # approving a change queues its run: pin the executor on so that does not depend on the local settings.yaml
+    monkeypatch.setattr(settings, "executor_enabled", True)
     Base.metadata.create_all(models_mod.get_engine())
     s = get_session()
     acct = CloudAccount(name="dev", provider="aws", is_enabled=True, credentials={}, regions=["ap-southeast-1"]); s.add(acct); s.flush()
@@ -208,7 +210,7 @@ def test_approve_requires_reason_and_binds_identity(client):
     cr_id = _planned()
     assert client.post(f"/api/changes/{cr_id}/approve", json={}).status_code == 422
     r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed", "content_hash": _seen(cr_id)})
-    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "web:anonymous"
+    assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "web:anonymous"
     assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again", "content_hash": _seen(cr_id)}).status_code == 409
 
 
@@ -242,7 +244,7 @@ def test_sod_403_when_enforced(client):
         app.dependency_overrides[deps.current_actor] = lambda: bob
         with patch.object(settings, "rbac_enforce", True):
             r = client.post(f"/api/changes/{control}/approve", json={"reason": "four eyes", "content_hash": _seen(control)})
-        assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "user:bob"
+        assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "user:bob"
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
     s = get_session()
@@ -275,9 +277,11 @@ def test_reject_cancel_clarify_review(client):
 
 
 def test_execute_and_timeline(client):
+    """/execute is the retry for an approved change whose run could not be queued (here: executor off at approval)."""
     from agenticops.config import settings
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
+    with patch.object(settings, "executor_enabled", False), patch("agenticops.services.change_service.notify_change_result"):
+        client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
     with patch.object(settings, "executor_enabled", True):
         r = client.post(f"/api/changes/{cr_id}/execute")
     assert r.status_code == 202 and r.json()["status"] == "pending" and r.json()["executed_by"] == "web:anonymous"
@@ -330,9 +334,8 @@ def test_resolve_review(client):
     from agenticops.config import settings
     from agenticops.services import change_service as cs
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
-    with patch.object(settings, "executor_enabled", True):
-        plan_id = client.post(f"/api/changes/{cr_id}/execute").json()["fix_plan_id"]
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})  # runs it
+    plan_id = client.get(f"/api/changes/{cr_id}").json()["plans"][0]["id"]
     with patch.object(cs, "notify_change_result"):
         cs.on_execution_result(plan_id, "succeeded", post_check_results=[])
     assert client.post(f"/api/changes/{cr_id}/resolve-review", json={"outcome": "maybe", "reason": "x"}).status_code == 422

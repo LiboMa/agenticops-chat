@@ -128,7 +128,8 @@ def list_change_requests(status: str = "", limit: int = 20) -> str:
 
 @tool
 def execute_change(change_request_id: int) -> str:
-    """Queue execution of an APPROVED change request (C#N). Confirm with the user first.
+    """Retry queuing an APPROVED change request (C#N) whose run could not be queued. Approving a change already
+    runs it, so this is only for a change still at 'approved'. Confirm with the user first.
     SAFETY: only approved changes run; the Executor works from the approved plan. Args: change_request_id: The C# number."""
     try:
         out = cs.request_execution(change_request_id, actor=_actor_from_context())

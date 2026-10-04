@@ -1653,8 +1653,8 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Fix Plans:[/cyan]
   /fix list \\[issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
-  /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
-  /execute <plan_id|C<id>>         Execute an approved fix plan or change
+  /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user> — approving runs it
+  /execute <plan_id|C<id>>         Execute an approved fix plan, or retry a change whose run was not queued
   /accept <I<id>|C<id>> yes|no <reason...>  Accept or reject a run pending acceptance as cli:<user>
 
 [cyan]Changes:[/cyan]
@@ -2531,14 +2531,17 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             reason = Prompt.ask("Approval reason (required)").strip()
             if not reason:
                 return "[red]A reason is required to approve a change.[/red]"
-        if not Confirm.ask("Approve this change?"):
+        if not Confirm.ask("Approve and run this change?"):
             return "[dim]Approval cancelled.[/dim]"
         actor = cli_actor()
-        try:
-            out = cs.approve(cr_id, actor=actor, reason=reason, content_hash=seen[1] or "")
+        try:  # approving a change runs it (as approving a fix plan does); /execute is only the retry
+            out = cs.approve_and_execute(cr_id, actor=actor, reason=reason, content_hash=seen[1] or "")
         except cs.ChangeError as e:
             return f"[red]{_safe_text(e)}[/red]"
-        return f"[green]Change C#{cr_id} approved by {actor.key} ({out['status']}). Execute with: /execute C{cr_id}[/green]"
+        if out["status"] == "approved":
+            return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued "
+                    f"(is the executor enabled?). Retry with: /execute C{cr_id}[/yellow]")
+        return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution ({out['status']}).[/green]"
 
     if not args:
         return "[yellow]Usage: /approve <plan_id|C<id>> \\[reason...][/yellow]"
@@ -2626,8 +2629,8 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
 
 
 def _slash_execute(ctx: ChatContext, args: list) -> str:
-    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or queue an approved
-    change request (C<id>) for the executor, as the CLI user."""
+    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or re-queue an approved
+    change request (C<id>) whose run could not be queued at approval, as the CLI user."""
     from rich.prompt import Confirm
 
     cr_id = _parse_change_ref(args[0]) if args else None

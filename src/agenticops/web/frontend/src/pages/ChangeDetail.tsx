@@ -136,16 +136,18 @@ function ChangeDetailView({ crId }: { crId: number }) {
     act.mutate(args, { onSuccess: () => setPending(null) });
   };
   const onExecute = async () => {
-    if (await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") })) {
+    if (await confirm(t("plans.executeConfirm"), { confirmText: t("changes.retryExecution"), cancelText: t("common.cancel") })) {
       runDirect({ id: cr.id, action: "execute" });
     }
   };
   const openApprove = () =>
     openDialog({
       action: "approve",
-      title: `${t("plans.approveTitle")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
-      description: plan ? `${t("plans.hash")} ${shortHash(plan.content_hash)}` : undefined,
-      confirmText: t("issues.approve"),
+      title: `${t("changes.approveAndRun")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
+      description: plan
+        ? `${t("changes.approveRunsNote")} ${t("plans.hash")} ${shortHash(plan.content_hash)}`
+        : t("changes.approveRunsNote"),
+      confirmText: t("changes.approveAndRun"),
       contentHash: plan?.content_hash ?? "",
     });
   const openAccept = (outcome: "completed" | "failed") =>
@@ -165,8 +167,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const PRIMARY: Record<ChangeNextAction, { label: string; run: () => void }> = {
     review: { label: t("changes.startReview"), run: () => runDirect({ id: cr.id, action: "review" }) },
     clarify: { label: t("changes.answerReviewer"), run: focusClarify },
-    approve: { label: t("issues.approve"), run: openApprove },
-    execute: { label: t("issues.execute"), run: onExecute },
+    approve: { label: t("changes.approveAndRun"), run: openApprove },
+    execute: { label: t("changes.retryExecution"), run: onExecute },
     accept: { label: t("changes.markCompleted"), run: () => openAccept("completed") },
   };
   const primary = head.action ? PRIMARY[head.action] : null;
@@ -540,7 +542,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
                   onClick={openApprove}
                   className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white disabled:opacity-50"
                 >
-                  {t("issues.approve")}
+                  {t("changes.approveAndRun")}
                 </button>
                 <button
                   disabled={act.isPending}
@@ -564,7 +566,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
                 onClick={onExecute}
                 className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
               >
-                {t("issues.execute")}
+                {t("changes.retryExecution")}
               </button>
             )}
             {canCancel && (
