@@ -764,5 +764,17 @@
   "plan.hashDrifted": "Changed since approval",
   "workitem.menu": "More actions",
   "workitem.expandAll": "Expand all",
-  "workitem.collapseAll": "Collapse all"
+  "workitem.collapseAll": "Collapse all",
+  "verdict.title": "Your verdict",
+  "verdict.hint": "One submit records both the root-cause verdict and the location verdict",
+  "verdict.choice.correct": "Root cause and location are both right",
+  "verdict.choice.partial": "Partly right (root cause right, location incomplete or misranked)",
+  "verdict.choice.rcaWrong": "The root cause is wrong",
+  "verdict.choice.falsePositive": "This is not an issue (false positive)",
+  "verdict.note": "Note",
+  "verdict.noteRequired": "Required for this choice",
+  "verdict.submit": "Submit verdict",
+  "verdict.needRca": "Needs an RCA result",
+  "verdict.recorded": "Recorded: {verdict}",
+  "verdict.partialSaved": "The root-cause verdict was saved; the issue feedback failed:"
 }

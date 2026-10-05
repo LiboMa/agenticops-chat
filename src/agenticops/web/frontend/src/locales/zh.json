@@ -764,5 +764,17 @@
   "plan.hashDrifted": "批准后内容已变",
   "workitem.menu": "更多操作",
   "workitem.expandAll": "全部展开",
-  "workitem.collapseAll": "全部折叠"
+  "workitem.collapseAll": "全部折叠",
+  "verdict.title": "你的判断",
+  "verdict.hint": "一次提交，同时记录根因结论与定位判断",
+  "verdict.choice.correct": "根因和定位都正确",
+  "verdict.choice.partial": "部分正确（根因对，定位不全或排序不对）",
+  "verdict.choice.rcaWrong": "根因错误",
+  "verdict.choice.falsePositive": "这不是问题（误报）",
+  "verdict.note": "备注",
+  "verdict.noteRequired": "这一项必填",
+  "verdict.submit": "提交判断",
+  "verdict.needRca": "需要先有 RCA 结果",
+  "verdict.recorded": "已判断：{verdict}",
+  "verdict.partialSaved": "根因判断已保存；问题反馈失败："
 }
