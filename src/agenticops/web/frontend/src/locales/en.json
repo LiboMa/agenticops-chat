@@ -40,8 +40,6 @@
   "chat.effort.standardHint": "Moderate thinking budget",
   "chat.effort.deep": "Deep",
   "chat.effort.deepHint": "For hard investigations — slower, pricier",
-  "nav.expand": "Expand sidebar",
-  "nav.collapse": "Collapse",
   "chat.contextPanel.agentCheck": "Ask agent to check",
   "chat.contextPanel.checkPrompt": "Check the current status of I#{id}: verify whether the issue still exists, and suggest next steps",
   "chat.placeholder": "Ask about AWS resources, health issues, or reports... (Cmd+Enter to send)",
@@ -892,5 +890,16 @@
   "notFound.body": "This address does not exist in AgenticOps. It may have been mistyped or moved.",
   "notFound.back": "Go to Chat",
   "home.restoreNotice": "The item you last had open no longer exists, or you can no longer access it.",
-  "home.dismiss": "Dismiss"
+  "home.dismiss": "Dismiss",
+  "nav.group.daily": "Daily work",
+  "nav.group.tools": "Operations tools",
+  "nav.group.administration": "Administration",
+  "nav.overview": "Runtime overview",
+  "nav.openIssues": "Open issues",
+  "nav.menu": "Menu",
+  "home.resume": "Resume last workspace",
+  "home.prefsTitle": "Home & language",
+  "home.prefsHint": "First visit starts in Chat; after that /app opens what you choose here. Links in notifications still open their exact issue, change or report. The language is switched from the top bar.",
+  "home.defaultEntry": "Default entry",
+  "home.save": "Save preference"
 }

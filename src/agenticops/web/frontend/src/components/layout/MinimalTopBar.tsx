@@ -3,6 +3,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { savePreferences } from "@/lib/preferences";
+import { MobileNav } from "./Sidebar";
 
 const ROUTE_LABELS: Record<string, string> = {
   "/app/overview": "nav.dashboard",
@@ -34,7 +35,7 @@ export function MinimalTopBar() {
 
   return (
     <header className="h-9 border-b border-border flex items-center justify-between px-4 sticky top-0 z-20 bg-background/80 backdrop-blur-sm">
-      <span className="text-sm font-medium text-foreground">{t(labelKey)}</span>
+      <span className="flex items-center gap-2 text-sm font-medium text-foreground"><MobileNav />{t(labelKey)}</span>
       <div className="flex items-center gap-1.5">
         {/* User + Logout */}
         {user && (

@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { reorderNavIds, moveId } from "@/lib/navOrder";
-import { NAV_ITEMS } from "@/components/layout/NavItems";
+import { V1_DEFAULT } from "@/lib/navGroups";
 
-describe("NAV_ITEMS", () => {
+// The one-list sidebar before 2.7.0; lib/navGroups migrates a stored v1 order into groups.
+const NAV_ITEMS = V1_DEFAULT.map((id) => ({ id }));
+
+describe("the v1 sidebar order", () => {
   it("Resources has its own entry after Changes (spec §3); signals stay out of the sidebar", () => {
     expect(NAV_ITEMS.map((i) => i.id)).toEqual([
       "dashboard", "chat", "issues", "changes", "resources", "audit", "schedules", "reports", "agent-metrics", "skills",

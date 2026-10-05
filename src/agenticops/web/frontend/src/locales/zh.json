@@ -40,8 +40,6 @@
   "chat.effort.standardHint": "适中的思考预算",
   "chat.effort.deep": "深度",
   "chat.effort.deepHint": "复杂排查用，更慢更贵",
-  "nav.expand": "展开侧边栏",
-  "nav.collapse": "收起",
   "chat.contextPanel.agentCheck": "让 agent 检查",
   "chat.contextPanel.checkPrompt": "检查 I#{id} 的当前状态,确认问题是否仍存在,并给出下一步建议",
   "chat.placeholder": "询问 AWS 资源、健康问题或报告... (Cmd+Enter 发送)",
@@ -892,5 +890,16 @@
   "notFound.body": "AgenticOps 里没有这个地址，可能输错了或已经移动。",
   "notFound.back": "回到对话",
   "home.restoreNotice": "上次打开的对象已不存在，或你已无权访问。",
-  "home.dismiss": "知道了"
+  "home.dismiss": "知道了",
+  "nav.group.daily": "日常工作",
+  "nav.group.tools": "运维工具",
+  "nav.group.administration": "管理",
+  "nav.overview": "运行总览",
+  "nav.openIssues": "有未结问题",
+  "nav.menu": "菜单",
+  "home.resume": "继续上次工作",
+  "home.prefsTitle": "首页与语言",
+  "home.prefsHint": "首次进入是对话；之后 /app 按这里的设置打开。通知里的链接仍直达对应的问题、变更或报告。语言在顶栏切换。",
+  "home.defaultEntry": "默认入口",
+  "home.save": "保存偏好"
 }
