@@ -162,13 +162,13 @@ def test_save_execution_result_for_change_calls_mapper(db):
         with patch("agenticops.services.change_service.on_execution_result", return_value={"status": "completed"}) as mapper, \
              patch("agenticops.services.notification_service.notify_execution_result") as fix_notify:
             out = save_execution_result(fix_plan_id=plan.id, health_issue_id=None, status="succeeded",
-                                        post_check_results=json.dumps([{"check": "c", "status": "pass"}]))
+                                        post_check_results=json.dumps([{"check_id": "pc-1", "check": "c", "status": "pass"}]))
     finally:
         reset_run_context(token)
     assert "FixExecution #" in out
     mapper.assert_called_once()
     assert mapper.call_args.args == (plan.id, "succeeded")
-    assert mapper.call_args.kwargs["post_check_results"] == [{"check": "c", "status": "pass"}]
+    assert mapper.call_args.kwargs["post_check_results"] == [{"check_id": "pc-1", "check": "c", "status": "pass"}]
     assert not fix_notify.called
     db.expire_all()
     assert db.get(FixPlan, plan.id).status == "executed"

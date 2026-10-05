@@ -122,3 +122,15 @@ def _command_ledger_off(monkeypatch):
     from agenticops.config import settings
 
     monkeypatch.setattr(settings, "command_audit_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_uncovered_refusals():
+    """save_execution_result refuses an uncovering result once per (plan, execution) — process-local state.
+    Every test's database restarts ids at 1, so a refusal left by one test would change the next one's."""
+    import sys
+
+    mod = sys.modules.get("agenticops.tools.metadata_tools")
+    if mod is not None:
+        mod._UNCOVERED_REFUSED.clear()
+    yield

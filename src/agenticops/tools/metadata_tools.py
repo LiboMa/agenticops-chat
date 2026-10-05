@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -1155,13 +1156,16 @@ def _iso(v) -> Optional[str]:
 
 
 def plan_dict(plan: FixPlan) -> dict:
-    """Everything one plan says — either origin, any status (get_plan, get_change_request)."""
+    """Everything one plan says — either origin, any status (get_plan, get_change_request). post_checks carry
+    their check_id, as the executor saw them, so a run's results can be read against them."""
+    from agenticops.services.verification import annotated_checks
     return {
         "id": plan.id, "label": plan_label(plan), "plan_kind": plan.plan_kind,
         "health_issue_id": plan.health_issue_id, "rca_result_id": plan.rca_result_id,
         "change_request_id": plan.change_request_id, "status": plan.status, "risk_level": plan.risk_level,
         "title": plan.title, "summary": plan.summary, "steps": plan.steps, "rollback_plan": plan.rollback_plan,
-        "estimated_impact": plan.estimated_impact, "pre_checks": plan.pre_checks, "post_checks": plan.post_checks,
+        "estimated_impact": plan.estimated_impact, "pre_checks": plan.pre_checks,
+        "post_checks": annotated_checks(plan.post_checks),
         "plan_version": plan.plan_version, "content_hash": plan.content_hash,
         "approved_by": plan.approved_by, "approved_at": _iso(plan.approved_at),
         "approved_version": plan.approved_version, "approved_hash": plan.approved_hash,
@@ -1234,10 +1238,13 @@ def get_execution_result(execution_id: Optional[int] = None, plan_id: Optional[i
             missing = f"Plan #{plan_id} has no execution."
         if execution is None:
             return missing
+        from agenticops.services.verification import bind_results
         plan = session.get(FixPlan, execution.fix_plan_id)
         data = execution_dict(execution)
         data["plan_label"] = plan_label(plan) if plan is not None else None
         data["change_request_id"] = plan.change_request_id if plan is not None else None
+        data["post_check_binding"] = (bind_results(plan.post_checks, execution.post_check_results)
+                                      if plan is not None else [])
         return json.dumps(data, default=str)
     finally:
         session.close()
@@ -1472,32 +1479,42 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
         if drift:
             return _abort_drifted_plan(session, plan, drift)
 
-        return _truncate(json.dumps({
+        # Never truncated: this is what will be executed and verified. The fields the run needs come first, so
+        # an oversized plan offloaded by the SDK's ContextOffloader still shows them in the preview it keeps.
+        from agenticops.services.verification import annotated_checks
+        return json.dumps({
             "id": plan.id,
-            "health_issue_id": plan.health_issue_id,
+            "label": plan_label(plan),
             "plan_kind": plan.plan_kind,
+            "risk_level": plan.risk_level,
+            "steps": plan.steps,
+            "post_checks": annotated_checks(plan.post_checks),
+            "pre_checks": plan.pre_checks,
+            "rollback_plan": plan.rollback_plan,
+            "health_issue_id": plan.health_issue_id,
             "change_request_id": plan.change_request_id,
             "rca_result_id": plan.rca_result_id,
-            "risk_level": plan.risk_level,
             "title": plan.title,
             "summary": plan.summary,
-            "steps": plan.steps,
-            "rollback_plan": plan.rollback_plan,
             "estimated_impact": plan.estimated_impact,
-            "pre_checks": plan.pre_checks,
-            "post_checks": plan.post_checks,
             "status": plan.status,
             "approved_by": plan.approved_by,
             "approved_at": str(plan.approved_at) if plan.approved_at else None,
-            "label": plan_label(plan),
             "plan_version": plan.plan_version,
             "content_hash": plan.content_hash,
             "approved_version": plan.approved_version,
             "approved_hash": plan.approved_hash,
             "created_at": str(plan.created_at),
-        }, default=str))
+        }, default=str)
     finally:
         session.close()
+
+
+# A succeeded result that does not cover the declared checks one to one is refused ONCE per run, so the
+# executor can correct it; a second such submission is recorded (pending acceptance), so a run's result is
+# never lost to a model that cannot comply. Keyed by (plan, queued execution); process-local like the run.
+_UNCOVERED_REFUSED: set = set()
+_UNCOVERED_LOCK = threading.Lock()
 
 
 @tool
@@ -1519,6 +1536,10 @@ def save_execution_result(
     post-checks, and moves the HealthIssue: passed → resolved, pending_acceptance → fix_executed (a human
     accepts or rejects it), failed → root_cause_identified.
 
+    A succeeded run must report exactly one post-check result per declared check_id; otherwise nothing is
+    recorded and the call returns INVALID naming the gap — call again with corrected results. A second
+    submission for the same run that still does not cover the checks is recorded as pending acceptance.
+
     Args:
         fix_plan_id: The FixPlan ID that was executed.
         health_issue_id: The HealthIssue ID associated with the plan (None for a change plan,
@@ -1526,7 +1547,9 @@ def save_execution_result(
         status: Execution outcome: succeeded, failed, rolled_back, or aborted.
         step_results: JSON array of per-step results [{step_index, command, status, output, duration_ms}].
         pre_check_results: JSON array of pre-check outcomes.
-        post_check_results: JSON array of post-check outcomes.
+        post_check_results: JSON array, one entry per declared post-check:
+            [{check_id, status: passed|failed|warning, output}] — check_id as get_approved_fix_plan lists it
+            (pc-1, pc-2, ...); a check you could not run is status "warning" with the reason in output.
         rollback_results: JSON array of rollback step outcomes (if applicable).
         error_message: Error description if execution failed.
         duration_ms: Total execution time in milliseconds.
@@ -1578,9 +1601,28 @@ def save_execution_result(
                            health_issue_id, fix_plan_id, issue_id)
 
         # Verification (spec §3.D.4): one verdict from the run's own results and the plan's post-checks
-        from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
+        from agenticops.services.verification import (
+            FAILED, PASSED, PENDING, as_results, binding_problems, declared_checks, evaluate,
+        )
         parsed_steps, parsed_post = as_results(step_results), as_results(post_check_results)
-        verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message)
+        run_key = (fix_plan_id, rc.execution_id)
+        if status == "succeeded" and declared_checks(plan.post_checks):
+            gaps = binding_problems(plan.post_checks, parsed_post)
+            with _UNCOVERED_LOCK:
+                refuse = bool(gaps) and run_key not in _UNCOVERED_REFUSED
+                if refuse:
+                    _UNCOVERED_REFUSED.add(run_key)
+            if refuse:
+                return (f"INVALID: the post-check results do not cover the plan's checks one to one — "
+                        f"{'; '.join(gaps)}. Report exactly one result per check_id "
+                        f"([{{check_id, status: passed|failed|warning, output}}]; a check you could not run is "
+                        f"status warning with the reason). Nothing was recorded: call save_execution_result "
+                        f"again with the corrected post_check_results — a second submission that still does "
+                        f"not cover the checks is recorded as pending human acceptance.")
+        with _UNCOVERED_LOCK:
+            _UNCOVERED_REFUSED.discard(run_key)
+        verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message,
+                                plan_changed=approval_drift(session, plan) is not None)
 
         now = datetime.now(timezone.utc)
         fields = dict(
@@ -1702,7 +1744,7 @@ def save_execution_result(
             try:
                 from agenticops.services.change_service import on_execution_result
                 on_execution_result(fix_plan_id, status, post_check_results=parsed_post, step_results=parsed_steps,
-                                    error=error_message)
+                                    error=error_message, judged=(verdict, why))
             except Exception:
                 logger.warning("change on_execution_result failed for FixPlan #%d", fix_plan_id, exc_info=True)
         else:

@@ -66,9 +66,13 @@ def make_fake_executor(post_results, status="succeeded"):
         from agenticops.tools.metadata_tools import get_approved_fix_plan, save_execution_result
         plan = json.loads(get_approved_fix_plan(fix_plan_id))
         assert plan["plan_kind"] == "change", plan["plan_kind"]
-        return save_execution_result(fix_plan_id=fix_plan_id, health_issue_id=None, status=status,
-                                     step_results=json.dumps([{"step_index": 0, "command": plan["steps"][0]["command"], "status": "ok"}]),
-                                     post_check_results=json.dumps(post_results))
+
+        def save():
+            return save_execution_result(fix_plan_id=fix_plan_id, health_issue_id=None, status=status,
+                                         step_results=json.dumps([{"step_index": 0, "command": plan["steps"][0]["command"], "status": "ok"}]),
+                                         post_check_results=json.dumps(post_results))
+        out = save()
+        return save() if out.startswith("INVALID:") else out  # the executor resubmits once, as the INVALID asks
     return fake_executor
 
 

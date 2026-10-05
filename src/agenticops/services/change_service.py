@@ -1175,10 +1175,11 @@ def _queue_approved(cr_id: int, actor: Actor) -> dict:
 
 
 def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_results: Optional[list] = None,
-                        step_results: Optional[list] = None, error: str = "") -> Optional[dict]:
+                        step_results: Optional[list] = None, error: str = "",
+                        judged: Optional[tuple] = None) -> Optional[dict]:
     """The ONLY writer of completed / needs_review / failed / rolled_back. Deterministic; no LLM input.
 
-    The verdict is verification.evaluate's: passed → completed; a run that did not succeed keeps its 2.6.0
+    The verdict is verification.evaluate's (`judged` when the caller already computed and stored it): passed → completed; a run that did not succeed keeps its 2.6.0
     mapping (rolled_back / failed); a succeeded run with a failed post-check, or one pending acceptance, →
     needs_review with the verification reason (the latter notifies execution_pending_acceptance).
 
@@ -1194,7 +1195,10 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
         if cr.status != "executing":
             logger.warning("on_execution_result: CR #%d is '%s', ignoring result %s", cr.id, cr.status, execution_status)
             return to_dict(cr)
-        verdict, reason = evaluate(execution_status, plan.post_checks, post_check_results, step_results, error)
+        # One verdict per run: save_execution_result passes the one it stored on the execution (judged), so
+        # the request and its run can never disagree; callers with no results (an abort, a closed ticket) don't.
+        verdict, reason = judged or evaluate(execution_status, plan.post_checks, post_check_results, step_results,
+                                             error)
         if verdict == PASSED:
             new_status = "completed"
         elif execution_status == "succeeded":  # a failed post-check or pending acceptance: a human decides

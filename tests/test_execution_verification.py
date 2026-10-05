@@ -69,10 +69,17 @@ def _fix(db, post_checks=(CHECK,), issue_status="fix_approved", plan_status="app
     return issue.id, plan.id, rca.id
 
 
-def _save(plan_id, status="succeeded", post=(), steps=({"status": "succeeded"},), error=""):
+def _save(plan_id, status="succeeded", post=(), steps=({"status": "succeeded"},), error="", resubmit=True):
+    """save_execution_result as the executor calls it. A succeeded result that does not cover the declared
+    checks one to one is refused once (INVALID, nothing written); with resubmit the executor sends the same
+    results again, which records them (pending acceptance) — the recorded verdict is what most tests check."""
     from agenticops.tools.metadata_tools import save_execution_result
-    return save_execution_result(fix_plan_id=plan_id, status=status, post_check_results=json.dumps(list(post)),
-                                 step_results=json.dumps(list(steps)), error_message=error)
+
+    def call():
+        return save_execution_result(fix_plan_id=plan_id, status=status, post_check_results=json.dumps(list(post)),
+                                     step_results=json.dumps(list(steps)), error_message=error)
+    out = call()
+    return call() if resubmit and out.startswith("INVALID:") else out
 
 
 def _fresh(model, pk):
@@ -266,9 +273,13 @@ def test_a_run_aborted_before_it_started_moves_nothing(db):
 
 
 def _save_raw(plan_id, post, steps='[{"status": "succeeded"}]'):
-    """The agent's own strings, as the tool receives them."""
+    """The agent's own strings, as the tool receives them (resubmitted once after an INVALID, like _save)."""
     from agenticops.tools.metadata_tools import save_execution_result
-    return save_execution_result(fix_plan_id=plan_id, status="succeeded", post_check_results=post, step_results=steps)
+    out = save_execution_result(fix_plan_id=plan_id, status="succeeded", post_check_results=post, step_results=steps)
+    if out.startswith("INVALID:"):
+        out = save_execution_result(fix_plan_id=plan_id, status="succeeded", post_check_results=post,
+                                    step_results=steps)
+    return out
 
 
 @pytest.mark.parametrize("post,reason", [('{"ok": false}', UNBOUND), ('{"success": false}', UNBOUND),
@@ -863,3 +874,104 @@ def test_the_executor_prompt_leaves_the_verdict_to_the_platform():
     from agenticops.agents.executor_agent import EXECUTOR_SYSTEM_PROMPT
     assert "with status passed / failed / warning" in EXECUTOR_SYSTEM_PROMPT
     assert "the platform verifies the post-check results" in EXECUTOR_SYSTEM_PROMPT
+
+
+# ── MVP-2.7.0 S1a: the executor sees every check_id and must report each one once ──
+
+A2 = {"check": "http health", "command": "curl -fsS http://web/healthz"}
+
+
+def test_the_executor_sees_the_whole_plan_with_every_check_id(db):
+    """The old 4000-char cap cut the plan JSON mid-steps; post_checks came after the prose and were lost first."""
+    from agenticops.tools.metadata_tools import get_approved_fix_plan
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    plan = db.get(FixPlan, plan_id)
+    plan.steps = [{"action": f"step {i}", "command": "aws ec2 describe-instances --instance-ids i-0abc " + "x" * 250}
+                  for i in range(20)]
+    pc.stamp_content(db, plan)
+    pc.stamp_approval(db, plan)
+    db.commit()
+    out = get_approved_fix_plan(plan_id)
+    assert len(out) > 6000
+    data = json.loads(out)  # whole: never truncated
+    assert len(data["steps"]) == 20
+    assert data["post_checks"] == [{"check_id": "pc-1", **CHECK}, {"check_id": "pc-2", **A2}]
+    keys = list(data)
+    assert keys.index("steps") < keys.index("summary") and keys.index("post_checks") < keys.index("summary")
+
+
+def test_an_uncovering_result_is_refused_once_and_writes_nothing(db, quiet):
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    out = _save(plan_id, post=[OK, OK], resubmit=False)  # the September counterexample
+    assert out.startswith("INVALID:") and "pc-2" in out and "check_id" in out
+    s = get_session()
+    try:
+        assert s.query(FixExecution).filter_by(fix_plan_id=plan_id).count() == 0
+    finally:
+        s.close()
+    assert _fresh(FixPlan, plan_id).status == "approved" and _fresh(HealthIssue, issue_id).status == "fix_approved"
+    # the corrected report is recorded and passes
+    _save(plan_id, post=[OK, {"check_id": "pc-2", "status": "passed"}], resubmit=False)
+    assert _only_execution(plan_id).verification_status == PASSED
+    assert _fresh(HealthIssue, issue_id).status == "resolved"
+
+
+def test_a_second_uncovering_result_is_recorded_pending_never_lost(db, quiet):
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    assert _save(plan_id, post=[OK, OK], resubmit=False).startswith("INVALID:")
+    out = _save(plan_id, post=[OK, OK], resubmit=False)
+    ex = _only_execution(plan_id)
+    assert (ex.verification_status, ex.verification_reason) == (
+        PENDING, "no result for post-check pc-2; post-check pc-1 reported more than once")
+    assert "awaiting human acceptance" in out
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+
+
+def test_a_run_that_did_not_succeed_is_recorded_without_the_coverage_check(db, quiet):
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    out = _save(plan_id, status="failed", post=[], error="step 1 failed", resubmit=False)
+    assert not out.startswith("INVALID:")
+    assert _only_execution(plan_id).verification_status == FAILED
+
+
+def test_a_change_run_is_judged_once(db, quiet):
+    """save_execution_result's verdict is the one the change request maps: on_execution_result does not
+    re-evaluate (two evaluations could disagree and strand the request in needs_review)."""
+    cr_id, plan_id, ex_id = _change(db)
+    real = vf.evaluate
+    calls = []
+
+    def counting(*a, **kw):
+        calls.append(a)
+        return real(*a, **kw)
+    with patch.object(vf, "evaluate", counting), patch.object(cs, "evaluate", counting):
+        _save_change(cr_id, plan_id, ex_id, post=[OK])
+    assert len(calls) == 1
+    assert (_fresh(FixExecution, ex_id).verification_status, _fresh(ChangeRequest, cr_id).status) == (
+        PASSED, "completed")
+
+
+def test_a_plan_whose_approval_drifted_during_the_run_cannot_pass(db, quiet):
+    issue_id, plan_id, _ = _fix(db, plan_status="executing")
+    plan = db.get(FixPlan, plan_id)
+    plan.steps = [{"command": "aws ec2 stop-instances --instance-ids i-0abc"}]  # changed after approval
+    pc.stamp_content(db, plan)
+    db.commit()
+    _save(plan_id, post=[OK])
+    ex = _only_execution(plan_id)
+    assert (ex.verification_status, ex.verification_reason) == (
+        PENDING, "the plan changed after approval; its post-checks cannot vouch for this run")
+
+
+def test_main_agents_plan_readers_show_the_check_ids(db):
+    from agenticops.tools.metadata_tools import get_execution_result, get_plan
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    assert [c["check_id"] for c in json.loads(get_plan(plan_id))["post_checks"]] == ["pc-1", "pc-2"]
+    _save(plan_id, post=[OK, {"check_id": "pc-2", "status": "passed"}])
+    data = json.loads(get_execution_result(plan_id=plan_id))
+    assert [r["check_id"] for r in data["post_check_binding"]] == ["pc-1", "pc-2"]
+
+
+def test_the_executor_prompt_asks_for_one_result_per_check_id():
+    from agenticops.agents.executor_agent import EXECUTOR_SYSTEM_PROMPT
+    assert "exactly one result per check_id" in EXECUTOR_SYSTEM_PROMPT

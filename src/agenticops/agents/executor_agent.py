@@ -89,9 +89,10 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
    - Never modify, skip, or improvise steps — execute EXACTLY what the approved plan specifies.
 
 5. POST-CHECK
-   For each item in the plan's post_checks list:
+   For each item in the plan's post_checks list (each has a check_id: pc-1, pc-2, ...):
    - Execute the verification using the appropriate read-only tool.
-   - Record one result per post-check, in order, with status passed / failed / warning.
+   - Record exactly one result per check_id, {{check_id, status, output}}, with status passed / failed / warning
+     (a check you could not run is warning, with the reason in output).
    - Post-check failures do NOT trigger rollback, but must be reported.
 
 6. ROLLBACK (only if step 4 failed)

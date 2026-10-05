@@ -262,10 +262,13 @@ class TestL4Lifecycle:
         plan = seed_data["plan"]
         issue = seed_data["issue"]
 
-        # Approve
+        # Approve — binding the reviewed content, as every approval route does (an unstamped plan never runs)
+        from agenticops.services.plan_content import stamp_approval, stamp_content
         plan.status = "approved"
         plan.approved_by = "test"
         plan.approved_at = utc_now()
+        stamp_content(session, plan)
+        stamp_approval(session, plan)
         issue.status = "fix_approved"
         session.commit()
 
