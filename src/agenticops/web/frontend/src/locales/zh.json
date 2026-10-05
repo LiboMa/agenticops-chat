@@ -891,5 +891,6 @@
   "workitem.filter.status": "状态",
   "workitem.filter.severity": "严重度",
   "workitem.filter.scope": "范围",
-  "workitem.filter.account": "账户"
+  "workitem.filter.account": "账户",
+  "nav.resources": "资源"
 }

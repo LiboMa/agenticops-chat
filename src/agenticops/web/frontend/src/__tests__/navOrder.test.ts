@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { reorderNavIds, moveId } from "@/lib/navOrder";
+import { NAV_ITEMS } from "@/components/layout/NavItems";
+
+describe("NAV_ITEMS", () => {
+  it("Resources has its own entry after Changes (spec §3); signals stay out of the sidebar", () => {
+    expect(NAV_ITEMS.map((i) => i.id)).toEqual([
+      "dashboard", "chat", "issues", "changes", "resources", "audit", "schedules", "reports", "agent-metrics", "skills",
+      "galaxy", "security",
+    ]);
+  });
+});
 
 describe("reorderNavIds", () => {
   it("keeps stored order for known ids", () => {

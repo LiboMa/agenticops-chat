@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useResources } from "@/hooks/useResources";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -8,7 +8,6 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { IssueQuickActions } from "@/components/ui/IssueQuickActions";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
-import { SignalsPanel } from "@/components/signals/SignalsPanel";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -16,6 +15,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
+import { legacyIssuesViewRedirect } from "@/lib/workitemRoutes";
 import type { Anomaly, Resource } from "@/api/types";
 
 /* ── Issues helpers ─────────────────────────────────────────────── */
@@ -76,60 +76,17 @@ const PAGE_SIZES = [50, 100, 200];
 
 /* ── Main component ─────────────────────────────────────────────── */
 
-type View = "issues" | "resources" | "signals";
-
 export default function IssuesAndPlans() {
   const { t } = useLocale();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const viewParam = searchParams.get("view");
-  const view: View =
-    viewParam === "resources" ? "resources" : viewParam === "signals" ? "signals" : "issues";
-
-  function setView(v: View) {
-    if (v === "issues") {
-      setSearchParams({});
-    } else {
-      setSearchParams({ view: v });
-    }
-  }
-
-  const titles: Record<View, string> = {
-    issues: t("issues.title"),
-    resources: t("resources.title"),
-    signals: t("signals.title"),
-  };
+  const location = useLocation();
+  // Resources and signals left this hub for their own pages (spec §3): an old ?view= link lands there, no extra history.
+  const redirect = legacyIssuesViewRedirect(location.search);
+  if (redirect) return <Navigate to={redirect} replace />;
 
   return (
     <div className="space-y-4">
-      {/* View toggle */}
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-semibold text-foreground">{titles[view]}</h1>
-        <div className="flex bg-secondary rounded-lg p-0.5">
-          {(["issues", "resources", "signals"] as View[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                view === v
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {titles[v]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {view === "issues" ? (
-        <IssuesView t={t} />
-      ) : view === "signals" ? (
-        <SignalsPanel />
-      ) : (
-        <ResourcesView navigate={navigate} t={t} initialType={searchParams.get("type") || ""} />
-      )}
+      <h1 className="text-xl font-semibold text-foreground">{t("issues.title")}</h1>
+      <IssuesView t={t} />
     </div>
   );
 }
@@ -280,7 +237,7 @@ function IssuesView({ t }: { t: (key: string) => string }) {
 
 /* ── Resources View ─────────────────────────────────────────────── */
 
-function ResourcesView({
+export function ResourcesView({
   navigate,
   t,
   initialType,

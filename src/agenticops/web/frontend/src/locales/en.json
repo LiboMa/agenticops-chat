@@ -891,5 +891,6 @@
   "workitem.filter.status": "Status",
   "workitem.filter.severity": "Severity",
   "workitem.filter.scope": "Scope",
-  "workitem.filter.account": "Account"
+  "workitem.filter.account": "Account",
+  "nav.resources": "Resources"
 }

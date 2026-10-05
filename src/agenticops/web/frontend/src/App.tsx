@@ -19,7 +19,9 @@ const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
 const ScheduleDetail = lazy(() => import("@/pages/ScheduleDetail"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const Resources = lazy(() => import("@/pages/Resources"));
 const ResourceDetail = lazy(() => import("@/pages/ResourceDetail"));
+const Signals = lazy(() => import("@/pages/Signals"));
 const AgentMetrics = lazy(() => import("@/pages/AgentMetrics"));
 const Skills = lazy(() => import("@/pages/Skills"));
 const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
@@ -163,6 +165,22 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Settings />
+                </Suspense>
+              }
+            />
+            <Route
+              path="resources"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Resources />
+                </Suspense>
+              }
+            />
+            <Route
+              path="signals"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <Signals />
                 </Suspense>
               }
             />

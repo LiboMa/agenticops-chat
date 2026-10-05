@@ -58,7 +58,7 @@ export default function Dashboard() {
 
   const s = stats.data!;
   const kpis = [
-    { label: t("dashboard.resources"), value: s.total_resources, hot: false, link: "/app/issues?view=resources" },
+    { label: t("dashboard.resources"), value: s.total_resources, hot: false, link: "/app/resources" },
     { label: t("dashboard.openIssues"), value: s.open_anomalies, hot: s.open_anomalies > 0 },
     { label: t("dashboard.critical"), value: s.critical_anomalies, hot: s.critical_anomalies > 0 },
     { label: t("dashboard.accounts"), value: s.total_accounts, hot: false },

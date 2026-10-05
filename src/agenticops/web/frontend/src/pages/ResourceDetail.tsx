@@ -49,7 +49,7 @@ export default function ResourceDetail() {
 
   return (
     <div className="space-y-4">
-      <Link to="/app/issues?view=resources" className="text-muted-foreground hover:text-foreground text-sm">
+      <Link to="/app/resources" className="text-muted-foreground hover:text-foreground text-sm">
         &larr; {t("resources.back")}
       </Link>
       <Card>
