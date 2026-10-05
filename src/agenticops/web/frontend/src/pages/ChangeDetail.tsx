@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useChange, useChangeAction, type ChangeActionArgs } from "@/hooks/useChanges";
 import { useChangeTimeline } from "@/hooks/useChangeTimeline";
 import { useSettings } from "@/hooks/useSettings";
 import { useAccounts } from "@/hooks/useAccounts";
+import { usePhaseCards } from "@/hooks/usePhaseCards";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ApiError } from "@/api/client";
@@ -24,8 +25,8 @@ import { ChangeRunBody, ClosedRecord } from "@/components/change/RunCard";
 import { ChangeAcceptBody } from "@/components/change/AcceptCard";
 import { externalRefLink, requestSummary, reviewSummary, runSummary, toPipelineEvents } from "@/lib/changeDetail";
 import { changeDetailModel } from "@/lib/changeDetailModel";
-import { CHANGE_PHASES, type ChangePhaseId, type ChangePhaseResult, type ChangePrimary } from "@/lib/changePhases";
-import { CHANGE_HASHES, parseHash } from "@/lib/workitemRoutes";
+import { CHANGE_PHASES, type ChangePhaseId, type ChangePrimary } from "@/lib/changePhases";
+import { CHANGE_HASHES } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { isBlank, type FactRow } from "@/lib/issueDetail";
 import { planCounts, planLabel, shortHash } from "@/lib/plans";
@@ -44,13 +45,6 @@ type Pending = {
   // approve: the hash the dialog shows is the hash it sends, even if a poll replaces the plan while it is open
   contentHash?: string;
 };
-
-/** The cards open on arrival: the current phase, a failed one, and the one a link's hash names. */
-function seedOpen(phase: ChangePhaseResult, target: string | null): Set<ChangePhaseId> {
-  const ids = phase.phases.filter((p) => p.state === "current" || p.state === "failed").map((p) => p.id);
-  if (target && (CHANGE_PHASES as readonly string[]).includes(target)) ids.push(target as ChangePhaseId);
-  return new Set(ids);
-}
 
 /** The right rail's key facts, blank rows dropped. */
 function changeFactRows(cr: ChangeRequestDetail, acct: Account | undefined, t: (k: string) => string): FactRow[] {
@@ -84,7 +78,6 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const { t } = useLocale();
   const settings = useSettings();
   const navigate = useNavigate();
-  const location = useLocation();
   const accounts = useAccounts();
   const { confirm, dialog } = useConfirm();
   const act = useChangeAction();
@@ -102,49 +95,12 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const model = q.data ? changeDetailModel(q.data) : null;
 
   /* -- URL: the hash opens a card (or the activity) and scrolls to it -- */
-  const target = parseHash(location.hash, CHANGE_HASHES);
   // Every card is controlled: re-seeded whenever the phase or its sub-state moves (a poll landing on needs_review
   // opens ⑤; needs_clarification re-opens ② for its answer box)
-  const seedKey = model ? `${model.phase.current}:${model.phase.sub}` : null;
-  const [cards, setCards] = useState<{ key: string | null; open: Set<ChangePhaseId> }>({ key: null, open: new Set() });
-  if (model && cards.key !== seedKey) setCards({ key: seedKey, open: seedOpen(model.phase, target) });
-  const openCard = (id: ChangePhaseId) => setCards((c) => ({ ...c, open: new Set(c.open).add(id) }));
-  const [activityOpen, setActivityOpen] = useState(true);
-  const [scrollTo, setScrollTo] = useState<{ id: string; focus?: boolean } | null>(null);
-  const selfHash = useRef<string | null>(null); // a hash a card header wrote: open it, do not scroll to it
-
-  const loaded = !!q.data;
-  useEffect(() => {
-    if (selfHash.current !== null && selfHash.current === location.hash) {
-      selfHash.current = null;
-      return;
-    }
-    if (!loaded || !target) return;
-    if (target === "activity") setActivityOpen(true);
-    else openCard(target as ChangePhaseId);
-    setScrollTo({ id: target });
-  }, [location.hash, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!scrollTo) return;
-    const el = document.getElementById(scrollTo.id);
-    el?.scrollIntoView(scrollTo.focus ? { behavior: "smooth", block: "center" } : { block: "start" });
-    if (scrollTo.focus) el?.focus();
-    setScrollTo(null);
-  }, [scrollTo]);
-
-  const toggleCard = (id: ChangePhaseId, open: boolean) => {
-    setCards((c) => {
-      const next = new Set(c.open);
-      if (open) next.add(id);
-      else next.delete(id);
-      return { ...c, open: next };
-    });
-    const hash = open ? `#${id}` : location.hash === `#${id}` ? "" : location.hash;
-    if (hash !== location.hash) {
-      selfHash.current = hash;
-      navigate({ search: location.search, hash }, { replace: true });
-    }
-  };
+  const cards = usePhaseCards<ChangePhaseId>({
+    ids: CHANGE_PHASES, hashes: CHANGE_HASHES, phases: model?.phase.phases ?? null,
+    seedKey: model ? `${model.phase.current}:${model.phase.sub}` : null,
+  });
 
   const backLink = (
     <Link to="/app/changes" className="text-sm text-muted-foreground hover:text-foreground">
@@ -243,7 +199,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
   // The primary button: the same handlers as the cards' outlined buttons, so the two never disagree
   const primaryRun: Record<NonNullable<ChangePrimary>, () => void> = {
     startReview: () => runDirect({ id: cr.id, action: "review" }),
-    answerReviewer: () => { openCard("review"); setScrollTo({ id: "change-clarify", focus: true }); },
+    answerReviewer: () => { cards.openCard("review"); cards.scrollTo("change-clarify", true); },
     approveAndRun: openApprove,
     retryExecution: onExecute,
     markCompleted: () => openAccept("completed"),
@@ -272,10 +228,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const card = (id: ChangePhaseId) => ({
     id, index: CHANGE_PHASES.indexOf(id) + 1, title: t(`workitem.phase.${id}`), state: state(id),
     futureHint: id === "request" ? null : t(`workitem.future.change.${id}`),
-    open: cards.open.has(id), onToggle: (o: boolean) => toggleCard(id, o),
+    open: cards.isOpen(id), onToggle: (o: boolean) => cards.toggleCard(id, o),
   });
-  const openable = m.phase.phases.filter((x) => x.state !== "future").map((x) => x.id);
-  const allOpen = openable.length > 0 && openable.every((x) => cards.open.has(x));
   const counts = plan && planCounts(plan);
   const planSummary = plan && counts && `${planLabel(plan, t)} · ${t("plan.counts")
     .replace("{steps}", String(counts.steps)).replace("{pre}", String(counts.preChecks))
@@ -311,11 +265,10 @@ function ChangeDetailView({ crId }: { crId: number }) {
           backLabel={t("nav.changes")}
         />
 
-        {openable.length > 0 && (
+        {cards.openable.length > 0 && (
           <div className="flex justify-end">
-            <button onClick={() => setCards((c) => ({ ...c, open: new Set(allOpen ? [] : openable) }))}
-                    className="text-xs text-primary hover:underline">
-              {t(allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
+            <button onClick={cards.toggleAll} className="text-xs text-primary hover:underline">
+              {t(cards.allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
             </button>
           </div>
         )}
@@ -368,15 +321,15 @@ function ChangeDetailView({ crId }: { crId: number }) {
         <section id="activity" className="scroll-mt-4">
           <Card>
             <CardBody className="space-y-3">
-              <button onClick={() => setActivityOpen(!activityOpen)} aria-expanded={activityOpen}
+              <button onClick={() => cards.setActivityOpen(!cards.activityOpen)} aria-expanded={cards.activityOpen}
                       className="flex w-full items-center justify-between text-left">
                 <h3 className="text-sm font-semibold text-foreground">{t("workitem.activity")}</h3>
-                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${activityOpen ? "rotate-90" : ""}`}
+                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${cards.activityOpen ? "rotate-90" : ""}`}
                      fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
-              {activityOpen && (tl.isLoading ? <Spinner label={t("common.loading")} />
+              {cards.activityOpen && (tl.isLoading ? <Spinner label={t("common.loading")} />
                 : tl.error ? <ErrorBanner message={tl.error.message} onRetry={() => tl.refetch()} actionLabel={t("common.retry")} />
                 : <ActivityList entries={toActivity(toPipelineEvents(tl.data ?? []), { hideText: m.reason })} t={t}
                                 emptyKey="changes.noEvents" />)}

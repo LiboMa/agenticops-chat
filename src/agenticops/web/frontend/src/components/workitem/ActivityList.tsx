@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ActivityEntry } from "@/lib/activity";
 import { formatShortDate } from "@/lib/formatDate";
+import { fillPlaceholders } from "@/lib/placeholders";
 
 const DOT: Record<ActivityEntry["tone"], string> = { ok: "bg-emerald-500", warn: "bg-amber-500", bad: "bg-red-500", info: "bg-blue-500" };
 
@@ -9,8 +10,6 @@ export function ActivityList({ entries, t, emptyKey }: { entries: ActivityEntry[
   const [raw, setRaw] = useState(false);
   if (entries.length === 0) return <p className="text-xs text-muted-foreground">{t(emptyKey)}</p>;
   const total = entries.reduce((n, e) => n + e.raw.length, 0);
-  const fill = (key: string, params: Record<string, string>) =>
-    Object.entries(params).reduce((s, [k, v]) => s.replace(`{${k}}`, v), t(key));
   return (
     <div className="space-y-2">
       <ol className="space-y-1.5">
@@ -19,7 +18,7 @@ export function ActivityList({ entries, t, emptyKey }: { entries: ActivityEntry[
             <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${DOT[e.tone]}`} />
             <div className="min-w-0">
               <span className="text-muted-foreground font-mono mr-1">{formatShortDate(e.ts)}</span>
-              <span className="text-foreground">{fill(e.labelKey, e.labelParams)}</span>
+              <span className="text-foreground">{fillPlaceholders(t(e.labelKey), e.labelParams)}</span>
               {e.count > 1 && <span className="ml-1 text-muted-foreground">×{e.count}</span>}
               {e.summary && <span className="block text-muted-foreground break-words">{e.summary}</span>}
               <span className="block text-[10px] text-muted-foreground/70">{e.actor}</span>

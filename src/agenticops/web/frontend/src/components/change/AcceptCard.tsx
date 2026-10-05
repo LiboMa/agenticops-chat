@@ -2,6 +2,7 @@ import type { ChangeStatus, FixExecution } from "@/api/types";
 import { VerificationChip } from "@/components/plans/VerificationChip";
 import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
+import { fillPlaceholders } from "@/lib/placeholders";
 
 type T = (key: string) => string;
 type Note = { key: string; params?: Record<string, string> };
@@ -25,7 +26,7 @@ export function ChangeAcceptBody({ status, latestRun, acceptNote, quietReason, o
   if (acceptNote && status !== "needs_review") {
     return (
       <p className={`text-sm ${muted}`}>
-        {Object.entries(acceptNote.params ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), t(acceptNote.key))}
+        {fillPlaceholders(t(acceptNote.key), acceptNote.params)}
       </p>
     );
   }

@@ -14,6 +14,7 @@ import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useAcceptExecution, useCancelExecution } from "@/hooks/useFixExecutions";
 import { useSettings } from "@/hooks/useSettings";
+import { usePhaseCards } from "@/hooks/usePhaseCards";
 import { useResource } from "@/hooks/useResourceDetail";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -35,22 +36,16 @@ import { AcceptBody } from "@/components/issue/AcceptCard";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { planLabel, shortHash } from "@/lib/plans";
+import { fillPlaceholders } from "@/lib/placeholders";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, issueFacts, isBlank,
 } from "@/lib/issueDetail";
 import { issueDetailModel, newestFirst, type Reason } from "@/lib/issueDetailModel";
-import { ISSUE_PHASES, type IssuePhaseId, type IssuePhaseResult, type IssuePrimary } from "@/lib/issuePhases";
-import { ISSUE_HASHES, legacyIssueTabHash, parseHash } from "@/lib/workitemRoutes";
+import { ISSUE_PHASES, type IssuePhaseId, type IssuePrimary } from "@/lib/issuePhases";
+import { ISSUE_HASHES, legacyIssueTabHash } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
 import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
-
-/** The cards open on arrival: the current phase, any failed one, and the one a link's hash names. */
-function seedOpen(phase: IssuePhaseResult, target: string | null): Set<IssuePhaseId> {
-  const ids = phase.phases.filter((p) => p.state === "current" || p.state === "failed").map((p) => p.id);
-  if (target && (ISSUE_PHASES as readonly string[]).includes(target)) ids.push(target as IssuePhaseId);
-  return new Set(ids);
-}
 
 /* ================================================================== */
 /*  Main component                                                     */
@@ -116,48 +111,13 @@ export default function IssueDetail() {
     const rest = q.toString();
     navigate({ search: rest ? `?${rest}` : "", hash: hash ? `#${hash}` : location.hash }, { replace: true });
   }, [location.search, location.hash, navigate]);
-  const target = parseHash(location.hash, ISSUE_HASHES);
 
   // Every card is controlled: re-seeded whenever the current phase moves (a poll landing on fix_executed opens ④)
-  const seedKey = model ? `${issueId}:${model.phase.current ?? "-"}` : null;
-  const [cards, setCards] = useState<{ key: string | null; open: Set<IssuePhaseId> }>({ key: null, open: new Set() });
-  if (model && cards.key !== seedKey) setCards({ key: seedKey, open: seedOpen(model.phase, target) });
-  const openCard = (id: IssuePhaseId) => setCards((c) => ({ ...c, open: new Set(c.open).add(id) }));
-  const [activityOpen, setActivityOpen] = useState(true);
+  const cards = usePhaseCards<IssuePhaseId>({
+    ids: ISSUE_PHASES, hashes: ISSUE_HASHES, phases: model?.phase.phases ?? null,
+    seedKey: model ? `${issueId}:${model.phase.current ?? "-"}` : null,
+  });
   const [showMerged, setShowMerged] = useState(false);
-  const [scrollTo, setScrollTo] = useState<string | null>(null);
-  const selfHash = useRef<string | null>(null); // a hash a card header wrote: open it, do not scroll to it
-
-  const loaded = !!anomaly.data;
-  useEffect(() => {
-    if (selfHash.current !== null && selfHash.current === location.hash) {
-      selfHash.current = null;
-      return;
-    }
-    if (!loaded || !target) return;
-    if (target === "activity") setActivityOpen(true);
-    else openCard(target as IssuePhaseId);
-    setScrollTo(target);
-  }, [location.hash, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!scrollTo) return;
-    document.getElementById(scrollTo)?.scrollIntoView({ block: "start" });
-    setScrollTo(null);
-  }, [scrollTo]);
-
-  const toggleCard = (id: IssuePhaseId, open: boolean) => {
-    setCards((c) => {
-      const next = new Set(c.open);
-      if (open) next.add(id);
-      else next.delete(id);
-      return { ...c, open: next };
-    });
-    const hash = open ? `#${id}` : location.hash === `#${id}` ? "" : location.hash;
-    if (hash !== location.hash) {
-      selfHash.current = hash;
-      navigate({ search: location.search, hash }, { replace: true });
-    }
-  };
 
   /* -- Local state ------------------------------------------------- */
   const [rcaLoading, setRcaLoading] = useState(false);
@@ -249,14 +209,13 @@ export default function IssueDetail() {
   const openAccept = (decision: "accepted" | "rejected") => setAcceptDecision(decision);
 
   /* -- Status line ------------------------------------------------- */
-  const fill = (r: Reason) =>
-    "text" in r ? r.text : Object.entries(r.params ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), t(r.key));
+  const fill = (r: Reason) => ("text" in r ? r.text : fillPlaceholders(t(r.key), r.params));
   const reason = closed
     ? (a.status === "resolved" && a.resolved_at ? t("workitem.reason.resolvedAt").replace("{at}", formatFullDate(a.resolved_at)) : null)
     : m.reason && fill(m.reason);
 
   const primaryRun: Record<NonNullable<IssuePrimary>, (() => void) | null> = {
-    reviewRca: () => { openCard("diagnose"); setScrollTo("verdict"); },
+    reviewRca: () => { cards.openCard("diagnose"); cards.scrollTo("verdict"); },
     rerunRca: triggerRca,
     generatePlan: triggerFixPlan,
     approveAndRun: canApprove ? () => openApproval("approve") : null,
@@ -300,8 +259,6 @@ export default function IssueDetail() {
 
   /* -- Phase cards ------------------------------------------------- */
   const state = (id: IssuePhaseId) => m.phase.phases.find((x) => x.id === id)!.state;
-  const openable = m.phase.phases.filter((x) => x.state !== "future").map((x) => x.id);
-  const allOpen = openable.length > 0 && openable.every((x) => cards.open.has(x));
   const runSummary = latestRun && [t("issues.executionN").replace("{n}", String(latestRun.id)),
     latestRun.verification_status ? t(`verification.${latestRun.verification_status}`) : executionStatusLabel(latestRun.status, t)]
     .join(" · ");
@@ -331,18 +288,17 @@ export default function IssueDetail() {
           <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">{actionInfo}</div>
         )}
 
-        {openable.length > 0 && (
+        {cards.openable.length > 0 && (
           <div className="flex justify-end">
-            <button onClick={() => setCards((c) => ({ ...c, open: new Set(allOpen ? [] : openable) }))}
-                    className="text-xs text-primary hover:underline">
-              {t(allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
+            <button onClick={cards.toggleAll} className="text-xs text-primary hover:underline">
+              {t(cards.allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
             </button>
           </div>
         )}
 
         <PhaseCard id="diagnose" index={1} title={t("workitem.phase.diagnose")} state={state("diagnose")}
                    summary={diagnoseSummary(rca.data, t)}
-                   open={cards.open.has("diagnose")} onToggle={(o) => toggleCard("diagnose", o)}>
+                   open={cards.isOpen("diagnose")} onToggle={(o) => cards.toggleCard("diagnose", o)}>
           <DiagnoseBody issueId={a.id} rca={rca.data} loading={rca.isLoading}
                         threshold={settings.data?.rca_min_confidence_for_autofix} timelineEvents={timeline.data}
                         closed={closed} onVerdictDone={() => { anomaly.refetch(); rca.refetch(); }} t={t} />
@@ -350,7 +306,7 @@ export default function IssueDetail() {
 
         <PhaseCard id="plan" index={2} title={t("workitem.phase.plan")} state={state("plan")}
                    summary={plan && `${planLabel(plan, t)} · ${plan.title}`} futureHint={t("workitem.future.issue.plan")}
-                   open={cards.open.has("plan")} onToggle={(o) => toggleCard("plan", o)}>
+                   open={cards.isOpen("plan")} onToggle={(o) => cards.toggleCard("plan", o)}>
           {fixPlans.isLoading ? <Spinner label={t("common.loading")} /> : plan ? (
             <div className="space-y-4">
               <PlanView plan={plan} t={t} />
@@ -380,7 +336,7 @@ export default function IssueDetail() {
 
         <PhaseCard id="run" index={3} title={t("workitem.phase.run")} state={state("run")} summary={runSummary}
                    futureHint={t("workitem.future.issue.run")}
-                   open={cards.open.has("run")} onToggle={(o) => toggleCard("run", o)}>
+                   open={cards.isOpen("run")} onToggle={(o) => cards.toggleCard("run", o)}>
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
                    error={executions.error} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
                    onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")}
@@ -390,7 +346,7 @@ export default function IssueDetail() {
         <PhaseCard id="accept" index={4} title={t("workitem.phase.accept")} state={state("accept")}
                    summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}
                    futureHint={t("workitem.future.issue.accept")}
-                   open={cards.open.has("accept")} onToggle={(o) => toggleCard("accept", o)}>
+                   open={cards.isOpen("accept")} onToggle={(o) => cards.toggleCard("accept", o)}>
           <AcceptBody runs={runs} loading={executions.isLoading} error={executions.error} onRetryFetch={() => executions.refetch()}
                       pendingRun={m.pendingRun} quietRunId={quietReasonRunId}
                       onAccept={() => openAccept("accepted")} onReject={() => openAccept("rejected")} t={t} />
@@ -429,15 +385,15 @@ export default function IssueDetail() {
         <section id="activity" className="scroll-mt-4">
           <Card>
             <CardBody className="space-y-3">
-              <button onClick={() => setActivityOpen(!activityOpen)} aria-expanded={activityOpen}
+              <button onClick={() => cards.setActivityOpen(!cards.activityOpen)} aria-expanded={cards.activityOpen}
                       className="flex w-full items-center justify-between text-left">
                 <h3 className="text-sm font-semibold text-foreground">{t("workitem.activity")}</h3>
-                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${activityOpen ? "rotate-90" : ""}`}
+                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${cards.activityOpen ? "rotate-90" : ""}`}
                      fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
-              {activityOpen && (timeline.isLoading
+              {cards.activityOpen && (timeline.isLoading
                 ? <Spinner label={t("common.loading")} />
                 : <ActivityList entries={toActivity(timeline.data, { hideText: m.reason && "text" in m.reason ? m.reason.text : null })}
                                 t={t} emptyKey="activity.empty" />)}

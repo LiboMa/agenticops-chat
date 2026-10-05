@@ -1,9 +1,8 @@
 import type { ChangeRequestDetail, FixExecution, FixPlan } from "@/api/types";
 import { Spinner } from "@/components/ui/Spinner";
-import { ExecutionEvidence } from "@/components/plans/ExecutionEvidence";
-import { RunningFor } from "@/components/issue/RunCard";
-import { executionStatusLabel } from "@/lib/issueDetail";
+import { RunList } from "@/components/workitem/RunList";
 import { formatFullDate } from "@/lib/formatDate";
+import { fillPlaceholders } from "@/lib/placeholders";
 import { shortHash } from "@/lib/plans";
 
 type T = (key: string) => string;
@@ -86,29 +85,8 @@ export function ChangeRunBody({
       )}
       {cr.status === "executing" && !inFlight && <Spinner label={t("changes.executingNote")} />}
 
-      {runs.length > 0 && (
-        <div className="space-y-3">
-          {runs.map((ex, i) => (
-            <details key={ex.id} open={i === 0} className="rounded-lg border border-border p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                {t("issues.executionN").replace("{n}", String(ex.id))}
-                <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  {executionStatusLabel(ex.status, t)}{ex.started_at && ` · ${formatFullDate(ex.started_at)}`}
-                </span>
-              </summary>
-              <div className="mt-3 space-y-3">
-                {IN_FLIGHT.includes(ex.status) && <RunningFor since={ex.started_at} t={t} />}
-                <ExecutionEvidence execution={ex} showError={ex.id !== quietRunId} />
-              </div>
-            </details>
-          ))}
-        </div>
-      )}
-      {endsHere && acceptNote && (
-        <p className={muted}>
-          {Object.entries(acceptNote.params ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), t(acceptNote.key))}
-        </p>
-      )}
+      {runs.length > 0 && <RunList runs={runs} quietRunId={quietRunId} t={t} />}
+      {endsHere && acceptNote && <p className={muted}>{fillPlaceholders(t(acceptNote.key), acceptNote.params)}</p>}
       {judged && (
         <p>
           <span className={muted}>{t("verification.acceptedBy")}: </span>
