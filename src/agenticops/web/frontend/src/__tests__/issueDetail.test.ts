@@ -4,7 +4,7 @@ import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, inFlightAutoRun, isBlank, issueFacts,
-  issueSourceLabel, ISSUE_SOURCES, issueStatuses, ISSUE_IN_FLIGHT, newestFirst, notQueuedSeen, resultRow, resultSummary, SEVERITIES,
+  issueSourceLabel, ISSUE_SOURCES, issueStatuses, ISSUE_IN_FLIGHT, newestFirst, notQueuedFrom, resultRow, resultSummary, SEVERITIES,
   severityLabel,
 } from "@/lib/issueDetail";
 
@@ -317,21 +317,28 @@ describe("inFlightAutoRun (final review C1 — mirrors pipeline_service.plan_run
   });
 });
 
-describe("notQueuedSeen (C1(c)): only a timeline that saw the approval can say 'not queued'", () => {
+describe("notQueuedFrom (C1(c)): when 'not queued' may be said, anchored on the plan's own approval", () => {
   let n = 0;
   const ev = (event_type: string, created_at: string, detail: unknown) =>
-    ({ id: ++n, event_type, stage: "issue", status: "completed", detail, actor: "user:a", duration_ms: null, created_at,
+    ({ id: ++n, event_type, stage: "execution", status: "x", detail, actor: "system", duration_ms: null, created_at,
        trace_id: null }) as PipelineEvent;
-  const now = Date.parse("2026-10-05T10:00:00Z");
-  it("the newest status move must be the one into fix_approved, past the grace or followed by a finished run", () => {
-    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:00", { to: "fix_approved" })], now)).toBe(true);
-    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", { to: "fix_approved" })], now)).toBe(false);
-    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", { to: "fix_approved" }),
-                          ev("execution_completed", "2026-10-05T09:59:55", { plan_id: 1 })], now)).toBe(true);
-    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:00:00", { to: "fix_planned" })], now)).toBe(false);
+  const A = "2026-10-05T09:57:59";
+  const due = Date.parse(`${A}Z`) + 30_000;
+  const plan = { id: 1, approved_at: A };
+  it("no run of the plan seen since its approval: from the approval + 30 s", () => {
+    expect(notQueuedFrom([], plan)).toBe(due);
+    expect(notQueuedFrom([ev("execution_started", "2026-10-05T09:00:00", { plan_id: 1 })], plan)).toBe(due); // an earlier cycle
+    expect(notQueuedFrom([ev("execution_started", "2026-10-05T09:58:10", { plan_id: 2 })], plan)).toBe(due); // another plan
+    expect(notQueuedFrom([ev("status_changed", "2026-10-05T09:58:10", { to: "fix_approved" })], plan)).toBe(due);
+    expect(notQueuedFrom([ev("execution_started", "2026-10-05T09:58:10", "{\"plan_id\":1}")], plan)).toBe(due); // malformed
   });
-  it("no status move, or one whose detail cannot be read, cannot be checked: true, as before 2.6.1", () => {
-    expect(notQueuedSeen([], now)).toBe(true);
-    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", "{\"to\":\"fix_approved\"}")], now)).toBe(true);
+  it("a start or an end of this plan's run since its approval (or a plan-less end on the issue): at once (0)", () => {
+    expect(notQueuedFrom([ev("execution_started", "2026-10-05T09:58:10", { plan_id: 1 })], plan)).toBe(0);
+    expect(notQueuedFrom([ev("execution_completed", "2026-10-05T09:58:10", { plan_id: 1 })], plan)).toBe(0);
+    expect(notQueuedFrom([ev("execution_completed", "2026-10-05T09:58:10", null)], plan)).toBe(0);
+  });
+  it("a plan without a readable approved_at has no anchor: at once (0), as before", () => {
+    expect(notQueuedFrom([], { id: 1, approved_at: null })).toBe(0);
+    expect(notQueuedFrom([], { id: 1, approved_at: "not a date" })).toBe(0);
   });
 });

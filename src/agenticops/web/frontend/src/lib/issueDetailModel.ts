@@ -1,5 +1,5 @@
 import type { FixExecution, FixPlan, HealthIssue, IssueStatus, PipelineEvent, RCAResult } from "@/api/types";
-import { inFlightAutoRun, issueStatuses, latestExecution, newestFirst, notQueuedSeen } from "@/lib/issueDetail";
+import { inFlightAutoRun, issueStatuses, latestExecution, newestFirst, notQueuedFrom } from "@/lib/issueDetail";
 import { currentFixPlan, issuePhases, type IssuePhaseResult } from "@/lib/issuePhases";
 import { confidenceBreakdown } from "@/lib/rcaQuality";
 
@@ -21,6 +21,7 @@ export interface IssueDetailModel {
   latestRun: FixExecution | null;
   pendingRun: FixExecution | null;
   autoRun: { startedAt: string } | null; // the approval's auto-run under way (no run row until it ends)
+  recheckAt: number | null;              // checking whether the run started: the moment (epoch ms) the grace ends
   quietRunError: boolean;     // the latest run's error_message IS the status line's sentence: ③ does not repeat it
   quietAcceptReason: boolean; // the latest run's verification_reason IS the status line's sentence: ④ does not repeat it
 }
@@ -42,7 +43,8 @@ export function issueDetailModel(input: {
   runsFailed?: boolean;                   // with executions undefined: the fetch failed rather than still loading
   rcaFailed?: boolean;                    // with rca undefined: the fetch failed rather than still loading (I1)
   timeline?: PipelineEvent[];             // the issue's events: an approval's auto-run is seen there; undefined = not known
-  timelineFailed?: boolean;               // with timeline undefined: the fetch failed rather than still loading
+  timelineFetchedAt?: number;             // when that copy was fetched (epoch ms; default now)
+  timelineFailed?: boolean;               // the timeline's last fetch failed: none loaded, or a cached copy that may be old
   executorTimeout?: number | null;        // seconds a started auto-run counts as under way (settings)
   now?: number;
 }): IssueDetailModel {
@@ -59,8 +61,11 @@ export function issueDetailModel(input: {
   const unknown = (failed: boolean | undefined): IssuePhaseResult =>
     ({ ...known, sub: failed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null });
   // No run row: whether the approval's auto-run is under way is on the timeline (matched to the plan). "Not queued"
-  // needs both loaded and a timeline that already saw the approval (C1(c)); until then the run state is unknown.
-  const timelineReady = input.timeline !== undefined && notQueuedSeen(input.timeline, input.now);
+  // needs both loaded and a timeline fetched from notQueuedFrom on — the plan's approval + the grace, unless a run of
+  // it already showed (C1(c)); until then the run state is unknown, and recheckAt is when to look again.
+  const notQueuedAt = input.timeline === undefined || input.plans === undefined ? null
+    : plan?.status === "approved" ? notQueuedFrom(input.timeline, plan) : 0;
+  const timelineReady = notQueuedAt !== null && (input.timelineFetchedAt ?? input.now ?? Date.now()) >= notQueuedAt;
   const runStateFailed = (input.plans === undefined && input.plansFailed) || (!timelineReady && input.timelineFailed);
   const phase: IssuePhaseResult = input.executions === undefined && RUN_DEPENDENT.has(issue.status) ? unknown(input.runsFailed)
     : known.sub === "notQueued" && (input.plans === undefined || !timelineReady)
@@ -93,8 +98,11 @@ export function issueDetailModel(input: {
     // the backend generates a plan from an RCA: none (or not loaded yet) → not offered
     ...(issue.status === "root_cause_identified" && rca && phase.primary !== "generatePlan" ? ["skipReviewGeneratePlan" as const] : []),
     ...(phase.sub === "executing" && latestRun && (latestRun.status === "pending" || latestRun.status === "running") ? ["cancelRun" as const] : []),
-    // an auto-run has no row to cancel; a stuck one can be queued again here (the backend refuses while it runs)
-    ...(issue.status === "fix_approved" && phase.sub === "executing" && autoRun ? ["retryExecution" as const] : []),
+    // an auto-run has no row to cancel, and one not known to have started may never have: either can be queued
+    // again here — never stuck — and the backend refuses (409) while a run is under way
+    ...(issue.status === "fix_approved" && plan?.status === "approved"
+        && ((phase.sub === "executing" && autoRun) || phase.sub === "checkingRun" || phase.sub === "runStateUnavailable")
+      ? ["retryExecution" as const] : []),
     ...(phase.primary === "markResolved" ? [] : ["markResolved" as const]),
     "dismiss",
   ];
@@ -118,6 +126,7 @@ export function issueDetailModel(input: {
     latestRun,
     pendingRun,
     autoRun,
+    recheckAt: phase.sub === "checkingRun" && notQueuedAt ? notQueuedAt : null,
     quietRunError: text !== null && text === latestRun?.error_message,
     quietAcceptReason: text !== null && text === latestRun?.verification_reason,
   };

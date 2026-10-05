@@ -15,6 +15,7 @@ import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useAcceptExecution, useCancelExecution } from "@/hooks/useFixExecutions";
 import { useSettings } from "@/hooks/useSettings";
 import { usePhaseCards } from "@/hooks/usePhaseCards";
+import { useRecheckAt } from "@/hooks/useRecheckAt";
 import { useResource } from "@/hooks/useResourceDetail";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -106,10 +107,13 @@ export default function IssueDetail() {
     executions: executions.data,
     runsFailed: !!executions.error,
     timeline: timeline.data,
+    timelineFetchedAt: timeline.dataUpdatedAt,
     timelineFailed: !!timeline.error,
     executorTimeout: settings.data?.executor_total_timeout,
     now: Date.now(),
   }) : null;
+  // "checking whether the run has started" ends with the grace: look again then, on a fresh timeline
+  useRecheckAt(model?.recheckAt ?? null, () => { void timeline.refetch(); });
 
   /* -- URL: an old ?tab= maps once onto its hash; the hash opens a card -- */
   useEffect(() => {
@@ -279,7 +283,8 @@ export default function IssueDetail() {
                  run: () => latestRun && ask(t("workitem.confirm.cancelRun"), label,
                    () => cancelExecMut.mutate(latestRun.id, { onError: (err) => setActionError(err.message) }), "destructive") };
       case "retryExecution":
-        return { key: item, label, disabled: executeMut.isPending, run: () => retry("workitem.confirm.retryWhileRunning")?.() };
+        return { key: item, label, disabled: executeMut.isPending,
+                 run: () => retry(m.phase.sub === "executing" ? "workitem.confirm.retryWhileRunning" : "workitem.confirm.retryWhileChecking")?.() };
     }
   });
 
