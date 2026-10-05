@@ -18,8 +18,21 @@ describe("reorderNavIds", () => {
   it("drops ids no longer current", () => {
     expect(reorderNavIds(["x", "a"], ["a"])).toEqual(["a"]);
   });
-  it("appends new current ids at the end", () => {
-    expect(reorderNavIds(["b", "a"], ["a", "b", "c"])).toEqual(["b", "a", "c"]);
+  it("a new current id goes right after its nearest predecessor in the default order", () => {
+    expect(reorderNavIds(["b", "a"], ["a", "b", "c"])).toEqual(["b", "c", "a"]);
+    expect(reorderNavIds(["b", "a"], ["a", "c", "d", "b"])).toEqual(["b", "a", "c", "d"]);
+  });
+  it("a new id with no predecessor in the stored order goes first", () => {
+    expect(reorderNavIds(["b"], ["a", "b"])).toEqual(["a", "b"]);
+  });
+  it("upgrade: a stored order from before Resources gets it after Changes; the user's own order stays", () => {
+    const current = NAV_ITEMS.map((i) => i.id as string);
+    const before = current.filter((id) => id !== "resources");
+    expect(reorderNavIds(before, current)).toEqual(current);
+    const own = ["chat", "changes", "dashboard", "issues", "audit", "security", "schedules", "reports", "agent-metrics",
+                 "skills", "galaxy"];
+    expect(reorderNavIds(own, current)).toEqual(["chat", "changes", "resources", "dashboard", "issues", "audit", "security",
+                                                 "schedules", "reports", "agent-metrics", "skills", "galaxy"]);
   });
   it("empty stored → current as-is", () => {
     expect(reorderNavIds([], ["a", "b"])).toEqual(["a", "b"]);
