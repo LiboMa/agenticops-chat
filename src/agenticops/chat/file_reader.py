@@ -15,6 +15,7 @@ DOCX_EXTENSIONS = {".docx"}
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
+MAX_UPLOAD_FILES = 5  # attachments per chat message (the send handler enforces it; bootstrap advertises it)
 MAX_FILE_SIZE = 512 * 1024  # 512 KB text limit
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB image limit
 MAX_DOCUMENT_SIZE = 5 * 1024 * 1024  # 5 MB document limit

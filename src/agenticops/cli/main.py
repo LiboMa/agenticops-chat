@@ -1440,7 +1440,7 @@ def quickstart(
     console.print()
     console.print(Rule("[bold green]Quickstart Complete[/bold green]"))
     console.print()
-    console.print(f"  Dashboard : http://{host}:{port}/app/")
+    console.print(f"  Web       : http://{host}:{port}/app/")
     console.print(f"  API       : http://{host}:{port}/api/health")
     console.print(f"  CLI chat  : [cyan]aiops chat[/cyan]")
     console.print()
@@ -4869,7 +4869,7 @@ def _print_service_info(host: str, port: int, *, frontend: bool = False) -> None
     if frontend:
         console.print(f"  Vite dev      : http://localhost:5173/app/  (hot-reload)")
     else:
-        console.print(f"  Web dashboard : http://{host}:{port}/app/")
+        console.print(f"  Web           : http://{host}:{port}/app/")
     console.print(f"  Feishu WS     : {'enabled' if _feishu_active else 'disabled'}")
     console.print(f"  Slack WS      : {'enabled' if _slack_active else 'disabled'}")
     console.print(f"  PID file      : {_SERVICE_PID_FILE}")

@@ -1131,6 +1131,16 @@ class ChatSession(Base):
     visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
 
 
+class Installation(Base):
+    """This installation's non-secret identity (MVP-2.7.0, `deployment_id` in GET /api/ui/bootstrap): one row,
+    random, kept in the database so it survives a container whose data_dir is ephemeral."""
+    __tablename__ = "installation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    deployment_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class ChatMessage(Base):
     """Individual message in a chat session."""
     __tablename__ = "chat_messages"
@@ -2116,10 +2126,35 @@ def init_db(engine=None):
 
     # MVP-2.6.1: graph anchoring columns + relation-build marker; runs last so every legacy column it reads exists.
     _migrate_2_6_1(engine)
-    # MVP-2.7.0: chat session owner + visibility.
+    # MVP-2.7.0: chat session owner + visibility; this installation's id.
     _migrate_2_7_0(engine)
+    _ensure_installation(engine)
 
     return engine
+
+
+def _ensure_installation(engine) -> None:
+    """Create the one Installation row if it is missing; a concurrent first start loses the insert, not the id."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+    s = Session(bind=engine)
+    try:
+        if s.get(Installation, 1) is None:
+            s.add(Installation(id=1, deployment_id=secrets.token_hex(12)))
+            s.commit()
+    except IntegrityError:
+        s.rollback()
+    finally:
+        s.close()
+
+
+def deployment_id() -> str:
+    s = get_session()
+    try:
+        row = s.get(Installation, 1)
+        return row.deployment_id if row else ""
+    finally:
+        s.close()
 
 
 def get_session() -> Session:

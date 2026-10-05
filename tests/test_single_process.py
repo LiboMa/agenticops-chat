@@ -96,7 +96,8 @@ def test_an_im_agent_turn_runs_off_the_event_loop(app_db):
 
 
 @pytest.mark.parametrize("module,names", [
-    ("agenticops.web.app", ["api_health", "api_create_health_issue", "api_run_rag_pipeline", "api_generate_report"]),
+    ("agenticops.web.app", ["api_health", "api_create_health_issue", "api_run_rag_pipeline", "api_generate_report",
+                            "api_get_settings"]),
     ("agenticops.web.routers.skills", ["api_generate_skill"]),
     ("agenticops.web.routers.accounts", ["api_test_account_connection"]),
     ("agenticops.web.routers.changes", ["api_create_change", "api_approve_change", "api_execute_change",
@@ -155,3 +156,12 @@ def test_the_scheduler_worker_override_is_gone():
     """AIOPS_SCHEDULER_WORKER forced the scheduler on in every worker (and crashed shutdown); the instance lock
     is now the only election."""
     assert "AIOPS_SCHEDULER_WORKER" not in (ROOT / "src/agenticops/web/app.py").read_text()
+
+
+def test_listing_bedrock_models_never_runs_on_the_event_loop():
+    """_allowed_model_ids() may list Bedrock models synchronously; the two async handlers that need it (PATCH
+    /api/settings, PATCH /api/chat/sessions/{id}) run it in a thread (MVP-2.7.0 S2)."""
+    src = (ROOT / "src/agenticops/web/app.py").read_text()
+    assert src.count("await asyncio.to_thread(_allowed_model_ids)") == 2
+    import re
+    assert re.findall(r"(?<!def )_allowed_model_ids\(\)", src) == []  # no direct call left (the def is fine)

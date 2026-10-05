@@ -357,6 +357,8 @@ from agenticops.web.routers import plans as _plans_router
 app.include_router(_plans_router.router)
 from agenticops.web.routers import connectors as _connectors_router
 app.include_router(_connectors_router.router)
+from agenticops.web.routers import ui as _ui_router  # MVP-2.7.0: workspace bootstrap + preferences
+app.include_router(_ui_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -453,12 +455,13 @@ async def resources_redirect():
 
 @app.get("/anomalies")
 async def anomalies_redirect():
-    return RedirectResponse(url="/app/anomalies", status_code=302)
+    # the SPA has no /app/anomalies: old links land on Cases (an anomaly id is a HealthIssue id)
+    return RedirectResponse(url="/app/issues", status_code=302)
 
 
 @app.get("/anomaly/{anomaly_id}")
 async def anomaly_redirect(anomaly_id: int):
-    return RedirectResponse(url=f"/app/anomalies/{anomaly_id}", status_code=302)
+    return RedirectResponse(url=f"/app/issues/{anomaly_id}", status_code=302)
 
 
 @app.get("/reports")
@@ -597,7 +600,7 @@ def _acp_available_backends() -> list[str]:
 
 
 @app.get("/api/settings")
-async def api_get_settings():
+def api_get_settings():  # plain def: model presets may list Bedrock models synchronously (one process — S1c)
     """Return all toggleable runtime settings."""
     from agenticops.config import AGENT_NAMES, MODEL_ALIASES, get_agent_model_config, FULL_CONTEXT, get_agent_window_size
 
@@ -803,7 +806,7 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     # A non-empty value must be a known preset (same guard as agent model_id would get).
     if "galaxy_model_id" in body:
         val = str(body["galaxy_model_id"] or "")
-        if val and val not in _allowed_model_ids():
+        if val and val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
             raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
         settings.galaxy_model_id = val
         save_to_yaml({"galaxy_model_id": val})
@@ -835,7 +838,7 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         for key, new in changed.items():
             setattr(settings, key, new)
 
-    return await api_get_settings()
+    return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models
 
 
 # ============================================================================
@@ -3910,7 +3913,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
     if (model_field_set or effort_field_set) and session_id in _streaming_sessions:
         raise HTTPException(409, "A response is still streaming — stop it before switching model or effort")
     if model_field_set and payload.model_id:
-        allowed = _allowed_model_ids()
+        allowed = await asyncio.to_thread(_allowed_model_ids)  # may list Bedrock models: off the event loop
         if payload.model_id not in allowed:
             raise HTTPException(400, f"Unknown model id. Allowed: {sorted(allowed)[:10]} ...")
     if effort_field_set and payload.effort:
@@ -4053,7 +4056,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         # Server-side cap (defense-in-depth): client enforces 5, but client
         # validation is bypassable (curl/Postman). Each file is read fully into
         # memory below, so bound the batch independent of the client.
-        MAX_UPLOAD_FILES = 5
+        from agenticops.chat.file_reader import MAX_UPLOAD_FILES
         if len(valid_uploads) > MAX_UPLOAD_FILES:
             raise HTTPException(400, f"Too many files ({len(valid_uploads)}); max {MAX_UPLOAD_FILES}")
 
@@ -4389,8 +4392,9 @@ if _cors_origins:
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "If-Match"],
+        expose_headers=["ETag"],
         max_age=settings.cors_max_age,
     )
 
