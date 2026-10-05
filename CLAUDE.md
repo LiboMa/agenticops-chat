@@ -6,6 +6,8 @@ AgenticOps (`aiops`) — CLI + Web AI operations assistant with multi-agent arch
 
 **User-facing docs:** `docs/WORKFLOW.md` (Mermaid diagrams + tutorials), `docs/MVP-1.0.0-RELEASE.md` (feature report), `docs/MVP-2.2.0-RELEASE.md` (Signal Gate noise reduction + RCA quality quintet), `docs/MVP-2.2.1-RELEASE.md` (effort/thinking policy — backend escalation + per-session chat override), `docs/MVP-2.5.0-RELEASE.md` (Cloud Security Review — dual-frequency posture + CIS scoring + NACL-aware three-state reachability + evidence-grounded advisor; E2E in `docs/MVP-2.5.0-E2E-REPORT.md`), `docs/MVP-2.6.0-RELEASE.md` (Change Management / ITSM; E2E in `docs/MVP-2.6.0-E2E-REPORT.md`), `docs/MVP-2.6.1-RELEASE.md` (latest: graph facts + pull connectors + RCA location loop + Issue/Change logic + Issues/Changes/Audit UI; live E2E pending, eval template `docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`)
 
+**MVP-2.7.0 (in progress, staged):** `docs/MVP-2.7.0-RELEASE.md` — blue-white workspace + core trust hardening in seven owner-accepted stages (roadmap `docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`; design inputs `docs/AgenticOps_BlueWhite_Review.zip`, `docs/ui-contracts/2026-10-05/`). S1 done: post-check binding, chat session ownership, one process.
+
 **Live E2E evidence:** `docs/MVP-2.2.0-CHAOS-E2E-REPORT.md` (L1 chaos: image/config/network on a real EKS cluster), `docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md` (L2 chaos: production-named faults; Signal Gate dedup + effort escalation validated live). Fault scripts: `infra/eks-chaos-lab/chaos/` (L1), `infra/eks-chaos-lab/faults-l2/` (L2).
 
 ## Protected Files
@@ -34,6 +36,7 @@ Web Dashboard ──────┘         │
 - **Auto-fix pipeline**: HealthIssue → RCA → post-RCA quality gate (evidence check → critic → confidence ≥ 0.6) → SRE → Approve(L0/L1) → Execute → Verify → Resolve. Low-confidence/refuted RCA → `needs_review`, no auto-fix. The RCA's root-cause location (≤ 3 ranked inventory resources + a causal path, MVP-2.6.1) is validated fail-closed and **observed only** — the critic, the confidence gate and auto-fix never read it
 - **Change Management (ITSM, MVP-2.6.0)**: routine changes flow ChangeRequest → SRE legitimacy review (Mode C, read-only) → policy → approval → Executor, with **NO HealthIssue**. One Plan table two origins (`fix_plans.plan_kind` = `fix`|`change`, mutually-exclusive `ck_fix_plans_origin` CHECK) + a `change_requests` ticket; two code-level state-machine validators; CR terminal state is written ONLY by `on_execution_result`. All change tools are gated by `change_management_enabled` and injected in lockstep with the prompt (an agent never sees a tool it cannot use). Approve/reject is a HUMAN action (Web/CLI) — never an agent
 - **Issue & Change logic (MVP-2.6.1)**: ONE write path for `HealthIssue.status` (`services/issue_state.transition_issue`: edge check + CAS + `status_changed` event; `tests/test_issue_status_writes.py` fails on any other write). A plan's executable content has a `plan_version` + `content_hash`; approval binds the hash it was shown (a stale hash → 409) and the execution gate recomputes it (drift → the run is refused, the plan withdrawn). A change request may carry its own `proposed_steps` + `external_ref` (SRE validates them, code computes `steps_diff`, a blocked command rejects); external systems open one through HMAC-signed `POST /api/changes/intake` as `webhook:<system>` (never approves/executes). Every run gets ONE verdict (`services/verification.evaluate`: `passed` / `failed` / `pending_acceptance` — a missing result is never a pass); `pending_acceptance` waits for a human (`POST /api/fix-executions/{id}/accept`, CLI `/accept`). Main reads plans and runs via `get_plan` / `get_execution_result`
+- **Core trust (MVP-2.7.0 S1)**: a post-check result counts only for the declared check its `check_id` names (`pc-1…pc-n` = position; post_checks are hashed, so frozen once approved) — missing / duplicate / undeclared / id-less results or an approval drift are `pending_acceptance`, never `passed`; `save_execution_result` refuses an uncovering succeeded result once (INVALID, nothing written) and records the second; `get_approved_fix_plan` is never truncated. Chat sessions have an owner: a logged-in user's new session is `private` (owner + admins), ownerless ones (legacy, auth off, IM, CLI) are `workspace`; `services/chat_access` gates every chat route, invisible = 404. **AgenticOps runs as ONE process** (`--workers 1`, replicas ≤ 1): chat/IM agents, connector/Galaxy/intake/Signal Gate locks and runtime settings are per-process; the scheduler flock reports a second process; blocking network calls never run inside an `async def` handler (plain `def` or `asyncio.to_thread`)
 - **Signal Gate (MVP-2.2.0)**: ALL issue creation (webhook/agent/REST) flows through `services/signal_gate.process_signal` — L1 deterministic rules (fingerprint-v2 = account|provider|resource|issue_type|upstream-key, flapping, cooldown, resource+type merge) + L2 cheap-LLM gray-zone judge (merge-or-new ONLY, never noise, fail-open). Every event = one auditable Signal row (`alert_events`); `GET /api/signals` + promote endpoint
 - **Dual alert intake**: Webhook (Prometheus/CloudWatch/Datadog) + IM Agent (Feishu/Slack)
 - **FixPlan dedup**: One issue → one active plan (draft=update, locked=reject, terminal=allow new)
@@ -184,6 +187,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `agent_{name}_model_id` | `""` | Per-agent model override (7 agents: main/scan/detect/rca/sre/executor/reporter) |
 | `agent_{name}_max_tokens` | `0` | Per-agent max_tokens override (0 = use bedrock_max_tokens) |
 | `deployment_profile` | `local` | local or cloud |
+| `event_loop_executor_threads` | `64` | Size of the event loop's default thread pool (MVP-2.7.0) — `asyncio.to_thread` / `run_in_executor` share it with every Strands model stream and sync tool in the ONE AgenticOps process |
 | `skills_enabled` | `true` | Agent Skills |
 | `skills_autonomous_write` | `true` | Allow agents to self-create/improve skills via `skill_manage` (drafts only) |
 | `skills_curator_enabled` | `true` | Skills Curator lifecycle (agent drafts stale/archive; human skills pinned) |
@@ -293,11 +297,13 @@ Approval records `approved_hash` / `approved_version` and must quote the hash th
 recomputes it and refuses a drifted plan (the run is aborted with "content changed after approval"). After a run,
 `verification.evaluate` gives ONE verdict, stored on `fix_executions.verification_status`: `passed` (succeeded and every
 declared post-check passed), `failed` (the run did not succeed, or a post-check failed — not the same as rolled back) or
-`pending_acceptance` (no post-checks, missing/incomplete results, a warning, a step without a success report). Every
-input first goes through `verification.as_results`, the one shape normaliser for `post_checks`, post-check results
-and step results: a list is kept, a dict is one entry, a JSON string is parsed first, anything else is no entries —
-so a `post_checks` or post-check result of the wrong shape counts as missing and the verdict is pending, never passed
-(step results of the wrong shape are no step reports, which alone do not hold a pass back). The business status, the
+`pending_acceptance` (no post-checks, a declared check with no result or more than one, a result for an undeclared
+check or without a `check_id`, an approval drift, a warning, a step without a success report). MVP-2.7.0: results
+bind one to one by `check_id` (`verification.bind_results`; a declared check's id is its position `pc-n`), never by
+count or position. `post_checks` are read only through `verification.declared_checks` (the same `decode_legacy_json`
+FixPlanResponse uses, so page and verdict count the same checks); results and step results go through
+`verification.as_results` (a list is kept, a dict is one entry, a JSON string is parsed first, anything else is no
+entries — a result of the wrong shape is missing, never a pass). The business status, the
 execution status and the verdict are three separate facts. A fix: `passed` → `resolved` (or `fix_executed` with
 `executor_auto_resolve=false`), `pending_acceptance` → `fix_executed`, `failed` → `root_cause_identified` + the RCA
 disputed. `save_execution_result` moves the issue only when it is in `fix_approved`, `fix_executing` or
@@ -327,7 +333,7 @@ cd src/agenticops/web/frontend && npx tsc --noEmit && npm run build
 # Run
 aiops chat                          # interactive REPL
 aiops chat "check health"           # headless
-uvicorn agenticops.web.app:app --reload --port 8000  # API server
+uvicorn agenticops.web.app:app --reload --port 8000  # API server (deployed: exactly ONE process, --workers 1)
 
 # Init
 aiops init --yes                    # non-interactive local

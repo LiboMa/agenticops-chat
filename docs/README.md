@@ -28,6 +28,7 @@ keeps its existing name (`README_CN.md`) — external links depend on it.
 
 | Version | Date | File | Live evidence |
 |---|---|---|---|
+| 2.7.0 | 2026-10-05 → (staged) | [`MVP-2.7.0-RELEASE.md`](MVP-2.7.0-RELEASE.md) | S1 awaiting owner acceptance; S2–S7 not started |
 | 2.6.1 | 2026-09-29 | [`MVP-2.6.1-RELEASE.md`](MVP-2.6.1-RELEASE.md) | pending owner-joint run ([`MVP-2.6.1-LOCATION-EVAL-REPORT.md`](MVP-2.6.1-LOCATION-EVAL-REPORT.md) template) |
 | 2.6.0 | 2026-09-26 | [`MVP-2.6.0-RELEASE.md`](MVP-2.6.0-RELEASE.md) | [`MVP-2.6.0-E2E-REPORT.md`](MVP-2.6.0-E2E-REPORT.md) |
 | 2.5.0 | 2026-08-31 (+ 2026-09-08 addendum) | [`MVP-2.5.0-RELEASE.md`](MVP-2.5.0-RELEASE.md) | [`MVP-2.5.0-E2E-REPORT.md`](MVP-2.5.0-E2E-REPORT.md) |

@@ -236,6 +236,8 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 
 > **开发 vs 生产:** `deploy-sg` 是**单机开发沙箱**(一台 EC2、宽权限 IAM、SQLite)—— **不要**在它上面跑生产。生产是 `ec2/ecs/eks` 的 Terraform 栈(RDS + S3、两层 IAM),但目前需你验证后再依赖。
 
+> **单进程:** AgenticOps 只能以一个进程运行(`uvicorn --workers 1`、一个副本)。chat 与 IM 的 agent、连接器 / Galaxy / 提单的锁、运行时设置都在这个进程的内存里;下面每种方式都已按此配置,同一 data 目录上的第二个进程会在启动时打出 ERROR。
+
 下面每种方式都遵循同一形状:**前置条件 → 部署 → 访问 → 回滚**。
 
 ### 1. 本地 (pip) —— 开发 / 评估
@@ -345,6 +347,7 @@ docs/             # WORKFLOW.md, MVP 发布说明, 设计文档, use-cases
 
 | 版本 | 日期 | 亮点 |
 |------|------|------|
+| **[2.7.0](docs/MVP-2.7.0-RELEASE.md)** | 2026-10-05 → | **蓝白工作台 + 核心信任加固**，分七个阶段、每阶段主人验收([全链规划](docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md))。**S1 已实现，待验收**：检查后验证的结果只算给它 `check_id` 点名的那条声明检查(重复结果不能再让执行通过)，执行器拿到不截断的完整方案；chat 会话归创建者(私有 / 工作区，看不见即 404)；单进程(`--workers 1`)，事件循环上没有阻塞调用。S2–S7(外壳、方案枢纽、Cases、Chat、双语报告、发布)未开始 |
 | **[2.6.1](docs/MVP-2.6.1-RELEASE.md)** | 2026-09-29 | **图事实 + RCA 定位闭环** —— 未关闭 Issue 锚定到已发布关系图(`resource_ref`,fail-closed,跨账户安全);K8s **拉取式连接器**(只读,按账户隔离的 kubeconfig);RCA 给出 ≤ 3 个排序根因资源 + 因果路径(路径的每条边对照关系图 fail-closed 校验),由人评判(只观测);Issue 状态单一写入口(CAS + 回退边);审批绑定内容哈希、执行**验收**、HMAC 签名的变更**提单**;Web 信息架构拆成**问题 / 变更 / 审计**,带局部关系图与 Galaxy `?focus=`。已实现,最终门禁全部通过(pytest 6347 passed、vitest 279 passed、`tsc` 与构建无错);**真实 live E2E 待与主人联合验证**([评测模板](docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md)) |
 | **[2.6.0](docs/MVP-2.6.0-RELEASE.md)** | 2026-09-26 | **变更管理 (ITSM)** —— 日常变更走 Main → SRE 合法性审核 → 审批 → Executor,**不需要 HealthIssue**;一张 Plan 表两种来源(`plan_kind` fix \| change)+ `change_requests` 工单;12 态变更状态机;**RBAC 影子模式**(审批人身份绑定 + SoD);两本审计账(`audit_logs` + `command_audits`)+ `/api/plans/stats`;`/app/plans`(Fix Plans / Change Plans / Audit)+ `/app/changes/:id`;CLI `/change` `/changes`。2026-09-26 在 dev 上跑完真实 live E2E([报告](docs/MVP-2.6.0-E2E-REPORT.md)):七步全部通过;发现的 3 个 UI/API 缺陷已修复(dev 待重新部署复验) |
 | **[2.5.0](docs/MVP-2.5.0-RELEASE.md)** | 2026-08-31 | **云安全审查** —— 双频姿态引擎(每小时确定性快照 + 每 10 分钟 GuardDuty / Security Hub / CloudTrail 增量拉取)、**纯函数可复现的 CIS 评分**、含 NACL 的**三态可达性**、证据接地的 **fail-closed 建议器**、`/app/security` —— 在两个真实账号只读验证([E2E](docs/MVP-2.5.0-E2E-REPORT.md)) · *2026-09-08 追加:* **技能广域加载**(URL / git / zip → 草稿,整包安全扫描)、**脚本沙箱**(无凭证、无网络,默认关)、Skills 页**导入器**与溯源、`web/routers/` 拆分 |
