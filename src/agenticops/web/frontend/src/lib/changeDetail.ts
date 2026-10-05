@@ -17,8 +17,8 @@ export function isHintResolved(hint: string, targets: Pick<ChangeTarget, "resour
   return targets.some((t) => norm(t.resource_id) === h || (t.hint != null && norm(t.hint) === h));
 }
 
-// Object detail values are JSON-stringified so PipelineTimeline (which renders
-// each value with String()) shows structured payloads instead of "[object Object]".
+// Object detail values are JSON-stringified so a reader that String()s a value (lib/activity's authz rule and
+// permission) shows the structured payload instead of "[object Object]".
 function stringifyObjectValues(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
@@ -38,8 +38,9 @@ function normalizeDetail(detail: unknown): Record<string, unknown> | null {
 
 /**
  * Adapt the backend's merged change timeline (events + audit rows) into the
- * PipelineEvent shape the Task-2 PipelineTimeline component consumes. The row
- * index becomes the id; missing fields fall back to component-safe defaults.
+ * PipelineEvent shape ContextPanel's MiniTimeline and lib/activity (ChangeDetail's
+ * ActivityList) consume. The row index becomes the id; missing fields fall back
+ * to component-safe defaults.
  */
 export function toPipelineEvents(entries: ChangeTimelineEntry[]): PipelineEvent[] {
   return entries.map((e, i) => ({

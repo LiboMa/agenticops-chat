@@ -1,16 +1,9 @@
 /**
- * IssueDetail view logic (MVP-2.6.1 spec §3.E.2): the tab in the URL, the three status labels, the anchor badge,
- * the execution evidence rows, when to poll and when a plan can be approved. Pure, so node can test it.
+ * IssueDetail view logic (MVP-2.6.1 spec §3.E.2): the issue's facts, the three status labels, the anchor badge,
+ * the execution evidence rows, when to poll and when a plan can be approved. Pure, so node can test it. An old
+ * `?tab=` link is mapped onto its phase-card hash by lib/workitemRoutes.
  */
 import type { FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, VerificationStatus } from "@/api/types";
-
-export const ISSUE_TABS = ["investigate", "fixPlan", "execution", "verification", "timeline"] as const;
-export type IssueTab = (typeof ISSUE_TABS)[number];
-
-/** `?tab=` → a tab; the pre-2.6.1 `issue` tab and anything unknown open Investigate. */
-export function parseIssueTab(v: string | null): IssueTab {
-  return (ISSUE_TABS as readonly string[]).includes(v ?? "") ? (v as IssueTab) : "investigate";
-}
 
 export interface IssueFacts {
   resourceType: string | null;

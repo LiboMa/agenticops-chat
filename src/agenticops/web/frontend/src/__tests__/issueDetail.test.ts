@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
-  newestFirst, parseIssueTab, resultRow, resultSummary,
+  newestFirst, resultRow, resultSummary,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -23,16 +23,6 @@ function execution(id: number, created_at: string, extra: Partial<FixExecution> 
     verification_reason: null, accepted_by: null, accepted_at: null, acceptance_note: null, created_at, ...extra,
   };
 }
-
-describe("parseIssueTab", () => {
-  it("reads the tab from the URL; the old `issue` tab and anything unknown open Investigate", () => {
-    expect(parseIssueTab("verification")).toBe("verification");
-    expect(parseIssueTab("fixPlan")).toBe("fixPlan");
-    expect(parseIssueTab("issue")).toBe("investigate");
-    expect(parseIssueTab("bogus")).toBe("investigate");
-    expect(parseIssueTab(null)).toBe("investigate");
-  });
-});
 
 describe("issueFacts", () => {
   it("lifts the resource and metric facts out of metric_data, null where the issue has none", () => {
