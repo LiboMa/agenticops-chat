@@ -100,6 +100,7 @@ export default function IssueDetail() {
     rcaFailed: !!rca.error,
     threshold: settings.data?.rca_min_confidence_for_autofix,
     plans: fixPlans.data,
+    plansFailed: !!fixPlans.error,
     executions: executions.data,
     runsFailed: !!executions.error,
     timeline: timeline.data,
@@ -213,6 +214,7 @@ export default function IssueDetail() {
     : executions.error ? { message: executions.error.message, retry: () => executions.refetch() }
     : rca.error && rca.data === undefined ? { message: rca.error.message, retry: () => rca.refetch() }
     : timeline.error && timeline.data === undefined ? { message: timeline.error.message, retry: () => timeline.refetch() }
+    : fixPlans.error && fixPlans.data === undefined ? { message: fixPlans.error.message, retry: () => fixPlans.refetch() }
     : null;
   const runsFetchError = executions.data === undefined ? executions.error : null;
   const rcaFetchError = rca.data === undefined ? rca.error : null;

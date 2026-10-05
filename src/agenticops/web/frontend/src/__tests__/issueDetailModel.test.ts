@@ -150,6 +150,10 @@ describe("issueDetailModel — an approval's auto-run (final review C1) and an R
     // a pending row decides on its own: the timeline is not needed
     expect(at({ timeline: undefined, executions: [run({ status: "pending" })] }).statusKey).toBe("workitem.sub.executing");
   });
+  it("the plans not loaded yet / failed: the auto-run cannot be matched to a plan — neutral too", () => {
+    expect([at({ plans: undefined }).statusKey, at({ plans: undefined }).primaryKey]).toEqual(["workitem.sub.loadingRuns", null]);
+    expect(at({ plans: undefined, plansFailed: true }).statusKey).toBe("workitem.sub.runsUnavailable");
+  });
   it("I1: the RCA failed to load at root_cause_identified — says so; never 'no RCA' + Rerun RCA", () => {
     const m = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, rcaFailed: true, threshold: 0.6,
                                  plans: [], executions: [] });

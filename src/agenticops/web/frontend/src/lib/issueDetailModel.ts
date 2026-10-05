@@ -37,6 +37,7 @@ export function issueDetailModel(input: {
   rca: RCAResult | null | undefined;
   threshold: number | null | undefined;
   plans: FixPlan[] | undefined;
+  plansFailed?: boolean;                  // with plans undefined: the fetch failed rather than still loading
   executions: FixExecution[] | undefined; // undefined = not known (still loading, or the fetch failed): never "no runs"
   runsFailed?: boolean;                   // with executions undefined: the fetch failed rather than still loading
   rcaFailed?: boolean;                    // with rca undefined: the fetch failed rather than still loading (I1)
@@ -58,8 +59,10 @@ export function issueDetailModel(input: {
   const unknown = (failed: boolean | undefined): IssuePhaseResult =>
     ({ ...known, sub: failed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null });
   const phase: IssuePhaseResult = input.executions === undefined && RUN_DEPENDENT.has(issue.status) ? unknown(input.runsFailed)
-    // no run row: whether the approval's auto-run is under way is on the timeline, not known until it loads
+    // no run row: whether the approval's auto-run is under way is on the timeline (matched to the plan), not known
+    // until both load
     : known.sub === "notQueued" && input.timeline === undefined ? unknown(input.timelineFailed)
+    : known.sub === "notQueued" && input.plans === undefined ? unknown(input.plansFailed)
     // the RCA decides root_cause_identified: one that failed to load is not "none"
     : known.sub === "reviewOrPlan" && rca === undefined && input.rcaFailed
       ? { ...known, sub: "rcaUnavailable", waitingFor: null, primary: null }
