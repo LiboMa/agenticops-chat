@@ -3038,9 +3038,11 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         try:
             init_db()
             with get_db_session() as db:
+                # Private sessions are their owner's (MVP-2.7.0): the CLI lists and picks only workspace
+                # sessions; an exact id still resumes one (the CLI is a local operator with DB access).
                 sessions = (
                     db.query(ChatSession)
-                    .filter(ChatSession.archived == False)
+                    .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                     .order_by(
                         ChatSession.pinned.desc(),
                         ChatSession.starred.desc(),
@@ -3094,15 +3096,15 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
                         ).first()
                     if row is None:
                         row = db.query(ChatSession).filter(
-                            ChatSession.name.ilike(f"%{identifier}%")
+                            ChatSession.name.ilike(f"%{identifier}%"), ChatSession.visibility == "workspace"
                         ).first()
                     if row is None:
                         return f"[red]Session '{identifier}' not found.[/red]"
                 else:
-                    # No argument: most recent non-archived session
+                    # No argument: most recent non-archived workspace session
                     row = (
                         db.query(ChatSession)
-                        .filter(ChatSession.archived == False)
+                        .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                         .order_by(ChatSession.last_activity_at.desc())
                         .first()
                     )
@@ -4322,7 +4324,7 @@ def _cli_setup_db_session(
                 # List recent sessions as a hint
                 recent = (
                     db.query(ChatSession)
-                    .filter(ChatSession.archived == False)
+                    .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                     .order_by(ChatSession.last_activity_at.desc())
                     .limit(5)
                     .all()
@@ -4355,11 +4357,11 @@ def _cli_setup_db_session(
         )
 
     elif resume:
-        # --resume: find the most recent non-archived session
+        # --resume: find the most recent non-archived workspace session (a private one is its owner's)
         with get_db_session() as db:
             row = (
                 db.query(ChatSession)
-                .filter(ChatSession.archived == False)
+                .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                 .order_by(ChatSession.last_activity_at.desc())
                 .first()
             )
