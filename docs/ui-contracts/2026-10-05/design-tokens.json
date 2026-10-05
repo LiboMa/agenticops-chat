@@ -1,0 +1,36 @@
+{
+  "status": "approved design baseline, not applied to product",
+  "source": "src/agenticops/web/frontend/src/index.css:11",
+  "colors": {
+    "primary": "#2563EB",
+    "primaryHover": "#1D4ED8",
+    "selected": "#EFF6FF",
+    "surface": "#FFFFFF",
+    "canvas": "#F8FAFC",
+    "text": "#0F172A",
+    "muted": "#64748B",
+    "border": "#E2E8F0"
+  },
+  "type": {
+    "latin": "Outfit (self-hosted for customer environments)",
+    "cjk": "PingFang SC / Microsoft YaHei / system sans",
+    "body": "14–15px",
+    "label": "12px",
+    "heading": "24px",
+    "lineHeight": 1.7
+  },
+  "layout": {
+    "navigation": "200px",
+    "caseQueue": "280–320px",
+    "readingMax": "960px",
+    "chatComposerMax": "760px",
+    "detailGutter": "24–32px"
+  },
+  "principles": [
+    "First A layout",
+    "White navigation and white reading surface",
+    "Blue for selection/actions, severity colours only for severity",
+    "No KPI dashboard as the mandatory home",
+    "Context chat on demand"
+  ]
+}

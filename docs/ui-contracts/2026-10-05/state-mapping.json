@@ -1,0 +1,77 @@
+{
+  "status": "proposed read projection; raw backend statuses retained",
+  "source": {
+    "issue": "models.py:372",
+    "plan": "models.py:588",
+    "change": "models.py:626",
+    "execution": "models.py:690"
+  },
+  "issueLifecycle": {
+    "open": [
+      "open",
+      "investigating",
+      "acknowledged",
+      "root_cause_identified",
+      "fix_planned",
+      "fix_approved",
+      "fix_executing",
+      "fix_executed"
+    ],
+    "resolved": [
+      "resolved"
+    ],
+    "dismissed": [
+      "dismissed"
+    ]
+  },
+  "plan": [
+    "draft",
+    "pending_approval",
+    "approved",
+    "executing",
+    "executed",
+    "failed",
+    "rejected"
+  ],
+  "change": [
+    "draft",
+    "under_review",
+    "needs_clarification",
+    "planned",
+    "approved",
+    "executing",
+    "needs_review",
+    "completed",
+    "failed",
+    "rolled_back",
+    "rejected",
+    "cancelled"
+  ],
+  "execution": [
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "rolled_back",
+    "aborted"
+  ],
+  "verification": [
+    "not_run",
+    "pending",
+    "passed",
+    "failed",
+    "inconclusive",
+    "not_applicable",
+    "accepted_manual"
+  ],
+  "rules": [
+    "Plan approved/executed is not evidence of recovery.",
+    "Empty checks never imply passed; legacy unbound checks are inconclusive.",
+    "Latest attempt is selected by stable ID/timestamp, never array position or title.",
+    "Check evidence binds execution_id + plan_content_version + check_id + target + tool evidence.",
+    "All expected checks must be present once and belong to the current successful execution.",
+    "Human acceptance uses accepted_manual and must not manufacture machine pass results.",
+    "Language changes cannot mutate status, commands, facts, version or approval binding.",
+    "Graph unavailable/stale/truncated/ambiguous is explicit, not zero impact or healthy."
+  ]
+}
