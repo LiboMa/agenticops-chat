@@ -171,7 +171,7 @@ def _executing(db):
 
 class TestTerminalMapper:
     @pytest.mark.parametrize("status,results,expected", [
-        ("succeeded", [{"check": "tag present", "status": "pass"}], "completed"),
+        ("succeeded", [{"check_id": "pc-1", "check": "tag present", "status": "pass"}], "completed"),
         ("succeeded", [], "needs_review"),
         ("succeeded", [{"check": "tag present", "status": "fail"}], "needs_review"),
         ("failed", [], "failed"),
@@ -187,7 +187,7 @@ class TestTerminalMapper:
         assert out["status"] == expected
         if status == "succeeded" and not results:  # pending acceptance: its own notification, not change_result
             notify.assert_not_called()
-            assert pending.call_args.args[1] == "post-check results missing or incomplete"
+            assert pending.call_args.args[1] == "no result for post-check pc-1"
         else:
             pending.assert_not_called()
             notify.assert_called_once()
@@ -338,7 +338,7 @@ class TestKillSwitch:
         from agenticops.services import change_service as cs
         cr_id, plan_id = _executing(db)
         with patch.object(settings, "change_management_enabled", False), patch.object(cs, "notify_change_result"):
-            out = cs.on_execution_result(plan_id, "succeeded", post_check_results=[{"check": "tag present", "status": "pass"}])
+            out = cs.on_execution_result(plan_id, "succeeded", post_check_results=[{"check_id": "pc-1", "check": "tag present", "status": "pass"}])
         assert out["status"] == "completed"
         db.expire_all()
         assert db.get(ChangeRequest, cr_id).status == "completed"

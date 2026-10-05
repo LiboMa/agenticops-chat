@@ -52,8 +52,8 @@ def _outcome(item) -> str:
 
 
 def as_results(value) -> list:
-    """The one shape of a post_checks / results value: a list. A dict is one entry and a JSON string is parsed
-    first; anything else (a bool, a number, None, unparseable text) is no entries — missing, never a pass."""
+    """The one shape of a results value: a list. A dict is one entry and a JSON string is parsed first;
+    anything else (a bool, a number, None, unparseable text) is no entries — missing, never a pass."""
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -64,28 +64,141 @@ def as_results(value) -> list:
     return value if isinstance(value, list) else []
 
 
-def evaluate(execution_status: str, post_checks, post_check_results=None, step_results=None,
-             error: str = "") -> tuple[str, str]:
-    """The verdict on one execution: `passed` only when it succeeded and every post-check it declared passed.
+def decode_legacy_json(value, want: type):
+    """A plan JSON column as a `want` (list or dict). Legacy rows hold it as a JSON *string*, sometimes encoded
+    more than once; up to three layers are decoded. None is empty; anything else is kept, wrapped — never
+    dropped. FixPlanResponse reads plan columns with this, so the API and the verdict see the same checks."""
+    for _ in range(3):
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value)
+        except ValueError:
+            break
+    if value is None:
+        return want()
+    if isinstance(value, want):
+        return value
+    return {"raw": value} if want is dict else [value]
 
-    A run that did not succeed, or a post-check that failed, is `failed`. A succeeded run is otherwise
-    `pending_acceptance` — no post-checks, missing or incomplete results, a warning, or a step that did not
-    report success — and a human accepts or rejects it; a missing result is never a pass. Every input goes
-    through as_results first, so a result of the wrong shape is missing rather than iterated.
+
+def declared_checks(post_checks) -> list:
+    """The plan's post-checks as a list — the one reading used by the verdict, the executor's view and the API."""
+    return decode_legacy_json(post_checks, list)
+
+
+def check_ids(post_checks) -> list[str]:
+    """A declared check's id is its position, pc-1 … pc-n. post_checks is in the content hash, so the list is
+    frozen once approved; identical checks still get distinct ids."""
+    return [f"pc-{i}" for i in range(1, len(declared_checks(post_checks)) + 1)]
+
+
+def check_label(item) -> str:
+    """What a declared check says, for people (mirrors the frontend CheckItem)."""
+    if isinstance(item, dict):
+        for key in ("check", "description", "action", "name", "command"):
+            if item.get(key):
+                return str(item[key])
+        return json.dumps(item, ensure_ascii=False, sort_keys=True)
+    return str(item)
+
+
+def annotated_checks(post_checks) -> list[dict]:
+    """The declared checks with their check_id, as the executor is shown them (never stored)."""
+    out = []
+    for cid, item in zip(check_ids(post_checks), declared_checks(post_checks)):
+        out.append({"check_id": cid, **item} if isinstance(item, dict) else {"check_id": cid, "check": str(item)})
+    return out
+
+
+def _result_id(item) -> Optional[str]:
+    if isinstance(item, dict) and item.get("check_id") is not None:
+        cid = str(item["check_id"]).strip().lower()
+        return cid or None
+    return None
+
+
+def bind_results(post_checks, post_check_results) -> list[dict]:
+    """Pair each declared check with the results that name it: one row per declared check in order, then one
+    per stray result. problem: None (bound once), missing, duplicate, undeclared (names no declared check) or
+    unbound (carries no check_id). result_status is the bound result's outcome (pass | warning | fail |
+    missing), None when nothing is bound."""
+    checks = declared_checks(post_checks)
+    ids = check_ids(post_checks)
+    results = as_results(post_check_results)
+    by_id: dict[str, list] = {}
+    strays = []
+    for r in results:
+        cid = _result_id(r)
+        if cid in ids:
+            by_id.setdefault(cid, []).append(r)
+        else:
+            strays.append((cid, r))
+    rows = []
+    for cid, item in zip(ids, checks):
+        bound = by_id.get(cid, [])
+        rows.append({
+            "check_id": cid, "check": check_label(item),
+            "result_status": _outcome(bound[0]) if bound else None,
+            "results": len(bound),
+            "problem": None if len(bound) == 1 else "missing" if not bound else "duplicate",
+        })
+    for cid, r in strays:
+        rows.append({"check_id": cid, "check": None, "result_status": _outcome(r), "results": 1,
+                     "problem": "undeclared" if cid else "unbound"})
+    return rows
+
+
+def binding_problems(post_checks, post_check_results) -> list[str]:
+    """Why the results do not cover the declared checks one to one; [] when they do."""
+    rows = bind_results(post_checks, post_check_results)
+    missing = [r["check_id"] for r in rows if r["problem"] == "missing"]
+    duplicate = [r["check_id"] for r in rows if r["problem"] == "duplicate"]
+    undeclared = [r["check_id"] for r in rows if r["problem"] == "undeclared"]
+    unbound = sum(1 for r in rows if r["problem"] == "unbound")
+    silent = [r["check_id"] for r in rows if r["problem"] is None and r["result_status"] == "missing"]
+    parts = []
+    if missing:
+        parts.append(f"no result for post-check {', '.join(missing)}")
+    if duplicate:
+        parts.append(f"post-check {', '.join(duplicate)} reported more than once")
+    if undeclared:
+        parts.append(f"result for undeclared check {', '.join(undeclared)}")
+    if unbound:
+        parts.append(f"{unbound} result{'s' if unbound > 1 else ''} without a check_id")
+    if silent:
+        parts.append(f"post-check {', '.join(silent)} reported no status")
+    return parts
+
+
+def evaluate(execution_status: str, post_checks, post_check_results=None, step_results=None,
+             error: str = "", plan_changed: bool = False) -> tuple[str, str]:
+    """The verdict on one execution: `passed` only when it succeeded and each declared post-check has exactly
+    one result naming its check_id, and every one of them passed.
+
+    A run that did not succeed, or any post-check result that failed, is `failed`. A succeeded run is
+    otherwise `pending_acceptance` — no post-checks, a plan changed after approval, a declared check with no
+    result or with more than one, a result for an undeclared check or with no check_id, a warning, or a step
+    that did not report success — and a human accepts or rejects it. Results are never matched by position
+    or by count: a repeated result cannot cover a missing check.
     """
     if execution_status != "succeeded":
         default = "execution rolled back" if execution_status == "rolled_back" else f"execution {execution_status}"
         return FAILED, error or default
-    post_checks = as_results(post_checks)
-    outcomes = [_outcome(r) for r in as_results(post_check_results)]
+    results = as_results(post_check_results)
+    outcomes = [_outcome(r) for r in results]
     if "fail" in outcomes:
-        return FAILED, f"post-check {outcomes.index('fail') + 1} failed"
-    if not post_checks:
+        i = outcomes.index("fail")
+        return FAILED, f"post-check {_result_id(results[i]) or i + 1} failed"
+    if not declared_checks(post_checks):
         return PENDING, "the plan has no post-checks"
-    if len(outcomes) < len(post_checks) or "missing" in outcomes:
-        return PENDING, "post-check results missing or incomplete"
+    if plan_changed:
+        return PENDING, "the plan changed after approval; its post-checks cannot vouch for this run"
+    problems = binding_problems(post_checks, results)
+    if problems:
+        return PENDING, "; ".join(problems)
     if "warning" in outcomes:
-        return PENDING, f"post-check {outcomes.index('warning') + 1} reported a warning"
+        return PENDING, f"post-check {_result_id(results[outcomes.index('warning')])} reported a warning"
     steps = [_outcome(s) for s in as_results(step_results)]
     unclear = next((i for i, o in enumerate(steps) if o != "pass"), None)
     if unclear is not None:

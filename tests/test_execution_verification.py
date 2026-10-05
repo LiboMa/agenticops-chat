@@ -22,7 +22,9 @@ from agenticops.services.verification import FAILED, PASSED, PENDING, evaluate
 BOB = Actor("user", "bob", 2, ("read", "write"))
 NOTIFY_PENDING = ns.notify_execution_pending_acceptance  # the real one (the autouse fixture patches it)
 CHECK = {"check": "healthy", "command": "aws ec2 describe-instance-status --instance-ids i-0abc"}
-OK = {"check": "healthy", "status": "passed"}
+OK = {"check_id": "pc-1", "check": "healthy", "status": "passed"}
+UNBOUND = "no result for post-check pc-1; 1 result without a check_id"
+NONE = (PENDING, "no result for post-check pc-1")
 
 
 @pytest.fixture
@@ -105,45 +107,51 @@ def _audit_actions(db):
     ("succeeded", [CHECK, CHECK], [{"status": "warning"}, {"status": "error"}], [], (FAILED, "post-check 2 failed")),
     ("succeeded", [], [{"status": "failed"}], [], (FAILED, "post-check 1 failed")),  # a failure is never pending
     ("succeeded", [], [], [], (PENDING, "the plan has no post-checks")),
-    ("succeeded", [CHECK, CHECK], [OK], [], (PENDING, "post-check results missing or incomplete")),
-    ("succeeded", [CHECK], [{"check": "healthy"}], [], (PENDING, "post-check results missing or incomplete")),
-    ("succeeded", [CHECK], [{"status": "WARN"}], [], (PENDING, "post-check 1 reported a warning")),
+    ("succeeded", [CHECK, CHECK], [OK], [], (PENDING, "no result for post-check pc-2")),
+    ("succeeded", [CHECK], [{"check": "healthy"}], [], (PENDING, UNBOUND)),
+    ("succeeded", [CHECK], [{"check_id": "pc-1"}], [], (PENDING, "post-check pc-1 reported no status")),
+    ("succeeded", [CHECK], [{"check_id": "pc-1", "status": "WARN"}], [], (PENDING, "post-check pc-1 reported a warning")),
     ("succeeded", [CHECK], [OK], [{"status": "succeeded"}, {"status": "skipped"}],
      (PENDING, "step 2 did not report success")),
     ("succeeded", [CHECK], [OK], [{"output": "no status"}], (PENDING, "step 1 did not report success")),
+    ("succeeded", [CHECK, CHECK, CHECK],
+     [{"check_id": "pc-1", "status": "ok"}, {"check_id": "pc-2", "passed": True}, {"check_id": "pc-3", "result": "PASS"}],
+     [{"status": "success"}], (PASSED, "all post-checks passed")),
+    # results matched by count alone are what MVP-2.7.0 closed: three bare passes are three unbound results
     ("succeeded", [CHECK, CHECK, CHECK], ["ok", {"passed": True}, {"result": "PASS"}], [{"status": "success"}],
-     (PASSED, "all post-checks passed")),
+     (PENDING, "no result for post-check pc-1, pc-2, pc-3; 3 results without a check_id")),
 ])
 def test_the_verdict_truth_table(status, checks, results, steps, expected):
     assert evaluate(status, checks, results, steps, "boom" if status == "failed" else "") == expected
 
 
-MISSING = (PENDING, "post-check results missing or incomplete")
 
 
 @pytest.mark.parametrize("checks,results,steps,expected", [
     # a JSON object is one result, never iterated by its keys
-    ([CHECK], {"ok": False}, [], MISSING),
-    ([CHECK], {"success": False}, [], MISSING),
+    ([CHECK], {"ok": False}, [], (PENDING, UNBOUND)),
+    ([CHECK], {"success": False}, [], (PENDING, UNBOUND)),
     ([CHECK], {"passed": False}, [], (FAILED, "post-check 1 failed")),
-    ([CHECK], {"check": "healthy", "status": "passed"}, [], (PASSED, "all post-checks passed")),
+    ([CHECK], {"check_id": "pc-1", "check": "healthy", "status": "passed"}, [], (PASSED, "all post-checks passed")),
+    ([CHECK], {"check": "healthy", "status": "passed"}, [], (PENDING, UNBOUND)),
     ([CHECK], json.dumps(OK), [], (PASSED, "all post-checks passed")),
     ([CHECK], json.dumps([OK]), [], (PASSED, "all post-checks passed")),
     ([CHECK], [OK], {"success": False}, (PENDING, "step 1 did not report success")),
     # a scalar or unreadable result is no result: missing, never a pass, never an exception
-    ([CHECK], "true", [], MISSING),
-    ([CHECK], "1", [], MISSING),
-    ([CHECK], True, [], MISSING),
-    ([CHECK], 1, [], MISSING),
-    ([CHECK], "not json", [], MISSING),
-    ([CHECK], '"passed"', [], MISSING),
+    ([CHECK], "true", [], NONE),
+    ([CHECK], "1", [], NONE),
+    ([CHECK], True, [], NONE),
+    ([CHECK], 1, [], NONE),
+    ([CHECK], "not json", [], NONE),
+    ([CHECK], '"passed"', [], NONE),
     ([CHECK], [OK], "true", (PASSED, "all post-checks passed")),  # the verdict rests on the post-checks
     ([CHECK], [OK], "1", (PASSED, "all post-checks passed")),
-    # post_checks in the same shapes: a legacy JSON string is parsed, never measured with len()
+    # post_checks are read like FixPlanResponse reads them (verification.declared_checks)
     ("[]", [OK, OK], [], (PENDING, "the plan has no post-checks")),
     (json.dumps([CHECK]), [OK], [], (PASSED, "all post-checks passed")),
     (CHECK, [OK], [], (PASSED, "all post-checks passed")),
-    ("not json", [OK, OK], [], (PENDING, "the plan has no post-checks")),
+    (json.dumps(json.dumps([CHECK])), [OK], [], (PASSED, "all post-checks passed")),  # double-encoded legacy
+    ("not json", [OK, OK], [], (PENDING, "post-check pc-1 reported more than once")),  # text is one check
 ])
 def test_a_result_of_any_shape_is_never_a_false_pass(checks, results, steps, expected):
     assert evaluate("succeeded", checks, results, steps) == expected
@@ -180,8 +188,8 @@ def test_a_passing_run_waits_at_fix_executed_without_auto_resolve(db, quiet, mon
 
 @pytest.mark.parametrize("checks,post,reason", [
     ((), [], "the plan has no post-checks"),
-    ((CHECK,), [], "post-check results missing or incomplete"),
-    ((CHECK,), [{"status": "warning"}], "post-check 1 reported a warning"),
+    ((CHECK,), [], "no result for post-check pc-1"),
+    ((CHECK,), [{"check_id": "pc-1", "status": "warning"}], "post-check pc-1 reported a warning"),
 ])
 def test_an_unverified_run_waits_for_acceptance(db, quiet, checks, post, reason):
     """A succeeded run no post-check passed is never closed: the issue waits at fix_executed (not resolved)."""
@@ -263,13 +271,14 @@ def _save_raw(plan_id, post, steps='[{"status": "succeeded"}]'):
     return save_execution_result(fix_plan_id=plan_id, status="succeeded", post_check_results=post, step_results=steps)
 
 
-@pytest.mark.parametrize("post", ['{"ok": false}', '{"success": false}', "true", "1", "not json"])
-def test_a_result_that_is_not_a_list_never_resolves_the_issue(db, quiet, post):
+@pytest.mark.parametrize("post,reason", [('{"ok": false}', UNBOUND), ('{"success": false}', UNBOUND),
+                                         ("true", NONE[1]), ("1", NONE[1]), ("not json", NONE[1])])
+def test_a_result_that_is_not_a_list_never_resolves_the_issue(db, quiet, post, reason):
     issue_id, plan_id, rca_id = _fix(db)
     out = _save_raw(plan_id, post)
     assert "Error" not in out
     ex = _only_execution(plan_id)
-    assert (ex.verification_status, ex.verification_reason) == MISSING
+    assert (ex.verification_status, ex.verification_reason) == (PENDING, reason)
     assert _fresh(HealthIssue, issue_id).status == "fix_executed"
     assert _fresh(RCAResult, rca_id).critic_verdict is None
     quiet["post"].assert_not_called()
@@ -277,7 +286,7 @@ def test_a_result_that_is_not_a_list_never_resolves_the_issue(db, quiet, post):
 
 def test_a_single_passing_object_resolves_and_disputes_nothing(db, quiet):
     issue_id, plan_id, rca_id = _fix(db)
-    _save_raw(plan_id, '{"check": "healthy", "status": "passed"}', steps='{"status": "succeeded"}')
+    _save_raw(plan_id, '{"check_id": "pc-1", "check": "healthy", "status": "passed"}', steps='{"status": "succeeded"}')
     assert _only_execution(plan_id).verification_status == PASSED
     assert _fresh(HealthIssue, issue_id).status == "resolved"
     assert _fresh(RCAResult, rca_id).critic_verdict is None
@@ -709,9 +718,9 @@ def test_an_unverified_change_run_needs_review_and_notifies_acceptance(db, quiet
     cr_id, plan_id, ex_id = _change(db)
     _save_change(cr_id, plan_id, ex_id, post=[])
     cr = _fresh(ChangeRequest, cr_id)
-    assert (cr.status, cr.needs_review_reason) == ("needs_review", "post-check results missing or incomplete")
+    assert (cr.status, cr.needs_review_reason) == ("needs_review", "no result for post-check pc-1")
     assert _fresh(FixExecution, ex_id).verification_status == PENDING
-    assert quiet["pending"].call_args.args == (ex_id, "post-check results missing or incomplete")
+    assert quiet["pending"].call_args.args == (ex_id, "no result for post-check pc-1")
     assert quiet["pending"].call_args.kwargs["cr"]["id"] == cr_id
 
 
@@ -739,7 +748,7 @@ def test_a_change_result_object_is_one_result_and_is_audited(db, quiet):
     finally:
         reset_run_context(token)
     cr = _fresh(ChangeRequest, cr_id)
-    assert (cr.status, cr.needs_review_reason) == ("needs_review", "post-check results missing or incomplete")
+    assert (cr.status, cr.needs_review_reason) == ("needs_review", UNBOUND)
     assert _fresh(FixExecution, ex_id).verification_status == PENDING
     db.expire_all()
     row = db.query(AuditLog).filter_by(entity_id=str(cr_id), action="change.needs_review").one()
@@ -748,7 +757,7 @@ def test_a_change_result_object_is_one_result_and_is_audited(db, quiet):
 
 def test_on_execution_result_takes_a_result_object(db, quiet):
     cr_id, plan_id, _ = _change(db)
-    snap = cs.on_execution_result(plan_id, "succeeded", post_check_results={"check": "healthy", "status": "passed"},
+    snap = cs.on_execution_result(plan_id, "succeeded", post_check_results={"check_id": "pc-1", "check": "healthy", "status": "passed"},
                                   step_results={"status": "succeeded"})
     assert snap["status"] == "completed"
 

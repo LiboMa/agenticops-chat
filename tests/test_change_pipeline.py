@@ -122,7 +122,7 @@ def test_main_path_request_review_approve_execute_complete(db, quiet):
     cs.approve(cr["id"], actor=BOB, reason="reviewed", content_hash=_seen(cr["id"]))
     with patch.object(settings, "executor_enabled", True):
         cs.request_execution(cr["id"], actor=BOB)
-    with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([{"check": "tag present", "status": "pass"}])):
+    with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([{"check_id": "pc-1", "check": "tag present", "status": "pass"}])):
         _run_executor_for(cr["id"])
     # 9b/9c contract: the queued ticket is closed IN PLACE (no second row), and the plan reaches `executed`
     plan, tickets = _plan_and_tickets(db, cr["id"])

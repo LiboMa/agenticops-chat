@@ -4,7 +4,6 @@ Mechanically extracted from app.py (no logic change) to shrink app.py and give
 routers a dependency-leaf module to import from (avoids app<->router import cycle).
 """
 
-import json
 from datetime import datetime
 from typing import Annotated, Dict, List, Optional
 
@@ -422,20 +421,10 @@ class FixPlanResponse(BaseModel):
     @classmethod
     def _decode_legacy_json(cls, value, info):
         """Legacy rows hold these JSON columns as JSON *strings* (an agent passed pre-encoded JSON); decode
-        them so one such row cannot 500 every fix-plan list. Undecodable text is kept, wrapped, not dropped."""
-        want = dict if info.field_name == "rollback_plan" else list
-        for _ in range(3):
-            if not isinstance(value, str):
-                break
-            try:
-                value = json.loads(value)
-            except ValueError:
-                break
-        if value is None:
-            return want()
-        if isinstance(value, want):
-            return value
-        return {"raw": value} if want is dict else [value]
+        them so one such row cannot 500 every fix-plan list. Undecodable text is kept, wrapped, not dropped.
+        The same function gives the verdict its post-checks, so the page and the verdict count the same ones."""
+        from agenticops.services.verification import decode_legacy_json
+        return decode_legacy_json(value, dict if info.field_name == "rollback_plan" else list)
 
 
 class FixExecutionResponse(BaseModel):

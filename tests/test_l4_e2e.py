@@ -286,8 +286,8 @@ class TestL4Lifecycle:
             ]),
             pre_check_results=json.dumps([{"check": "Instance running", "status": "pass"}]),
             post_check_results=json.dumps([
-                {"check": "CPU below 80%", "status": "pass"},
-                {"check": "Response time OK", "status": "pass"},
+                {"check_id": "pc-1", "check": "CPU below 80%", "status": "pass"},
+                {"check_id": "pc-2", "check": "Response time OK", "status": "pass"},
             ]),
             duration_ms=180000,
         )

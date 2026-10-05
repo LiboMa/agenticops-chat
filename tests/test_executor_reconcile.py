@@ -22,7 +22,7 @@ from agenticops.services.plan_content import stamp_approval
 from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly  # the executor's fallback tools
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-PASSED = json.dumps([{"check": "c", "status": "pass"}])
+PASSED = json.dumps([{"check_id": "pc-1", "check": "c", "status": "pass"}])
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ def test_a_change_run_closes_its_own_ticket_in_place(db):
     ex = rows[0]
     assert ex.status == "succeeded" and ex.executed_by == "user:bob"  # the requester, kept
     assert ex.started_at.replace(tzinfo=None) == T0.replace(tzinfo=None)  # the claim, kept
-    assert ex.completed_at is not None and ex.post_check_results == [{"check": "c", "status": "pass"}]
+    assert ex.completed_at is not None and ex.post_check_results == [{"check_id": "pc-1", "check": "c", "status": "pass"}]
     assert db.get(FixPlan, pid).status == "executed" and db.get(ChangeRequest, cr_id).status == "completed"
     assert _audits(db, "change.failed") == []  # the post-run reconcile was a no-op
     assert f"FixExecution #{ex_id}" in seen["saved"]
@@ -643,7 +643,7 @@ def test_two_overlapping_mapper_calls_leave_one_terminal_and_one_audit_row(db, c
     with caplog.at_level(logging.WARNING, logger="agenticops.services.change_service"), \
          patch.object(change_service, "evaluate", side_effect=a_failure_lands_meanwhile):
         snap = change_service.on_execution_result(pid, "succeeded",
-                                                  post_check_results=[{"check": "c", "status": "pass"}])
+                                                  post_check_results=[{"check_id": "pc-1", "check": "c", "status": "pass"}])
     db.expire_all()
     assert db.get(ChangeRequest, cr_id).status == "failed" and snap["status"] == "failed"
     terminal = [a for a in ("change.completed", "change.needs_review", "change.failed", "change.rolled_back")

@@ -514,7 +514,7 @@ class TestFullE2EPipeline:
                 {"step_index": 2, "command": "systemctl restart app-worker", "status": "succeeded", "output": "Service restarted", "duration_ms": 2000},
             ]),
             pre_check_results=json.dumps([{"check": "CPU > 90%", "status": "passed", "output": "CPU: 97.2%"}]),
-            post_check_results=json.dumps([{"check": "CPU < 50%", "status": "passed", "output": "CPU: 12.4%"}]),
+            post_check_results=json.dumps([{"check_id": "pc-1", "check": "CPU < 50%", "status": "passed", "output": "CPU: 12.4%"}]),
             duration_ms=5000,
         )
         print(f"[5] Execution saved: {exec_result}")
