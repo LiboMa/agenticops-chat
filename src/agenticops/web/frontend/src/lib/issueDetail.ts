@@ -63,6 +63,14 @@ export function issueStatuses(issue: Pick<HealthIssue, "status">, executions: Fi
 /** The issue statuses a fix is in motion in: the page polls the issue until the run lands its verdict. */
 export const ISSUE_IN_FLIGHT: ReadonlySet<IssueStatus> = new Set<IssueStatus>(["fix_approved", "fix_executing"]);
 
+// The FixExecution statuses the backend writes (models.FixExecution: pending → running → succeeded | failed | rolled_back | aborted)
+const EXECUTION_STATUSES = new Set(["pending", "running", "succeeded", "failed", "rolled_back", "aborted"]);
+
+/** A run's status in the reader's language; one the backend may add later stays as its raw value. */
+export function executionStatusLabel(status: string, t: (key: string) => string): string {
+  return EXECUTION_STATUSES.has(status) ? t(`execution.status.${status}`) : status;
+}
+
 /** A run still queued (pending) or claimed (running); every other status is finished. */
 export function hasRunInFlight(executions: Pick<FixExecution, "status">[] | undefined): boolean {
   return !!executions?.some((e) => e.status === "pending" || e.status === "running");

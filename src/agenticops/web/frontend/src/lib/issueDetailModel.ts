@@ -1,4 +1,4 @@
-import type { FixExecution, FixPlan, HealthIssue, RCAResult } from "@/api/types";
+import type { FixExecution, FixPlan, HealthIssue, IssueStatus, RCAResult } from "@/api/types";
 import { issueStatuses, latestExecution, newestFirst } from "@/lib/issueDetail";
 import { currentFixPlan, issuePhases, type IssuePhaseResult } from "@/lib/issuePhases";
 import { confidenceBreakdown } from "@/lib/rcaQuality";
@@ -19,9 +19,13 @@ export interface IssueDetailModel {
   otherPlans: FixPlan[];
   latestRun: FixExecution | null;
   pendingRun: FixExecution | null;
+  quietRunError: boolean;     // the latest run's error_message IS the status line's sentence: ③ does not repeat it
+  quietAcceptReason: boolean; // the latest run's verification_reason IS the status line's sentence: ④ does not repeat it
 }
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
+// Where an issue stands at these statuses depends on its latest run, so it cannot be told while the runs are unknown
+const RUN_DEPENDENT: ReadonlySet<IssueStatus> = new Set<IssueStatus>(["root_cause_identified", "fix_approved", "fix_executed"]);
 const runText = (r: FixExecution | null) =>
   r ? r.acceptance_note || r.verification_reason || r.error_message || null : null;
 
@@ -31,13 +35,17 @@ export function issueDetailModel(input: {
   rca: RCAResult | null | undefined;
   threshold: number | null | undefined;
   plans: FixPlan[] | undefined;
-  executions: FixExecution[] | undefined;
+  executions: FixExecution[] | undefined; // undefined = not known (still loading, or the fetch failed): never "no runs"
+  runsFailed?: boolean;                   // with executions undefined: the fetch failed rather than still loading
 }): IssueDetailModel {
   const { issue, rca, threshold } = input;
   const plan = currentFixPlan(input.plans);
   const latestRun = latestExecution(input.executions);
   // undefined (still loading) keeps list mode — never a flash of "rerun RCA"; null means there is no RCA
-  const phase = issuePhases({ status: issue.status, rca, threshold, plan, latestRun });
+  const known = issuePhases({ status: issue.status, rca, threshold, plan, latestRun });
+  const phase: IssuePhaseResult = input.executions === undefined && RUN_DEPENDENT.has(issue.status)
+    ? { ...known, sub: input.runsFailed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null }
+    : known;
   const pendingRun = issueStatuses(issue, input.executions).pending;
 
   let reason: Reason | null = null;
@@ -58,17 +66,20 @@ export function issueDetailModel(input: {
 
   const terminal = issue.status === "resolved" || issue.status === "dismissed";
   const menu: IssueMenuItem[] = terminal ? ["reopen"] : [
-    "runRca",
-    ...(issue.status === "root_cause_identified" && phase.primary !== "generatePlan" ? ["skipReviewGeneratePlan" as const] : []),
+    ...(phase.primary === "rerunRca" ? [] : ["runRca" as const]),
+    // the backend generates a plan from an RCA: none (or not loaded yet) → not offered
+    ...(issue.status === "root_cause_identified" && rca && phase.primary !== "generatePlan" ? ["skipReviewGeneratePlan" as const] : []),
     ...(phase.sub === "executing" && latestRun && (latestRun.status === "pending" || latestRun.status === "running") ? ["cancelRun" as const] : []),
     ...(phase.primary === "markResolved" ? [] : ["markResolved" as const]),
     "dismiss",
   ];
 
   const tone = phase.sub === "needsNewPlan" ? "bad"
-    : ["needsReview", "rcaRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan"].includes(phase.sub) ? "warn"
+    : ["needsReview", "rcaRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
+       "runsUnavailable"].includes(phase.sub) ? "warn"
     : phase.sub === "passed" || phase.sub === "resolved" ? "ok" : "info";
 
+  const text = reason && "text" in reason ? reason.text : null;
   return {
     phase,
     statusKey: `workitem.sub.${phase.sub}`,
@@ -81,6 +92,8 @@ export function issueDetailModel(input: {
     otherPlans: newestFirstPlans(input.plans).filter((p) => p.id !== plan?.id),
     latestRun,
     pendingRun,
+    quietRunError: text !== null && text === latestRun?.error_message,
+    quietAcceptReason: text !== null && text === latestRun?.verification_reason,
   };
 }
 

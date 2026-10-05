@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { confidenceBreakdown, gateSentenceKey, qualityBadges, unmatchedRefs } from "@/lib/rcaQuality";
+import { confidenceBreakdown, qualityBadges, unmatchedRefs } from "@/lib/rcaQuality";
 
 describe("confidenceBreakdown", () => {
   it("I#1: 0.95 × 0.6 (evidence not verified) = 0.57, below 0.6 → gate not passed; a weak critic costs nothing", () => {
@@ -53,20 +53,5 @@ describe("unmatchedRefs", () => {
     ])).toEqual(["PATCH …/scale"]);
     expect(unmatchedRefs(undefined)).toEqual([]);
     expect(unmatchedRefs([{ event_type: "rca_evidence_check", detail: null, created_at: "x" }])).toEqual([]);
-  });
-});
-
-describe("gateSentenceKey", () => {
-  it("a refuted RCA says the reviewer paused it, even at / above the threshold; below the gate says below; else none", () => {
-    expect(gateSentenceKey(confidenceBreakdown({ confidence: 0.45, evidence_verified: true, critic_verdict: "refuted" }, 0.3)))
-      .toBe("rca.confidence.refutedGate");
-    expect(gateSentenceKey(confidenceBreakdown({ confidence: 0.57, evidence_verified: false, critic_verdict: "weak" }, 0.6)))
-      .toBe("rca.confidence.below");
-    expect(gateSentenceKey(confidenceBreakdown({ confidence: 0.9, evidence_verified: true, critic_verdict: "supported" }, 0.6)))
-      .toBeNull();
-  });
-  it("threshold unknown (settings loading): no gate sentence at all, refuted or not", () => {
-    expect(gateSentenceKey(confidenceBreakdown({ confidence: 0.2, evidence_verified: true, critic_verdict: "refuted" }, undefined)))
-      .toBeNull();
   });
 });

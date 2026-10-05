@@ -8,7 +8,8 @@ export type WaitingFor = "rca_agent" | "you" | "sre_agent" | "approver" | "execu
 export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveAndRun" | "retryExecution"
   | "acceptResult" | "markResolved" | null;
 export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan"
-  | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed";
+  | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
+  | "loadingRuns" | "runsUnavailable"; // detail page only (issueDetailModel): the runs are not known yet / failed to load
 
 export interface IssuePhaseInput {
   status: IssueStatus;

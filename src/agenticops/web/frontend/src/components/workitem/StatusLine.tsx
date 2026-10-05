@@ -18,6 +18,7 @@ export interface StatusLineProps {
   menu?: StatusLineAction[];         // the "⋯" menu (secondary actions)
   error?: string | null;             // a 409/403 message, shown in an ErrorBanner under the line
   onDismissError?: () => void;
+  errorActionLabel?: string;         // the banner's button; default "Close" (a failed fetch passes "Retry")
   backTo: string; backLabel: string;
 }
 
@@ -27,7 +28,8 @@ const DOT: Record<StatusLineProps["tone"], string> = {
 
 /** The work item's one status indicator: where it is, why, who moves it next, and the one primary button. */
 export function StatusLine({
-  refLabel, title, badges, statusLabel, tone, reason, waiting, primary, menu, error, onDismissError, backTo, backLabel,
+  refLabel, title, badges, statusLabel, tone, reason, waiting, primary, menu, error, onDismissError, errorActionLabel,
+  backTo, backLabel,
 }: StatusLineProps) {
   const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
@@ -128,7 +130,7 @@ export function StatusLine({
           </div>
         </CardBody>
       </Card>
-      {error && <ErrorBanner message={error} onRetry={onDismissError} actionLabel={t("common.close")} />}
+      {error && <ErrorBanner message={error} onRetry={onDismissError} actionLabel={errorActionLabel ?? t("common.close")} />}
     </div>
   );
 }

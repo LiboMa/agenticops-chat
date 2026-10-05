@@ -127,7 +127,6 @@
   "rca.confidence.stepCritic": "reviewer refuted ×0.5",
   "rca.confidence.criticWeakFree": "a weak reviewer verdict costs nothing",
   "rca.confidence.threshold": "auto-fix threshold {threshold}",
-  "rca.confidence.below": "Below the threshold: auto-fix is paused until a person reviews the root cause.",
   "rca.unmatchedRefs": "References not found in this RCA's tool calls",
   "signals.title": "Signals",
   "signals.all": "All",
@@ -777,7 +776,6 @@
   "verdict.needRca": "Needs an RCA result",
   "verdict.recorded": "Recorded: {verdict}",
   "verdict.partialSaved": "The root-cause verdict was saved; the issue feedback failed:",
-  "rca.confidence.refutedGate": "The reviewer refuted the root cause: auto-fix is paused until a person reviews it.",
   "workitem.phase.diagnose": "Diagnose",
   "workitem.phase.plan": "Plan",
   "workitem.phase.run": "Approve & run",
@@ -839,5 +837,13 @@
   "workitem.facts": "Key facts",
   "workitem.runningFor": "Running for {elapsed}",
   "workitem.otherPlans": "Other versions ({n})",
-  "workitem.description": "Description"
+  "workitem.description": "Description",
+  "workitem.sub.loadingRuns": "Loading the runs…",
+  "workitem.sub.runsUnavailable": "The runs could not be loaded",
+  "execution.status.pending": "Queued",
+  "execution.status.running": "Running",
+  "execution.status.succeeded": "Succeeded",
+  "execution.status.failed": "Failed",
+  "execution.status.rolled_back": "Rolled back",
+  "execution.status.aborted": "Aborted"
 }

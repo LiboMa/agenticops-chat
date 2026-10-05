@@ -6,7 +6,7 @@ import { LocalGraph } from "@/components/graph/LocalGraph";
 import { VerdictBlock } from "@/components/issue/VerdictBlock";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
-import { confidenceBreakdown, gateSentenceKey, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
+import { confidenceBreakdown, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
 
 type T = (key: string) => string;
 
@@ -83,7 +83,6 @@ function RcaSection({ rca: r, threshold, timelineEvents, showVerdict, t }: {
       .replace("{steps}", steps.join(" → ")).replace("{final}", pct(b.final))] : []),
     ...(r.critic_verdict === "weak" ? [t("rca.confidence.criticWeakFree")] : []),
   ];
-  const gate = gateSentenceKey(b);
   const refs = unmatchedRefs(timelineEvents);
   const model = r.model_id?.trim();
   const factors = r.contributing_factors ?? [];
@@ -115,7 +114,8 @@ function RcaSection({ rca: r, threshold, timelineEvents, showVerdict, t }: {
         <div className="text-foreground report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(r.root_cause) }} />
       </div>
 
-      {/* Confidence bar, the auto-fix threshold, and how the stored number was reached */}
+      {/* Confidence bar, the auto-fix threshold, and how the stored number was reached; the pause itself is the
+          status line's sentence, not repeated here */}
       <div>
         <div className="flex justify-between text-sm mb-1">
           <span className="text-muted-foreground">{t("issues.confidence")}</span>
@@ -132,7 +132,6 @@ function RcaSection({ rca: r, threshold, timelineEvents, showVerdict, t }: {
           )}
         </div>
         {explain.length > 0 && <div className="mt-1 text-xs text-muted-foreground">{explain.join(" · ")}</div>}
-        {gate && <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">{t(gate)}</div>}
         {refs.length > 0 && (
           <div className="mt-3">
             <div className="text-xs font-medium text-foreground mb-1">{t("rca.unmatchedRefs")}</div>

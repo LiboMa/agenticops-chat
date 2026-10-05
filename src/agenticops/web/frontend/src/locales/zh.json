@@ -126,7 +126,6 @@
   "rca.confidence.stepCritic": "评审员否定 ×0.5",
   "rca.confidence.criticWeakFree": "评审员判「证据偏弱」不扣分",
   "rca.confidence.threshold": "自动修复阈值 {threshold}",
-  "rca.confidence.below": "低于阈值：自动修复已暂停，等人复核根因。",
   "rca.unmatchedRefs": "不在本次 RCA 工具调用记录里的引用",
   "signals.title": "信号",
   "signals.all": "全部",
@@ -777,7 +776,6 @@
   "verdict.needRca": "需要先有 RCA 结果",
   "verdict.recorded": "已判断：{verdict}",
   "verdict.partialSaved": "根因判断已保存；问题反馈失败：",
-  "rca.confidence.refutedGate": "评审员否定了根因：自动修复已暂停，等人复核。",
   "workitem.phase.diagnose": "诊断",
   "workitem.phase.plan": "方案",
   "workitem.phase.run": "审批并执行",
@@ -839,5 +837,13 @@
   "workitem.facts": "关键事实",
   "workitem.runningFor": "已执行 {elapsed}",
   "workitem.otherPlans": "其它版本（{n}）",
-  "workitem.description": "描述"
+  "workitem.description": "描述",
+  "workitem.sub.loadingRuns": "正在读取执行记录…",
+  "workitem.sub.runsUnavailable": "执行记录读取失败",
+  "execution.status.pending": "排队中",
+  "execution.status.running": "执行中",
+  "execution.status.succeeded": "成功",
+  "execution.status.failed": "失败",
+  "execution.status.rolled_back": "已回滚",
+  "execution.status.aborted": "已中止"
 }

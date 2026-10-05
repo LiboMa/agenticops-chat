@@ -1,4 +1,6 @@
 import type { FixExecution } from "@/api/types";
+import { Spinner } from "@/components/ui/Spinner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { VerificationChip } from "@/components/plans/VerificationChip";
 import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
@@ -7,14 +9,20 @@ type T = (key: string) => string;
 
 /** ④ Accept: the newest run's verdict and who accepted it. Accept / reject only for `pendingRun` (issueStatuses:
  *  the newest run, while the issue sits at fix_executed); the reason the status line already shows is not repeated. */
-export function AcceptBody({ runs, pendingRun, quietRunId, onAccept, onReject, t }: {
+export function AcceptBody({ runs, loading, error, onRetryFetch, pendingRun, quietRunId, onAccept, onReject, t }: {
   runs: FixExecution[];          // newest first
+  loading: boolean;
+  error: Error | null;
+  onRetryFetch: () => void;
   pendingRun: FixExecution | null;
-  quietRunId: number | null;     // the run whose reason the status line already shows
+  quietRunId: number | null;     // the run whose verification_reason the status line already shows
   onAccept: () => void;
   onReject: () => void;
   t: T;
 }) {
+  if (loading) return <Spinner label={t("common.loading")} />;
+  // a failed fetch must not read as "not executed"
+  if (error) return <ErrorBanner message={error.message} onRetry={onRetryFetch} />;
   const latest = runs[0] ?? null;
   if (!latest) return <p className="text-sm text-muted-foreground">{t("verification.noExecution")}</p>;
   const rows: [string, string | null][] = [
@@ -31,7 +39,7 @@ export function AcceptBody({ runs, pendingRun, quietRunId, onAccept, onReject, t
         {pendingRun?.id === latest.id && (
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onAccept}
-                    className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
+                    className="px-3 py-1.5 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-lg hover:bg-emerald-500/10 transition-colors">
               {t("workitem.primary.acceptResult")}
             </button>
             <button onClick={onReject}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
 import {
-  anchorBadge, approvalBlockedReason, canApprovePlan, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
+  anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
   newestFirst, parseIssueTab, resultRow, resultSummary,
 } from "@/lib/issueDetail";
 
@@ -221,5 +221,15 @@ describe("factRows", () => {
   it("isBlank", () => {
     for (const v of ["", " ", "unknown", "Unknown", "—", "-", "n/a", null, undefined]) expect(isBlank(v), String(v)).toBe(true);
     for (const v of ["x", 0, "0"]) expect(isBlank(v), String(v)).toBe(false);
+  });
+});
+
+describe("executionStatusLabel", () => {
+  it("a status the backend writes reads as its locale key; an unknown one stays as the raw value", () => {
+    const t = (k: string) => `<${k}>`;
+    expect(["pending", "running", "succeeded", "failed", "rolled_back", "aborted"].map((s) => executionStatusLabel(s, t)))
+      .toEqual(["<execution.status.pending>", "<execution.status.running>", "<execution.status.succeeded>",
+                "<execution.status.failed>", "<execution.status.rolled_back>", "<execution.status.aborted>"]);
+    expect(executionStatusLabel("exploded", t)).toBe("exploded");
   });
 });

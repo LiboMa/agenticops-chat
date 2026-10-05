@@ -3,7 +3,7 @@ import type { FixExecution, FixPlan, IssueStatus } from "@/api/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ExecutionEvidence } from "@/components/plans/ExecutionEvidence";
-import { approvalBlockedReason, canApprovePlan } from "@/lib/issueDetail";
+import { approvalBlockedReason, canApprovePlan, executionStatusLabel } from "@/lib/issueDetail";
 import { formatElapsed, formatFullDate, parseApiDate } from "@/lib/formatDate";
 
 type T = (key: string) => string;
@@ -19,7 +19,7 @@ export function RunBody({
   loading: boolean;
   error: Error | null;
   onRetryFetch: () => void;
-  quietRunId: number | null;     // the run whose error the status line already shows
+  quietRunId: number | null;     // the run whose error_message the status line already shows
   onApprove: () => void;
   onReject: () => void;
   approving: boolean;
@@ -50,7 +50,7 @@ export function RunBody({
           <div className="flex items-center gap-3">
             {approvable && (
               <button onClick={onApprove} disabled={approving}
-                      className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+                      className="px-4 py-2 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium rounded-lg hover:bg-emerald-500/10 disabled:opacity-50 transition-colors">
                 {t("workitem.primary.approveAndRun")}
               </button>
             )}
@@ -77,7 +77,7 @@ export function RunBody({
               <summary className="cursor-pointer text-sm font-semibold text-foreground">
                 {t("issues.executionN").replace("{n}", String(ex.id))}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  {ex.status}{ex.started_at && ` · ${formatFullDate(ex.started_at)}`}
+                  {executionStatusLabel(ex.status, t)}{ex.started_at && ` · ${formatFullDate(ex.started_at)}`}
                 </span>
               </summary>
               <div className="mt-3 space-y-3">

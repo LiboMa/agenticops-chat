@@ -35,9 +35,11 @@ import { AcceptBody } from "@/components/issue/AcceptCard";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { planLabel, shortHash } from "@/lib/plans";
-import { anchorBadge, approvalBlockedReason, canApprovePlan, factRows, issueFacts, isBlank } from "@/lib/issueDetail";
+import {
+  anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, issueFacts, isBlank,
+} from "@/lib/issueDetail";
 import { issueDetailModel, newestFirst, type Reason } from "@/lib/issueDetailModel";
-import { ISSUE_PHASES, type IssuePhaseId, type IssuePhaseResult } from "@/lib/issuePhases";
+import { ISSUE_PHASES, type IssuePhaseId, type IssuePhaseResult, type IssuePrimary } from "@/lib/issuePhases";
 import { ISSUE_HASHES, legacyIssueTabHash, parseHash } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
@@ -93,13 +95,15 @@ export default function IssueDetail() {
     lastStatus.current = { id: issueId, status: issueStatus };
   }, [issueStatus, issueId, qc]);
 
-  // Loading inputs stay undefined: the RCA → list mode (no flash of "rerun RCA"), the threshold → no gate yet
+  // Loading inputs stay undefined: the RCA → list mode (no flash of "rerun RCA"), the threshold → no gate yet, the
+  // runs → not known (loading or failed, never "no runs": the status line says which instead of inventing a state)
   const model = anomaly.data ? issueDetailModel({
     issue: anomaly.data,
     rca: rca.isLoading ? undefined : (rca.data ?? null),
     threshold: settings.data?.rca_min_confidence_for_autofix,
     plans: fixPlans.data,
-    executions: executions.data,
+    executions: executions.isLoading || executions.error ? undefined : executions.data,
+    runsFailed: !!executions.error,
   }) : null;
 
   /* -- URL: an old ?tab= maps once onto its hash; the hash opens a card -- */
@@ -232,8 +236,11 @@ export default function IssueDetail() {
   const closed = a.status === "resolved" || a.status === "dismissed";
   const canApprove = !!plan && canApprovePlan(plan, a.status);
   const blocked = plan ? approvalBlockedReason(plan, a.status) : null;
-  // the run whose own sentence the status line carries: its error / reason is not repeated in the cards (P3)
-  const quietRunId = m.reason && "text" in m.reason ? m.latestRun?.id ?? null : null;
+  // the latest run's sentence is the status line's: ③ / ④ do not repeat that exact text (P3)
+  const quietErrorRunId = m.quietRunError ? m.latestRun?.id ?? null : null;
+  const quietReasonRunId = m.quietAcceptReason ? m.latestRun?.id ?? null : null;
+  // a failed runs fetch is said where the reader is — under the status line — with a retry; an action error wins
+  const runsError = !actionError && executions.error ? executions.error.message : null;
 
   const openApproval = (kind: "approve" | "reject") => {
     (kind === "approve" ? approveMut : rejectMut).reset();
@@ -248,7 +255,7 @@ export default function IssueDetail() {
     ? (a.status === "resolved" && a.resolved_at ? t("workitem.reason.resolvedAt").replace("{at}", formatFullDate(a.resolved_at)) : null)
     : m.reason && fill(m.reason);
 
-  const primaryRun: Record<string, (() => void) | null> = {
+  const primaryRun: Record<NonNullable<IssuePrimary>, (() => void) | null> = {
     reviewRca: () => { openCard("diagnose"); setScrollTo("verdict"); },
     rerunRca: triggerRca,
     generatePlan: triggerFixPlan,
@@ -260,7 +267,7 @@ export default function IssueDetail() {
     acceptResult: m.pendingRun ? () => openAccept("accepted") : null,
     markResolved: () => ask(t("workitem.confirm.resolve"), t("workitem.primary.markResolved"), () => updateStatus("resolved")),
   };
-  const primaryBusy: Record<string, boolean> = {
+  const primaryBusy: Partial<Record<NonNullable<IssuePrimary>, boolean>> = {
     rerunRca: rcaLoading, generatePlan: fixPlanLoading, approveAndRun: approveMut.isPending,
     retryExecution: executeMut.isPending, markResolved: updateStatusMut.isPending,
   };
@@ -296,7 +303,8 @@ export default function IssueDetail() {
   const openable = m.phase.phases.filter((x) => x.state !== "future").map((x) => x.id);
   const allOpen = openable.length > 0 && openable.every((x) => cards.open.has(x));
   const runSummary = latestRun && [t("issues.executionN").replace("{n}", String(latestRun.id)),
-    latestRun.verification_status ? t(`verification.${latestRun.verification_status}`) : latestRun.status].join(" · ");
+    latestRun.verification_status ? t(`verification.${latestRun.verification_status}`) : executionStatusLabel(latestRun.status, t)]
+    .join(" · ");
   const badge = anchorBadge(a, anchorRes.data?.resource_name);
 
   /* -- Render ------------------------------------------------------ */
@@ -313,8 +321,9 @@ export default function IssueDetail() {
           waiting={m.waitingKey && t(m.waitingKey)}
           primary={primary}
           menu={menu}
-          error={actionError}
-          onDismissError={() => setActionError(null)}
+          error={actionError ?? runsError}
+          onDismissError={() => (actionError ? setActionError(null) : executions.refetch())}
+          errorActionLabel={actionError ? undefined : t("common.retry")}
           backTo="/app/issues"
           backLabel={t("nav.issues")}
         />
@@ -373,7 +382,7 @@ export default function IssueDetail() {
                    futureHint={t("workitem.future.issue.run")}
                    open={cards.open.has("run")} onToggle={(o) => toggleCard("run", o)}>
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
-                   error={executions.error} onRetryFetch={() => executions.refetch()} quietRunId={quietRunId}
+                   error={executions.error} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
                    onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")}
                    approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
         </PhaseCard>
@@ -382,7 +391,8 @@ export default function IssueDetail() {
                    summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}
                    futureHint={t("workitem.future.issue.accept")}
                    open={cards.open.has("accept")} onToggle={(o) => toggleCard("accept", o)}>
-          <AcceptBody runs={runs} pendingRun={m.pendingRun} quietRunId={quietRunId}
+          <AcceptBody runs={runs} loading={executions.isLoading} error={executions.error} onRetryFetch={() => executions.refetch()}
+                      pendingRun={m.pendingRun} quietRunId={quietReasonRunId}
                       onAccept={() => openAccept("accepted")} onReject={() => openAccept("rejected")} t={t} />
         </PhaseCard>
       </div>
