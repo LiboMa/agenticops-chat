@@ -64,6 +64,12 @@ export async function apiFetch<T>(
 
   const res = await fetch(url, { ...options, headers });
 
+  // A wrong password is the login endpoint's own 401: say why, don't treat it as an expired session
+  if (res.status === 401 && path.startsWith("/auth/login")) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(401, formatErrorDetail(body.detail ?? res.statusText));
+  }
+
   if (res.status === 401) {
     // Token expired or invalid — redirect to login
     clearAuthToken();

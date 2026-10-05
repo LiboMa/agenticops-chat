@@ -6,13 +6,24 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/logo-192.png" />
-    <title>AgenticAIOps</title>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <title>AgenticOps</title>
+    <script>
+      // Before the first paint (MVP-2.7.0): this browser's theme, font size and language, so a reload never
+      // flashes the wrong theme. First visit = light; the system dark preference is not followed.
+      (function () {
+        try {
+          var d = document.documentElement;
+          var theme = localStorage.getItem("theme");
+          var size = localStorage.getItem("fontSize");
+          var lang = localStorage.getItem("aiops_locale");
+          if (theme === "dark") d.classList.add("dark");
+          d.style.fontSize = size === "small" ? "13px" : size === "large" ? "17px" : "15px";
+          d.lang = lang === "zh" ? "zh-CN" : "en";
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 antialiased">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
