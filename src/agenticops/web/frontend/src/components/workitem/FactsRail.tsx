@@ -18,8 +18,10 @@ export function FactsRail({ title, rows, t, extra }: { title: string; rows: Fact
               <div key={`${r.labelKey}-${i}`} className="grid grid-cols-[6rem_1fr] gap-2">
                 <dt className="text-muted-foreground">{t(r.labelKey)}</dt>
                 <dd className="min-w-0 break-words">
-                  {r.href ? <Link to={r.href} className={cn(cls, "text-primary hover:underline")}>{value}</Link>
-                          : <span className={cls}>{value}</span>}
+                  {r.href && r.external
+                    ? <a href={r.href} target="_blank" rel="noopener noreferrer" className={cn(cls, "text-primary hover:underline")}>{value} ↗</a>
+                    : r.href ? <Link to={r.href} className={cn(cls, "text-primary hover:underline")}>{value}</Link>
+                    : <span className={cls}>{value}</span>}
                 </dd>
               </div>
             );

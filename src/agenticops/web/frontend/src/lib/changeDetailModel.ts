@@ -17,6 +17,7 @@ export interface ChangeDetailModel {
   acceptNote: { key: string; params?: Record<string, string> } | null;
   menu: ChangeMenuItem[];
   quietRunError: boolean; // the latest run's error_message IS the status line's sentence: ④ does not repeat it
+  quietReviewReasons: boolean; // the review rejected it and its reasons ARE the status line's sentence: ② does not list them
 }
 
 const CANCELLABLE = ["draft", "needs_clarification", "planned", "approved"];
@@ -29,7 +30,8 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
   const latestRun = runs[0] ?? null;
   const phase = changePhases(cr);
   const reason = changeHeadline(cr, latestRun).reason;
-  const failedRun = latestRun && latestRun.verification_status === "failed";
+  // the system's verdict only: a person who marked it failed accepted the run (accepted_by is theirs)
+  const failedRun = latestRun && latestRun.verification_status === "failed" && !latestRun.accepted_by;
   const menu: ChangeMenuItem[] = [
     ...(cr.status === "under_review" ? ["restartReview" as const] : []),
     ...(cr.status === "planned" ? ["reject" as const] : []),
@@ -51,5 +53,7 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
     acceptNote: failedRun ? { key: "workitem.accept.systemFailed", params: { n: String(latestRun!.id) } } : null,
     menu,
     quietRunError: reason !== null && reason === latestRun?.error_message,
+    // the backend writes a review's rejection_reason as its reasons joined with "; " (change_service.submit_review)
+    quietReviewReasons: cr.status === "rejected" && cr.review_reasons.length > 0 && reason === cr.review_reasons.join("; "),
   };
 }

@@ -70,4 +70,25 @@ describe("changeDetailModel — C#1 (failed at pre-check #1): the failure senten
     expect(changeDetailModel({ ...cr, status: "approved", executions: [bare] }).quietRunError).toBe(false);
     expect(changeDetailModel({ ...cr, executions: [] }).quietRunError).toBe(false);
   });
+  it("quietReviewReasons: a review's rejection is its reasons joined — the status line says them, ② does not", () => {
+    const reasons = ["target is a production database", "no rollback for a drop"];
+    const byReview = { ...cr, status: "rejected", review_verdict: "rejected", review_reasons: reasons,
+                       rejection_reason: reasons.join("; "), executions: [] } as unknown as ChangeRequestDetail;
+    expect([changeDetailModel(byReview).reason, changeDetailModel(byReview).quietReviewReasons])
+      .toEqual(["target is a production database; no rollback for a drop", true]);
+    // an approver's rejection of the plan: the reason is the approver's, the review's own reasons stay in ②
+    const byApprover = { ...byReview, review_verdict: "approved_for_planning", rejection_reason: "not this week" };
+    expect(changeDetailModel(byApprover).quietReviewReasons).toBe(false);
+    // needs clarification: the reasons are the reviewer's questions, kept next to the answer box
+    const asking = { ...byReview, status: "needs_clarification", review_verdict: "needs_clarification",
+                     rejection_reason: null } as ChangeRequestDetail;
+    expect(changeDetailModel(asking).quietReviewReasons).toBe(false);
+  });
+  it("acceptNote is the system's verdict only: a person who marked it failed did accept it", () => {
+    // resolve-review "failed" stamps the run failed AND records who judged it (change_service.resolve_review)
+    const judged = { ...run, status: "succeeded", error_message: null, verification_reason: "no post-checks",
+                     accepted_by: "user:admin", accepted_at: "2026-10-03T10:20:00", acceptance_note: "pods still crash-looping" };
+    const m = changeDetailModel({ ...cr, executions: [judged as FixExecution] });
+    expect([m.reason, m.acceptNote]).toEqual(["pods still crash-looping", null]);
+  });
 });

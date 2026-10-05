@@ -93,7 +93,7 @@ export function RunBody({
 }
 
 /** A spinner with the time since the run started, ticking each second; a queued run has no start yet. */
-function RunningFor({ since, t }: { since: string | null; t: T }) {
+export function RunningFor({ since, t }: { since: string | null; t: T }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const h = window.setInterval(() => setNow(Date.now()), 1000);

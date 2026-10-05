@@ -5,7 +5,10 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { cn } from "@/lib/cn";
 
-export interface StatusLineAction { key: string; label: string; run: () => void; disabled?: boolean; variant?: "default" | "destructive" }
+export interface StatusLineAction {
+  key: string; label: string; run: () => void; disabled?: boolean; variant?: "default" | "destructive";
+  title?: string;                    // a menu item's hover note
+}
 export interface StatusLineProps {
   refLabel: string;                 // "I#1" / "C#1"
   title: string;
@@ -113,6 +116,7 @@ export function StatusLine({
                       <button
                         key={a.key}
                         role="menuitem"
+                        title={a.title}
                         disabled={a.disabled}
                         onClick={() => { setMenuOpen(false); a.run(); }}
                         className={cn(

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useChange, useChangeAction, type ChangeActionArgs } from "@/hooks/useChanges";
 import { useChangeTimeline } from "@/hooks/useChangeTimeline";
 import { useSettings } from "@/hooks/useSettings";
@@ -7,31 +7,29 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ApiError } from "@/api/client";
-import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { Card, CardBody } from "@/components/ui/Card";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
-import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { ChangeStepper } from "@/components/plans/ChangeStepper";
-import { ChangeStatusBadge } from "@/components/plans/ChangeStatusBadge";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
 import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
-import { RunbookStep } from "@/components/plans/RunbookStep";
-import { CheckItem } from "@/components/plans/CheckItem";
-import { RollbackPlan } from "@/components/plans/RollbackPlan";
-import { ExecutionsTable } from "@/components/plans/ExecutionsTable";
-import { PipelineTimeline } from "@/components/plans/PipelineTimeline";
-import { ExecutionEvidence } from "@/components/plans/ExecutionEvidence";
-import { VerificationChip } from "@/components/plans/VerificationChip";
-import { LocalGraph } from "@/components/graph/LocalGraph";
-import { formatFullDate } from "@/lib/formatDate";
-import { renderMarkdown } from "@/lib/renderMarkdown";
-import {
-  activeChangePlan, changeHeadline, externalRefLink, isHintResolved, planStepMarks, policySummary, toPipelineEvents,
-  type ChangeNextAction,
-} from "@/lib/changeDetail";
-import { newestFirst } from "@/lib/issueDetail";
-import { planLabel, shortHash } from "@/lib/plans";
+import { PlanView } from "@/components/plans/PlanView";
+import { StatusLine, type StatusLineAction } from "@/components/workitem/StatusLine";
+import { PhaseCard } from "@/components/workitem/PhaseCard";
+import { FactsRail } from "@/components/workitem/FactsRail";
+import { ActivityList } from "@/components/workitem/ActivityList";
+import { RequestBody, requestSummary } from "@/components/change/RequestCard";
+import { ReviewBody, reviewSummary } from "@/components/change/ReviewCard";
+import { ChangeRunBody, ClosedRecord, runSummary } from "@/components/change/RunCard";
+import { ChangeAcceptBody } from "@/components/change/AcceptCard";
+import { externalRefLink, toPipelineEvents } from "@/lib/changeDetail";
+import { changeDetailModel } from "@/lib/changeDetailModel";
+import { CHANGE_PHASES, type ChangePhaseId, type ChangePhaseResult, type ChangePrimary } from "@/lib/changePhases";
+import { CHANGE_HASHES, parseHash } from "@/lib/workitemRoutes";
+import { toActivity } from "@/lib/activity";
+import { isBlank, type FactRow } from "@/lib/issueDetail";
+import { planCounts, planLabel, shortHash } from "@/lib/plans";
+import type { Account, ChangeRequestDetail } from "@/api/types";
 
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
 // so `action` is kept to this subset and branched on below to build a well-typed mutate() argument.
@@ -47,9 +45,34 @@ type Pending = {
   contentHash?: string;
 };
 
-// Join the present, non-empty parts of a header line with " · " (no dangling separators).
-const joinDot = (parts: Array<string | null | undefined | false>): string =>
-  parts.filter((x): x is string => typeof x === "string" && x.length > 0).join(" · ");
+/** The cards open on arrival: the current phase, a failed one, and the one a link's hash names. */
+function seedOpen(phase: ChangePhaseResult, target: string | null): Set<ChangePhaseId> {
+  const ids = phase.phases.filter((p) => p.state === "current" || p.state === "failed").map((p) => p.id);
+  if (target && (CHANGE_PHASES as readonly string[]).includes(target)) ids.push(target as ChangePhaseId);
+  return new Set(ids);
+}
+
+/** The right rail's key facts, blank rows dropped. */
+function changeFactRows(cr: ChangeRequestDetail, acct: Account | undefined, t: (k: string) => string): FactRow[] {
+  const rows: FactRow[] = [];
+  const res = cr.target_resources;
+  const targets = res.length > 0 ? res.map((r) => r.resource_id) : cr.target_hints;
+  if (targets.length > 0) {
+    rows.push({ labelKey: "changes.targets", kind: "mono",
+                value: targets.length > 1 ? `${targets[0]} +${targets.length - 1}` : targets[0],
+                href: res[0]?.db_id != null ? `/app/resources/${res[0].db_id}` : undefined });
+  }
+  rows.push({ labelKey: "facts.account",
+              value: cr.account_id == null ? t("plans.form.accountAny") : acct ? `${acct.name} (${acct.provider})` : `#${cr.account_id}` });
+  if (cr.risk_level) rows.push({ labelKey: "plans.risk", value: cr.risk_level });
+  rows.push({ labelKey: "plans.requestedBy", value: cr.requested_by, kind: "mono" });
+  const ext = externalRefLink(cr.external_ref);
+  if (ext) rows.push({ labelKey: "changes.externalRef", value: ext.label, kind: "mono", href: ext.url ?? undefined, external: true });
+  const created = cr.requested_at ?? cr.created_at;
+  if (created) rows.push({ labelKey: "issues.created", value: created, kind: "date" });
+  if (!isBlank(cr.trace_id)) rows.push({ labelKey: "facts.trace", value: cr.trace_id!, kind: "mono" });
+  return rows;
+}
 
 export default function ChangeDetail() {
   const { id } = useParams<{ id: string }>();
@@ -61,6 +84,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const { t } = useLocale();
   const settings = useSettings();
   const navigate = useNavigate();
+  const location = useLocation();
   const accounts = useAccounts();
   const { confirm, dialog } = useConfirm();
   const act = useChangeAction();
@@ -75,6 +99,52 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const qId = changesOn && valid ? crId : 0;
   const q = useChange(qId);
   const tl = useChangeTimeline(qId, q.data?.status);
+  const model = q.data ? changeDetailModel(q.data) : null;
+
+  /* -- URL: the hash opens a card (or the activity) and scrolls to it -- */
+  const target = parseHash(location.hash, CHANGE_HASHES);
+  // Every card is controlled: re-seeded whenever the phase or its sub-state moves (a poll landing on needs_review
+  // opens ⑤; needs_clarification re-opens ② for its answer box)
+  const seedKey = model ? `${model.phase.current}:${model.phase.sub}` : null;
+  const [cards, setCards] = useState<{ key: string | null; open: Set<ChangePhaseId> }>({ key: null, open: new Set() });
+  if (model && cards.key !== seedKey) setCards({ key: seedKey, open: seedOpen(model.phase, target) });
+  const openCard = (id: ChangePhaseId) => setCards((c) => ({ ...c, open: new Set(c.open).add(id) }));
+  const [activityOpen, setActivityOpen] = useState(true);
+  const [scrollTo, setScrollTo] = useState<{ id: string; focus?: boolean } | null>(null);
+  const selfHash = useRef<string | null>(null); // a hash a card header wrote: open it, do not scroll to it
+
+  const loaded = !!q.data;
+  useEffect(() => {
+    if (selfHash.current !== null && selfHash.current === location.hash) {
+      selfHash.current = null;
+      return;
+    }
+    if (!loaded || !target) return;
+    if (target === "activity") setActivityOpen(true);
+    else openCard(target as ChangePhaseId);
+    setScrollTo({ id: target });
+  }, [location.hash, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!scrollTo) return;
+    const el = document.getElementById(scrollTo.id);
+    el?.scrollIntoView(scrollTo.focus ? { behavior: "smooth", block: "center" } : { block: "start" });
+    if (scrollTo.focus) el?.focus();
+    setScrollTo(null);
+  }, [scrollTo]);
+
+  const toggleCard = (id: ChangePhaseId, open: boolean) => {
+    setCards((c) => {
+      const next = new Set(c.open);
+      if (open) next.add(id);
+      else next.delete(id);
+      return { ...c, open: next };
+    });
+    const hash = open ? `#${id}` : location.hash === `#${id}` ? "" : location.hash;
+    if (hash !== location.hash) {
+      selfHash.current = hash;
+      navigate({ search: location.search, hash }, { replace: true });
+    }
+  };
 
   const backLink = (
     <Link to="/app/changes" className="text-sm text-muted-foreground hover:text-foreground">
@@ -94,22 +164,18 @@ function ChangeDetailView({ crId }: { crId: number }) {
   if (q.isLoading) return <Spinner label={t("common.loading")} />;
   if (q.error)
     return <ErrorBanner message={q.error.message} onRetry={() => q.refetch()} actionLabel={t("common.retry")} />;
-  if (!q.data) return notFoundNotice;
+  if (!q.data || !model) return notFoundNotice;
 
   const cr = q.data;
-  // The plan an approve acts on (the backend's active_plan_for), so the dialog shows and sends its content_hash
-  const plan = activeChangePlan(cr.plans);
-  const p = policySummary(cr.policy_decision, cr.review_reasons);
+  const m = model;
+  // The plan an approve acts on (activeChangePlan, the backend's active_plan_for), so the dialog shows and sends its
+  // content_hash
+  const plan = m.plan;
   const acct = cr.account_id != null ? accounts.data?.find((a) => a.id === cr.account_id) : undefined;
-  const runs = newestFirst(cr.executions);
-  const latest = runs[0] ?? null;
-  const head = changeHeadline(cr, latest);
-  const marks = planStepMarks(cr.steps_diff);
-  const ext = externalRefLink(cr.external_ref);
-  const shadowImpact = cr.policy_decision?.shadow_blast_radius;
-  // The graph's impact count only feeds the policy when enforced; until then the approval card labels it
+  // The graph's impact count only feeds the policy when enforced; until then the review card labels it
   const impactNote = settings.data?.policy_graph_impact_enforce ? undefined : t("changes.impactReference");
 
+  /* -- Handlers ---------------------------------------------------- */
   const runDirect = (args: ChangeActionArgs) => {
     setMsg(null);
     act.mutate(args, { onError: (e) => setMsg((e as Error).message) });
@@ -150,6 +216,20 @@ function ChangeDetailView({ crId }: { crId: number }) {
       confirmText: t("changes.approveAndRun"),
       contentHash: plan?.content_hash ?? "",
     });
+  const openReject = () =>
+    openDialog({
+      action: "reject",
+      title: `${t("plans.rejectTitle")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
+      confirmText: t("issues.reject"),
+      variant: "destructive",
+    });
+  const openCancel = () =>
+    openDialog({
+      action: "cancel",
+      title: `${t("changes.cancelChange")} C#${cr.id}`,
+      confirmText: t("common.confirm"),
+      variant: "destructive",
+    });
   const openAccept = (outcome: "completed" | "failed") =>
     openDialog({
       action: "resolve-review",
@@ -158,545 +238,151 @@ function ChangeDetailView({ crId }: { crId: number }) {
       variant: outcome === "failed" ? "destructive" : undefined,
       extra: { outcome },
     });
-  const focusClarify = () => {
-    const el = document.getElementById("change-clarify");
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    el?.focus();
-  };
-  // The header's primary button: the same handler as the card's, so the two never disagree
-  const PRIMARY: Record<ChangeNextAction, { label: string; run: () => void }> = {
-    review: { label: t("changes.startReview"), run: () => runDirect({ id: cr.id, action: "review" }) },
-    clarify: { label: t("changes.answerReviewer"), run: focusClarify },
-    approve: { label: t("changes.approveAndRun"), run: openApprove },
-    execute: { label: t("changes.retryExecution"), run: onExecute },
-    accept: { label: t("changes.markCompleted"), run: () => openAccept("completed") },
-    copy: { label: t("changes.copyAsNew"), run: () => setCopy(true) },
-  };
-  const primary = head.action ? PRIMARY[head.action] : null;
 
-  const canCancel = ["draft", "needs_clarification", "planned", "approved"].includes(cr.status);
-  const canCopy = ["needs_review", "completed", "failed", "rolled_back", "rejected", "cancelled"].includes(cr.status);
-  const muted = "text-muted-foreground";
+  /* -- Status line ------------------------------------------------- */
+  // The primary button: the same handlers as the cards' outlined buttons, so the two never disagree
+  const primaryRun: Record<NonNullable<ChangePrimary>, () => void> = {
+    startReview: () => runDirect({ id: cr.id, action: "review" }),
+    answerReviewer: () => { openCard("review"); setScrollTo({ id: "change-clarify", focus: true }); },
+    approveAndRun: openApprove,
+    retryExecution: onExecute,
+    markCompleted: () => openAccept("completed"),
+    copyAsNew: () => setCopy(true),
+  };
+  const p = m.phase.primary;
+  const primary: StatusLineAction | null = p && m.primaryKey
+    ? { key: p, label: t(m.primaryKey), run: primaryRun[p], disabled: act.isPending || (p === "copyAsNew" && accounts.isLoading) }
+    : null;
+  const menu: StatusLineAction[] = m.menu.map((item) => {
+    switch (item) {
+      case "restartReview":
+        return { key: item, label: t("changes.restartReview"), title: t("changes.restartReviewHint"), disabled: act.isPending,
+                 run: () => runDirect({ id: cr.id, action: "review" }) };
+      case "reject": return { key: item, label: t("issues.reject"), variant: "destructive", disabled: act.isPending, run: openReject };
+      case "cancel": return { key: item, label: t("changes.cancelChange"), variant: "destructive", disabled: act.isPending, run: openCancel };
+      case "copyAsNew": return { key: item, label: t("changes.copyAsNew"), disabled: accounts.isLoading, run: () => setCopy(true) };
+    }
+  });
+  // A direct action's message, else a dialog action's once its dialog is closed (open, the dialog shows it)
+  const error = msg ?? (!pending && act.error ? act.error.message : null);
 
+  /* -- Phase cards ------------------------------------------------- */
+  const has = (id: ChangePhaseId) => m.phase.phases.some((x) => x.id === id);
+  const state = (id: ChangePhaseId) => m.phase.phases.find((x) => x.id === id)!.state;
+  const card = (id: ChangePhaseId) => ({
+    id, index: CHANGE_PHASES.indexOf(id) + 1, title: t(`workitem.phase.${id}`), state: state(id),
+    futureHint: id === "request" ? null : t(`workitem.future.change.${id}`),
+    open: cards.open.has(id), onToggle: (o: boolean) => toggleCard(id, o),
+  });
+  const openable = m.phase.phases.filter((x) => x.state !== "future").map((x) => x.id);
+  const allOpen = openable.length > 0 && openable.every((x) => cards.open.has(x));
+  const counts = plan && planCounts(plan);
+  const planSummary = plan && counts && `${planLabel(plan, t)} · ${t("plan.counts")
+    .replace("{steps}", String(counts.steps)).replace("{pre}", String(counts.preChecks))
+    .replace("{post}", String(counts.postChecks)).replace("{rollback}", String(counts.rollback))}`;
+  const latestRun = m.latestRun;
+  // a cancel before any review / approval ends the list at ① / ②: who cancelled is said in that card
+  const closedHere = (id: ChangePhaseId) => cr.status === "cancelled" && state(id) === "failed" && <ClosedRecord cr={cr} t={t} />;
+
+  /* -- Render ------------------------------------------------------ */
   return (
-    <div className="space-y-6">
-      {backLink}
-      {/* One line: title · status · reason · to-do · primary action (spec §3.E.4) */}
-      <Card>
-        <CardBody className="space-y-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="font-mono text-sm bg-secondary text-muted-foreground px-2 py-0.5 rounded">C#{cr.id}</span>
-            <h1 className="text-2xl font-semibold text-foreground">{cr.title}</h1>
-            {cr.risk_level && <RiskLevelBadge level={cr.risk_level} />}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <ChangeStatusBadge status={cr.status} />
-            {head.reason && (
-              <>
-                <span className={muted}>·</span>
-                <span className="min-w-0 break-words text-foreground">{head.reason}</span>
-              </>
-            )}
-            <span className={muted}>·</span>
-            <span className={muted}>{t("changes.todoLabel")}:</span>
-            <span className="text-foreground">{t(`changes.todo.${head.todo ?? "none"}`)}</span>
-            {primary && (
-              <button
-                disabled={act.isPending || (head.action === "copy" && accounts.isLoading)}
-                onClick={primary.run}
-                className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
-              >
-                {primary.label}
-              </button>
-            )}
-          </div>
-          <ChangeStepper cr={cr} />
-        </CardBody>
-      </Card>
-      {msg && <ErrorBanner message={msg} onRetry={() => setMsg(null)} actionLabel={t("common.close")} />}
-
-      {/* Request: what was asked for, with the requester's own steps and the external ticket */}
-      <Card>
-        <CardHeader>
-          <h2 className="font-semibold">{t("changes.request")}</h2>
-          <span className="text-xs text-muted-foreground" title={t("changes.source")}>
-            {joinDot([cr.source, cr.trace_id])}
-          </span>
-        </CardHeader>
-        <CardBody className="space-y-3">
-          <div className="text-sm report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cr.description) }} />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground block">{t("plans.requestedBy")}</span>
-              <span className="font-mono">{cr.requested_by}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("plans.type")}</span>
-              {t(`plans.changeType.${cr.effective_change_type ?? cr.requested_change_type}`)}
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.created")}</span>
-              {formatFullDate(cr.requested_at ?? cr.created_at)}
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("plans.form.account")}</span>
-              {cr.account_id == null
-                ? t("plans.form.accountAny")
-                : acct
-                  ? `${acct.name} (${acct.provider})`
-                  : `#${cr.account_id}`}
-            </div>
-          </div>
-          {ext && (
-            <div className="text-sm">
-              <span className="text-muted-foreground">{t("changes.externalRef")}: </span>
-              {ext.url ? (
-                <a href={ext.url} target="_blank" rel="noopener noreferrer" className="font-mono text-primary hover:underline">
-                  {ext.label}
-                </a>
-              ) : (
-                <span className="font-mono">{ext.label}</span>
-              )}
-              {ext.requestedBy && (
-                <span className="text-muted-foreground"> · {t("changes.externalRequestedBy").replace("{name}", ext.requestedBy)}</span>
-              )}
-            </div>
-          )}
-          <div>
-            <span className="text-muted-foreground block text-sm mb-1">{t("changes.targets")}</span>
-            <div className="flex flex-wrap gap-1">
-              {cr.target_resources.map((x, i) => {
-                const title = typeof x.evidence === "string" ? x.evidence : x.evidence.command;
-                return x.db_id != null ? (
-                  <Link
-                    key={`${x.resource_id}-${i}`}
-                    to={`/app/resources/${x.db_id}`}
-                    className="px-1.5 py-0.5 rounded bg-secondary text-xs font-mono hover:underline"
-                    title={title}
-                  >
-                    {x.resource_id}
-                  </Link>
-                ) : (
-                  <span
-                    key={`${x.resource_id}-${i}`}
-                    className="px-1.5 py-0.5 rounded bg-secondary text-xs font-mono"
-                    title={title}
-                  >
-                    {x.resource_id}
-                  </span>
-                );
-              })}
-              {cr.target_hints
-                .filter((h) => !isHintResolved(h, cr.target_resources))
-                .map((h, i) => (
-                  <span
-                    key={`hint-${i}`}
-                    className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 text-xs font-mono"
-                    title={t("changes.unresolved")}
-                  >
-                    {h}?
-                  </span>
-                ))}
-            </div>
-          </div>
-          {cr.justification && (
-            <div>
-              <span className="text-muted-foreground block text-sm">{t("changes.justification")}</span>
-              <p className="text-sm text-muted-foreground">{cr.justification}</p>
-            </div>
-          )}
-          {(cr.proposed_steps?.length ?? 0) > 0 && (
-            <div>
-              <span className="text-muted-foreground block text-sm mb-1">{t("changes.proposedSteps")}</span>
-              <ol className="space-y-1 text-sm">
-                {cr.proposed_steps!.map((st, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{i + 1}.</span>
-                    <div className="min-w-0">
-                      {st.action && <div className="text-foreground">{st.action}</div>}
-                      <code className="text-xs font-mono break-all">{st.command}</code>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* Implementation plan vN: its steps, how they differ from the request's, and its content hash */}
-      {plan && (
-        <Card>
-          <CardHeader>
-            <h2 className="font-semibold">{planLabel(plan, t)}</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-muted-foreground">
-                {t("plans.hash")} {shortHash(plan.content_hash)}
-                {plan.approved_hash &&
-                  ` · ${t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} ${shortHash(plan.approved_hash)}`}
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4 min-w-0">
+        <StatusLine
+          refLabel={`C#${cr.id}`}
+          title={cr.title}
+          badges={
+            <>
+              {cr.risk_level && <RiskLevelBadge level={cr.risk_level} />}
+              <span className="text-xs px-2 py-0.5 rounded bg-secondary text-muted-foreground">
+                {t(`plans.changeType.${cr.effective_change_type ?? cr.requested_change_type}`)}
               </span>
-              <FixPlanStatusBadge status={plan.status} />
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div
-              className="text-muted-foreground mb-4 report-content"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(plan.summary) }}
-            />
-            {marks && (
-              <p className="mb-3 text-xs text-muted-foreground">
-                {t("changes.stepsDiff")}:{" "}
-                {marks.identical
-                  ? t("changes.stepsDiff.identical")
-                  : t("changes.stepsDiff.summary")
-                      .replace("{added}", String(marks.added))
-                      .replace("{modified}", String(marks.modified))
-                      .replace("{removed}", String(marks.removed.length))
-                      .replace("{unchanged}", String(marks.unchanged))}
-              </p>
-            )}
-            <ol className="space-y-4">
-              {plan.steps.map((st, i) => {
-                const mark = marks?.byPlanStep.get(i + 1);
-                return (
-                  <div key={i}>
-                    {mark && (
-                      <p className="mb-1 text-xs text-amber-600 dark:text-amber-400 break-all">
-                        {mark.kind === "added"
-                          ? t("changes.stepsDiff.added")
-                          : t("changes.stepsDiff.modified").replace("{cmd}", mark.proposed)}
-                      </p>
-                    )}
-                    <RunbookStep index={i + 1} step={st} />
-                  </div>
-                );
-              })}
-            </ol>
-            {marks && marks.removed.length > 0 && (
-              <div className="mt-4">
-                <h4 className="font-semibold mb-1 text-sm">{t("changes.stepsDiff.removed")}</h4>
-                <ul className="space-y-1 text-xs">
-                  {marks.removed.map((r) => (
-                    <li key={r.proposed_step} className="font-mono break-all text-muted-foreground line-through">
-                      {r.proposed_step}. {r.command}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {plan.pre_checks.length > 0 && (
-              <div className="mt-6">
-                <h4 className="font-semibold mb-2">{t("issues.preChecks")}</h4>
-                <ul className="space-y-1.5">
-                  {plan.pre_checks.map((c, i) => (
-                    <CheckItem key={i} item={c} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            {plan.post_checks.length > 0 && (
-              <div className="mt-6">
-                <h4 className="font-semibold mb-2">{t("issues.postChecks")}</h4>
-                <ul className="space-y-1.5">
-                  {plan.post_checks.map((c, i) => (
-                    <CheckItem key={i} item={c} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            {Object.keys(plan.rollback_plan).length > 0 && <RollbackPlan plan={plan.rollback_plan} />}
-          </CardBody>
-        </Card>
-      )}
+            </>
+          }
+          statusLabel={t(m.statusKey)}
+          tone={m.tone}
+          reason={m.reason}
+          waiting={m.waitingKey && t(m.waitingKey)}
+          primary={primary}
+          menu={menu}
+          error={error}
+          onDismissError={() => { setMsg(null); act.reset(); }}
+          backTo="/app/changes"
+          backLabel={t("nav.changes")}
+        />
 
-      {/* Approval: what the review and the policy advised, apart from what a human actually decided */}
-      <Card>
-        <CardHeader>
-          <h2 className="font-semibold">{t("changes.approval")}</h2>
-        </CardHeader>
-        <CardBody className="space-y-5">
-          <section className="space-y-2 text-sm">
-            <h3 className="font-medium text-foreground">
-              {t("changes.policyAdvice")}
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {joinDot([cr.reviewed_by, cr.reviewed_at && formatFullDate(cr.reviewed_at)])}
-              </span>
-            </h3>
-            <div>
-              <span className={muted}>{t("changes.verdict")}: </span>
-              <span className="font-mono">{cr.review_verdict ?? "-"}</span>
-            </div>
-            {cr.action_type && (
-              <div>
-                <span className={muted}>{t("changes.actionType")}: </span>
-                <span className="font-mono">{cr.action_type}</span>
-              </div>
-            )}
-            {cr.policy_rule && (
-              <div>
-                <span className={muted}>{t("changes.policy")}: </span>
-                <span className="font-mono">
-                  {cr.policy_rule} → {cr.policy_action}
-                </span>
-              </div>
-            )}
-            {cr.review_reasons.length > 0 && (
-              <ul className="list-disc list-inside text-muted-foreground">
-                {cr.review_reasons.map((r, i) => (
-                  <li key={i}>{r}</li>
-                ))}
-              </ul>
-            )}
-            {p.reasons.length > 0 && (
-              <ul className="list-disc list-inside text-muted-foreground">
-                {p.reasons.map((r, i) => (
-                  <li key={`p-${i}`}>{r}</li>
-                ))}
-              </ul>
-            )}
-            {p.escalatedFrom && p.effectiveRisk && (
-              <div className="text-amber-600">
-                {t("changes.riskEscalated").replace("{from}", p.escalatedFrom).replace("{to}", p.effectiveRisk)}
-              </div>
-            )}
-            {typeof shadowImpact === "number" && (
-              <div className={muted}>{t("changes.shadowImpact").replace("{n}", String(shadowImpact))}</div>
-            )}
-            <div className="pt-1">
-              <h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t("changes.impactGraph")}
-              </h4>
-              <LocalGraph subject={{ changeRequestId: cr.id }} note={impactNote} height={300} />
-            </div>
-          </section>
-
-          <section className="space-y-1 text-sm border-t border-border pt-4">
-            <h3 className="font-medium text-foreground">{t("changes.actualApproval")}</h3>
-            {cr.approved_by ? (
-              <p>
-                <span className={muted}>{t("plans.approvedBy")}: </span>
-                {joinDot([
-                  cr.approved_by,
-                  cr.approved_at && formatFullDate(cr.approved_at),
-                  plan?.approved_hash &&
-                    `${t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} ${shortHash(plan.approved_hash)}`,
-                ])}
-                {cr.approval_reason && <span className="block text-muted-foreground">{cr.approval_reason}</span>}
-              </p>
-            ) : cr.rejected_by ? (
-              <p className="text-red-500">
-                {t(cr.status === "cancelled" ? "changes.status.cancelled" : "changes.status.rejected")}:{" "}
-                {joinDot([cr.rejected_by, cr.rejected_at && formatFullDate(cr.rejected_at), cr.rejection_reason])}
-              </p>
-            ) : (
-              <p className={muted}>{t("changes.notApproved")}</p>
-            )}
-          </section>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            {cr.status === "draft" && (
-              <button
-                disabled={act.isPending}
-                onClick={() => runDirect({ id: cr.id, action: "review" })}
-                className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
-              >
-                {t("changes.startReview")}
-              </button>
-            )}
-            {cr.status === "under_review" && (
-              <>
-                <button
-                  disabled={act.isPending}
-                  onClick={() => runDirect({ id: cr.id, action: "review" })}
-                  className="px-4 py-2 text-sm rounded-lg border border-border disabled:opacity-50"
-                >
-                  {t("changes.restartReview")}
-                </button>
-                <span className="text-xs text-muted-foreground">{t("changes.restartReviewHint")}</span>
-              </>
-            )}
-            {cr.status === "needs_clarification" && (
-              <div className="w-full space-y-2">
-                <label htmlFor="change-clarify" className="text-sm text-muted-foreground block">{t("changes.clarifyLabel")}</label>
-                <textarea
-                  id="change-clarify"
-                  rows={3}
-                  maxLength={4000}
-                  value={clarify}
-                  onChange={(e) => setClarify(e.target.value)}
-                  placeholder={t("changes.clarifyPlaceholder")}
-                  className="w-full border border-border bg-background rounded-lg px-3 py-2 text-sm"
-                />
-                <button
-                  disabled={!clarify.trim() || act.isPending}
-                  onClick={sendClarify}
-                  className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
-                >
-                  {t("changes.clarify")}
-                </button>
-              </div>
-            )}
-            {cr.status === "planned" && (
-              <>
-                <button
-                  disabled={act.isPending}
-                  onClick={openApprove}
-                  className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white disabled:opacity-50"
-                >
-                  {t("changes.approveAndRun")}
-                </button>
-                <button
-                  disabled={act.isPending}
-                  onClick={() =>
-                    openDialog({
-                      action: "reject",
-                      title: `${t("plans.rejectTitle")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
-                      confirmText: t("issues.reject"),
-                      variant: "destructive",
-                    })
-                  }
-                  className="px-4 py-2 text-sm rounded-lg border border-red-500/40 text-red-500 disabled:opacity-50"
-                >
-                  {t("issues.reject")}
-                </button>
-              </>
-            )}
-            {cr.status === "approved" && (
-              <button
-                disabled={act.isPending}
-                onClick={onExecute}
-                className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
-              >
-                {t("changes.retryExecution")}
-              </button>
-            )}
-            {canCancel && (
-              <button
-                disabled={act.isPending}
-                onClick={() =>
-                  openDialog({
-                    action: "cancel",
-                    title: `${t("changes.cancelChange")} C#${cr.id}`,
-                    confirmText: t("common.confirm"),
-                    variant: "destructive",
-                  })
-                }
-                className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground disabled:opacity-50"
-              >
-                {t("changes.cancelChange")}
-              </button>
-            )}
-            {cr.status === "executing" && (
-              <span className="text-sm text-muted-foreground">{t("changes.executingNote")}</span>
-            )}
-            {canCopy && (
-              <button
-                disabled={accounts.isLoading}
-                onClick={() => setCopy(true)}
-                className="px-4 py-2 text-sm rounded-lg border border-border disabled:opacity-50"
-              >
-                {t("changes.copyAsNew")}
-              </button>
-            )}
+        {openable.length > 0 && (
+          <div className="flex justify-end">
+            <button onClick={() => setCards((c) => ({ ...c, open: new Set(allOpen ? [] : openable) }))}
+                    className="text-xs text-primary hover:underline">
+              {t(allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
+            </button>
           </div>
-        </CardBody>
-      </Card>
+        )}
 
-      {/* Execution evidence: the run history, then what each run did — newest first, the newest open */}
-      {runs.length > 0 && (
-        <Card>
-          <CardHeader>
-            <h2 className="font-semibold">{t("changes.execution")}</h2>
-          </CardHeader>
-          <CardBody className="space-y-4">
-            <ExecutionsTable executions={runs} />
-            {runs.map((ex, i) => (
-              <details key={ex.id} open={i === 0} className="border-t border-border pt-3">
-                <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                  {t("issues.executionN").replace("{n}", String(ex.id))}
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    {ex.status}{ex.started_at && ` · ${formatFullDate(ex.started_at)}`}
-                  </span>
-                </summary>
-                <div className="mt-4">
-                  <ExecutionEvidence execution={ex} />
-                </div>
-              </details>
-            ))}
-          </CardBody>
-        </Card>
-      )}
+        <PhaseCard {...card("request")} summary={requestSummary(cr, t)}>
+          <div className="space-y-4">
+            <RequestBody cr={cr} t={t} />
+            {closedHere("request")}
+          </div>
+        </PhaseCard>
 
-      {/* Acceptance: the newest run's verification, and the human verdict a needs_review change waits for */}
-      {(latest || cr.status === "needs_review") && (
-        <Card>
-          <CardHeader>
-            <h2 className="font-semibold">{t("changes.acceptance")}</h2>
-            {latest && <VerificationChip status={latest.verification_status} />}
-          </CardHeader>
-          <CardBody className="space-y-4">
-            {latest ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div className="md:col-span-2">
-                  <span className="text-muted-foreground block">{t("verification.reason")}</span>
-                  <span className="text-foreground whitespace-pre-wrap">{latest.verification_reason || "—"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">{t("verification.acceptedBy")}</span>
-                  <span className="text-foreground">{latest.accepted_by || "—"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">{t("verification.acceptedAt")}</span>
-                  <span className="text-foreground">{latest.accepted_at ? formatFullDate(latest.accepted_at) : "—"}</span>
-                </div>
-                <div className="md:col-span-2">
-                  <span className="text-muted-foreground block">{t("verification.note")}</span>
-                  <span className="text-foreground whitespace-pre-wrap">{latest.acceptance_note || "—"}</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("changes.noAcceptance")}</p>
-            )}
-            {cr.status === "needs_review" && (
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="w-full text-sm text-muted-foreground">{t("changes.needsReviewNote")}</span>
-                <button
-                  disabled={act.isPending}
-                  onClick={() => openAccept("completed")}
-                  className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white disabled:opacity-50"
-                >
-                  {t("changes.markCompleted")}
-                </button>
-                <button
-                  disabled={act.isPending}
-                  onClick={() => openAccept("failed")}
-                  className="px-4 py-2 text-sm rounded-lg border border-red-500/40 text-red-500 disabled:opacity-50"
-                >
-                  {t("changes.markFailed")}
-                </button>
-              </div>
-            )}
-          </CardBody>
-        </Card>
-      )}
+        {has("review") && (
+          <PhaseCard {...card("review")} summary={reviewSummary(cr, t)}>
+            <div className="space-y-4">
+              <ReviewBody cr={cr} quietReasons={m.quietReviewReasons} impactNote={impactNote} clarify={clarify}
+                          onClarifyChange={setClarify} onSendClarify={sendClarify} sending={act.isPending} t={t} />
+              {closedHere("review")}
+            </div>
+          </PhaseCard>
+        )}
 
-      {/* Timeline */}
-      <Card>
-        <CardHeader>
-          <h2 className="font-semibold">{t("changes.timeline")}</h2>
-        </CardHeader>
-        <CardBody>
-          {tl.isLoading ? (
-            <Spinner label={t("common.loading")} />
-          ) : tl.error ? (
-            <ErrorBanner message={tl.error.message} onRetry={() => tl.refetch()} actionLabel={t("common.retry")} />
-          ) : (tl.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("changes.noEvents")}</p>
-          ) : (
-            <PipelineTimeline events={toPipelineEvents(tl.data ?? [])} />
-          )}
-        </CardBody>
-      </Card>
+        {has("plan") && (
+          <PhaseCard {...card("plan")} summary={planSummary}>
+            {plan ? <PlanView plan={plan} stepsDiff={cr.steps_diff} t={t} />
+                  : <p className="text-sm text-muted-foreground">{t("workitem.future.change.plan")}</p>}
+          </PhaseCard>
+        )}
+
+        {has("run") && (
+          <PhaseCard {...card("run")} summary={runSummary(cr, latestRun, t)}>
+            <ChangeRunBody cr={cr} plan={plan} runs={m.runs} quietRunId={m.quietRunError ? latestRun?.id ?? null : null}
+                           endsHere={!has("accept")} acceptNote={m.acceptNote}
+                           onApprove={openApprove} onReject={openReject} onRetry={onExecute} busy={act.isPending} t={t} />
+          </PhaseCard>
+        )}
+
+        {has("accept") && (
+          <PhaseCard {...card("accept")}
+                     summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}>
+            <ChangeAcceptBody status={cr.status} latestRun={latestRun} acceptNote={m.acceptNote}
+                              onCompleted={() => openAccept("completed")} onFailed={() => openAccept("failed")}
+                              busy={act.isPending} t={t} />
+          </PhaseCard>
+        )}
+      </div>
+
+      {/* -- Right rail: key facts + activity -- */}
+      <aside className="space-y-4 min-w-0">
+        <FactsRail title={t("workitem.facts")} rows={changeFactRows(cr, acct, t)} t={t} />
+        <section id="activity" className="scroll-mt-4">
+          <Card>
+            <CardBody className="space-y-3">
+              <button onClick={() => setActivityOpen(!activityOpen)} aria-expanded={activityOpen}
+                      className="flex w-full items-center justify-between text-left">
+                <h3 className="text-sm font-semibold text-foreground">{t("workitem.activity")}</h3>
+                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${activityOpen ? "rotate-90" : ""}`}
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {activityOpen && (tl.isLoading ? <Spinner label={t("common.loading")} />
+                : tl.error ? <ErrorBanner message={tl.error.message} onRetry={() => tl.refetch()} actionLabel={t("common.retry")} />
+                : <ActivityList entries={toActivity(toPipelineEvents(tl.data ?? []))} t={t} emptyKey="changes.noEvents" />)}
+            </CardBody>
+          </Card>
+        </section>
+      </aside>
 
       {pending && (
         <ReasonDialog

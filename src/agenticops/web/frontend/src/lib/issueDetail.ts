@@ -119,7 +119,7 @@ export function anchorBadge(
   return { kind, candidates: kind === "ambiguous" ? issue.anchor_candidates?.candidates?.length ?? 0 : 0 };
 }
 
-export interface FactRow { labelKey: string; value: string; kind?: "date" | "mono"; href?: string }
+export interface FactRow { labelKey: string; value: string; kind?: "date" | "mono"; href?: string; external?: boolean }
 
 /** The issue's key facts for the right rail, blank rows dropped (an alarm's "unknown" resource is not a fact). */
 export function factRows(
