@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch, setAuthToken, clearAuthToken, getAuthToken } from "@/api/client";
 
 interface LoginResponse {
@@ -28,6 +29,7 @@ function getStoredUser(): AuthUser | null {
 }
 
 export function useAuth() {
+  const qc = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(getStoredUser);
   const isAuthenticated = !!getAuthToken() && !!user;
 
@@ -44,9 +46,11 @@ export function useAuth() {
       is_admin: data.is_admin,
     };
     localStorage.setItem("aiops_user", JSON.stringify(authUser));
+    // Nothing fetched as the previous user may show for this one (their private sessions included)
+    qc.clear();
     setUser(authUser);
     return authUser;
-  }, []);
+  }, [qc]);
 
   const logout = useCallback(async () => {
     try {
@@ -56,6 +60,9 @@ export function useAuth() {
     }
     clearAuthToken();
     setUser(null);
+    // A full reload, not an in-app navigation: the query cache and the chat stream store hold this user's
+    // data (private sessions and messages), which the next user in this tab must never see.
+    window.location.assign(`${import.meta.env.BASE_URL}login`);
   }, []);
 
   return { user, isAuthenticated, login, logout };

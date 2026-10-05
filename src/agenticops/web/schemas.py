@@ -731,6 +731,9 @@ class ChatSessionResponse(BaseModel):
     # MVP-2.7.0: private = its owner and admins; workspace = everyone. owned_by_me is for the caller.
     visibility: str = "workspace"
     owned_by_me: bool = False
+    # Whether the caller may rename / pin / archive / switch model / delete it (owner or admin; anyone for an
+    # ownerless session) — reading and sending only need it to be visible
+    can_manage: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 

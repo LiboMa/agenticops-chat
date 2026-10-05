@@ -68,6 +68,7 @@
   "chat.visibility.othersPrivate": "他人私有",
   "chat.makeWorkspace": "对工作区可见",
   "chat.makePrivate": "设为仅自己可见",
+  "chat.ownerManages": "他人共享给你的会话 —— 只有会话主人能修改",
   "chat.saveReportPrivateWarning": "这个会话是私有的，但保存后的报告对工作区所有人可见。",
   "chat.showArchived": "显示归档",
   "chat.pinned": "已置顶",

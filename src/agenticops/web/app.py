@@ -3803,6 +3803,7 @@ def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, c
         pinned=bool(row.pinned), starred=bool(row.starred), archived=bool(row.archived),
         model_id=row.model_id, effort=row.effort,
         visibility=row.visibility or chat_access.WORKSPACE, owned_by_me=chat_access.owned_by(row, actor),
+        can_manage=chat_access.can_manage(row, actor),
         **extra,
     )
 
@@ -3919,6 +3920,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
 
     with get_db_session() as db:
         row = chat_access.get_visible_session(db, session_id, actor)
+        chat_access.check_manage(row, actor)
         if payload.visibility is not None:
             chat_access.check_visibility_change(row, actor, payload.visibility)
             row.visibility = payload.visibility
@@ -3992,6 +3994,7 @@ async def api_delete_chat_session(session_id: str, actor: Actor = Depends(curren
     from agenticops.services import chat_access
     with get_db_session() as db:
         row = chat_access.get_visible_session(db, session_id, actor)
+        chat_access.check_manage(row, actor)
         db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
         # FK cascades are not enforced on SQLite: a summary left behind could be injected into a later
         # session that reuses this primary key.
@@ -4105,7 +4108,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
 
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            if row:
+            if row and chat_access.can_see(row, actor):  # still the caller's to write (it may have gone private)
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=ch_result.message))
                 row.last_activity_at = datetime.now(timezone.utc)
@@ -4125,7 +4128,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         # Persist user message + result
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            if row:
+            if row and chat_access.can_see(row, actor):  # still the caller's to write (it may have gone private)
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=send_result.message))
                 row.last_activity_at = datetime.now(timezone.utc)
@@ -4142,11 +4145,10 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         file_images=file_images, file_documents=file_documents,
     )
 
-    # Validate session & persist user message
+    # Validate session & persist user message (checked again: it may have gone private since the first check)
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
+        _private_session = (row.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE
         msg = ChatMessage(
             session_id=row.id, role="user", content=user_content,
             attachments=attachments,
@@ -4295,16 +4297,19 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 log_agent_call(
                     agent_name="main",
                     action="chat",
-                    input_summary=user_content[:500],
-                    output_summary=accumulated[:500],
+                    # GET /api/agent-logs shows these to everyone: a private session's text stays out of it
+                    input_summary="" if _private_session else user_content[:500],
+                    output_summary="" if _private_session else accumulated[:500],
                     tool_calls=len(tool_calls),
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     duration_ms=int((time.monotonic() - _chat_start_time) * 1000),
                     trace_id=_chat_trace_id,
                     model_id=_main_model_id,
-                    actor_type="user",
-                    actor_id=getattr(getattr(request, "state", None), "user", None),
+                    # the actor's key, not request.state.user (a User object in a String column: with auth on
+                    # every chat-turn log row failed to insert and was silently dropped)
+                    actor_type=actor.kind,
+                    actor_id=actor.key,
                 )
             except Exception:
                 logger.debug("Failed to log main agent call", exc_info=True)

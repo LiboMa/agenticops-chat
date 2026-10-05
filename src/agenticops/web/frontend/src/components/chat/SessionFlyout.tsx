@@ -12,7 +12,7 @@ import { sortSessions, filterArchived } from "@/lib/sortSessions";
 import { groupSessions } from "@/lib/groupSessions";
 import { useActiveStreamingSessions } from "@/hooks/useSessionStream";
 import { useAuth } from "@/hooks/useAuth";
-import { canChangeVisibility, otherVisibility, visibilityTag } from "@/lib/sessionVisibility";
+import { canChangeVisibility, canManage, otherVisibility, visibilityTag } from "@/lib/sessionVisibility";
 
 interface Props {
   open: boolean;
@@ -227,6 +227,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                             <p
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
+                                if (!canManage(s)) return;
                                 setRenamingId(s.session_id);
                                 setRenameValue(s.name);
                               }}
@@ -237,8 +238,8 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                           </div>
                         )}
 
-                        {/* Hover action menu */}
-                        <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
+                        {/* Hover action menu — only for whoever may manage the session (owner / admin / ownerless) */}
+                        {canManage(s) && <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
                           <button
                             onClick={(e) => handleTogglePin(s.session_id, s.pinned, e)}
                             className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -279,7 +280,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
-                        </div>
+                        </div>}
                       </div>
                     );
                   })}

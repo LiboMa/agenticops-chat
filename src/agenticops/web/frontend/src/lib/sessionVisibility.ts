@@ -17,6 +17,11 @@ export function canChangeVisibility(s: Pick<ChatSession, "owned_by_me">, authent
   return authenticated && !!s.owned_by_me;
 }
 
+/** Rename / pin / archive / model / delete — false only when the server says so (an older API sends nothing). */
+export function canManage(s: Pick<ChatSession, "can_manage">): boolean {
+  return s.can_manage !== false;
+}
+
 export function otherVisibility(s: Pick<ChatSession, "visibility">): SessionVisibility {
   return (s.visibility ?? "workspace") === "private" ? "workspace" : "private";
 }

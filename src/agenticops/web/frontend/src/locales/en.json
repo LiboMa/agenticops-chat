@@ -68,6 +68,7 @@
   "chat.visibility.othersPrivate": "Private (not yours)",
   "chat.makeWorkspace": "Share with the workspace",
   "chat.makePrivate": "Make private (only you)",
+  "chat.ownerManages": "Shared with you — only its owner can change this",
   "chat.saveReportPrivateWarning": "This conversation is private, but a saved report is visible to everyone in the workspace.",
   "chat.showArchived": "Show archived",
   "chat.pinned": "Pinned",

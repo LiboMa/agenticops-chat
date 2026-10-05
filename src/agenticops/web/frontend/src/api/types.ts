@@ -731,6 +731,8 @@ export interface ChatSession {
   /** MVP-2.7.0: private = its owner and admins; workspace = everyone (auth off: always workspace) */
   visibility?: "private" | "workspace";
   owned_by_me?: boolean;
+  /** may rename / pin / archive / switch model / delete it (its owner or an admin; anyone if it has no owner) */
+  can_manage?: boolean;
 }
 
 export interface ChatMessage {

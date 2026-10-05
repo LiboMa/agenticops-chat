@@ -99,8 +99,34 @@ def test_a_workspace_session_is_everyones(env):
     assert r.status_code == 200 and r.json()["visibility"] == "workspace"
     bob = env.as_(BOB)
     assert sid in [x["session_id"] for x in bob.get("/api/chat/sessions").json()]
-    assert bob.get(f"/api/chat/sessions/{sid}").json()["owned_by_me"] is False
-    assert bob.patch(f"/api/chat/sessions/{sid}", json={"name": "renamed"}).status_code == 200
+    body = bob.get(f"/api/chat/sessions/{sid}").json()
+    assert (body["owned_by_me"], body["can_manage"]) == (False, False)
+    _add_message(sid)
+    assert len(bob.get(f"/api/chat/sessions/{sid}/messages").json()["messages"]) == 1
+
+
+def test_sharing_a_session_shares_reading_not_managing_it(env):
+    """A shared session is still its owner's: others read (and talk) in it, but cannot rename, archive, switch
+    its model or delete it; an admin can. A 403 here reveals nothing — the caller can already see the session."""
+    sid = _new(env, ALICE)["session_id"]
+    env.as_(ALICE).patch(f"/api/chat/sessions/{sid}", json={"visibility": "workspace"})
+    bob = env.as_(BOB)
+    for body in ({"name": "mine now"}, {"archived": True}, {"pinned": True}, {"effort": "deep"}):
+        assert bob.patch(f"/api/chat/sessions/{sid}", json=body).status_code == 403, body
+    assert bob.delete(f"/api/chat/sessions/{sid}").status_code == 403
+    assert env.as_(ALICE).get(f"/api/chat/sessions/{sid}").json()["name"] == "s"
+    assert env.as_(ADMIN).patch(f"/api/chat/sessions/{sid}", json={"name": "by admin"}).status_code == 200
+    assert env.as_(ALICE).get(f"/api/chat/sessions/{sid}").json()["can_manage"] is True
+
+
+def test_an_ownerless_session_is_still_everyones_to_manage(env):
+    s = get_session()
+    s.add(ChatSession(session_id="legacy-2", name="old"))
+    s.commit(); s.close()
+    bob = env.as_(BOB)
+    assert bob.get("/api/chat/sessions/legacy-2").json()["can_manage"] is True
+    assert bob.patch("/api/chat/sessions/legacy-2", json={"name": "renamed"}).status_code == 200
+    assert bob.delete("/api/chat/sessions/legacy-2").status_code == 204
 
 
 def test_only_the_owner_or_an_admin_changes_who_sees_a_session(env):
@@ -240,3 +266,26 @@ def test_registration_answers_with_the_new_user(tmp_path, monkeypatch):
     r = TestClient(app).post("/api/auth/register", json={"email": "dave@example.com", "password": "pw-123456"})
     assert r.status_code == 201, r.text
     assert r.json()["email"] == "dave@example.com"
+
+
+def test_a_private_chat_turn_is_logged_with_its_actor_and_without_its_text(env):
+    """The chat-turn AgentLog took request.state.user (a User object) as actor_id, so with auth on every row
+    failed to insert and was dropped; and GET /api/agent-logs shows summaries to everyone — so a private
+    session's turn is logged (tokens, cost, actor) without its text."""
+    from agenticops.models import AgentLog
+    from agenticops.web import app as app_mod
+    sid = _new(env, ALICE)["session_id"]
+
+    class FakeAgent:
+        async def stream_async(self, _content):
+            yield {"data": "the private answer"}
+    with patch.object(app_mod._chat_sessions, "get_or_create", return_value=FakeAgent()):
+        r = env.as_(ALICE).post(f"/api/chat/sessions/{sid}/messages", json={"content": "a private question"})
+        assert r.status_code == 200
+    s = get_session()
+    try:
+        row = s.query(AgentLog).filter_by(agent_name="main", action="chat").one()
+        assert (row.actor_type, row.actor_id) == ("user", ALICE.key)
+        assert row.input_summary in ("", None) and row.output_summary in ("", None)
+    finally:
+        s.close()

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canChangeVisibility, otherVisibility, visibilityTag } from "@/lib/sessionVisibility";
+import { canChangeVisibility, canManage, otherVisibility, visibilityTag } from "@/lib/sessionVisibility";
 
 describe("session visibility", () => {
   it("tags workspace sessions and other people's private ones, never the reader's own", () => {
@@ -21,5 +21,11 @@ describe("session visibility", () => {
     expect(otherVisibility({ visibility: "private" })).toBe("workspace");
     expect(otherVisibility({ visibility: "workspace" })).toBe("private");
     expect(otherVisibility({})).toBe("private");
+  });
+
+  it("lets anyone manage unless the server says the session is someone else's", () => {
+    expect(canManage({ can_manage: true })).toBe(true);
+    expect(canManage({})).toBe(true);
+    expect(canManage({ can_manage: false })).toBe(false);
   });
 });

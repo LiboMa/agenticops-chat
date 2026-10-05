@@ -31,6 +31,7 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
 
   if (!sessionId) return null;
   const session = sessionsQ.data?.find((s) => s.session_id === sessionId);
+  const locked = session?.can_manage === false;  // a session shared with you: its owner picks the model
   const presets = settingsQ.data?.model_presets ?? [];
   const globalMain = settingsQ.data?.agent_models?.["main"]?.model_id ?? "";
 
@@ -53,9 +54,9 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
-          disabled={disabled}
+          disabled={disabled || locked}
           className="self-center flex items-center gap-1 max-w-[180px] px-2 py-1 rounded-lg text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-          title={disabled ? t("chat.model.streamingLocked") : t("chat.model.switchTooltip")}
+          title={locked ? t("chat.ownerManages") : disabled ? t("chat.model.streamingLocked") : t("chat.model.switchTooltip")}
         >
           {/* chip icon */}
           <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">

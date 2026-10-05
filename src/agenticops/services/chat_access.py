@@ -60,6 +60,20 @@ def get_visible_session(db, session_id: str, actor: Actor) -> ChatSession:
     return row
 
 
+def can_manage(row: ChatSession, actor: Actor) -> bool:
+    """Rename, pin, archive, model/effort, delete. A session with an owner is the owner's (and admins') to
+    manage even when shared with the workspace — sharing it for reading must not hand everyone its deletion.
+    An ownerless (workspace) session stays manageable by anyone who sees it, as before 2.7.0."""
+    if not settings.api_auth_enabled or row.owner_user_id is None or is_admin(actor):
+        return True
+    return owned_by(row, actor)
+
+
+def check_manage(row: ChatSession, actor: Actor) -> None:
+    if not can_manage(row, actor):  # the caller can see it, so a 403 reveals nothing
+        raise HTTPException(403, "Only the session's owner or an admin can change or delete it")
+
+
 def check_visibility_change(row: ChatSession, actor: Actor, visibility: str) -> None:
     """Only the owner or an admin decides who sees a session; a session with no owner stays workspace."""
     if visibility == (row.visibility or WORKSPACE):
