@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { IconSidebar } from "./IconSidebar";
 import { MinimalTopBar } from "./MinimalTopBar";
 import { CommandPalette } from "../CommandPalette";
+import { RestoreNotice, ShellEffects } from "./ShellEffects";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
 export function AppShell() {
@@ -29,10 +30,12 @@ export function AppShell() {
       <div className={`transition-[padding] duration-200 ${navExpanded ? "pl-[200px]" : "pl-[52px]"}`}>
         <MinimalTopBar />
         <main className="p-6">
+          <RestoreNotice />
           <Outlet />
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ShellEffects />
     </div>
   );
 }

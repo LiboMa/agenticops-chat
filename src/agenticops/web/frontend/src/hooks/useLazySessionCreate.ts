@@ -5,6 +5,7 @@ import { apiFetch } from "@/api/client";
 import { chatStream } from "@/lib/chatStream";
 import { appendMessageToCache, nextTempId } from "@/hooks/useChatMessages";
 import type { ChatSession, ChatMessage } from "@/api/types";
+import { currentUserId, userKey } from "@/lib/home";
 
 /**
  * Lazy (deferred) session creation for the welcome flow:
@@ -29,7 +30,7 @@ export function useLazySessionCreate() {
           method: "POST",
           body: JSON.stringify({ name: undefined }),
         });
-        localStorage.setItem("aiops-last-session-id", session.session_id);
+        localStorage.setItem(userKey("aiops-last-session-id", currentUserId()), session.session_id);
         qc.invalidateQueries({ queryKey: ["chat-sessions"] });
         // Seed the user's message into the cache so it shows the moment the
         // Chat page mounts (the history query starts empty for a new session).

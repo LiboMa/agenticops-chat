@@ -1,3 +1,5 @@
+import { loginPath } from "@/lib/home";
+
 const BASE_URL = "/api";
 
 export class ApiError extends Error {
@@ -74,7 +76,7 @@ export async function apiFetch<T>(
     // Token expired or invalid — redirect to login
     clearAuthToken();
     if (!window.location.pathname.includes("/login")) {
-      window.location.href = "/app/login";
+      window.location.href = loginPath(window.location);  // log in again, then come back here
     }
     throw new ApiError(401, "Session expired");
   }

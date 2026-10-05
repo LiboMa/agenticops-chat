@@ -2,9 +2,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { savePreferences } from "@/lib/preferences";
 
 const ROUTE_LABELS: Record<string, string> = {
-  "/app": "nav.dashboard",
+  "/app/overview": "nav.dashboard",
   "/app/chat": "nav.chat",
   "/app/issues": "nav.issues",
   "/app/changes": "nav.changes",
@@ -49,7 +50,11 @@ export function MinimalTopBar() {
         )}
         {/* Locale toggle */}
         <button
-          onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+          onClick={() => {
+            const next = locale === "en" ? "zh" : "en";
+            setLocale(next);
+            void savePreferences({ locale: next });  // the user's choice follows them to other browsers
+          }}
           className="px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground bg-secondary hover:bg-muted border border-border rounded transition-colors"
         >
           {locale === "en" ? "CN" : "EN"}

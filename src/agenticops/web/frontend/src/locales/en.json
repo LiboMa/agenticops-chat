@@ -887,5 +887,10 @@
   "severity.critical": "Critical",
   "severity.high": "High",
   "severity.medium": "Medium",
-  "severity.low": "Low"
+  "severity.low": "Low",
+  "notFound.title": "Page not found",
+  "notFound.body": "This address does not exist in AgenticOps. It may have been mistyped or moved.",
+  "notFound.back": "Go to Chat",
+  "home.restoreNotice": "The item you last had open no longer exists, or you can no longer access it.",
+  "home.dismiss": "Dismiss"
 }

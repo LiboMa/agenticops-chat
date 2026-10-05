@@ -887,5 +887,10 @@
   "severity.critical": "严重",
   "severity.high": "高",
   "severity.medium": "中",
-  "severity.low": "低"
+  "severity.low": "低",
+  "notFound.title": "页面不存在",
+  "notFound.body": "AgenticOps 里没有这个地址，可能输错了或已经移动。",
+  "notFound.back": "回到对话",
+  "home.restoreNotice": "上次打开的对象已不存在，或你已无权访问。",
+  "home.dismiss": "知道了"
 }

@@ -16,8 +16,10 @@ import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import { apiFetch } from "@/api/client";
+import { currentUserId, userKey } from "@/lib/home";
 
-const LAST_SESSION_KEY = "aiops-last-session-id";
+// Per signed-in user: a shared browser must never reopen someone else's last conversation
+const lastSessionKey = () => userKey("aiops-last-session-id", currentUserId());
 
 export default function Chat() {
   const { t } = useLocale();
@@ -43,7 +45,7 @@ export default function Chat() {
     if (urlSessionId || restorationAttempted.current) return;
     restorationAttempted.current = true;
 
-    const lastSessionId = localStorage.getItem(LAST_SESSION_KEY);
+    const lastSessionId = localStorage.getItem(lastSessionKey());
     if (!lastSessionId) {
       setShowWelcome(true);
       return;
@@ -57,7 +59,7 @@ export default function Chat() {
       .catch((err: unknown) => {
         // Session deleted or not found — clear localStorage and show welcome (Req 1.5)
         if (err instanceof ApiError && err.status === 404) {
-          localStorage.removeItem(LAST_SESSION_KEY);
+          localStorage.removeItem(lastSessionKey());
         }
         setShowWelcome(true);
       });
@@ -69,10 +71,10 @@ export default function Chat() {
     if (!selectedId) return;
 
     // Persist on every navigation to a valid session
-    localStorage.setItem(LAST_SESSION_KEY, selectedId);
+    localStorage.setItem(lastSessionKey(), selectedId);
 
     const handleBeforeUnload = () => {
-      localStorage.setItem(LAST_SESSION_KEY, selectedId);
+      localStorage.setItem(lastSessionKey(), selectedId);
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);

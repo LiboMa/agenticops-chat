@@ -1,7 +1,10 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
+import { HomeResolver } from "@/components/layout/HomeResolver";
+import { loginPath } from "@/lib/home";
+import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
 import { legacyPlansRedirect } from "@/lib/plans";
@@ -27,10 +30,13 @@ const Skills = lazy(() => import("@/pages/Skills"));
 const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
 const Galaxy = lazy(() => import("@/pages/Galaxy"));
 const Security = lazy(() => import("@/pages/Security"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const token = getAuthToken();
-  if (!token) return <Navigate to="/app/login" replace />;
+  // signed out: log in, then come back exactly here (path, query and hash)
+  if (!token) return <Navigate to={loginPath(location)} replace />;
   return <>{children}</>;
 }
 
@@ -39,15 +45,6 @@ function LegacyPlansRedirect() {
   const [params] = useSearchParams();
   return <Navigate to={legacyPlansRedirect(params.get("tab"))} replace />;
 }
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
 
 export default function App() {
   return (
@@ -63,8 +60,10 @@ export default function App() {
             }
           />
           <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
+            {/* /app: a pinned home, the last place, or Chat (MVP-2.7.0); the dashboard lives at /app/overview */}
+            <Route index element={<HomeResolver />} />
             <Route
-              index
+              path="overview"
               element={
                 <Suspense fallback={<Spinner />}>
                   <Dashboard />
@@ -229,6 +228,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <Security />
+                </Suspense>
+              }
+            />
+            <Route
+              path="*"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <NotFound />
                 </Suspense>
               }
             />

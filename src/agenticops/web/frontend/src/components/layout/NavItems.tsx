@@ -8,7 +8,7 @@ import { reorderNavIds, moveId } from "@/lib/navOrder";
 import { NavPreviewCard } from "./NavPreviewCard";
 
 export const NAV_ITEMS = [
-  { id: "dashboard", to: "/app", icon: "grid", labelKey: "nav.dashboard", end: true },
+  { id: "dashboard", to: "/app/overview", icon: "grid", labelKey: "nav.dashboard", end: false },
   { id: "chat", to: "/app/chat", icon: "chat", labelKey: "nav.chat", end: false },
   { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", end: false, badge: true },
   { id: "changes", to: "/app/changes", icon: "clipboard", labelKey: "nav.changes", end: false },

@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { safeNext } from "@/lib/home";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -9,6 +10,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -16,7 +18,8 @@ export default function Login() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate("/app", { replace: true });
+      // back to where the user was, if that is an in-app page; else /app decides (home preference)
+      navigate(safeNext(params.get("next"), window.location.origin) ?? "/app", { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
