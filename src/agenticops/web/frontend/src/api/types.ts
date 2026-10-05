@@ -728,6 +728,9 @@ export interface ChatSession {
   model_id: string | null;
   /** Per-session effort (thinking) override: off|standard|deep; null = Auto */
   effort?: string | null;
+  /** MVP-2.7.0: private = its owner and admins; workspace = everyone (auth off: always workspace) */
+  visibility?: "private" | "workspace";
+  owned_by_me?: boolean;
 }
 
 export interface ChatMessage {

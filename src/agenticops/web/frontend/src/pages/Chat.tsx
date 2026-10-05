@@ -85,12 +85,14 @@ export default function Chat() {
     }
   }, [urlSessionId]);
 
-  useChatSession(selectedId); // metadata only — primes session existence/validation
+  // Metadata of the open session: also its name when it is not among the 50 listed (e.g. a shared link)
+  const { data: sessionDetail } = useChatSession(selectedId);
   const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, sendMessage, cancel } =
     useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
-  const currentSession = sessions?.find((s) => s.session_id === selectedId);
+  const currentSession = sessions?.find((s) => s.session_id === selectedId)
+    ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
 
   // Three-zone layout state
   const [flyoutOpen, setFlyoutOpen] = useState(false);
@@ -327,6 +329,7 @@ export default function Chat() {
         <SaveReportDialog
           sessionId={selectedId}
           sessionName={currentSession.name}
+          isPrivate={currentSession.visibility === "private"}
           onClose={() => setShowSaveReport(false)}
         />
       )}
