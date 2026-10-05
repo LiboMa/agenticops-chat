@@ -32,3 +32,57 @@ describe("changeRow", () => {
     expect(r.dots.map((d) => d.state)).toEqual(["done", "done", "done", "failed"]);
   });
 });
+
+describe("issueRow — row cues (fix round 1)", () => {
+  it("an ARN keeps its meaningful tail, the full id stays for the tooltip; the region is shown when present", () => {
+    const arn = "arn:aws:eks:us-east-1:123456789012:cluster/agenticops-chaos-lab";
+    const r = issueRow(anomaly({ resource_type: "EKS", resource_id: arn, region: "us-east-1" }));
+    expect(r.subtitle).toBe("EKS · agenticops-chaos-lab · us-east-1");
+    expect(r.subtitleFull).toBe(`EKS · ${arn} · us-east-1`);
+  });
+  it("a long plain id keeps its last 28 characters; an 'unknown' region is not shown", () => {
+    const r = issueRow(anomaly({ resource_type: "Pod", resource_id: "frontend-7d9f8b6c5-abcde-0123456789", region: "unknown" }));
+    expect(r.subtitle).toBe("Pod · …d-7d9f8b6c5-abcde-0123456789");
+  });
+  it("recurrence is occurrence_count, 1 when absent", () => {
+    expect(issueRow(anomaly({ occurrence_count: 40 })).recurrence).toBe(40);
+    expect(issueRow(anomaly({})).recurrence).toBe(1);
+  });
+  it("emphasis: an open critical issue is 'critical'; resolved / dismissed are 'closed' (even if critical); else none", () => {
+    expect(issueRow(anomaly({ severity: "critical" })).emphasis).toBe("critical");
+    expect(issueRow(anomaly({ severity: "critical", status: "resolved" })).emphasis).toBe("closed");
+    expect(issueRow(anomaly({ status: "dismissed" })).emphasis).toBe("closed");
+    expect(issueRow(anomaly({})).emphasis).toBeNull();
+  });
+  it("the time is the detection time, even once resolved; an issue has no change type", () => {
+    const r = issueRow(anomaly({ status: "resolved", resolved_at: "2026-10-04T01:00:00" }));
+    expect(r.time).toBe("2026-10-03T03:39:04");
+    expect(r.typeKey).toBeNull();
+  });
+  it("fix_approved in list mode waits for the executor, never 'you' (not queued)", () => {
+    expect(issueRow(anomaly({ status: "fix_approved" })).waitKey).toBe("workitem.wait.executor");
+  });
+});
+
+describe("changeRow — more cases (fix round 1)", () => {
+  const cr = (x: Partial<ChangeRequest>) => ({ id: 2, title: "Scale ng-app", status: "planned", review_verdict: "approved_for_planning",
+    approved_at: null, risk_level: null, requested_by: "user:alice", external_ref: null, requested_change_type: "normal",
+    effective_change_type: null, updated_at: null, created_at: "2026-10-03T08:00:00", ...x }) as ChangeRequest;
+  it("no external ticket: the subtitle is the requester alone; no update yet: the time is created_at", () => {
+    const r = changeRow(cr({}));
+    expect(r.subtitle).toBe("user:alice");
+    expect(r.subtitleFull).toBe("user:alice");
+    expect(r.time).toBe("2026-10-03T08:00:00");
+    expect(r.account).toBeNull();
+  });
+  it("cancelled: copy-as-new is the next step, the row is closed; completed: no wait, closed", () => {
+    expect(changeRow(cr({ status: "cancelled" }))).toMatchObject({ waitKey: "workitem.primary.copyAsNew", emphasis: "closed" });
+    expect(changeRow(cr({ status: "completed" }))).toMatchObject({ waitKey: null, emphasis: "closed" });
+    expect(changeRow(cr({ status: "planned" }))).toMatchObject({ waitKey: "workitem.wait.approver", emphasis: null });
+  });
+  it("the type shown with the risk is the effective type, else the requested one; recurrence is always 1", () => {
+    expect(changeRow(cr({})).typeKey).toBe("plans.changeType.normal");
+    expect(changeRow(cr({ effective_change_type: "emergency" })).typeKey).toBe("plans.changeType.emergency");
+    expect(changeRow(cr({})).recurrence).toBe(1);
+  });
+});

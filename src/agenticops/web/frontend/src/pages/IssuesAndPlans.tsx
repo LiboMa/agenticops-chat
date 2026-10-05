@@ -13,7 +13,7 @@ import { StatusIndicator } from "@/components/ui/StatusIndicator";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { ISSUE_SCOPES, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
+import { ISSUE_SCOPES, isSecurityIssue, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import { legacyIssuesViewRedirect } from "@/lib/workitemRoutes";
 import type { Anomaly, Resource } from "@/api/types";
@@ -195,7 +195,7 @@ function IssuesView({ t }: { t: (key: string) => string }) {
         <select value={severity} onChange={(e) => setSeverity(e.target.value as Severity)} aria-label={t("workitem.filter.severity")} className={selectClass}>
           {(["all", "critical", "high", "medium", "low"] as Severity[]).map((sev) => (
             <option key={sev} value={sev}>
-              {named("workitem.filter.severity", `${sev === "all" ? t("issues.all") : sev} (${sevCounts[sev] ?? 0})`)}
+              {named("workitem.filter.severity", `${t(sev === "all" ? "issues.all" : `severity.${sev}`)} (${sevCounts[sev] ?? 0})`)}
             </option>
           ))}
         </select>
@@ -226,6 +226,12 @@ function IssuesView({ t }: { t: (key: string) => string }) {
           rows={filtered.map(issueRow)}
           levelHeader={t("facts.severity")}
           renderLevel={(r) => <SeverityBadge severity={r.level as Anomaly["severity"]} />}
+          timeHeader={t("issues.detected")}
+          rowExtra={(r) => isSecurityIssue(byKey.get(r.key)?.anomaly_type) && (
+            <Link to="/app/security" onClick={(e) => e.stopPropagation()} className="text-primary hover:underline">
+              {t("issues.openSecurity")} →
+            </Link>
+          )}
           rowActions={(r) => { const a = byKey.get(r.key); return a ? <IssueQuickActions issue={a} /> : null; }}
           emptyMessage={t("issues.noIssues")}
           t={t}

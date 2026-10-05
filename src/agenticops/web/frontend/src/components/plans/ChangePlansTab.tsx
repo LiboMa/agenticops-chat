@@ -66,7 +66,13 @@ export function ChangePlansTab() {
           <WorkItemTable
             rows={rows.map((c) => changeRow(c, accountName(c.account_id)))}
             levelHeader={t("plans.risk")}
-            renderLevel={(r) => r.level ? <RiskLevelBadge level={r.level as RiskLevel} /> : <span className="text-xs text-muted-foreground">—</span>}
+            renderLevel={(r) => (
+              <span className="inline-flex items-center gap-1.5">
+                {r.level ? <RiskLevelBadge level={r.level as RiskLevel} /> : <span className="text-xs text-muted-foreground">{t("workitem.unrated")}</span>}
+                {r.typeKey && <span className="text-xs text-muted-foreground">{t(r.typeKey)}</span>}
+              </span>
+            )}
+            timeHeader={t("workitem.col.updated")}
             emptyMessage={t("plans.noChanges")}
             t={t}
           />

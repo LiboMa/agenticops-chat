@@ -882,7 +882,6 @@
   "workitem.col.wait": "Waiting for / next step",
   "workitem.col.account": "Account",
   "workitem.col.updated": "Updated",
-  "workitem.quick.confirm": "Confirm",
   "workitem.quick.confirmTitle": "Confirm this is a real issue",
   "workitem.quick.confirmed": "Confirmed as a real issue",
   "workitem.quick.statusDone": "{ref} is now {status}",
@@ -892,5 +891,11 @@
   "workitem.filter.severity": "Severity",
   "workitem.filter.scope": "Scope",
   "workitem.filter.account": "Account",
-  "nav.resources": "Resources"
+  "nav.resources": "Resources",
+  "workitem.recurred": "Recurred {n} times (merged by the Signal Gate)",
+  "workitem.unrated": "Unrated",
+  "severity.critical": "Critical",
+  "severity.high": "High",
+  "severity.medium": "Medium",
+  "severity.low": "Low"
 }

@@ -3,27 +3,50 @@ import { isBlank } from "@/lib/issueDetail";
 import { issuePhases, type PhaseView } from "@/lib/issuePhases";
 import { changePhases } from "@/lib/changePhases";
 
+/** "critical": an open critical issue (tinted); "closed": a resolved / dismissed issue or a closed change (dimmed). */
+export type RowEmphasis = "critical" | "closed" | null;
+
 export interface WorkItemRow {
-  key: string; ref: string; href: string; title: string; subtitle: string | null;
-  statusKey: string; dots: PhaseView[]; waitKey: string | null; level: string | null; account: string | null; updated: string | null;
+  key: string; ref: string; href: string; title: string;
+  subtitle: string | null; subtitleFull: string | null; // shortened for the row / untruncated for its tooltip
+  statusKey: string; dots: PhaseView[]; waitKey: string | null; level: string | null;
+  typeKey: string | null; // a change's type (standard / normal / emergency), shown with its risk
+  recurrence: number;     // signals the Signal Gate merged into the issue; 1 = it happened once
+  emphasis: RowEmphasis;
+  account: string | null; time: string | null;
+}
+
+/** An ARN's tail is the resource's own name; a long id keeps its last 28 characters (the end carries the signal). */
+export function shortId(id: string): string {
+  const rid = id.startsWith("arn:") ? id.split(/[/:]/).filter(Boolean).pop() ?? id : id;
+  return rid.length > 28 ? "…" + rid.slice(-28) : rid;
 }
 
 /** An issue list row. The list has no RCA or runs, so the wait comes from list-mode issuePhases (R2). */
 export function issueRow(a: Anomaly): WorkItemRow {
   const p = issuePhases({ status: a.status });
-  const sub = [a.resource_type, a.resource_id].filter((x) => !isBlank(x)).join(" · ");
-  return { key: `I${a.id}`, ref: `I#${a.id}`, href: `/app/issues/${a.id}`, title: a.title, subtitle: sub || null,
+  const [type, id, region] = [a.resource_type, a.resource_id, a.region].map((x) => (isBlank(x) ? null : x));
+  const closed = a.status === "resolved" || a.status === "dismissed";
+  return { key: `I${a.id}`, ref: `I#${a.id}`, href: `/app/issues/${a.id}`, title: a.title,
+           subtitle: [type, id && shortId(id), region].filter(Boolean).join(" · ") || null,
+           subtitleFull: [type, id, region].filter(Boolean).join(" · ") || null,
            statusKey: `issues.status.${a.status}`, dots: p.phases, waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : null,
-           level: a.severity, account: a.account_name, updated: a.resolved_at ?? a.detected_at };
+           level: a.severity, typeKey: null, recurrence: a.occurrence_count ?? 1,
+           emphasis: closed ? "closed" : a.severity === "critical" ? "critical" : null,
+           account: a.account_name, time: a.detected_at };
 }
 
 /** A change list row; a closed change's "wait" column says its next step (copy as new) instead. */
 export function changeRow(cr: ChangeRequest, accountName?: string | null): WorkItemRow {
   const p = changePhases(cr);
   const ext = cr.external_ref ? `${cr.external_ref.system} ${cr.external_ref.ticket_id}` : null;
+  const sub = [cr.requested_by, ext].filter(Boolean).join(" · ") || null;
+  const type = cr.effective_change_type ?? cr.requested_change_type;
   return { key: `C${cr.id}`, ref: `C#${cr.id}`, href: `/app/changes/${cr.id}`, title: cr.title,
-           subtitle: [cr.requested_by, ext].filter(Boolean).join(" · ") || null,
+           subtitle: sub, subtitleFull: sub,
            statusKey: `changes.status.${cr.status}`, dots: p.phases,
            waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : p.primary === "copyAsNew" ? "workitem.primary.copyAsNew" : null,
-           level: cr.risk_level, account: accountName ?? null, updated: cr.updated_at ?? cr.created_at };
+           level: cr.risk_level, typeKey: type ? `plans.changeType.${type}` : null, recurrence: 1,
+           emphasis: p.terminal ? "closed" : null,
+           account: accountName ?? null, time: cr.updated_at ?? cr.created_at };
 }

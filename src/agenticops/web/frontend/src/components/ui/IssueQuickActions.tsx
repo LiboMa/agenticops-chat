@@ -1,10 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { Link } from "react-router-dom";
 import { useConfirm } from "./ConfirmDialog";
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueFeedback } from "@/hooks/useAgentMemory";
 import { useLocale } from "@/i18n/LocaleContext";
-import { isSecurityIssue } from "@/lib/issueScope";
 import type { Anomaly, IssueStatus } from "@/api/types";
 
 /** Statuses where the resolve / confirm / dismiss quick actions are offered; resolved and dismissed offer reopen. */
@@ -19,7 +17,7 @@ const ACTIONABLE = new Set<string>([
   "fix_executed",
 ]);
 
-/** The issue list's row quick actions (R3), rendered in WorkItemTable's rowActions slot. */
+/** The issue list's row quick actions (R3), icon buttons in WorkItemTable's rowActions column. */
 export function IssueQuickActions({ issue }: { issue: Anomaly }) {
   const { t } = useLocale();
   const isClosed = issue.status === "resolved" || issue.status === "dismissed";
@@ -69,34 +67,26 @@ export function IssueQuickActions({ issue }: { issue: Anomaly }) {
   return (
     <>
       {toast ? (
-        <span data-pinned className="text-xs font-medium px-2 py-1 rounded-md bg-primary/10 text-primary border border-primary/20">
-          {toast}
-        </span>
+        <span data-pinned className="text-[11px] leading-tight text-right text-primary">{toast}</span>
       ) : (
         <>
-          {isSecurityIssue(issue.anomaly_type) && (
-            <Link to="/app/security" onClick={(e) => e.stopPropagation()} className="px-2 py-1 text-xs text-primary hover:underline">
-              {t("issues.openSecurity")} →
-            </Link>
-          )}
           {canAct && (
             <>
-              <InlineBtn
+              <IconBtn
                 label={resolveLabel}
                 onClick={(e) => handleStatus(e, "resolved", t("workitem.confirm.resolve"), resolveLabel)}
                 disabled={busy}
                 className="text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
                 icon={<IconCheck />}
               />
-              <InlineBtn
-                label={t("workitem.quick.confirm")}
-                title={t("workitem.quick.confirmTitle")}
+              <IconBtn
+                label={t("workitem.quick.confirmTitle")}
                 onClick={handleConfirmed}
                 disabled={busy}
                 className="text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
                 icon={<IconThumbUp />}
               />
-              <InlineBtn
+              <IconBtn
                 label={dismissLabel}
                 onClick={(e) => handleStatus(e, "dismissed", t("workitem.confirm.dismiss"), dismissLabel, "destructive")}
                 disabled={busy}
@@ -106,7 +96,7 @@ export function IssueQuickActions({ issue }: { issue: Anomaly }) {
             </>
           )}
           {isClosed && (
-            <InlineBtn
+            <IconBtn
               label={reopenLabel}
               onClick={(e) => handleStatus(e, "open", t("workitem.confirm.reopen"), reopenLabel)}
               disabled={busy}
@@ -121,18 +111,16 @@ export function IssueQuickActions({ issue }: { issue: Anomaly }) {
   );
 }
 
-/* ── Inline button ────────────────────────────────────────────────── */
+/* ── Icon button (the label is its tooltip and accessible name) ──── */
 
-function InlineBtn({
+function IconBtn({
   label,
-  title,
   onClick,
   disabled,
   className = "",
   icon,
 }: {
   label: string;
-  title?: string;
   onClick: (e: React.MouseEvent) => void;
   disabled: boolean;
   className?: string;
@@ -142,11 +130,11 @@ function InlineBtn({
     <button
       onClick={onClick}
       disabled={disabled}
-      title={title}
-      className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md transition-colors disabled:opacity-40 ${className}`}
+      title={label}
+      aria-label={label}
+      className={`inline-flex items-center justify-center p-1.5 rounded-md transition-colors disabled:opacity-40 ${className}`}
     >
       {icon}
-      {label}
     </button>
   );
 }

@@ -69,6 +69,11 @@ describe("issuePhases — list mode (R2) and missing data (Review Focus 1)", () 
   it("root_cause_identified with rca null (the RCA row is gone) → rerun RCA", () => {
     expect(pick(issuePhases(P({ status: "root_cause_identified", rca: null })))).toEqual(["diagnose", "needsReview", "you", "rerunRca"]);
   });
+  it("fix_approved in list mode (runs unknown) waits for the executor, never 'not queued'; a known no-run still is", () => {
+    expect(pick(issuePhases({ status: "fix_approved" }))).toEqual(["run", "executing", "executor", null]);
+    expect(pick(issuePhases({ status: "fix_approved", latestRun: undefined }))).toEqual(["run", "executing", "executor", null]);
+    expect(pick(issuePhases({ status: "fix_approved", latestRun: null }))).toEqual(["run", "notQueued", "you", "retryExecution"]);
+  });
   it("fix_executed in list mode (no run known) → unverified, you", () => {
     expect(pick(issuePhases({ status: "fix_executed" }))).toEqual(["accept", "unverified", "you", null]);
   });

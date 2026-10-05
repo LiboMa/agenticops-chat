@@ -882,7 +882,6 @@
   "workitem.col.wait": "等谁 / 下一步",
   "workitem.col.account": "账户",
   "workitem.col.updated": "更新",
-  "workitem.quick.confirm": "确认",
   "workitem.quick.confirmTitle": "确认这是真实问题",
   "workitem.quick.confirmed": "已确认是真实问题",
   "workitem.quick.statusDone": "{ref} 已改为「{status}」",
@@ -892,5 +891,11 @@
   "workitem.filter.severity": "严重度",
   "workitem.filter.scope": "范围",
   "workitem.filter.account": "账户",
-  "nav.resources": "资源"
+  "nav.resources": "资源",
+  "workitem.recurred": "重复出现 {n} 次（信号闸门已归并）",
+  "workitem.unrated": "未评级",
+  "severity.critical": "严重",
+  "severity.high": "高",
+  "severity.medium": "中",
+  "severity.low": "低"
 }

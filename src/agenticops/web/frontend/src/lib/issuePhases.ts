@@ -45,7 +45,8 @@ function result(current: IssuePhaseId, sub: IssueSub, waitingFor: WaitingFor, pr
 }
 
 /** Spec §4: where an issue is, why, who moves it next and the page's one primary button. `rca: undefined`
- *  is list mode (R2): the list has no RCA, so root_cause_identified cannot tell review from plan. */
+ *  is list mode (R2): the list has no RCA, so root_cause_identified cannot tell review from plan. Likewise
+ *  `latestRun: undefined` means the runs are not known, `null` that there is none. */
 export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
   const run = i.latestRun ?? null;
   switch (i.status) {
@@ -70,6 +71,8 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
     case "fix_planned":
       return result("run", "awaitingApproval", "approver", i.plan && APPROVABLE.has(i.plan.status) ? "approveAndRun" : null);
     case "fix_approved":
+      // latestRun undefined = the runs are not known (list mode): approving queues the run, so never claim "not queued"
+      if (i.latestRun === undefined) return result("run", "executing", "executor", null);
       return run && IN_FLIGHT.has(run.status) ? result("run", "executing", "executor", null)
                                                : result("run", "notQueued", "you", "retryExecution");
     case "fix_executing":

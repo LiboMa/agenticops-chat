@@ -42,7 +42,9 @@ export function issueDetailModel(input: {
   const plan = currentFixPlan(input.plans);
   const latestRun = latestExecution(input.executions);
   // undefined (still loading) keeps list mode — never a flash of "rerun RCA"; null means there is no RCA
-  const known = issuePhases({ status: issue.status, rca, threshold, plan, latestRun });
+  // likewise runs not known yet are undefined, loaded-and-none is null
+  const known = issuePhases({ status: issue.status, rca, threshold, plan,
+                              latestRun: input.executions === undefined ? undefined : latestRun });
   const phase: IssuePhaseResult = input.executions === undefined && RUN_DEPENDENT.has(issue.status)
     ? { ...known, sub: input.runsFailed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null }
     : known;
