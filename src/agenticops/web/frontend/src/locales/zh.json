@@ -528,6 +528,8 @@
   "graph.blast.observed": "已观测",
   "graph.blast.truncatedHint": "图被截断，实际数字可能更大",
   "graph.showLlm": "显示 LLM 推断的关系",
+  "graph.showAll": "显示全部 {n} 个",
+  "graph.showCompact": "只看锚点邻域",
   "graph.truncatedPrefix": "已截断：",
   "graph.truncated.expansion_cap": "达到展开上限",
   "graph.truncated.node_cap": "达到节点上限",

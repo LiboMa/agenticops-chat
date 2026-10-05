@@ -528,6 +528,8 @@
   "graph.blast.observed": "Observed",
   "graph.blast.truncatedHint": "The graph was cut off, so the real number may be higher",
   "graph.showLlm": "Show LLM-inferred relations",
+  "graph.showAll": "Show all {n}",
+  "graph.showCompact": "Show the anchor's neighbourhood only",
   "graph.truncatedPrefix": "Truncated:",
   "graph.truncated.expansion_cap": "expansion limit reached",
   "graph.truncated.node_cap": "node limit reached",

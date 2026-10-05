@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { FocusEdge, FocusNode, GraphFocus } from "@/api/types";
-import { LOCAL_GRAPH_NODE_CAP, buildLocalGraph, focusPath } from "@/lib/localGraph";
+import {
+  COMPACT_NODE_CAP, LOCAL_GRAPH_NODE_CAP, buildLocalGraph, compactLocalGraph, focusPath, type LgNode, type LocalGraphModel,
+} from "@/lib/localGraph";
 
 function node(ref: number, hops: number, extra: Partial<FocusNode> = {}): FocusNode {
   return { ref, type: "EC2", name: `n-${ref}`, account_id: 1, region: "us-east-1", absent: false, hops,
@@ -142,5 +144,33 @@ describe("buildLocalGraph", () => {
     const m = buildLocalGraph(focus({ truncated: true, truncated_reason: "expansion_cap+node_cap",
                                       related: { merged: [], candidates: [], truncated: true } }));
     expect(m.truncated).toEqual(["expansion_cap", "node_cap", "related"]);
+  });
+});
+
+function n(id: string, extra: Partial<LgNode> = {}): LgNode {
+  return { id, kind: "resource", ref: Number(id.slice(2)) || null, label: id, type: null, hops: 2, health: "unknown",
+           issueIds: [], anchor: false, onPath: false, absent: false, merged: [], candidates: [], ...extra };
+}
+
+describe("compactLocalGraph (P11)", () => {
+  it("keeps the anchor, the causal path, merged signals and 1-hop neighbours, in that order, up to the cap", () => {
+    const nodes = [n("r:1", { anchor: true, hops: 0 }), n("r:2", { onPath: true, hops: 2 }),
+                   n("m:x", { kind: "merged", ref: null, hops: null }),
+                   ...Array.from({ length: 30 }, (_, i) => n(`r:${10 + i}`, { hops: 1 })),
+                   n("r:99", { hops: 2 })];
+    const links = [{ id: "s:1>2", kind: "structural" as const, source: "r:1", target: "r:2", llm: false, onPath: true },
+                   { id: "s:1>99", kind: "structural" as const, source: "r:1", target: "r:99", llm: false, onPath: false }];
+    const model: LocalGraphModel = { nodes, links, anchorIds: ["r:1"], truncated: [] };
+    const { model: m, hidden } = compactLocalGraph(model);
+    expect(m.nodes.length).toBe(COMPACT_NODE_CAP);
+    expect(m.nodes.slice(0, 3).map((x) => x.id)).toEqual(["r:1", "r:2", "m:x"]);
+    expect(m.nodes.some((x) => x.id === "r:99")).toBe(false); // 2 hops, off the path
+    expect(m.links.map((l) => l.id)).toEqual(["s:1>2"]);      // a link to a dropped node goes too
+    expect(hidden).toBe(nodes.length - COMPACT_NODE_CAP);
+    expect(m.anchorIds).toEqual(["r:1"]);
+  });
+  it("a small graph is unchanged", () => {
+    const model: LocalGraphModel = { nodes: [n("r:1", { anchor: true, hops: 0 }), n("r:2", { hops: 1 })], links: [], anchorIds: ["r:1"], truncated: [] };
+    expect(compactLocalGraph(model)).toEqual({ model, hidden: 0 });
   });
 });

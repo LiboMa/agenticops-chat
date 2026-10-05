@@ -155,3 +155,31 @@ export function buildLocalGraph(focus: GraphFocus,
   if (focus.related.truncated) truncated.push("related");
   return { nodes: [...nodes.values()], links, anchorIds, truncated };
 }
+
+/** The default drawing on an issue page (P11): the anchor, the RCA causal path, merged signals, then the
+ *  anchor's 1-hop neighbours and candidate issues — capped, so a 132-neighbour star stays readable. */
+export const COMPACT_NODE_CAP = 15;
+
+function compactRank(nd: LgNode): number {
+  if (nd.anchor) return 0;
+  if (nd.onPath) return 1;
+  if (nd.kind === "merged" || nd.kind === "issue") return 2;
+  if (nd.kind === "resource" && (nd.hops ?? Infinity) <= 1) return 3;
+  if (nd.kind === "candidate") return 4;
+  return 9;
+}
+
+export function compactLocalGraph(model: LocalGraphModel, cap = COMPACT_NODE_CAP): { model: LocalGraphModel; hidden: number } {
+  const ranked = model.nodes
+    .map((nd, i) => ({ nd, i, r: compactRank(nd) }))
+    .filter((x) => x.r < 9)
+    .sort((a, b) => a.r - b.r || (a.nd.hops ?? Infinity) - (b.nd.hops ?? Infinity) || a.i - b.i);
+  const kept = new Set(ranked.slice(0, cap).map((x) => x.nd.id));
+  if (kept.size === model.nodes.length) return { model, hidden: 0 };
+  const nodes = model.nodes.filter((nd) => kept.has(nd.id));
+  return {
+    model: { ...model, nodes, links: model.links.filter((l) => kept.has(l.source) && kept.has(l.target)),
+             anchorIds: model.anchorIds.filter((id) => kept.has(id)) },
+    hidden: model.nodes.length - nodes.length,
+  };
+}

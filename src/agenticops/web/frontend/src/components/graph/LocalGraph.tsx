@@ -14,7 +14,9 @@ import { useGraphFocus } from "@/hooks/useGraphFocus";
 import { useLocale } from "@/i18n/LocaleContext";
 import { cn } from "@/lib/cn";
 import { galaxyFocusPath } from "@/lib/galaxy";
-import { buildLocalGraph, type FocusSubject, type LgLink, type LgNode, type LocalGraphModel } from "@/lib/localGraph";
+import {
+  buildLocalGraph, compactLocalGraph, type FocusSubject, type LgLink, type LgNode, type LocalGraphModel,
+} from "@/lib/localGraph";
 
 // Galaxy's NEBULA palette, so a resource reads the same colour on both pages
 const HEALTH_FILL: Record<GalaxyHealth, string> = {
@@ -99,20 +101,26 @@ interface LocalGraphProps {
   path?: LocationPathEdge[]; // the RCA causal chain to highlight (location.path)
   note?: string; // e.g. "for reference only" while RBAC is in shadow mode
   height?: number;
+  compact?: boolean; // draw only the anchor's neighbourhood (compactLocalGraph) until the user asks for all
 }
 
-export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProps) {
+export function LocalGraph({ subject, path, note, height = 360, compact = false }: LocalGraphProps) {
   const { t } = useLocale();
   const uid = useId().replace(/:/g, "");
   const [showLlm, setShowLlm] = useState(false);
   const [sel, setSel] = useState<Selected>(null);
+  const [showAll, setShowAll] = useState(false);
   const { data: focus, isLoading, isError, error, isPlaceholderData } = useGraphFocus(subject, showLlm);
 
-  const model = useMemo(() => (focus ? buildLocalGraph(focus, { showLlm, path }) : null), [focus, showLlm, path]);
+  const full = useMemo(() => (focus ? buildLocalGraph(focus, { showLlm, path }) : null), [focus, showLlm, path]);
+  const compactMode = compact && !showAll;
+  const view = useMemo(() => (!full ? null : compactMode ? compactLocalGraph(full) : { model: full, hidden: 0 }),
+                       [full, compactMode]);
+  const model = view?.model ?? null;
   const pos = useMemo(() => (model && model.nodes.length ? layout(model) : null), [model]);
 
   if (isLoading) return <Spinner label={t("common.loading")} />;
-  if (isError || !focus || !model) {
+  if (isError || !focus || !full || !view || !model) {
     return (
       <p className="text-sm text-destructive">
         {t("common.error")}{error && <span className="text-muted-foreground"> {error.message}</span>}
@@ -141,6 +149,11 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
         <input type="checkbox" checked={showLlm} onChange={(e) => setShowLlm(e.target.checked)} />
         {t("graph.showLlm")}
       </label>
+      {compact && (showAll || view.hidden > 0) && (
+        <button type="button" onClick={() => setShowAll(!showAll)} className="text-primary hover:underline">
+          {showAll ? t("graph.showCompact") : t("graph.showAll").replace("{n}", String(full.nodes.length))}
+        </button>
+      )}
     </div>
   );
 
@@ -197,10 +210,12 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
           const r = n.anchor ? 12 : 8;
           const outside = n.kind !== "resource";
           const picked = sel?.kind === "node" && sel.id === n.id;
+          const labelled = !compactMode || n.anchor || n.onPath; // compact: other names show on hover only
           return (
             <g key={n.id} transform={`translate(${p.x},${p.y})`} role="button" tabIndex={0}
                aria-label={`${n.label} ${t(`galaxy.health.${n.health}`)}`} className="cursor-pointer outline-none"
                opacity={n.absent ? 0.45 : 1} {...onActivate(() => setSel({ kind: "node", id: n.id }))}>
+              {!labelled && <title>{n.label}</title>}
               {n.kind === "issue"
                 ? <rect x={-r} y={-r} width={2 * r} height={2 * r} rx={3} fill={HEALTH_FILL[n.health]} />
                 : <circle r={r} fill={HEALTH_FILL[n.health]} />}
@@ -214,9 +229,11 @@ export function LocalGraph({ subject, path, note, height = 360 }: LocalGraphProp
                   <text textAnchor="middle" dy="3" fontSize="8" fill="#fff">{n.issueIds.length}</text>
                 </g>
               )}
-              <text y={r + 13} textAnchor="middle" fontSize="10" className="fill-muted-foreground">
-                {short(n.label)}
-              </text>
+              {labelled && (
+                <text y={r + 13} textAnchor="middle" fontSize="10" className="fill-muted-foreground">
+                  {short(n.label)}
+                </text>
+              )}
             </g>
           );
         })}
