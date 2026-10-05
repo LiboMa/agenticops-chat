@@ -207,3 +207,24 @@ def test_old_anomaly_links_land_on_cases(env):
 def test_the_cli_banner_names_the_web_ui_not_the_dashboard():
     src = (ROOT / "src/agenticops/cli/main.py").read_text()
     assert "Dashboard : http" not in src and "Web dashboard : http" not in src
+
+
+@pytest.mark.parametrize("if_match", [b"\xb2", b"\xb9", b"0", b"-1", b"abc", b'"1x"'])
+def test_a_malformed_if_match_is_428_not_a_crash(env, if_match):
+    """A raw 0xB2 byte reaches the server as '²', which str.isdigit() accepts and int() refuses (was a 500)."""
+    headers, _ = env.login("alice@example.com")
+    r = env.client.patch("/api/users/me/preferences", headers={**headers, "If-Match": if_match}, json={"home": "chat"})
+    assert r.status_code == 428, (if_match, r.status_code)
+
+
+def test_an_if_match_list_matches_any_of_its_revisions(env):
+    headers, _ = env.login("alice@example.com")
+    r = env.client.patch("/api/users/me/preferences", headers={**headers, "If-Match": '"7", "1"'}, json={"home": "chat"})
+    assert r.status_code == 200 and r.json()["revision"] == 2
+    r = env.client.patch("/api/users/me/preferences", headers={**headers, "If-Match": '"7", "8"'}, json={"home": "issues"})
+    assert r.status_code == 412
+
+
+def test_an_unauthenticated_write_is_401_before_its_body_is_judged(env):
+    r = env.client.patch("/api/users/me/preferences", headers={"If-Match": "*"}, json={"home": "nonsense", "x": 1})
+    assert r.status_code == 401

@@ -71,4 +71,8 @@ describe("breadcrumbFor", () => {
   ])("%s → %s %s", (path, sectionKey, object) => {
     expect(breadcrumbFor(path)).toEqual({ sectionKey, object });
   });
+  it("a malformed escape is shown as typed, not thrown (it would blank the app)", () => {
+    expect(breadcrumbFor("/app/issues/%")).toEqual({ sectionKey: "nav.issues", object: "I#%" });
+    expect(breadcrumbFor("/app/skills/%E0")).toEqual({ sectionKey: "nav.skills", object: "%E0" });
+  });
 });

@@ -30,7 +30,8 @@ export function HomeResolver() {
       const probe = probeFor(target);
       if (probe) {
         try {
-          await apiFetch(probe.api);
+          // a hung check must not keep the spinner up: after 3 s go on to the target (the page will say)
+          await Promise.race([apiFetch(probe.api), new Promise((resolve) => setTimeout(resolve, 3000))]);
         } catch (e) {
           if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
             forgetLastRoute();

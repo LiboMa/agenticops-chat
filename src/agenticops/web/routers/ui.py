@@ -7,7 +7,7 @@ says what this deployment can do; it never carries a secret or connector configu
 
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -16,6 +16,12 @@ from agenticops.services import ui_preferences as prefs
 from agenticops.web.deps import require_authenticated_user
 
 router = APIRouter(tags=["workspace-ui"])
+
+
+async def signed_in_user(request: Request):
+    """A dependency, so identity is checked before the body is: an unauthenticated PATCH is a 401, never a
+    422 that describes the body."""
+    return await require_authenticated_user(request, admin=False)
 
 CONTRACT_VERSION = "workspace-ui-1"
 
@@ -54,12 +60,11 @@ def _features() -> dict:
 
 
 @router.get("/api/ui/bootstrap")
-async def api_ui_bootstrap(request: Request) -> dict:
+async def api_ui_bootstrap(user=Depends(signed_in_user)) -> dict:
     """Everything the shell needs before its first screen: who you are, what is enabled, the upload limits
     and your preferences (so the shell never needs a second request to decide where to land)."""
     from agenticops import __version__
     from agenticops.models import deployment_id
-    user = await require_authenticated_user(request, admin=False)
     preferences = prefs.read(user.id)
     return {
         "contract_version": CONTRACT_VERSION,
@@ -78,8 +83,7 @@ async def api_ui_bootstrap(request: Request) -> dict:
 
 
 @router.get("/api/users/me/preferences")
-async def api_get_preferences(request: Request, response: Response) -> dict:
-    user = await require_authenticated_user(request, admin=False)
+async def api_get_preferences(response: Response, user=Depends(signed_in_user)) -> dict:
     doc = prefs.read(user.id)
     response.headers["ETag"] = prefs.etag(doc["revision"])
     return doc
@@ -119,11 +123,10 @@ class PreferencesUpdate(BaseModel):
 
 
 @router.patch("/api/users/me/preferences")
-async def api_update_preferences(request: Request, response: Response, data: PreferencesUpdate,
+async def api_update_preferences(response: Response, data: PreferencesUpdate, user=Depends(signed_in_user),
                                  if_match: Optional[str] = Header(default=None)):
     """Write some preferences. If-Match must carry the ETag (revision) you read — or `*` to merge these
     fields whatever else changed (the last route uses that); 428 without it, 412 when it is stale."""
-    user = await require_authenticated_user(request, admin=False)
     expected = prefs.parse_if_match(if_match)
     if expected is None:
         return _ui_error(428, "if_match_required", "Send If-Match with the preferences ETag you read (or *)")

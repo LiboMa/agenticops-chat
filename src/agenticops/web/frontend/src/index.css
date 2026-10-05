@@ -103,7 +103,7 @@
     color: hsl(var(--foreground));
   }
   /* A visible keyboard focus on every control (form fields keep their own ring below) */
-  :where(a, button, summary, [role="button"], [tabindex]):focus-visible {
+  :where(a, button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }

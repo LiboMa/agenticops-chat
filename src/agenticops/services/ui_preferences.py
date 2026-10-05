@@ -39,16 +39,22 @@ class PreferencesConflict(Exception):
 
 
 def parse_if_match(header: Optional[str]):
-    """`"3"`, `W/"3"` or `3` → 3; `*` → "*"; missing or malformed → None."""
+    """`"3"`, `W/"3"` or `3` → (3,); a list `"2", "3"` → (2, 3) (any of them may match); `*` → "*";
+    missing or malformed → None (ASCII digits only: "²".isdigit() is True but int() refuses it)."""
     if header is None:
         return None
-    value = header.strip()
-    if value == "*":
+    if header.strip() == "*":
         return "*"
-    if value.startswith("W/"):
-        value = value[2:]
-    value = value.strip('"')
-    return int(value) if value.isdigit() and int(value) >= 1 else None
+    revisions = []
+    for part in header.split(","):
+        value = part.strip()
+        if value.startswith("W/"):
+            value = value[2:]
+        value = value.strip('"')
+        if not (value.isascii() and value.isdigit()) or int(value) < 1:
+            return None
+        revisions.append(int(value))
+    return tuple(revisions) or None
 
 
 def etag(revision: int) -> str:
@@ -72,15 +78,18 @@ def read(user_id: int) -> dict:
 
 
 def write(user_id: int, changes: dict, expected) -> dict:
-    """Merge `changes` (already validated) into the user's preferences, guarded by `expected`: a revision
-    number, or "*" to merge regardless of other writers (still never losing their fields: the merge is
-    redone on the current document until its compare-and-set wins). Raises PreferencesConflict."""
+    """Merge `changes` (already validated) into the user's preferences, guarded by `expected`: the revisions
+    the caller read (any may match), or "*" to merge regardless of other writers (still never losing their
+    fields: the merge is redone on the current document until its compare-and-set wins). Raises
+    PreferencesConflict."""
+    if isinstance(expected, int):
+        expected = (expected,)
     for _ in range(5):
         s = get_session()
         try:
             row = s.get(UserPreferences, user_id)
             current = row.revision if row else 1
-            if expected != "*" and expected != current:
+            if expected != "*" and current not in expected:
                 raise PreferencesConflict(current)
             data = {**(row.data if row else {}), **changes}
             if row is None:

@@ -124,6 +124,12 @@ export function breadcrumbFor(pathname: string): { sectionKey: string | null; ob
     issues: (v) => `I#${v}`, changes: (v) => `C#${v}`, resources: (v) => `R#${v}`,
     reports: (v) => `#${v}`, schedules: (v) => `#${v}`, skills: (v) => v,
   };
-  const ref = id && refs[hit.entry.id] ? refs[hit.entry.id](decodeURIComponent(id)) : null;  // chat ids are not shown
+  let raw = id;
+  try {
+    raw = id && decodeURIComponent(id);
+  } catch {
+    /* a malformed escape (/app/issues/%) is shown as typed, never thrown into the whole shell */
+  }
+  const ref = raw && refs[hit.entry.id] ? refs[hit.entry.id](raw) : null;  // chat ids are not shown
   return { sectionKey: hit.entry.labelKey, object: ref };
 }

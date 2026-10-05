@@ -25,6 +25,7 @@ function getInitialFontSize(): FontSize {
 
 interface ThemeValue {
   theme: Theme;
+  setTheme: (theme: Theme) => void;
   toggle: () => void;
   fontSize: FontSize;
   setFontSize: (size: FontSize) => void;
@@ -50,7 +51,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggle = useCallback(() => setThemeState((t) => (t === "light" ? "dark" : "light")), []);
   const setFontSize = useCallback((size: FontSize) => setFontSizeState(size), []);
 
-  return <ThemeContext.Provider value={{ theme, toggle, fontSize, setFontSize }}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme: setThemeState, toggle, fontSize, setFontSize }}>
+      {children}
+    </ThemeContext.Provider>
+  );
 }
 
 export function useTheme(): ThemeValue {

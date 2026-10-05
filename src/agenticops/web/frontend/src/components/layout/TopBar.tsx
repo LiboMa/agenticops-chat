@@ -22,10 +22,11 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { t, locale, setLocale } = useLocale();
   const { pathname } = useLocation();
   const crumb = breadcrumbFor(pathname);
-  const section = crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
+  const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
+  const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
 
   useEffect(() => {
-    document.title = `AgenticOps · ${section}`;
+    document.title = section ? `AgenticOps · ${section}` : "AgenticOps";
   }, [section]);
 
   const pickLocale = (next: "zh" | "en") => {
@@ -40,7 +41,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
         <MobileNav />
         <nav aria-label={t("topbar.breadcrumb")} className="flex min-w-0 items-center gap-2.5 max-[800px]:hidden">
           <span>AgenticOps</span>
-          <span aria-hidden="true">/</span>
+          {section && <span aria-hidden="true">/</span>}
           <b className="truncate font-medium text-foreground">{section}</b>
           {crumb.object && (<><span aria-hidden="true">/</span><span className="font-mono text-foreground">{crumb.object}</span></>)}
         </nav>
@@ -74,7 +75,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
 
 function AvatarMenu() {
   const { t } = useLocale();
-  const { theme, toggle, fontSize, setFontSize } = useTheme();
+  const { theme, setTheme, fontSize, setFontSize } = useTheme();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [homeOpen, setHomeOpen] = useState(false);
@@ -94,21 +95,26 @@ function AvatarMenu() {
                                 className="z-50 min-w-[220px] rounded-md border border-border bg-card p-1.5 shadow-lg animate-[slideInRight_0.2s_ease-out]">
             {user && <DropdownMenu.Label className="truncate px-2.5 py-1.5 text-xs text-muted-foreground">{user.email}</DropdownMenu.Label>}
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
-            <DropdownMenu.Item className={item} onSelect={(e) => { e.preventDefault(); toggle(); }}>
-              {t("topbar.theme")}
-              <span className="text-xs text-muted-foreground">{theme === "dark" ? t("topbar.themeDark") : t("topbar.themeLight")}</span>
-            </DropdownMenu.Item>
-            <div className="px-2.5 py-1.5">
-              <p className="mb-1 text-sm text-foreground">{t("topbar.fontSize")}</p>
-              <div role="radiogroup" aria-label={t("topbar.fontSize")} className="flex gap-1">
-                {(Object.keys(FONT_SIZES) as FontSize[]).map((size) => (
-                  <button key={size} type="button" role="radio" aria-checked={fontSize === size} onClick={() => setFontSize(size)}
-                          className={`flex-1 rounded border px-2 py-1 text-xs ${fontSize === size ? "border-primary bg-selected text-primary" : "border-border text-muted-foreground"}`}>
-                    {t(`topbar.font.${size}`)}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Radix radio items: reachable with the arrow keys like every menu item */}
+            <DropdownMenu.Label className="px-2.5 pt-1 text-[11px] text-muted-foreground">{t("topbar.theme")}</DropdownMenu.Label>
+            <DropdownMenu.RadioGroup value={theme} onValueChange={(v) => setTheme(v as "light" | "dark")}>
+              {(["light", "dark"] as const).map((v) => (
+                <DropdownMenu.RadioItem key={v} value={v} className={item} onSelect={(e) => e.preventDefault()}>
+                  {v === "dark" ? t("topbar.themeDark") : t("topbar.themeLight")}
+                  <DropdownMenu.ItemIndicator className="text-primary">✓</DropdownMenu.ItemIndicator>
+                </DropdownMenu.RadioItem>
+              ))}
+            </DropdownMenu.RadioGroup>
+            <DropdownMenu.Label className="px-2.5 pt-2 text-[11px] text-muted-foreground">{t("topbar.fontSize")}</DropdownMenu.Label>
+            <DropdownMenu.RadioGroup value={fontSize} onValueChange={(v) => setFontSize(v as FontSize)}>
+              {(Object.keys(FONT_SIZES) as FontSize[]).map((size) => (
+                <DropdownMenu.RadioItem key={size} value={size} className={item} onSelect={(e) => e.preventDefault()}>
+                  {t(`topbar.font.${size}`)}
+                  <DropdownMenu.ItemIndicator className="text-primary">✓</DropdownMenu.ItemIndicator>
+                </DropdownMenu.RadioItem>
+              ))}
+            </DropdownMenu.RadioGroup>
+            <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <DropdownMenu.Item className={item} onSelect={async () => { await logout(); navigate("/app/login", { replace: true }); }}>

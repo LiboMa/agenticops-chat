@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { useStats } from "@/hooks/useStats";
@@ -43,18 +43,32 @@ export function Sidebar() {
 
   const saved = boot.data?.preferences.nav_groups_open ?? [];
   const current = entryForPath(pathname);
-  const isOpen = (g: CollapsibleGroup) => saved.includes(g) || current?.group === g;
+  // The group holding the page opens when you arrive in it; after that the user's click wins (even inside it)
+  const [override, setOverride] = useState<Partial<Record<CollapsibleGroup, boolean>>>({});
+  const currentGroup = current?.group;
+  useEffect(() => {
+    if (currentGroup && currentGroup !== "daily") {
+      setOverride((o) => {
+        const next = { ...o };
+        delete next[currentGroup as CollapsibleGroup];
+        return next;
+      });
+    }
+  }, [currentGroup]);
+  const isOpen = (g: CollapsibleGroup) => override[g] ?? (saved.includes(g) || currentGroup === g);
   const toggle = (g: CollapsibleGroup) => {
-    const next = isOpen(g) ? saved.filter((x) => x !== g) : [...saved, g];
-    void savePreferences({ nav_groups_open: next });
+    const open = !isOpen(g);
+    setOverride((o) => ({ ...o, [g]: open }));
+    const next = open ? [...new Set([...saved, g])] : saved.filter((x) => x !== g);
+    if (next.length !== saved.length) void savePreferences({ nav_groups_open: next });  // only a real change is saved
   };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-[200px] flex-col border-r border-border bg-card px-3 pb-3 pt-5 min-[801px]:flex max-[1100px]:w-[166px] max-[1100px]:px-2">
-      <NavLink to="/app/chat" className="mb-5 flex items-center gap-2.5 px-2 text-[18px] font-bold tracking-tight text-primary max-[1100px]:text-[15px]">
+      <Link to="/app/chat" className="mb-5 flex items-center gap-2.5 px-2 text-[18px] font-bold tracking-tight text-primary max-[1100px]:text-[15px]">
         <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="" className="h-6 w-6 shrink-0" />
         <span className="truncate">AgenticOps</span>
-      </NavLink>
+      </Link>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {NAV_GROUPS.map((g) => {
@@ -88,22 +102,23 @@ export function Sidebar() {
                       onDragEnd={() => { setDrag(null); setOver(null); }}
                       className={over === item.id && drag?.id !== item.id ? "border-t-2 border-primary" : "border-t-2 border-transparent"}
                     >
-                      <NavLink
+                      {/* a plain Link: the active entry is lib/navGroups' (detail pages, Signals), and so is aria-current */}
+                      <Link
                         to={item.to}
-                        className={() => {
-                          const active = current?.entry.id === item.id;
-                          return `relative my-0.5 flex min-h-[39px] items-center gap-2.5 rounded-[5px] px-[11px] py-2 text-[13px] transition-colors max-[1100px]:gap-2 max-[1100px]:px-2 max-[1100px]:text-xs ${
-                            active ? "bg-selected font-semibold text-primary" : "text-foreground/75 hover:bg-accent hover:text-foreground"
-                          }`;
-                        }}
+                        className={`relative my-0.5 flex min-h-[39px] items-center gap-2.5 rounded-[5px] px-[11px] py-2 text-[13px] transition-colors max-[1100px]:gap-2 max-[1100px]:px-2 max-[1100px]:text-xs ${
+                          current?.entry.id === item.id ? "bg-selected font-semibold text-primary" : "text-foreground/75 hover:bg-accent hover:text-foreground"
+                        }`}
                         aria-current={current?.entry.id === item.id ? "page" : undefined}
                       >
                         <SvgIcon d={ICON_PATHS[item.icon]} className="h-[17px] w-[17px]" />
                         <span className="truncate">{t(item.labelKey)}</span>
                         {item.badge && hasOpenIssues && (
-                          <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label={t("nav.openIssues")} />
+                          <>
+                            <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
+                            <span className="sr-only">{t("nav.openIssues")}</span>
+                          </>
                         )}
-                      </NavLink>
+                      </Link>
                     </div>
                   ))}
                 </nav>
@@ -149,9 +164,13 @@ export function HomePrefsDialog({ open, onOpenChange: setOpen }: { open: boolean
   const [choice, setChoice] = useState<Home>("resume");
   const [saving, setSaving] = useState(false);
 
+  // Start from the saved home when the dialog OPENS — not on every cache write while it is open (the
+  // throttled last-route save rewrites the cache and would undo the user's pick)
+  const savedHome = useRef<Home>("resume");
+  savedHome.current = boot.data?.preferences.home ?? "resume";
   useEffect(() => {
-    if (open) setChoice(boot.data?.preferences.home ?? "resume");
-  }, [open, boot.data]);
+    if (open) setChoice(savedHome.current);
+  }, [open]);
 
   const save = async () => {
     setSaving(true);
@@ -197,11 +216,11 @@ export function MobileNav() {
   return (
     <select
       aria-label={t("nav.menu")}
-      value={current?.to ?? ""}
+      value={current && pathname === current.to ? current.to : ""}
       onChange={(e) => { if (e.target.value) navigate(e.target.value); }}
       className="min-w-[110px] max-w-[150px] rounded-[5px] border border-border bg-card px-2 py-1.5 text-xs min-[801px]:hidden"
     >
-      <option value="" disabled>{t("nav.menu")}</option>
+      <option value="" disabled>{current ? t(current.labelKey) : t("nav.menu")}</option>
       {NAV_GROUPS.map((g) => (
         <optgroup key={g.id} label={t(g.labelKey)}>
           {g.items.map((i) => <option key={i.id} value={i.to}>{t(i.labelKey)}</option>)}

@@ -32,17 +32,17 @@ export function ShellEffects() {
   return null;
 }
 
-/** "The last item you opened is gone or no longer yours to see" — shown once after a failed restore. */
+/** "The last item you opened is gone or no longer yours to see" — a toast for the one navigation that carried
+ *  it (it belongs to that history entry, so it never follows you to the next page), over the page, not in it. */
 export function RestoreNotice() {
   const { t } = useLocale();
-  const { state } = useLocation();
-  const [open, setOpen] = useState(Boolean((state as { restoreNotice?: boolean } | null)?.restoreNotice));
-  useEffect(() => {
-    if ((state as { restoreNotice?: boolean } | null)?.restoreNotice) setOpen(true);
-  }, [state]);
-  if (!open) return null;
+  const location = useLocation();
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const carried = Boolean((location.state as { restoreNotice?: boolean } | null)?.restoreNotice);
+  if (!carried || dismissed === location.key) return null;
+  const setOpen = (_: boolean) => setDismissed(location.key);
   return (
-    <div role="status" className="mb-4 flex items-start justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+    <div role="status" className="fixed left-1/2 top-[calc(var(--topbar-h)+12px)] z-40 flex w-[min(560px,calc(100vw-30px))] -translate-x-1/2 items-start justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-lg dark:bg-amber-950 dark:text-amber-300">
       <span>{t("home.restoreNotice")}</span>
       <button type="button" onClick={() => setOpen(false)} className="text-xs underline">{t("home.dismiss")}</button>
     </div>

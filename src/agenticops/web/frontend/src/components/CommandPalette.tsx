@@ -189,7 +189,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
             {debouncedQuery && !isLoading && flatResults.length === 0 && (
               <div className="py-12 text-center text-sm text-muted-foreground">
-                {t("palette.noResults").replace("{q}", debouncedQuery)}
+                {t("palette.noResults").replace("{q}", () => debouncedQuery)}
               </div>
             )}
 

@@ -18,8 +18,11 @@ function patch(changes: Changes, ifMatch: string) {
 export function savePreferences(changes: Changes, opts: { wildcard?: boolean } = {}): Promise<UiPreferences | null> {
   const run = queue.then(async () => {
     const key = bootstrapKey();
-    const boot = queryClient.getQueryData<UiBootstrap>(key);
-    if (!boot) return null;
+    // a choice made before bootstrap arrived is written once it has, not dropped
+    const boot = queryClient.getQueryData<UiBootstrap>(key)
+      ?? await queryClient.fetchQuery<UiBootstrap>({
+        queryKey: key, queryFn: () => apiFetch<UiBootstrap>("/ui/bootstrap"), staleTime: 5 * 60_000,
+      });
     queryClient.setQueryData<UiBootstrap>(key, { ...boot, preferences: { ...boot.preferences, ...changes } });
     let doc: UiPreferences;
     try {
@@ -57,9 +60,11 @@ export function localLastRoute(): string | null {
 function flush() {
   timer = null;
   if (pending === null || pending === sent) return;
-  sent = pending;
-  sentAt = Date.now();
-  void savePreferences({ last_route: pending }, { wildcard: true });
+  const route = pending;
+  sentAt = Date.now();  // throttle the attempts; `sent` only moves once the server has it
+  void savePreferences({ last_route: route }, { wildcard: true }).then((doc) => {
+    if (doc) sent = route;
+  });
 }
 
 export function recordLastRoute(path: string): void {
