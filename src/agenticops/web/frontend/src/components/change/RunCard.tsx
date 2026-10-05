@@ -14,17 +14,6 @@ const IN_FLIGHT = ["pending", "running"];
 const joinDot = (parts: Array<string | null | undefined | false>): string =>
   parts.filter((x): x is string => typeof x === "string" && x.length > 0).join(" · ");
 
-/** A run's one-line label: its number, then its verdict, else its localized status. */
-function runLabel(ex: FixExecution, t: T): string {
-  return joinDot([t("issues.executionN").replace("{n}", String(ex.id)),
-    ex.verification_status ? t(`verification.${ex.verification_status}`) : executionStatusLabel(ex.status, t)]);
-}
-
-/** The one-line summary of a collapsed ④ card: who approved it, then the latest run and its verdict. */
-export function runSummary(cr: ChangeRequestDetail, latestRun: FixExecution | null, t: T): string | null {
-  return joinDot([cr.approved_by && `${t("plans.approvedBy")}: ${cr.approved_by}`, latestRun && runLabel(latestRun, t)]) || null;
-}
-
 /** Who rejected or cancelled it, and when. The reason is the status line's sentence, so it is not repeated here. */
 export function ClosedRecord({ cr, t }: { cr: ChangeRequestDetail; t: T }) {
   if (!cr.rejected_by || (cr.status !== "rejected" && cr.status !== "cancelled")) return null;

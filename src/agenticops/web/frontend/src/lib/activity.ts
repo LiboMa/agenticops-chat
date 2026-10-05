@@ -44,7 +44,7 @@ function summarize(d: Record<string, unknown>): string {
   return "";
 }
 
-function entry(e: PipelineEvent): ActivityEntry {
+function entry(e: PipelineEvent, hide: string): ActivityEntry {
   const d = asObject(e.detail);
   const type = e.event_type;
   const known = KNOWN.has(type);
@@ -54,7 +54,7 @@ function entry(e: PipelineEvent): ActivityEntry {
     labelKey: known ? `activity.type.${type.replace(/\./g, "_")}` : "activity.type.unknown",
     labelParams: isAuthz ? { rule: String(d.rule ?? ""), permission: String(d.permission ?? "") }
       : known ? {} : { type },
-    summary: isAuthz ? "" : summarize(d),
+    summary: isAuthz ? "" : hideSummary(summarize(d), hide),
     actor: e.actor || "system",
     tone: BAD.has(type) || e.status === "failed" ? "bad" : WARN.has(type) ? "warn"
       : e.status === "completed" || e.status === "succeeded" ? "ok" : "info",
@@ -63,12 +63,17 @@ function entry(e: PipelineEvent): ActivityEntry {
   };
 }
 
-/** The timeline as sentences, oldest first; a run of identical consecutive events is one entry ×N. */
-export function toActivity(events: PipelineEvent[] | undefined): ActivityEntry[] {
+// The page's status line already says this sentence: the entry keeps its label, actor and time, not the sentence
+const hideSummary = (summary: string, hide: string) => (hide && summary === hide ? "" : summary);
+
+/** The timeline as sentences, oldest first; a run of identical consecutive events is one entry ×N. `hideText`
+ *  is the status line's sentence (spec §1-3: said once): a summary equal to it is left out, the raw view keeps it. */
+export function toActivity(events: PipelineEvent[] | undefined, opts?: { hideText?: string | null }): ActivityEntry[] {
+  const hide = opts?.hideText?.trim() ?? "";
   const sorted = [...(events ?? [])].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || a.id - b.id);
   const out: ActivityEntry[] = [];
   for (const e of sorted) {
-    const next = entry(e);
+    const next = entry(e, hide);
     const last = out[out.length - 1];
     if (last && last.labelKey === next.labelKey && last.summary === next.summary && last.actor === next.actor
         && JSON.stringify(last.labelParams) === JSON.stringify(next.labelParams)) {

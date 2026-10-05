@@ -2,31 +2,12 @@ import { useState } from "react";
 import type { ChangeRequestDetail } from "@/api/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { LocalGraph } from "@/components/graph/LocalGraph";
-import { policySummary } from "@/lib/changeDetail";
+import { policyActionLabel, policySummary, verdictLabel } from "@/lib/changeDetail";
 import { formatFullDate } from "@/lib/formatDate";
 
 type T = (key: string) => string;
 
-const VERDICTS = ["approved_for_planning", "needs_clarification", "rejected"]; // change_service.REVIEW_VERDICTS
 const SHOWN_REASONS = 3;
-
-/** The SRE review's verdict in words; a value this page does not know stays as it came. */
-export function verdictLabel(v: string | null, t: T): string | null {
-  return v ? (VERDICTS.includes(v) ? t(`changes.reviewVerdict.${v}`) : v) : null;
-}
-
-/** The one-line summary of a collapsed ② card: verdict · risk · action, a missing part dropped with its separator. */
-export function reviewSummary(cr: ChangeRequestDetail, t: T): string | null {
-  const parts: Record<string, string | null> = {
-    verdict: verdictLabel(cr.review_verdict, t), risk: cr.risk_level, action: cr.action_type,
-  };
-  const line = t("workitem.summary.review")
-    .split("·")
-    .map((seg) => seg.replace(/\{(\w+)\}/g, (_, k: string) => parts[k] ?? "").trim())
-    .filter(Boolean)
-    .join(" · ");
-  return line || null;
-}
 
 /** ② Review: who reviewed it and the verdict, the action and the policy decision, the first reasons (the rest
  *  folded), a raised risk, the shadow impact count and its graph (folded; marked for reference only while the
@@ -78,7 +59,7 @@ export function ReviewBody({
           {cr.policy_rule && (
             <div>
               <dt className={muted}>{t("changes.policy")}</dt>
-              <dd className="font-mono break-all">{cr.policy_rule} → {cr.policy_action}</dd>
+              <dd className="break-all"><span className="font-mono">{cr.policy_rule}</span> → {policyActionLabel(cr.policy_action, t)}</dd>
             </div>
           )}
         </dl>
@@ -106,7 +87,11 @@ export function ReviewBody({
         </p>
       )}
       {typeof shadowImpact === "number" && (
-        <p className={muted}>{t("changes.shadowImpact").replace("{n}", String(shadowImpact))}</p>
+        <p className={muted}>
+          {t("changes.shadowImpact").replace("{n}", String(shadowImpact))}
+          {/* the count is visible unfolded, so its "for reference only" goes with it, not only with the graph */}
+          {impactNote && <span className="block text-xs">{impactNote}</span>}
+        </p>
       )}
       <ImpactGraph changeRequestId={cr.id} note={impactNote} t={t} />
       {cr.status === "needs_clarification" && (

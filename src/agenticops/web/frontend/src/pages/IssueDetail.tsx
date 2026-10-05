@@ -439,7 +439,8 @@ export default function IssueDetail() {
               </button>
               {activityOpen && (timeline.isLoading
                 ? <Spinner label={t("common.loading")} />
-                : <ActivityList entries={toActivity(timeline.data)} t={t} emptyKey="activity.empty" />)}
+                : <ActivityList entries={toActivity(timeline.data, { hideText: m.reason && "text" in m.reason ? m.reason.text : null })}
+                                t={t} emptyKey="activity.empty" />)}
             </CardBody>
           </Card>
         </section>

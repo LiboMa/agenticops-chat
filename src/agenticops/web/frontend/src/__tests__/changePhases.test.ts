@@ -7,6 +7,9 @@ const C = (status: string, extra: Record<string, unknown> = {}) =>
   ({ status, review_verdict: null, approved_at: null, ...extra }) as Parameters<typeof changePhases>[0];
 const pick = (r: ReturnType<typeof changePhases>) => [r.current, r.sub, r.waitingFor, r.primary];
 const ids = (r: ReturnType<typeof changePhases>) => r.phases.map((p) => `${p.id}:${p.state}`);
+// a change detail with nothing on it but its status (the model's other inputs empty)
+const bare = (status: string) => ({ id: 1, status, review_verdict: null, approved_at: null, needs_review_reason: null,
+  review_reasons: [], rejection_reason: null, plans: [], executions: [], policy_decision: null }) as unknown as ChangeRequestDetail;
 
 describe("changePhases — spec §4 change table", () => {
   it("open states", () => {
@@ -84,11 +87,77 @@ describe("changeDetailModel — C#1 (failed at pre-check #1): the failure senten
                      rejection_reason: null } as ChangeRequestDetail;
     expect(changeDetailModel(asking).quietReviewReasons).toBe(false);
   });
-  it("acceptNote is the system's verdict only: a person who marked it failed did accept it", () => {
-    // resolve-review "failed" stamps the run failed AND records who judged it (change_service.resolve_review)
-    const judged = { ...run, status: "succeeded", error_message: null, verification_reason: "no post-checks",
-                     accepted_by: "user:admin", accepted_at: "2026-10-03T10:20:00", acceptance_note: "pods still crash-looping" };
+  it("acceptNote ('the system judged it failed') only for the system's terminal verdict", () => {
+    const note = { key: "workitem.accept.systemFailed", params: { n: "1" } };
+    // failed by the system: the run itself did not succeed (C#1, aborted at a pre-check)
+    expect(changeDetailModel(cr).acceptNote).toEqual(note);
+    expect(changeDetailModel({ ...cr, status: "rolled_back", executions: [{ ...run, status: "rolled_back" } as FixExecution] }).acceptNote)
+      .toEqual(note);
+    // a succeeded run whose post-check failed waits for a person (on_execution_result → needs_review): no note,
+    // the person decides — Mark completed is the primary, and the verdict's reason is the status line's
+    const postFail = { ...run, status: "succeeded", error_message: null, verification_reason: "post-check #2 failed: 0/3 ready" } as FixExecution;
+    const nr = changeDetailModel({ ...cr, status: "needs_review", needs_review_reason: "post-check #2 failed: 0/3 ready",
+                                   executions: [postFail] });
+    expect([nr.acceptNote, nr.phase.primary, nr.reason, nr.quietAcceptReason])
+      .toEqual([null, "markCompleted", "post-check #2 failed: 0/3 ready", true]);
+    // the person's verdict on that run: resolve_review stamps only a pending run, so the failed one keeps no
+    // accepted_by — still no "the system judged it" note, whichever way the person decided
+    expect(changeDetailModel({ ...cr, status: "completed", executions: [postFail] }).acceptNote).toBeNull();
+    expect(changeDetailModel({ ...cr, status: "failed", executions: [postFail] }).acceptNote).toBeNull();
+    // a pending run the person marked failed: stamped failed with who judged it
+    const judged = { ...postFail, accepted_by: "user:admin", accepted_at: "2026-10-03T10:20:00", acceptance_note: "pods still crash-looping" };
     const m = changeDetailModel({ ...cr, executions: [judged as FixExecution] });
     expect([m.reason, m.acceptNote]).toEqual(["pods still crash-looping", null]);
+  });
+  it("quietAcceptReason: ⑤ leaves out the verdict reason only when it IS the status line's sentence", () => {
+    const pend = { ...run, status: "succeeded", error_message: null, verification_status: "pending_acceptance",
+                   verification_reason: "the plan has no post-checks" } as FixExecution;
+    // an older row without needs_review_reason: the status line falls back to the run's own reason
+    expect(changeDetailModel({ ...cr, status: "needs_review", executions: [pend] }).quietAcceptReason).toBe(true);
+    expect(changeDetailModel({ ...cr, status: "needs_review", needs_review_reason: "different", executions: [pend] }).quietAcceptReason)
+      .toBe(false);
+    // completed: no reason on the status line, so ⑤ shows the verdict's
+    expect(changeDetailModel({ ...cr, status: "completed", executions: [{ ...pend, verification_status: "passed" } as FixExecution] })
+      .quietAcceptReason).toBe(false);
+  });
+});
+
+describe("changeDetailModel — every status: primary, menu and tone (copy-as-new exactly once on a closed change)", () => {
+  const ROWS: [string, string | null, string[], string][] = [
+    ["draft", "startReview", ["cancel"], "info"],
+    ["under_review", null, ["restartReview"], "info"],
+    ["needs_clarification", "answerReviewer", ["cancel"], "warn"],
+    ["planned", "approveAndRun", ["reject", "cancel"], "warn"],
+    ["approved", "retryExecution", ["cancel"], "warn"],
+    ["executing", null, [], "info"],
+    ["needs_review", "markCompleted", ["copyAsNew"], "warn"],
+    ["completed", null, ["copyAsNew"], "ok"],
+    ["failed", "copyAsNew", [], "bad"],
+    ["rolled_back", "copyAsNew", [], "bad"],
+    ["rejected", "copyAsNew", [], "bad"],
+    ["cancelled", "copyAsNew", [], "bad"],
+  ];
+  it.each(ROWS)("%s → primary %s, menu %j, tone %s", (status, primary, menu, tone) => {
+    const m = changeDetailModel(bare(status));
+    expect([m.phase.primary, m.menu, m.tone]).toEqual([primary, menu, tone]);
+    const copies = [m.phase.primary, ...m.menu].filter((x) => x === "copyAsNew").length;
+    expect(copies).toBe(["draft", "under_review", "needs_clarification", "planned", "approved", "executing"].includes(status) ? 0 : 1);
+  });
+  it("covers all 12 statuses", () => expect(ROWS).toHaveLength(12));
+});
+
+describe("changePhases — edge endings", () => {
+  it("a policy block (review passed, then the policy said block) ends the list at ② review, not ④", () => {
+    const blocked = C("rejected", { review_verdict: "approved_for_planning", policy_action: "block" });
+    expect(ids(changePhases(blocked))).toEqual(["request:done", "review:failed"]);
+    expect(ids(changePhases(C("rejected", { review_verdict: "approved_for_planning", policy_action: "require_human" }))))
+      .toEqual(["request:done", "review:done", "plan:done", "run:failed"]);
+  });
+  it("a status outside the union (a newer backend) degrades: no button, nobody waited on, never throws", () => {
+    const r = changePhases(C("paused", { review_verdict: "approved_for_planning", approved_at: "2026-10-03T09:55:56" }));
+    expect([r.sub, r.waitingFor, r.primary, r.terminal]).toEqual(["unknown", null, null, false]);
+    expect(ids(r)).toEqual(["request:done", "review:done", "plan:done", "run:done", "accept:future"]);
+    const m = changeDetailModel(bare("paused"));
+    expect([m.statusKey, m.primaryKey, m.menu, m.tone]).toEqual(["workitem.sub.unknown", null, [], "info"]);
   });
 });

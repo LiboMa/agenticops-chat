@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { activeChangePlan, changeHeadline, externalRefLink, isHintResolved, planStepMarks, policySummary, toPipelineEvents } from "@/lib/changeDetail";
+import {
+  activeChangePlan, changeHeadline, externalRefLink, isHintResolved, planStepMarks, policyActionLabel, policySummary,
+  requestSummary, reviewSummary, runSummary, sourceLabel, toPipelineEvents, unresolvedHints, verdictLabel,
+} from "@/lib/changeDetail";
+import { formatShortDate } from "@/lib/formatDate";
+import en from "@/locales/en.json";
+import zh from "@/locales/zh.json";
 import type { ChangeRequest, ChangeTarget, ChangeTimelineEntry, FixExecution, FixPlan } from "@/api/types";
 
 type Tgt = Pick<ChangeTarget, "resource_id" | "hint">;
@@ -215,5 +221,46 @@ describe("activeChangePlan", () => {
     // all terminal: the newest, for display only
     expect(activeChangePlan([plan(9, "rejected"), plan(7, "executed")])?.id).toBe(9);
     expect(activeChangePlan([])).toBeNull();
+  });
+});
+
+describe("ChangeDetail's one-line summaries and enum labels (pure; components/change render them)", () => {
+  const tEn = (k: string) => (en as Record<string, string>)[k] ?? k;
+  const tZh = (k: string) => (zh as Record<string, string>)[k] ?? k;
+  type Summ = Parameters<typeof reviewSummary>[0];
+  it("verdict / policy action / source: a known value in words, an unknown one as it came, none → null", () => {
+    expect(verdictLabel("approved_for_planning", tEn)).toBe("Approved for planning");
+    expect(verdictLabel("brand_new", tEn)).toBe("brand_new");
+    expect(verdictLabel(null, tEn)).toBeNull();
+    expect(policyActionLabel("block", tZh)).toBe("拦截");
+    expect(policyActionLabel("require_itsm_change", tEn)).toBe("Needs an external ITSM change");
+    expect(policyActionLabel("later_action", tEn)).toBe("later_action");
+    expect(policyActionLabel(null, tEn)).toBeNull();
+    expect(sourceLabel("webhook", tEn)).toBe("External system (webhook)");
+    expect(sourceLabel("smoke-signal", tEn)).toBe("smoke-signal");
+    for (const v of ["approved_for_planning", "needs_clarification", "rejected"]) expect(en).toHaveProperty(`changes.reviewVerdict.${v}`);
+    for (const v of ["auto_approve", "require_human", "require_itsm_change", "block", "escalate"]) expect(en).toHaveProperty(`changes.policyAction.${v}`);
+    for (const v of ["chat", "web", "cli", "im", "webhook", "api"]) expect(en).toHaveProperty(`changes.source.${v}`);
+  });
+  it("reviewSummary: verdict · risk · action, a missing part dropped with its separator, nothing → null", () => {
+    const r = (x: Partial<Summ>) => ({ review_verdict: null, risk_level: null, action_type: null, ...x }) as Summ;
+    expect(reviewSummary(r({ review_verdict: "approved_for_planning", risk_level: "L1", action_type: "tag" }), tEn))
+      .toBe("Approved for planning · L1 · tag");
+    expect(reviewSummary(r({ review_verdict: "approved_for_planning", action_type: "tag" }), tEn)).toBe("Approved for planning · tag");
+    expect(reviewSummary(r({ risk_level: "L2" }), tZh)).toBe("L2");
+    expect(reviewSummary(r({}), tEn)).toBeNull();
+  });
+  it("requestSummary counts the structured targets plus the hints none of them matched", () => {
+    const cr = { requested_by: "webhook:e2e-itsm", requested_at: "2026-10-03T03:37:32", created_at: null,
+                 target_hints: ["frontend", "ghost"],
+                 target_resources: [{ resource_id: "chaos-lab/frontend", hint: "frontend" }] } as Parameters<typeof requestSummary>[0];
+    expect(unresolvedHints(cr)).toEqual(["ghost"]);
+    expect(requestSummary(cr, tEn)).toBe(`webhook:e2e-itsm · ${formatShortDate("2026-10-03T03:37:32")} · 2 targets`);
+  });
+  it("runSummary: who approved it, then the latest run and its verdict (else its status in words)", () => {
+    const run = { id: 4, status: "aborted", verification_status: null } as FixExecution;
+    expect(runSummary({ approved_by: "user:admin" }, run, tEn)).toBe("Approved by: user:admin · Execution #4 · Aborted");
+    expect(runSummary({ approved_by: null }, { ...run, verification_status: "failed" }, tEn)).toBe("Execution #4 · Failed");
+    expect(runSummary({ approved_by: null }, null, tEn)).toBeNull();
   });
 });

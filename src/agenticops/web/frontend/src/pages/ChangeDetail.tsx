@@ -18,11 +18,11 @@ import { StatusLine, type StatusLineAction } from "@/components/workitem/StatusL
 import { PhaseCard } from "@/components/workitem/PhaseCard";
 import { FactsRail } from "@/components/workitem/FactsRail";
 import { ActivityList } from "@/components/workitem/ActivityList";
-import { RequestBody, requestSummary } from "@/components/change/RequestCard";
-import { ReviewBody, reviewSummary } from "@/components/change/ReviewCard";
-import { ChangeRunBody, ClosedRecord, runSummary } from "@/components/change/RunCard";
+import { RequestBody } from "@/components/change/RequestCard";
+import { ReviewBody } from "@/components/change/ReviewCard";
+import { ChangeRunBody, ClosedRecord } from "@/components/change/RunCard";
 import { ChangeAcceptBody } from "@/components/change/AcceptCard";
-import { externalRefLink, toPipelineEvents } from "@/lib/changeDetail";
+import { externalRefLink, requestSummary, reviewSummary, runSummary, toPipelineEvents } from "@/lib/changeDetail";
 import { changeDetailModel } from "@/lib/changeDetailModel";
 import { CHANGE_PHASES, type ChangePhaseId, type ChangePhaseResult, type ChangePrimary } from "@/lib/changePhases";
 import { CHANGE_HASHES, parseHash } from "@/lib/workitemRoutes";
@@ -355,7 +355,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
         {has("accept") && (
           <PhaseCard {...card("accept")}
                      summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}>
-            <ChangeAcceptBody status={cr.status} latestRun={latestRun} acceptNote={m.acceptNote}
+            <ChangeAcceptBody status={cr.status} latestRun={latestRun} acceptNote={m.acceptNote} quietReason={m.quietAcceptReason}
                               onCompleted={() => openAccept("completed")} onFailed={() => openAccept("failed")}
                               busy={act.isPending} t={t} />
           </PhaseCard>
@@ -378,7 +378,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
               </button>
               {activityOpen && (tl.isLoading ? <Spinner label={t("common.loading")} />
                 : tl.error ? <ErrorBanner message={tl.error.message} onRetry={() => tl.refetch()} actionLabel={t("common.retry")} />
-                : <ActivityList entries={toActivity(toPipelineEvents(tl.data ?? []))} t={t} emptyKey="changes.noEvents" />)}
+                : <ActivityList entries={toActivity(toPipelineEvents(tl.data ?? []), { hideText: m.reason })} t={t}
+                                emptyKey="changes.noEvents" />)}
             </CardBody>
           </Card>
         </section>

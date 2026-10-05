@@ -9,7 +9,8 @@ export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveA
   | "acceptResult" | "markResolved" | null;
 export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan"
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
-  | "loadingRuns" | "runsUnavailable"; // detail page only (issueDetailModel): the runs are not known yet / failed to load
+  | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
+  | "unknown"; // a status this page does not know (a newer backend)
 
 export interface IssuePhaseInput {
   status: IssueStatus;
@@ -78,14 +79,21 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
       if (run?.verification_status === "passed") return result("accept", "passed", "you", "markResolved");
       return result("accept", "unverified", "you", run ? "markResolved" : null);
     case "resolved":
-    case "dismissed": {
-      const reached: Record<IssuePhaseId, boolean> = {
-        diagnose: !!i.rca, plan: !!i.plan, run: !!run, accept: run?.verification_status === "passed" || (i.status === "resolved" && !!run),
-      };
-      return { current: null, sub: i.status, waitingFor: null, primary: null,
-               phases: ISSUE_PHASES.map((id) => ({ id, state: reached[id] ? "done" : "future" })) };
-    }
+    case "dismissed":
+      return reachedOnly(i, i.status);
+    default: // degrade, never throw: no button, nobody waited on
+      return reachedOnly(i, "unknown");
   }
+}
+
+/** No current phase: the phases there is data for read done, the rest future. */
+function reachedOnly(i: IssuePhaseInput, sub: IssueSub): IssuePhaseResult {
+  const run = i.latestRun ?? null;
+  const reached: Record<IssuePhaseId, boolean> = {
+    diagnose: !!i.rca, plan: !!i.plan, run: !!run, accept: run?.verification_status === "passed" || (i.status === "resolved" && !!run),
+  };
+  return { current: null, sub, waitingFor: null, primary: null,
+           phases: ISSUE_PHASES.map((id) => ({ id, state: reached[id] ? "done" : "future" })) };
 }
 
 const TERMINAL_PLAN = new Set(["executed", "failed", "rejected"]);

@@ -84,3 +84,11 @@ describe("currentFixPlan (Review Focus 2)", () => {
     expect(currentFixPlan(undefined)).toBeNull();
   });
 });
+
+describe("issuePhases — a status outside the union (a newer backend) degrades, never throws", () => {
+  it("no current phase, no button, nobody waited on; the phases it has data for read done", () => {
+    const r = issuePhases(P({ status: "quarantined" as IssuePhaseInput["status"], rca: gatePass }));
+    expect(pick(r)).toEqual([null, "unknown", null, null]);
+    expect(states(r)).toEqual(["done", "future", "future", "future"]);
+  });
+});

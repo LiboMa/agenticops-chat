@@ -6,20 +6,23 @@ import { isBlank } from "@/lib/issueDetail";
 type T = (key: string) => string;
 type Note = { key: string; params?: Record<string, string> };
 
-/** ⑤ Accept. A run the system judged failed needs no acceptance — one sentence pointing at that run. Waiting for a
- *  verdict: mark completed / failed (a reason is required; outlined, the status line holds the filled one); the
- *  reason it waits is the status line's. Completed: the verdict and who accepted it. */
-export function ChangeAcceptBody({ status, latestRun, acceptNote, onCompleted, onFailed, busy, t }: {
+/** ⑤ Accept. Waiting for a person's verdict: the run's verdict, mark completed / failed (a reason is required;
+ *  outlined, the status line holds the filled one). A run the system judged failed needs no acceptance — one
+ *  sentence pointing at that run. Completed: the verdict and who accepted it. The verdict reason is left out when
+ *  it IS the status line's sentence (`quietReason`). */
+export function ChangeAcceptBody({ status, latestRun, acceptNote, quietReason, onCompleted, onFailed, busy, t }: {
   status: ChangeStatus;
   latestRun: FixExecution | null;
   acceptNote: Note | null;
+  quietReason: boolean;
   onCompleted: () => void;
   onFailed: () => void;
   busy: boolean;
   t: T;
 }) {
   const muted = "text-muted-foreground";
-  if (acceptNote) {
+  const reason = latestRun && !quietReason && !isBlank(latestRun.verification_reason) ? latestRun.verification_reason : null;
+  if (acceptNote && status !== "needs_review") {
     return (
       <p className={`text-sm ${muted}`}>
         {Object.entries(acceptNote.params ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), t(acceptNote.key))}
@@ -36,6 +39,7 @@ export function ChangeAcceptBody({ status, latestRun, acceptNote, onCompleted, o
     return (
       <div className="space-y-3 text-sm">
         {head}
+        {reason && <p className="text-foreground whitespace-pre-wrap break-words">{reason}</p>}
         <p className={muted}>{t("changes.needsReviewNote")}</p>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={onCompleted} disabled={busy}
@@ -52,7 +56,7 @@ export function ChangeAcceptBody({ status, latestRun, acceptNote, onCompleted, o
   }
   if (!latestRun) return <p className={`text-sm ${muted}`}>{t("changes.noAcceptance")}</p>;
   const rows: [string, string | null][] = [
-    ["verification.reason", latestRun.verification_reason],
+    ["verification.reason", reason],
     ["verification.acceptedBy", latestRun.accepted_by],
     ["verification.acceptedAt", latestRun.accepted_at && formatFullDate(latestRun.accepted_at)],
     ["verification.note", latestRun.acceptance_note],

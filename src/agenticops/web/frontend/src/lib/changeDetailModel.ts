@@ -18,6 +18,7 @@ export interface ChangeDetailModel {
   menu: ChangeMenuItem[];
   quietRunError: boolean; // the latest run's error_message IS the status line's sentence: ④ does not repeat it
   quietReviewReasons: boolean; // the review rejected it and its reasons ARE the status line's sentence: ② does not list them
+  quietAcceptReason: boolean; // the latest run's verification_reason IS the status line's sentence: ⑤ does not repeat it
 }
 
 const CANCELLABLE = ["draft", "needs_clarification", "planned", "approved"];
@@ -30,8 +31,11 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
   const latestRun = runs[0] ?? null;
   const phase = changePhases(cr);
   const reason = changeHeadline(cr, latestRun).reason;
-  // the system's verdict only: a person who marked it failed accepted the run (accepted_by is theirs)
-  const failedRun = latestRun && latestRun.verification_status === "failed" && !latestRun.accepted_by;
+  // "the system judged it failed" only for the system's terminal verdict. A succeeded run with a failed verdict
+  // (a post-check failed) went to needs_review and a person decided it; resolve_review stamps only a pending run,
+  // so that run's accepted_by stays empty — its status tells it apart. A person's acceptance sets accepted_by.
+  const failedRun = (cr.status === "failed" || cr.status === "rolled_back") && latestRun !== null
+    && latestRun.verification_status === "failed" && !latestRun.accepted_by && latestRun.status !== "succeeded";
   const menu: ChangeMenuItem[] = [
     ...(cr.status === "under_review" ? ["restartReview" as const] : []),
     ...(cr.status === "planned" ? ["reject" as const] : []),
@@ -40,7 +44,7 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
   ];
   return {
     phase,
-    statusKey: `changes.status.${cr.status}`,
+    statusKey: phase.sub === "unknown" ? "workitem.sub.unknown" : `changes.status.${cr.status}`,
     tone: phase.terminal && phase.sub !== "completed" ? "bad"
       : phase.sub === "completed" ? "ok"
       : ["needsClarification", "awaitingApproval", "notQueued", "awaitingAcceptance"].includes(phase.sub) ? "warn" : "info",
@@ -50,10 +54,11 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
     plan: activeChangePlan(cr.plans),
     latestRun,
     runs,
-    acceptNote: failedRun ? { key: "workitem.accept.systemFailed", params: { n: String(latestRun!.id) } } : null,
+    acceptNote: failedRun ? { key: "workitem.accept.systemFailed", params: { n: String(latestRun.id) } } : null,
     menu,
     quietRunError: reason !== null && reason === latestRun?.error_message,
     // the backend writes a review's rejection_reason as its reasons joined with "; " (change_service.submit_review)
     quietReviewReasons: cr.status === "rejected" && cr.review_reasons.length > 0 && reason === cr.review_reasons.join("; "),
+    quietAcceptReason: reason !== null && reason === latestRun?.verification_reason,
   };
 }

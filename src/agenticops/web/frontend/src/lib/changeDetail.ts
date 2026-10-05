@@ -2,6 +2,8 @@ import type {
   ChangeExternalRef, ChangeRequest, ChangeStatus, ChangeStepsDiff, ChangeTarget, ChangeTimelineEntry, FixExecution,
   FixPlan, PipelineEvent,
 } from "@/api/types";
+import { formatShortDate } from "@/lib/formatDate";
+import { executionStatusLabel } from "@/lib/issueDetail";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -157,4 +159,65 @@ const TERMINAL_PLAN: readonly string[] = ["executed", "failed", "rejected"];
  *  executed / failed / rejected; else the newest, for display only; null with no plan. */
 export function activeChangePlan(plans: FixPlan[]): FixPlan | null {
   return plans.find((p) => !TERMINAL_PLAN.includes(p.status)) ?? plans[0] ?? null;
+}
+
+/* -- ChangeDetail's labels and one-line summaries (components/change render them) -- */
+
+type T = (key: string) => string;
+// The values the backend writes: change_service.REVIEW_VERDICTS, policy_engine.VALID_ACTIONS, ChangeRequest.source
+const REVIEW_VERDICTS = ["approved_for_planning", "needs_clarification", "rejected"];
+const POLICY_ACTIONS = ["auto_approve", "require_human", "require_itsm_change", "block", "escalate"];
+const SOURCES = ["chat", "web", "cli", "im", "webhook", "api"];
+const label = (known: readonly string[], prefix: string) => (v: string | null | undefined, t: T): string | null =>
+  v ? (known.includes(v) ? t(`${prefix}.${v}`) : v) : null;
+
+/** An enum the backend wrote, in words; a value this page does not know stays as it came, none is null. */
+export const verdictLabel = label(REVIEW_VERDICTS, "changes.reviewVerdict");
+export const policyActionLabel = label(POLICY_ACTIONS, "changes.policyAction");
+export const sourceLabel = label(SOURCES, "changes.source");
+
+// Join the present, non-empty parts with " · " (no dangling separators).
+const joinDot = (parts: Array<string | null | undefined | false>): string =>
+  parts.filter((x): x is string => typeof x === "string" && x.length > 0).join(" · ");
+
+/** The requester's target hints no structured target matched: shown amber, and counted as targets. */
+export function unresolvedHints(cr: Pick<ChangeRequest, "target_hints" | "target_resources">): string[] {
+  return cr.target_hints.filter((h) => !isHintResolved(h, cr.target_resources));
+}
+
+/** ①'s collapsed line: who asked, when, and for how many targets. */
+export function requestSummary(
+  cr: Pick<ChangeRequest, "requested_by" | "requested_at" | "created_at" | "target_hints" | "target_resources">, t: T,
+): string {
+  const n = cr.target_resources.length + unresolvedHints(cr).length;
+  return t("workitem.summary.request")
+    .replace("{by}", cr.requested_by)
+    .replace("{at}", formatShortDate(cr.requested_at ?? cr.created_at))
+    .replace("{n}", String(n));
+}
+
+/** ②'s collapsed line: verdict · risk · action — the template's "·" segments, one with no value dropped. */
+export function reviewSummary(cr: Pick<ChangeRequest, "review_verdict" | "risk_level" | "action_type">, t: T): string | null {
+  const parts: Record<string, string | null> = {
+    verdict: verdictLabel(cr.review_verdict, t), risk: cr.risk_level, action: cr.action_type,
+  };
+  const line = t("workitem.summary.review")
+    .split("·")
+    .map((seg) => seg.replace(/\{(\w+)\}/g, (_, k: string) => parts[k] ?? "").trim())
+    .filter(Boolean)
+    .join(" · ");
+  return line || null;
+}
+
+/** A run's one-line label: its number, then its verdict, else its status in words. */
+export function runLabel(ex: Pick<FixExecution, "id" | "status" | "verification_status">, t: T): string {
+  return joinDot([t("issues.executionN").replace("{n}", String(ex.id)),
+    ex.verification_status ? t(`verification.${ex.verification_status}`) : executionStatusLabel(ex.status, t)]);
+}
+
+/** ④'s collapsed line: who approved it, then the latest run and its verdict. */
+export function runSummary(
+  cr: Pick<ChangeRequest, "approved_by">, latestRun: Pick<FixExecution, "id" | "status" | "verification_status"> | null, t: T,
+): string | null {
+  return joinDot([cr.approved_by && `${t("plans.approvedBy")}: ${cr.approved_by}`, latestRun && runLabel(latestRun, t)]) || null;
 }

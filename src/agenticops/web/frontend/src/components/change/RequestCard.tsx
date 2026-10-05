@@ -1,25 +1,11 @@
 import { Link } from "react-router-dom";
 import type { ChangeRequestDetail } from "@/api/types";
-import { externalRefLink, isHintResolved } from "@/lib/changeDetail";
+import { externalRefLink, sourceLabel, unresolvedHints } from "@/lib/changeDetail";
 import { isBlank } from "@/lib/issueDetail";
-import { formatFullDate, formatShortDate } from "@/lib/formatDate";
+import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 
 type T = (key: string) => string;
-
-/** The requester's target hints no structured target matched: shown amber, and counted as targets. */
-export function unresolvedHints(cr: Pick<ChangeRequestDetail, "target_hints" | "target_resources">): string[] {
-  return cr.target_hints.filter((h) => !isHintResolved(h, cr.target_resources));
-}
-
-/** The one-line summary of a collapsed ① card: who asked, when, and for how many targets. */
-export function requestSummary(cr: ChangeRequestDetail, t: T): string {
-  const n = cr.target_resources.length + unresolvedHints(cr).length;
-  return t("workitem.summary.request")
-    .replace("{by}", cr.requested_by)
-    .replace("{at}", formatShortDate(cr.requested_at ?? cr.created_at))
-    .replace("{n}", String(n));
-}
 
 /** ① Request: what was asked for — the description, who and when, the external ticket (linked only to an http(s)
  *  URL), the targets (a hint no inventory resource matched in amber), the justification and the requester's steps. */
@@ -46,7 +32,7 @@ export function RequestBody({ cr, t }: { cr: ChangeRequestDetail; t: T }) {
         {!isBlank(cr.source) && (
           <div>
             <dt className={muted}>{t("changes.source")}</dt>
-            <dd className="font-mono">{cr.source}</dd>
+            <dd>{sourceLabel(cr.source, t)}</dd>
           </div>
         )}
       </dl>

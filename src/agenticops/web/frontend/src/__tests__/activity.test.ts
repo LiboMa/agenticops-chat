@@ -45,3 +45,27 @@ describe("toActivity (P4)", () => {
     expect(out[1].summary).toBe("95%");
   });
 });
+
+describe("toActivity hideText (spec §1-3: the status line's sentence is said once)", () => {
+  const sentence = "Pre-check #1 FAILED: Deployment frontend reports 0 ready replicas (expected 3/3).";
+  const events = [
+    ev("execution_completed", { reason: sentence, execution_status: "aborted" }, { created_at: "2026-10-03T09:56:39", actor: "agent:executor" }),
+    ev("change.failed", { reason: ` ${sentence} ` }, { created_at: "2026-10-03T09:56:40", actor: "agent:executor" }),
+    ev("change_approved", { reason: "go for deployment." }, { created_at: "2026-10-03T09:55:56", actor: "user:admin" }),
+  ];
+  it("an entry whose summary IS the hidden text keeps its label, actor and time but no summary (both trimmed)", () => {
+    const out = toActivity(events, { hideText: `${sentence}\n` });
+    expect(out.map((x) => [x.labelKey, x.summary, x.actor, x.ts])).toEqual([
+      ["activity.type.change_approved", "go for deployment.", "user:admin", "2026-10-03T09:55:56"],
+      ["activity.type.execution_completed", "", "agent:executor", "2026-10-03T09:56:39"],
+      ["activity.type.change_failed", "", "agent:executor", "2026-10-03T09:56:40"],
+    ]);
+    expect(out[1].raw[0].detail).toEqual({ reason: sentence, execution_status: "aborted" }); // the raw view keeps it
+  });
+  it("a different summary is kept; no opts, or a null / blank hideText, changes nothing", () => {
+    expect(toActivity(events, { hideText: "something else" }).map((x) => x.summary))
+      .toEqual(["go for deployment.", sentence, sentence]);
+    expect(toActivity(events)).toEqual(toActivity(events, { hideText: null }));
+    expect(toActivity(events, { hideText: "  " }).map((x) => x.summary)).toEqual(["go for deployment.", sentence, sentence]);
+  });
+});
