@@ -29,6 +29,9 @@ describe("fixPlanMutationKeys (I2)", () => {
       expect(keys).toContainEqual(key);
     }
   });
+  it("also invalidates the issue timeline: an approval's move and its auto-run's start are read there (C1(c))", () => {
+    expect(fixPlanMutationKeys(1)).toContainEqual(["issue-timeline"]);
+  });
 });
 
 // M1 — the change-action args are a discriminated union: each action carries the body the backend expects.

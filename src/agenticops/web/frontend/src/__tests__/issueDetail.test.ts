@@ -4,7 +4,8 @@ import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, inFlightAutoRun, isBlank, issueFacts,
-  issueSourceLabel, ISSUE_SOURCES, issueStatuses, ISSUE_IN_FLIGHT, newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
+  issueSourceLabel, ISSUE_SOURCES, issueStatuses, ISSUE_IN_FLIGHT, newestFirst, notQueuedSeen, resultRow, resultSummary, SEVERITIES,
+  severityLabel,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -313,5 +314,24 @@ describe("inFlightAutoRun (final review C1 — mirrors pipeline_service.plan_run
       expect(inFlightAutoRun([ev("execution_started", at(5), detail)], 3, opts)).toBeNull();
     expect(inFlightAutoRun([ev("execution_started", at(5), { plan_id: 3 })], null, opts)).toBeNull();
     expect(inFlightAutoRun(undefined, 3, opts)).toBeNull();
+  });
+});
+
+describe("notQueuedSeen (C1(c)): only a timeline that saw the approval can say 'not queued'", () => {
+  let n = 0;
+  const ev = (event_type: string, created_at: string, detail: unknown) =>
+    ({ id: ++n, event_type, stage: "issue", status: "completed", detail, actor: "user:a", duration_ms: null, created_at,
+       trace_id: null }) as PipelineEvent;
+  const now = Date.parse("2026-10-05T10:00:00Z");
+  it("the newest status move must be the one into fix_approved, past the grace or followed by a finished run", () => {
+    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:00", { to: "fix_approved" })], now)).toBe(true);
+    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", { to: "fix_approved" })], now)).toBe(false);
+    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", { to: "fix_approved" }),
+                          ev("execution_completed", "2026-10-05T09:59:55", { plan_id: 1 })], now)).toBe(true);
+    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:00:00", { to: "fix_planned" })], now)).toBe(false);
+  });
+  it("no status move, or one whose detail cannot be read, cannot be checked: true, as before 2.6.1", () => {
+    expect(notQueuedSeen([], now)).toBe(true);
+    expect(notQueuedSeen([ev("status_changed", "2026-10-05T09:59:50", "{\"to\":\"fix_approved\"}")], now)).toBe(true);
   });
 });

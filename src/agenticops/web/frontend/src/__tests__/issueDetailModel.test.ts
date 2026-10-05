@@ -118,9 +118,15 @@ describe("issueDetailModel — an approval's auto-run (final review C1) and an R
     ({ id: ++n, event_type, stage: "execution", status: "x", detail, actor: "system", duration_ms: null, created_at,
        trace_id: null }) as PipelineEvent;
   const started = ev("execution_started", "2026-10-05T09:58:00", { plan_id: 1, executor: "agent:executor" });
+  // transition_issue's event, written in the approve transaction before the auto-run thread starts
+  const moved = (to: string, created_at: string) => ev("status_changed", created_at, { from: "x", to, reason: "r" });
+  const approved = moved("fix_approved", "2026-10-05T09:57:59");
+  const iso = (ms: number) => new Date(ms).toISOString().replace("Z", ""); // the backend's naive UTC
   const at = (x: Partial<Parameters<typeof issueDetailModel>[0]>) => issueDetailModel({
-    issue: { status: "fix_approved" }, rca: rcaI1, threshold: 0.6, plans: [plan], executions: [], timeline: [started],
+    issue: { status: "fix_approved" }, rca: rcaI1, threshold: 0.6, plans: [plan], executions: [], timeline: [approved, started],
     executorTimeout: 1800, now, ...x });
+  const pick = (m: ReturnType<typeof issueDetailModel>) => [m.statusKey, m.primaryKey, m.reason, m.waitingKey];
+  const CHECKING = ["workitem.sub.checkingRun", null, null, null];
 
   it("right after «Approve & run»: running, waiting for the executor, no primary, no 'not queued'; retry only in ⋯", () => {
     const m = at({});
@@ -132,7 +138,7 @@ describe("issueDetailModel — an approval's auto-run (final review C1) and an R
   });
   it("the run completed (or failed) after it started → not queued + retry primary again", () => {
     const done = ev("execution_completed", "2026-10-05T09:59:00", { plan_id: 1 });
-    const m = at({ timeline: [started, done] });
+    const m = at({ timeline: [approved, started, done] });
     expect([m.statusKey, m.primaryKey]).toEqual(["workitem.sub.notQueued", "workitem.primary.retryExecution"]);
     expect(m.autoRun).toBeNull();
   });
@@ -140,19 +146,44 @@ describe("issueDetailModel — an approval's auto-run (final review C1) and an R
     expect(at({ now: now + 3600_000 }).statusKey).toBe("workitem.sub.notQueued");
   });
   it("another plan's start does not count", () => {
-    expect(at({ timeline: [ev("execution_started", "2026-10-05T09:58:00", { plan_id: 2 })] }).statusKey).toBe("workitem.sub.notQueued");
+    expect(at({ timeline: [approved, ev("execution_started", "2026-10-05T09:58:00", { plan_id: 2 })] }).statusKey)
+      .toBe("workitem.sub.notQueued");
   });
-  it("the timeline not loaded yet / failed: a neutral state, never 'not queued' + retry", () => {
-    const loading = at({ timeline: undefined });
-    expect([loading.statusKey, loading.primaryKey, loading.reason, loading.waitingKey]).toEqual(["workitem.sub.loadingRuns", null, null, null]);
+  it("C1(c): a timeline fetched before the approval (no move into fix_approved yet) is not evidence — checking, no Retry", () => {
+    expect(pick(at({ timeline: [moved("fix_planned", "2026-10-05T09:50:00")] }))).toEqual(CHECKING);
+    // an older approval cycle does not count: the newest status move must be this one
+    expect(pick(at({ timeline: [moved("fix_approved", "2026-10-05T09:00:00"), moved("root_cause_identified", "2026-10-05T09:10:00"),
+                                moved("fix_planned", "2026-10-05T09:50:00")] }))).toEqual(CHECKING);
+    expect(at({ timeline: [moved("fix_planned", "2026-10-05T09:50:00")] }).tone).toBe("info");
+  });
+  it("C1(c): the approval seen and no start: checking while the auto-run may still be starting, then not queued", () => {
+    const justNow = moved("fix_approved", iso(now - 5_000));
+    expect(pick(at({ timeline: [justNow] }))).toEqual(CHECKING);
+    const later = at({ timeline: [justNow], now: now + 60_000 });
+    expect([later.statusKey, later.primaryKey, later.reason])
+      .toEqual(["workitem.sub.notQueued", "workitem.primary.retryExecution", { key: "workitem.reason.notQueued" }]);
+    // a run that already ended after the approval needs no wait
+    const ended = [justNow, ev("execution_started", iso(now - 4_000), { plan_id: 1 }), ev("execution_completed", iso(now - 2_000), { plan_id: 1 })];
+    expect(at({ timeline: ended }).statusKey).toBe("workitem.sub.notQueued");
+  });
+  it("a timeline with no status moves at all (an issue approved before 2.6.1) cannot be checked: not queued as before", () => {
+    expect(at({ timeline: [] }).primaryKey).toBe("workitem.primary.retryExecution");
+  });
+  it("the timeline not loaded yet / failed: a neutral state that names what is missing, never 'not queued' + retry", () => {
+    expect(pick(at({ timeline: undefined }))).toEqual(CHECKING);
     const failed = at({ timeline: undefined, timelineFailed: true });
-    expect([failed.statusKey, failed.primaryKey, failed.tone]).toEqual(["workitem.sub.runsUnavailable", null, "warn"]);
+    expect([failed.statusKey, failed.primaryKey, failed.tone]).toEqual(["workitem.sub.runStateUnavailable", null, "warn"]);
+    // a failed poll over a pre-approval copy: the same, never the stale "not queued"
+    expect(at({ timeline: [moved("fix_planned", "2026-10-05T09:50:00")], timelineFailed: true }).statusKey)
+      .toBe("workitem.sub.runStateUnavailable");
     // a pending row decides on its own: the timeline is not needed
     expect(at({ timeline: undefined, executions: [run({ status: "pending" })] }).statusKey).toBe("workitem.sub.executing");
+    // the runs themselves unknown keep their own wording
+    expect(at({ executions: undefined }).statusKey).toBe("workitem.sub.loadingRuns");
   });
   it("the plans not loaded yet / failed: the auto-run cannot be matched to a plan — neutral too", () => {
-    expect([at({ plans: undefined }).statusKey, at({ plans: undefined }).primaryKey]).toEqual(["workitem.sub.loadingRuns", null]);
-    expect(at({ plans: undefined, plansFailed: true }).statusKey).toBe("workitem.sub.runsUnavailable");
+    expect(pick(at({ plans: undefined }))).toEqual(CHECKING);
+    expect(at({ plans: undefined, plansFailed: true }).statusKey).toBe("workitem.sub.runStateUnavailable");
   });
   it("I1: the RCA failed to load at root_cause_identified — says so; never 'no RCA' + Rerun RCA", () => {
     const m = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, rcaFailed: true, threshold: 0.6,

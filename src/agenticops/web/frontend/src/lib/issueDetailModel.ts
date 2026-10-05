@@ -1,5 +1,5 @@
 import type { FixExecution, FixPlan, HealthIssue, IssueStatus, PipelineEvent, RCAResult } from "@/api/types";
-import { inFlightAutoRun, issueStatuses, latestExecution, newestFirst } from "@/lib/issueDetail";
+import { inFlightAutoRun, issueStatuses, latestExecution, newestFirst, notQueuedSeen } from "@/lib/issueDetail";
 import { currentFixPlan, issuePhases, type IssuePhaseResult } from "@/lib/issuePhases";
 import { confidenceBreakdown } from "@/lib/rcaQuality";
 
@@ -58,11 +58,13 @@ export function issueDetailModel(input: {
                               latestRun: input.executions === undefined ? undefined : latestRun });
   const unknown = (failed: boolean | undefined): IssuePhaseResult =>
     ({ ...known, sub: failed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null });
+  // No run row: whether the approval's auto-run is under way is on the timeline (matched to the plan). "Not queued"
+  // needs both loaded and a timeline that already saw the approval (C1(c)); until then the run state is unknown.
+  const timelineReady = input.timeline !== undefined && notQueuedSeen(input.timeline, input.now);
+  const runStateFailed = (input.plans === undefined && input.plansFailed) || (!timelineReady && input.timelineFailed);
   const phase: IssuePhaseResult = input.executions === undefined && RUN_DEPENDENT.has(issue.status) ? unknown(input.runsFailed)
-    // no run row: whether the approval's auto-run is under way is on the timeline (matched to the plan), not known
-    // until both load
-    : known.sub === "notQueued" && input.timeline === undefined ? unknown(input.timelineFailed)
-    : known.sub === "notQueued" && input.plans === undefined ? unknown(input.plansFailed)
+    : known.sub === "notQueued" && (input.plans === undefined || !timelineReady)
+      ? { ...known, sub: runStateFailed ? "runStateUnavailable" : "checkingRun", waitingFor: null, primary: null }
     // the RCA decides root_cause_identified: one that failed to load is not "none"
     : known.sub === "reviewOrPlan" && rca === undefined && input.rcaFailed
       ? { ...known, sub: "rcaUnavailable", waitingFor: null, primary: null }
@@ -99,7 +101,7 @@ export function issueDetailModel(input: {
 
   const tone = phase.sub === "needsNewPlan" ? "bad"
     : ["needsReview", "rcaRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
-       "runsUnavailable", "rcaUnavailable"].includes(phase.sub) ? "warn"
+       "runsUnavailable", "rcaUnavailable", "runStateUnavailable"].includes(phase.sub) ? "warn"
     : phase.sub === "passed" || phase.sub === "resolved" ? "ok" : "info";
 
   const text = reason && "text" in reason ? reason.text : null;

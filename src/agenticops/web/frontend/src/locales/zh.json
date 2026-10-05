@@ -813,6 +813,8 @@
   "workitem.sub.loadingRuns": "正在读取执行记录…",
   "workitem.sub.runsUnavailable": "执行记录读取失败",
   "workitem.sub.rcaUnavailable": "RCA 无法加载",
+  "workitem.sub.checkingRun": "已批准 —— 正在确认执行是否已开始",
+  "workitem.sub.runStateUnavailable": "已批准 —— 无法加载执行是否已开始",
   "workitem.menu.retryExecution": "重试执行",
   "workitem.confirm.retryWhileRunning": "批准后的执行似乎仍在进行 —— 它结束前服务器会拒绝第二次执行。仍要重新入队执行？",
   "workitem.autoRunNote": "执行器正在运行已批准的方案；运行结束后，执行记录会出现在这里。",

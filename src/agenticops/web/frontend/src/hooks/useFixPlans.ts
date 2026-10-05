@@ -3,10 +3,11 @@ import { apiFetch } from "@/api/client";
 import type { FixPlan, PlanKind } from "@/api/types";
 import { toQuery } from "@/lib/plans";
 
-/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read, and the
- *  issue and its runs, which approve and execute move on the backend. */
+/** Every query a fix-plan mutation must refresh — including plan-stats, which the Audit tab's KPIs read, the
+ *  issue and its runs, which approve and execute move on the backend, and the issue timeline, where IssueDetail
+ *  reads the approval's move and its auto-run's start (C1(c)). */
 export const fixPlanMutationKeys = (id: number): QueryKey[] =>
-  [["fix-plans"], ["fix-plan", id], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"]];
+  [["fix-plans"], ["fix-plan", id], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"], ["issue-timeline"]];
 
 export type FixPlanFilters = {
   status?: string;

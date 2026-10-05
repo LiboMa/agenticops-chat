@@ -77,7 +77,8 @@ export default function IssueDetail() {
 
   // The issue poll can land on fix_executed after the runs poll has stopped; the banner needs the verdict the
   // backend wrote to the run in the same transaction, so a status move refetches the runs (and the plan, whose
-  // badge moves with them). Keyed by issue id: following a link to another issue reuses this page and is not a move.
+  // badge moves with them, and the timeline, where an approval's auto-run shows before it has a row). Keyed by
+  // issue id: following a link to another issue reuses this page and is not a move.
   const qc = useQueryClient();
   const issueStatus = anomaly.data?.status;
   const lastStatus = useRef({ id: issueId, status: issueStatus });
@@ -86,6 +87,7 @@ export default function IssueDetail() {
     if (prev.id === issueId && prev.status !== undefined && issueStatus !== undefined && prev.status !== issueStatus) {
       qc.invalidateQueries({ queryKey: ["issue-executions", issueId] });
       qc.invalidateQueries({ queryKey: ["fix-plans"] });
+      qc.invalidateQueries({ queryKey: ["issue-timeline", issueId] });
     }
     lastStatus.current = { id: issueId, status: issueStatus };
   }, [issueStatus, issueId, qc]);
@@ -213,7 +215,9 @@ export default function IssueDetail() {
   const fetchError = actionError ? null
     : executions.error ? { message: executions.error.message, retry: () => executions.refetch() }
     : rca.error && rca.data === undefined ? { message: rca.error.message, retry: () => rca.refetch() }
-    : timeline.error && timeline.data === undefined ? { message: timeline.error.message, retry: () => timeline.refetch() }
+    // the timeline's error also when a failed poll left only a copy that cannot tell whether the run started
+    : timeline.error && (timeline.data === undefined || m.phase.sub === "runStateUnavailable")
+      ? { message: timeline.error.message, retry: () => timeline.refetch() }
     : fixPlans.error && fixPlans.data === undefined ? { message: fixPlans.error.message, retry: () => fixPlans.refetch() }
     : null;
   const runsFetchError = executions.data === undefined ? executions.error : null;

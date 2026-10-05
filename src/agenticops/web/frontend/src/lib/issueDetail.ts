@@ -118,6 +118,27 @@ export function inFlightAutoRun(
   return null;
 }
 
+/** How long after an approval a missing auto-run start still reads as "starting", not "not queued": the thread logs
+ *  its start moments after the approval commits, and a timeline fetch can land in between (C1(c)). */
+export const AUTO_RUN_START_GRACE_MS = 30_000;
+
+/** Whether the timeline can tell that an approved plan's run was NOT queued (C1(c)). It must already hold the
+ *  approval — its newest status move is the one into fix_approved, which transition_issue writes in the approve
+ *  transaction before the auto-run starts — and then a run that ended after it, or the grace without a start.
+ *  A timeline fetched before the approval is no evidence. One with no readable status move at all (an issue that
+ *  reached fix_approved before 2.6.1 wrote them) cannot be checked: true, as before. */
+export function notQueuedSeen(
+  events: Pick<PipelineEvent, "id" | "event_type" | "detail" | "created_at">[], now: number = Date.now(),
+): boolean {
+  const newest = [...events].sort((a, b) => eventTime(b) - eventTime(a) || b.id - a.id);
+  const i = newest.findIndex((e) => e.event_type === "status_changed");
+  const d: unknown = i >= 0 ? newest[i].detail : null;
+  if (!d || typeof d !== "object" || Array.isArray(d)) return true;
+  if ((d as { to?: unknown }).to !== "fix_approved") return false;
+  return newest.slice(0, i).some((e) => e.event_type === "execution_completed")
+    || now - eventTime(newest[i]) >= AUTO_RUN_START_GRACE_MS;
+}
+
 const APPROVABLE_PLAN: ReadonlySet<FixPlanStatus> = new Set<FixPlanStatus>(["draft", "pending_approval"]);
 
 /** Why an approvable plan cannot be approved: its issue is closed (the approve endpoint refuses it with 409,
