@@ -1,0 +1,96 @@
+import type { FixExecution, FixPlan, IssueStatus, RCAResult } from "@/api/types";
+import { confidenceBreakdown } from "@/lib/rcaQuality";
+
+export type IssuePhaseId = "diagnose" | "plan" | "run" | "accept";
+export type PhaseState = "done" | "current" | "future" | "failed";
+export interface PhaseView<I extends string = string> { id: I; state: PhaseState }
+export type WaitingFor = "rca_agent" | "you" | "sre_agent" | "approver" | "executor" | "requester" | "acceptor" | null;
+export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveAndRun" | "retryExecution"
+  | "acceptResult" | "markResolved" | null;
+export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan"
+  | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed";
+
+export interface IssuePhaseInput {
+  status: IssueStatus;
+  rca?: Pick<RCAResult, "confidence" | "evidence_verified" | "critic_verdict" | "human_verdict"> | null;
+  threshold?: number | null;
+  plan?: Pick<FixPlan, "status"> | null;
+  latestRun?: Pick<FixExecution, "status" | "verification_status"> | null;
+}
+
+export interface IssuePhaseResult {
+  current: IssuePhaseId | null;
+  sub: IssueSub;
+  waitingFor: WaitingFor;
+  primary: IssuePrimary;
+  phases: PhaseView<IssuePhaseId>[];
+}
+
+export const ISSUE_PHASES: readonly IssuePhaseId[] = ["diagnose", "plan", "run", "accept"];
+const APPROVABLE = new Set(["draft", "pending_approval"]);
+const IN_FLIGHT = new Set(["pending", "running"]);
+
+function line(current: IssuePhaseId, failed: IssuePhaseId[] = []): PhaseView<IssuePhaseId>[] {
+  const at = ISSUE_PHASES.indexOf(current);
+  return ISSUE_PHASES.map((id, i) => ({
+    id, state: failed.includes(id) ? "failed" : i < at ? "done" : i === at ? "current" : "future",
+  }));
+}
+
+function result(current: IssuePhaseId, sub: IssueSub, waitingFor: WaitingFor, primary: IssuePrimary,
+                failed: IssuePhaseId[] = []): IssuePhaseResult {
+  return { current, sub, waitingFor, primary, phases: line(current, failed) };
+}
+
+/** Spec §4: where an issue is, why, who moves it next and the page's one primary button. `rca: undefined`
+ *  is list mode (R2): the list has no RCA, so root_cause_identified cannot tell review from plan. */
+export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
+  const run = i.latestRun ?? null;
+  switch (i.status) {
+    case "open":
+    case "investigating":
+    case "acknowledged":
+      return result("diagnose", "running", "rca_agent", null);
+    case "root_cause_identified": {
+      if (run && (run.verification_status === "failed" || run.status === "failed" || run.status === "aborted"
+                  || run.status === "rolled_back")) {
+        return result("plan", "needsNewPlan", "you", "generatePlan", ["run"]);
+      }
+      if (i.rca === undefined) return result("diagnose", "reviewOrPlan", "you", null);
+      if (i.rca === null) return result("diagnose", "needsReview", "you", "rerunRca");
+      if (i.rca.human_verdict === "incorrect") return result("diagnose", "rcaRejected", "you", "rerunRca");
+      if (i.rca.human_verdict === "correct") return result("plan", "toGenerate", "you", "generatePlan");
+      const gate = confidenceBreakdown(i.rca, i.threshold).gatePassed;
+      if (gate === null) return result("diagnose", "reviewOrPlan", "you", null);
+      return gate ? result("plan", "toGenerate", "sre_agent", "generatePlan")
+                  : result("diagnose", "needsReview", "you", "reviewRca");
+    }
+    case "fix_planned":
+      return result("run", "awaitingApproval", "approver", i.plan && APPROVABLE.has(i.plan.status) ? "approveAndRun" : null);
+    case "fix_approved":
+      return run && IN_FLIGHT.has(run.status) ? result("run", "executing", "executor", null)
+                                               : result("run", "notQueued", "you", "retryExecution");
+    case "fix_executing":
+      return result("run", "executing", "executor", null);
+    case "fix_executed":
+      if (run?.verification_status === "pending_acceptance") return result("accept", "awaitingAcceptance", "acceptor", "acceptResult");
+      if (run?.verification_status === "passed") return result("accept", "passed", "you", "markResolved");
+      return result("accept", "unverified", "you", run ? "markResolved" : null);
+    case "resolved":
+    case "dismissed": {
+      const reached: Record<IssuePhaseId, boolean> = {
+        diagnose: !!i.rca, plan: !!i.plan, run: !!run, accept: run?.verification_status === "passed" || (i.status === "resolved" && !!run),
+      };
+      return { current: null, sub: i.status, waitingFor: null, primary: null,
+               phases: ISSUE_PHASES.map((id) => ({ id, state: reached[id] ? "done" : "future" })) };
+    }
+  }
+}
+
+const TERMINAL_PLAN = new Set(["executed", "failed", "rejected"]);
+
+/** The plan the page shows and approves: the newest not executed / failed / rejected, else the newest. */
+export function currentFixPlan(plans: FixPlan[] | undefined): FixPlan | null {
+  const sorted = [...(plans ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+  return sorted.find((p) => !TERMINAL_PLAN.has(p.status)) ?? sorted[0] ?? null;
+}
