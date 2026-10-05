@@ -50,15 +50,23 @@
 - 已登录用户新建的会话归本人、`private`（本人和 admin 可见）；没有单一主人的会话（2.7.0 之前的所有会话、认证关闭时 / IM / CLI 建的会话）是 `workspace`，与以前一样所有人可见。认证关闭时所有调用者都是 `web:anonymous`，所有会话照旧可见。
 - `services/chat_access` 是唯一规则：列表、读取、历史、发消息、修改、删除、存为报告全部经过它；看不见的会话一律 404，响应与不存在的会话完全相同。
 - 只有 owner 或 admin 能改 `visibility`（`PATCH /api/chat/sessions/{id}`），无主会话不能改成 private（409）。
+- **共享的是阅读，不是管理**（独立审查后收紧，偏离 S1b 计划第 4 条「可见即可改名 / 删除」）：有主的会话即使共享给工作区，改名、置顶、归档、切换模型 / 思考强度、删除仍只属于 owner 或 admin（其他人 403——他们本来就看得见，不泄露信息）；其他人可以阅读、继续对话。无主会话照旧任何人可管理。响应带 `can_manage`，界面只给能管理的人显示这些操作。
 - 可见性检查放在第一步：读上传、`/channel`、`/send_to`、streaming 409 都在它之后。
 - 列表计数改为一次分组查询；删除时一并删除 `SessionSummary`。
 - CLI：`/session list`、无参 `/session resume`、按名字片段恢复、`aiops chat --resume`、启动时的「最近会话」提示都只看 workspace 会话；精确 id / UUID 仍可恢复任意会话（CLI 是有库访问权的本地操作员）。
 - Web UI：登录后会话行标「工作区」或「他人私有」（只有 admin 看得到后者）；owner 在会话悬停菜单里切换 私有 / 工作区；通过链接打开、不在前 50 条列表里的会话也能显示名称和「存为报告」；私有会话存为报告前提示「报告对工作区所有人可见」。
 - 顺手修的两个 detached 实例问题：`validate_api_key`（PARK-S5）和 `create_user`（注册接口）。
+- 退出登录改为整页刷新、登录时清空查询缓存：之前在同一个标签页里，下一个登录的人能从前端缓存看到上一个人的私有会话与消息。
+- 主 chat 每轮的 AgentLog 之前把 User 对象当 `actor_id` 写进字符串列，开启认证后每一行都插入失败并被静默吞掉（成本统计偏少）；现在记 actor 的 key，且私有会话那一轮不记对话摘要（token / 成本照记），因为 `GET /api/agent-logs` 对所有人可见。
 
 **迁移**：`chat_sessions.owner_user_id`（可空）+ `visibility`（`NOT NULL DEFAULT 'workspace'`），幂等，每进程每数据库 URL 执行一次。
 
-**已知缺口**：`GET /api/agent-logs` 仍把每轮对话前 500 字的摘要返回给所有人（运维指标视图，收紧需要单独决定）；报告本身没有归属（S6 再议）；IM 会话仍出现在 web 列表中。
+**已知缺口（需主人决定）**：
+- `GET /api/agent-logs` 对所有人可见：工作区会话每轮的前 500 字摘要仍在其中（私有会话已不记摘要）。
+- 报告没有归属：私有会话存成的报告对工作区可见（界面会提示），S6 再议。
+- 私有会话里的内容可能经 agent 写出的东西流向工作区：agent 记忆（`memory_manage` / `record_agent_feedback` 写进 `agent-memory/*`，所有人可读并注入每个人的 agent）、从对话里提的变更单（标题 / 理由）、从对话里建的 issue。
+- 「私有」的强度取决于 admin 账户：admin 能看所有私有会话，而未设置 `AIOPS_ADMIN_PASSWORD` 时种子 admin 的密码是默认值 `aiops2026`；`POST /api/auth/register` 公开可注册（得到 read/write）。建议开启认证的部署设置 admin 密码、并决定是否关闭自助注册。
+- IM 会话仍出现在 web 列表中。
 
 ## S1c 单进程运行 + 事件循环不阻塞
 
@@ -94,10 +102,21 @@
 ## S1 验收清单（主人手动）
 
 1. **假通过已堵**：`pytest tests/test_post_check_binding.py tests/test_execution_verification.py -v` 中，9 月反例判 `pending_acceptance` 且原因点名 `pc-2`；本地起服务打开造好的 Issue，证据区 pc-2「无结果」、pc-1「上报了 2 次」，验收卡要求人工判断；6 kB 方案的测试证明执行器拿到全部步骤与 check_id。
-2. **会话隔离**：本地 `AIOPS_API_AUTH_ENABLED=true` 起服务，注册 alice、bob；alice 新建会话（默认私有），bob 的列表里没有，直接打开 URL 显示不存在；alice 切成工作区可见后 bob 能看到；用 API key 调会话接口返回 200；关闭认证重启，所有会话照旧可见。
+2. **会话隔离**：本地 `AIOPS_API_AUTH_ENABLED=true` 起服务，注册 alice、bob；alice 新建会话（默认私有），bob 的列表里没有，直接打开 URL 显示不存在；alice 切成工作区可见后 bob 能看到、能继续对话，但没有改名 / 删除 / 切换模型的入口（API 返回 403）；alice 退出后 bob 在同一标签页登录，看不到 alice 的任何私有会话；用 API key 调会话接口返回 200；关闭认证重启，所有会话照旧可见。
 3. **单进程**：三处部署文件都是 `--workers 1`；同一 data_dir 再起一个进程，日志出现 ERROR；`pytest tests/test_single_process.py` 证明 STS / 告警判官 / IM agent 慢的时候其他请求不被卡住。
 4. **门禁**：见下。
 
 ## S1 门禁结果
 
-（T9 填入：后端全量 pytest 对比基线 6378 passed / 85 skipped，vitest，tsc，build。）
+2026-10-05，在 `MVP-2.7.0` 上（S1 全部提交之后）：
+
+| 门禁 | 结果 | 基线（`1ec53b3`） |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6449 passed / 85 skipped / 0 failed** | 6378 passed / 85 skipped |
+| `npx tsc --noEmit` | 0 错误 | 0 |
+| `npm test`（vitest） | **41 个文件 / 429 个测试全过**（含 locale 中英成对） | 39 个文件 / 418（另有 1 个 Playwright 脚本被误收集、恒失败，已在 `e9d4f48` 排除） |
+| `npm run build` | 成功 | 成功 |
+
+另做了两件事：
+- **独立安全审查**（只审 S1b）：用真实认证中间件、真实登录和 API key 探测，确认 7 个路由上私有会话的 404 与不存在的会话完全相同；它提出的 2 个重要、2 个次要问题已在 `f154005` 修复，其余写进上面的已知缺口。
+- **本地页面走查**：用临时库和真实执行路径造了 9 月反例，Issue 页显示「no result for post-check pc-2; post-check pc-1 reported more than once」、pc-1「reported 2 times」、pc-2「no result」，标题计数在 `a097d4c` 修正为「1 pass · 1 no result」（之前按原始条数写成「2 pass」）。
