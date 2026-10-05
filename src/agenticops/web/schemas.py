@@ -5,7 +5,7 @@ routers a dependency-leaf module to import from (avoids app<->router import cycl
 """
 
 from datetime import datetime
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -689,6 +689,8 @@ class ChatSessionUpdate(BaseModel):
     model_id: Optional[str] = None
     # "" = set Auto (stored NULL); omitted = don't change; else off|standard|deep
     effort: Optional[str] = None
+    # Who sees the session (MVP-2.7.0): only its owner or an admin may change it
+    visibility: Optional[Literal["private", "workspace"]] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -726,6 +728,9 @@ class ChatSessionResponse(BaseModel):
     model_id: Optional[str] = None
     # Per-session effort (thinking) override; None = Auto
     effort: Optional[str] = None
+    # MVP-2.7.0: private = its owner and admins; workspace = everyone. owned_by_me is for the caller.
+    visibility: str = "workspace"
+    owned_by_me: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -3304,12 +3304,11 @@ async def api_generate_report(request: ReportGenerateRequest):
 
 
 @app.post("/api/reports/from-session", response_model=ReportResponse, status_code=201)
-async def api_report_from_session(request: ReportFromSessionRequest):
+async def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
     """Create a report from a chat session's messages."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        chat_session = db.query(ChatSession).filter_by(session_id=request.session_id).first()
-        if not chat_session:
-            raise HTTPException(status_code=404, detail=f"Chat session {request.session_id} not found")
+        chat_session = chat_access.get_visible_session(db, request.session_id, actor)
 
         query = (
             db.query(ChatMessage)
@@ -3777,29 +3776,42 @@ async def api_list_im_apps():
 # ============================================================================
 
 
+def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, cls=ChatSessionResponse, **extra):
+    """One session as the caller sees it (owned_by_me is relative to the caller)."""
+    from agenticops.services import chat_access
+    return cls(
+        id=row.id, session_id=row.session_id, name=row.name,
+        created_at=row.created_at, updated_at=row.updated_at,
+        last_activity_at=row.last_activity_at, message_count=message_count,
+        pinned=bool(row.pinned), starred=bool(row.starred), archived=bool(row.archived),
+        model_id=row.model_id, effort=row.effort,
+        visibility=row.visibility or chat_access.WORKSPACE, owned_by_me=chat_access.owned_by(row, actor),
+        **extra,
+    )
+
+
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
-async def api_create_chat_session(payload: ChatSessionCreate):
+async def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(current_actor)):
+    from agenticops.services import chat_access
     sid = str(uuid.uuid4())
     name = payload.name or f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+    owner, visibility = chat_access.new_session_owner(actor)
     with get_db_session() as db:
-        row = ChatSession(session_id=sid, name=name)
+        row = ChatSession(session_id=sid, name=name, owner_user_id=owner, visibility=visibility)
         db.add(row)
         db.flush()
-        return ChatSessionResponse(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at, message_count=0,
-            model_id=row.model_id, effort=row.effort,
-        )
+        return _chat_session_response(row, 0, actor)
 
 
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
 async def api_list_chat_sessions(
     limit: int = Query(default=50, le=100),
     include_archived: bool = Query(default=False),
+    actor: Actor = Depends(current_actor),
 ):
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        query = db.query(ChatSession)
+        query = chat_access.visible_filter(db.query(ChatSession), actor)
         if not include_archived:
             query = query.filter(ChatSession.archived == False)
         rows = (
@@ -3808,40 +3820,27 @@ async def api_list_chat_sessions(
             .limit(limit)
             .all()
         )
-        result = []
-        for r in rows:
-            cnt = db.query(func.count(ChatMessage.id)).filter(
-                ChatMessage.session_id == r.id
-            ).scalar()
-            result.append(ChatSessionResponse(
-                id=r.id, session_id=r.session_id, name=r.name,
-                created_at=r.created_at, updated_at=r.updated_at,
-                last_activity_at=r.last_activity_at, message_count=cnt,
-                pinned=r.pinned, starred=r.starred, archived=r.archived,
-                model_id=r.model_id, effort=r.effort,
-            ))
-        return result
+        # One grouped count for the page, not one COUNT per session
+        counts = dict(
+            db.query(ChatMessage.session_id, func.count(ChatMessage.id))
+            .filter(ChatMessage.session_id.in_([r.id for r in rows]))
+            .group_by(ChatMessage.session_id)
+            .all()
+        ) if rows else {}
+        return [_chat_session_response(r, counts.get(r.id, 0), actor) for r in rows]
 
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
-async def api_get_chat_session(session_id: str):
+async def api_get_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
     """Session metadata only. History is fetched via the paginated
     /sessions/{id}/messages endpoint. `messages` is always [] (deprecated)."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
         cnt = db.query(func.count(ChatMessage.id)).filter(
             ChatMessage.session_id == row.id
         ).scalar()
-        return ChatSessionDetail(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at,
-            message_count=cnt,
-            pinned=row.pinned, starred=row.starred, archived=row.archived,
-            messages=[],
-        )
+        return _chat_session_response(row, cnt, actor, cls=ChatSessionDetail, messages=[])
 
 
 @app.get("/api/chat/sessions/{session_id}/messages", response_model=ChatMessagesPage)
@@ -3849,13 +3848,13 @@ async def api_get_chat_messages(
     session_id: str,
     limit: int = Query(default=50, ge=1, le=100),
     before: Optional[int] = Query(default=None, description="Return messages with id < before (older page)"),
+    actor: Actor = Depends(current_actor),
 ):
     """Cursor-paginated chat history, newest-first window returned in
     chronological (oldest→newest) order. Cursor = ChatMessage.id."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
 
         q = db.query(ChatMessage).filter(ChatMessage.session_id == row.id)
         if before is not None:
@@ -3883,7 +3882,11 @@ async def api_get_chat_messages(
 
 
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks,
+                                  actor: Actor = Depends(current_actor)):
+    from agenticops.services import chat_access
+    with get_db_session() as db:  # first: a session the caller cannot see is a 404 before anything else answers
+        chat_access.get_visible_session(db, session_id, actor)
     model_field_set = "model_id" in payload.model_fields_set
     effort_field_set = "effort" in payload.model_fields_set
     if (model_field_set or effort_field_set) and session_id in _streaming_sessions:
@@ -3898,9 +3901,10 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
             raise HTTPException(400, f"Unknown effort level. Allowed: {sorted(allowed_effort)}")
 
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
+        if payload.visibility is not None:
+            chat_access.check_visibility_change(row, actor, payload.visibility)
+            row.visibility = payload.visibility
         if payload.name is not None:
             row.name = payload.name
         if payload.pinned is not None:
@@ -3923,13 +3927,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
-        response = ChatSessionResponse(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at, message_count=cnt,
-            pinned=row.pinned, starred=row.starred, archived=row.archived,
-            model_id=row.model_id, effort=row.effort,
-        )
+        response = _chat_session_response(row, cnt, actor)
 
     # Rebuild this session's agent with the new model/effort on next message
     if agent_changed:
@@ -3972,12 +3970,15 @@ def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
 
 
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
-async def api_delete_chat_session(session_id: str):
+async def api_delete_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
+    from agenticops.models import SessionSummary
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
         db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+        # FK cascades are not enforced on SQLite: a summary left behind could be injected into a later
+        # session that reuses this primary key.
+        db.query(SessionSummary).filter(SessionSummary.session_id == row.id).delete()
         db.delete(row)
     _chat_sessions.remove(session_id)
 
@@ -3999,7 +4000,7 @@ async def api_delete_chat_session(session_id: str):
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
-async def api_send_chat_message(session_id: str, request: Request):
+async def api_send_chat_message(session_id: str, request: Request, actor: Actor = Depends(current_actor)):
     """Send a message, optionally with a file attachment.
 
     Accepts:
@@ -4007,6 +4008,12 @@ async def api_send_chat_message(session_id: str, request: Request):
     - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
     """
     from agenticops.chat.preprocessor import preprocess_message
+    from agenticops.services import chat_access
+
+    # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
+    # no upload is read, no /channel or /send_to command executes, and the 404 reveals nothing.
+    with get_db_session() as db:
+        chat_access.get_visible_session(db, session_id, actor)
 
     content_type = request.headers.get("content-type", "")
     file_contents: list[tuple[str, str]] = []
@@ -4143,11 +4150,10 @@ async def api_send_chat_message(session_id: str, request: Request):
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
         set_trace_id(_chat_trace_id)
-        # Run Context for this chat turn — tools/services read it for audit attribution
-        # (the REST dependency current_actor does not run for this SSE handler).
-        from agenticops.auth.actor import actor_from_request
+        # Run Context for this chat turn — tools/services read it for audit attribution. The stream runs in
+        # its own task, so the context current_actor stamped on the request is set again here.
         from agenticops.run_context import RunContext, set_run_context
-        _actor = actor_from_request(request)
+        _actor = actor
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
                                    agent_name="main", chat_session_id=session_id))

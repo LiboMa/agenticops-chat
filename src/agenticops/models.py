@@ -1125,6 +1125,11 @@ class ChatSession(Base):
     # Per-session effort (thinking) override: off|standard|deep; NULL = Auto
     effort: Mapped[Optional[str]] = mapped_column(String(20), default=None)
 
+    # Who may see it (MVP-2.7.0, services/chat_access): `private` = its owner and admins, `workspace` = everyone.
+    # NULL owner = no single owner — pre-2.7.0 rows, and sessions made with auth off, from IM or from the CLI.
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
+
 
 class ChatMessage(Base):
     """Individual message in a chat session."""
@@ -1573,6 +1578,46 @@ def _backfill_plan_hashes_2_6_1(engine) -> None:
             session.commit()
     except Exception as exc:
         logger.warning("MVP-2.6.1 plan hash backfill skipped: %s", exc)
+
+
+# MVP-2.7.0: chat session ownership. Existing rows become workspace sessions with no owner (unchanged reach).
+_ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
+    "chat_sessions": {"owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
+}
+_migrated_2_7_0_urls: set[str] = set()
+_migrate_2_7_0_lock = threading.Lock()
+
+
+def _statements_2_7_0(insp, dialect) -> list[str]:
+    """DDL still needed for the 2.7.0 shape; pure like _statements_2_6_1, empty once migrated."""
+    guard = " IF NOT EXISTS" if dialect.name == "postgresql" else ""
+    stmts: list[str] = []
+    for tbl, cols in _ADD_COLUMNS_2_7_0.items():
+        if not insp.has_table(tbl):
+            continue
+        existing = {c["name"] for c in insp.get_columns(tbl)}
+        for col, extra in cols.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {tbl} ADD COLUMN{guard} {_add_column_ddl(dialect, tbl, col, extra)}")
+    return stmts
+
+
+def _run_migrate_2_7_0(engine) -> None:
+    stmts = _statements_2_7_0(inspect(engine), engine.dialect)
+    if stmts:
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.execute(text(stmt))
+
+
+def _migrate_2_7_0(engine) -> None:
+    """Idempotent MVP-2.7.0 migration — once per process per database URL; a DDL failure raises."""
+    key = str(engine.url)
+    with _migrate_2_7_0_lock:
+        if key in _migrated_2_7_0_urls:
+            return
+        _run_migrate_2_7_0(engine)
+        _migrated_2_7_0_urls.add(key)
 
 
 def _run_migrate_2_6_1(engine) -> None:
@@ -2071,6 +2116,8 @@ def init_db(engine=None):
 
     # MVP-2.6.1: graph anchoring columns + relation-build marker; runs last so every legacy column it reads exists.
     _migrate_2_6_1(engine)
+    # MVP-2.7.0: chat session owner + visibility.
+    _migrate_2_7_0(engine)
 
     return engine
 
