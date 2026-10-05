@@ -117,7 +117,7 @@ export function PlanView({ plan, stepsDiff, t }: { plan: FixPlan; stepsDiff?: Ch
         <div>
           <h4 className="font-semibold text-foreground mb-2">{t("issues.postChecks")}</h4>
           <ul className="space-y-1.5">
-            {postChecks.map((c, i) => <CheckItem key={i} item={c} />)}
+            {postChecks.map((c, i) => <CheckItem key={i} item={c} checkId={`pc-${i + 1}`} />)}
           </ul>
         </div>
       )}

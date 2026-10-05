@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { resultRow, resultSummary, type ResultOutcome } from "@/lib/issueDetail";
+import { postCheckRows, type PostCheckRow } from "@/lib/postChecks";
 import type { FixExecution } from "@/api/types";
 
 const OUTCOME_CHIP: Record<ResultOutcome, string> = {
@@ -30,6 +31,7 @@ export function ExecutionEvidence({ execution: ex, showError = true }: { executi
       {SECTIONS.map(([field, label]) => {
         const items = ex[field] ?? [];
         const counts = resultSummary(items);
+        const bound = field === "post_check_results" ? postCheckRows(ex) : null;
         return (
           <div key={field}>
             <h4 className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -40,10 +42,19 @@ export function ExecutionEvidence({ execution: ex, showError = true }: { executi
                       .map((k) => `${counts[k]} ${t(`evidence.outcome.${k}`)}`).join(" · ")}
               </span>
             </h4>
-            {items.length > 0 && (
+            {bound && !bound.legacy ? (
               <ol className="space-y-1">
-                {items.map((item, i) => <ResultLine key={i} index={i + 1} item={item} />)}
+                {bound.rows.map((row) => <BoundCheckLine key={row.key} row={row} />)}
               </ol>
+            ) : items.length > 0 && (
+              <>
+                {bound && (ex.post_check_binding?.length ?? 0) > 0 && (
+                  <p className="mb-1 text-xs text-muted-foreground">{t("evidence.legacyUnbound")}</p>
+                )}
+                <ol className="space-y-1">
+                  {items.map((item, i) => <ResultLine key={i} index={i + 1} item={item} />)}
+                </ol>
+              </>
             )}
           </div>
         );
@@ -70,6 +81,41 @@ function ResultLine({ index, item }: { index: number; item: unknown }) {
       {open && r.output && (
         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 bg-secondary/50 p-2 font-mono">
           {r.output}
+        </pre>
+      )}
+    </li>
+  );
+}
+
+/** One declared post-check and what was reported for it (or a stray result): the problem, when there is one,
+ *  is said in words next to the outcome — it is what the verdict's reason ("no result for post-check pc-2") names. */
+function BoundCheckLine({ row }: { row: PostCheckRow }) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const problem = row.problem === "duplicate"
+    ? t("evidence.problem.duplicate").replace("{n}", String(row.count))
+    : row.problem ? t(`evidence.problem.${row.problem}`) : "";
+  return (
+    <li className="rounded border border-border/60 text-xs">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} disabled={!row.output}
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left enabled:hover:bg-secondary">
+        <span className="font-mono text-muted-foreground">{row.label}</span>
+        {row.outcome && (
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${OUTCOME_CHIP[row.outcome]}`}>
+            {t(`evidence.outcome.${row.outcome}`)}
+          </span>
+        )}
+        {problem && (
+          <span className="rounded border border-amber-500/50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+            {problem}
+          </span>
+        )}
+        <span className="flex-1 truncate text-foreground">{row.title || "—"}</span>
+        {row.output && <span className="text-muted-foreground">{open ? t("issues.collapse") : t("issues.expand")}</span>}
+      </button>
+      {open && row.output && (
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 bg-secondary/50 p-2 font-mono">
+          {row.output}
         </pre>
       )}
     </li>

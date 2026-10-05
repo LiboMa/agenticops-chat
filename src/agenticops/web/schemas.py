@@ -448,8 +448,23 @@ class FixExecutionResponse(BaseModel):
     accepted_at: Optional[datetime] = None
     acceptance_note: Optional[str] = None
     created_at: datetime
+    # One row per declared post-check of this run's own plan, then stray results (verification.bind_results):
+    # {check_id, check, result_status, results, problem: null|missing|duplicate|undeclared|unbound}
+    post_check_binding: list = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _bind_post_checks(cls, value, handler):
+        """Read from a FixExecution row, pair its results with its plan's checks — the same function the
+        verdict uses, so the page shows exactly what a reason like "no result for post-check pc-2" means."""
+        model = handler(value)
+        plan = getattr(value, "fix_plan", None)
+        if plan is not None and not model.post_check_binding:
+            from agenticops.services.verification import bind_results
+            model.post_check_binding = bind_results(plan.post_checks, model.post_check_results)
+        return model
 
 
 class ExecutionAcceptBody(BaseModel):

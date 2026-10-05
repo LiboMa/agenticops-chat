@@ -257,9 +257,20 @@ export interface FixExecution {
   accepted_at: string | null;
   acceptance_note: string | null;
   created_at: string;
+  // MVP-2.7.0: the run's results paired with its own plan's declared checks (verification.bind_results)
+  post_check_binding?: PostCheckBinding[];
 }
 
 export type VerificationStatus = "passed" | "failed" | "pending_acceptance";
+
+/** One declared post-check (check_id pc-n) and what was reported for it, or one stray result after them. */
+export interface PostCheckBinding {
+  check_id: string | null;
+  check: string | null;
+  result_status: "pass" | "warning" | "fail" | "missing" | null;
+  results: number;
+  problem: null | "missing" | "duplicate" | "undeclared" | "unbound";
+}
 
 /* ------------------------------------------------------------------ */
 /*  Account                                                            */

@@ -975,3 +975,23 @@ def test_main_agents_plan_readers_show_the_check_ids(db):
 def test_the_executor_prompt_asks_for_one_result_per_check_id():
     from agenticops.agents.executor_agent import EXECUTOR_SYSTEM_PROMPT
     assert "exactly one result per check_id" in EXECUTOR_SYSTEM_PROMPT
+
+
+def test_the_api_pairs_each_run_with_its_own_plans_checks(db, quiet):
+    """Every FixExecutionResponse (list, detail, an issue's runs, a change's runs) carries post_check_binding:
+    one row per declared check of the run's own plan, then stray results — computed by the verdict's function."""
+    from agenticops.web.app import app
+    client = TestClient(app)
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK, A2))
+    _save(plan_id, post=[OK, OK])  # refused once, then recorded pending
+    ex = _only_execution(plan_id)
+    expected = [("pc-1", "healthy", "duplicate"), ("pc-2", "http health", "missing")]
+    for url in (f"/api/fix-executions/{ex.id}", f"/api/fix-executions?fix_plan_id={plan_id}",
+                f"/api/health-issues/{issue_id}/executions"):
+        body = client.get(url).json()
+        row = body if isinstance(body, dict) else body[0]
+        assert [(b["check_id"], b["check"], b["problem"]) for b in row["post_check_binding"]] == expected, url
+    cr_id, change_plan, change_ex = _change(db)
+    _save_change(cr_id, change_plan, change_ex, post=[OK])
+    shown = client.get(f"/api/changes/{cr_id}").json()["executions"][0]["post_check_binding"]
+    assert [(b["check_id"], b["problem"], b["result_status"]) for b in shown] == [("pc-1", None, "pass")]
