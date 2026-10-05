@@ -5,6 +5,7 @@ import { RunbookStep } from "@/components/plans/RunbookStep";
 import { CheckItem } from "@/components/plans/CheckItem";
 import { RollbackPlan } from "@/components/plans/RollbackPlan";
 import { planStepMarks } from "@/lib/changeDetail";
+import { isBlank } from "@/lib/issueDetail";
 import { planCounts, planLabel, shortHash } from "@/lib/plans";
 import { formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
@@ -49,8 +50,9 @@ export function PlanView({ plan, stepsDiff, t }: { plan: FixPlan; stepsDiff?: Ch
 
       <div className="text-muted-foreground report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(plan.summary) }} />
       <p className="text-xs text-muted-foreground">
-        {t("issues.impact")}: <span className="text-foreground">{plan.estimated_impact || "-"}</span>
-        {" · "}{t("issues.created")}: <span className="text-foreground">{formatShortDate(plan.created_at)}</span>
+        {/* a blank impact is not a fact: no row, never "-" (spec §1-6) */}
+        {!isBlank(plan.estimated_impact) && <>{t("issues.impact")}: <span className="text-foreground">{plan.estimated_impact}</span>{" · "}</>}
+        {t("issues.created")}: <span className="text-foreground">{formatShortDate(plan.created_at)}</span>
       </p>
 
       {marks && (

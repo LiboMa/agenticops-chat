@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { choiceAvailable, locationJudgeable, noteRequired, verdictRequests } from "@/lib/verdict";
+import { choiceAvailable, locationJudgeable, noteRequired, remainingRequests, verdictRequests } from "@/lib/verdict";
 
 const valid = { location_status: "valid" as const, location_verdict: null };
 const absent = { location_status: "absent" as const, location_verdict: null };
@@ -38,5 +38,18 @@ describe("verdict (P9): one block, the existing two endpoints", () => {
     expect(choiceAvailable("rcaWrong", null)).toBe(false);
     expect(choiceAvailable("falsePositive", null)).toBe(true);
     expect(locationJudgeable({ location_status: "partial", location_verdict: null })).toBe(true);
+  });
+});
+
+describe("remainingRequests (final review Minor 5): a half-saved submit retries only what did not take effect", () => {
+  const req = verdictRequests("correct", valid, "");
+  it("the second call failed: only the issue feedback is left — the root-cause verdict is never sent twice", () => {
+    expect(remainingRequests(req, "issueFeedback")).toEqual({ rcaFeedback: null, issueFeedback: req.issueFeedback });
+  });
+  it("the first call failed: nothing took effect, so nothing is half-saved (the form submits again as it is)", () => {
+    expect(remainingRequests(req, "rcaFeedback")).toBeNull();
+  });
+  it("a single-call choice has no second part to retry", () => {
+    expect(remainingRequests(verdictRequests("rcaWrong", valid, "x"), "issueFeedback")).toBeNull();
   });
 });

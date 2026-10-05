@@ -64,7 +64,7 @@ function changeFactRows(cr: ChangeRequestDetail, acct: Account | undefined, t: (
   if (ext) rows.push({ labelKey: "changes.externalRef", value: ext.label, kind: "mono", href: ext.url ?? undefined, external: true });
   const created = cr.requested_at ?? cr.created_at;
   if (created) rows.push({ labelKey: "issues.created", value: created, kind: "date" });
-  if (!isBlank(cr.trace_id)) rows.push({ labelKey: "facts.trace", value: cr.trace_id!, kind: "mono" });
+  if (!isBlank(cr.trace_id)) rows.push({ labelKey: "facts.trace", value: cr.trace_id!, kind: "mono", copy: true });
   return rows;
 }
 
@@ -285,6 +285,13 @@ function ChangeDetailView({ crId }: { crId: number }) {
             <div className="space-y-4">
               <ReviewBody cr={cr} quietReasons={m.quietReviewReasons} impactNote={impactNote} clarify={clarify}
                           onClarifyChange={setClarify} onSendClarify={sendClarify} sending={act.isPending} t={t} />
+              {/* the list ends here (a policy block): the plan it stopped stays readable */}
+              {m.reviewPlan && (
+                <div className="space-y-2 border-t border-border pt-4">
+                  <h4 className="text-sm font-semibold text-foreground">{t("workitem.reviewedPlan")}</h4>
+                  <PlanView plan={m.reviewPlan} stepsDiff={cr.steps_diff} t={t} />
+                </div>
+              )}
               {closedHere("review")}
             </div>
           </PhaseCard>

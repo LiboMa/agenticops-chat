@@ -153,6 +153,16 @@ describe("changePhases — edge endings", () => {
     expect(ids(changePhases(C("rejected", { review_verdict: "approved_for_planning", policy_action: "require_human" }))))
       .toEqual(["request:done", "review:done", "plan:done", "run:failed"]);
   });
+  it("a list that ends at ② with a plan shows that plan read-only inside ② (final review Minor 7)", () => {
+    const plan = { id: 7, status: "rejected", created_at: "2026-10-03T09:00:00" };
+    const blocked = { ...bare("rejected"), review_verdict: "approved_for_planning", policy_action: "block", plans: [plan] } as unknown as ChangeRequestDetail;
+    expect(changeDetailModel(blocked).reviewPlan?.id).toBe(7);
+    // no plan to show; or the list reaches ③, which draws it
+    expect(changeDetailModel({ ...blocked, plans: [] } as ChangeRequestDetail).reviewPlan).toBeNull();
+    expect(changeDetailModel({ ...blocked, policy_action: "require_human" } as ChangeRequestDetail).reviewPlan).toBeNull();
+    expect(changeDetailModel({ ...bare("planned"), review_verdict: "approved_for_planning", plans: [plan] } as unknown as ChangeRequestDetail)
+      .reviewPlan).toBeNull();
+  });
   it("a status outside the union (a newer backend) degrades: no button, nobody waited on, never throws", () => {
     const r = changePhases(C("paused", { review_verdict: "approved_for_planning", approved_at: "2026-10-03T09:55:56" }));
     expect([r.sub, r.waitingFor, r.primary, r.terminal]).toEqual(["unknown", null, null, false]);

@@ -4,6 +4,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { cn } from "@/lib/cn";
+import { nextMenuIndex, type MenuKey } from "@/lib/menuNav";
 
 export interface StatusLineAction {
   key: string; label: string; run: () => void; disabled?: boolean; variant?: "default" | "destructive";
@@ -38,11 +39,21 @@ export function StatusLine({
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const items = menu ?? [];
 
-  // ESC and a click outside close the menu; bound only while it is open
+  // ESC (focus back on ⋯) and a click outside close the menu; bound only while it is open. Opening it focuses its
+  // first enabled item, so the arrow keys work at once.
   useEffect(() => {
     if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
+    const first = nextMenuIndex(-1, "Home", items.map((a) => !!a.disabled));
+    if (first >= 0) itemRefs.current[first]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      triggerRef.current?.focus();
+    };
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
@@ -52,9 +63,17 @@ export function StatusLine({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown);
     };
+    // the items are read once per opening; a poll that re-renders them must not steal the focus back
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpen]);
 
-  const items = menu ?? [];
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const current = itemRefs.current.findIndex((el) => el === document.activeElement);
+    const next = nextMenuIndex(current, e.key as MenuKey, items.map((a) => !!a.disabled));
+    if (next >= 0) itemRefs.current[next]?.focus();
+  };
   return (
     <div className="space-y-2">
       <Card>
@@ -74,10 +93,12 @@ export function StatusLine({
                 <span className="font-medium text-foreground">{statusLabel}</span>
               </div>
               {reason && (
-                <p onClick={() => setExpanded(!expanded)}
-                   className={cn("text-sm text-foreground/80 break-words cursor-pointer", !expanded && "line-clamp-2")}>
+                // a button, so the keyboard expands the clamped sentence too
+                <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}
+                        className={cn("w-full text-left text-sm text-foreground/80 break-words cursor-pointer",
+                                      expanded ? "block" : "line-clamp-2")}>
                   {reason}
-                </p>
+                </button>
               )}
               {waiting && <p className="text-sm text-muted-foreground">{waiting}</p>}
             </div>
@@ -99,6 +120,7 @@ export function StatusLine({
                 )}
                 {items.length > 0 && (
                   <button
+                    ref={triggerRef}
                     onClick={() => setMenuOpen(!menuOpen)}
                     aria-haspopup="menu"
                     aria-expanded={menuOpen}
@@ -110,17 +132,19 @@ export function StatusLine({
                   </button>
                 )}
                 {menuOpen && items.length > 0 && (
-                  <div role="menu"
+                  <div role="menu" aria-label={t("workitem.menu")} onKeyDown={onMenuKey}
                        className="absolute right-0 top-full mt-1 z-20 min-w-48 rounded-lg border bg-popover shadow-lg py-1 animate-[slideInRight_0.2s_ease-out]">
-                    {items.map((a) => (
+                    {items.map((a, i) => (
                       <button
                         key={a.key}
+                        ref={(el) => { itemRefs.current[i] = el; }}
                         role="menuitem"
+                        tabIndex={-1}
                         title={a.title}
                         disabled={a.disabled}
                         onClick={() => { setMenuOpen(false); a.run(); }}
                         className={cn(
-                          "block w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50",
+                          "block w-full text-left px-3 py-2 text-sm hover:bg-accent focus:bg-accent focus:outline-none transition-colors disabled:opacity-50",
                           a.variant === "destructive" ? "text-red-500" : "text-popover-foreground",
                         )}
                       >

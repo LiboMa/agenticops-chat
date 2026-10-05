@@ -45,3 +45,11 @@ export function verdictRequests(choice: VerdictChoice, rca: LocInput, note: stri
       return { rcaFeedback: null, issueFeedback: withNote({ type: "false_positive" as const, confidence: 4 }) };
   }
 }
+
+/** What a submit stopped at `failed` still has to send, when part of it already took effect: the root-cause
+ *  verdict saved and the issue feedback failed → that feedback alone (the saved verdict is not sent twice).
+ *  null when nothing took effect (the form submits again as it is) or nothing is left. */
+export function remainingRequests(req: VerdictRequests, failed: "rcaFeedback" | "issueFeedback"): VerdictRequests | null {
+  return failed === "issueFeedback" && req.rcaFeedback && req.issueFeedback
+    ? { rcaFeedback: null, issueFeedback: req.issueFeedback } : null;
+}

@@ -12,6 +12,7 @@ export interface ChangeDetailModel {
   waitingKey: string | null;
   primaryKey: string | null;
   plan: FixPlan | null;
+  reviewPlan: FixPlan | null; // the list ends at ② before ③ is drawn (a policy block): its plan, read-only, in ②
   latestRun: FixExecution | null;
   runs: FixExecution[];
   acceptNote: { key: string; params?: Record<string, string> } | null;
@@ -36,6 +37,8 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
   // so that run's accepted_by stays empty — its status tells it apart. A person's acceptance sets accepted_by.
   const failedRun = (cr.status === "failed" || cr.status === "rolled_back") && latestRun !== null
     && latestRun.verification_status === "failed" && !latestRun.accepted_by && latestRun.status !== "succeeded";
+  const plan = activeChangePlan(cr.plans);
+  const endsAtReview = phase.terminal && !phase.phases.some((p) => p.id === "plan");
   const menu: ChangeMenuItem[] = [
     ...(cr.status === "under_review" ? ["restartReview" as const] : []),
     ...(cr.status === "planned" ? ["reject" as const] : []),
@@ -51,7 +54,8 @@ export function changeDetailModel(cr: ChangeRequestDetail): ChangeDetailModel {
     reason,
     waitingKey: phase.waitingFor ? `workitem.wait.${phase.waitingFor}` : null,
     primaryKey: phase.primary ? `workitem.primary.${phase.primary}` : null,
-    plan: activeChangePlan(cr.plans),
+    plan,
+    reviewPlan: endsAtReview ? plan : null,
     latestRun,
     runs,
     acceptNote: failedRun ? { key: "workitem.accept.systemFailed", params: { n: String(latestRun.id) } } : null,

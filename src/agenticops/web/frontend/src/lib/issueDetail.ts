@@ -3,7 +3,9 @@
  * the execution evidence rows, when to poll and when a plan can be approved. Pure, so node can test it. An old
  * `?tab=` link is mapped onto its phase-card hash by lib/workitemRoutes.
  */
-import type { FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, PipelineEvent, VerificationStatus } from "@/api/types";
+import type {
+  FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, PipelineEvent, RCAResult, VerificationStatus,
+} from "@/api/types";
 import { parseApiDate } from "@/lib/formatDate";
 
 export interface IssueFacts {
@@ -71,6 +73,20 @@ export const SEVERITIES: readonly HealthIssue["severity"][] = ["critical", "high
 /** A severity in the reader's language; any other value (a signal's or a KB entry's own) stays raw. */
 export function severityLabel(severity: string, t: (key: string) => string): string {
   return (SEVERITIES as readonly string[]).includes(severity) ? t(`severity.${severity}`) : severity;
+}
+
+/** The issue sources the backend writes (detect agent, patrol, security collectors, alarm intake); a label lives at
+ *  `issues.source.<source>`. `webhook_<system>` / `im_<system>` (alert intake) name their system. */
+export const ISSUE_SOURCES: readonly string[] = [
+  "cloudwatch_alarm", "metric_anomaly", "log_pattern", "manual", "graph_patrol", "security_posture", "security_poll",
+  "threat_detection", "vuln_scan", "network_exposure", "identity_hygiene", "audit_logging", "encryption_audit",
+];
+
+/** An issue's source in the reader's language; any other value stays raw (spec §1-6). */
+export function issueSourceLabel(source: string, t: (key: string) => string): string {
+  if (ISSUE_SOURCES.includes(source)) return t(`issues.source.${source}`);
+  const family = /^(webhook|im)_(.+)$/.exec(source);
+  return family ? t(`issues.source.${family[1]}`).replace("{name}", family[2]) : source;
 }
 
 /** A run still queued (pending) or claimed (running); every other status is finished. */
@@ -150,11 +166,14 @@ export interface FactRow {
   copy?: boolean; // a click copies the value
 }
 
-/** The issue's key facts for the right rail, blank rows dropped (an alarm's "unknown" resource is not a fact). */
+/** The issue's key facts for the right rail, blank rows dropped (an alarm's "unknown" resource is not a fact); the
+ *  root-cause resource is the latest RCA's top location candidate, once the location passed validation. */
 export function factRows(
   issue: Pick<HealthIssue, "resource_id" | "resource_ref" | "anchor_status" | "account_name" | "severity" | "source"
     | "detected_at" | "trace_id" | "metric_data">,
-  anchor?: { name: string | null; type: string | null } | null,
+  anchor: { name: string | null; type: string | null } | null | undefined,
+  t: (key: string) => string,
+  rca?: Pick<RCAResult, "location" | "location_status"> | null,
 ): FactRow[] {
   const rows: FactRow[] = [];
   const f = issueFacts(issue);
@@ -167,9 +186,16 @@ export function factRows(
   }
   if (!isBlank(f.resourceType)) rows.push({ labelKey: "facts.type", value: f.resourceType! });
   if (!isBlank(f.region)) rows.push({ labelKey: "facts.region", value: f.region! });
+  const top = rca?.location_status === "valid" || rca?.location_status === "partial"
+    ? [...(rca.location?.candidates ?? [])].sort((a, b) => a.rank - b.rank)[0] : undefined;
+  if (top) {
+    const name = !isBlank(top.name) ? top.name! : !isBlank(top.resource_id) ? top.resource_id! : `#${top.ref}`;
+    rows.push({ labelKey: "facts.rootCause", value: [name, top.type].filter((x) => !isBlank(x)).join(" · "),
+                href: `/app/resources/${top.ref}` });
+  }
   if (!isBlank(issue.account_name)) rows.push({ labelKey: "facts.account", value: issue.account_name! });
-  rows.push({ labelKey: "facts.severity", value: issue.severity.toUpperCase() });
-  if (!isBlank(issue.source)) rows.push({ labelKey: "facts.source", value: issue.source });
+  rows.push({ labelKey: "facts.severity", value: severityLabel(issue.severity, t) });
+  if (!isBlank(issue.source)) rows.push({ labelKey: "facts.source", value: issueSourceLabel(issue.source, t) });
   rows.push({ labelKey: "facts.detected", value: issue.detected_at, kind: "date" });
   if (!isBlank(issue.trace_id)) rows.push({ labelKey: "facts.trace", value: issue.trace_id!, kind: "mono", copy: true });
   return rows;

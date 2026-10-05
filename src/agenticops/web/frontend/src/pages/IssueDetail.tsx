@@ -382,7 +382,7 @@ export default function IssueDetail() {
       <aside className="space-y-4 min-w-0">
         <FactsRail
           title={t("workitem.facts")}
-          rows={factRows(a, { name: anchorRes.data?.resource_name ?? null, type: anchorRes.data?.resource_type ?? null })}
+          rows={factRows(a, { name: anchorRes.data?.resource_name ?? null, type: anchorRes.data?.resource_type ?? null }, t, rca.data)}
           t={t}
           extra={
             <div className="space-y-2 border-t border-border pt-3 text-sm">

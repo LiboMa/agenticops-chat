@@ -4,7 +4,7 @@ import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, inFlightAutoRun, isBlank, issueFacts,
-  issueStatuses, ISSUE_IN_FLIGHT, newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
+  issueSourceLabel, ISSUE_SOURCES, issueStatuses, ISSUE_IN_FLIGHT, newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -193,19 +193,40 @@ describe("anchorBadge with the resource name (P8)", () => {
 });
 
 describe("factRows", () => {
+  const t = (k: string) => `<${k}>`;
   it("drops empty, 'unknown' and dash values; the anchor row links the resource with its name and type", () => {
     const i = issue({ resource_id: "unknown", resource_ref: 36, anchor_status: "anchored", account_name: "chaos-lab",
                       source: "cloudwatch_alarm", metric_data: { resource_type: "unknown", region: "—" } });
-    const rows = factRows(i, { name: "agenticops-chaos-lab", type: "EKS" });
+    const rows = factRows(i, { name: "agenticops-chaos-lab", type: "EKS" }, t);
     expect(rows.map((r) => r.labelKey)).toEqual(
       ["facts.anchor", "facts.account", "facts.severity", "facts.source", "facts.detected", "facts.trace"]);
     expect(rows[0]).toEqual({ labelKey: "facts.anchor", value: "agenticops-chaos-lab · EKS", href: "/app/resources/36" });
     expect(rows.find((r) => r.labelKey === "facts.detected")?.kind).toBe("date");
     // the trace id is copied with a click, as the old header's chip was
     expect(rows.find((r) => r.labelKey === "facts.trace")).toEqual({ labelKey: "facts.trace", value: "TRC-1", kind: "mono", copy: true });
+    // severity and source in the reader's language (spec §1-6), not "HIGH" / cloudwatch_alarm
+    expect(rows.find((r) => r.labelKey === "facts.severity")?.value).toBe("<severity.high>");
+    expect(rows.find((r) => r.labelKey === "facts.source")?.value).toBe("<issues.source.cloudwatch_alarm>");
+  });
+  it("the root-cause resource: the top validated location candidate, linked, after the anchor facts (spec §6.1)", () => {
+    const loc = (location_status: "valid" | "partial" | "invalid" | "absent", candidates: object[]) =>
+      ({ location_status, location: { candidates, path: [], dropped: [] } }) as never;
+    const cands = [{ ref: 7, rank: 2, type: "EC2", name: "web", resource_id: "i-1", supporting: [], refuting: [] },
+                   { ref: 9, rank: 1, type: "RDS", name: "db-1", resource_id: "db-1", supporting: [], refuting: [] }];
+    const i = issue({ metric_data: { region: "us-east-1" } });
+    const rows = factRows(i, null, t, loc("valid", cands));
+    expect(rows.map((r) => r.labelKey).slice(0, 4)).toEqual(["facts.resource", "facts.region", "facts.rootCause", "facts.account"]);
+    expect(rows[2]).toEqual({ labelKey: "facts.rootCause", value: "db-1 · RDS", href: "/app/resources/9" });
+    expect(factRows(i, null, t, loc("partial", [{ ...cands[1], name: null, type: null }]))
+      .find((r) => r.labelKey === "facts.rootCause")?.value).toBe("db-1");
+    expect(factRows(i, null, t, loc("partial", [{ ...cands[1], name: null, resource_id: null, type: null }]))
+      .find((r) => r.labelKey === "facts.rootCause")?.value).toBe("#9");
+    // a location that failed validation (or none) names no root cause
+    for (const l of [loc("invalid", cands), loc("absent", []), null, undefined])
+      expect(factRows(i, null, t, l).some((r) => r.labelKey === "facts.rootCause")).toBe(false);
   });
   it("an unanchored issue with a real resource id shows it as the resource row; region/type when present", () => {
-    const rows = factRows(issue({ resource_id: "i-0abc", metric_data: { resource_type: "EC2", region: "us-east-1" } }));
+    const rows = factRows(issue({ resource_id: "i-0abc", metric_data: { resource_type: "EC2", region: "us-east-1" } }), null, t);
     expect(rows.slice(0, 3)).toEqual([
       { labelKey: "facts.resource", value: "i-0abc", kind: "mono" },
       { labelKey: "facts.type", value: "EC2" },
@@ -215,6 +236,23 @@ describe("factRows", () => {
   it("isBlank", () => {
     for (const v of ["", " ", "unknown", "Unknown", "—", "-", "n/a", null, undefined]) expect(isBlank(v), String(v)).toBe(true);
     for (const v of ["x", 0, "0"]) expect(isBlank(v), String(v)).toBe(false);
+  });
+});
+
+describe("issueSourceLabel", () => {
+  it("a source the backend writes reads as its key; webhook_ / im_ name their system; anything else stays raw", () => {
+    const t = (k: string) => (k === "issues.source.webhook" ? "Webhook · {name}" : k === "issues.source.im" ? "IM · {name}" : `<${k}>`);
+    expect(issueSourceLabel("cloudwatch_alarm", t)).toBe("<issues.source.cloudwatch_alarm>");
+    expect(issueSourceLabel("webhook_datadog", t)).toBe("Webhook · datadog");
+    expect(issueSourceLabel("im_prometheus", t)).toBe("IM · prometheus");
+    expect(issueSourceLabel("agent", t)).toBe("agent");
+    expect(issueSourceLabel("webhook_", t)).toBe("webhook_");
+  });
+  it("every known source (and the two families) has a label in both locales", () => {
+    for (const k of [...ISSUE_SOURCES, "webhook", "im"]) {
+      expect((en as Record<string, string>)[`issues.source.${k}`], k).toBeTruthy();
+      expect((zh as Record<string, string>)[`issues.source.${k}`], k).toBeTruthy();
+    }
   });
 });
 

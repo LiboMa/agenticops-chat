@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { FactRow } from "@/lib/issueDetail";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -6,6 +7,14 @@ import { cn } from "@/lib/cn";
 
 /** The right rail's key facts; the rows come already stripped of blank values (`factRows`). */
 export function FactsRail({ title, rows, t, extra }: { title: string; rows: FactRow[]; t: (k: string) => string; extra?: React.ReactNode }) {
+  const [copied, setCopied] = useState<number | null>(null); // the row just copied says so for a moment
+  useEffect(() => {
+    if (copied === null) return;
+    const h = window.setTimeout(() => setCopied(null), 1500);
+    return () => window.clearTimeout(h);
+  }, [copied]);
+  const copy = (i: number, value: string) =>
+    navigator.clipboard?.writeText(value).then(() => setCopied(i), () => {});
   return (
     <Card>
       <CardBody className="space-y-3">
@@ -22,9 +31,14 @@ export function FactsRail({ title, rows, t, extra }: { title: string; rows: Fact
                     ? <a href={r.href} target="_blank" rel="noopener noreferrer" className={cn(cls, "text-primary hover:underline")}>{value} ↗</a>
                     : r.href ? <Link to={r.href} className={cn(cls, "text-primary hover:underline")}>{value}</Link>
                     : r.copy
-                      ? <button type="button" title={t("facts.copyHint")}
-                                onClick={() => navigator.clipboard?.writeText(r.value).catch(() => {})}
-                                className={cn(cls, "text-left hover:text-primary cursor-pointer")}>{value}</button>
+                      ? <>
+                          <button type="button" title={t("facts.copyHint")} onClick={() => copy(i, r.value)}
+                                  className={cn(cls, "text-left hover:text-primary cursor-pointer")}>{value}</button>
+                          {/* announced to a screen reader too */}
+                          <span role="status" className="ml-2 text-xs text-emerald-600 dark:text-emerald-400">
+                            {copied === i ? t("facts.copied") : ""}
+                          </span>
+                        </>
                     : <span className={cls}>{value}</span>}
                 </dd>
               </div>
