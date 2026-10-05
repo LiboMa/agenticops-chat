@@ -2,6 +2,7 @@ import type { FixExecution, FixPlan, IssueStatus } from "@/api/types";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { RunList } from "@/components/workitem/RunList";
+import { RunningFor } from "@/components/workitem/RunningFor";
 import { approvalBlockedReason, canApprovePlan } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
 
@@ -10,7 +11,7 @@ type T = (key: string) => string;
 /** ③ Approve & run: who approved which version, approve / reject while the plan waits (the same handlers as the
  *  status line's primary), then every run's evidence. A run's failure sentence is the status line's, not here (P3). */
 export function RunBody({
-  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, onApprove, onReject, approving, rejecting, t,
+  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, autoRunSince, onApprove, onReject, approving, rejecting, t,
 }: {
   plan: FixPlan | null;
   issueStatus: IssueStatus;
@@ -19,6 +20,7 @@ export function RunBody({
   error: Error | null;
   onRetryFetch: () => void;
   quietRunId: number | null;     // the run whose error_message the status line already shows
+  autoRunSince: string | null;   // the approval's auto-run under way since then: it has no record until it ends
   onApprove: () => void;
   onReject: () => void;
   approving: boolean;
@@ -66,6 +68,15 @@ export function RunBody({
       ) : error ? (
         // a failed fetch must not read as "no executions"
         <ErrorBanner message={error.message} onRetry={onRetryFetch} actionLabel={t("common.retry")} />
+      ) : autoRunSince ? (
+        // the approval's own run: no record until it ends, so earlier runs (if any) follow it
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <RunningFor since={autoRunSince} t={t} />
+            <p className="text-sm text-muted-foreground">{t("workitem.autoRunNote")}</p>
+          </div>
+          {runs.length > 0 && <RunList runs={runs} quietRunId={quietRunId} t={t} />}
+        </div>
       ) : runs.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t(plan ? "issues.noExecutions" : "workitem.future.issue.run")}</p>
       ) : (

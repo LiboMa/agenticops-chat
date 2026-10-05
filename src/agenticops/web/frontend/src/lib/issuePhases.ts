@@ -10,6 +10,7 @@ export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveA
 export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan"
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
   | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
+  | "rcaUnavailable"                   // detail page only: the RCA failed to load, so where the issue stands is not known
   | "unknown"; // a status this page does not know (a newer backend)
 
 export interface IssuePhaseInput {
@@ -18,6 +19,7 @@ export interface IssuePhaseInput {
   threshold?: number | null;
   plan?: Pick<FixPlan, "status"> | null;
   latestRun?: Pick<FixExecution, "status" | "verification_status"> | null;
+  autoRunInFlight?: boolean; // the approval's auto-run is under way: it has no run row until it ends (final review C1)
 }
 
 export interface IssuePhaseResult {
@@ -71,10 +73,12 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
     case "fix_planned":
       return result("run", "awaitingApproval", "approver", i.plan && APPROVABLE.has(i.plan.status) ? "approveAndRun" : null);
     case "fix_approved":
-      // latestRun undefined = the runs are not known (list mode): approving queues the run, so never claim "not queued"
-      if (i.latestRun === undefined) return result("run", "executing", "executor", null);
-      return run && IN_FLIGHT.has(run.status) ? result("run", "executing", "executor", null)
-                                               : result("run", "notQueued", "you", "retryExecution");
+      // latestRun undefined = the runs are not known (list mode): approving queues the run, so never claim "not queued".
+      // An approval's auto-run writes no row until it ends: the timeline's signal says it is running.
+      if (i.latestRun === undefined || (run && IN_FLIGHT.has(run.status)) || i.autoRunInFlight) {
+        return result("run", "executing", "executor", null);
+      }
+      return result("run", "notQueued", "you", "retryExecution");
     case "fix_executing":
       return result("run", "executing", "executor", null);
     case "fix_executed":

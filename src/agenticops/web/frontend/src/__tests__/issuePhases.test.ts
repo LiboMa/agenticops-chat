@@ -36,9 +36,19 @@ describe("issuePhases — spec §4 issue table, one case per row", () => {
     expect(pick(issuePhases(P({ status: "fix_planned", plan: { status: "pending_approval" } })))).toEqual(["run", "awaitingApproval", "approver", "approveAndRun"]);
     expect(pick(issuePhases(P({ status: "fix_planned", plan: null })))).toEqual(["run", "awaitingApproval", "approver", null]);
   });
-  it("fix_approved and no run queued → ③ not queued, you, retry; a queued run → executing", () => {
+  it("fix_approved, no run row and no auto-run under way (auto-execute off, or it failed before starting) → ③ not queued, you, retry; a queued run → executing", () => {
     expect(pick(issuePhases(P({ status: "fix_approved", plan: { status: "approved" }, latestRun: null })))).toEqual(["run", "notQueued", "you", "retryExecution"]);
+    expect(pick(issuePhases(P({ status: "fix_approved", plan: { status: "approved" }, latestRun: null, autoRunInFlight: false }))))
+      .toEqual(["run", "notQueued", "you", "retryExecution"]);
     expect(pick(issuePhases(P({ status: "fix_approved", latestRun: { status: "pending", verification_status: null } })))).toEqual(["run", "executing", "executor", null]);
+  });
+  it("fix_approved, the approval's auto-run under way (no row until it ends — final review C1) → ③ executing, the executor, no primary", () => {
+    expect(pick(issuePhases(P({ status: "fix_approved", plan: { status: "approved" }, latestRun: null, autoRunInFlight: true }))))
+      .toEqual(["run", "executing", "executor", null]);
+    // an older finished run of the same plan (an aborted one leaves it approved) does not hide the new auto-run
+    expect(pick(issuePhases(P({ status: "fix_approved", plan: { status: "approved" }, autoRunInFlight: true,
+                                latestRun: { status: "aborted", verification_status: null } }))))
+      .toEqual(["run", "executing", "executor", null]);
   });
   it("fix_executing → ③ executing, the executor, no primary", () => {
     expect(pick(issuePhases(P({ status: "fix_executing" })))).toEqual(["run", "executing", "executor", null]);
@@ -73,6 +83,7 @@ describe("issuePhases — list mode (R2) and missing data (Review Focus 1)", () 
     expect(pick(issuePhases({ status: "fix_approved" }))).toEqual(["run", "executing", "executor", null]);
     expect(pick(issuePhases({ status: "fix_approved", latestRun: undefined }))).toEqual(["run", "executing", "executor", null]);
     expect(pick(issuePhases({ status: "fix_approved", latestRun: null }))).toEqual(["run", "notQueued", "you", "retryExecution"]);
+    expect(pick(issuePhases({ status: "fix_approved", latestRun: null, autoRunInFlight: true }))).toEqual(["run", "executing", "executor", null]);
   });
   it("fix_executed in list mode (no run known) → unverified, you", () => {
     expect(pick(issuePhases({ status: "fix_executed" }))).toEqual(["accept", "unverified", "you", null]);

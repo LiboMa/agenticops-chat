@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { PipelineEvent, RCAResult } from "@/api/types";
 import { Spinner } from "@/components/ui/Spinner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LocalGraph } from "@/components/graph/LocalGraph";
 import { VerdictBlock } from "@/components/issue/VerdictBlock";
 import { formatFullDate } from "@/lib/formatDate";
@@ -20,10 +21,12 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** ① Diagnose: the RCA, where it located the cause, the local graph and "your verdict" (not on a closed issue).
  *  Without an RCA the card only says so — running one is the status line's or the ⋯ menu's job (P10). */
-export function DiagnoseBody({ issueId, rca, loading, threshold, timelineEvents, closed, onVerdictDone, t }: {
+export function DiagnoseBody({ issueId, rca, loading, error, onRetryFetch, threshold, timelineEvents, closed, onVerdictDone, t }: {
   issueId: number;
   rca: RCAResult | null | undefined;
   loading: boolean;
+  error: Error | null;             // the RCA fetch failed with none loaded: never "no RCA yet"
+  onRetryFetch: () => void;
   threshold: number | null | undefined;
   timelineEvents: PipelineEvent[] | undefined;
   closed: boolean;
@@ -31,6 +34,10 @@ export function DiagnoseBody({ issueId, rca, loading, threshold, timelineEvents,
   t: T;
 }) {
   if (loading) return <Spinner label={t("common.loading")} />;
+  if (rca === undefined && error) {
+    return <ErrorBanner message={`${t("workitem.sub.rcaUnavailable")}: ${error.message}`} onRetry={onRetryFetch}
+                        actionLabel={t("common.retry")} />;
+  }
   if (!rca) {
     return (
       <div className="space-y-1">

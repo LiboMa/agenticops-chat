@@ -90,16 +90,22 @@ export default function IssueDetail() {
     lastStatus.current = { id: issueId, status: issueStatus };
   }, [issueStatus, issueId, qc]);
 
-  // Loading inputs stay undefined: the RCA → list mode (no flash of "rerun RCA"), the threshold → no gate yet, the
-  // runs → not known while none have loaded (still loading, or the first fetch failed — never "no runs": the status
-  // line says which instead of inventing a state). A failed refetch keeps the runs already loaded.
+  // Inputs not loaded stay undefined — still loading, or the fetch failed, never "none": the RCA → list mode (no
+  // flash of "rerun RCA"; null is a stored "no RCA"), the threshold → no gate yet, the runs and the timeline (where
+  // an approval's auto-run shows before it has a row) → not known. The status line says which instead of inventing
+  // a state. A failed refetch keeps the data already loaded.
   const model = anomaly.data ? issueDetailModel({
     issue: anomaly.data,
-    rca: rca.isLoading ? undefined : (rca.data ?? null),
+    rca: rca.data,
+    rcaFailed: !!rca.error,
     threshold: settings.data?.rca_min_confidence_for_autofix,
     plans: fixPlans.data,
     executions: executions.data,
     runsFailed: !!executions.error,
+    timeline: timeline.data,
+    timelineFailed: !!timeline.error,
+    executorTimeout: settings.data?.executor_total_timeout,
+    now: Date.now(),
   }) : null;
 
   /* -- URL: an old ?tab= maps once onto its hash; the hash opens a card -- */
@@ -201,10 +207,15 @@ export default function IssueDetail() {
   // the latest run's sentence is the status line's: ③ / ④ do not repeat that exact text (P3)
   const quietErrorRunId = m.quietRunError ? m.latestRun?.id ?? null : null;
   const quietReasonRunId = m.quietAcceptReason ? m.latestRun?.id ?? null : null;
-  // a failed runs fetch is said where the reader is — under the status line — with a retry; an action error wins.
-  // The cards show the runs already loaded; only with none loaded do they say the fetch failed.
-  const runsError = !actionError && executions.error ? executions.error.message : null;
+  // a failed fetch the status line depends on is said where the reader is — under it — with a retry; an action
+  // error wins. The cards show what is already loaded; only with nothing loaded do they say the fetch failed.
+  const fetchError = actionError ? null
+    : executions.error ? { message: executions.error.message, retry: () => executions.refetch() }
+    : rca.error && rca.data === undefined ? { message: rca.error.message, retry: () => rca.refetch() }
+    : timeline.error && timeline.data === undefined ? { message: timeline.error.message, retry: () => timeline.refetch() }
+    : null;
   const runsFetchError = executions.data === undefined ? executions.error : null;
+  const rcaFetchError = rca.data === undefined ? rca.error : null;
 
   const openApproval = (kind: "approve" | "reject") => {
     (kind === "approve" ? approveMut : rejectMut).reset();
@@ -218,15 +229,18 @@ export default function IssueDetail() {
     ? (a.status === "resolved" && a.resolved_at ? t("workitem.reason.resolvedAt").replace("{at}", formatFullDate(a.resolved_at)) : null)
     : m.reason && fill(m.reason);
 
+  // queue the approved plan again; while its auto-run looks under way (⋯ only) the confirm says so — the server
+  // refuses a second run (409) until that one ends or goes stale
+  const retry = (confirmKey: string) => plan
+    ? () => ask(t(confirmKey), t("workitem.primary.retryExecution"),
+                () => executeMut.mutate(plan.id, { onError: (err) => setActionError(err.message) }))
+    : null;
   const primaryRun: Record<NonNullable<IssuePrimary>, (() => void) | null> = {
     reviewRca: () => { cards.openCard("diagnose"); cards.scrollTo("verdict"); },
     rerunRca: triggerRca,
     generatePlan: triggerFixPlan,
     approveAndRun: canApprove ? () => openApproval("approve") : null,
-    retryExecution: plan
-      ? () => ask(t("workitem.confirm.retry"), t("workitem.primary.retryExecution"),
-                  () => executeMut.mutate(plan.id, { onError: (err) => setActionError(err.message) }))
-      : null,
+    retryExecution: retry("workitem.confirm.retry"),
     acceptResult: m.pendingRun ? () => openAccept("accepted") : null,
     markResolved: () => ask(t("workitem.confirm.resolve"), t("workitem.primary.markResolved"), () => updateStatus("resolved")),
   };
@@ -258,6 +272,8 @@ export default function IssueDetail() {
         return { key: item, label, variant: "destructive", disabled: cancelExecMut.isPending,
                  run: () => latestRun && ask(t("workitem.confirm.cancelRun"), label,
                    () => cancelExecMut.mutate(latestRun.id, { onError: (err) => setActionError(err.message) }), "destructive") };
+      case "retryExecution":
+        return { key: item, label, disabled: executeMut.isPending, run: () => retry("workitem.confirm.retryWhileRunning")?.() };
     }
   });
 
@@ -282,8 +298,8 @@ export default function IssueDetail() {
           waiting={m.waitingKey && t(m.waitingKey)}
           primary={primary}
           menu={menu}
-          error={actionError ?? runsError}
-          onDismissError={() => (actionError ? setActionError(null) : executions.refetch())}
+          error={actionError ?? fetchError?.message ?? null}
+          onDismissError={() => (actionError ? setActionError(null) : fetchError?.retry())}
           errorActionLabel={actionError ? undefined : t("common.retry")}
           backTo="/app/issues"
           backLabel={t("nav.issues")}
@@ -307,7 +323,7 @@ export default function IssueDetail() {
         <PhaseCard id="diagnose" index={1} title={t("workitem.phase.diagnose")} state={state("diagnose")}
                    summary={diagnoseSummary(rca.data, t)}
                    open={cards.isOpen("diagnose")} onToggle={(o) => cards.toggleCard("diagnose", o)}>
-          <DiagnoseBody issueId={a.id} rca={rca.data} loading={rca.isLoading}
+          <DiagnoseBody issueId={a.id} rca={rca.data} loading={rca.isLoading} error={rcaFetchError} onRetryFetch={() => rca.refetch()}
                         threshold={settings.data?.rca_min_confidence_for_autofix} timelineEvents={timeline.data}
                         closed={closed} onVerdictDone={() => { anomaly.refetch(); rca.refetch(); }} t={t} />
         </PhaseCard>
@@ -347,6 +363,7 @@ export default function IssueDetail() {
                    open={cards.isOpen("run")} onToggle={(o) => cards.toggleCard("run", o)}>
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
                    error={runsFetchError} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
+                   autoRunSince={m.autoRun?.startedAt ?? null}
                    onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")}
                    approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
         </PhaseCard>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { FixExecution, FixPlan, RCAResult } from "@/api/types";
+import type { FixExecution, FixPlan, PipelineEvent, RCAResult } from "@/api/types";
 import { issueDetailModel } from "@/lib/issueDetailModel";
 
 const rcaI1 = { confidence: 0.57, evidence_verified: false, critic_verdict: "weak", human_verdict: null } as RCAResult;
@@ -37,11 +37,13 @@ describe("issueDetailModel", () => {
     expect([m.primaryKey, m.reason]).toEqual([null, null]);
     expect(m.menu[0]).toBe("runRca");
   });
-  it("approved but not queued → retry is the primary and the reason says so", () => {
+  it("approved, no run row and no auto-run on the timeline → retry is the primary and the reason says so", () => {
     const plan = { id: 1, status: "approved", created_at: "2026-10-03T09:00:00" } as FixPlan;
-    const m = issueDetailModel({ issue: { status: "fix_approved" }, rca: rcaI1, threshold: 0.6, plans: [plan], executions: [] });
+    const m = issueDetailModel({ issue: { status: "fix_approved" }, rca: rcaI1, threshold: 0.6, plans: [plan], executions: [],
+                                 timeline: [] });
     expect(m.primaryKey).toBe("workitem.primary.retryExecution");
     expect(m.reason).toEqual({ key: "workitem.reason.notQueued" });
+    expect(m.menu).not.toContain("retryExecution");
   });
   it("terminal: no primary; menu has reopen only", () => {
     const m = issueDetailModel({ issue: { status: "dismissed" }, rca: null, threshold: 0.6, plans: [], executions: [] });
@@ -105,5 +107,62 @@ describe("issueDetailModel", () => {
     const gate = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: rcaI1, threshold: 0.6, plans: [],
                                     executions: [run({ error_message: "x", verification_reason: "x" })] });
     expect([gate.quietRunError, gate.quietAcceptReason]).toEqual([false, false]);
+  });
+});
+
+describe("issueDetailModel — an approval's auto-run (final review C1) and an RCA that failed to load (I1)", () => {
+  const plan = { id: 1, status: "approved", created_at: "2026-10-05T09:00:00" } as FixPlan;
+  const now = Date.parse("2026-10-05T10:00:00Z");
+  let n = 0;
+  const ev = (event_type: string, created_at: string, detail: Record<string, unknown> | null) =>
+    ({ id: ++n, event_type, stage: "execution", status: "x", detail, actor: "system", duration_ms: null, created_at,
+       trace_id: null }) as PipelineEvent;
+  const started = ev("execution_started", "2026-10-05T09:58:00", { plan_id: 1, executor: "agent:executor" });
+  const at = (x: Partial<Parameters<typeof issueDetailModel>[0]>) => issueDetailModel({
+    issue: { status: "fix_approved" }, rca: rcaI1, threshold: 0.6, plans: [plan], executions: [], timeline: [started],
+    executorTimeout: 1800, now, ...x });
+
+  it("right after «Approve & run»: running, waiting for the executor, no primary, no 'not queued'; retry only in ⋯", () => {
+    const m = at({});
+    expect([m.statusKey, m.waitingKey, m.primaryKey, m.reason, m.tone])
+      .toEqual(["workitem.sub.executing", "workitem.wait.executor", null, null, "info"]);
+    expect(m.autoRun).toEqual({ startedAt: "2026-10-05T09:58:00" });
+    expect(m.menu).toContain("retryExecution");
+    expect(m.menu).not.toContain("cancelRun"); // an auto-run has no row to cancel
+  });
+  it("the run completed (or failed) after it started → not queued + retry primary again", () => {
+    const done = ev("execution_completed", "2026-10-05T09:59:00", { plan_id: 1 });
+    const m = at({ timeline: [started, done] });
+    expect([m.statusKey, m.primaryKey]).toEqual(["workitem.sub.notQueued", "workitem.primary.retryExecution"]);
+    expect(m.autoRun).toBeNull();
+  });
+  it("a start older than the executor timeout is stale: not queued", () => {
+    expect(at({ now: now + 3600_000 }).statusKey).toBe("workitem.sub.notQueued");
+  });
+  it("another plan's start does not count", () => {
+    expect(at({ timeline: [ev("execution_started", "2026-10-05T09:58:00", { plan_id: 2 })] }).statusKey).toBe("workitem.sub.notQueued");
+  });
+  it("the timeline not loaded yet / failed: a neutral state, never 'not queued' + retry", () => {
+    const loading = at({ timeline: undefined });
+    expect([loading.statusKey, loading.primaryKey, loading.reason, loading.waitingKey]).toEqual(["workitem.sub.loadingRuns", null, null, null]);
+    const failed = at({ timeline: undefined, timelineFailed: true });
+    expect([failed.statusKey, failed.primaryKey, failed.tone]).toEqual(["workitem.sub.runsUnavailable", null, "warn"]);
+    // a pending row decides on its own: the timeline is not needed
+    expect(at({ timeline: undefined, executions: [run({ status: "pending" })] }).statusKey).toBe("workitem.sub.executing");
+  });
+  it("I1: the RCA failed to load at root_cause_identified — says so; never 'no RCA' + Rerun RCA", () => {
+    const m = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, rcaFailed: true, threshold: 0.6,
+                                 plans: [], executions: [] });
+    expect([m.statusKey, m.primaryKey, m.reason, m.waitingKey, m.tone])
+      .toEqual(["workitem.sub.rcaUnavailable", null, null, null, "warn"]);
+    // still loading: the neutral list mode; a failed run decides without the RCA
+    expect(issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, threshold: 0.6, plans: [], executions: [] })
+      .statusKey).toBe("workitem.sub.reviewOrPlan");
+    const failedRun = run({ status: "failed", verification_status: "failed", verification_reason: "post-check 2 failed" });
+    expect(issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, rcaFailed: true, threshold: 0.6,
+                              plans: [], executions: [failedRun] }).statusKey).toBe("workitem.sub.needsNewPlan");
+    // a stored "none" is still none
+    expect(issueDetailModel({ issue: { status: "root_cause_identified" }, rca: null, threshold: 0.6, plans: [], executions: [] })
+      .reason).toEqual({ key: "workitem.reason.noRca" });
   });
 });

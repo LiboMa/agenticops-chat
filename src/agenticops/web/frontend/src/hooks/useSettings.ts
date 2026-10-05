@@ -37,14 +37,15 @@ export interface AppSettings {
   rbac_enforce: boolean;
   policy_graph_impact_enforce: boolean; // read-only: false = the graph's impact count is shadow-recorded
   rca_min_confidence_for_autofix: number; // read-only: the post-RCA auto-fix gate
+  executor_total_timeout: number;         // read-only: seconds a fix plan's auto-run counts as under way
 }
 
 type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: number };
-// change_management_enabled, policy_graph_impact_enforce, rca_min_confidence_for_autofix and
+// change_management_enabled, policy_graph_impact_enforce, rca_min_confidence_for_autofix, executor_total_timeout and
 // acp_available_backends are read-only: PATCH /api/settings rejects them as unknown keys (400), so they are
 // dropped from the patch shape (they stay readable on AppSettings).
 type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled"
-  | "policy_graph_impact_enforce" | "rca_min_confidence_for_autofix" | "acp_available_backends">>
+  | "policy_graph_impact_enforce" | "rca_min_confidence_for_autofix" | "executor_total_timeout" | "acp_available_backends">>
   & { agent_models?: Record<string, AgentModelPatch> };
 
 export function useSettings() {

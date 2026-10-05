@@ -3,7 +3,8 @@
  * the execution evidence rows, when to poll and when a plan can be approved. Pure, so node can test it. An old
  * `?tab=` link is mapped onto its phase-card hash by lib/workitemRoutes.
  */
-import type { FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, VerificationStatus } from "@/api/types";
+import type { FixExecution, FixPlan, FixPlanStatus, HealthIssue, IssueStatus, PipelineEvent, VerificationStatus } from "@/api/types";
+import { parseApiDate } from "@/lib/formatDate";
 
 export interface IssueFacts {
   resourceType: string | null;
@@ -75,6 +76,30 @@ export function severityLabel(severity: string, t: (key: string) => string): str
 /** A run still queued (pending) or claimed (running); every other status is finished. */
 export function hasRunInFlight(executions: Pick<FixExecution, "status">[] | undefined): boolean {
   return !!executions?.some((e) => e.status === "pending" || e.status === "running");
+}
+
+const eventTime = (e: Pick<PipelineEvent, "created_at">) => parseApiDate(e.created_at)?.getTime() ?? 0;
+
+/** An approval's auto-run of this plan in progress, by its start — null when none (2026-10-05 final review C1).
+ *  The executor thread writes no run row until it ends, so the timeline is the signal; this mirrors
+ *  services/pipeline_service.plan_run_in_flight: the newest execution_started naming the plan with no
+ *  execution_completed on the issue after it, begun less than the executor timeout ago when that is known. */
+export function inFlightAutoRun(
+  events: Pick<PipelineEvent, "id" | "event_type" | "detail" | "created_at">[] | undefined,
+  planId: number | null | undefined,
+  opts: { timeoutSeconds?: number | null; now?: number } = {},
+): { startedAt: string } | null {
+  if (planId == null) return null;
+  const newest = [...(events ?? [])].sort((a, b) => eventTime(b) - eventTime(a) || b.id - a.id);
+  for (const e of newest) {
+    if (e.event_type === "execution_completed") return null; // newer than any start of this plan still to come
+    const d: unknown = e.detail;
+    if (e.event_type !== "execution_started" || !d || typeof d !== "object" || Array.isArray(d)
+        || (d as { plan_id?: unknown }).plan_id !== planId) continue;
+    const stale = opts.timeoutSeconds != null && (opts.now ?? Date.now()) - eventTime(e) >= opts.timeoutSeconds * 1000;
+    return stale ? null : { startedAt: e.created_at };
+  }
+  return null;
 }
 
 const APPROVABLE_PLAN: ReadonlySet<FixPlanStatus> = new Set<FixPlanStatus>(["draft", "pending_approval"]);

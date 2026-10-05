@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { FixExecution, HealthIssue } from "@/api/types";
+import type { FixExecution, HealthIssue, PipelineEvent } from "@/api/types";
 import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
-  anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
-  newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
+  anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, inFlightAutoRun, isBlank, issueFacts,
+  issueStatuses, ISSUE_IN_FLIGHT, newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -240,5 +240,40 @@ describe("executionStatusLabel", () => {
       .toEqual(["<execution.status.pending>", "<execution.status.running>", "<execution.status.succeeded>",
                 "<execution.status.failed>", "<execution.status.rolled_back>", "<execution.status.aborted>"]);
     expect(executionStatusLabel("exploded", t)).toBe("exploded");
+  });
+});
+
+describe("inFlightAutoRun (final review C1 — mirrors pipeline_service.plan_run_in_flight)", () => {
+  let n = 0;
+  const ev = (event_type: string, created_at: string, detail: unknown = null) =>
+    ({ id: ++n, event_type, stage: "execution", status: "x", detail, actor: "system", duration_ms: null, created_at,
+       trace_id: null }) as PipelineEvent;
+  const now = Date.parse("2026-10-05T10:00:00Z");
+  const at = (min: number) => new Date(now - min * 60_000).toISOString().replace("Z", ""); // the backend's naive UTC
+  const opts = { timeoutSeconds: 1800, now };
+
+  it("the newest start naming the plan, with no completion after it → its start time", () => {
+    expect(inFlightAutoRun([ev("execution_started", at(5), { plan_id: 3 })], 3, opts)).toEqual({ startedAt: at(5) });
+  });
+  it("a completion after the start (succeeded, failed or a plan-less one on the issue) ends it", () => {
+    for (const detail of [{ plan_id: 3, verification: "passed" }, { plan_id: 3 }, null])
+      expect(inFlightAutoRun([ev("execution_started", at(5), { plan_id: 3 }), ev("execution_completed", at(1), detail)], 3, opts)).toBeNull();
+  });
+  it("a completion older than the newest start does not end it; the events need not arrive sorted", () => {
+    const events = [ev("execution_started", at(2), { plan_id: 3 }), ev("execution_started", at(20), { plan_id: 3 }),
+                    ev("execution_completed", at(10), { plan_id: 3 })];
+    expect(inFlightAutoRun(events, 3, opts)).toEqual({ startedAt: at(2) });
+  });
+  it("stale beyond the executor timeout; without a known timeout it is not bounded", () => {
+    const events = [ev("execution_started", at(31), { plan_id: 3 })];
+    expect(inFlightAutoRun(events, 3, opts)).toBeNull();
+    expect(inFlightAutoRun(events, 3, { now })).toEqual({ startedAt: at(31) });
+  });
+  it("another plan's start, a malformed detail, no plan, no events → null", () => {
+    expect(inFlightAutoRun([ev("execution_started", at(5), { plan_id: 4 })], 3, opts)).toBeNull();
+    for (const detail of ["{\"plan_id\":3}", [3], null])
+      expect(inFlightAutoRun([ev("execution_started", at(5), detail)], 3, opts)).toBeNull();
+    expect(inFlightAutoRun([ev("execution_started", at(5), { plan_id: 3 })], null, opts)).toBeNull();
+    expect(inFlightAutoRun(undefined, 3, opts)).toBeNull();
   });
 });
