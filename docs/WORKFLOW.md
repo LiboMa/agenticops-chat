@@ -949,11 +949,26 @@ aiops web
 uvicorn agenticops.web.app:app --reload --port 8000
 ```
 
-Open `http://localhost:8000/app/dashboard` and explore:
+Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)**:
+
+- **Where `/app` lands**: your pinned home (Chat / Issues / Reports, set in **Home & language** at the foot of
+  the sidebar or in the avatar menu), otherwise **resume** — the last allow-listed page you had open (an issue,
+  change, report or chat that is gone or no longer visible falls back to its list with a notice that names
+  nothing) — otherwise Chat. A full URL (a notification link, a bookmark) always opens exactly that page.
+- **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
+  included) after signing in; only same-origin `/app` pages are accepted as `next`.
+- **Sidebar**: *Daily work* (Chat, Issues, Reports), then the collapsible *Operations tools* (Changes, Audit,
+  Resources, Schedules) and *Administration* (Runtime overview, Agent metrics, Skills, Galaxy, Security,
+  Settings) — the group holding the current page opens by itself; drag to reorder inside a group. Below 800px
+  the sidebar becomes a menu in the top bar.
+- **Top bar**: breadcrumb, search (⌘K / Ctrl K), 中文 | English, and the avatar menu (account, theme, font
+  size, Home & language, sign out). Preferences (home, language, open groups, last page) follow your account
+  to other browsers (`GET /api/ui/bootstrap`, `GET`/`PATCH /api/users/me/preferences`, If-Match revisions);
+  theme and font size stay per browser.
 
 | Page | What You Can Do |
 |------|----------------|
-| **Dashboard** | Overview stats, recent issues |
+| **Runtime overview** | Overview stats, recent issues (`/app/overview`; it was the `/app` home before 2.7.0) |
 | **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history |
 | **Issues** | The issue list (`/app/issues`) on the shared work-item table — per row the phase dots, status, who it waits on, severity, account, detected time (×N when it recurred); filters on one row: status, severity, scope in `?scope=` (ops events (default) / security findings (`security_*` sources) / all), account, sort, search, plus **Raw signals →**; hover quick actions resolve / confirm / dismiss / reopen. An old `?view=resources` / `?view=signals` link redirects to the pages below |
 | **Issue Detail** | The work-item template (see *Issue & Change UI* below): one status line with the one primary button and a **⋯** menu, four phase cards ① Diagnose (RCA, confidence against the auto-fix gate, root-cause location, a compact local graph, **Your verdict**) ② Plan (`I#N fix plan vN` + content hash) ③ Approve & run (approval, run evidence) ④ Accept, and a right rail of key facts + activity. `#diagnose` / `#plan` / `#run` / `#accept` / `#activity` open a card; an old `?tab=` link maps onto them |
