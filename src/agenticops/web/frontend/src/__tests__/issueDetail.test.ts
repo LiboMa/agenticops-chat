@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
+import en from "@/locales/en.json";
+import zh from "@/locales/zh.json";
 import {
   anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
-  newestFirst, resultRow, resultSummary,
+  newestFirst, resultRow, resultSummary, SEVERITIES, severityLabel,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -213,6 +215,21 @@ describe("factRows", () => {
   it("isBlank", () => {
     for (const v of ["", " ", "unknown", "Unknown", "—", "-", "n/a", null, undefined]) expect(isBlank(v), String(v)).toBe(true);
     for (const v of ["x", 0, "0"]) expect(isBlank(v), String(v)).toBe(false);
+  });
+});
+
+describe("severityLabel", () => {
+  it("a severity the backend writes reads as its locale key; an unknown one stays as the raw value", () => {
+    const t = (k: string) => `<${k}>`;
+    expect(["critical", "high", "medium", "low"].map((s) => severityLabel(s, t)))
+      .toEqual(["<severity.critical>", "<severity.high>", "<severity.medium>", "<severity.low>"]);
+    expect(severityLabel("info", t)).toBe("info");
+  });
+  it("every severity has a label in both locales", () => {
+    for (const s of SEVERITIES) {
+      expect((en as Record<string, string>)[`severity.${s}`], s).toBeTruthy();
+      expect((zh as Record<string, string>)[`severity.${s}`], s).toBeTruthy();
+    }
   });
 });
 

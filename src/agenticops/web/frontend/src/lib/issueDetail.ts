@@ -64,6 +64,14 @@ export function executionStatusLabel(status: string, t: (key: string) => string)
   return EXECUTION_STATUSES.has(status) ? t(`execution.status.${status}`) : status;
 }
 
+/** The severities an issue carries (HealthIssue.severity); a label lives at `severity.<severity>`. */
+export const SEVERITIES: readonly HealthIssue["severity"][] = ["critical", "high", "medium", "low"];
+
+/** A severity in the reader's language; any other value (a signal's or a KB entry's own) stays raw. */
+export function severityLabel(severity: string, t: (key: string) => string): string {
+  return (SEVERITIES as readonly string[]).includes(severity) ? t(`severity.${severity}`) : severity;
+}
+
 /** A run still queued (pending) or claimed (running); every other status is finished. */
 export function hasRunInFlight(executions: Pick<FixExecution, "status">[] | undefined): boolean {
   return !!executions?.some((e) => e.status === "pending" || e.status === "running");
