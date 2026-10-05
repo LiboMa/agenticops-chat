@@ -112,3 +112,18 @@ export function entryForPath(pathname: string): { group: GroupId; entry: NavEntr
   }
   return null;
 }
+
+/** The top bar's breadcrumb for a path: the section's label key and, on a detail page, the object's short
+ *  reference (I#5, C#3, R#12 — R# is a resource, so a report is just #7). null section = no entry (404). */
+export function breadcrumbFor(pathname: string): { sectionKey: string | null; object: string | null } {
+  if (pathname === "/app/signals" || pathname.startsWith("/app/signals/")) return { sectionKey: "signals.title", object: null };
+  const hit = entryForPath(pathname);
+  if (!hit) return { sectionKey: null, object: null };
+  const id = pathname.slice(hit.entry.to.length + 1).split("/")[0] || null;
+  const refs: Record<string, (v: string) => string> = {
+    issues: (v) => `I#${v}`, changes: (v) => `C#${v}`, resources: (v) => `R#${v}`,
+    reports: (v) => `#${v}`, schedules: (v) => `#${v}`, skills: (v) => v,
+  };
+  const ref = id && refs[hit.entry.id] ? refs[hit.entry.id](decodeURIComponent(id)) : null;  // chat ids are not shown
+  return { sectionKey: hit.entry.labelKey, object: ref };
+}

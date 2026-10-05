@@ -901,5 +901,17 @@
   "home.prefsTitle": "Home & language",
   "home.prefsHint": "First visit starts in Chat; after that /app opens what you choose here. Links in notifications still open their exact issue, change or report. The language is switched from the top bar.",
   "home.defaultEntry": "Default entry",
-  "home.save": "Save preference"
+  "home.save": "Save preference",
+  "topbar.breadcrumb": "Breadcrumb",
+  "topbar.search": "Search issues, changes, resources (⌘K)",
+  "topbar.searchPlaceholder": "Search issues, changes, resources",
+  "topbar.account": "Account menu",
+  "topbar.theme": "Theme",
+  "topbar.themeDark": "Dark",
+  "topbar.themeLight": "Light",
+  "topbar.fontSize": "Font size",
+  "topbar.font.small": "Small",
+  "topbar.font.medium": "Medium",
+  "topbar.font.large": "Large",
+  "topbar.signOut": "Sign out"
 }

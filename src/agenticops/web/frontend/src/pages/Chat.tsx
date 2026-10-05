@@ -149,7 +149,7 @@ export default function Chat() {
   };
 
   return (
-    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-2.25rem)] -m-6">
+    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
       {/* Left: Session Flyout (resizable) */}
       <div
         style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}

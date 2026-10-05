@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
-import { MinimalTopBar } from "./MinimalTopBar";
+import { TopBar } from "./TopBar";
 import { CommandPalette } from "../CommandPalette";
 import { RestoreNotice, ShellEffects } from "./ShellEffects";
 
@@ -26,7 +26,7 @@ export function AppShell() {
     <div className="min-h-screen bg-canvas text-foreground">
       <Sidebar />
       <div className="min-[801px]:pl-[166px] min-[1101px]:pl-[200px]">
-        <MinimalTopBar />
+        <TopBar onSearch={() => setPaletteOpen(true)} />
         <main className="p-6">
           <RestoreNotice />
           <Outlet />

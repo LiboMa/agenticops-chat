@@ -901,5 +901,17 @@
   "home.prefsTitle": "首页与语言",
   "home.prefsHint": "首次进入是对话；之后 /app 按这里的设置打开。通知里的链接仍直达对应的问题、变更或报告。语言在顶栏切换。",
   "home.defaultEntry": "默认入口",
-  "home.save": "保存偏好"
+  "home.save": "保存偏好",
+  "topbar.breadcrumb": "当前位置",
+  "topbar.search": "搜索问题、变更、资源（⌘K）",
+  "topbar.searchPlaceholder": "搜索问题、变更、资源",
+  "topbar.account": "账户菜单",
+  "topbar.theme": "主题",
+  "topbar.themeDark": "深色",
+  "topbar.themeLight": "浅色",
+  "topbar.fontSize": "字号",
+  "topbar.font.small": "小",
+  "topbar.font.medium": "中",
+  "topbar.font.large": "大",
+  "topbar.signOut": "退出登录"
 }

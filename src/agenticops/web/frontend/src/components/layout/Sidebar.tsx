@@ -128,11 +128,24 @@ const HOME_CHOICES: { value: Home; labelKey: string }[] = [
   { value: "reports", labelKey: "nav.reports" },
 ];
 
-/** 首页与语言 / Home & language: which page /app opens. Language itself is switched from the top bar. */
 export function HomePrefsButton({ className = "" }: { className?: string }) {
   const { t } = useLocale();
-  const boot = useBootstrap();
   const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+              className={`w-full rounded-[5px] px-2.5 py-2 text-left text-[11px] text-foreground/75 hover:bg-selected ${className}`}>
+        {t("home.prefsTitle")}
+      </button>
+      <HomePrefsDialog open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
+/** 首页与语言 / Home & language: which page /app opens. Language itself is switched from the top bar. */
+export function HomePrefsDialog({ open, onOpenChange: setOpen }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useLocale();
+  const boot = useBootstrap();
   const [choice, setChoice] = useState<Home>("resume");
   const [saving, setSaving] = useState(false);
 
@@ -149,11 +162,6 @@ export function HomePrefsButton({ className = "" }: { className?: string }) {
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <button type="button" className={`w-full rounded-[5px] px-2.5 py-2 text-left text-[11px] text-foreground/75 hover:bg-selected ${className}`}>
-          {t("home.prefsTitle")}
-        </button>
-      </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-30px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-6 shadow-xl animate-[slideInRight_0.2s_ease-out]">

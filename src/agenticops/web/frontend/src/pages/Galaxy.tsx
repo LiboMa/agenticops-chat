@@ -315,7 +315,7 @@ export default function Galaxy() {
     // escape AppShell <main> p-6 auto-height box; Canvas needs an explicit-height parent.
     // Galaxy is a fixed Nebula-Violet starfield — chrome uses fixed dark values
     // (not theme tokens) so it stays consistent whether the app is light or dark.
-    <div className="relative h-[calc(100vh-2.25rem)] -m-6 w-auto" style={{ background: P.surface }}>
+    <div className="relative h-[calc(100vh-var(--topbar-h))] -m-6 w-auto" style={{ background: P.surface }}>
       {/* status bar */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 px-4 py-2
                       bg-black/40 backdrop-blur border-b border-white/10 text-xs text-[#c9c6d6]">

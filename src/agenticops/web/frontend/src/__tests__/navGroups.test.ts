@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NAV_GROUPS, V1_DEFAULT, defaultOrder, entryForPath, migrateNavOrder, moveWithinGroup, normalizeOrder } from "@/lib/navGroups";
+import { NAV_GROUPS, V1_DEFAULT, breadcrumbFor, defaultOrder, entryForPath, migrateNavOrder, moveWithinGroup, normalizeOrder } from "@/lib/navGroups";
 
 describe("NAV_GROUPS — the blue/white sidebar", () => {
   it("daily work, operations tools, administration; every old entry kept, Settings joins administration", () => {
@@ -59,5 +59,16 @@ describe("entryForPath", () => {
   it("paths of no entry → null (prefix is not enough)", () => {
     expect(entryForPath("/app/no-such-page")).toBeNull();
     expect(entryForPath("/app/chatty")).toBeNull();
+  });
+});
+
+describe("breadcrumbFor", () => {
+  it.each([
+    ["/app/issues", "nav.issues", null], ["/app/issues/5", "nav.issues", "I#5"], ["/app/changes/3", "nav.changes", "C#3"],
+    ["/app/resources/12", "nav.resources", "R#12"], ["/app/reports/7", "nav.reports", "#7"],
+    ["/app/skills/linux-admin", "nav.skills", "linux-admin"], ["/app/chat/3f2a-uuid", "nav.chat", null],
+    ["/app/signals", "signals.title", null], ["/app/overview", "nav.overview", null], ["/app/nope", null, null],
+  ])("%s → %s %s", (path, sectionKey, object) => {
+    expect(breadcrumbFor(path)).toEqual({ sectionKey, object });
   });
 });
