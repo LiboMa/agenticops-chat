@@ -39,6 +39,15 @@ export function planLabel(fp: PlanLink & { plan_version?: number | null }, t: (k
 /** The first 8 characters of a content hash, "—" when there is none. */
 export const shortHash = (h: string | null | undefined) => (h ? h.slice(0, 8) : "—");
 
+/** The four counts PlanView's header shows ("1 step · 3 pre-checks · 3 post-checks · rollback 1"). */
+export function planCounts(plan: Pick<FixPlan, "steps" | "pre_checks" | "post_checks" | "rollback_plan">) {
+  const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  const rb = plan.rollback_plan && typeof plan.rollback_plan === "object" ? plan.rollback_plan : {};
+  const rollback = Array.isArray((rb as Record<string, unknown>).steps) ? len((rb as Record<string, unknown>).steps)
+    : Object.keys(rb).length > 0 ? 1 : 0;
+  return { steps: len(plan.steps), preChecks: len(plan.pre_checks), postChecks: len(plan.post_checks), rollback };
+}
+
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 

@@ -758,5 +758,11 @@
   "activity.type.plan_execute_requested": "请求执行",
   "activity.type.plan_execution_cancelled": "执行已取消",
   "activity.type.authz_denied": "规则 {rule} 拦下了 {permission}",
-  "activity.type.authz_denied_shadow": "规则 {rule} 会拦下 {permission}（影子模式，已放行）"
+  "activity.type.authz_denied_shadow": "规则 {rule} 会拦下 {permission}（影子模式，已放行）",
+  "plan.counts": "{steps} 步 · 预检 {pre} · 后检 {post} · 回滚 {rollback}",
+  "plan.hashMatches": "与批准内容一致",
+  "plan.hashDrifted": "批准后内容已变",
+  "workitem.menu": "更多操作",
+  "workitem.expandAll": "全部展开",
+  "workitem.collapseAll": "全部折叠"
 }

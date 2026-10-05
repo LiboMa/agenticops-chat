@@ -758,5 +758,11 @@
   "activity.type.plan_execute_requested": "Run requested",
   "activity.type.plan_execution_cancelled": "Run cancelled",
   "activity.type.authz_denied": "Rule {rule} blocked {permission}",
-  "activity.type.authz_denied_shadow": "Rule {rule} would block {permission} (shadow mode, allowed)"
+  "activity.type.authz_denied_shadow": "Rule {rule} would block {permission} (shadow mode, allowed)",
+  "plan.counts": "{steps} steps · {pre} pre-checks · {post} post-checks · rollback {rollback}",
+  "plan.hashMatches": "Matches the approved content",
+  "plan.hashDrifted": "Changed since approval",
+  "workitem.menu": "More actions",
+  "workitem.expandAll": "Expand all",
+  "workitem.collapseAll": "Collapse all"
 }

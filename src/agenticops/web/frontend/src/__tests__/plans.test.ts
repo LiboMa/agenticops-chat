@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -89,5 +89,16 @@ describe("planLabel / shortHash", () => {
   it("shortens a content hash to 8 characters; no hash is an em dash", () => {
     expect(shortHash("0123456789abcdef")).toBe("01234567");
     expect(shortHash(null)).toBe("—");
+  });
+});
+
+describe("planCounts", () => {
+  it("counts steps / pre / post checks; rollback = its steps, or 1 for a non-empty plan without a steps list", () => {
+    expect(planCounts({ steps: [{}, {}], pre_checks: [{}], post_checks: [{}, {}, {}], rollback_plan: { steps: ["a", "b"] } }))
+      .toEqual({ steps: 2, preChecks: 1, postChecks: 3, rollback: 2 });
+    expect(planCounts({ steps: [], pre_checks: [], post_checks: [], rollback_plan: { description: "undo" } }).rollback).toBe(1);
+    expect(planCounts({ steps: [], pre_checks: [], post_checks: [], rollback_plan: {} }).rollback).toBe(0);
+    expect(planCounts({ steps: null as unknown as unknown[], pre_checks: undefined as unknown as unknown[], post_checks: [], rollback_plan: null as unknown as Record<string, unknown> }))
+      .toEqual({ steps: 0, preChecks: 0, postChecks: 0, rollback: 0 });
   });
 });
