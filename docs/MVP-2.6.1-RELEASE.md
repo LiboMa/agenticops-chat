@@ -2,12 +2,13 @@
 
 > Version: 2.6.1 · Branch: `MVP-2.6.1` · Date: 2026-09-29（草稿日期；push 时按主人确认日期回填） · 主题：问题锚到图上的资源，RCA 在图上定位根因、由人评判；审批绑定内容、执行后有验收；界面拆成 问题 / 变更 / 审计
 >
-> **状态：计划 A–E 已全部实现，作为 `MVP-2.6.1` 分支上的本地提交存在（未 push）。最终门禁（2026-10-02）全部通过：全量 pytest 6347 passed / 85 skipped、0 次真实 AWS 调用（在 0c745cc 上跑，其后只有前端改动）；前端在 c7630e7 上 `tsc --noEmit` 0 错误、`vitest run src` 27 个文件 / 279 个测试全过（含 locale-parity 测试 `locales.test.ts`）、`vite build` 成功。联合 live E2E（含 26 次定位评测）尚待与主人一起跑。** 依主人铁律，只有联合 E2E 通过且当面确认后才 `git push --no-verify`。锚定率与查询性能见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`（下文验收 1–2）；评测指标（验收 3–5）只在联合 E2E 后据实填入 —— 本文不预填未验证的数字。
+> **状态：计划 A–E 已全部实现，作为 `MVP-2.6.1` 分支上的本地提交存在（未 push）。最终门禁（2026-10-02）全部通过：全量 pytest 6347 passed / 85 skipped、0 次真实 AWS 调用（在 0c745cc 上跑，其后只有前端改动）；前端在 c7630e7 上 `tsc --noEmit` 0 错误、`vitest run src` 27 个文件 / 279 个测试全过（含 locale-parity 测试 `locales.test.ts`）、`vite build` 成功。联合 live E2E（路线 A：chaos-lab 集群）进行中：定位评测三个计分批次（39 次）已跑完，验收 3、4 通过、5 已据实报告；评测中发现并修复了 RCA 重采偏差（b401d36 + fe7e9fd，fe7e9fd 上全量 pytest 6350 passed / 85 skipped）；intake 与告警 webhook 令牌已实测通过；修复流、变更流、连接器卡片与 UI 走查待主人当面走。** 依主人铁律，只有联合 E2E 通过且当面确认后才 `git push --no-verify`。锚定率与查询性能见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`（下文验收 1–2）；评测指标（验收 3–5）见 `MVP-2.6.1-LOCATION-EVAL-REPORT.md`，联合 E2E 全程记录见 `MVP-2.6.1-E2E-REPORT.md`。
 >
 > 设计：`docs/superpowers/specs/2026-09-28-mvp-2.6.1-graph-rca-loop-and-issue-change-design.md`
 > 计划：`docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-{a,b,c,d,e}-*.md`
 > 图事实实测：`docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`（`scripts/measure_graph_facts.py`，在本地库只读副本上生成）
-> 定位评测证据（待产出）：`docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`
+> 定位评测证据：`docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`（chaos-lab 实测，off / on #1 / on #2 三个计分批次）
+> 联合 live E2E 记录：`docs/MVP-2.6.1-E2E-REPORT.md`（进行中，主人走查待补）
 
 ## 一句话
 
@@ -35,10 +36,10 @@
   - 告警 webhook `POST /api/webhooks/alert[/{source}]` 配置 `webhook_secret` 后校验令牌或 HMAC。
   - `/api/changes/intake` **无 UI，这是有意的**：它给外部 ITSM 系统调用，创建的变更单在现有变更页面里可见。其余新端点都有对应 UI（下一行）。
 - **Web UI** — 做。
-  - 侧栏改为 **问题 / 变更 / 审计** 三个入口；`/app/audit` 独立成页；`/app/plans` 重定向到 `/app/changes`（`?tab=fix` → `/app/issues`，`?tab=audit` → `/app/audit`）；删除 `pages/PlansAndChanges.tsx` 与 `components/plans/FixPlansTab.tsx`。
+  - 侧栏改为 **问题 / 变更 / 审计** 三个入口；`/app/audit` 独立成页；`/app/plans` 重定向到 `/app/changes`（`?tab=fix` → `/app/issues`，`?tab=audit` → `/app/audit`）；删除 `pages/PlansAndChanges.tsx` 与 `components/plans/FixPlansTab.tsx`。（2.6.1 之后侧栏加了「资源」，见「2.6.1 之后：统一工单模板（方案 A）」。）
   - 问题列表三个视图：运维事件（默认）/ 安全发现 / 全部，写进 URL（`?scope=`），原有阶段筛选保留。
-  - IssueDetail 重排：顶部 业务 / 执行 / 验证 三个状态标签 + 锚点徽标（资源链接 / 未定位 / 歧义 N 个候选 / 账户级）+ 待验收横幅（接受 / 拒绝，理由必填）；五个 tab 写进 `?tab=`：调查（RCA + 定位卡 + 局部图 + 定位判定）、修复方案（版本 + 哈希）、执行记录（step / pre / post / rollback 证据）、验证、时间线（长值可展开，不再截断）。
-  - ChangeDetail 重排：首屏一句话（状态 · 原因 · 待办 · 主操作）；申请（自带步骤 + 外部工单链接）、实施方案 vN（步骤、`steps_diff`、哈希）、审批（「策略建议」与「实际审批」分开；影子模式下潜在影响的数字和图标注「仅供参考」）、执行证据、验收卡；NewChangeDialog 加可选的步骤编辑和外部引用。
+  - IssueDetail 重排：顶部 业务 / 执行 / 验证 三个状态标签 + 锚点徽标（资源链接 / 未定位 / 歧义 N 个候选 / 账户级）+ 待验收横幅（接受 / 拒绝，理由必填）；五个 tab 写进 `?tab=`：调查（RCA + 定位卡 + 局部图 + 定位判定）、修复方案（版本 + 哈希）、执行记录（step / pre / post / rollback 证据）、验证、时间线（长值可展开，不再截断）。（2.6.1 之后改为统一工单模板：tab 换成阶段卡，`?tab=` 映射到 hash 锚点，见下文同名一节。）
+  - ChangeDetail 重排：首屏一句话（状态 · 原因 · 待办 · 主操作）；申请（自带步骤 + 外部工单链接）、实施方案 vN（步骤、`steps_diff`、哈希）、审批（「策略建议」与「实际审批」分开；影子模式下潜在影响的数字和图标注「仅供参考」）、执行证据、验收卡；NewChangeDialog 加可选的步骤编辑和外部引用。（2.6.1 之后改为同一模板的五张阶段卡，见下文。）
   - 局部关系图 `components/graph/LocalGraph.tsx`：用于 IssueDetail、ResourceDetail（新「局部关系图」tab）和 ChangeDetail 审批卡；四种关系（结构关系 / RCA 定位路径 / 合并信号 / 相邻问题）、三层爆炸半径（数字直接取 API）、下方附键盘可达的列表视图、截断时写明原因；节点详情可「在全景图中查看」（Open in Galaxy，跳到 Galaxy 的 `?focus=`）。
   - Galaxy：`?focus=<资源 id>` 深链（`cloud_resources` 的 id，写作 `12`、`R12`、`R%2312` 或 `res:12`；选中 + 居中；不在最新构建里时给提示）；有新构建落地就刷新；删除没人用的 overview / expand hooks（端点保留）。
   - Chat：`C#` 引用也打开 ContextPanel（问题 + 变更两种）；FixPlanCard 标题形如「I#12 修复方案 v2」「C#3 实施方案 v1」+ 短哈希。
@@ -103,7 +104,7 @@
 - **判定与统计**：人对定位下 correct / partial / incorrect（仅当最新 RCA 的定位为 valid / partial 时可判，否则 409），统计走 `GET /api/rca/location-stats`（Top-1、已判定数、锚定率、分布）。
 - **策略影子模式**：`estimate_blast_radius`（下游、rule 关系、≤ 3 跳、不含自身；变更取最宽的目标）记在决策的 `shadow_blast_radius` 上，`policy_graph_impact_enforce=false` 时 `blast_radius_gte` 规则看不到它。
 - **证据门变严**：RCA 证据检查不再拿 `save_rca_result` 自己的输入 / 回复当依据，证据门从此真正起作用（见「已知偏差与限制」C-M6）。
-- **评测**：`infra/eks-chaos-lab/e2e/ground_truth.yaml`（13 个场景的真值）+ `location_eval.py`（纯函数：AC@1 / AC@3 / MRR、图召回率）+ `LOCATION_BATCH=off|on bash run-e2e.sh --location-only`；结果写进 `docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`（模板已就位，联合 E2E 时填）。
+- **评测**：`infra/eks-chaos-lab/e2e/ground_truth.yaml`（13 个场景的真值）+ `location_eval.py`（纯函数：AC@1 / AC@3 / MRR、图召回率）+ `LOCATION_BATCH=off|on bash run-e2e.sh --location-only`；结果写进 `docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`（chaos-lab 实测：AC@1 off 0.00 → on 0.77，图召回率 13/13）。
 
 ## 计划 D — Issue / Change 逻辑
 
@@ -174,6 +175,110 @@
 - **spec §3.B.2 修订（2026-09-30）**：AWS W2 扫描标缺席 + `resource-scan` 调度 + 统一的「存在」定义（见计划 B）。
 - **spec §3.B.2 修订（2026-10-01，P-1）**：父 → 子的存在规则（墓碑，见计划 B）。
 - **spec §3.C.1 修订（2026-10-01，Plan C 终审 M-2）**：锚点是容器（集群 / 命名空间 / 网络）时，在证据包里排在所有候选之后；本 Issue 自己不算佐证。
+- **spec §3.C.2 修订（2026-10-03，T10 联合 E2E，Ruling E-T10f）**：集群上一次成功采集早于本 Issue 的故障起点（`observed_at`，缺省 `first_seen`）时，即使不到 `rca_k8s_recollect_min_age_seconds` 也重采。定位评测 on #1 有 5 个未命中把上一个用例的对象排在第一位，原因是重采被最小间隔跳过（红测 b401d36、修复 fe7e9fd；见 `MVP-2.6.1-LOCATION-EVAL-REPORT.md` 发现 1）。
+- **变更批准即执行（2026-10-03，联合 E2E 走查，主人要求）**：
+  - 起因：走查 C#1 时要先「批准」、再手点「执行」，主人要求批准后直接执行，和修复方案一致（修复方案人工批准后本来就自动执行）。
+  - 实现：新的 `change_service.approve_and_execute` 先调 `approve()`，失败照原样抛出，不入队；成功后以审批人的身份在同一请求内调 `request_execution`。入队失败（例如执行器关闭）时，批准不回滚：变更停在 `approved`，并发送既有的 `change_result(execution_not_queued)` 通知。
+  - 不加开关。红测 6cf348e，实现 e762b9a。
+  - 六个可达面：
+    - CLI：`/approve C<id>` 批准即入队；`/execute C<id>` 只用来重试。
+    - Web API：`POST /api/changes/{id}/approve` 同一请求内入队，响应通常是 `executing`；`POST …/execute` 只用来重试；不新增端点。
+    - Web UI：ChangeDetail 的按钮和对话框改为「批准并执行」，并注明会立即执行；「重试执行」只在停在 `approved` 时出现，此时待办显示「已批准，但未能入队执行」。
+    - Agent tool：`execute_change` 的说明和 Main 提示词改为「只用来重试」；agent 仍然不能批准。
+    - Schedule：非目标。
+    - Notification：复用 `execution_not_queued`。
+  - 策略自动审批分支走同一个函数，仍然只入队一次。
+- **统一工单模板（方案 A，2026-10-04，联合 E2E 走查，主人要求）**：见下一节。
+
+## 2.6.1 之后：统一工单模板（方案 A）
+
+> 主人原话：「Issue 页面看上去和使用上非常的乱……使 Issue / fix plan / Change 等功能更加规划、更加合理。」2026-10-04 选方案 A，并要求 A1–A4 一次做完。与「变更批准即执行」同属联合 E2E 期间主人要求的改动。
+>
+> 设计：`docs/superpowers/specs/2026-10-04-issue-change-workitem-template-design.md`（66b1d93）· 计划：`docs/superpowers/plans/2026-10-04-issue-change-workitem-template.md`（f296ca3）· 评审稿：`docs/design/2026-10-03-issue-change-ui-proposals.html`。提交 9868501 … 049bf7e，只在本地，未 push。
+
+**做了什么**
+
+- **问题和变更共用一套详情模板**。首屏只有一个状态行：工单号、标题、状态、原因句（最多两行）、等谁、**唯一一个主按钮**，其余动作都在「⋯」菜单里，只在后端会接受时出现。下面是一列阶段卡，右栏是「关键事实」和「动态」。
+  - 问题四段：① 诊断 → ② 方案 → ③ 审批并执行 → ④ 验收。
+  - 变更五段：① 申请 → ② 审核 → ③ 方案 → ④ 审批并执行 → ⑤ 验收。
+  - 已结束的阶段折叠成一句话，当前阶段展开，还没到的阶段只写「谁、在什么条件下推动它」；失败、回滚、拒绝、取消时，列表在出事的那一段收尾（策略拦截的拒绝在 ② 审核收尾）。
+  - 7 步步进器、5 段进度条、头部三枚状态标签、问题详情的 5 个 tab 都不再出现。
+- **主按钮由纯函数算出**：`lib/issuePhases` / `lib/changePhases` 按设计 §4 的两张表逐行实现、逐行有测试；两个列表的「等谁」列用同一个函数（列表模式），所以列表和详情不会说两种话。
+- **失败原因只说一次**：原因句只在状态行；执行卡只放检查证据；动态里去掉与状态行相同的那一句。
+- **「你的判断」**：问题详情唯一的反馈控件，四选一、一次提交（根因和定位都正确 / 部分正确 / 根因错误 / 这不是问题）。只调用现有的 `rca-feedback` 与 `feedback` 端点，取代 👍👎、定位三选一和「误报 / 确认」三个旧控件。
+- **① 诊断写出闸门推导**：原始置信度 → ×0.6（证据核验未通过）→ ×0.5（评审员否定）→ 最终值，与自动修复阈值比较，`weak` 不扣分。局部图默认是紧凑视图（锚点的 1 跳邻居加因果路径，最多 15 个节点），有「显示全部 N 个」。
+- **列表**：问题和变更共用 `WorkItemTable`。问题的筛选压成一行（状态、严重度、范围 `?scope=`、账户、排序、搜索、「原始信号 →」）；行上保留快捷操作和重复次数 ×N。
+- **信息架构**：资源单独进侧栏（`/app/resources`，在「变更」之后）；信号移到 `/app/signals`，不进侧栏；`/app/issues?view=resources|signals` 用 `replace` 跳到新页面。
+- **链接**：详情用 hash 锚点打开阶段卡并滚到它（问题 `#diagnose` / `#plan` / `#run` / `#accept` / `#activity`，变更 `#request` … `#accept` / `#activity`）；旧的 `?tab=investigate|fixPlan|execution|verification|timeline`（以及 2.6.1 之前的 `?tab=issue`）用 `replace` 映射一次。
+- **文案**：可见状态都走 locale，执行状态、策略动作、来源、审核结论等枚举都有中英文，未知值原样显示。被取代的组件（IssueActionBar、IssueStatusStepper、IssueRow、ExecutionsTable、PipelineTimeline）和 46 个只被旧页面用过的 locale 键已删除。
+
+**六个可达面（逐行）**
+
+- **CLI** — 非目标。`aiops chat`、`/change`、`/approve`、`/accept` 不变。
+- **Web API** — 做（极小）。`GET /api/settings` 加只读字段 `rca_min_confidence_for_autofix`，`PATCH` 收到它返回 400（与 `policy_graph_impact_enforce` 同一做法）；不新增端点。
+- **Web UI** — 做。
+  - 重写 `pages/IssueDetail.tsx`、`pages/ChangeDetail.tsx`；`pages/IssuesAndPlans.tsx` 只留问题列表；新页面 `pages/Resources.tsx`、`pages/Signals.tsx`；`components/plans/ChangePlansTab.tsx` 改用 `WorkItemTable`。
+  - 新组件：`components/workitem/{StatusLine,PhaseCard,FactsRail,ActivityList,RunList,RunningFor}`、`components/issue/{DiagnoseCard,RunCard,AcceptCard,VerdictBlock}`、`components/change/{RequestCard,ReviewCard,RunCard,AcceptCard}`、`components/ui/{WorkItemTable,IssueQuickActions}`、`components/plans/PlanView`、`hooks/usePhaseCards`。
+  - 新纯函数模块（都有 vitest）：`lib/{issuePhases,changePhases,issueDetailModel,changeDetailModel,workItems,workitemRoutes,activity,verdict,rcaQuality,phaseCards,placeholders,issueStatus}`。
+  - 侧栏 `NavItems` 加「资源」，`App.tsx` 加路由和重定向，`locales/{zh,en}.json` 成对增删。`PipelineStepper`、`ChangeStepper` 仍被 Chat 的 ContextPanel 使用，保留。
+- **Agent tool** — 非目标。
+- **Schedule** — 非目标。
+- **Notification** — 非目标。通知里的深链 `/app/issues/:id`、`/app/changes/:id` 照常打开，旧 `?tab=` 也能映射。
+
+**计划层面的裁定**
+
+- **R1**：P14（问题侧「Execute」改名「重试执行」）并入 Task 11，P15（问题筛选压成一行）并入 Task 14，P2 里 IssueRow 的状态文案并入 Task 14；IssueActionBar 的确认文案不做，因为这个组件已被删除。
+- **R2**：列表接口不带 RCA 置信度和最新运行，所以列表以「列表模式」调用同一个 `issuePhases`：`root_cause_identified` 显示「待复核根因或生成方案 · 等你」，`fix_executed` 显示「已执行，无判定 · 等你」；详情页拿到全部输入，给出精确结果。
+- **R3**：列表行的快捷操作（解决 / 确认 / 忽略 / 重新打开）和安全问题的「打开安全页」链接保留，放在 `WorkItemTable` 的 `rowActions` 列。
+- **R4**：文档在 Task 16 一次更新。
+
+**执行中的裁定**（每条一行）
+
+- 资源名字段是 `resource_name`，不是计划里写的 `name`；锚点行用它。
+- 每张阶段卡都受控（`open` + `onToggle`），阶段一变就重新决定哪些卡展开，hash 也能重新打开当前卡。
+- 执行证据卡只在最新一次运行的错误原文就是状态行原因时隐藏它（`showError`）；更早的运行照常显示自己的错误。
+- 「已暂停自动修复」只在状态行说：① 诊断保留置信度推导和阈值竖线，不再重复那句话。
+- 卡片里重复主按钮的那些按钮保留、改成描边样式，整页只有状态行一个实心按钮（「提交判断」也改为描边）。
+- 执行状态（`succeeded`、`running` 等）改用 `execution.status.*` 文案。
+- 没有 RCA 时「⋯」菜单不再提供「跳过复核直接生成方案」（后端本来就拒绝）；主按钮已是「重新运行 RCA」时，菜单不再重复它。
+- 「这一句状态行已经说过」的判断放进视图模型、逐字比较、有测试：③ 只在错误原文完全相同时不显示，④ 只在验收原因完全相同时不显示。
+- 失败的变更在 ④ 收尾（设计 §3 / §4 的收尾规则优先于线框 A-3），「系统已判定失败（见执行 #n）」写在 ④ 的末尾。
+- 这句「系统已判定失败」只在变更已终结为 `failed` / `rolled_back`、最新运行判定为失败且没人验收过时出现；`needs_review` 时 ⑤ 显示验收原因和「标记完成 / 标记失败」，因为后检失败的运行要由人决定。
+- 动态里与状态行原因相同的那条摘要不显示（`toActivity(…, { hideText })`），事件本身（标签、操作人、时间）保留。
+- 策略动作、来源等枚举本地化，未知值原样显示；影子影响的数字和「仅供参考」一起出现；策略拦截的拒绝在 ② 审核收尾；12 个变更状态逐个有模型测试；两个阶段模型遇到未知状态都退化显示，不白屏。
+- `needs_review` 时，⑤ 的验收原因与状态行相同就不重复。
+- 已存过侧栏顺序的浏览器，新入口「资源」插在它前一个已有入口之后（即「变更」之后），不追加到末尾。
+- 列表行加回重复次数 ×N（MVP-2.2.0 的功能不能消失）。
+- 列表行补齐：安全问题链接常显、ARN 副标题保留有意义的尾段、显示区域、未关闭的 critical 行着色、已关闭行变淡、变更显示类型和风险、未评级写「未评级」、严重度筛选本地化、工单号和标题是真链接、快捷操作单独一列、问题列写「检测时间」；列表模式下 `fix_approved` 显示「等执行器」，没有运行数据时不说「未入队」。
+- 变更列表去掉按列头排序：接口已按最新在前，加上四个筛选够用，`WorkItemTable` 也不做排序。
+- Task 16 一并清掉评审遗留的小问题：两个详情页共用 `usePhaseCards`、`RunList`、`RunningFor` 和 `fillPlaceholders`（行为不变）；ErrorBanner 的「重试」本地化；执行记录一次轮询失败时保留已加载的运行，错误只显示在状态行下方；「RCA 已触发」提示可以关闭；Trace 一行点击复制；「仅供参考」只出现一次；快捷操作的长提示截断在本列，刚关闭的行显示提示时不变淡；变更 ⑤ 里那段不可能执行到的分支删除；严重度徽标显示中英文（未知值原样显示）。
+
+**最终评审修复（2026-10-05，每条一行）**
+
+- C1：批准后的自动执行在结束前不写执行记录，问题详情改从时间线读「运行中」（该方案最新一条 `execution_started` 之后没有 `execution_completed`，且不足 `executor_total_timeout` 秒；后端 `pipeline_service.plan_run_in_flight`、前端 `inFlightAutoRun` 同一定义）：此时 ③「执行中 · 等执行器」、无主按钮，「重试执行」只在「⋯」；`POST /api/fix-plans/{id}/execute` 在运行中返回 409；`GET /api/settings` 加只读字段 `executor_total_timeout`。设计 §4 有日期修订。
+- I1：RCA 拉取失败不再当作「没有 RCA」：状态行写「RCA 无法加载」、无主按钮，错误和「重试」在状态行下方，① 同样提示。
+- 变更「批准即执行」：入队时抢锁失败（被并发执行或取消抢先）不再误报 `execution_not_queued`；未入队的通知写明拒绝原因；CLI `/approve` 按 已入队 / 未能入队 / 已被其它请求改为某状态 三种说法；策略自动批准只在批准这一步失败时退回人工审批。
+- 关键事实：严重度、来源用中英文（未知值原样）；新增「根因资源」一行（最新 RCA 已通过校验的首位定位候选，链接到资源页）；Trace 点击复制后显示「已复制」，变更详情同样可复制。
+- PlanView：预计影响为空时不显示（不再写「-」）。
+- 「你的判断」：根因判断已保存、问题反馈失败时，只重试问题反馈；已记录的定位判断只在定位卡里显示一次。
+- 策略拦截的变更：② 审核里只读显示被拦下的方案。
+- 无障碍：状态行原因句用按钮展开（键盘可用）；「⋯」菜单打开时聚焦第一项，支持 ↑ / ↓ / Home / End，Esc 关闭并把焦点还给「⋯」。
+- 删除无引用的 `verification.pendingBanner` / `verification.accept` 两个键。
+
+**已知缺口（刻意不做或留给后续）**
+
+- A5「关联」（按资源反查同一资源上未关闭的工单）需要新增按资源过滤的 API 参数，不在本次。
+- 修复方案「已批准、未入队」时不发通知（变更侧会发 `execution_not_queued`），这处不对称没改；时间线上看不到自动执行在跑时，问题详情的状态行显示「已批准，未入队」和主按钮「重试执行」，没有通知也能看出状态。
+- 自动执行线程正常返回、却没调用 `save_execution_result` 时不写收尾事件，「运行中」会一直显示到 `executor_total_timeout`（默认 30 分钟）后才变回「未入队」；修复方案的自动执行改走 ExecutorService 工单（可见、可取消、有看门狗）是后续项。
+- 变更详情 ③ 只显示当前方案，不列「其它版本」（问题详情 ② 有）；PlanView 在零步骤时也显示检查和回滚。两条都留给最终评审。
+- 页面里「hash → 哪张卡」的映射：纯函数部分（`seedOpenCards`、`toggledCardHash`、`workitemRoutes`）有测试，`usePhaseCards` 本身没有组件测试（前端不引入 jsdom / Testing Library）。
+- 联合 E2E 清单第 2、3、7 项按旧的 tab 界面写成，走查时对应到阶段卡：`?tab=verification` 现在打开 ④ 验收卡（`#accept`），「修复方案 tab 批准」对应 ③ 审批并执行。
+
+**测试（实测）**
+
+- 前端（049bf7e）：`tsc --noEmit` 0 错误；`vitest run src` 38 个文件 / 395 个测试全过（含 locale-parity）；`vite build` 成功。
+- 后端全量（c591136 的代码，其后只有前端和文档改动；本计划唯一的后端改动是 Task 1）：6359 passed / 85 skipped / 0 failed。基线是 6357 passed / 85 skipped 加 1 个已知的本机 DNS 假失败；多出的 2 个，一个是 Task 1 的新测试，一个是 `test_web_tools::test_invalid_headers_json` 这次通过了（本机这次把 example.com 解析到公网地址，不是 198.18.0.170）。
+- 没有在浏览器里走查：这一步等主人在 chaos-lab 上用真实的 I#n / C#n 走一遍。
 
 ## 验收标准（对照设计 §8）
 
@@ -181,28 +286,28 @@
 |---|---|---|
 | 1 | 锚定率 `(anchored + account_level) / 总数` ≥ 95%（达不到则报告原因分布，不放宽规则）；36 组跨账户重复 id 一次都不错配 | 锚定率 **未达标**：（562 + 25）/ 888 = 66.1%。原因分布：库存里找不到这个资源 291（多为没有扫描器列举的类型，id 形态前几位是 `arn:cloudformation` 39、`arn:elasticloadbalancing` 38、`arn:iam` 35、`arn:rds` 25）、Issue 无账户也无信号记录 6、同规则命中多个资源 4；按设计不放宽规则。跨账户重复 id **达标**：36 组，指向它们的未关闭 Issue 错配 0；`resolve()` 探测 72/72 锚到持有账户、不给账户时锚定 0 次。实测见 `MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md` |
 | 2 | 2 跳邻域 SQL ≤ 5；本地库 p95 < 200 ms | **达标**：457 个锚定资源 × 3 轮共 1371 次调用（每次清缓存），SQL 最多 4 条；p50 4.1 ms、p95 6.1 ms、最大 43.3 ms；截断 0 次。实测同上 |
-| 3 | 图召回率 ≥ 12/13（硬门槛） | 联合 E2E（`MVP-2.6.1-LOCATION-EVAL-REPORT.md`） |
-| 4 | on 批次 `location_status ∈ {valid, partial}` ≥ 90%；无效引用绝不记成 valid | 校验分支有单测；比例待联合 E2E |
-| 5 | AC@1 / AC@3 / MRR 的 off / on 对照如实报告，不设门槛 | 联合 E2E |
-| 6 | 连接器安全：Secret 无 data；部分采集不产生 absent；kubectl env 无非目标账户的 `AWS_*` | 单测覆盖；联合 E2E 在真实集群复核 |
-| 7 | 配置令牌后不带令牌的 webhook 401；6 个解析器都取到 `observed_at` | 单测覆盖 |
+| 3 | 图召回率 ≥ 12/13（硬门槛） | **达标**：13/13，三个计分批次都是（`MVP-2.6.1-LOCATION-EVAL-REPORT.md`） |
+| 4 | on 批次 `location_status ∈ {valid, partial}` ≥ 90%；无效引用绝不记成 valid | **达标**：两个 on 批次都是 13/13 = 100%；抽查 on #2 每个存下的候选都对得上已部署集群的库存行，没有记成 `invalid` 的 |
+| 5 | AC@1 / AC@3 / MRR 的 off / on 对照如实报告，不设门槛 | **已报告**：off 0.00 / 0.00 / 0.00 → on #1（修复前）0.38 / 0.38 / 0.38 → on #2（fe7e9fd）0.77 / 0.77 / 0.77；命中都在第 1 位。未命中逐个分析见评测报告「Findings」 |
+| 6 | 连接器安全：Secret 无 data；部分采集不产生 absent；kubectl env 无非目标账户的 `AWS_*` | 单测覆盖。chaos-lab 实测：每次运行都是 `partial`（实验集群的 RBAC 不给读 `secrets`），`absent` 0；库里没有任何 Secret 行，所以「无 data」在真实集群上没有被检验到；kubectl env 未在真实集群上检查 |
+| 7 | 配置令牌后不带令牌的 webhook 401；6 个解析器都取到 `observed_at` | 单测覆盖；chaos-lab 实测：不带令牌、令牌错 401，带令牌 201 |
 | 8 | 过期哈希审批 409；执行器遇到哈希不一致拒绝执行；状态写入只在 `transition_issue`（grep 测试） | 单测覆盖 |
 | 9 | dismissed / resolved 不给节点上色；没有 Issue 的节点 `unknown`；UI 三层爆炸半径与 API 一致 | 单测 + 前端 vitest 覆盖 |
 | 10 | 规则关系行数 = rule_graph 资源到资源的边数；方向测试通过，锁反向的旧测试已删 | 单测覆盖 |
 | 11 | `pending_acceptance` 时 IssueDetail 与 ChangeDetail 顶部显示同一条原因 | 前端 vitest 覆盖；联合 E2E 走查 |
-| 12 | intake：签名错 401、未配置 404、同一工单重复提交得到同一张变更单；`webhook:*` 批准在影子模式下也 403 | 单测覆盖；联合 E2E 复核 |
-| 13 | 全量测试 + 前端四道门通过；联合 live E2E 跑完并经主人确认后才 push | 门禁 **通过**：pytest 6347 passed / 85 skipped；`tsc` 0 错误；vitest 27 个文件 / 279 个测试；`vite build` 成功；locale-parity 测试通过。联合 E2E 待跑，未 push |
+| 12 | intake：签名错 401、未配置 404、同一工单重复提交得到同一张变更单；`webhook:*` 批准在影子模式下也 403 | 单测覆盖；**chaos-lab 实测通过**：错签、过期时间戳 401；正确签名 201、同一工单再提交 200 同一张单；`webhook:*` 批准 / 执行在影子模式下 403（在 pod 内调服务层——没有让 webhook 身份批准的 HTTP 路由）。开着 API 鉴权时，未配置的 intake 对匿名调用者是通用的 401，登录后才是 404（中间件只在配置了密钥时放行这个路由） |
+| 13 | 全量测试 + 前端四道门通过；联合 live E2E 跑完并经主人确认后才 push | 门禁 **通过**：fe7e9fd 上 pytest 6350 passed / 85 skipped（另有 1 个已知的本机 DNS 假失败）；前端自 f4127b3 起未变：`tsc` 0 错误；vitest 27 个文件 / 279 个测试；`vite build` 成功；locale-parity 测试通过。联合 E2E 进行中，未 push |
 
-## 联合 live E2E 清单（设计 §7，和主人一起跑 —— 尚未执行）
+## 联合 live E2E 清单（设计 §7，和主人一起跑 —— 进行中）
 
-部署方式与环境当场与主人确认（定位评测在 chaos-lab 集群内按 `infra/eks-chaos-lab/e2e/README.md`「Root-cause location eval」跑；其余流程在 dev）。任何 push 之前先征得确认。
+主人选了路线 A：全部在 chaos-lab 集群内跑（定位评测按 `infra/eks-chaos-lab/e2e/README.md`「Root-cause location eval」），push 获准后再更新 dev。镜像在 dev 机上远程构建。逐项结果见 `MVP-2.6.1-E2E-REPORT.md`：1、4、5 已完成；6 的 API 部分已完成；2、3、6 的界面部分、7 待主人走查。任何 push 之前先征得确认。
 
 1. **定位评测 26 次**：`LOCATION_BATCH=off` 与 `on` 各跑 13 个场景 → `python location_eval.py <off> <on>` → 填 `MVP-2.6.1-LOCATION-EVAL-REPORT.md`（验收 3–5）。注意：`--location-only` 会带评测环境变量重启集群内的应用，**重启会清空 pod 的数据库**，onboarding 夹具的 Galaxy 重建会跑廉价模型（Haiku）的 LLM 增强（有费用）；cleanup 恢复所有故障并撤掉评测环境变量。顺带核对一次被卸载的证据包里 candidates 仍能到达 agent（C-FR1）。
 2. **一次 fix 流**：IssueDetail 看锚点与局部图 → 修复方案 tab 批准（对话框显示哈希）→ 执行 → `pending_acceptance` 横幅 → 接受（理由必填）→ Issue resolved；再验一次「批准后改方案 → 执行被拒 → 回到 `root_cause_identified`」。`?tab=verification` 直接打开时选中该 tab；接受后横幅消失；拒绝后 Issue 回到 `root_cause_identified`。`infra/eks-lab/scenarios/case-6-unhealthy-targets/verify.sh` 的批准段（现在走得到，只做过语法检查）在这里真跑一次。
 3. **一次 change 流**：NewChangeDialog 自带步骤 + 外部工单 → SRE 审核 → ChangeDetail 看 `steps_diff` 与影子模式的潜在影响 → 批准 → 执行 → 验收卡验收。
-4. **intake**：未配置 404 → 配置后错签 401 → 正确签名 201 → 同一工单再提交 200 同一张单 → 以 `webhook:*` 身份批准 403。
-5. **告警 webhook 令牌**：配置 `webhook_secret` 后不带令牌 401、带令牌 200。
-6. **连接器**：Settings 连接器卡片「立即运行」→ 卡片先显示运行中、再出现一行新运行和计数；运行中再点一次 → 409 提示，运行结束后清掉；库里 Secret 行无 data；采集后 Galaxy 出现 K8s 节点、`?focus=` 可深链。
+4. **intake**：未配置 404（开着 API 鉴权时需登录，匿名是 401）→ 配置后错签 401 → 正确签名 201 → 同一工单再提交 200 同一张单 → 以 `webhook:*` 身份批准 403。
+5. **告警 webhook 令牌**：配置 `webhook_secret` 后不带令牌 401、带令牌被接受（新建 Issue 时是 201）。
+6. **连接器**：Settings 连接器卡片「立即运行」→ 卡片先显示运行中、再出现一行新运行和计数；运行中再点一次 → 409 提示，运行结束后清掉（这把锁在进程内，多 worker 部署下不一定复现，见 E2E 报告）；库里 Secret 行无 data；采集后 Galaxy 出现 K8s 节点、`?focus=` 可深链。
 7. **UI 走查**：问题三视图、IssueDetail 五个 tab、ChangeDetail、审计页、Chat 的 `I#` / `C#` 面板、AgentMetrics 定位卡片（7 天的比率）、中英切换；LocalGraph 在 IssueDetail、ChangeDetail、ResourceDetail 三处都渲染；从 LocalGraph 的「在全景图中查看」（Open in Galaxy）走一次 `?focus=<id>`，参数还在 URL 时等一次构建落地；顶栏四个标题（agent-metrics、skills、galaxy、security）；浏览器控制台无报错。
 
 ## 已知偏差与限制
@@ -228,7 +333,7 @@
 **图事实层（计划 A）**
 
 - **A-1** 锚定率可能达不到 95%（spec §10.1），实测数字与原因分布见 `docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`；按 spec 如实报告原因分布，**不为达标放宽规则**。
-- **A-2** 规则写入的串行锁在进程内；多个 uvicorn worker 会各有一把，多 worker 部署需要换成 DB 级锁（spec §10.3）。
+- **A-2** 规则写入的串行锁在进程内；多个 uvicorn worker 会各有一把，多 worker 部署需要换成 DB 级锁（spec §10.3）。**联合 E2E 发现，现有部署并不是单进程**：`docker/Dockerfile` 与 dev 机的 systemd（`iac/deploy-sg/deploy.sh`）都跑 `--workers 4`。连接器的运行锁（「立即运行」的 409 与运行中徽标）、D-9 的 intake 去重锁同样只在进程内。见 `MVP-2.6.1-E2E-REPORT.md`。
 - **A-3**（A M-5）Galaxy 页面与 GraphQueryService 对「当前构建」的定义不同（前者按 `finished_at`，后者按 `rules_published_at`）：普通构建还在 LLM 阶段时落地的一次 rule-only 刷新，会让查询层读刷新的规则，而页面仍显示那次普通构建。
 - **A-4**（A M-7）某账户没配 `credentials.account_id` 时，跳过 `account_conflict` 检查；ARN 里的账号如果没有任何账户声明过，结果是 `unknown_account`，即使库存里有这个资源 —— 拉低锚定率，不影响安全。
 
@@ -320,7 +425,7 @@ Datadog / 观测云 / ServiceNow CMDB 连接器与 MCP 声明式连接器；Chat
    - **E-T2 M-4**：图聚焦的 `related.truncated` 没考虑 `NODE_CAP_MAX` 造成的结构截断（界面可以读 `blast.truncated`）。
    - **E-T2**：Web 的修复方案批准路由从不调用 `notify_fix_approved`（既有问题；只有 agent 工具那条路会通知）。
    - **E-T3 M-7b**：LocalGraph 没有中心节点时的候选循环没有测试；`latestExecution` 按 `created_at` 排序，而后端的「最新一次」是 `max(id)`（除非两次运行时间戳相同，否则一致）。
-   - **E-T4**：`IssueDetail.tsx` 太大（各 tab + 验收 + 证据），以后拆分。
+   - **E-T4**：`IssueDetail.tsx` 太大（各 tab + 验收 + 证据），以后拆分。**已解决**：统一工单模板把它拆成阶段卡组件（`components/issue/*`）和纯视图模型（`lib/issueDetailModel`），页面 567 行。
    - **E-T6b**：修复方案批准对话框（ContextPanel 与 IssueDetail）实时读 `fp.content_hash`，确认时显示的就是发送的；对话框开着时哈希变了，显示的文本也会跟着变（门会再查一次，漂移会被拒）。
    - **E-T7**：ResourceDetail 的 tab 标签除了新的「局部关系图」都是硬编码英文（既有）；没有 `focus` 参数时，Galaxy 的 `exitFocus` 也会做一次无意义的 URL 替换。
    - **E-T8**：连接器卡片的轮询间隔（运行中 5 秒 / 空闲 30 秒）写死在 `useConnectors` 里，没有测试。
