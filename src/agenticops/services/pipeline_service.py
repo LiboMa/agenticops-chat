@@ -14,6 +14,7 @@ Non-blocking: Agent stages (SRE, Executor) run in daemon threads.
 Follows the same pattern as rca_service.py.
 """
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -319,6 +320,38 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     )
     thread.start()
     logger.info("Auto-execute spawned for FixPlan #%d", fix_plan_id)
+
+
+def plan_run_in_flight(session, plan_id: int) -> bool:
+    """Whether an auto-run of this fix plan is in progress (2026-10-05 final review C1).
+
+    _run_auto_execute writes no FixExecution row until the run ends, so the plan stays 'approved' throughout.
+    Its timeline events are the one signal every worker sees: the newest `execution_started` naming this plan
+    is in flight when no `execution_completed` on the issue came after it and it began less than
+    executor_total_timeout seconds ago (a run that died without a closing event goes stale). A ticketed run
+    (POST /execute, a change) is a pending/running row and moves the plan off 'approved' — not this signal.
+    """
+    from datetime import timedelta
+    from agenticops.models import FixPlan, PipelineEvent
+    plan = session.get(FixPlan, plan_id)
+    if plan is None or not plan.health_issue_id:
+        return False
+    events = (session.query(PipelineEvent)
+              .filter(PipelineEvent.health_issue_id == plan.health_issue_id,
+                      PipelineEvent.event_type.in_(("execution_started", "execution_completed")))
+              .order_by(PipelineEvent.created_at.desc(), PipelineEvent.id.desc())
+              .all())
+    for e in events:  # newest first
+        if e.event_type == "execution_completed":
+            return False  # the newest start of this plan, if any, is older than this completion
+        try:
+            detail = json.loads(e.detail) if e.detail else None
+        except ValueError:
+            detail = None
+        if isinstance(detail, dict) and detail.get("plan_id") == plan_id:
+            started = e.created_at if e.created_at.tzinfo else e.created_at.replace(tzinfo=timezone.utc)
+            return datetime.now(timezone.utc) - started < timedelta(seconds=settings.executor_total_timeout)
+    return False
 
 
 def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:

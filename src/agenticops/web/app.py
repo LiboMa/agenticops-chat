@@ -653,6 +653,8 @@ async def api_get_settings():
         "policy_graph_impact_enforce": settings.policy_graph_impact_enforce,
         # Read-only: the post-RCA gate's threshold, so IssueDetail can say why auto-fix paused (2026-10-04 spec §8)
         "rca_min_confidence_for_autofix": settings.rca_min_confidence_for_autofix,
+        # Read-only: how long a fix plan's auto-run counts as in flight, so IssueDetail and POST /execute agree
+        "executor_total_timeout": settings.executor_total_timeout,
     }
 
 
@@ -2712,6 +2714,12 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
             authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
+
+        # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
+        # must not run the same plan alongside it (2026-10-05 final review C1)
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        if plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is already in progress")
 
         # Mark plan as executing (status verified 'approved' above — cannot raise); the issue moves with it
         transition_plan(plan, "executing")

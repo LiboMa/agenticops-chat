@@ -448,6 +448,17 @@ def test_settings_expose_rca_autofix_threshold_read_only(client, settings_io):
     settings_io.assert_not_called()
 
 
+def test_settings_expose_the_executor_timeout_read_only(client, settings_io):
+    """IssueDetail bounds a fix plan's auto-run signal by the same timeout the backend uses (2026-10-05 final
+    review C1), so it never claims a run long dead is still running."""
+    from agenticops.config import settings
+    with patch.object(settings, "executor_total_timeout", 1234):
+        assert client.get("/api/settings").json()["executor_total_timeout"] == 1234
+        r = client.patch("/api/settings", json={"executor_total_timeout": 1})
+        assert r.status_code == 400 and settings.executor_total_timeout == 1234
+    settings_io.assert_not_called()
+
+
 def test_settings_toggle_yaml_failure_applies_nothing_and_a_retry_heals(client, settings_io):
     """The audit rows are written, then the yaml, then the rows commit, all BEFORE the in-memory flip: a failed
     yaml write rolls the rows back and leaves the old value live, so an identical retry still sees the change
