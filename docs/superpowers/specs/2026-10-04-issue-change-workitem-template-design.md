@@ -116,6 +116,8 @@
 | `fix_executed`，最新一次运行 `passed`（`executor_auto_resolve=false` 时才会停在这里） | ④ · 已通过 | 你 | 「标记已解决」 |
 | `resolved` / `dismissed` | 终态横幅 | — | 无（「⋯」菜单里有「重新打开」） |
 
+> **2026-10-05 最终评审 C1 修订**：上表「`fix_approved`，方案 `approved`，还没有运行 → 需重试」一行的前提不成立。批准后 `trigger_auto_execute` 在后台线程里直接跑执行器，整段运行期间不写 FixExecution 记录（结束时才由 `save_execution_result` 写入），方案一直是 `approved`、问题一直是 `fix_approved`；按原表，页面会在整段运行期间说「已批准，未入队 · 等你」并把「重试执行」作为唯一主按钮，点下去会让第二个执行器并发跑同一方案。改为：「运行中」的信号取时间线——该方案最新一条 `execution_started` 之后同一问题没有 `execution_completed`，且开始不足 `executor_total_timeout` 秒（后端 `pipeline_service.plan_run_in_flight`，前端 `lib/issueDetail.inFlightAutoRun`，同一定义）。有这个信号时 ③ 为「执行中 · 等执行器 · 无主按钮」，「重试执行」只留在「⋯」里，并由后端兜底：`POST /api/fix-plans/{id}/execute` 在信号成立时返回 409「A run of this plan is already in progress」。没有信号（自动执行关闭，或在开始前就失败了）才是「需重试 · 重试执行」；时间线还没加载或加载失败时是中性状态，不说「未入队」。为此 `GET /api/settings` 多一个只读字段 `executor_total_timeout`（`PATCH` 收到返回 400），§8「不改」一段里「问题详情在 ③ 显示『需重试』」的说法以本段为准。
+
 **`changePhases(cr, activePlan, latestRun)` 的映射：**
 
 | 变更状态 | 当前阶段 · 子状态 | 等谁 | 主按钮 |
