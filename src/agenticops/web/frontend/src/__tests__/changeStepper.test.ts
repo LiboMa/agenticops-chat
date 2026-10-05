@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { changeStepState, CHANGE_STEP_KEYS, stepLabelKey, type ChangeStepInput, type StepTone } from "@/lib/changeStepper";
+import {
+  changeStepState, CHANGE_STEP_KEYS, stepLabelKey, visibleStepCount, type ChangeStepInput, type StepTone,
+} from "@/lib/changeStepper";
 import type { ChangeStatus } from "@/api/types";
 
 // One row per line of R6's table: status -> { index, tone }. review_verdict "approved_for_planning" means the
@@ -61,5 +63,20 @@ describe("stepLabelKey", () => {
       .toBe("changes.status.completed");
     expect(stepLabelKey({ status: "needs_review", approved_at: "x", review_verdict: PLAN_OK }, 4))
       .toBe("changes.status.needs_review");
+  });
+});
+
+describe("visibleStepCount (P12)", () => {
+  const cr = (status: string, extra: Record<string, unknown> = {}) =>
+    ({ status, approved_at: null, review_verdict: null, ...extra }) as Parameters<typeof visibleStepCount>[0];
+  it("a bad ending is the last step drawn; a good or open path draws all steps", () => {
+    expect(visibleStepCount(cr("failed"))).toBe(5);                       // ends at Executed
+    expect(visibleStepCount(cr("rolled_back"))).toBe(5);
+    expect(visibleStepCount(cr("rejected"))).toBe(2);                     // the review rejected it
+    expect(visibleStepCount(cr("rejected", { review_verdict: "approved_for_planning" }))).toBe(4);
+    expect(visibleStepCount(cr("cancelled", { approved_at: "2026-10-03T09:00:00" }))).toBe(5);
+    expect(visibleStepCount(cr("completed"))).toBe(CHANGE_STEP_KEYS.length);
+    expect(visibleStepCount(cr("planned"))).toBe(CHANGE_STEP_KEYS.length);
+    expect(visibleStepCount(cr("needs_review"))).toBe(CHANGE_STEP_KEYS.length);
   });
 });

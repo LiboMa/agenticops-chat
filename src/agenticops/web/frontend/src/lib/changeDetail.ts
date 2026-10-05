@@ -74,8 +74,9 @@ export function policySummary(
   return { reasons, escalatedFrom, effectiveRisk };
 }
 
-/** What must happen next (a `changes.todo.*` key) and the header's primary button, by status; closed → none. */
-export type ChangeNextAction = "review" | "clarify" | "approve" | "execute" | "accept";
+/** What must happen next (a `changes.todo.*` key) and the header's primary button, by status; completed → none;
+ *  a change closed without completing → copy it as a new request. */
+export type ChangeNextAction = "review" | "clarify" | "approve" | "execute" | "accept" | "copy";
 const NEXT: Partial<Record<ChangeStatus, [todo: string, action: ChangeNextAction | null]>> = {
   draft: ["startReview", "review"],
   under_review: ["review", null],
@@ -84,6 +85,10 @@ const NEXT: Partial<Record<ChangeStatus, [todo: string, action: ChangeNextAction
   approved: ["notQueued", "execute"], // approving runs it; still approved = the run was not queued → retry
   executing: ["executing", null],
   needs_review: ["accept", "accept"],
+  failed: ["copyAsNew", "copy"],
+  rolled_back: ["copyAsNew", "copy"],
+  rejected: ["copyAsNew", "copy"],
+  cancelled: ["copyAsNew", "copy"],
 };
 
 export interface ChangeHeadline {

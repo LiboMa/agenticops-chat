@@ -170,6 +170,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
     approve: { label: t("changes.approveAndRun"), run: openApprove },
     execute: { label: t("changes.retryExecution"), run: onExecute },
     accept: { label: t("changes.markCompleted"), run: () => openAccept("completed") },
+    copy: { label: t("changes.copyAsNew"), run: () => setCopy(true) },
   };
   const primary = head.action ? PRIMARY[head.action] : null;
 
@@ -201,7 +202,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
             <span className="text-foreground">{t(`changes.todo.${head.todo ?? "none"}`)}</span>
             {primary && (
               <button
-                disabled={act.isPending}
+                disabled={act.isPending || (head.action === "copy" && accounts.isLoading)}
                 onClick={primary.run}
                 className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
               >

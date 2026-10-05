@@ -62,3 +62,10 @@ export function changeStepState(cr: ChangeStepInput): ChangeStepState {
 export function stepLabelKey(cr: ChangeStepInput, i: number): string {
   return i === changeStepState(cr).index ? `changes.status.${cr.status}` : CHANGE_STEP_KEYS[i];
 }
+
+/** How many steps the stepper draws: a change that ended badly ends at the step it ended on (P12) — no
+ *  "Completed" after "Failed"; every other change draws the whole path. */
+export function visibleStepCount(cr: ChangeStepInput): number {
+  const s = changeStepState(cr);
+  return s.tone === "bad" ? s.index + 1 : CHANGE_STEP_KEYS.length;
+}

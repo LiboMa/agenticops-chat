@@ -144,10 +144,19 @@ describe("changeHeadline", () => {
       .toEqual({ reason: "which cluster? · when?", todo: "clarify", action: "clarify" });
   });
 
-  it("a closed change has no to-do; rejected / cancelled read the rejection reason", () => {
+  it("rejected / cancelled read the rejection reason; completed has no to-do", () => {
     expect(changeHeadline(cr({ status: "rejected", rejection_reason: "too risky" }), null))
-      .toEqual({ reason: "too risky", todo: null, action: null });
+      .toEqual({ reason: "too risky", todo: "copyAsNew", action: "copy" });
     expect(changeHeadline(cr({ status: "cancelled", rejection_reason: "not needed" }), null).reason).toBe("not needed");
+    expect(changeHeadline(cr({ status: "completed" }), run({ verification_status: "passed" })))
+      .toEqual({ reason: null, todo: null, action: null });
+  });
+
+  it("a closed change that did not complete offers copy-as-new; completed has nothing to do (P13)", () => {
+    for (const status of ["failed", "rolled_back", "cancelled"] as const) {
+      const h = changeHeadline(cr({ status }), null);
+      expect([h.todo, h.action], status).toEqual(["copyAsNew", "copy"]);
+    }
     expect(changeHeadline(cr({ status: "completed" }), run({ verification_status: "passed" })))
       .toEqual({ reason: null, todo: null, action: null });
   });

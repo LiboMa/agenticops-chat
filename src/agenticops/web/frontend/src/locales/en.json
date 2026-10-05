@@ -642,6 +642,7 @@
   "changes.todo.notQueued": "Approved, but the run could not be queued — retry it",
   "changes.todo.executing": "The executor is running the plan",
   "changes.todo.accept": "A reviewer accepts or rejects the result",
+  "changes.todo.copyAsNew": "Copy it as a new change request",
   "changes.todo.none": "None",
   "changes.answerReviewer": "Answer the reviewer",
   "changes.proposedSteps": "Requested steps",

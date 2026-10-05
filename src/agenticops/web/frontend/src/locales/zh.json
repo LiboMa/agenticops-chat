@@ -642,6 +642,7 @@
   "changes.todo.notQueued": "已批准，但未能入队执行 —— 请重试",
   "changes.todo.executing": "执行器正在执行",
   "changes.todo.accept": "验收人确认执行结果",
+  "changes.todo.copyAsNew": "复制为新变更申请",
   "changes.todo.none": "无",
   "changes.answerReviewer": "补充信息",
   "changes.proposedSteps": "申请步骤",
