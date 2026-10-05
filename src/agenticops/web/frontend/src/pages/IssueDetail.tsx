@@ -14,6 +14,7 @@ import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useAcceptExecution, useCancelExecution } from "@/hooks/useFixExecutions";
+import { useSettings } from "@/hooks/useSettings";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
@@ -43,9 +44,10 @@ import {
   anchorBadge, approvalBlockedReason, canApprovePlan, issueFacts, issueStatuses, latestExecution, newestFirst, parseIssueTab,
   ISSUE_TABS, type IssueTab,
 } from "@/lib/issueDetail";
+import { confidenceBreakdown, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
 import { apiFetch } from "@/api/client";
 import type {
-  FixExecution, HealthIssue, IssueStatus, LocationVerdict, MergedAlert, FixPlan,
+  FixExecution, HealthIssue, IssueStatus, LocationVerdict, MergedAlert, FixPlan, PipelineEvent,
 } from "@/api/types";
 
 /* ================================================================== */
@@ -286,6 +288,7 @@ export default function IssueDetail() {
           rca={rca}
           rcaLoading={rcaLoading}
           onRunRca={triggerRca}
+          timelineEvents={timeline.data}
           t={t}
         />
       )}
@@ -329,12 +332,14 @@ function IssueTab({
   rca,
   rcaLoading,
   onRunRca,
+  timelineEvents,
   t,
 }: {
   issue: HealthIssue;
   rca: ReturnType<typeof useAnomalyRca>;
   rcaLoading: boolean;
   onRunRca: () => void;
+  timelineEvents: PipelineEvent[] | undefined;
   t: (key: string) => string;
 }) {
   const f = issueFacts(a);
@@ -395,7 +400,8 @@ function IssueTab({
       </Card>
 
       {/* RCA Section */}
-      <RcaSection issueId={a.id} rca={rca} rcaLoading={rcaLoading} onRunRca={onRunRca} t={t} />
+      <RcaSection issueId={a.id} rca={rca} rcaLoading={rcaLoading} onRunRca={onRunRca}
+                  timelineEvents={timelineEvents} t={t} />
 
       {rca.data && <LocationSection issueId={a.id} rca={rca.data} t={t} />}
 
@@ -414,20 +420,31 @@ function IssueTab({
 /*  RCA Section                                                        */
 /* ================================================================== */
 
+const TONE: Record<QualityTone, string> = {
+  ok: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  warn: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  bad: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+};
+
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+
 function RcaSection({
   issueId,
   rca,
   rcaLoading,
   onRunRca,
+  timelineEvents,
   t,
 }: {
   issueId: number;
   rca: ReturnType<typeof useAnomalyRca>;
   rcaLoading: boolean;
   onRunRca: () => void;
+  timelineEvents: PipelineEvent[] | undefined;
   t: (key: string) => string;
 }) {
   const feedback = useRcaFeedback(issueId);
+  const settings = useSettings();
   if (rca.isLoading) return <Spinner label="Loading RCA..." />;
 
   if (!rca.data) {
@@ -455,34 +472,29 @@ function RcaSection({
   }
 
   const r = rca.data;
+  const b = confidenceBreakdown(r, settings.data?.rca_min_confidence_for_autofix);
+  const steps = [
+    ...(b.evidencePenalty ? [t("rca.confidence.stepEvidence")] : []),
+    ...(b.criticPenalty ? [t("rca.confidence.stepCritic")] : []),
+  ];
+  const explain = [
+    ...(steps.length ? [t("rca.confidence.breakdown").replace("{raw}", pct(b.raw))
+      .replace("{steps}", steps.join(" → ")).replace("{final}", pct(b.final))] : []),
+    ...(r.critic_verdict === "weak" ? [t("rca.confidence.criticWeakFree")] : []),
+  ];
+  const refs = unmatchedRefs(timelineEvents);
   return (
     <Card>
       <CardBody>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
             {t("issues.rcaResults")}
-            {r.evidence_verified === true && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" title={t("issues.rcaEvidenceVerifiedHint")}>
-                {t("issues.rcaEvidenceVerified")}
+            {qualityBadges(r).map((q) => (
+              <span key={q.key} title={q.hint ?? undefined}
+                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${TONE[q.tone]}`}>
+                {t(q.key)}
               </span>
-            )}
-            {r.evidence_verified === false && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" title={t("issues.rcaEvidenceUnverifiedHint")}>
-                {t("issues.rcaEvidenceUnverified")}
-              </span>
-            )}
-            {r.critic_verdict && (
-              <span
-                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  r.critic_verdict === "supported"
-                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                }`}
-                title={r.critic_notes ?? ""}
-              >
-                critic: {r.critic_verdict}
-              </span>
-            )}
+            ))}
           </h2>
           {/* Human verdict (ground-truth capture) */}
           <div className="flex items-center gap-1">
@@ -518,15 +530,38 @@ function RcaSection({
           <div className="flex justify-between text-sm mb-1">
             <span className="text-muted-foreground">{t("issues.confidence")}</span>
             <span className="font-medium text-foreground">
-              {Math.round((r.confidence ?? 0) * 100)}%
+              {pct(b.final)}
             </span>
           </div>
-          <div className="w-full bg-secondary rounded-full h-2">
+          <div className="relative w-full bg-secondary rounded-full h-2">
             <div
               className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${(r.confidence ?? 0) * 100}%` }}
+              style={{ width: `${b.final * 100}%` }}
             />
+            {b.threshold !== null && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-px h-3 bg-foreground/60"
+                style={{ left: `${b.threshold * 100}%` }}
+                title={t("rca.confidence.threshold").replace("{threshold}", pct(b.threshold))}
+              />
+            )}
           </div>
+          {explain.length > 0 && (
+            <div className="mt-1 text-xs text-muted-foreground">{explain.join(" · ")}</div>
+          )}
+          {b.gatePassed === false && (
+            <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">{t("rca.confidence.below")}</div>
+          )}
+          {refs.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs font-medium text-foreground mb-1">{t("rca.unmatchedRefs")}</div>
+              <ul className="space-y-0.5">
+                {refs.map((ref, i) => (
+                  <li key={i} className="font-mono text-xs break-all text-muted-foreground">{ref}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Root Cause */}
@@ -563,7 +598,8 @@ function RcaSection({
         )}
 
         <div className="mt-4 text-xs text-muted-foreground">
-          {t("issues.rcaModel")}: {r.model_id} | {t("issues.rcaAnalyzed")} {formatFullDate(r.created_at)}
+          {r.model_id?.trim() && <>{t("issues.rcaModel")}: {r.model_id} | </>}
+          {t("issues.rcaAnalyzed")} {formatFullDate(r.created_at)}
         </div>
       </CardBody>
     </Card>
