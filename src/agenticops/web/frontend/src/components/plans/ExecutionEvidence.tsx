@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { resultRow, resultSummary, type ResultOutcome } from "@/lib/issueDetail";
-import { postCheckRows, type PostCheckRow } from "@/lib/postChecks";
+import { boundSummary, postCheckRows, type PostCheckRow } from "@/lib/postChecks";
 import type { FixExecution } from "@/api/types";
 
 const OUTCOME_CHIP: Record<ResultOutcome, string> = {
@@ -37,7 +37,8 @@ export function ExecutionEvidence({ execution: ex, showError = true }: { executi
             <h4 className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-foreground">
               {t(label)}
               <span className="text-xs font-normal text-muted-foreground">
-                {items.length === 0 ? t("evidence.none")
+                {bound && !bound.legacy ? boundTally(bound.rows, t)
+                  : items.length === 0 ? t("evidence.none")
                   : (Object.keys(counts) as ResultOutcome[]).filter((k) => counts[k] > 0)
                       .map((k) => `${counts[k]} ${t(`evidence.outcome.${k}`)}`).join(" · ")}
               </span>
@@ -85,6 +86,14 @@ function ResultLine({ index, item }: { index: number; item: unknown }) {
       )}
     </li>
   );
+}
+
+/** "1 pass · 1 no result": the tally of a bound run, per declared check (lib/postChecks.boundSummary). */
+function boundTally(rows: PostCheckRow[], t: (k: string) => string): string {
+  const { outcomes, missing } = boundSummary(rows);
+  const parts = (Object.keys(outcomes) as ResultOutcome[]).map((k) => `${outcomes[k]} ${t(`evidence.outcome.${k}`)}`);
+  if (missing) parts.push(`${missing} ${t("evidence.problem.missing")}`);
+  return parts.join(" · ") || t("evidence.none");
 }
 
 /** One declared post-check and what was reported for it (or a stray result): the problem, when there is one,

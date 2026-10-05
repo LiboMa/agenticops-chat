@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { postCheckRows } from "@/lib/postChecks";
+import { boundSummary, postCheckRows } from "@/lib/postChecks";
 import type { FixExecution, PostCheckBinding } from "@/api/types";
 
 const run = (post: unknown[], binding: PostCheckBinding[]): FixExecution => ({
@@ -65,5 +65,15 @@ describe("postCheckRows", () => {
 
   it("falls back to legacy when the server sent no binding", () => {
     expect(postCheckRows(run([{ status: "passed" }], [])).legacy).toBe(true);
+  });
+});
+
+describe("boundSummary", () => {
+  it("counts declared checks, not reported results: the counterexample is one pass and one missing", () => {
+    const ex = run(
+      [{ check_id: "pc-1", status: "passed" }, { check_id: "pc-1", status: "passed" }],
+      [row("pc-1", "rollout ready", "pass", 2, "duplicate"), row("pc-2", "http health", null, 0, "missing")],
+    );
+    expect(boundSummary(postCheckRows(ex).rows)).toEqual({ outcomes: { pass: 1 }, missing: 1 });
   });
 });

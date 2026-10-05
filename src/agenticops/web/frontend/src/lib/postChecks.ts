@@ -46,3 +46,15 @@ export function postCheckRows(ex: FixExecution): { legacy: boolean; rows: PostCh
   });
   return { legacy: false, rows };
 }
+
+/** The section's tally for a bound run, one count per declared check (a duplicate counts once, by its outcome);
+ *  a declared check with no result is counted as such — never folded into the passes the raw list would show. */
+export function boundSummary(rows: PostCheckRow[]): { outcomes: Partial<Record<ResultOutcome, number>>; missing: number } {
+  const outcomes: Partial<Record<ResultOutcome, number>> = {};
+  let missing = 0;
+  for (const r of rows) {
+    if (r.problem === "missing") missing++;
+    else if (r.outcome) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+  }
+  return { outcomes, missing };
+}
