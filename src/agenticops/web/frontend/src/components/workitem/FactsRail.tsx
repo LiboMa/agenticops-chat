@@ -21,6 +21,10 @@ export function FactsRail({ title, rows, t, extra }: { title: string; rows: Fact
                   {r.href && r.external
                     ? <a href={r.href} target="_blank" rel="noopener noreferrer" className={cn(cls, "text-primary hover:underline")}>{value} ↗</a>
                     : r.href ? <Link to={r.href} className={cn(cls, "text-primary hover:underline")}>{value}</Link>
+                    : r.copy
+                      ? <button type="button" title={t("facts.copyHint")}
+                                onClick={() => navigator.clipboard?.writeText(r.value).catch(() => {})}
+                                className={cn(cls, "text-left hover:text-primary cursor-pointer")}>{value}</button>
                     : <span className={cls}>{value}</span>}
                 </dd>
               </div>

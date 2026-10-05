@@ -66,6 +66,14 @@ describe("issueDetailModel", () => {
     expect(issueDetailModel({ issue: { status: "fix_planned" }, rca: rcaI1, threshold: 0.6, plans: [], executions: undefined,
                               runsFailed: true }).statusKey).toBe("workitem.sub.awaitingApproval");
   });
+  it("a failed refetch with runs already loaded: the cached runs still decide the state (runsFailed alone hides nothing)", () => {
+    const running = run({ status: "running" });
+    const input = { issue: { status: "fix_executing" as const }, rca: rcaI1, threshold: 0.6, plans: [], executions: [running] };
+    const cached = issueDetailModel({ ...input, runsFailed: true });
+    expect(cached.statusKey).toBe(issueDetailModel(input).statusKey);
+    expect(cached.statusKey).not.toBe("workitem.sub.runsUnavailable");
+    expect(cached.menu).toContain("cancelRun");
+  });
   it("the menu never repeats the primary's Rerun RCA, and never offers plan generation without an RCA", () => {
     const none = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: null, threshold: 0.6, plans: [], executions: [] });
     expect(none.primaryKey).toBe("workitem.primary.rerunRca");

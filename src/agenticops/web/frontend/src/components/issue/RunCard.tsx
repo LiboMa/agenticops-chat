@@ -65,7 +65,7 @@ export function RunBody({
         <Spinner label={t("common.loading")} />
       ) : error ? (
         // a failed fetch must not read as "no executions"
-        <ErrorBanner message={error.message} onRetry={onRetryFetch} />
+        <ErrorBanner message={error.message} onRetry={onRetryFetch} actionLabel={t("common.retry")} />
       ) : runs.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t(plan ? "issues.noExecutions" : "workitem.future.issue.run")}</p>
       ) : (

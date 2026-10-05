@@ -22,7 +22,7 @@ export function AcceptBody({ runs, loading, error, onRetryFetch, pendingRun, qui
 }) {
   if (loading) return <Spinner label={t("common.loading")} />;
   // a failed fetch must not read as "not executed"
-  if (error) return <ErrorBanner message={error.message} onRetry={onRetryFetch} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={onRetryFetch} actionLabel={t("common.retry")} />;
   const latest = runs[0] ?? null;
   if (!latest) return <p className="text-sm text-muted-foreground">{t("verification.noExecution")}</p>;
   const rows: [string, string | null][] = [

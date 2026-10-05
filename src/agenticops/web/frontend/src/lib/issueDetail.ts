@@ -119,7 +119,10 @@ export function anchorBadge(
   return { kind, candidates: kind === "ambiguous" ? issue.anchor_candidates?.candidates?.length ?? 0 : 0 };
 }
 
-export interface FactRow { labelKey: string; value: string; kind?: "date" | "mono"; href?: string; external?: boolean }
+export interface FactRow {
+  labelKey: string; value: string; kind?: "date" | "mono"; href?: string; external?: boolean;
+  copy?: boolean; // a click copies the value
+}
 
 /** The issue's key facts for the right rail, blank rows dropped (an alarm's "unknown" resource is not a fact). */
 export function factRows(
@@ -142,7 +145,7 @@ export function factRows(
   rows.push({ labelKey: "facts.severity", value: issue.severity.toUpperCase() });
   if (!isBlank(issue.source)) rows.push({ labelKey: "facts.source", value: issue.source });
   rows.push({ labelKey: "facts.detected", value: issue.detected_at, kind: "date" });
-  if (!isBlank(issue.trace_id)) rows.push({ labelKey: "facts.trace", value: issue.trace_id!, kind: "mono" });
+  if (!isBlank(issue.trace_id)) rows.push({ labelKey: "facts.trace", value: issue.trace_id!, kind: "mono", copy: true });
   return rows;
 }
 

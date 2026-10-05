@@ -2,19 +2,16 @@ import type { ChangeStatus, FixExecution } from "@/api/types";
 import { VerificationChip } from "@/components/plans/VerificationChip";
 import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
-import { fillPlaceholders } from "@/lib/placeholders";
 
 type T = (key: string) => string;
-type Note = { key: string; params?: Record<string, string> };
 
 /** ⑤ Accept. Waiting for a person's verdict: the run's verdict, mark completed / failed (a reason is required;
- *  outlined, the status line holds the filled one). A run the system judged failed needs no acceptance — one
- *  sentence pointing at that run. Completed: the verdict and who accepted it. The verdict reason is left out when
- *  it IS the status line's sentence (`quietReason`). */
-export function ChangeAcceptBody({ status, latestRun, acceptNote, quietReason, onCompleted, onFailed, busy, t }: {
+ *  outlined, the status line holds the filled one). Completed: the verdict and who accepted it. The verdict reason
+ *  is left out when it IS the status line's sentence (`quietReason`). A run the system judged failed ends the list
+ *  at ④, which carries that note (ChangeRunBody). */
+export function ChangeAcceptBody({ status, latestRun, quietReason, onCompleted, onFailed, busy, t }: {
   status: ChangeStatus;
   latestRun: FixExecution | null;
-  acceptNote: Note | null;
   quietReason: boolean;
   onCompleted: () => void;
   onFailed: () => void;
@@ -23,13 +20,6 @@ export function ChangeAcceptBody({ status, latestRun, acceptNote, quietReason, o
 }) {
   const muted = "text-muted-foreground";
   const reason = latestRun && !quietReason && !isBlank(latestRun.verification_reason) ? latestRun.verification_reason : null;
-  if (acceptNote && status !== "needs_review") {
-    return (
-      <p className={`text-sm ${muted}`}>
-        {fillPlaceholders(t(acceptNote.key), acceptNote.params)}
-      </p>
-    );
-  }
   const head = latestRun && (
     <div className="flex flex-wrap items-center gap-3">
       <h3 className="font-semibold text-foreground">{t("issues.executionN").replace("{n}", String(latestRun.id))}</h3>

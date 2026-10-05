@@ -67,7 +67,10 @@ export function IssueQuickActions({ issue }: { issue: Anomaly }) {
   return (
     <>
       {toast ? (
-        <span data-pinned className="text-[11px] leading-tight text-right text-primary">{toast}</span>
+        // clamped to the column: a long failure message must not widen it (the whole text is the tooltip)
+        <span data-pinned title={toast} className="max-w-24 line-clamp-2 break-words text-[11px] leading-tight text-right text-primary">
+          {toast}
+        </span>
       ) : (
         <>
           {canAct && (

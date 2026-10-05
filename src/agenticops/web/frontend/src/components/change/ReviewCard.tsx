@@ -93,7 +93,8 @@ export function ReviewBody({
           {impactNote && <span className="block text-xs">{impactNote}</span>}
         </p>
       )}
-      <ImpactGraph changeRequestId={cr.id} note={impactNote} t={t} />
+      {/* the note is said once: under the count above when there is one, else on the graph */}
+      <ImpactGraph changeRequestId={cr.id} note={typeof shadowImpact === "number" ? undefined : impactNote} t={t} />
       {cr.status === "needs_clarification" && (
         <div className="space-y-2 border-t border-border pt-4">
           <label htmlFor="change-clarify" className={`${muted} block`}>{t("changes.clarifyLabel")}</label>

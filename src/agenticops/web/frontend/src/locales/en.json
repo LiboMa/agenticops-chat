@@ -572,6 +572,7 @@
   "facts.source": "Source",
   "facts.detected": "Detected",
   "facts.trace": "Trace",
+  "facts.copyHint": "Click to copy",
   "issues.tab.investigate": "Investigate",
   "issues.tab.execution": "Execution",
   "issues.tab.verification": "Verification",

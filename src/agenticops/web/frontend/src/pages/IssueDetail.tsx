@@ -91,13 +91,14 @@ export default function IssueDetail() {
   }, [issueStatus, issueId, qc]);
 
   // Loading inputs stay undefined: the RCA → list mode (no flash of "rerun RCA"), the threshold → no gate yet, the
-  // runs → not known (loading or failed, never "no runs": the status line says which instead of inventing a state)
+  // runs → not known while none have loaded (still loading, or the first fetch failed — never "no runs": the status
+  // line says which instead of inventing a state). A failed refetch keeps the runs already loaded.
   const model = anomaly.data ? issueDetailModel({
     issue: anomaly.data,
     rca: rca.isLoading ? undefined : (rca.data ?? null),
     threshold: settings.data?.rca_min_confidence_for_autofix,
     plans: fixPlans.data,
-    executions: executions.isLoading || executions.error ? undefined : executions.data,
+    executions: executions.data,
     runsFailed: !!executions.error,
   }) : null;
 
@@ -186,6 +187,7 @@ export default function IssueDetail() {
       <ErrorBanner
         message={anomaly.error.message}
         onRetry={() => anomaly.refetch()}
+        actionLabel={t("common.retry")}
       />
     );
 
@@ -199,8 +201,10 @@ export default function IssueDetail() {
   // the latest run's sentence is the status line's: ③ / ④ do not repeat that exact text (P3)
   const quietErrorRunId = m.quietRunError ? m.latestRun?.id ?? null : null;
   const quietReasonRunId = m.quietAcceptReason ? m.latestRun?.id ?? null : null;
-  // a failed runs fetch is said where the reader is — under the status line — with a retry; an action error wins
+  // a failed runs fetch is said where the reader is — under the status line — with a retry; an action error wins.
+  // The cards show the runs already loaded; only with none loaded do they say the fetch failed.
   const runsError = !actionError && executions.error ? executions.error.message : null;
+  const runsFetchError = executions.data === undefined ? executions.error : null;
 
   const openApproval = (kind: "approve" | "reject") => {
     (kind === "approve" ? approveMut : rejectMut).reset();
@@ -285,7 +289,11 @@ export default function IssueDetail() {
           backLabel={t("nav.issues")}
         />
         {actionInfo && (
-          <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">{actionInfo}</div>
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">
+            <span className="flex-1">{actionInfo}</span>
+            <button onClick={() => setActionInfo(null)} aria-label={t("common.close")} title={t("common.close")}
+                    className="shrink-0 leading-none hover:opacity-70">×</button>
+          </div>
         )}
 
         {cards.openable.length > 0 && (
@@ -338,7 +346,7 @@ export default function IssueDetail() {
                    futureHint={t("workitem.future.issue.run")}
                    open={cards.isOpen("run")} onToggle={(o) => cards.toggleCard("run", o)}>
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
-                   error={executions.error} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
+                   error={runsFetchError} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
                    onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")}
                    approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
         </PhaseCard>
@@ -347,7 +355,7 @@ export default function IssueDetail() {
                    summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}
                    futureHint={t("workitem.future.issue.accept")}
                    open={cards.isOpen("accept")} onToggle={(o) => cards.toggleCard("accept", o)}>
-          <AcceptBody runs={runs} loading={executions.isLoading} error={executions.error} onRetryFetch={() => executions.refetch()}
+          <AcceptBody runs={runs} loading={executions.isLoading} error={runsFetchError} onRetryFetch={() => executions.refetch()}
                       pendingRun={m.pendingRun} quietRunId={quietReasonRunId}
                       onAccept={() => openAccept("accepted")} onReject={() => openAccept("rejected")} t={t} />
         </PhaseCard>

@@ -308,7 +308,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
         {has("accept") && (
           <PhaseCard {...card("accept")}
                      summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}>
-            <ChangeAcceptBody status={cr.status} latestRun={latestRun} acceptNote={m.acceptNote} quietReason={m.quietAcceptReason}
+            <ChangeAcceptBody status={cr.status} latestRun={latestRun} quietReason={m.quietAcceptReason}
                               onCompleted={() => openAccept("completed")} onFailed={() => openAccept("failed")}
                               busy={act.isPending} t={t} />
           </PhaseCard>

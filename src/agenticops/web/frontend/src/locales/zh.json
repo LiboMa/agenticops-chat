@@ -572,6 +572,7 @@
   "facts.source": "来源",
   "facts.detected": "检测于",
   "facts.trace": "Trace",
+  "facts.copyHint": "点击复制",
   "issues.tab.investigate": "调查",
   "issues.tab.execution": "执行记录",
   "issues.tab.verification": "验证",

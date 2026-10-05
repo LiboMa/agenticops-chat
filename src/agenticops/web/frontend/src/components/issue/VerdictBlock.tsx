@@ -104,7 +104,7 @@ export function VerdictBlock({ issueId, rca, onDone }: { issueId: number; rca: R
       <button
         onClick={submit}
         disabled={!choice || (noteRequired(choice) && !note.trim()) || busy}
-        className="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        className="px-4 py-2 text-sm font-medium rounded-lg border border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50 transition-colors"
       >
         {t("verdict.submit")}
       </button>

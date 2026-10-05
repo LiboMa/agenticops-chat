@@ -209,6 +209,8 @@ describe("factRows", () => {
       ["facts.anchor", "facts.account", "facts.severity", "facts.source", "facts.detected", "facts.trace"]);
     expect(rows[0]).toEqual({ labelKey: "facts.anchor", value: "agenticops-chaos-lab · EKS", href: "/app/resources/36" });
     expect(rows.find((r) => r.labelKey === "facts.detected")?.kind).toBe("date");
+    // the trace id is copied with a click, as the old header's chip was
+    expect(rows.find((r) => r.labelKey === "facts.trace")).toEqual({ labelKey: "facts.trace", value: "TRC-1", kind: "mono", copy: true });
   });
   it("an unanchored issue with a real resource id shows it as the resource row; region/type when present", () => {
     const rows = factRows(issue({ resource_id: "i-0abc", metric_data: { resource_type: "EC2", region: "us-east-1" } }));
