@@ -137,6 +137,11 @@ def test_slash_approve_change_runs_it(db):
         with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "approved"}):
             out = cli._slash_approve(None, ["C4", "looks", "good"])
         assert "could not be queued" in out and "/execute C4" in out
+        # another request moved it before this approval's run was queued (2026-10-05 final review Minor 1)
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "cancelled"}):
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert "queued for execution" not in out and "could not be queued" not in out
+        assert "approved" in out and "'cancelled'" in out
 
 
 def test_slash_changes_lists(db):

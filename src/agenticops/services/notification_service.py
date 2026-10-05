@@ -311,10 +311,11 @@ def notify_change_pending_approval(cr: dict, plan: dict) -> None:
     )
 
 
-def notify_change_result(cr: dict, outcome: str) -> None:
+def notify_change_result(cr: dict, outcome: str, *, reason: str = "") -> None:
     """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
-    rejected / needs_clarification / review_failed / execution_not_queued). A needs_review result says why."""
-    reason = " ".join(str(cr.get("needs_review_reason") or "").split())[:500] if outcome == "needs_review" else ""
+    rejected / needs_clarification / review_failed / execution_not_queued). A needs_review result says why;
+    another outcome says the `reason` given (execution_not_queued: the refusal)."""
+    reason = " ".join(str((cr.get("needs_review_reason") if outcome == "needs_review" else reason) or "").split())[:500]
     reason_line = f"Reason: {reason}\n" if reason else ""
     notify_event(
         "change_result",

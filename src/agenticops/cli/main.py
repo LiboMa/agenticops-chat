@@ -2538,10 +2538,14 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             out = cs.approve_and_execute(cr_id, actor=actor, reason=reason, content_hash=seen[1] or "")
         except cs.ChangeError as e:
             return f"[red]{_safe_text(e)}[/red]"
+        if out["status"] == "executing":
+            return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution.[/green]"
         if out["status"] == "approved":
-            return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued "
-                    f"(is the executor enabled?). Retry with: /execute C{cr_id}[/yellow]")
-        return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution ({out['status']}).[/green]"
+            why = " (the executor is disabled)" if not settings.executor_enabled else ""
+            return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued{why}. "
+                    f"Retry with: /execute C{cr_id}[/yellow]")
+        return (f"[yellow]Change C#{cr_id} approved by {actor.key}; another request moved it to "
+                f"'{out['status']}' before this approval queued a run.[/yellow]")
 
     if not args:
         return "[yellow]Usage: /approve <plan_id|C<id>> \\[reason...][/yellow]"

@@ -404,6 +404,26 @@ class TestAutoApproveDurability:
         result.assert_not_called()
         pending.assert_not_called()
 
+    def test_an_exception_after_the_auto_approval_never_asks_a_human_to_approve(self, db):
+        """2026-10-05 final review Minor 1: only the approve step falls back to the human gate. An exception
+        after the approval committed (here: reading the change back) must not send the pending-approval notice
+        for a change that is already approved and queued."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _under_review_with_draft_l1_plan(db)
+        with patch.object(settings, "change_auto_approve_standard", True), \
+             patch.object(settings, "executor_enabled", True), \
+             patch.object(cs, "get_change", side_effect=RuntimeError("db gone")), \
+             patch.object(cs, "notify_change_pending_approval") as pending, \
+             patch.object(cs, "notify_change_result"):
+            with pytest.raises(RuntimeError):
+                cs.submit_review(cr_id, verdict="approved_for_planning", risk_level="L1", action_type="tag",
+                                 reasons=["ok"], actor=agent_actor("sre"))
+        pending.assert_not_called()
+        db.expire_all()
+        assert db.get(ChangeRequest, cr_id).status == "executing"
+        assert db.query(FixExecution).filter_by(fix_plan_id=plan_id).count() == 1
+
     def test_failed_auto_approve_falls_back_to_the_human_gate(self, db):
         from agenticops.config import settings
         from agenticops.services import change_service as cs
@@ -472,3 +492,59 @@ class TestApproveAndExecute:
         execute.assert_not_called()
         db.expire_all()
         assert db.get(ChangeRequest, cr_id).status == "planned" and db.query(FixExecution).count() == 0
+
+    def test_the_not_queued_notice_says_why(self, db):
+        """2026-10-05 final review Minor 1: the refusal is in the notification, not only in the log."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _planned(db)
+        with patch.object(settings, "executor_enabled", False), patch.object(cs, "notify_change_result") as result:
+            cs.approve_and_execute(cr_id, actor=BOB, reason="reviewed", content_hash=_seen(cr_id))
+        assert result.call_args.args[1] == "execution_not_queued"
+        assert "Executor is disabled" in result.call_args.kwargs["reason"]
+
+    def test_the_not_queued_notification_body_carries_the_refusal(self):
+        from agenticops.services import notification_service as ns
+        cr = {"id": 3, "title": "t", "requested_by": "user:alice", "risk_level": "L1", "needs_review_reason": None}
+        with patch.object(ns, "notify_event") as sent:
+            ns.notify_change_result(cr, "execution_not_queued", reason="Executor is disabled\n(executor_enabled=false)")
+        assert "Reason: Executor is disabled (executor_enabled=false)\n" in sent.call_args.args[2]  # one line
+
+    def test_a_claim_lost_to_a_concurrent_execute_is_not_reported_as_not_queued(self, db):
+        """Losing approved → executing means another request moved the change: a concurrent /execute already
+        queued it. That is no 'not queued' — no notification, and the one run stays the only one."""
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, plan_id = _planned(db)
+        carol = Actor("user", "carol", user_id=3, permissions=("read", "write"))
+        real = cs.request_execution
+
+        def raced(cid, *, actor):
+            real(cid, actor=carol)            # the concurrent request lands first
+            return real(cid, actor=actor)     # ours loses: the change is no longer approved
+
+        with patch.object(settings, "executor_enabled", True), patch.object(cs, "request_execution", side_effect=raced), \
+             patch.object(cs, "notify_change_result") as result:
+            out = cs.approve_and_execute(cr_id, actor=BOB, reason="reviewed", content_hash=_seen(cr_id))
+        assert out["status"] == "executing"
+        result.assert_not_called()
+        db.expire_all()
+        assert [r.executed_by for r in db.query(FixExecution).filter_by(fix_plan_id=plan_id)] == ["user:carol"]
+
+    def test_a_claim_lost_to_a_cancel_is_not_reported_as_not_queued(self, db):
+        from agenticops.config import settings
+        from agenticops.services import change_service as cs
+        cr_id, _ = _planned(db)
+        real = cs.request_execution
+
+        def cancelled(cid, *, actor):
+            cs.cancel(cid, actor=ALICE, reason="not now")
+            return real(cid, actor=actor)
+
+        with patch.object(settings, "executor_enabled", True), patch.object(cs, "request_execution", side_effect=cancelled), \
+             patch.object(cs, "notify_change_result") as result:
+            out = cs.approve_and_execute(cr_id, actor=BOB, reason="reviewed", content_hash=_seen(cr_id))
+        assert out["status"] == "cancelled"
+        assert "execution_not_queued" not in [c.args[1] for c in result.call_args_list]
+        db.expire_all()
+        assert db.query(FixExecution).count() == 0
