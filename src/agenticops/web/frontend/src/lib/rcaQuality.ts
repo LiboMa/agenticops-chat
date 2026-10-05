@@ -65,3 +65,10 @@ export function unmatchedRefs(
   const refs = asObject(newest?.detail)?.unmatched_refs;
   return Array.isArray(refs) ? refs.filter((r): r is string => typeof r === "string") : [];
 }
+
+/** The sentence under the confidence bar when the auto-fix gate is shut: a refuted RCA is paused by the reviewer
+ *  whatever its number, otherwise it is below the threshold; none while the gate passes or the threshold is unknown. */
+export function gateSentenceKey(b: ConfidenceBreakdown): "rca.confidence.refutedGate" | "rca.confidence.below" | null {
+  if (b.gatePassed !== false) return null;
+  return b.criticPenalty ? "rca.confidence.refutedGate" : "rca.confidence.below";
+}

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
-import { formatFullDate, formatShortDate, parseApiDate } from "@/lib/formatDate";
+import { formatElapsed, formatFullDate, formatShortDate, parseApiDate } from "@/lib/formatDate";
 
 // A naive timestamp only misparses when the local zone is not UTC, so pin a +08:00 zone:
 // these tests must also fail against a broken parser on a UTC machine.
@@ -54,5 +54,13 @@ describe("formatShortDate / formatFullDate", () => {
       expect(formatShortDate(bad)).toBe("-");
       expect(formatFullDate(bad)).toBe("-");
     }
+  });
+});
+
+describe("formatElapsed", () => {
+  it("seconds, then minutes + seconds, then hours + minutes; negative or NaN reads 0s", () => {
+    expect([0, 42_000, 185_000, 3_600_000 + 125_000].map(formatElapsed)).toEqual(["0s", "42s", "3m 05s", "1h 02m"]);
+    expect(formatElapsed(-5_000)).toBe("0s");
+    expect(formatElapsed(Number.NaN)).toBe("0s");
   });
 });
