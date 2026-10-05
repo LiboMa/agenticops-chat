@@ -18,12 +18,13 @@ const SECTIONS = [
 ] as const;
 
 /** What one run actually did: its pre-check / step / post-check / rollback results, each with its whole output.
- *  Shared by IssueDetail and ChangeDetail; the Card stays in the caller. */
-export function ExecutionEvidence({ execution: ex }: { execution: FixExecution }) {
+ *  Shared by IssueDetail and ChangeDetail; the Card stays in the caller. `showError={false}` leaves the run's
+ *  error out — a page whose status line already carries that sentence shows it once (P3). */
+export function ExecutionEvidence({ execution: ex, showError = true }: { execution: FixExecution; showError?: boolean }) {
   const { t } = useLocale();
   return (
     <div className="space-y-4">
-      {ex.error_message && (
+      {showError && ex.error_message && (
         <p className="rounded bg-red-500/10 p-2 text-sm text-red-500 whitespace-pre-wrap break-words">{ex.error_message}</p>
       )}
       {SECTIONS.map(([field, label]) => {
