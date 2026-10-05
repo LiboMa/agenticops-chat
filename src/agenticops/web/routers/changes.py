@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -42,6 +43,8 @@ router = APIRouter(prefix="/api/changes", tags=["changes"], dependencies=[Depend
 
 
 def _call(fn, *args, **kwargs):
+    """Run a change_service call, its ChangeError as an HTTP error. The handlers are plain `def` (FastAPI's
+    threadpool): service calls can resolve targets live and notify, which must not hold the event loop."""
     try:
         return fn(*args, **kwargs)
     except cs.ChangeError as e:
@@ -55,7 +58,7 @@ def _last_policy_decision(cr_id: int) -> Optional[dict]:
 
 
 @router.post("", response_model=ChangeRequestResponse, status_code=201)
-async def api_create_change(data: ChangeRequestCreate, request: Request, actor: Actor = Depends(current_actor)):
+def api_create_change(data: ChangeRequestCreate, request: Request, actor: Actor = Depends(current_actor)):
     """Open a change request; the SRE review starts in the background (poll GET /api/changes/{id})."""
     # APIAuthMiddleware sets request.state.api_key only for aiops_* API keys; the Web UI signs in with a session token
     source = "api" if getattr(request.state, "api_key", None) is not None else "web"
@@ -90,7 +93,7 @@ async def api_intake_change(request: Request, response: Response):
     except ValidationError as e:
         raise RequestValidationError([{**err, "loc": ("body", *err["loc"])}
                                       for err in e.errors(include_url=False, include_context=False)]) from e
-    cr, created = _call(cs.intake_change, title=data.title, description=data.description,
+    cr, created = await asyncio.to_thread(_call, cs.intake_change, title=data.title, description=data.description,
                         account_name=data.account, targets=data.target_hints, justification=data.justification,
                         proposed_steps=[step.model_dump() for step in data.proposed_steps] if data.proposed_steps else None,
                         external_ref=data.external_ref.model_dump(exclude_none=True), requested_by=data.requested_by)
@@ -100,7 +103,7 @@ async def api_intake_change(request: Request, response: Response):
 
 
 @router.get("", response_model=List[ChangeRequestResponse])
-async def api_list_changes(
+def api_list_changes(
     status: Optional[str] = None, account_id: Optional[int] = None, requested_by: Optional[str] = None,
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d)$"),
     limit: int = Query(default=50, ge=1, le=500), offset: int = Query(default=0, ge=0),
@@ -114,7 +117,7 @@ async def api_list_changes(
 
 
 @router.get("/{cr_id}", response_model=ChangeRequestDetail)
-async def api_get_change(cr_id: int):
+def api_get_change(cr_id: int):
     snap = _call(cs.get_change, cr_id)
     with get_db_session() as session:
         plans = session.query(FixPlan).filter_by(change_request_id=cr_id).order_by(FixPlan.created_at.desc()).all()
@@ -130,46 +133,46 @@ async def api_get_change(cr_id: int):
 
 
 @router.post("/{cr_id}/approve", response_model=ChangeRequestResponse)
-async def api_approve_change(cr_id: int, body: ChangeApproveBody, actor: Actor = Depends(current_actor)):
+def api_approve_change(cr_id: int, body: ChangeApproveBody, actor: Actor = Depends(current_actor)):
     """Approve the reviewed implementation plan and queue its run (a change runs on approval, as a fix plan does);
     a run that cannot be queued leaves the change approved — POST /execute is the retry."""
     return _call(cs.approve_and_execute, cr_id, actor=actor, reason=body.reason, content_hash=body.content_hash)
 
 
 @router.post("/{cr_id}/reject", response_model=ChangeRequestResponse)
-async def api_reject_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
+def api_reject_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
     return _call(cs.reject, cr_id, actor=actor, reason=body.reason)
 
 
 @router.post("/{cr_id}/cancel", response_model=ChangeRequestResponse)
-async def api_cancel_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
+def api_cancel_change(cr_id: int, body: ChangeReasonBody, actor: Actor = Depends(current_actor)):
     return _call(cs.cancel, cr_id, actor=actor, reason=body.reason)
 
 
 @router.post("/{cr_id}/clarify", response_model=ChangeRequestResponse, status_code=202)
-async def api_clarify_change(cr_id: int, body: ChangeClarifyBody, actor: Actor = Depends(current_actor)):
+def api_clarify_change(cr_id: int, body: ChangeClarifyBody, actor: Actor = Depends(current_actor)):
     return _call(cs.clarify, cr_id, actor=actor, message=body.message)
 
 
 @router.post("/{cr_id}/review", response_model=ChangeRequestResponse, status_code=202)
-async def api_review_change(cr_id: int, actor: Actor = Depends(current_actor)):
+def api_review_change(cr_id: int, actor: Actor = Depends(current_actor)):
     """(Re)start the SRE review of a draft — e.g. after a watchdog rollback."""
     return _call(cs.restart_review, cr_id, actor=actor)
 
 
 @router.post("/{cr_id}/execute", response_model=FixExecutionResponse, status_code=202)
-async def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
+def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
     out = _call(cs.request_execution, cr_id, actor=actor)
     with get_db_session() as session:
         return FixExecutionResponse.model_validate(session.get(FixExecution, out["execution_id"]))
 
 
 @router.post("/{cr_id}/resolve-review", response_model=ChangeRequestResponse)
-async def api_resolve_review(cr_id: int, body: ChangeResolveReviewBody, actor: Actor = Depends(current_actor)):
+def api_resolve_review(cr_id: int, body: ChangeResolveReviewBody, actor: Actor = Depends(current_actor)):
     return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason)
 
 
 @router.get("/{cr_id}/timeline", response_model=List[ChangeTimelineEntry])
-async def api_change_timeline(cr_id: int):
+def api_change_timeline(cr_id: int):
     _call(cs.get_change, cr_id)  # 404 guard
     return cs.change_timeline(cr_id)

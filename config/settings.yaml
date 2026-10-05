@@ -209,6 +209,7 @@ rbac_file: config/rbac.yaml
 audit_retention_days: 365
 command_audit_enabled: true
 session_ttl_minutes: 30
+event_loop_executor_threads: 64   # AgenticOps runs as ONE process; this pool serves to_thread + every agent stream
 session_history_depth: 20
 default_regions:
   aws:

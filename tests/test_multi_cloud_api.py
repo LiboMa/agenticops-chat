@@ -40,6 +40,8 @@ def client(tmp_path):
         mock_settings.feishu_ws_enabled = False
         mock_settings.slack_ws_enabled = False
         mock_settings.executor_poll_interval = 60
+        mock_settings.event_loop_executor_threads = 8
+        mock_settings.data_dir = tmp_path  # the instance lock file; a MagicMock path wrote MagicMock/ in the repo
         with TestClient(app) as c:
             yield c
 

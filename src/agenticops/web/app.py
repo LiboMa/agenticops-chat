@@ -74,11 +74,41 @@ from agenticops.web.deps import current_actor, require_authenticated_user
 # Application Lifespan (startup + shutdown in async context manager)
 # ============================================================================
 
+def _acquire_instance_lock():
+    """Take <data_dir>/.scheduler.lock without waiting. The holder is THE AgenticOps process: it runs the cron
+    scheduler. Any other process on the same data_dir logs an ERROR and serves requests without the scheduler
+    — chat and IM agents, the connector / Galaxy / intake locks and runtime settings are per-process, so a
+    second process (uvicorn --workers N>1, a second replica) silently breaks them (MVP-2.7.0)."""
+    import fcntl
+    path = Path(settings.data_dir) / ".scheduler.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(path, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except OSError:
+        fd.close()
+        logger.error(
+            "Another AgenticOps process already holds %s — run ONE process (uvicorn --workers 1, one replica): "
+            "chat/IM agents, connector/Galaxy/intake locks and runtime settings live in one process's memory. "
+            "This process serves requests but does not run the scheduler.", path)
+        return None
+
+
+def _size_default_executor(loop) -> None:
+    """asyncio.to_thread / run_in_executor share the loop's default pool with every Strands model stream and
+    sync tool, which hold a thread for their whole run; its stock size (CPUs + 4) starves under a few chats."""
+    from concurrent.futures import ThreadPoolExecutor
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=max(4, settings.event_loop_executor_threads),
+                                                 thread_name_prefix="aiops-loop"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown in a single async context manager."""
     # --- Startup ---
     _setup_service_logging()
+    _size_default_executor(asyncio.get_running_loop())
     init_db()
 
     # Surface model-ID config drift early (unmatched IDs lose window tuning
@@ -130,22 +160,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("MCP config load failed: %s", e)
 
-    # Start background cron scheduler — only in ONE worker to avoid duplicate runs.
-    # uvicorn multiprocessing: first spawned worker gets the lowest PID after master.
-    import os
-    _is_scheduler_worker = os.environ.get("AIOPS_SCHEDULER_WORKER") == "1"
-    if not _is_scheduler_worker:
-        # Auto-elect: only first worker to acquire the file lock runs scheduler
-        import fcntl
-        _lock_path = Path(settings.data_dir) / ".scheduler.lock"
-        _lock_path.parent.mkdir(parents=True, exist_ok=True)
-        _lock_fd = open(_lock_path, "w")
-        try:
-            fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _is_scheduler_worker = True
-        except (IOError, OSError):
-            _lock_fd.close()
-            _lock_fd = None
+    # One AgenticOps process per data_dir: the instance lock elects the scheduler and reports a second process.
+    _lock_fd = _acquire_instance_lock()
+    _is_scheduler_worker = _lock_fd is not None
 
     scheduler_instance = None
     if _is_scheduler_worker:
@@ -207,7 +224,7 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.debug("security: auto schedule seed skipped", exc_info=True)
     else:
-        logger.info("Cron scheduler skipped (another worker owns it)")
+        logger.info("Cron scheduler skipped (another process owns it)")
 
     # Auto-detect IM WS from channels.yaml (fallback to config override)
     _startup_log = logging.getLogger(__name__)
@@ -1321,7 +1338,7 @@ async def api_update_exclude_patterns(body: dict):
 
 
 @app.get("/api/health", response_model=HealthResponse)
-async def api_health():
+def api_health():
     """Health check endpoint."""
     import time
     import shutil
@@ -2120,7 +2137,7 @@ async def api_get_health_issue(issue_id: int):
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
-async def api_create_health_issue(data: HealthIssueCreate):
+def api_create_health_issue(data: HealthIssueCreate):
     """Create a new health issue via the Signal Gate (dedup applies; MVP-2.2.0).
 
     A duplicate of an active issue returns THAT issue (merged) instead of
@@ -2919,7 +2936,7 @@ async def api_executor_status():
 
 
 @app.post("/api/rag/pipeline/{health_issue_id}")
-async def api_run_rag_pipeline(health_issue_id: int):
+def api_run_rag_pipeline(health_issue_id: int):
     """Manually trigger RAG pipeline for a health issue."""
     if not settings.rag_pipeline_enabled:
         raise HTTPException(status_code=400, detail="RAG pipeline is disabled")
@@ -3263,7 +3280,7 @@ async def api_get_report(report_id: int):
 
 
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
-async def api_generate_report(request: ReportGenerateRequest):
+def api_generate_report(request: ReportGenerateRequest):
     """Generate a new report."""
     from agenticops.report import ReportGenerator
 
@@ -4084,7 +4101,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     if user_content.strip().lower().startswith(("/channel", "/channels")):
         from agenticops.chat.channel import execute_channel
 
-        ch_result = execute_channel(user_content.strip())
+        ch_result = await asyncio.to_thread(execute_channel, user_content.strip())  # `/channel test` sends
 
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
@@ -4103,7 +4120,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
 
-        send_result = execute_send_to(user_content.strip())
+        send_result = await asyncio.to_thread(execute_send_to, user_content.strip())
 
         # Persist user message + result
         with get_db_session() as db:
@@ -4145,7 +4162,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             parts = [p.strip().lower() for p in scan_focus_req.split(",") if p.strip()]
             if all(p in VALID_SCAN_FOCUS for p in parts):
                 set_scan_focus(scan_focus_req)
-        agent = _chat_sessions.get_or_create(session_id)
+        # Building a session's agent (MCP clients included) is slow, blocking work: off the loop
+        agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
         # Set trace_id for this chat turn so sub-agent logs are correlated
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
@@ -4714,8 +4732,19 @@ def _get_im_sessions():
 
 
 async def _handle_im_message(platform: str, msg) -> None:
-    """Process an inbound IM message: run agent → reply via notifier."""
-    from agenticops.im.gateway import IMInboundMessage
+    """Process an inbound IM message: run agent → reply via notifier. The turn (a command, or a whole agent
+    run) and its persistence run in a worker thread — inline they froze every other request, SSE included."""
+    response_text = await asyncio.to_thread(_run_im_turn, platform, msg)
+    notifier = _get_im_sessions().get_notifier(platform, msg.chat_id, msg.app_name)
+    if notifier:
+        try:
+            await notifier.send(subject="", body=response_text, severity=None)
+        except Exception as e:
+            logger.error("IM reply failed (%s:%s): %s", platform, msg.chat_id, e)
+
+
+def _run_im_turn(platform: str, msg) -> str:
+    """The blocking part of one IM message: the reply text, with both messages persisted."""
 
     # Intercept /channel command before agent dispatch
     content_stripped = msg.content.strip()
@@ -4769,8 +4798,6 @@ async def _handle_im_message(platform: str, msg) -> None:
             logger.error("IM agent error (%s:%s): %s", platform, msg.chat_id, e)
             response_text = f"Agent error: {e}"
 
-    notifier = _get_im_sessions().get_notifier(platform, msg.chat_id, msg.app_name)
-
     # Persist messages
     from agenticops.models import ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel
     with get_db_session() as db:
@@ -4793,13 +4820,7 @@ async def _handle_im_message(platform: str, msg) -> None:
         # Save assistant response
         db.add(ChatMessageModel(session_id=row.id, role="assistant", content=response_text))
         row.last_activity_at = datetime.now(timezone.utc)
-
-    # Reply to IM
-    if notifier:
-        try:
-            await notifier.send(subject="", body=response_text, severity=None)
-        except Exception as e:
-            logger.error("IM reply failed (%s:%s): %s", platform, msg.chat_id, e)
+    return response_text
 
 
 @app.post("/api/im/feishu/callback")

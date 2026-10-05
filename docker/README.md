@@ -99,10 +99,10 @@ Interval: 30s | Timeout: 5s | Start period: 15s | Retries: 3
 ┌─────────────────────────────────────────┐
 │ Container (UID 1000, agenticops user)   │
 │                                         │
-│  uvicorn (4 workers, port 8000)         │
+│  uvicorn (1 process — required, :8000)  │
 │  ├── FastAPI app                        │
 │  ├── Agent framework (Strands + Bedrock)│
-│  ├── Scheduler (1 worker only, CAS)    │
+│  ├── Scheduler (instance lock + CAS)   │
 │  └── IM bots (Feishu/Slack WS)         │
 │                                         │
 │  Tools: aws, kubectl, uvx, git, ssh    │

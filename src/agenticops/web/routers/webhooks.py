@@ -4,6 +4,7 @@ With `webhook_secret` set, the two alert-intake routes need the shared token or 
 spec §3.B.5) instead of APIAuthMiddleware's Bearer: CloudWatch-via-SNS and Alertmanager cannot log in.
 """
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -137,8 +138,9 @@ async def _process_webhook_alert(body: dict, source: str = "") -> JSONResponse:
         logger.warning("Failed to parse webhook alert: %s", e)
         raise HTTPException(status_code=400, detail=f"Failed to parse alert: {e}")
 
-    # Multi-alert payloads (Prometheus/Grafana groups) → one signal each.
-    results = [process_alert(alert, trace_id=trace_id) for alert in alerts]
+    # Multi-alert payloads (Prometheus/Grafana groups) → one signal each. In a worker thread: the Signal Gate's
+    # gray-zone judge is a Bedrock call made under its lock, which would otherwise hold the event loop.
+    results = await asyncio.to_thread(lambda: [process_alert(alert, trace_id=trace_id) for alert in alerts])
 
     if all(r.action == "error" for r in results):
         raise HTTPException(status_code=500, detail=results[0].message)

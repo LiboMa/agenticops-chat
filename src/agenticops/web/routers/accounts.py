@@ -125,7 +125,7 @@ async def api_delete_account(account_id: int):
 
 
 @router.post("/api/accounts/{account_id}/test")
-async def api_test_account_connection(account_id: int):
+def api_test_account_connection(account_id: int):
     """Test credential chain for an account. Returns success/failure with identity."""
     from agenticops.credentials.session_factory import get_session_factory
     with get_db_session() as session:

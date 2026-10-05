@@ -100,6 +100,11 @@ resource "kubernetes_deployment" "app" {
   spec {
     replicas = var.replicas
 
+    # Stop the old pod before the new one starts: a rolling update would briefly run two processes
+    strategy {
+      type = "Recreate"
+    }
+
     selector {
       match_labels = { app = var.project_name }
     }

@@ -88,7 +88,7 @@ def _build_multi_region_graph(regions: list[str]) -> InfraGraph:
 
 
 @router.get("/multi-region")
-async def get_multi_region_graph(
+def get_multi_region_graph(
     regions: str = Query("", description="Comma-separated region codes, e.g. 'us-east-1,eu-west-1'. Empty = all regions."),
 ) -> SerializedGraph:
     """Get ReactFlow-ready graph for multi-region network topology.
@@ -106,7 +106,7 @@ async def get_multi_region_graph(
 
 
 @router.get("/vpc/{vpc_id}")
-async def get_vpc_graph(
+def get_vpc_graph(
     vpc_id: str,
     region: str = Query("us-east-1"),
 ) -> SerializedGraph:
@@ -123,7 +123,7 @@ async def get_vpc_graph(
 
 
 @router.get("/region")
-async def get_region_graph(
+def get_region_graph(
     region: str = Query("us-east-1"),
 ) -> SerializedGraph:
     """Get ReactFlow-ready graph for a region (multi-VPC view).
@@ -139,7 +139,7 @@ async def get_region_graph(
 
 
 @router.get("/vpc/{vpc_id}/reachability/{subnet_id}")
-async def get_reachability(
+def get_reachability(
     vpc_id: str,
     subnet_id: str,
     region: str = Query("us-east-1"),
@@ -154,7 +154,7 @@ async def get_reachability(
 
 
 @router.get("/vpc/{vpc_id}/impact/{resource_id}")
-async def get_impact(
+def get_impact(
     vpc_id: str,
     resource_id: str,
     region: str = Query("us-east-1"),
@@ -169,7 +169,7 @@ async def get_impact(
 
 
 @router.get("/vpc/{vpc_id}/path")
-async def get_path(
+def get_path(
     vpc_id: str,
     source: str = Query(...),
     target: str = Query(...),
@@ -185,7 +185,7 @@ async def get_path(
 
 
 @router.get("/vpc/{vpc_id}/anomalies")
-async def get_anomalies(
+def get_anomalies(
     vpc_id: str,
     region: str = Query("us-east-1"),
 ) -> AnomalyReport:
@@ -202,7 +202,7 @@ async def get_anomalies(
 
 
 @router.get("/vpc/{vpc_id}/enriched")
-async def get_enriched_vpc_graph(
+def get_enriched_vpc_graph(
     vpc_id: str,
     region: str = Query("us-east-1"),
 ) -> SerializedGraph:
@@ -216,7 +216,7 @@ async def get_enriched_vpc_graph(
 
 
 @router.post("/vpc/{vpc_id}/dependency-chain")
-async def post_dependency_chain(
+def post_dependency_chain(
     vpc_id: str,
     fault_node_id: str = Query(..., description="Node ID to simulate failure for"),
     region: str = Query("us-east-1"),
@@ -231,7 +231,7 @@ async def post_dependency_chain(
 
 
 @router.get("/vpc/{vpc_id}/spof")
-async def get_spof(
+def get_spof(
     vpc_id: str,
     region: str = Query("us-east-1"),
 ) -> SPOFReport:
@@ -245,7 +245,7 @@ async def get_spof(
 
 
 @router.get("/vpc/{vpc_id}/capacity-risk")
-async def get_capacity_risk(
+def get_capacity_risk(
     vpc_id: str,
     region: str = Query("us-east-1"),
     threshold: float = Query(0.8, ge=0.0, le=1.0),
@@ -260,7 +260,7 @@ async def get_capacity_risk(
 
 
 @router.post("/vpc/{vpc_id}/change-simulation")
-async def post_change_simulation(
+def post_change_simulation(
     vpc_id: str,
     edge_source: str = Query(..., description="Source node of the edge to remove"),
     edge_target: str = Query(..., description="Target node of the edge to remove"),
@@ -279,7 +279,7 @@ async def post_change_simulation(
 
 
 @router.get("/search")
-async def search_graph_nodes(
+def search_graph_nodes(
     q: str = Query("", description="Search query (matches label or ID)"),
     node_type: str = Query("", description="Filter by node type"),
     region: str = Query("", description="Filter by region"),
@@ -510,7 +510,7 @@ def get_focus(
 
 
 @router.get("/stats")
-async def get_graph_stats() -> dict:
+def get_graph_stats() -> dict:
     """Get graph statistics: node/edge counts, last sync, staleness."""
     try:
         from sqlalchemy import text
@@ -570,7 +570,7 @@ async def get_graph_stats() -> dict:
 
 
 @router.get("/diff")
-async def get_graph_diff(
+def get_graph_diff(
     limit: int = Query(10, ge=1, le=50, description="Number of recent snapshots"),
 ) -> list[dict]:
     """Compare recent graph snapshots to show sync history."""

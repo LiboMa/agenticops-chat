@@ -44,6 +44,11 @@ variable "memory" {
 variable "desired_count" {
   type    = number
   default = 1
+  # AgenticOps keeps chat/IM agents, locks and runtime settings in one process's memory (MVP-2.7.0)
+  validation {
+    condition     = var.desired_count <= 1
+    error_message = "AgenticOps runs as ONE process: desired_count must be 0 or 1."
+  }
 }
 
 # --- App ---

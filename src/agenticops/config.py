@@ -1067,6 +1067,13 @@ class Settings(BaseSettings):
         description="Agent instance TTL in minutes before cleanup",
     )
 
+    # The one process's default thread pool (MVP-2.7.0): asyncio.to_thread / run_in_executor share it with every
+    # Strands model stream and sync tool, which hold a thread for their whole run
+    event_loop_executor_threads: int = Field(
+        default=64,
+        description="Size of the event loop's default ThreadPoolExecutor (min 4)",
+    )
+
     # Session history restoration
     session_history_depth: int = Field(
         default=20,
