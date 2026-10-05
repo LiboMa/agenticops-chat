@@ -11,6 +11,8 @@ export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
   | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
   | "rcaUnavailable"                   // detail page only: the RCA failed to load, so where the issue stands is not known
+  | "checkingRun" | "runStateUnavailable" // detail page only: approved, no run row — whether its auto-run started is
+                                          // not known yet (timeline / plans loading or older than the approval) / failed
   | "unknown"; // a status this page does not know (a newer backend)
 
 export interface IssuePhaseInput {

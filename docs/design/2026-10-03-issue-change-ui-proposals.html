@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AgenticOps · 问题 / 修复方案 / 变更 前端重设计（三套方案评审稿）</title>
+<meta name="viewport" content="width=1440">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:#eef0f3;color:#1f2328;font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",sans-serif}
+.doc{width:1440px;margin:0 auto;padding:28px 44px 80px;background:#f7f8fa;min-height:100vh}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:.2px}
+h2{font-size:21px;margin:34px 0 10px;padding-bottom:6px;border-bottom:2px solid #dfe3e8}
+h3{font-size:16.5px;margin:26px 0 8px}
+h4{font-size:14px;margin:18px 0 6px}
+p{margin:6px 0 10px}
+ul,ol{margin:6px 0 10px;padding-left:22px}
+li{margin:2px 0}
+a{color:#2557d6}
+code,.mono{font-family:SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+code{background:#eceff3;border-radius:4px;padding:0 4px}
+.muted{color:#6b7280}
+.small{font-size:12px}
+.xs{font-size:11px}
+.meta{color:#57606a;font-size:13px}
+.lead{font-size:15px;color:#333}
+.callout{background:#fff;border:1px solid #dfe3e8;border-left:4px solid #2557d6;border-radius:6px;padding:10px 14px;margin:12px 0}
+.callout.warn{border-left-color:#d97706}
+.callout.ok{border-left-color:#16a34a}
+.callout.red{border-left-color:#dc2626}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.box{background:#fff;border:1px solid #dfe3e8;border-radius:8px;padding:12px 16px}
+.box h4{margin-top:2px}
+/* tab bar */
+.tabbar{position:sticky;top:0;z-index:20;display:flex;gap:4px;background:#f7f8fa;padding:10px 0 8px;border-bottom:1px solid #dfe3e8;margin:18px 0 6px}
+.tabbar button{font:inherit;font-size:13.5px;padding:6px 14px;border:1px solid #d0d6dd;background:#fff;border-radius:7px;cursor:pointer;color:#333}
+.tabbar button.on{background:#2557d6;border-color:#2557d6;color:#fff;font-weight:600}
+.tabbar .sp{flex:1}
+.tabbar .hint{font-size:12px;color:#6b7280;align-self:center}
+.js .panel{display:none}
+.js .panel.on{display:block}
+@media print{.js .panel{display:block}.tabbar{display:none}}
+/* doc tables */
+table.t{width:100%;border-collapse:collapse;background:#fff;margin:8px 0 14px;font-size:13px}
+table.t th,table.t td{border:1px solid #dfe3e8;padding:6px 9px;vertical-align:top;text-align:left}
+table.t th{background:#f0f2f5;font-weight:600;white-space:nowrap}
+table.t td.c{text-align:center}
+table.t tr.hl td{background:#f3f7ff}
+.yes{color:#0f7b3d;font-weight:600}
+.no{color:#6b7280;font-weight:600}
+.pid{display:inline-block;font:600 11px/1.5 SFMono-Regular,Menlo,monospace;background:#fde8e8;color:#a61b1b;border-radius:3px;padding:0 5px;margin-right:3px;white-space:nowrap}
+.pid.n{background:#fff1d6;color:#8a5a00}
+.tag{display:inline-block;font-size:11px;border-radius:3px;padding:0 6px;border:1px solid #cfd6de;background:#fff;color:#444;white-space:nowrap}
+.tag.s{background:#e6f4ea;border-color:#b6dfc2;color:#0f6b34}
+.tag.m{background:#fff4dc;border-color:#f1d49a;color:#8a5a00}
+.tag.l{background:#fde8e8;border-color:#f3b9b9;color:#a61b1b}
+/* ---------- wireframes ---------- */
+.wf{background:#fff;border:1px solid #c9d0d8;border-radius:10px;margin:14px 0 22px;box-shadow:0 2px 8px rgba(15,23,42,.06);overflow:hidden}
+.wf-cap{display:flex;align-items:center;gap:10px;background:#eef1f5;border-bottom:1px solid #d5dbe2;padding:6px 12px;font-size:12px;color:#444}
+.wf-cap b{color:#111}
+.wf-cap .dots{display:flex;gap:4px}
+.wf-cap .dots i{width:9px;height:9px;border-radius:50%;background:#cfd5dc;display:block}
+.wf-cap .url{font-family:SFMono-Regular,Menlo,monospace;background:#fff;border:1px solid #d5dbe2;border-radius:4px;padding:0 8px;color:#555}
+.wf-app{display:flex;position:relative;font-size:12.5px;line-height:1.5}
+.wf-side{width:136px;flex:none;background:#fafbfc;border-right:1px solid #e6e9ed;padding:10px 7px}
+.wf-side .logo{font-weight:700;color:#2557d6;font-size:12px;padding:2px 8px 10px}
+.nv{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-radius:6px;color:#4b5563;margin-bottom:2px;font-size:12px}
+.nv.on{background:#e8efff;color:#2557d6;font-weight:600;box-shadow:inset 2px 0 0 #2557d6}
+.nv.new{outline:1.5px dashed #2557d6;outline-offset:-1px}
+.nv.moved{outline:1.5px dashed #d97706;outline-offset:-1px}
+.nv .bd{background:#dc2626;color:#fff;border-radius:8px;font-size:10px;padding:0 5px;line-height:15px}
+.wf-main{flex:1;min-width:0;background:#fff;position:relative}
+.wf-top{height:32px;border-bottom:1px solid #eceef1;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:12px;color:#444}
+.wf-top .r{display:flex;gap:6px;align-items:center;color:#666}
+.wf-top .r span{border:1px solid #dde1e6;border-radius:4px;padding:0 6px;font-size:11px}
+.wf-pad{padding:14px 18px 18px}
+.crumb{font-size:12px;color:#6b7280;margin-bottom:8px}
+.h1{font-size:17px;font-weight:700;margin:0}
+.idb{font:600 11.5px SFMono-Regular,Menlo,monospace;background:#eef0f3;color:#555;border-radius:4px;padding:1px 6px}
+.card{border:1px solid #e3e6ea;border-radius:8px;padding:10px 13px;margin-bottom:10px;background:#fff}
+.card h5{margin:0 0 6px;font-size:13px}
+.btn{display:inline-block;padding:4px 11px;border-radius:6px;border:1px solid #cfd4da;font-size:12px;background:#fff;color:#222;white-space:nowrap;line-height:1.5}
+.btn.pri{background:#2557d6;border-color:#2557d6;color:#fff;font-weight:600}
+.btn.go{background:#0f8a4c;border-color:#0f8a4c;color:#fff;font-weight:600}
+.btn.dan{color:#b42318;border-color:#f1b3ad}
+.btn.ghost{border-color:transparent;color:#2557d6;padding-left:4px;padding-right:4px}
+.btn.sm{padding:1px 8px;font-size:11px}
+.sel{display:inline-block;border:1px solid #d5dae0;border-radius:6px;padding:3px 9px;font-size:12px;color:#333;background:#fff;white-space:nowrap}
+.sel:after{content:" ▾";color:#888}
+.search{display:inline-block;border:1px solid #d5dae0;border-radius:6px;padding:3px 9px;font-size:12px;color:#999;width:220px;background:#fff}
+.chip{display:inline-block;padding:0 7px;border-radius:10px;font-size:11px;border:1px solid #d5dae0;color:#444;background:#fff;white-space:nowrap;line-height:17px}
+.chip.red{border-color:#f3b4b4;background:#fdecec;color:#b42318}
+.chip.amb{border-color:#f2d39b;background:#fff6e5;color:#8a5a00}
+.chip.grn{border-color:#b7e0c3;background:#eaf7ee;color:#0f6b34}
+.chip.blu{border-color:#bcd0fb;background:#edf3ff;color:#2557d6}
+.chip.gry{border-color:#e1e4e8;background:#f3f4f6;color:#6b7280}
+.sev{font-weight:700;font-size:11px}
+.sev.high{color:#ea580c}.sev.crit{color:#dc2626}.sev.med{color:#ca8a04}.sev.low{color:#2563eb}
+.dt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+.dt.red{background:#dc2626}.dt.amb{background:#f59e0b}.dt.grn{background:#16a34a}.dt.blu{background:#2557d6}.dt.gry{background:#c5cad1}
+.code{background:#1f2633;color:#e6edf3;border-radius:5px;padding:4px 9px;font:11px/1.55 SFMono-Regular,Menlo,monospace;margin:3px 0;white-space:pre-wrap;word-break:break-all}
+.kv{display:grid;grid-template-columns:76px 1fr;gap:3px 8px;font-size:12px}
+.kv dt{color:#6b7280;margin:0}
+.kv dd{margin:0;min-width:0;word-break:break-word}
+.grid-r{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}
+.rail .card{background:#fbfcfd}
+.statusline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;padding:8px 10px;border-radius:7px;background:#f6f8fb;border:1px solid #e3e8ef;font-size:12.5px}
+.statusline .why{flex:1;min-width:300px;color:#222}
+.statusline.fail{background:#fdf1f0;border-color:#f4c7c2}
+.statusline.amb{background:#fff8ea;border-color:#f2dcae}
+.statusline .st{font-weight:700;white-space:nowrap}
+/* phase cards */
+.ph{border:1px solid #e3e6ea;border-radius:8px;margin-bottom:8px;background:#fff}
+.ph-h{display:flex;align-items:center;gap:9px;padding:7px 11px;font-size:12.5px}
+.ph-h .t{font-weight:700;white-space:nowrap}
+.ph-h .s{color:#4b5563;flex:1;min-width:0}
+.ph-n{width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:#e5e7eb;color:#6b7280}
+.ph.done .ph-n{background:#16a34a;color:#fff}
+.ph.cur{border-color:#2557d6;box-shadow:0 0 0 2px #e3ebff}
+.ph.cur .ph-n{background:#2557d6;color:#fff}
+.ph.wait{border-color:#e7a93a;box-shadow:0 0 0 2px #fff1d4}
+.ph.wait .ph-n{background:#f59e0b;color:#fff}
+.ph.fail{border-color:#e48a83;box-shadow:0 0 0 2px #fde4e1}
+.ph.fail .ph-n{background:#dc2626;color:#fff}
+.ph.fut{background:#fafafa;opacity:.62}
+.ph-b{padding:6px 14px 11px 40px;border-top:1px dashed #e6e9ed}
+.sub{font-size:11.5px;font-weight:700;color:#374151;margin:8px 0 3px;text-transform:none}
+.verdict{border:1.5px solid #2557d6;border-radius:8px;padding:9px 12px;background:#f5f8ff;margin-top:10px}
+.radio{display:flex;align-items:flex-start;gap:6px;padding:3px 0;font-size:12px}
+.radio i{width:12px;height:12px;border-radius:50%;border:1.5px solid #8b95a3;flex:none;margin-top:3px;display:block}
+.radio i.on{border-color:#2557d6;background:radial-gradient(#2557d6 0 3px,#fff 3.5px)}
+.ta{border:1px solid #d5dae0;border-radius:6px;background:#fff;padding:5px 8px;color:#999;font-size:12px;min-height:34px;margin:5px 0}
+.bar{height:7px;background:#e8ebef;border-radius:4px;position:relative;margin:4px 0}
+.bar b{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:#f59e0b}
+.bar u{position:absolute;top:-4px;bottom:-4px;width:2px;background:#111}
+.act{list-style:none;padding:0;margin:4px 0}
+.act li{position:relative;padding:2px 0 4px 14px;font-size:11.5px;border-left:2px solid #e3e6ea;margin:0}
+.act li:before{content:"";position:absolute;left:-5px;top:7px;width:8px;height:8px;border-radius:50%;background:#c5cad1}
+.act li.r:before{background:#dc2626}.act li.a:before{background:#f59e0b}.act li.g:before{background:#16a34a}.act li.b:before{background:#2557d6}
+.act time{font-family:SFMono-Regular,Menlo,monospace;color:#6b7280;margin-right:5px;font-size:10.5px}
+.chk{display:flex;gap:8px;align-items:baseline;border:1px solid #edf0f3;border-radius:5px;padding:3px 8px;margin:3px 0;font-size:12px}
+.chk .n{color:#9aa1ab;width:14px}
+.chk .o{font-size:11px;color:#6b7280;margin-left:auto;font-family:SFMono-Regular,Menlo,monospace}
+.pass{font:700 10px SFMono-Regular,Menlo,monospace;color:#0f6b34;background:#e6f4ea;border-radius:3px;padding:0 4px}
+.fail-b{font:700 10px SFMono-Regular,Menlo,monospace;color:#b42318;background:#fde4e1;border-radius:3px;padding:0 4px}
+.skip{font:700 10px SFMono-Regular,Menlo,monospace;color:#6b7280;background:#eef0f3;border-radius:3px;padding:0 4px}
+.seg{display:inline-flex;border:1px solid #d5dae0;border-radius:6px;overflow:hidden;font-size:11.5px}
+.seg span{padding:2px 9px;border-right:1px solid #d5dae0;color:#444;background:#fff;white-space:nowrap}
+.seg span:last-child{border-right:none}
+.seg span.on{background:#2557d6;color:#fff;font-weight:600}
+.toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0 10px}
+.toolbar .sp{flex:1}
+/* list table */
+table.wt{width:100%;border-collapse:collapse;font-size:12px}
+table.wt th{font-weight:500;color:#6b7280;font-size:11px;text-align:left;border-bottom:1px solid #e3e6ea;padding:5px 8px;white-space:nowrap}
+table.wt td{padding:7px 8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+table.wt tr.pick td{background:#f2f6ff}
+table.wt .ttl{font-weight:600;color:#111}
+table.wt .s2{font-size:11px;color:#6b7280}
+.pd{white-space:nowrap}
+.pd i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#d6d9de;margin-right:2px}
+.pd i.d{background:#16a34a}.pd i.c{background:#2557d6}.pd i.w{background:#f59e0b}.pd i.f{background:#dc2626}
+.demo{font-size:9.5px;border:1px dashed #9aa3ae;color:#6b7280;border-radius:3px;padding:0 3px;margin-left:4px;vertical-align:1px;white-space:nowrap}
+.anno{display:inline-block;background:#fff7d1;border:1px solid #efd36a;color:#6f5300;font-size:10.5px;border-radius:4px;padding:0 5px;line-height:16px;margin-left:5px;white-space:nowrap;vertical-align:1px}
+.annoblk{background:#fff7d1;border:1px solid #efd36a;color:#5c4500;font-size:11px;border-radius:5px;padding:4px 8px;margin:6px 0}
+/* drawer */
+.dim{position:absolute;inset:0;background:rgba(17,24,39,.30)}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:560px;background:#fff;border-left:1px solid #cdd3da;box-shadow:-10px 0 28px rgba(0,0,0,.14);padding:12px 16px;overflow:hidden}
+.drawer .dh{display:flex;align-items:center;gap:8px;border-bottom:1px solid #eceef1;padding-bottom:8px;margin-bottom:8px}
+.drawer .x{margin-left:auto;color:#6b7280;font-size:12px}
+.drawer .foot{position:absolute;left:0;right:0;bottom:0;border-top:1px solid #e3e6ea;background:#fbfcfd;padding:9px 16px;display:flex;gap:8px;align-items:center}
+.opt{border:1px solid #d5dae0;border-radius:7px;padding:6px 9px;margin:4px 0;font-size:12px;display:flex;gap:8px;align-items:center;background:#fff}
+.opt.on{border-color:#2557d6;background:#f3f7ff}
+/* board */
+.board{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.col{background:#f4f6f8;border-radius:8px;padding:7px;min-height:430px}
+.col h6{margin:0 0 6px;font-size:12px;display:flex;justify-content:space-between;align-items:center;color:#374151}
+.col h6 .n{background:#e2e6eb;border-radius:8px;font-size:10.5px;padding:0 6px;color:#444}
+.kc{background:#fff;border:1px solid #e1e5ea;border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:11.5px;line-height:1.45}
+.kc.demo-c{border-style:dashed}
+.kc.pick{border-color:#2557d6;box-shadow:0 0 0 2px #e1e9ff}
+.kc .k{font:600 10.5px SFMono-Regular,Menlo,monospace;color:#555}
+.kc .who{font-size:11px;color:#2557d6;margin-top:2px}
+.kc .who.me{color:#b45309;font-weight:600}
+.kc .ft{display:flex;justify-content:space-between;color:#8a929c;font-size:10.5px;margin-top:2px}
+/* anatomy */
+.anat{display:flex;flex-direction:column;gap:5px}
+.anat div{border:1px solid #cfd6de;border-radius:5px;background:#fff;padding:5px 9px;font-size:12px;position:relative}
+.anat div.bad{border-color:#f0a8a2;background:#fff6f5}
+.anat div .pid{float:right;margin-left:4px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+.foot-note{font-size:12px;color:#6b7280;margin-top:40px;border-top:1px solid #dfe3e8;padding-top:10px}
+</style>
+<script>document.documentElement.className+=" js";</script>
+</head>
+<body>
+<div class="doc">
+
+<h1>问题 / 修复方案 / 变更 —— 前端重设计：三套方案（评审稿）</h1>
+<div class="meta">AgenticOps MVP-2.6.1 · 2026-10-04 · 仅供评审，不含实现 · 依据：worktree <code>mvp-2.6.1</code> 前端代码 + 2026-10-03 实验室截图（<code>/tmp/aiops-ui/*.png</code>）</div>
+
+<div class="callout">
+<b>主人原话：</b>「Issue 页面看上去和使用上非常的乱，请针对此前的功能，重新设计至少三套前端方案给我 Review，使 Issue / fix plan / Change 等功能更加规划、更加合理。」<br>
+<b>怎么读：</b>先看「现状诊断」，每个问题有编号（<span class="pid">I-a</span> 问题详情、<span class="pid">C-a</span> 变更详情、<span class="pid">L-a</span> 列表与信息架构；<span class="pid n">I-g</span> 黄色 = 本次新发现）。每套方案末尾都有一张「问题 → 解决」对照表。「对比」「公共修复」「推荐」在最后三页。<br>
+<b>样例数据：</b>I#1「EKS-agenticops-chaos-lab-RunningPods-Low」和 C#1「E2E intake: annotate the frontend deployment」是实验室里的真实数据；标 <span class="demo">示意</span> 的虚线行和卡片是补的示意数据，只用来展示有多条工单时列表、看板长什么样。
+</div>
+
+<div class="callout ok">
+<b>前提（本地已实现）：批准变更就是执行。</b>变更详情的批准按钮和对话框文案为「批准并执行 / Approve &amp; run」，附说明「批准后立即执行该方案。」。「重试执行 / Retry execution」只在变更停在 <code>approved</code>（执行没能入队）时出现，此时待办文案为「已批准，但未能入队执行 —— 请重试」。修复方案本来就是人工批准后自动执行。三套方案都以此为前提：<b>任何地方都不再有单独的「执行」按钮，只有入队失败时的「重试执行」。</b>
+</div>
+
+<div class="tabbar" id="tabbar">
+  <button data-t="p-diag">0 · 现状诊断</button>
+  <button data-t="p-a">方案 A · 统一工单模板</button>
+  <button data-t="p-b">方案 B · 待办驱动</button>
+  <button data-t="p-c">方案 C · 流水线看板</button>
+  <button data-t="p-cmp">对比</button>
+  <button data-t="p-fix">公共修复</button>
+  <button data-t="p-rec">推荐</button>
+  <span class="sp"></span><span class="hint">禁用 JS 或打印时所有页依次展开</span>
+</div>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-diag">
+<h2>0 · 现状诊断</h2>
+<p class="lead">「乱」不是哪一个控件丑，而是<b>同一件事说了好几遍、不同的事挤在一起、最关键的一句话没说</b>。下面先看两个详情页的结构，再列出全部问题。</p>
+
+<div class="cols2">
+  <div class="box">
+    <h4>IssueDetail 现状结构（I#1，约 2100 px）</h4>
+    <div class="anat">
+      <div class="bad">7 步步进器 Open → Investigate → RCA → Plan → Approve → Execute → Resolved <span class="pid">I-a</span></div>
+      <div class="bad">头部：I#1 · HIGH · BUSINESS ● RCA Complete · EXECUTION — · VERIFICATION — · [unknown] · TRC-c6db8c46 · 标题下 5 段进度条 <span class="pid">I-a</span><span class="pid">I-c</span><span class="pid n">I-i</span></div>
+      <div class="bad">操作栏：Generate Fix Plan · Resolve ┃ False Positive · Confirmed · Dismiss <span class="pid">I-b</span><span class="pid n">I-h</span></div>
+      <div class="bad">5 个 tab：Investigate · Fix Plan · Execution · Verification · Timeline <span class="pid">I-d</span></div>
+      <div class="bad">事实块：Resource <i>unknown</i> · Type — · Region — · Account chaos-lab <span class="pid">I-c</span></div>
+      <div class="bad" style="padding-bottom:30px">RCA Results [evidence ✗] [critic: weak] 👍👎 · 置信度 57% · 根因 · 4 条因素 · 6 条建议 · 「Model: |」 <span class="pid">I-b</span><span class="pid">I-f</span><span class="pid n">I-g</span></div>
+      <div class="bad">Root-cause location [Valid] #1 backend #2 frontend · Correct / Partially correct / Incorrect <span class="pid">I-b</span></div>
+      <div class="bad" style="padding-bottom:44px">Local graph：Structural 132 · Potential 134 · 星型、标签重叠 <span class="pid">I-e</span></div>
+    </div>
+  </div>
+  <div class="box">
+    <h4>ChangeDetail 现状结构（C#1，5070 px）</h4>
+    <div class="anat">
+      <div class="bad">头部：C#1 标题 L1 · ● Failed · <u>Pre-check #1 FAILED …</u> · To do: None · 步进器 ✓✓✓✓ ⑤Failed — ⑥Completed <span class="pid">C-b</span><span class="pid">C-c</span><span class="pid">C-d</span></div>
+      <div>Request：申请人 / 类型 / 创建 / 账户 / 外部单 / 目标 / 理由 / 请求步骤</div>
+      <div style="padding-bottom:60px">C#1 implementation plan v1：说明 + 步骤 + 3 项预检 + 3 项后检（每项一个黑色命令块）+ Rollback Plan <span class="pid">C-a</span></div>
+      <div class="bad" style="padding-bottom:40px">Approval：策略建议大段文字（verdict / action type / policy / 9 条理由）+ 影子影响图 + Actual approval + 「Copy as new」埋在这里 <span class="pid">C-a</span><span class="pid">C-c</span></div>
+      <div class="bad">Executions 表 + 红框 <u>#1 error: Pre-check #1 FAILED …</u> + 展开 <u>Pre-check #1 FAILED …</u> + 预检/步骤/后检/回滚 <span class="pid">C-b</span></div>
+      <div class="bad">Acceptance：Verdict <u>Pre-check #1 FAILED …</u> · Accepted by — <span class="pid">C-b</span></div>
+      <div class="bad" style="padding-bottom:70px">Timeline：约 22 条，每条一串原始 JSON 键值，含 4 组重复 <span class="pid">C-e</span></div>
+    </div>
+    <p class="xs muted" style="margin-top:6px">下划线 = 同一句失败原因，整页出现 4 次。</p>
+  </div>
+</div>
+
+<h3>问题详情（IssueDetail）</h3>
+<table class="t">
+<tr><th style="width:62px">编号</th><th>现象</th><th style="width:330px">证据</th></tr>
+<tr><td><span class="pid">I-a</span></td><td>同一个进度显示三遍：7 步步进器、头部三枚状态（BUSINESS · RCA Complete / EXECUTION — / VERIFICATION —）、标题下 5 段进度条。三者粒度不同，用户要自己对齐。</td><td class="small"><code>IssueDetail.tsx:177</code> IssueStatusStepper，<code>:197-205</code> 三枚 StatusLabel，<code>:235</code> PipelineStepper</td></tr>
+<tr><td><span class="pid">I-b</span></td><td>操作栏把生命周期动作（Generate Fix Plan / Resolve / Dismiss）和反馈（False Positive / Confirmed）混在一起；RCA 卡上还有 👍👎，定位卡上还有 Correct / Partially correct / Incorrect —— <b>三套反馈机制</b>，用户不知道该点哪个、点了有什么区别。</td><td class="small"><code>IssueActionBar.tsx</code>，<code>RcaSection</code>，<code>LocationSection</code>（<code>IssueDetail.tsx:915</code>）</td></tr>
+<tr><td><span class="pid">I-c</span></td><td>事实块写 Resource「unknown」、Type「—」、Region「—」，紧接着的定位卡却写着 Deployment backend / frontend，看起来自相矛盾。头部锚点徽章也显示「unknown」：它打印的是告警原始的 <code>resource_id</code>，而不是锚定到的资源名。已在实验室库核实：<code>anchor_status = anchored</code>，<code>resource_ref = 36</code> 是 EKS 集群 agenticops-chaos-lab，而 <code>resource_id</code> 字面值就是「unknown」。</td><td class="small"><code>IssueDetail.tsx:208</code> 徽章文字 = <code>a.resource_id</code>；<code>:350-363</code> 事实块</td></tr>
+<tr><td><span class="pid">I-d</span></td><td>一条线性流程被拆成 5 个 tab；「Fix Plan」tab 为空时又放了一个「Create Fix Plan」，和操作栏的「Generate Fix Plan」重复。</td><td class="small">截图 issue1-fix.png；<code>FixPlanTab</code> 空状态</td></tr>
+<tr><td><span class="pid">I-e</span></td><td>局部图默认画出全部 132 个结构邻居，星型展开，标签互相压盖（kube-system / amazon-cloudwatch / ip-192-168-… 重叠）。</td><td class="small">截图 issue1.png 底部；<code>LocalGraph.tsx</code></td></tr>
+<tr><td><span class="pid">I-f</span></td><td>徽章「evidence ✗」「critic: weak」看不懂：什么证据？谁是 critic？weak 意味着什么？</td><td class="small">RCA 卡头部</td></tr>
+<tr><td><span class="pid n">I-g</span></td><td><b>置信度前后不一致，也没解释。</b>时间线写「root cause saved (confidence 95%)」，卡片写 57%。实际算法是 0.95 × 证据惩罚 0.6 = 0.57（critic 判 weak 不扣分）；57% 低于自动修复阈值 60%，所以自动修复被暂停、等人复核。页面上没有一句话说「自动修复已暂停、原因是什么」。</td><td class="small"><code>services/rca_quality.py:29</code> <code>EVIDENCE_PENALTY = 0.6</code>；timeline「rca needs review: confidence 0.57 &lt; 0.6」；阈值 <code>rca_min_confidence_for_autofix</code> 目前没有下发给前端</td></tr>
+<tr><td><span class="pid n">I-h</span></td><td><b>主按钮和真实状态不符。</b>系统在等人复核根因，主按钮却是「Generate Fix Plan」。</td><td class="small"><code>IssueActionBar.tsx</code> 按 status 选主按钮，不看 RCA 是否过闸门</td></tr>
+<tr><td><span class="pid n">I-i</span></td><td>状态文案没有国际化：<code>IssueStatusBadge.tsx</code> 写死英文「RCA Complete」，<code>IssueRow.tsx</code> 写死原始值「rca_done」，<code>IssueActionBar.tsx</code> 的确认文案、「Run RCA」「This issue has been dismissed」都是英文。另外 RCA 卡在 model_id 为空时显示「Model: |」。</td><td class="small"><code>IssueStatusBadge.tsx</code> LABELS，<code>IssueRow.tsx:18-29</code></td></tr>
+</table>
+
+<h3>变更详情（ChangeDetail）</h3>
+<table class="t">
+<tr><th style="width:62px">编号</th><th>现象</th><th style="width:330px">证据</th></tr>
+<tr><td><span class="pid">C-a</span></td><td>一页 5070 px 平铺到底：申请、方案（步骤 / 预检 / 后检 / 回滚）、审批（策略建议大段文字 + 影子影响图）、实际审批、执行、验收、时间线。已经结束的阶段和当前阶段一样占地方。</td><td class="small">截图 change1.png</td></tr>
+<tr><td><span class="pid">C-b</span></td><td>同一句失败原因「Pre-check #1 FAILED: Deployment frontend in chaos-lab namespace reports /0 ready replicas (expected 3/3)…」出现 4 次：标题行、红色错误框、执行展开、验收 Verdict。</td><td class="small">c1-top.png、c1-exec.png</td></tr>
+<tr><td><span class="pid">C-c</span></td><td>「Failed · To do: None」：到了终态就不给下一步了，「Copy as new」埋在审批卡底部。</td><td class="small"><code>changes.todo.none</code>；<code>ChangeDetail.tsx:590</code></td></tr>
+<tr><td><span class="pid">C-d</span></td><td>步进器「✓Requested ✓Reviewed ✓Planned ✓Approved ⑤Failed — ⑥Completed」：失败之后还画着一个「Completed」，读起来像流程还没走完。</td><td class="small"><code>ChangeStepper.tsx</code></td></tr>
+<tr><td><span class="pid">C-e</span></td><td>时间线是原始 JSON（<code>policy_decision: {"action":"auto_approve",…}</code>），而且有重复：change reviewed ×2、policy decision ×2、change approved ×2、authz.denied ×2。两条 authz.denied 实际含义是「策略建议自动批准，但 webhook 来源按规则 no-webhook-approve-or-execute 不能批准 / 执行，转人工」，从页面上完全看不出来。</td><td class="small">change1.png 时间线；<code>lib/changeDetail.ts</code> <code>toPipelineEvents</code> 把对象 JSON.stringify</td></tr>
+<tr><td><span class="pid n">C-f</span></td><td><b>两张工单在说同一件事，却互不知道。</b>C#1 预检失败，是因为 frontend 就绪副本为 0；而 I#1 的根因正是 frontend / backend 被缩容到 0。两张工单针对同一个 Deployment，页面之间没有任何关联提示。</td><td class="small">C#1 预检 #1 输出 vs I#1 根因与定位 #2 frontend</td></tr>
+<tr><td><span class="pid">C-g</span></td><td>（已解决）过去批准后还要再点「执行」并确认一次。本地已改为「批准并执行」；三套方案都保留「重试执行」，只用于没能入队的补救。</td><td class="small"><code>changes.approveAndRun</code>、<code>changes.retryExecution</code>、<code>changes.todo.notQueued</code></td></tr>
+</table>
+
+<h3>列表与信息架构</h3>
+<table class="t">
+<tr><th style="width:62px">编号</th><th>现象</th><th style="width:330px">证据</th></tr>
+<tr><td><span class="pid">L-a</span></td><td>问题列表的第一条数据上面叠了 4 行筛选：问题 / 资源 / 信号 → 运维事件 / 安全发现 / 全部 → 全部 / 进行中 / 已解决 / 已忽略 → 严重度。</td><td class="small">issues.png</td></tr>
+<tr><td><span class="pid">L-b</span></td><td>「资源」「信号」挂在问题枢纽下，但它们和问题不是一类东西（资源是库存，信号是问题的原始输入）。</td><td class="small"><code>IssuesAndPlans.tsx:85-128</code></td></tr>
+<tr><td><span class="pid">L-c</span></td><td>列表行显示原始枚举「rca_done」，详情页却是「RCA Complete」；切到中文界面两者都还是英文。</td><td class="small"><code>IssueRow.tsx:22</code></td></tr>
+<tr><td><span class="pid">L-d</span></td><td>问题列表是卡片行，变更列表是表格：同类信息用两种样式。</td><td class="small">issues.png vs changes.png</td></tr>
+<tr><td><span class="pid">L-e</span></td><td>修复方案没有自己的列表，只能进到每个问题里看。</td><td class="small">路由里没有 plans 列表（<code>/app/plans</code> 已重定向）</td></tr>
+<tr><td><span class="pid">L-f</span></td><td>修复方案和变更实施方案是<b>同一张表</b>（<code>fix_plans.plan_kind = fix | change</code>），同一台状态机、同一套 <code>plan_version</code> + <code>content_hash</code> 审批绑定，却由两套不同的页面结构渲染（IssueDetail 的 FixPlanTab，ChangeDetail 的方案卡）。</td><td class="small"><code>IssueDetail.tsx:577</code> vs <code>ChangeDetail.tsx:328</code></td></tr>
+<tr><td><span class="pid">L-g</span></td><td>没有任何地方回答「现在有什么在等我（批准 / 验收 / 复核）」。侧栏红点只表示「有未关闭的问题」。</td><td class="small"><code>NavItems.tsx</code> <code>hasOpenIssues</code></td></tr>
+</table>
+
+<div class="callout warn"><b>没能核实：</b>audit.png 截图停在「Loading…」，审计页的实际内容这次看不到。所以三套方案都不设计审计页的具体改动，只决定它在侧栏的位置。<br><b>已核实（实验室库，只读）：</b>I#1 已锚定，<code>resource_ref 36</code> = EKS 集群 agenticops-chaos-lab；C#1 的时间（UTC）为 09:55:56 批准、09:56:11 点击执行、09:56:39 在预检 #1 中止。</div>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-a">
+<h2>方案 A ·「统一工单模板」</h2>
+
+<div class="cols2">
+<div class="box">
+<h4>核心理念：一张工单，一条线</h4>
+<p>问题和变更都是「工单」：都要从「搞清楚该做什么」走到「做完并确认」。详情页只回答三件事：<b>现在在哪一步、为什么停在这里、下一步谁做什么</b>。走过的阶段折叠成一句话，当前阶段展开，没到的阶段置灰。整页只有一个主按钮。</p>
+<p><b>关键观察：</b>问题和变更的<b>后三段完全一样</b>。「方案 → 审批并执行 → 验收」就是同一张 <code>fix_plans</code> 表的生命周期，只有前段不同：问题从「诊断」（RCA）开始，变更从「申请 → 审核」（SRE 合法性审核）开始。所以模板是「各自的前段 + 共享的后三段」，后三段由同一组组件渲染（解决 <span class="pid">L-f</span>）。</p>
+</div>
+<div class="box">
+<h4>服务谁</h4>
+<p><b>主要：</b>一线值班 SRE / 运维工程师，也就是点开一张具体工单、要把它推进到底的人。<br><b>次要：</b>审批人，在详情页的当前阶段里直接「批准并执行」。</p>
+<h4>阶段划分（对简报的细化）</h4>
+<table class="t" style="margin:4px 0">
+<tr><th>问题</th><td>① 诊断 → ② 方案 → ③ 审批并执行 → ④ 验收</td></tr>
+<tr><th>变更</th><td>① 申请 → ② 审核 → ③ 方案 → ④ 审批并执行 → ⑤ 验收</td></tr>
+</table>
+<p class="small muted">简报里问题有「审批」「执行」两段。修复方案本来就是批准后自动执行，变更现在也是，所以两者都合成「审批并执行」一段。问题因此是 4 段，后三段与变更逐字对齐。</p>
+</div>
+</div>
+
+<h3>信息架构（侧栏与路由）</h3>
+<table class="t">
+<tr><th style="width:200px"></th><th>之前</th><th>之后</th></tr>
+<tr><td>侧栏</td><td>仪表盘 · 对话 · <b>问题</b>（内含 问题 / 资源 / 信号 三个视图）· 变更 · 审计 · 定时任务 · 报告 · Agent 指标 · 技能 · 全景图 · 安全</td><td>仪表盘 · 对话 · <b>问题</b> · <b>变更</b> · <b>资源</b>（从问题枢纽移出，独立入口）· 审计 · 定时任务 · 报告 · Agent 指标 · 技能 · 全景图 · 安全</td></tr>
+<tr><td>问题列表</td><td><code>/app/issues</code>（<code>?view=resources|signals</code> 切视图）</td><td><code>/app/issues</code> 只放问题。<code>?view=resources</code> → 重定向 <code>/app/resources</code>，<code>?view=signals</code> → 重定向 <code>/app/signals</code></td></tr>
+<tr><td>信号</td><td>问题枢纽里的一个 tab</td><td><code>/app/signals</code>，不进侧栏：从问题列表工具栏的「原始信号 →」和问题详情右栏的「合并信号 1 条 →」进入</td></tr>
+<tr><td>问题详情</td><td><code>/app/issues/:id?tab=investigate|fixPlan|execution|verification|timeline</code></td><td><code>/app/issues/:id#diagnose|plan|run|accept</code>。旧 <code>?tab=</code> 映射到对应阶段（timeline → 展开右栏「动态」），旧链接不失效</td></tr>
+<tr><td>变更</td><td><code>/app/changes</code>、<code>/app/changes/:id</code></td><td>路由不变，详情换模板：<code>#request|review|plan|run|accept</code></td></tr>
+<tr><td>修复方案</td><td>只在问题详情的 Fix Plan tab 里</td><td>仍在所属工单内（「③ 方案」阶段），不单独做列表（见「刻意不做」）</td></tr>
+</table>
+
+<h3>线框 A-1 · 列表：问题和变更用同一个表格组件</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>问题列表</b><span class="url">/app/issues</span><span class="anno">4 行筛选压成 1 行 · L-a</span><span class="anno">状态用 locale 文案 · L-c</span><span class="anno">新增「等谁 / 下一步」列</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div>
+    <div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv on">问题 <span class="bd">1</span></div><div class="nv">变更</div><div class="nv moved">资源</div><div class="nv">审计</div><div class="nv">定时任务</div><div class="nv">报告</div><div class="nv">Agent 指标</div><div class="nv">技能</div><div class="nv">全景图</div><div class="nv">安全</div>
+  </div>
+  <div class="wf-main">
+    <div class="wf-top"><span>问题</span><span class="r">admin <span>退出</span><span>EN</span></span></div>
+    <div class="wf-pad">
+      <div class="h1">问题</div>
+      <div class="toolbar">
+        <span class="search">搜索标题、资源、Trace…</span>
+        <span class="sel">状态：进行中 (1)</span><span class="sel">严重度：全部</span><span class="sel">范围：运维事件</span><span class="sel">账户：全部</span><span class="sel">排序：最新</span>
+        <span class="sp"></span><a class="btn ghost">原始信号 →</a>
+      </div>
+      <table class="wt">
+        <tr><th style="width:44px">#</th><th>标题</th><th style="width:200px">状态</th><th style="width:270px">等谁 / 下一步</th><th style="width:66px">严重度</th><th style="width:90px">账户</th><th style="width:96px">更新</th></tr>
+        <tr class="pick"><td class="mono">I#1</td><td><div class="ttl">EKS-agenticops-chaos-lab-RunningPods-Low</div><div class="s2">EKS 集群 agenticops-chaos-lab · CloudWatch 告警</div></td><td><span class="pd"><i class="w"></i><i></i><i></i><i></i></span> 根因待复核</td><td><b style="color:#b45309">等你</b>：判断根因是否正确<div class="s2">RCA 57%，低于自动修复阈值 60%</div></td><td><span class="sev high">HIGH</span></td><td>chaos-lab</td><td class="s2">10-03 03:41</td></tr>
+        <tr><td class="mono">I#2<span class="demo">示意</span></td><td><div class="ttl">RDS database-demo CPUUtilization &gt; 90%</div><div class="s2">RDS 实例 database-demo</div></td><td><span class="pd"><i class="d"></i><i class="d"></i><i class="d"></i><i class="w"></i></span> 待验收</td><td><b style="color:#b45309">等你</b>：验收执行 #4 的结果<div class="s2">后检 2/3 通过，无法自动判定</div></td><td><span class="sev crit">CRIT</span></td><td>prod-a</td><td class="s2">40 分钟前</td></tr>
+        <tr><td class="mono">I#3<span class="demo">示意</span></td><td><div class="ttl">ALB app-prod 5xx 突增</div><div class="s2">ALB app-prod</div></td><td><span class="pd"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></span> 执行中</td><td>等执行器：执行 #1，已用 1 分 20 秒</td><td><span class="sev med">MED</span></td><td>prod-b</td><td class="s2">2 分钟前</td></tr>
+        <tr><td class="mono">I#4<span class="demo">示意</span></td><td><div class="ttl">S3 bucket logs-archive 公共读 ACL</div><div class="s2">S3 logs-archive</div></td><td><span class="pd"><i class="d"></i><i class="d"></i><i class="w"></i><i></i></span> 待审批</td><td>等审批人：修复方案 v1 · L2</td><td><span class="sev high">HIGH</span></td><td>prod-a</td><td class="s2">3 小时前</td></tr>
+      </table>
+      <div class="annoblk">状态列 = 阶段点 + locale 状态名（<code>issues.status.*</code>，中英两套）。四个点对应 诊断 / 方案 / 审批并执行 / 验收；黄 = 等人，蓝 = 智能体或执行器在跑，红 = 失败。「等谁」列由 <code>lib/issuePhases.ts</code> 根据状态 + RCA 是否过闸门 + 最新执行的判定纯函数算出，与详情页状态行同源。</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>变更列表（同一个 WorkItemTable 组件）</b><span class="url">/app/changes</span><span class="anno">与问题列表同一样式 · L-d</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div>
+    <div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv">问题 <span class="bd">1</span></div><div class="nv on">变更</div><div class="nv moved">资源</div><div class="nv">审计</div>
+  </div>
+  <div class="wf-main">
+    <div class="wf-pad">
+      <div class="toolbar"><div class="h1">变更</div><span class="sp"></span><span class="btn pri">+ 新建变更申请</span></div>
+      <div class="toolbar" style="margin-top:0">
+        <span class="search">搜索标题、目标、外部单号…</span><span class="sel">状态：全部</span><span class="sel">风险：全部</span><span class="sel">账户：全部</span><span class="sel">申请人：全部</span><span class="seg"><span class="on">全部</span><span>7 天</span><span>30 天</span><span>90 天</span></span>
+      </div>
+      <table class="wt">
+        <tr><th style="width:44px">#</th><th>标题</th><th style="width:200px">状态</th><th style="width:270px">等谁 / 下一步</th><th style="width:66px">风险</th><th style="width:90px">账户</th><th style="width:96px">更新</th></tr>
+        <tr><td class="mono">C#2<span class="demo">示意</span></td><td><div class="ttl">Scale nodegroup ng-app 3 → 5</div><div class="s2">申请人 user:alice · 外部单 CHG-1007</div></td><td><span class="pd"><i class="d"></i><i class="d"></i><i class="d"></i><i class="w"></i><i></i></span> 待审批</td><td>等审批人：「批准并执行」方案 v2</td><td><span class="chip blu">L2</span></td><td>prod-a</td><td class="s2">3 小时前</td></tr>
+        <tr class="pick"><td class="mono">C#1</td><td><div class="ttl">E2E intake: annotate the frontend deployment</div><div class="s2">申请人 webhook:e2e-itsm · 外部单 e2e-itsm CHG-1001</div></td><td><span class="pd"><i class="d"></i><i class="d"></i><i class="d"></i><i class="f"></i><i></i></span> 失败</td><td>下一步：处理目标后「复制为新变更」<div class="s2">预检 #1 未通过，未做任何改动</div></td><td><span class="chip blu">L1</span></td><td>chaos-lab</td><td class="s2">10-03 09:56</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 A-2 · 问题详情 I#1（当前：诊断 · 待复核）</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>问题详情</b><span class="url">/app/issues/1#diagnose</span><span class="anno">一个状态行替代三种进度 · I-a</span><span class="anno">主按钮跟随真实状态 · I-h</span><span class="anno">反馈合并为一处 · I-b</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div>
+    <div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv on">问题 <span class="bd">1</span></div><div class="nv">变更</div><div class="nv moved">资源</div><div class="nv">审计</div><div class="nv">定时任务</div><div class="nv">报告</div>
+  </div>
+  <div class="wf-main">
+    <div class="wf-top"><span>问题 / I#1</span><span class="r">admin <span>退出</span><span>EN</span></span></div>
+    <div class="wf-pad">
+      <div class="crumb">← 问题</div>
+      <div style="display:flex;align-items:center;gap:8px"><span class="idb">I#1</span><span class="sev high">● HIGH</span><span class="h1">EKS-agenticops-chaos-lab-RunningPods-Low</span></div>
+      <div class="statusline amb">
+        <span class="st"><span class="dt amb"></span>根因待复核</span>
+        <span class="why">RCA 置信度 57%，低于自动修复阈值 60%，<b>自动修复已暂停</b>。<span class="muted">等你：判断根因和定位是否正确。</span></span>
+        <span class="btn pri">复核根因 ↓</span><span class="btn">⋯</span>
+      </div>
+      <div class="annoblk" style="margin-left:auto;width:430px">「⋯」菜单：重新运行 RCA · 跳过复核，直接生成修复方案 · 手动标记已解决 · 忽略此问题。原操作栏的 5 个按钮只剩这一个主按钮加一个菜单，「误报 / 确认」并入下面的「你的判断」。</div>
+
+      <div class="grid-r" style="margin-top:10px">
+        <div>
+          <div class="ph wait">
+            <div class="ph-h"><span class="ph-n">1</span><span class="t">诊断</span><span class="s">RCA 完成于 03:40 · 质量闸门未通过 → 等人复核</span><span class="chip amb">待复核</span><span class="btn sm">全部展开</span></div>
+            <div class="ph-b">
+              <div class="sub">根因 <span class="muted xs" style="font-weight:400">RCA 智能体 · Opus 4.6 · 10-03 03:40</span></div>
+              <div class="small">IAM user sa-malibo manually scaled both backend and frontend deployments to 0 replicas in the chaos-lab namespace via kubectl at 03:38:50Z (frontend) and 03:38:52Z (backend). Recurring pattern over the past 12 hours, likely chaos exercises. The frontend HPA (minPods=2) cannot recover from 0 replicas.</div>
+              <div class="sub">置信度</div>
+              <div style="display:flex;align-items:center;gap:10px"><div class="bar" style="width:300px"><b style="width:57%"></b><u style="left:60%"></u></div><b>57%</b><span class="xs muted">竖线 = 自动修复阈值 60%</span></div>
+              <div class="small">原始 95% → <span class="chip red">证据核验未通过</span> ×0.6 → 57% · <span class="chip amb">评审员：证据偏弱</span>（不扣分） <a class="xs">为什么？</a></div>
+              <div class="xs muted">未核实的引用：<span class="mono">PATCH /apis/apps/v1/namespaces/chaos-lab/deployments/frontend/scale by sa-mali…</span> 不在本次 RCA 的工具调用记录里。<span class="anno">I-f I-g</span></div>
+              <div class="sub">根因定位 <span class="chip grn">有效</span></div>
+              <div class="small"><b>#1</b> <a>backend</a> <span class="muted">K8s Deployment</span> <span class="xs" style="color:#0f6b34">证据 E1 E2 E3 E5</span> &nbsp; <b>#2</b> <a>frontend</a> <span class="muted">K8s Deployment</span> <span class="xs" style="color:#0f6b34">证据 E1 E2 E3 E4</span></div>
+              <div class="xs muted">因果路径：agenticops-chaos-lab → chaos-lab（包含）· agenticops-chaos-lab → agenticops（包含）</div>
+              <div style="display:flex;gap:6px;margin-top:6px"><span class="btn sm">▸ 贡献因素 4</span><span class="btn sm">▸ 建议 6</span><span class="btn sm">▸ 局部拓扑 · 锚点 1 跳 + 因果路径 · 12 / 132 个节点</span></div>
+              <div class="verdict">
+                <div style="display:flex;justify-content:space-between"><b class="small">你的判断</b><span class="xs muted">一次提交，同时记录根因结论与定位判断</span></div>
+                <div class="radio"><i class="on"></i><span><b>根因和定位都正确</b> <span class="muted">→ 继续：主按钮变为「生成修复方案」</span></span></div>
+                <div class="radio"><i></i><span><b>部分正确</b> <span class="muted">（根因对，定位不全或排序不对）</span></span></div>
+                <div class="radio"><i></i><span><b>根因错误</b> <span class="muted">→ 记入 RCA 记忆，可「重新运行 RCA」</span></span></div>
+                <div class="radio"><i></i><span><b>这不是问题（误报）</b> <span class="muted">→ 忽略本问题，并记住同类告警</span></span></div>
+                <div class="ta">备注（「根因错误」「误报」时必填）</div>
+                <span class="btn pri sm">提交判断</span>
+                <div class="xs muted" style="margin-top:4px">实现：一次 <code>POST /api/health-issues/1/rca-feedback</code>（<code>verdict</code> + <code>location_verdict</code> + <code>note</code>），加上 <code>POST /api/health-issues/1/feedback</code>（<code>confirmed</code> 或 <code>false_positive</code>）。都是现有端点。定位为 <code>absent/invalid</code> 时「部分正确」置灰并说明原因（后端会 409）。</div>
+              </div>
+            </div>
+          </div>
+          <div class="ph fut"><div class="ph-h"><span class="ph-n">2</span><span class="t">方案</span><span class="s">复核为「正确」后由 SRE 智能体生成；也可在「⋯」里跳过复核直接生成</span></div></div>
+          <div class="ph fut"><div class="ph-h"><span class="ph-n">3</span><span class="t">审批并执行</span><span class="s">L0 / L1 自动批准并执行；L2 及以上等人「批准并执行」</span></div></div>
+          <div class="ph fut"><div class="ph-h"><span class="ph-n">4</span><span class="t">验收</span><span class="s">执行后自动验证；无法判定时等人验收</span></div></div>
+          <div class="annoblk">未来阶段只写一句「谁、在什么条件下推动它」，不放按钮，解决 Fix Plan tab 里重复的「Create Fix Plan」<span class="pid">I-d</span>。局部图默认折叠，展开后只画「锚点 1 跳 + 因果路径」，上限约 15 个节点，非路径节点悬停才显示标签，另有「显示全部 132」开关 <span class="pid">I-e</span>。</div>
+        </div>
+        <div class="rail">
+          <div class="card"><h5>关键事实</h5>
+            <dl class="kv">
+              <dt>锚点</dt><dd><a>EKS 集群 agenticops-chaos-lab</a> <span class="chip grn">已定位</span></dd>
+              <dt>根因资源</dt><dd><a>backend</a> · <a>frontend</a> <span class="muted">K8s Deployment</span></dd>
+              <dt>账户</dt><dd>chaos-lab (aws)</dd>
+              <dt>严重度</dt><dd><span class="sev high">HIGH</span></dd>
+              <dt>来源</dt><dd>CloudWatch 告警 · <a>合并信号 1 条 →</a></dd>
+              <dt>检测于</dt><dd>2026-10-03 03:39:04</dd>
+              <dt>Trace</dt><dd class="mono">TRC-c6db8c46 ⧉</dd>
+            </dl>
+            <div class="xs muted" style="margin-top:6px">没有值的字段（告警原始 Resource「unknown」、Type、Region）直接不显示，不再和定位卡打架 <span class="pid">I-c</span>。</div>
+          </div>
+          <div class="card"><h5>动态 <span class="xs muted" style="font-weight:400">7 条 · <a>原始事件 (8)</a></span></h5>
+            <ul class="act">
+              <li><time>03:39</time>CloudWatch 告警创建问题（high · 信号 #1）</li>
+              <li class="b"><time>03:39</time>RCA 开始（Opus 4.6 · 思考预算 4096）</li>
+              <li><time>03:39</time>状态：已打开 → 调查中</li>
+              <li class="g"><time>03:40</time>RCA 完成，原始置信度 95%</li>
+              <li class="r"><time>03:41</time>证据核验未通过：1 条引用不在工具调用记录中，置信度 ×0.6</li>
+              <li class="a"><time>03:41</time>评审员：证据偏弱</li>
+              <li class="a"><time>03:41</time>57% &lt; 阈值 60%，等人工复核</li>
+            </ul>
+          </div>
+          <div class="card" style="border-style:dashed"><h5>关联 <span class="chip gry">二期</span></h5>
+            <div class="small"><a>C#1</a> 同一资源 frontend · <span class="chip red">失败</span><br><span class="xs muted">变更预检失败正是因为 frontend 被缩到 0 <span class="pid n">C-f</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 A-3 · 变更详情 C#1（终态：失败）</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>变更详情</b><span class="url">/app/changes/1#run</span><span class="anno">失败原因只出现一次 · C-b</span><span class="anno">终态给出下一步 · C-c</span><span class="anno">已结束的阶段折叠 · C-a</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div>
+    <div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv">问题 <span class="bd">1</span></div><div class="nv on">变更</div><div class="nv moved">资源</div><div class="nv">审计</div><div class="nv">定时任务</div>
+  </div>
+  <div class="wf-main">
+    <div class="wf-top"><span>变更 / C#1</span><span class="r">admin <span>退出</span><span>EN</span></span></div>
+    <div class="wf-pad">
+      <div class="crumb">← 变更</div>
+      <div style="display:flex;align-items:center;gap:8px"><span class="idb">C#1</span><span class="h1">E2E intake: annotate the frontend deployment</span><span class="chip blu">L1</span><span class="chip gry">标准变更</span></div>
+      <div class="statusline fail">
+        <span class="st"><span class="dt red"></span>失败</span>
+        <span class="why">预检 #1 未通过：Deployment frontend 就绪副本 0/3（期望 3/3），执行已中止，<b>没有做任何改动</b>。<span class="muted">下一步：先处理 frontend（见关联 I#1），再复制为新变更。</span></span>
+        <span class="btn pri">复制为新变更</span><span class="btn">⋯</span>
+      </div>
+      <div class="grid-r" style="margin-top:10px">
+        <div>
+          <div class="ph done"><div class="ph-h"><span class="ph-n">✓</span><span class="t">申请</span><span class="s">webhook:e2e-itsm 于 10-03 03:37 提交 · 外部单 e2e-itsm CHG-1001 · 目标 1 个 · 请求步骤 1 条</span><span class="btn sm">展开</span></div></div>
+          <div class="ph done"><div class="ph-h"><span class="ph-n">✓</span><span class="t">审核</span><span class="s">SRE 智能体 03:38 判定可以计划 · 动作 tag · 策略 auto-approve-low-risk 建议自动批准；来源是 webhook，不能自动批准，转人工</span><span class="btn sm">展开</span></div></div>
+          <div class="ph done"><div class="ph-h"><span class="ph-n">✓</span><span class="t">方案</span><span class="s">v1 · <span class="mono">#8f48231e</span> · 1 步 · 3 项预检 · 3 项后检 · 回滚 1 步 · 与请求一致</span><span class="btn sm">展开 → PlanView</span></div></div>
+          <div class="ph fail">
+            <div class="ph-h"><span class="ph-n">!</span><span class="t">审批并执行</span><span class="s">admin 批准 v1 → 执行 #1 中止于预检 #1</span><span class="chip red">失败</span></div>
+            <div class="ph-b">
+              <div class="small"><b>审批</b> · admin 于 09:55:56 批准 v1 <span class="mono">#8f48231e</span> <span class="chip grn">哈希一致</span> · 理由「go for deployment.」</div>
+              <div class="small" style="margin-top:6px"><b>执行 #1</b> · <span class="chip red">已中止</span> · 09:56:11 由 user:admin 点击执行（当时批准与执行还是两步）· 09:56:39 中止于预检 #1</div><div class="xs muted">在本设计（批准即执行）下，这两步就是一次「批准并执行」。</div>
+              <div class="sub">预检 <span class="xs muted" style="font-weight:400">1 项未通过 · 2 项通过</span></div>
+              <div class="chk"><span class="n">1</span><span class="fail-b">FAIL</span><span>Deployment exists and is healthy</span><span class="o">输出 <b style="color:#b42318">/0</b> · 期望 3/3</span></div>
+              <div class="chk"><span class="n">2</span><span class="pass">PASS</span><span>Record current annotation state</span></div>
+              <div class="chk"><span class="n">3</span><span class="pass">PASS</span><span>Record current rollout revision</span></div>
+              <div class="small" style="margin-top:6px"><span class="skip">SKIP</span> 步骤 1 未执行 &nbsp; <span class="skip">SKIP</span> 后检未执行 &nbsp; <span class="skip">N/A</span> 回滚不需要（没有做改动）</div>
+              <div class="xs muted" style="margin-top:4px">这里只列证据（哪项检查、什么输出），原因句只在顶部状态行出现一次。展开某项可以看命令：<span class="mono">kubectl get deployment frontend -n chaos-lab -o jsonpath='{.status.readyReplicas}/{.spec.replicas}'</span></div>
+            </div>
+          </div>
+          <div class="ph fut"><div class="ph-h"><span class="ph-n">5</span><span class="t">验收</span><span class="s">系统已判定失败（见执行 #1），不需要人工验收</span></div></div>
+          <div class="annoblk">阶段列表在失败的地方收尾，最后一张卡就是结局，不再画「⑥ Completed」<span class="pid">C-d</span>。整页高度约 1100 px（现状 5070 px）。</div>
+        </div>
+        <div class="rail">
+          <div class="card"><h5>关键事实</h5>
+            <dl class="kv">
+              <dt>目标</dt><dd class="mono" style="font-size:11px">agenticops-chaos-lab/Deployment/chaos-lab/frontend</dd>
+              <dt>账户</dt><dd>chaos-lab (aws)</dd>
+              <dt>风险</dt><dd><span class="chip blu">L1</span> 标准变更</dd>
+              <dt>申请人</dt><dd>webhook:e2e-itsm <span class="muted">（外部 e2e-requester）</span></dd>
+              <dt>外部单</dt><dd><a>e2e-itsm CHG-1001 ↗</a></dd>
+              <dt>创建于</dt><dd>2026-10-03 03:37:32</dd>
+              <dt>Trace</dt><dd class="mono">TRC-51311e3a ⧉</dd>
+            </dl>
+          </div>
+          <div class="card" style="border-style:dashed;border-color:#e7a93a"><h5>关联 <span class="chip gry">二期</span></h5>
+            <div class="small">⚠ <a>I#1</a> 仍在进行中：同一 Deployment frontend 被缩容到 0。<br><span class="xs muted">审核的实时检查（03:38:19）时目标 3/3 就绪；I#1 的根因记录它在 03:38:50Z 被缩容，二者都是 UTC。也就是说，审核刚通过半分钟，目标就坏了。</span></div>
+          </div>
+          <div class="card"><h5>动态 <span class="xs muted" style="font-weight:400">9 条 · <a>原始事件 (22)</a></span></h5>
+            <ul class="act">
+              <li><time>03:37</time>webhook:e2e-itsm 提交申请（CHG-1001）</li>
+              <li class="b"><time>03:37</time>SRE 智能体开始审核</li>
+              <li class="a"><time>03:38</time>策略 auto-approve-low-risk 建议自动批准（L1 · tag）</li>
+              <li class="a"><time>03:38</time>自动批准被规则 no-webhook-approve-or-execute 拦下 ×2，转人工</li>
+              <li><time>03:38</time>生成实施方案 v1 #8f48231e</li>
+              <li class="g"><time>03:38</time>审核通过 → 已计划，等人批准</li>
+              <li class="g"><time>09:55</time>admin 批准 v1：「go for deployment.」</li>
+              <li class="b"><time>09:56</time>admin 点击执行，执行 #1 开始</li>
+              <li class="r"><time>09:56</time>执行 #1 中止于预检 #1 → 变更失败</li>
+            </ul>
+            <div class="xs muted">连续重复的事件合并（×2）；原始 JSON 收进「原始事件」开关 <span class="pid">C-e</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 A-4 · 同一模板的其它状态（审批人视角 / 入队失败）</h3>
+<div class="cols2">
+<div class="wf" style="margin-top:0">
+<div class="wf-cap"><b>C#1 在 09:55 时的样子</b>（状态 planned，回放）<span class="anno">批准 = 执行</span></div>
+<div class="wf-pad">
+  <div class="statusline amb"><span class="st"><span class="dt amb"></span>待审批</span><span class="why">方案 v1 已就绪，策略建议自动批准，但来源是 webhook，需要人工批准。<span class="muted">等审批人。</span></span><span class="btn go">批准并执行</span><span class="btn">⋯</span></div>
+  <div class="ph done" style="margin-top:8px"><div class="ph-h"><span class="ph-n">✓</span><span class="t">方案</span><span class="s">v1 · #8f48231e · 1 步 · 预检 3 · 后检 3 · 回滚 1 · 与请求一致</span></div></div>
+  <div class="ph wait"><div class="ph-h"><span class="ph-n">4</span><span class="t">审批并执行</span><span class="s">等审批人</span><span class="chip amb">待审批</span></div>
+    <div class="ph-b">
+      <div class="sub">风险与策略</div>
+      <div class="small"><span class="chip blu">L1</span> 动作 tag · 策略 auto-approve-low-risk → 建议自动批准</div>
+      <ul class="small" style="margin:3px 0"><li>目标已在库存中核实，实时检查 3/3 就绪</li><li>只改 Deployment 元数据，不会触发新 ReplicaSet / Pod 重启</li><li>有精确回滚（删除该 annotation）</li></ul>
+      <div class="xs"><a>其余理由 ▸</a> · 影子影响：1 个资源（仅供参考，不参与策略）<a>查看影响图 ▸</a></div>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center"><span class="btn go">批准并执行</span><span class="btn dan">拒绝</span><span class="btn">取消变更</span><span class="xs muted">批准后立即执行该方案。</span></div>
+    </div>
+  </div>
+  <div class="annoblk">「批准并执行」打开现有 ReasonDialog（slideInRight + ESC）：标题「批准并执行 C#1 方案 v1」，副标题显示哈希 #8f48231e，理由必填，按钮「批准并执行」。状态行的主按钮和阶段卡里的按钮是同一个处理函数，两者永远一致。</div>
+</div>
+</div>
+<div class="wf" style="margin-top:0">
+<div class="wf-cap"><b>已批准，但没能入队</b>（状态 approved）<span class="anno">「重试执行」只出现在这里</span></div>
+<div class="wf-pad">
+  <div class="statusline fail"><span class="st"><span class="dt red"></span>已批准</span><span class="why">已批准，但未能入队执行 —— 请重试。<span class="muted">admin 于 09:55 批准 v1 #8f48231e。</span></span><span class="btn pri">重试执行</span><span class="btn">⋯</span></div>
+  <div class="ph fail" style="margin-top:8px"><div class="ph-h"><span class="ph-n">!</span><span class="t">审批并执行</span><span class="s">已批准 · 入队失败</span><span class="chip red">需重试</span></div>
+    <div class="ph-b small">批准记录：admin · 09:55:56 · v1 #8f48231e · 「go for deployment.」<br>入队错误：<span class="mono xs">（后端返回的原因原样显示一次）</span></div>
+  </div>
+  <div class="ph fut"><div class="ph-h"><span class="ph-n">5</span><span class="t">验收</span><span class="s">执行完成后自动验证</span></div></div>
+  <h5 style="margin:12px 0 4px">共享组件 PlanView（问题的修复方案和变更的实施方案都用它）</h5>
+  <div class="card">
+    <div class="small"><b>方案 v1</b> · <span class="mono">#8f48231e</span> · <span class="chip grn">已批准 v1 · 哈希一致</span> · 与请求一致（无增删改）</div>
+    <div style="margin:6px 0"><span class="seg"><span class="on">步骤 1</span><span>预检 3</span><span>后检 3</span><span>回滚 1</span></span></div>
+    <div class="small">1. Annotate the deployment</div>
+    <div class="code">$ kubectl annotate deployment frontend -n chaos-lab aiops-e2e/intake=checked --overwrite</div>
+    <div class="xs muted">由现有 RunbookStep / CheckItem / RollbackPlan 组合；变更多一个「与请求的差异」行（来自 <code>steps_diff</code>），修复方案没有这一行。<span class="pid">L-f</span></div>
+  </div>
+</div>
+</div>
+</div>
+
+<h3>状态 → 阶段映射（<code>lib/issuePhases.ts</code> / <code>lib/changePhases.ts</code>，纯函数，可测试）</h3>
+<div class="cols2">
+<table class="t">
+<tr><th>问题状态</th><th>当前阶段</th><th>等谁 / 主按钮</th></tr>
+<tr><td>open · investigating · acknowledged</td><td>① 诊断</td><td>RCA 智能体 / 无主按钮（「⋯」有「运行 RCA」）</td></tr>
+<tr class="hl"><td>root_cause_identified，RCA <b>未过</b>闸门</td><td>① 诊断 · 待复核</td><td>你 /「复核根因」</td></tr>
+<tr><td>root_cause_identified，RCA 已过闸门</td><td>② 方案</td><td>SRE 智能体 /「生成修复方案」（自动流水线没跑时）</td></tr>
+<tr><td>fix_planned（方案 pending_approval）</td><td>③ 审批并执行 · 待审批</td><td>审批人 /「批准并执行」</td></tr>
+<tr><td>fix_approved（未入队）</td><td>③ · 需重试</td><td>你 /「重试执行」</td></tr>
+<tr><td>fix_executing</td><td>③ · 执行中</td><td>执行器 / 无（「⋯」有「取消执行」）</td></tr>
+<tr><td>fix_executed + pending_acceptance</td><td>④ 验收 · 待验收</td><td>你 /「接受结果」（「拒绝」在旁边）</td></tr>
+<tr><td>resolved · dismissed</td><td>终态横幅</td><td>「重新打开」放进「⋯」</td></tr>
+</table>
+<table class="t">
+<tr><th>变更状态</th><th>当前阶段</th><th>等谁 / 主按钮</th></tr>
+<tr><td>draft</td><td>① 申请</td><td>申请人 /「发起审核」</td></tr>
+<tr><td>under_review</td><td>② 审核 · 进行中</td><td>SRE 智能体 / 无</td></tr>
+<tr><td>needs_clarification</td><td>② 审核 · 待澄清</td><td>申请人 /「回答审核方」（输入框在阶段卡内）</td></tr>
+<tr><td>planned</td><td>④ 审批并执行 · 待审批</td><td>审批人 /「批准并执行」</td></tr>
+<tr class="hl"><td>approved（未入队）</td><td>④ · 需重试</td><td>你 /「重试执行」</td></tr>
+<tr><td>executing</td><td>④ · 执行中</td><td>执行器 / 无</td></tr>
+<tr><td>needs_review</td><td>⑤ 验收 · 待验收</td><td>验收人 /「标记完成」（「标记失败」在旁边）</td></tr>
+<tr><td>completed · failed · rolled_back · rejected · cancelled</td><td>终态（在失败或结束的阶段收尾）</td><td>失败 / 回滚 / 拒绝 →「复制为新变更」</td></tr>
+</table>
+</div>
+<p class="small muted">「RCA 是否过闸门」= 最新 RCA 的 <code>confidence</code> ≥ <code>rca_min_confidence_for_autofix</code>，且评审员没有判 refuted。阈值目前不下发给前端，需要在 <code>GET /api/settings</code> 加一个只读字段（见「公共修复」P5）。</p>
+
+<h3>问题 → 解决</h3>
+<table class="t">
+<tr><th style="width:62px">问题</th><th>方案 A 的解决方式</th></tr>
+<tr><td><span class="pid">I-a</span></td><td>删掉 7 步步进器、5 段进度条和三枚状态；只留一个状态行（状态 · 为什么 · 等谁 · 一个主按钮），进度由阶段卡本身表达。</td></tr>
+<tr><td><span class="pid">I-b</span></td><td>生命周期动作只剩一个主按钮加「⋯」；👍👎、定位三选一、误报 / 确认合并成「你的判断」一个块，一次提交。</td></tr>
+<tr><td><span class="pid">I-c</span></td><td>右栏「关键事实」用锚点和根因资源，空值字段不显示；锚点徽章显示锚定资源名。</td></tr>
+<tr><td><span class="pid">I-d</span></td><td>没有 tab：线性流程就是一列阶段卡；未来阶段只有一句说明，不放按钮。</td></tr>
+<tr><td><span class="pid">I-e</span></td><td>局部图默认折叠；展开后画锚点 1 跳 + 因果路径，上限约 15 个节点，「显示全部 132」开关。</td></tr>
+<tr><td><span class="pid">I-f</span></td><td>「证据核验未通过」「评审员：证据偏弱」写成人话，并列出未核实的引用。</td></tr>
+<tr><td><span class="pid n">I-g</span></td><td>置信度条带阈值竖线，并写出「95% → ×0.6 → 57%」的推导。</td></tr>
+<tr><td><span class="pid n">I-h</span></td><td>主按钮由 <code>issuePhases</code> 根据「RCA 是否过闸门」决定：这里是「复核根因」。</td></tr>
+<tr><td><span class="pid n">I-i</span></td><td>状态、阶段、确认文案全部走 locale；空的 Model 字段不显示。</td></tr>
+<tr><td><span class="pid">C-a</span></td><td>已结束的阶段折叠成一句话；页面约 1100 px。策略理由只露 3 条，其余折叠；影子影响图按需打开。</td></tr>
+<tr><td><span class="pid">C-b</span></td><td>原因句只在状态行出现；执行卡只放检查证据；验收卡写「系统已判定失败（见执行 #1）」。</td></tr>
+<tr><td><span class="pid">C-c</span></td><td>终态主按钮是「复制为新变更」，下一步写在状态行里。</td></tr>
+<tr><td><span class="pid">C-d</span></td><td>阶段列表在失败处收尾，不画后面的「Completed」。</td></tr>
+<tr><td><span class="pid">C-e</span></td><td>右栏「动态」：一事件一句话，重复合并，authz.denied 翻译成规则名 + 后果，原始 JSON 在开关里。</td></tr>
+<tr><td><span class="pid n">C-f</span></td><td>右栏「关联」（二期）：按资源反查同一资源上未关闭的问题 / 变更。</td></tr>
+<tr><td><span class="pid">C-g</span></td><td>主按钮「批准并执行」；「重试执行」只在 approved（未入队）时出现。</td></tr>
+<tr><td><span class="pid">L-a</span></td><td>筛选压成一行下拉。</td></tr>
+<tr><td><span class="pid">L-b</span></td><td>资源独立进侧栏；信号改为 <code>/app/signals</code>，从工具栏和右栏进入。</td></tr>
+<tr><td><span class="pid">L-c</span></td><td>列表和详情用同一份 locale 状态文案。</td></tr>
+<tr><td><span class="pid">L-d</span></td><td>问题和变更共用 WorkItemTable：同列序，同「等谁 / 下一步」列。</td></tr>
+<tr><td><span class="pid">L-e</span></td><td><b>不做独立方案列表</b>（刻意）：方案离开所属工单就没法决策。「跨工单的待批方案」交给 B 的待办；A 的列表可以按「状态：待审批」筛出来。</td></tr>
+<tr><td><span class="pid">L-f</span></td><td>共享 PlanView 和共享的后三段阶段卡。</td></tr>
+<tr><td><span class="pid">L-g</span></td><td>部分解决：列表里有「等谁」列，可以按「等你」排序和筛选。完整的「待我处理」入口要等 B。</td></tr>
+</table>
+
+<h3>交互细节</h3>
+<ul>
+<li><b>键盘：</b>阶段卡头是 <code>&lt;button&gt;</code>，Tab 可聚焦，Enter / 空格展开或折叠；URL 锚点（<code>#diagnose</code>、<code>#run</code>…）直达某阶段；所有对话框（ReasonDialog、确认框）沿用 <code>animate-[slideInRight_0.2s_ease-out]</code>，ESC 关闭。</li>
+<li><b>空状态：</b>未来阶段只写「谁、在什么条件下推动它」。全页只有状态行一个主按钮，其它地方不重复放 CTA。</li>
+<li><b>失败状态：</b>失败阶段红框、自动展开；原因句只在状态行；接口错误（409 / 403）显示在状态行下方的 ErrorBanner，比如「方案已更新到 v2，请重新查看」「按职责分离规则，申请人不能批准自己的变更」。</li>
+<li><b>进行中：</b>执行中的阶段显示转圈和已用时，沿用现有轮询（<code>ISSUE_IN_FLIGHT</code>、<code>hasRunInFlight</code>、状态变化时重拉执行记录）。</li>
+<li><b>全部展开：</b>阶段卡头有「全部展开」，用于打印、复盘、对照。</li>
+<li><b>双语：</b>新文案全部进 <code>locales/zh.json</code> + <code>en.json</code>（<code>workitem.phase.*</code>、<code>workitem.wait.*</code>、<code>activity.*</code>）。状态行原因最多两行，超出折叠；英文更长，主按钮固定在右侧不换行。数据本身（RCA 原文、命令）不翻译。</li>
+</ul>
+
+<h3>改动范围</h3>
+<table class="t">
+<tr><th style="width:150px">面</th><th style="width:80px">做 / 非目标</th><th>内容</th></tr>
+<tr><td>CLI</td><td class="no">非目标</td><td><code>aiops chat</code>、<code>/change</code> 不变。</td></tr>
+<tr><td>Web API</td><td class="yes">做（极小）</td><td><b>不新增端点。</b>只在 <code>GET /api/settings</code> 加一个只读字段 <code>rca_min_confidence_for_autofix</code>（公共修复 P5 也需要）。复用：<code>GET /api/issues/{id}</code>、<code>/api/issues/{id}/rca</code>、<code>/api/fix-plans?health_issue_id=</code>、问题执行记录与时间线端点、<code>POST /api/health-issues/{id}/rca-feedback</code>、<code>POST /api/health-issues/{id}/feedback</code>、<code>PUT /api/fix-plans/{id}/approve</code>、<code>POST /api/fix-plans/{id}/reject</code>、<code>POST /api/fix-executions/{id}/accept</code>、<code>/api/changes/*</code>（含已实现的批准即执行）。二期「关联」需要给 <code>GET /api/issues</code> 和 <code>GET /api/changes</code> 加按资源过滤的参数。</td></tr>
+<tr><td>Web UI</td><td class="yes">做</td><td>重写 <code>pages/IssueDetail.tsx</code>（1259 行 → 约 500 行）、<code>pages/ChangeDetail.tsx</code>（732 → 约 400）；改 <code>pages/IssuesAndPlans.tsx</code>（只留问题，资源 / 信号拆出）、<code>components/plans/ChangePlansTab.tsx</code>（改用 WorkItemTable）。新增 <code>components/workitem/{StatusLine,PhaseCard,FactsRail,ActivityList}.tsx</code>、<code>components/plans/PlanView.tsx</code>、<code>components/issue/VerdictBlock.tsx</code>、<code>components/ui/WorkItemTable.tsx</code>、<code>lib/{issuePhases,changePhases,activity}.ts</code> 及测试。<code>NavItems.tsx</code>（+资源）、<code>App.tsx</code>（路由与重定向）、<code>locales/{zh,en}.json</code>。详情页不再用 <code>IssueStatusStepper</code> / <code>PipelineStepper</code> / <code>IssueActionBar</code>。</td></tr>
+<tr><td>Agent tool</td><td class="no">非目标</td><td>智能体工具不变。</td></tr>
+<tr><td>Schedule</td><td class="no">非目标</td><td>—</td></tr>
+<tr><td>Notification</td><td class="no">非目标</td><td>通知里的链接仍指向 <code>/app/issues/:id</code>、<code>/app/changes/:id</code>，新模板照常打开。</td></tr>
+</table>
+
+<div class="cols3">
+<div class="box"><h4>工作量 <span class="tag l">L</span></h4><p class="small">约 18 个文件，两个大页重写。复用 RunbookStep、CheckItem、RollbackPlan、ExecutionEvidence、VerificationChip、LocalGraph、ReasonDialog、NewChangeDialog（复制为新变更）。</p></div>
+<div class="box"><h4>风险与代价</h4><ul class="small"><li>IssueDetail 有不少微妙逻辑（进行中轮询、状态变化时重拉执行记录、只在 fix_executed 时可验收、<code>approvalBlockedReason</code>）。缓解：留在 <code>lib/*</code> 纯函数里，测试先行。</li><li>折叠会藏起有人依赖的信息（比如局部图），所以有「全部展开」。</li><li>旧 <code>?tab=</code> 深链接必须映射。</li></ul></div>
+<div class="box"><h4>刻意不做</h4><ul class="small"><li>独立的修复方案列表页</li><li>把问题和变更合并成同一个实体或同一个列表（两个列表，同一个表格组件）</li><li>批量操作、拖拽</li><li>新增端点</li><li>改审计页</li></ul></div>
+</div>
+
+<h3>分期落地</h3>
+<ol>
+<li><b>A1 公共修复</b>（见「公共修复」页，S，可以先单独上线）</li>
+<li><b>A2 模板组件 + 问题详情：</b>StatusLine / PhaseCard / FactsRail / ActivityList / PlanView / VerdictBlock + <code>issuePhases</code>，IssueDetail 套模板</li>
+<li><b>A3 变更详情：</b>在同一批组件上组装 ChangeDetail + <code>changePhases</code></li>
+<li><b>A4 列表与信息架构：</b>WorkItemTable、资源独立入口、<code>/app/signals</code>、重定向</li>
+<li><b>A5（可选）关联：</b>按资源反查同资源上的未关闭工单</li>
+</ol>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-b">
+<h2>方案 B ·「待办驱动」</h2>
+
+<div class="cols2">
+<div class="box">
+<h4>核心理念：人只做决定，每个决定只给必要的信息</h4>
+<p>大部分工作由智能体推进（RCA、生成方案、L0/L1 自动批准、执行、自动验证）。人真正要做的是少数几个<b>身份绑定的决定</b>：批准或拒绝、验收、复核根因、回答澄清、重试。B 给这些决定一个统一入口「待我处理」。每个决定在一个右侧抽屉里完成，抽屉里只放做这个决定必需的信息。详情页保留给深度调查，只做瘦身（公共修复 + 少量结构调整）。</p>
+</div>
+<div class="box">
+<h4>服务谁</h4>
+<p><b>主要：</b>审批人、值班负责人、变更经理。<br><b>次要：</b>SRE 每天第一眼该看的地方。</p>
+<h4>「我」是谁</h4>
+<p class="small">系统里没有指派（assignee）模型，所以「待我处理」= <b>我的权限和职责分离规则允许我做的决定</b>，判定方式和写端点完全一致（同一个 <code>authz.check</code>）。例如 <code>rbac.yaml</code> 的 <code>sod-change-approver-not-requester</code>：我自己提交的变更不进我的「待审批」（影子模式下照样显示，但带提醒）；「待澄清」只给申请人和管理员（<code>requester-or-admin</code>）。</p>
+</div>
+</div>
+
+<h3>六个桶</h3>
+<table class="t">
+<tr><th style="width:96px">桶</th><th>问题侧</th><th>变更侧</th><th style="width:200px">决定</th><th>服务端判据</th></tr>
+<tr><td><b>待审批</b></td><td>修复方案 <code>pending_approval</code>（L2 及以上）</td><td><code>planned</code></td><td>批准并执行 / 拒绝</td><td><code>fix_plans.status</code>；<code>change_requests.status</code></td></tr>
+<tr><td><b>待验收</b></td><td>最新执行 <code>pending_acceptance</code>（问题停在 <code>fix_executed</code>）</td><td><code>needs_review</code></td><td>接受 / 拒绝（理由必填）</td><td><code>fix_executions.verification_status</code></td></tr>
+<tr><td><b>待复核</b></td><td>最新 RCA 没过闸门（置信度低于阈值或被评审员驳回），且还没人判定</td><td>—</td><td>正确 / 部分正确 / 错误 / 误报</td><td><code>rca_results.confidence</code>、<code>critic_verdict</code>、<code>human_verdict IS NULL</code></td></tr>
+<tr><td><b>待澄清</b></td><td>—</td><td><code>needs_clarification</code>，且我是申请人或管理员</td><td>回答审核方</td><td><code>requested_by</code></td></tr>
+<tr><td><b>需重试</b></td><td>修复方案 approved 但没入队</td><td><code>approved</code>（未能入队）</td><td>重试执行</td><td>批准后没有执行记录</td></tr>
+<tr><td><b>近期失败</b></td><td>执行失败（7 天）</td><td><code>failed</code> / <code>rolled_back</code>（7 天）</td><td>只是知会：复制为新变更 / 查看</td><td>7 天后自动移出，不需要「已读」状态</td></tr>
+</table>
+
+<h3>信息架构（侧栏与路由）</h3>
+<table class="t">
+<tr><th style="width:200px"></th><th>之前</th><th>之后</th></tr>
+<tr><td>侧栏</td><td>仪表盘 · 对话 · 问题 · 变更 · 审计 · …</td><td>仪表盘 · <b>待办</b>（新，带数字角标）· 对话 · 问题 · 变更 · 审计 · …（其余不动）</td></tr>
+<tr><td>新路由</td><td>—</td><td><code>/app/inbox?bucket=approve|accept|review|clarify|retry|failed</code>；抽屉状态也在 URL 里：<code>/app/inbox?item=C2</code>，通知和聊天可以直接深链接到某个决定</td></tr>
+<tr><td>仪表盘</td><td>「Active Plans」卡</td><td>换成「待我处理」卡：每个桶的计数 + 前 3 项，点击直接打开抽屉</td></tr>
+<tr><td>详情页</td><td>现有结构</td><td>保留路由。瘦身：一个状态行；tab 从 5 个减为 3 个；反馈合并；变更详情加左侧分节导航（见 B-5）</td></tr>
+</table>
+
+<h3>线框 B-1 · 待我处理</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>待办</b><span class="url">/app/inbox</span><span class="anno">回答「什么在等我」· L-g</span><span class="anno">问题和变更混排，按等待时长排序</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div>
+    <div class="nv">仪表盘</div><div class="nv on new">待办 <span class="bd">4</span></div><div class="nv">对话</div><div class="nv">问题</div><div class="nv">变更</div><div class="nv">审计</div><div class="nv">定时任务</div><div class="nv">报告</div><div class="nv">技能</div><div class="nv">安全</div>
+  </div>
+  <div class="wf-main">
+    <div class="wf-top"><span>待办</span><span class="r">admin <span>退出</span><span>EN</span></span></div>
+    <div class="wf-pad">
+      <div style="display:flex;align-items:baseline;gap:10px"><div class="h1">待我处理</div><span class="small muted">你有权限做决定的事项 · 等得最久的排在最前</span></div>
+      <div class="toolbar">
+        <span class="seg"><span class="on">全部 5</span><span>待审批 2</span><span>待验收 1</span><span>待复核 1</span><span>待澄清 0</span><span>需重试 0</span><span>近期失败 1</span></span>
+        <span class="sel">账户：全部</span><span class="sel">类型：问题 + 变更</span><span class="sp"></span><span class="xs muted">↑↓ 选择 · Enter 打开 · ESC 关闭</span>
+      </div>
+      <table class="wt">
+        <tr><th style="width:84px">桶</th><th style="width:48px">#</th><th>标题</th><th style="width:330px">要你做什么 / 为什么</th><th style="width:66px">级别</th><th style="width:84px">账户</th><th style="width:80px">已等待</th></tr>
+        <tr class="pick"><td><span class="chip amb">待复核</span></td><td class="mono">I#1</td><td class="ttl">EKS-agenticops-chaos-lab-RunningPods-Low</td><td>判断根因是否正确<div class="s2">RCA 57%，低于自动修复阈值 60%，自动修复已暂停</div></td><td><span class="sev high">HIGH</span></td><td>chaos-lab</td><td class="s2">1 天</td></tr>
+        <tr><td><span class="chip blu">待审批</span></td><td class="mono">C#2<span class="demo">示意</span></td><td class="ttl">Scale nodegroup ng-app 3 → 5</td><td>批准并执行方案 v2，或拒绝<div class="s2">v2 比申请多 1 个预检；影子影响 14 个资源</div></td><td><span class="chip blu">L2</span></td><td>prod-a</td><td class="s2">3 小时</td></tr>
+        <tr><td><span class="chip grn">待验收</span></td><td class="mono">I#2<span class="demo">示意</span></td><td class="ttl">RDS database-demo CPUUtilization &gt; 90%</td><td>接受或拒绝执行 #4 的结果<div class="s2">后检 2/3 通过，系统无法自动判定</div></td><td><span class="sev crit">CRIT</span></td><td>prod-a</td><td class="s2">40 分钟</td></tr>
+        <tr><td><span class="chip blu">待审批</span></td><td class="mono">I#4<span class="demo">示意</span></td><td class="ttl">S3 bucket logs-archive 公共读 ACL</td><td>批准并执行修复方案 v1，或拒绝<div class="s2">去掉 public-read ACL · 有回滚</div></td><td><span class="chip blu">L2</span></td><td>prod-a</td><td class="s2">20 分钟</td></tr>
+        <tr style="opacity:.8"><td><span class="chip red">近期失败</span></td><td class="mono">C#1</td><td class="ttl">E2E intake: annotate the frontend deployment</td><td>知会：预检 #1 未通过，没有做任何改动<div class="s2">可以复制为新变更 · 7 天后自动移出</div></td><td><span class="chip blu">L1</span></td><td>chaos-lab</td><td class="s2">1 天</td></tr>
+      </table>
+      <div class="small muted" style="margin-top:10px">智能体正在处理 3 项，不需要你：<a>RCA 中 1</a> · <a>审核中 1</a> · <a>执行中 1</a></div>
+      <div class="annoblk">空状态：「没有等你做的决定。」下面仍显示「智能体正在处理 N 项」，避免让人误以为系统停了。侧栏角标 = 除「近期失败」外各桶之和（这里是 4），替换现在含义模糊的「有未关闭问题」红点。</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 B-2 · 决策抽屉：复核 I#1 的根因</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>抽屉</b><span class="url">/app/inbox?item=I1</span><span class="anno">slideInRight 0.2s · ESC 关闭</span><span class="anno">只放做这个决定需要的信息</span></div>
+<div class="wf-app" style="height:640px">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv">仪表盘</div><div class="nv on new">待办 <span class="bd">4</span></div><div class="nv">对话</div><div class="nv">问题</div><div class="nv">变更</div></div>
+  <div class="wf-main">
+    <div class="wf-pad" style="filter:blur(.4px)">
+      <div class="h1">待我处理</div>
+      <table class="wt" style="margin-top:14px"><tr><th>桶</th><th>#</th><th>标题</th></tr>
+      <tr class="pick"><td><span class="chip amb">待复核</span></td><td class="mono">I#1</td><td>EKS-agenticops-chaos-lab-RunningPods-Low</td></tr>
+      <tr><td><span class="chip blu">待审批</span></td><td class="mono">C#2</td><td>Scale nodegroup ng-app 3 → 5</td></tr>
+      <tr><td><span class="chip grn">待验收</span></td><td class="mono">I#2</td><td>RDS database-demo CPUUtilization &gt; 90%</td></tr></table>
+    </div>
+    <div class="dim"></div>
+    <div class="drawer">
+      <div class="dh"><span class="chip amb">待复核</span><span class="idb">I#1</span><b class="small">EKS-agenticops-chaos-lab-RunningPods-Low</b><span class="x"><a>打开完整详情 ↗</a> &nbsp; ✕</span></div>
+      <div class="sub" style="margin-top:0">为什么需要你</div>
+      <div class="small">RCA 置信度 <b>57%</b>，低于自动修复阈值 60%，自动修复已暂停。原始 95%：有 1 条证据引用在工具调用记录里找不到，所以 ×0.6；评审员认为证据偏弱。</div>
+      <div class="bar" style="width:260px;margin:6px 0"><b style="width:57%"></b><u style="left:60%"></u></div>
+      <div class="sub">根因（摘要）</div>
+      <div class="small">IAM user sa-malibo scaled backend and frontend to 0 replicas via kubectl at 03:38:50Z / 03:38:52Z; the HPA cannot recover from 0. <a class="xs">全文 ▸</a></div>
+      <div class="sub">定位</div>
+      <div class="small"><b>#1</b> backend · <b>#2</b> frontend <span class="muted">K8s Deployment · 定位有效</span></div>
+      <div class="sub">证据</div>
+      <div class="small">未核实：<span class="mono xs">PATCH …/deployments/frontend/scale by sa-mali…</span> <a class="xs">全部证据 ▸</a></div>
+      <div class="sub">你的判断</div>
+      <div class="opt on"><span class="radio"><i class="on"></i></span><span><b>根因正确</b> · 继续生成修复方案</span></div>
+      <div class="opt"><span class="radio"><i></i></span><span><b>部分正确</b> · 定位不全或排序不对</span></div>
+      <div class="opt"><span class="radio"><i></i></span><span><b>根因错误</b> · 重新运行 RCA</span></div>
+      <div class="opt"><span class="radio"><i></i></span><span><b>误报</b> · 忽略并记住同类告警</span></div>
+      <div class="ta">备注（错误 / 误报时必填）</div>
+      <div class="foot"><span class="btn pri">提交判断</span><span class="btn">稍后</span><span class="xs muted" style="margin-left:auto">提交后抽屉关闭，焦点移到下一行（不自动打开）</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 B-3 · 决策抽屉：批准一个变更（C#1 在 09:55 时的回放）</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>抽屉</b><span class="url">/app/inbox?item=C1</span><span class="anno">差异 + 哈希放在按钮上方</span><span class="anno">理由在抽屉内填写，不再弹第二个框</span></div>
+<div class="wf-app" style="height:700px">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv">仪表盘</div><div class="nv on new">待办 <span class="bd">4</span></div><div class="nv">对话</div><div class="nv">问题</div><div class="nv">变更</div></div>
+  <div class="wf-main">
+    <div class="wf-pad"><div class="h1">待我处理</div></div>
+    <div class="dim"></div>
+    <div class="drawer">
+      <div class="dh"><span class="chip blu">待审批</span><span class="idb">C#1</span><b class="small">E2E intake: annotate the frontend deployment</b><span class="chip blu">L1</span><span class="x"><a>完整详情 ↗</a> &nbsp; ✕</span></div>
+      <div class="annoblk" style="margin-top:0">回放：C#1 在 09:55（状态 planned）时抽屉里会显示的内容。</div>
+      <div class="sub">要批准的是什么</div>
+      <div class="small">方案 <b>v1</b> · <span class="mono">#8f48231e</span> · <span class="chip grn">与请求一致（无增删改）</span></div>
+      <div class="code">$ kubectl annotate deployment frontend -n chaos-lab aiops-e2e/intake=checked --overwrite</div>
+      <div class="small">预检 3 · 后检 3 · 回滚：<span class="mono xs">kubectl annotate deployment frontend -n chaos-lab aiops-e2e/intake-</span> <a class="xs">PlanView ▸</a></div>
+      <div class="sub">风险与策略</div>
+      <div class="small">L1 · 动作 tag · 策略 auto-approve-low-risk 建议自动批准；来源是 webhook，规则 no-webhook-approve-or-execute 要求人工。</div>
+      <ul class="small" style="margin:2px 0 2px"><li>目标已在库存中核实，实时检查 3/3 就绪</li><li>只改元数据，不触发滚动更新</li><li>有精确回滚</li></ul>
+      <div class="sub">影响范围</div>
+      <div class="small">影子影响：1 个资源（影响图里显示 frontend 与 frontend-pdb、nginx-config、chaos-lab 的关系）· 仅供参考，不参与策略 <a class="xs">影响图 ▸</a></div>
+      <div class="sub">申请</div>
+      <div class="small">webhook:e2e-itsm · 外部单 e2e-itsm CHG-1001 · 理由「Joint live E2E of the change intake」· <span class="chip grn">你不是申请人，可以批准</span></div>
+      <div class="sub">批准理由（必填）</div>
+      <div class="ta">go for deployment.</div>
+      <div class="foot"><span class="btn go">批准并执行</span><span class="btn dan">拒绝</span><span class="xs muted">批准后立即执行该方案。</span><span class="xs muted" style="margin-left:auto">409：别人已批准 / 方案已更新 → 抽屉内提示并刷新</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 B-4 · 仪表盘上的「待我处理」卡（一期入口）</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>仪表盘</b><span class="url">/app</span><span class="anno">替换「Active Plans」卡</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv on">仪表盘</div><div class="nv new">待办 <span class="bd">4</span></div><div class="nv">对话</div><div class="nv">问题</div><div class="nv">变更</div></div>
+  <div class="wf-main"><div class="wf-pad">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div class="card"><div class="xs muted">资源 <span class="demo">示意</span></div><b style="font-size:18px">1,284</b></div><div class="card"><div class="xs muted">未关闭问题</div><b style="font-size:18px;color:#dc2626">1</b></div><div class="card"><div class="xs muted">严重</div><b style="font-size:18px">0</b></div><div class="card"><div class="xs muted">账户</div><b style="font-size:18px">3</b></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px">
+      <div class="card" style="border-color:#2557d6"><h5>待我处理 <span class="xs muted" style="font-weight:400">4 项 · <a>全部 →</a></span></h5>
+        <div class="toolbar" style="margin:2px 0 6px"><span class="chip blu">待审批 2</span><span class="chip grn">待验收 1</span><span class="chip amb">待复核 1</span><span class="chip gry">待澄清 0</span><span class="chip red">近期失败 1</span></div>
+        <div class="small" style="border-top:1px solid #eef0f3;padding:4px 0"><span class="chip amb">待复核</span> I#1 EKS-…-RunningPods-Low <span class="muted">· 1 天</span></div>
+        <div class="small" style="border-top:1px solid #eef0f3;padding:4px 0"><span class="chip blu">待审批</span> C#2 Scale nodegroup ng-app 3 → 5<span class="demo">示意</span> <span class="muted">· 3 小时</span></div>
+        <div class="small" style="border-top:1px solid #eef0f3;padding:4px 0"><span class="chip grn">待验收</span> I#2 RDS database-demo CPU<span class="demo">示意</span> <span class="muted">· 40 分钟</span></div>
+      </div>
+      <div class="card"><h5>最近的问题</h5><div class="small muted">（现有卡片不变）</div></div>
+    </div>
+  </div></div>
+</div>
+</div>
+
+<h3>线框 B-5 · 瘦身后的详情页（深度调查用）</h3>
+<div class="cols2">
+<div class="wf" style="margin-top:0">
+<div class="wf-cap"><b>问题详情 I#1 · 瘦身</b><span class="url">/app/issues/1</span></div>
+<div class="wf-pad">
+  <div style="display:flex;gap:8px;align-items:center"><span class="idb">I#1</span><span class="sev high">● HIGH</span><b>EKS-agenticops-chaos-lab-RunningPods-Low</b></div>
+  <div class="statusline amb"><span class="st"><span class="dt amb"></span>根因待复核</span><span class="why">57% &lt; 60%，自动修复已暂停</span><span class="btn pri">复核根因</span><span class="btn">⋯</span></div>
+  <div style="display:flex;gap:14px;border-bottom:1px solid #e3e6ea;margin:10px 0 8px;font-size:12px"><span style="border-bottom:2px solid #2557d6;color:#2557d6;padding-bottom:3px">调查</span><span>方案与执行</span><span>时间线</span></div>
+  <div class="card small">事实（空值不显示）· RCA 卡（质量说人话 + 置信度推导）· 定位 · <b>一个「你的判断」块</b> · 局部图（锚点 1 跳）</div>
+  <div class="xs muted">5 个 tab → 3 个：「修复方案 / 执行 / 验证」合并成「方案与执行」，因为验证判定属于某次执行；空 tab 不再放重复按钮。结构仍然是 tab，这是和 A 的主要区别。</div>
+</div>
+</div>
+<div class="wf" style="margin-top:0">
+<div class="wf-cap"><b>变更详情 C#1 · 瘦身</b><span class="url">/app/changes/1</span></div>
+<div class="wf-pad">
+  <div style="display:flex;gap:8px;align-items:center"><span class="idb">C#1</span><b>E2E intake: annotate the frontend deployment</b><span class="chip blu">L1</span></div>
+  <div class="statusline fail"><span class="st"><span class="dt red"></span>失败</span><span class="why">预检 #1 未通过：frontend 就绪 0/3，没有做任何改动</span><span class="btn pri">复制为新变更</span></div>
+  <div style="display:grid;grid-template-columns:110px 1fr;gap:10px;margin-top:10px">
+    <div class="small" style="border-right:1px solid #e3e6ea">
+      <div class="nv">申请</div><div class="nv">方案</div><div class="nv">审批</div><div class="nv on">执行 ✗</div><div class="nv">验收</div><div class="nv">时间线</div>
+    </div>
+    <div class="small"><div class="card">各节内容不变，全部可见；左侧分节导航吸顶，点击跳转，当前节高亮。失败原因只在状态行出现；时间线换成一句话一条。</div></div>
+  </div>
+  <div class="xs muted">和 A 的区别：不折叠、不重排，只加导航、去重复。改动小，但页面仍然很长。</div>
+</div>
+</div>
+</div>
+
+<h3>问题 → 解决</h3>
+<table class="t">
+<tr><th style="width:62px">问题</th><th>方案 B 的解决方式</th></tr>
+<tr><td><span class="pid">I-a</span></td><td>公共修复：一个状态行。</td></tr>
+<tr><td><span class="pid">I-b</span></td><td>抽屉里只有一个判断（四选一）；详情页 RCA 卡也合并成一个「你的判断」块。</td></tr>
+<tr><td><span class="pid">I-c</span></td><td>公共修复：锚点名 + 空值不显示。</td></tr>
+<tr><td><span class="pid">I-d</span></td><td>tab 5 → 3，空 tab 不放重复按钮。线性流程仍然拆在 tab 里（没有 A 彻底）。</td></tr>
+<tr><td><span class="pid">I-e</span></td><td>公共修复：局部图默认 1 跳，有上限。</td></tr>
+<tr><td><span class="pid">I-f</span><span class="pid n">I-g</span></td><td>抽屉的「为什么需要你」一段写清推导；详情页同样处理（公共修复）。</td></tr>
+<tr><td><span class="pid n">I-h</span></td><td>待复核的问题出现在「待复核」桶里，主动作就是复核；详情页主按钮按公共修复 P7 调整。</td></tr>
+<tr><td><span class="pid n">I-i</span></td><td>公共修复。</td></tr>
+<tr><td><span class="pid">C-a</span></td><td>审批人不必再读 5000 px：抽屉约 700 px。详情页仍然长，靠分节导航缓解（未彻底解决）。</td></tr>
+<tr><td><span class="pid">C-b</span><span class="pid">C-c</span><span class="pid">C-d</span><span class="pid">C-e</span></td><td>公共修复（原因只说一次、终态给下一步、步进器收尾、可读时间线）。</td></tr>
+<tr><td><span class="pid n">C-f</span></td><td>未解决（同 A 二期：需要按资源反查）。</td></tr>
+<tr><td><span class="pid">C-g</span></td><td>抽屉按钮就是「批准并执行」；「需重试」是单独的桶。</td></tr>
+<tr><td><span class="pid">L-a</span><span class="pid">L-b</span><span class="pid">L-c</span><span class="pid">L-d</span></td><td>公共修复只做 L-a、L-c；L-b、L-d 不在 B 的范围内（列表不重做）。</td></tr>
+<tr><td><span class="pid">L-e</span></td><td>「待审批」桶就是真正需要的那份方案列表：只列等人批的方案，跨问题和变更。</td></tr>
+<tr><td><span class="pid">L-f</span></td><td>抽屉用共享 PlanView；两个详情页也换成 PlanView。</td></tr>
+<tr><td><span class="pid">L-g</span></td><td><b>这正是 B 的核心。</b></td></tr>
+</table>
+
+<h3>交互细节</h3>
+<ul>
+<li><b>键盘：</b>↑↓ 选择行，Enter 打开抽屉，ESC 关闭（抽屉自带 window keydown 监听，与 <code>chat/ContextPanel.tsx</code> 一致）；抽屉打开时焦点落在第一个决定上，Tab 在抽屉内循环。</li>
+<li><b>决定之后：</b>抽屉关闭，这一行淡出，焦点移到下一行，<b>不自动打开下一项</b>，避免顺手误批。</li>
+<li><b>空状态：</b>「没有等你做的决定」+「智能体正在处理 N 项」。某个桶为空时 tab 置灰但仍可点，并说明这个桶装什么。</li>
+<li><b>失败状态：</b>写端点返回 409（别人先批了、方案已更新到 v2、状态变了）时，抽屉内显示「C#2 已由 bob 于 10:02 批准」或「方案已更新到 v2，请重新查看差异」，并刷新内容，不会悄悄失败。返回 403（RBAC 强制模式）时显示规则名。</li>
+<li><b>影子模式：</b><code>rbac_enforce=false</code> 时，违反职责分离的项照样列出，但带「按规则你不应批准自己的申请」提示，和后端「审计但放行」的行为一致。</li>
+<li><b>双语：</b>桶名、「为什么」模板、按钮全部走 locale（<code>inbox.bucket.*</code>、<code>inbox.why.*</code>）；「为什么」由后端返回结构化字段（如 <code>{kind:"rca_below_gate", confidence:0.57, threshold:0.6}</code>），由前端渲染成句子，不由后端拼中文或英文。</li>
+</ul>
+
+<h3>改动范围</h3>
+<table class="t">
+<tr><th style="width:150px">面</th><th style="width:80px">做 / 非目标</th><th>内容</th></tr>
+<tr><td>CLI</td><td class="no">非目标</td><td>CLI 已有 <code>/change</code>。<code>aiops inbox</code> 不做。</td></tr>
+<tr><td>Web API</td><td class="yes">做</td><td><b>新增 1 个只读端点</b> <code>GET /api/inbox?bucket=&amp;account_id=&amp;kind=&amp;limit=</code>，返回 <code>{counts:{approve,accept,review,clarify,retry,failed}, items:[{kind,id,bucket,title,why,risk|severity,account,waiting_since}]}</code>。按当前会话 actor 过滤（权限 + 职责分离，与写端点同一个 <code>authz.check</code>；影子模式下只标记不隐藏），每个桶一条 SQL。侧栏角标用同一端点的 <code>?counts_only=1</code>。不新增写端点：所有决定复用 <code>/api/changes/{id}/approve|reject|clarify|execute|resolve-review</code>、<code>/api/fix-plans/{id}/approve|reject</code>、<code>/api/fix-executions/{id}/accept</code>、<code>/api/health-issues/{id}/rca-feedback|feedback</code>。为什么不能只靠前端拼：<code>/api/fix-executions</code> 没有 <code>verification_status</code> 过滤，RCA 也没有「低于闸门」的列表过滤，前端拼只能 N+1。</td></tr>
+<tr><td>Web UI</td><td class="yes">做</td><td>新增 <code>pages/Inbox.tsx</code>、<code>components/inbox/{InboxList,DecisionDrawer,ReviewDecision,ApprovalDecision,AcceptDecision}.tsx</code>、<code>components/plans/{PlanView,PlanDiff}.tsx</code>（PlanDiff 从 ChangeDetail 的 steps_diff 渲染中抽出）、<code>components/dashboard/InboxCard.tsx</code>、<code>hooks/useInbox.ts</code>；改 <code>pages/Dashboard.tsx</code>（替换 Active Plans 卡）、<code>NavItems.tsx</code>（+待办与计数角标）、<code>App.tsx</code>（路由）、<code>locales/{zh,en}.json</code>；详情页按 B-5 瘦身（<code>IssueDetail.tsx</code> tab 合并、<code>ChangeDetail.tsx</code> 分节导航）。</td></tr>
+<tr><td>Agent tool</td><td class="no">非目标</td><td>决定是人类动作，智能体不需要 inbox 工具。</td></tr>
+<tr><td>Schedule</td><td class="no">非目标</td><td>—</td></tr>
+<tr><td>Notification</td><td class="no">非目标（一期）</td><td>不加新通知。二期可以把现有「需要审批」类通知里的链接改成 <code>/app/inbox?item=…</code> 深链接，这只是链接变了，不是新通知。</td></tr>
+</table>
+
+<div class="cols3">
+<div class="box"><h4>工作量 <span class="tag m">M</span> + <span class="tag s">S</span></h4><p class="small">UI 约 12 个文件（M）；API 1 个端点 + 测试（S），重点测「桶判据和状态机一致」「RBAC 过滤和写端点一致」。</p></div>
+<div class="box"><h4>风险与代价</h4><ul class="small"><li><b>列表能看到、点了却 403</b>：过滤必须和写端点同源，否则信任崩塌。</li><li><b>橡皮图章</b>：抽屉让批准太容易。对策：理由必填，差异和哈希放在按钮上方，没有批量批准，不自动打开下一项。</li><li>只解决「做决定」，详情页本身的乱只靠瘦身缓解。</li><li>多一个聚合端点要维护，状态机变了它要跟着改（用测试锁住）。</li></ul></div>
+<div class="box"><h4>刻意不做</h4><ul class="small"><li>指派 / 认领 / SLA 引擎</li><li>批量批准</li><li>「已读 / 稍后」状态（近期失败 7 天自动移出）</li><li>新通知</li><li>给智能体 inbox 工具</li><li>重做列表页</li></ul></div>
+</div>
+
+<h3>分期落地</h3>
+<ol>
+<li><b>B1 公共修复</b>（S）</li>
+<li><b>B2</b> <code>GET /api/inbox</code> + 仪表盘「待我处理」卡 + 侧栏计数（先用最小形态验证大家会不会用）</li>
+<li><b>B3</b> <code>/app/inbox</code> 页 + 决策抽屉（复核 / 审批 / 验收 / 澄清 / 重试五种）</li>
+<li><b>B4</b> 详情页瘦身（tab 合并、分节导航）</li>
+</ol>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-c">
+<h2>方案 C ·「流水线看板」</h2>
+
+<div class="cols2">
+<div class="box">
+<h4>核心理念：看见流动</h4>
+<p>把问题修复和变更放上同一条流水线：<b>列 = 生命周期阶段，卡片 = 工单</b>。一眼看出哪里在堆积、谁在等、哪张卡卡住了。卡片上写着下一步和等谁；点开是一个详情抽屉。</p>
+<p class="small muted">问题和变更后三段相同（同一个 FixPlan 生命周期），所以它们能放进同一套列。前段各自映射到「新进」「诊断 / 审核」。</p>
+</div>
+<div class="box">
+<h4>服务谁</h4>
+<p><b>主要：</b>团队负责人、值班交接、周会复盘，也就是想看全局流量的人。<br><b>次要：</b>值班 SRE，打开「只看等我的」当待办用。</p>
+</div>
+</div>
+
+<h3>列的定义（<code>lib/flowStage.ts</code>，纯函数；测试保证两台状态机的每个状态都落在且只落在一列）</h3>
+<table class="t">
+<tr><th style="width:100px">列</th><th>问题（HealthIssue / FixPlan / FixExecution）</th><th>变更（ChangeRequest）</th><th style="width:240px">卡片上的「等谁」</th></tr>
+<tr><td><b>新进</b></td><td><code>open</code></td><td><code>draft</code></td><td>RCA 智能体 / 申请人发起审核</td></tr>
+<tr><td><b>诊断 / 审核</b></td><td><code>investigating</code>、<code>acknowledged</code>；<code>root_cause_identified</code> 且 RCA 未过闸门（带「待复核」旗）</td><td><code>under_review</code>；<code>needs_clarification</code>（带「待澄清」旗）</td><td>智能体；有旗时 = 等你 / 等申请人</td></tr>
+<tr><td><b>有方案</b></td><td><code>root_cause_identified</code> 且已过闸门（SRE 生成中）；<code>fix_planned</code> + 方案 draft</td><td>—（变更的方案在审核阶段产出，直接进「待审批」）</td><td>SRE 智能体</td></tr>
+<tr><td><b>待审批</b></td><td><code>fix_planned</code> + 方案 <code>pending_approval</code></td><td><code>planned</code></td><td>审批人</td></tr>
+<tr><td><b>执行中</b></td><td><code>fix_approved</code>、<code>fix_executing</code></td><td><code>approved</code>（未入队：红旗「需重试」）、<code>executing</code></td><td>执行器；红旗时 = 等你重试</td></tr>
+<tr><td><b>待验收</b></td><td><code>fix_executed</code>（<code>pending_acceptance</code> 只在这个状态下存在）</td><td><code>needs_review</code></td><td>验收人</td></tr>
+<tr><td><b>结束</b>（7 天）</td><td><code>resolved</code> = 完成；执行失败 = 失败</td><td><code>completed</code> = 完成；<code>failed</code> / <code>rolled_back</code> = 失败</td><td>— / 失败卡写下一步</td></tr>
+<tr><td class="muted">默认隐藏</td><td><code>dismissed</code></td><td><code>rejected</code>、<code>cancelled</code></td><td>筛选「显示已关闭」可见</td></tr>
+</table>
+
+<h3>信息架构（侧栏与路由）</h3>
+<table class="t">
+<tr><th style="width:200px"></th><th>之前</th><th>之后</th></tr>
+<tr><td>侧栏</td><td>仪表盘 · 对话 · 问题 · 变更 · 审计 · …</td><td>仪表盘 · 对话 · <b>工作流</b>（新，看板）· 问题 · 变更 · 审计 · …；问题和变更仍是列表视图入口</td></tr>
+<tr><td>新路由</td><td>—</td><td><code>/app/flow?kind=all|issue|change&amp;account=&amp;mine=1</code>，抽屉 <code>&amp;item=I1</code></td></tr>
+<tr><td>列表</td><td>问题卡片列表、变更表格</td><td>保留，工作流页右上角「看板 | 列表」切换到对应列表</td></tr>
+<tr><td>详情页</td><td>现有结构</td><td>保留。卡片抽屉覆盖日常 80% 的需要；完整详情页按 B-5 的方式瘦身</td></tr>
+</table>
+
+<h3>线框 C-1 · 看板</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>工作流</b><span class="url">/app/flow?kind=all</span><span class="anno">问题和变更同一条流水线</span><span class="anno">卡片写下一步和等谁</span><span class="anno">不支持拖拽</span></div>
+<div class="wf-app">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv on new">工作流</div><div class="nv">问题 <span class="bd">1</span></div><div class="nv">变更</div><div class="nv">审计</div><div class="nv">定时任务</div><div class="nv">报告</div></div>
+  <div class="wf-main">
+    <div class="wf-top"><span>工作流</span><span class="r">admin <span>退出</span><span>EN</span></span></div>
+    <div class="wf-pad">
+      <div class="toolbar"><div class="h1">工作流</div><span class="seg"><span class="on">全部</span><span>问题</span><span>变更</span></span><span class="sel">账户：全部</span><span class="sel">严重度 / 风险：全部</span><span class="seg"><span>只看等我的</span></span><span class="sp"></span><span class="seg"><span class="on">看板</span><span>列表</span></span></div>
+      <div class="board">
+        <div class="col"><h6>新进 <span class="n">1</span></h6>
+          <div class="kc demo-c"><div class="k">I#6 <span class="demo">示意</span> <span class="sev med">MED</span></div>EC2 i-0f07b StatusCheckFailed<div class="who">等 RCA 智能体</div><div class="ft"><span>prod-b</span><span>2 分钟</span></div></div>
+        </div>
+        <div class="col"><h6>诊断 / 审核 <span class="n">2</span></h6>
+          <div class="kc pick"><div class="k">I#1 <span class="sev high">HIGH</span> <span class="chip amb">待复核</span></div>EKS-agenticops-chaos-lab-RunningPods-Low<div class="who me">等你：判断根因（57% &lt; 60%）</div><div class="ft"><span>chaos-lab</span><span>1 天</span></div></div>
+          <div class="kc demo-c"><div class="k">C#3 <span class="demo">示意</span> <span class="chip blu">L2</span> <span class="chip amb">待澄清</span></div>Rotate RDS master password<div class="who">等申请人回答审核方</div><div class="ft"><span>prod-a</span><span>5 小时</span></div></div>
+        </div>
+        <div class="col"><h6>有方案 <span class="n">1</span></h6>
+          <div class="kc demo-c"><div class="k">I#3 <span class="demo">示意</span> <span class="sev med">MED</span></div>ALB app-prod 5xx 突增<div class="who">等 SRE 智能体生成方案</div><div class="ft"><span>prod-b</span><span>6 分钟</span></div></div>
+        </div>
+        <div class="col"><h6>待审批 <span class="n">2</span></h6>
+          <div class="kc demo-c"><div class="k">C#2 <span class="demo">示意</span> <span class="chip blu">L2</span></div>Scale nodegroup ng-app 3 → 5<div class="who me">等你：批准并执行 v2</div><div class="ft"><span>prod-a</span><span>3 小时</span></div></div>
+          <div class="kc demo-c"><div class="k">I#4 <span class="demo">示意</span> <span class="sev high">HIGH</span></div>S3 bucket logs-archive 公共读 ACL<div class="who me">等你：批准并执行 v1</div><div class="ft"><span>prod-a</span><span>20 分钟</span></div></div>
+        </div>
+        <div class="col"><h6>执行中 <span class="n">1</span></h6>
+          <div class="kc demo-c"><div class="k">I#7 <span class="demo">示意</span> <span class="sev med">MED</span></div>Restart backend pods<div class="who">执行 #2 · 已用 1 分 20 秒</div><div class="ft"><span>prod-b</span><span>1 分钟</span></div></div>
+        </div>
+        <div class="col"><h6>待验收 <span class="n">1</span></h6>
+          <div class="kc demo-c"><div class="k">I#2 <span class="demo">示意</span> <span class="sev crit">CRIT</span></div>RDS database-demo CPUUtilization &gt; 90%<div class="who me">等你：验收执行 #4（后检 2/3）</div><div class="ft"><span>prod-a</span><span>40 分钟</span></div></div>
+        </div>
+        <div class="col"><h6>结束 · 7 天 <span class="n">2</span></h6>
+          <div class="kc" style="border-left:3px solid #dc2626"><div class="k">C#1 <span class="chip blu">L1</span> <span class="chip red">失败</span></div>E2E intake: annotate the frontend deployment<div class="who">预检 #1 未通过，没有做改动 → 复制为新变更</div><div class="ft"><span>chaos-lab</span><span>1 天前</span></div></div>
+          <div class="kc demo-c" style="border-left:3px solid #16a34a"><div class="k">I#8 <span class="demo">示意</span> <span class="chip grn">完成</span></div>NAT gateway 丢包<div class="who">已解决</div><div class="ft"><span>prod-a</span><span>2 天前</span></div></div>
+        </div>
+      </div>
+      <div class="annoblk">每列最多显示 20 张卡，其余显示「再显示 N 张」；卡片按等待时长排序；「等你」用橙色。键盘：←→ 切列，↑↓ 切卡，Enter 打开抽屉，ESC 关闭。每 30 秒自动刷新（沿用 TanStack Query 的 <code>refetchInterval</code>）。</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 C-2 · 卡片抽屉：I#1</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>抽屉</b><span class="url">/app/flow?item=I1</span><span class="anno">slideInRight · ESC</span><span class="anno">阶段一句话 + 当前决定</span></div>
+<div class="wf-app" style="height:560px">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv on new">工作流</div><div class="nv">问题</div><div class="nv">变更</div></div>
+  <div class="wf-main">
+    <div class="wf-pad"><div class="board" style="grid-template-columns:repeat(4,1fr)"><div class="col" style="min-height:300px"><h6>新进</h6></div><div class="col" style="min-height:300px"><h6>诊断 / 审核</h6><div class="kc pick">I#1 …</div></div><div class="col" style="min-height:300px"><h6>有方案</h6></div><div class="col" style="min-height:300px"><h6>待审批</h6></div></div></div>
+    <div class="dim"></div>
+    <div class="drawer">
+      <div class="dh"><span class="idb">I#1</span><b class="small">EKS-agenticops-chaos-lab-RunningPods-Low</b><span class="sev high">HIGH</span><span class="x"><a>完整详情 ↗</a> &nbsp; ✕</span></div>
+      <div class="statusline amb" style="margin-top:0"><span class="st">根因待复核</span><span class="why">57% &lt; 60%，自动修复已暂停</span></div>
+      <div class="ph wait" style="margin-top:8px"><div class="ph-h"><span class="ph-n">1</span><span class="t">诊断</span><span class="s">sa-malibo 用 kubectl 把 backend / frontend 缩到 0 · 定位 #1 backend #2 frontend</span></div></div>
+      <div class="ph fut"><div class="ph-h"><span class="ph-n">2</span><span class="t">方案</span><span class="s">复核后生成</span></div></div>
+      <div class="ph fut"><div class="ph-h"><span class="ph-n">3</span><span class="t">审批并执行</span><span class="s">—</span></div></div>
+      <div class="ph fut"><div class="ph-h"><span class="ph-n">4</span><span class="t">验收</span><span class="s">—</span></div></div>
+      <div class="sub">你的判断</div>
+      <div class="opt on"><span class="radio"><i class="on"></i></span>根因正确 · 生成修复方案</div>
+      <div class="opt"><span class="radio"><i></i></span>部分正确</div>
+      <div class="opt"><span class="radio"><i></i></span>根因错误 · 重新 RCA</div>
+      <div class="opt"><span class="radio"><i></i></span>误报 · 忽略并记住</div>
+      <div class="foot"><span class="btn pri">提交判断</span><span class="xs muted">提交后卡片移到「有方案」列</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>线框 C-3 · 卡片抽屉：C#1（失败）</h3>
+<div class="wf">
+<div class="wf-cap"><span class="dots"><i></i><i></i><i></i></span><b>抽屉</b><span class="url">/app/flow?item=C1</span><span class="anno">失败原因只出现一次</span></div>
+<div class="wf-app" style="height:470px">
+  <div class="wf-side"><div class="logo">AgenticOps</div><div class="nv">仪表盘</div><div class="nv">对话</div><div class="nv on new">工作流</div></div>
+  <div class="wf-main">
+    <div class="wf-pad"><div class="board" style="grid-template-columns:repeat(4,1fr)"><div class="col" style="min-height:300px"><h6>执行中</h6></div><div class="col" style="min-height:300px"><h6>待验收</h6></div><div class="col" style="min-height:300px"><h6>结束 · 7 天</h6><div class="kc pick">C#1 …</div></div><div class="col" style="min-height:300px"></div></div></div>
+    <div class="dim"></div>
+    <div class="drawer">
+      <div class="dh"><span class="idb">C#1</span><b class="small">E2E intake: annotate the frontend deployment</b><span class="chip blu">L1</span><span class="x"><a>完整详情 ↗</a> &nbsp; ✕</span></div>
+      <div class="statusline fail" style="margin-top:0"><span class="st">失败</span><span class="why">预检 #1 未通过：frontend 就绪 0/3（期望 3/3），没有做任何改动</span></div>
+      <div class="ph done" style="margin-top:8px"><div class="ph-h"><span class="ph-n">✓</span><span class="t">申请 · 审核 · 方案</span><span class="s">webhook:e2e-itsm 03:37 · SRE 03:38 判定可计划 · v1 #8f48231e</span></div></div>
+      <div class="ph fail"><div class="ph-h"><span class="ph-n">!</span><span class="t">审批并执行</span><span class="s">admin 09:55:56 批准 → 09:56:11 执行 #1 → 09:56:39 中止于预检 #1</span></div>
+        <div class="ph-b"><div class="chk"><span class="n">1</span><span class="fail-b">FAIL</span><span>Deployment exists and is healthy</span><span class="o">/0 · 期望 3/3</span></div><div class="chk"><span class="n">2</span><span class="pass">PASS</span><span>Record current annotation state</span></div><div class="chk"><span class="n">3</span><span class="pass">PASS</span><span>Record current rollout revision</span></div></div></div>
+      <div class="foot"><span class="btn pri">复制为新变更</span><span class="xs muted">打开现有 NewChangeDialog，预填原申请</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<h3>问题 → 解决</h3>
+<table class="t">
+<tr><th style="width:62px">问题</th><th>方案 C 的解决方式</th></tr>
+<tr><td><span class="pid">I-a</span><span class="pid">I-c</span><span class="pid">I-e</span><span class="pid">I-f</span><span class="pid n">I-g</span><span class="pid n">I-i</span></td><td>公共修复。</td></tr>
+<tr><td><span class="pid">I-b</span></td><td>抽屉里一个判断块；详情页同样合并（公共修复 + B-5 式瘦身）。</td></tr>
+<tr><td><span class="pid">I-d</span></td><td>抽屉用阶段一句话代替 tab；完整详情页仍是 3 个 tab（瘦身）。</td></tr>
+<tr><td><span class="pid n">I-h</span></td><td>卡片上的「等你：判断根因」就是真实的下一步；详情页主按钮按公共修复 P7 调整。</td></tr>
+<tr><td><span class="pid">C-a</span></td><td>抽屉约 500 px；完整详情页仍长，靠分节导航缓解（未彻底解决）。</td></tr>
+<tr><td><span class="pid">C-b</span><span class="pid">C-c</span><span class="pid">C-d</span><span class="pid">C-e</span></td><td>公共修复；抽屉内原因只出现一次，终态有「复制为新变更」。</td></tr>
+<tr><td><span class="pid n">C-f</span></td><td>未解决（看板上两张卡在不同列，看不出是同一个资源）。</td></tr>
+<tr><td><span class="pid">C-g</span></td><td>「待审批」卡的抽屉主按钮是「批准并执行」；入队失败的卡在「执行中」列带红旗「需重试」。</td></tr>
+<tr><td><span class="pid">L-a</span></td><td>看板只有一行筛选；列表视图同公共修复。</td></tr>
+<tr><td><span class="pid">L-b</span><span class="pid">L-d</span></td><td>未解决（列表页不在 C 的范围内）。</td></tr>
+<tr><td><span class="pid">L-c</span></td><td>卡片上用 locale 文案和「等谁」句子，不显示原始枚举。</td></tr>
+<tr><td><span class="pid">L-e</span></td><td>「有方案」「待审批」两列就是跨工单的方案视图。</td></tr>
+<tr><td><span class="pid">L-f</span></td><td>抽屉用共享 PlanView。</td></tr>
+<tr><td><span class="pid">L-g</span></td><td>「只看等我的」开关部分回答了这个问题，但它是看板的筛选，不是决策队列。</td></tr>
+</table>
+
+<h3>交互细节</h3>
+<ul>
+<li><b>键盘：</b>←→ 切列，↑↓ 切卡，Enter 打开抽屉，ESC 关闭；抽屉 slideInRight。</li>
+<li><b>不能拖拽：</b>状态转移是身份绑定的人类动作，要填理由、要核对哈希，有的还要过 RBAC，拖一下就改状态会绕过这些。卡片只能点开，在抽屉里做决定。</li>
+<li><b>空列：</b>显示「—」，列头悬停说明这一列装什么。</li>
+<li><b>失败：</b>「结束」列里失败卡左边框红色，写一句原因和下一步。</li>
+<li><b>量大：</b>每列上限 20 张 +「再显示 N 张」，「结束」只放 7 天内；多账户时建议先选账户。</li>
+<li><b>双语：</b>列名、旗子、「等谁」模板都走 locale。列很窄，英文卡片标题最多两行截断，悬停显示全名。</li>
+</ul>
+
+<h3>改动范围</h3>
+<table class="t">
+<tr><th style="width:150px">面</th><th style="width:80px">做 / 非目标</th><th>内容</th></tr>
+<tr><td>CLI</td><td class="no">非目标</td><td>—</td></tr>
+<tr><td>Web API</td><td class="yes">做（小）</td><td><b>一期不新增端点</b>，前端组合 <code>GET /api/issues</code> + <code>GET /api/changes</code> + <code>GET /api/fix-plans?kind=fix&amp;status=pending_approval</code>。<code>fix_executed</code> 直接视为待验收，不用逐条拉执行记录。但「待复核」旗需要 RCA 闸门结果，列表接口没有带出来：要么给问题列表响应加一个只读字段（如 <code>rca_gate: passed|below_gate|refuted|none</code>），要么 N+1。工单量大以后需要 <code>GET /api/flow</code>（服务端分列、计数、分页），列为二期「可能需要」。</td></tr>
+<tr><td>Web UI</td><td class="yes">做</td><td>新增 <code>pages/Flow.tsx</code>、<code>components/flow/{Board,BoardColumn,FlowCard,FlowDrawer}.tsx</code>、<code>lib/flowStage.ts</code>（+ 测试）、<code>hooks/useFlow.ts</code>、<code>components/plans/PlanView.tsx</code>；改 <code>NavItems.tsx</code>（+工作流）、<code>App.tsx</code>、<code>locales/{zh,en}.json</code>；详情页按 B-5 方式瘦身。抽屉复用 ReasonDialog、VerificationChip、ExecutionEvidence、NewChangeDialog。</td></tr>
+<tr><td>Agent tool</td><td class="no">非目标</td><td>—</td></tr>
+<tr><td>Schedule</td><td class="no">非目标</td><td>—</td></tr>
+<tr><td>Notification</td><td class="no">非目标</td><td>—</td></tr>
+</table>
+
+<div class="cols3">
+<div class="box"><h4>工作量 <span class="tag l">L</span></h4><p class="small">看板是全新组件（列、卡、虚拟化、键盘导航、抽屉），映射函数要覆盖两台状态机，再加详情页瘦身。</p></div>
+<div class="box"><h4>风险与代价</h4><ul class="small"><li><b>第三套状态模型：</b>列和两台状态机不一一对应（<code>needs_clarification</code>、<code>approved</code> 未入队、<code>dismissed</code> 都要特殊处理），用户要学，开发要维护。</li><li><b>规模差：</b>多账户、数百个问题时列会溢出，看板失去「一眼看清」的意义。</li><li>和仪表盘的统计功能重叠。</li><li>对「做决定」帮助有限，还是要进抽屉；对详情页本身的乱没有帮助。</li><li>看板天然诱导「拖一下」的需求。</li></ul></div>
+<div class="box"><h4>刻意不做</h4><ul class="small"><li>拖拽改状态</li><li>WIP 上限</li><li>按账户分泳道（只做筛选）</li><li>自定义列</li><li>在卡片上直接批准（必须进抽屉看差异和哈希）</li></ul></div>
+</div>
+
+<h3>分期落地</h3>
+<ol>
+<li><b>C1 公共修复</b>（S）</li>
+<li><b>C2</b> <code>lib/flowStage.ts</code> + 只读看板（点卡片进现有详情页，没有抽屉）</li>
+<li><b>C3</b> 卡片抽屉（复用 PlanView、ReasonDialog）</li>
+<li><b>C4</b> <code>GET /api/flow</code>（量大时）+ 详情页瘦身</li>
+</ol>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-cmp">
+<h2>对比</h2>
+<table class="t">
+<tr><th style="width:190px">维度</th><th>A · 统一工单模板</th><th>B · 待办驱动</th><th>C · 流水线看板</th></tr>
+<tr><td>解决的核心问题</td><td>单张工单「乱」</td><td>「什么在等我」</td><td>「全局卡在哪」</td></tr>
+<tr><td>目标用户</td><td>一线值班 SRE（深入一张工单）</td><td>审批人、值班负责人、变更经理</td><td>团队负责人、值班交接、复盘</td></tr>
+<tr><td>首屏信息密度</td><td>中：一张工单的当前阶段 + 事实栏，其余折叠</td><td>高，且全是需要决定的：只列等人做的事</td><td>全局高、单卡低：7 列卡片，细节要点开</td></tr>
+<tr><td>首屏能回答什么</td><td>这张工单在哪、为什么、下一步</td><td>我现在该做哪几件事</td><td>流水线哪里堆积</td></tr>
+<tr class="hl"><td>点击：批准一个待审批变更</td><td><b>4</b>：变更 → 行 → 批准并执行 → 理由并确认</td><td><b>3</b>：待办 → 行 → 填理由后「批准并执行」（从仪表盘卡片进入是 2）</td><td><b>4</b>：工作流 → 卡 → 批准并执行 → 理由并确认（抽屉复用 B 的内嵌理由时为 3）</td></tr>
+<tr><td colspan="4" class="small muted">参照：「批准即执行」上线前是 6 次（变更 → 行 → 批准 → 确认 → 执行 → 确认），本地已实现的现状是 4 次。A 在点击数上不比现状少，它的收益是审批人只看到当前阶段，不用读 5000 px。打字不计入点击。</td></tr>
+<tr class="hl"><td>点击：验收一次执行结果</td><td><b>4</b>：问题 → 行 → 接受结果 → 理由并确认</td><td><b>3</b>：待办 → 行 → 填理由后「接受」</td><td><b>4</b>（或 3）</td></tr>
+<tr><td colspan="4" class="small muted">参照：现状 4 次（问题 → 行 → 横幅「接受」→ 理由并确认）。</td></tr>
+<tr class="hl"><td>复核一个低置信 RCA</td><td>1 次提交</td><td>1 次提交</td><td>1 次提交</td></tr>
+<tr><td colspan="4" class="small muted">参照：现状分散在 3 处（👍👎、定位三选一、误报 / 确认），要提交 2–3 次，且不说明三者区别。</td></tr>
+<tr><td>学习成本</td><td>低：两种工单一个模板，后三段一模一样</td><td>低：新入口，但每个抽屉只有一个决定</td><td>中：要理解列和两台状态机的映射</td></tr>
+<tr><td>改动量</td><td><span class="tag l">L</span> 两个详情页重写 + 列表</td><td><span class="tag m">M</span> 新页 + 抽屉，<span class="tag s">S</span> 1 个端点</td><td><span class="tag l">L</span> 看板 + 抽屉 + 映射 + 瘦身</td></tr>
+<tr><td>新增端点</td><td>0（<code>/api/settings</code> 加 1 个只读字段）</td><td>1（只读 <code>GET /api/inbox</code>）</td><td>一期 0（列表响应加 1 个只读字段）；量大时 1</td></tr>
+<tr><td>与现有代码复用度</td><td>高：重排现有 RunbookStep / CheckItem / RollbackPlan / ExecutionEvidence / VerificationChip / LocalGraph / ReasonDialog，逻辑留在 <code>lib/*</code></td><td>高：抽屉复用同一批组件，所有决定复用现有写端点</td><td>中：看板、列、卡、键盘导航是全新的</td></tr>
+<tr><td>多账户、大量工单的扩展性</td><td>中：表格 + 筛选 + 分页，详情页不受数量影响</td><td><b>好</b>：随「需要人的事」增长，而不是随库存增长；按账户筛选</td><td>差：列溢出，需要服务端分列 + 强筛选</td></tr>
+<tr><td>主要风险</td><td>重写大页的回归</td><td>RBAC 过滤一致性、橡皮图章</td><td>映射维护、规模、诱导拖拽</td></tr>
+<tr><td>对「现状诊断」的覆盖</td><td>23 条中 20 条直接解决；C-f 放二期，L-e 刻意不做，L-g 部分解决</td><td>直接解决 L-g、L-e、C-g；其余靠公共修复，C-a / I-d 只缓解，L-b / L-d / C-f 不解决</td><td>直接解决 L-e、C-g；其余靠公共修复，C-a / I-d 只缓解，L-b / L-d / C-f 不解决，L-g 部分解决</td></tr>
+</table>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-fix">
+<h2>公共修复：无论选哪套都该做</h2>
+<p>这些修复和信息架构无关，每条都小（S）、可以单独上线，也是三套方案的共同第一期。</p>
+<table class="t">
+<tr><th style="width:40px">#</th><th>修复</th><th style="width:150px">解决</th><th style="width:330px">涉及文件</th></tr>
+<tr><td>P1</td><td><b>只留一个状态指示。</b>详情页去掉 7 步步进器、5 段进度条和三枚状态，换成一个状态行：状态（locale）· 为什么 · 等谁 · 一个主按钮。</td><td><span class="pid">I-a</span></td><td><code>pages/IssueDetail.tsx</code>、<code>components/ui/IssueStatusStepper.tsx</code>、<code>PipelineStepper.tsx</code></td></tr>
+<tr><td>P2</td><td><b>状态文案国际化，列表与详情同源。</b><code>IssueStatusBadge</code> 的 LABELS、<code>IssueRow</code> 的 STATUS_LABELS、<code>IssueActionBar</code> 的确认文案全部进 locale。</td><td><span class="pid n">I-i</span><span class="pid">L-c</span></td><td><code>IssueStatusBadge.tsx</code>、<code>IssueRow.tsx</code>、<code>IssueActionBar.tsx</code>、<code>locales/{zh,en}.json</code></td></tr>
+<tr><td>P3</td><td><b>失败原因只说一次。</b>放在状态行；执行区只展示检查证据；验收区写「系统已判定失败（见执行 #1）」；红色错误框不再复述。</td><td><span class="pid">C-b</span></td><td><code>pages/ChangeDetail.tsx</code>、<code>components/plans/ExecutionsTable.tsx</code>、<code>ExecutionEvidence.tsx</code></td></tr>
+<tr><td>P4</td><td><b>可读的时间线。</b>每种事件一个句子模板（<code>lib/activity.ts</code>），连续重复的事件合并成「×2」，原始 JSON 收进「原始事件」开关；<code>authz.denied</code> 写成「规则 X 拦下了 Y 的 Z」。</td><td><span class="pid">C-e</span></td><td><code>components/plans/PipelineTimeline.tsx</code>、<code>lib/changeDetail.ts</code>、新增 <code>lib/activity.ts</code></td></tr>
+<tr><td>P5</td><td><b>解释置信度。</b>置信度条带阈值线，并写出「原始 95% → 证据核验未通过 ×0.6 → 57%；阈值 60% → 等人复核」。需要在 <code>GET /api/settings</code> 加只读字段 <code>rca_min_confidence_for_autofix</code>（目前没有下发）。</td><td><span class="pid n">I-g</span></td><td><code>IssueDetail.tsx</code> RcaSection、<code>web/app.py</code>（settings 响应 +1 字段）</td></tr>
+<tr><td>P6</td><td><b>质量徽章说人话。</b>「evidence ✗」→「证据核验未通过」，「critic: weak」→「评审员：证据偏弱」，悬停显示 <code>critic_notes</code> 和未核实的引用。</td><td><span class="pid">I-f</span></td><td><code>IssueDetail.tsx</code>、locale</td></tr>
+<tr><td>P7</td><td><b>主按钮跟着真实状态走。</b>RCA 没过闸门时主按钮是「复核根因」，「生成修复方案」降到「⋯」。</td><td><span class="pid n">I-h</span></td><td><code>IssueActionBar.tsx</code></td></tr>
+<tr><td>P8</td><td><b>锚点徽章显示锚定资源名</b>，而不是告警原始 <code>resource_id</code>；事实块不显示「unknown」「—」。</td><td><span class="pid">I-c</span></td><td><code>lib/issueDetail.ts</code> <code>anchorBadge</code>、<code>IssueDetail.tsx</code></td></tr>
+<tr><td>P9</td><td><b>反馈合并为一处。</b>👍👎、定位三选一、误报 / 确认合并为「你的判断」四选一，一次提交（<code>rca-feedback</code> 一次调用带 <code>verdict</code> + <code>location_verdict</code>，加上 <code>feedback</code>）。</td><td><span class="pid">I-b</span></td><td>新增 <code>components/issue/VerdictBlock.tsx</code>，<code>IssueDetail.tsx</code></td></tr>
+<tr><td>P10</td><td><b>空 tab 不放重复按钮。</b>空状态只解释「为什么空、谁来推动」。</td><td><span class="pid">I-d</span></td><td><code>IssueDetail.tsx</code> FixPlanTab</td></tr>
+<tr><td>P11</td><td><b>局部图默认收敛。</b>默认「锚点 1 跳 + 因果路径」，上限约 15 个节点；非路径节点悬停才显示标签；「显示全部 132」开关。</td><td><span class="pid">I-e</span></td><td><code>components/graph/LocalGraph.tsx</code></td></tr>
+<tr><td>P12</td><td><b>变更步进器在结局处收尾。</b>失败、回滚、拒绝、取消时，最后一个节点就是结局，不再画「⑥ Completed」。</td><td><span class="pid">C-d</span></td><td><code>components/plans/ChangeStepper.tsx</code>、<code>lib/changeStepper.ts</code></td></tr>
+<tr><td>P13</td><td><b>终态给出下一步。</b>失败 / 回滚 / 拒绝时，「待办：无」改为「下一步：复制为新变更」，按钮提到状态行。</td><td><span class="pid">C-c</span></td><td><code>lib/changeDetail.ts</code> <code>changeHeadline</code>、<code>ChangeDetail.tsx</code></td></tr>
+<tr><td>P14</td><td><b>「执行」只剩重试。</b>变更已按「批准并执行」实现；问题详情修复方案里 <code>approved</code> 状态下的「Execute」按钮也改名「重试执行」，只作为未入队的补救。</td><td><span class="pid">C-g</span></td><td><code>IssueDetail.tsx</code> FixPlanTab</td></tr>
+<tr><td>P15</td><td><b>问题列表筛选压成一行</b>（状态、严重度、范围做成下拉），去掉 4 层叠放。</td><td><span class="pid">L-a</span></td><td><code>pages/IssuesAndPlans.tsx</code></td></tr>
+<tr><td>P16</td><td><b>空值不显示</b>：RCA 卡在 model_id 为空时不显示「Model: |」。</td><td><span class="pid n">I-i</span></td><td><code>IssueDetail.tsx</code> RcaSection</td></tr>
+</table>
+<div class="callout"><b>改动范围（公共修复本身）：</b>Web UI <span class="yes">做</span>（上表）· Web API <span class="yes">做（极小）</span>：只给 <code>GET /api/settings</code> 加 1 个只读字段，无新端点 · CLI <span class="no">非目标</span> · Agent tool <span class="no">非目标</span> · Schedule <span class="no">非目标</span> · Notification <span class="no">非目标</span>。</div>
+</section>
+
+<!-- ===================================================================== -->
+<section class="panel" id="p-rec">
+<h2>推荐</h2>
+<div class="callout ok" style="font-size:15px"><b>推荐：以方案 A 为底座，把方案 B 的「待我处理」做成仪表盘上的入口卡；方案 C 暂不做。</b></div>
+
+<h3>理由</h3>
+<ol>
+<li><b>主人说的「乱」主要在详情页。</b>现状诊断 23 条里有 15 条在两个详情页（I-a…I-i、C-a…C-f）。只有 A 正面重构了详情页；B 和 C 都把详情页留给公共修复，C-a（5000 px）和 I-d（线性流程拆成 tab）只能缓解。</li>
+<li><b>A 最经济。</b>不新增端点（只给 settings 加一个只读字段），复用度最高，符合「简约、经济、不加没用的功能」。</li>
+<li><b>A 贴合领域的真实结构。</b>两种工单的后三段是同一个 FixPlan 生命周期：一套 PlanView、一套阶段卡就消掉了 L-f，以后加第三种工单（比如安全建议转工单）也能直接套用。</li>
+<li><b>B 的价值真实，但先用最小形态验证。</b>「什么在等我」（L-g）A 回答不了，但 B 要新增一个聚合端点，还要保证 RBAC 过滤一致。先做仪表盘卡片和侧栏计数，看实际使用频率，再决定要不要做完整的 <code>/app/inbox</code> 页。抽屉里的决定组件（复核、审批、验收）和 A 的阶段卡是同一批，届时几乎零成本。</li>
+<li><b>C 不划算。</b>它引入第三套状态模型，规模化差，对「做决定」帮助最小。以后需要全局视图时，在 A 的列表里加一个「按阶段分组」视图就够了，不必做看板。</li>
+</ol>
+
+<h3>落地顺序（第一期范围写死）</h3>
+<table class="t">
+<tr><th style="width:90px">期</th><th>内容</th><th style="width:110px">规模</th><th style="width:240px">新端点</th></tr>
+<tr class="hl"><td><b>第一期</b></td><td><b>公共修复 P1–P16</b> + <b>A 的模板组件</b>（StatusLine / PhaseCard / FactsRail / ActivityList / PlanView / VerdictBlock + <code>lib/issuePhases.ts</code>）+ <b>问题详情套模板</b></td><td><span class="tag m">M</span>–<span class="tag l">L</span></td><td>无（settings +1 只读字段）</td></tr>
+<tr><td>第二期</td><td>变更详情套同一模板（<code>lib/changePhases.ts</code>），PlanView 同时服务修复方案和变更方案</td><td><span class="tag m">M</span></td><td>无</td></tr>
+<tr><td>第三期</td><td>A 的统一列表（WorkItemTable）+ 信息架构：资源独立入口、<code>/app/signals</code>、旧链接重定向</td><td><span class="tag m">M</span></td><td>无</td></tr>
+<tr><td>第四期</td><td>B 的仪表盘「待我处理」卡 + 侧栏计数</td><td><span class="tag s">S</span>–<span class="tag m">M</span></td><td><code>GET /api/inbox</code>（只读）</td></tr>
+<tr><td>以后再定</td><td>完整 <code>/app/inbox</code> 页 + 决策抽屉；「关联」（同一资源上的工单互相提示，C-f）</td><td>—</td><td>按资源过滤参数</td></tr>
+</table>
+
+<h3>需要主人拍板的点</h3>
+<ul>
+<li>问题的阶段是否接受「诊断 → 方案 → 审批并执行 → 验收」四段（把审批和执行合并，与变更后三段对齐）？</li>
+<li>「资源」是否从问题枢纽移出、单独进侧栏？「信号」是否改为不进侧栏的 <code>/app/signals</code>？</li>
+<li>「你的判断」四选一是否可以替代现有三套反馈（👍👎 / 定位三选一 / 误报与确认）？</li>
+<li>修复方案是否接受「不做独立列表」？跨工单的「待批方案」由第四期的「待我处理」承担。</li>
+</ul>
+
+<div class="callout warn"><b>没能核实：</b>审计页内容（截图只有「Loading…」）。<br><b>已核实（2026-10-04，实验室库 UTC 与代码）：</b>C#1 审核 03:38:19 完成（审核时实测目标 3/3），I#1 03:39:04 检测到（缩容之后）；修复方案执行失败后 Issue 回到 <code>root_cause_identified</code>（状态机回退边，RCA 记为 disputed）；问题侧「已批准未入队」：<code>trigger_auto_execute</code> 在 <code>auto_fix_enabled</code> 或 <code>executor_enabled</code> 关闭时只记日志返回——方案停在 <code>approved</code>、Issue 停在 <code>fix_approved</code>，<b>没有通知</b>；修复方案上现有的 Execute 按钮（<code>IssueDetail.tsx:641</code>）就是它的重试。这与变更侧（有 <code>execution_not_queued</code> 通知）不对称，可列入公共修复。</div>
+</section>
+
+<div class="foot-note">本文件是设计评审稿，不改动任何产品代码。线框里的 <span class="demo">示意</span> 数据是虚构的；I#1、C#1 的字段、命令、时间取自 2026-10-03 实验室截图和 worktree 代码。弹窗与抽屉一律 <code>animate-[slideInRight_0.2s_ease-out]</code> + ESC 关闭（项目弹窗规则）；新文案 zh / en 同步。</div>
+
+</div>
+<script>
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('#tabbar button'));
+  var panels=[].slice.call(document.querySelectorAll('.panel'));
+  function show(id,scroll){
+    tabs.forEach(function(t){t.classList.toggle('on',t.getAttribute('data-t')===id);});
+    panels.forEach(function(p){p.classList.toggle('on',p.id===id);});
+    if(scroll){
+      if(history.replaceState){history.replaceState(null,'','#'+id);}
+      var bar=document.getElementById('tabbar');window.scrollTo(0,bar.offsetTop-4);
+    }
+  }
+  tabs.forEach(function(t){t.addEventListener('click',function(){show(t.getAttribute('data-t'),true);});});
+  var h=location.hash.replace('#','');
+  show(document.getElementById(h)&&/^p-/.test(h)?h:'p-diag',false);
+})();
+</script>
+</body>
+</html>

@@ -118,6 +118,31 @@ export function inFlightAutoRun(
   return null;
 }
 
+/** How long after a plan's approval a missing auto-run start still reads as "starting", not "not queued": the thread
+ *  logs its start moments after the approval commits, and a timeline fetch can land in between (C1(c)). */
+export const AUTO_RUN_START_GRACE_MS = 30_000;
+
+/** From when (epoch ms) an approved plan with no run row and no auto-run under way may be called "not queued"
+ *  (C1(c)), anchored on the plan's own approved_at — a withdraw + re-approve writes no new status move, and an issue
+ *  from before 2.6.1 has none. 0 = at once: since the approval the timeline shows a start or an end of this plan's
+ *  run (or a plan-less end on the issue), which is not under way now, so it ended or went stale; or the plan has no
+ *  readable approved_at (no anchor, as before). Otherwise approved_at + the grace: only a timeline fetched from then
+ *  on that still shows no start says the run was never queued. */
+export function notQueuedFrom(
+  events: Pick<PipelineEvent, "event_type" | "detail" | "created_at">[], plan: Pick<FixPlan, "id" | "approved_at">,
+): number {
+  const approved = parseApiDate(plan.approved_at)?.getTime();
+  if (approved === undefined) return 0;
+  const ran = events.some((e) => {
+    if ((e.event_type !== "execution_started" && e.event_type !== "execution_completed") || eventTime(e) < approved) return false;
+    const d: unknown = e.detail;
+    if (d != null && (typeof d !== "object" || Array.isArray(d))) return false; // unreadable: not evidence
+    const pid = d == null ? undefined : (d as { plan_id?: unknown }).plan_id;
+    return pid === plan.id || (e.event_type === "execution_completed" && pid === undefined);
+  });
+  return ran ? 0 : approved + AUTO_RUN_START_GRACE_MS;
+}
+
 const APPROVABLE_PLAN: ReadonlySet<FixPlanStatus> = new Set<FixPlanStatus>(["draft", "pending_approval"]);
 
 /** Why an approvable plan cannot be approved: its issue is closed (the approve endpoint refuses it with 409,
