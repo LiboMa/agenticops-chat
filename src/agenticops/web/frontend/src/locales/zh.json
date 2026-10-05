@@ -913,5 +913,21 @@
   "topbar.font.small": "小",
   "topbar.font.medium": "中",
   "topbar.font.large": "大",
-  "topbar.signOut": "退出登录"
+  "topbar.signOut": "退出登录",
+  "palette.placeholder": "搜索问题、修复方案、变更、报告、资源…",
+  "palette.typeToSearch": "输入关键词开始搜索…",
+  "palette.noResults": "没有找到「{q}」",
+  "palette.group.issue": "问题",
+  "palette.group.fix_plan": "修复方案",
+  "palette.group.report": "报告",
+  "palette.group.resource": "资源",
+  "palette.group.change_plan": "变更方案",
+  "palette.group.change_request": "变更单",
+  "login.tagline": "以 Agent 为先的云运维",
+  "login.email": "邮箱",
+  "login.password": "密码",
+  "login.signIn": "登录",
+  "login.signingIn": "正在登录…",
+  "login.invalid": "邮箱或密码不正确。",
+  "login.failed": "登录失败，请重试。"
 }
