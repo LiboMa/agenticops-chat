@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { FixExecution, HealthIssue } from "@/api/types";
 import {
-  anchorBadge, approvalBlockedReason, canApprovePlan, hasRunInFlight, issueFacts, issueStatuses, ISSUE_IN_FLIGHT, newestFirst,
-  parseIssueTab, resultRow, resultSummary,
+  anchorBadge, approvalBlockedReason, canApprovePlan, factRows, hasRunInFlight, isBlank, issueFacts, issueStatuses, ISSUE_IN_FLIGHT,
+  newestFirst, parseIssueTab, resultRow, resultSummary,
 } from "@/lib/issueDetail";
 
 function issue(extra: Partial<HealthIssue> = {}): HealthIssue {
@@ -187,5 +187,39 @@ describe("hasRunInFlight", () => {
       .toBe(false);
     expect(hasRunInFlight([])).toBe(false);
     expect(hasRunInFlight(undefined)).toBe(false);
+  });
+});
+
+describe("anchorBadge with the resource name (P8)", () => {
+  it("names the anchored resource, not the alarm's raw resource_id; falls back to #ref, never to 'unknown'", () => {
+    const i = issue({ resource_id: "unknown", resource_ref: 36, anchor_status: "anchored" });
+    expect(anchorBadge(i, "agenticops-chaos-lab")).toEqual({ kind: "resource", ref: 36, label: "agenticops-chaos-lab" });
+    expect(anchorBadge(i)).toEqual({ kind: "resource", ref: 36, label: "#36" });
+    expect(anchorBadge(issue({ resource_id: "i-0abc", resource_ref: 5, anchor_status: "anchored" }))).toEqual(
+      { kind: "resource", ref: 5, label: "i-0abc" });
+  });
+});
+
+describe("factRows", () => {
+  it("drops empty, 'unknown' and dash values; the anchor row links the resource with its name and type", () => {
+    const i = issue({ resource_id: "unknown", resource_ref: 36, anchor_status: "anchored", account_name: "chaos-lab",
+                      source: "cloudwatch_alarm", metric_data: { resource_type: "unknown", region: "—" } });
+    const rows = factRows(i, { name: "agenticops-chaos-lab", type: "EKS" });
+    expect(rows.map((r) => r.labelKey)).toEqual(
+      ["facts.anchor", "facts.account", "facts.severity", "facts.source", "facts.detected", "facts.trace"]);
+    expect(rows[0]).toEqual({ labelKey: "facts.anchor", value: "agenticops-chaos-lab · EKS", href: "/app/resources/36" });
+    expect(rows.find((r) => r.labelKey === "facts.detected")?.kind).toBe("date");
+  });
+  it("an unanchored issue with a real resource id shows it as the resource row; region/type when present", () => {
+    const rows = factRows(issue({ resource_id: "i-0abc", metric_data: { resource_type: "EC2", region: "us-east-1" } }));
+    expect(rows.slice(0, 3)).toEqual([
+      { labelKey: "facts.resource", value: "i-0abc", kind: "mono" },
+      { labelKey: "facts.type", value: "EC2" },
+      { labelKey: "facts.region", value: "us-east-1" },
+    ]);
+  });
+  it("isBlank", () => {
+    for (const v of ["", " ", "unknown", "Unknown", "—", "-", "n/a", null, undefined]) expect(isBlank(v), String(v)).toBe(true);
+    for (const v of ["x", 0, "0"]) expect(isBlank(v), String(v)).toBe(false);
   });
 });

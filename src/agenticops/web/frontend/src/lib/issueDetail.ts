@@ -88,16 +88,54 @@ export type AnchorBadge =
   | { kind: "resource"; ref: number; label: string }
   | { kind: "ambiguous" | "account_level" | "unanchored"; candidates: number };
 
-/** A link to the anchored resource, or why there is none; null before the resolver has reached the issue. */
+const BLANK = new Set(["", "unknown", "—", "-", "n/a", "none", "null"]);
+/** A value not worth a row: absent, empty, or a placeholder an alarm carried instead of a fact. */
+export function isBlank(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === "number") return false;
+  return typeof v !== "string" || BLANK.has(v.trim().toLowerCase());
+}
+
+/** A link to the anchored resource, named by the resource itself (not the alarm's raw resource_id), or why there
+ *  is none; null before the resolver has reached the issue. */
 export function anchorBadge(
   issue: Pick<HealthIssue, "resource_id" | "resource_ref" | "anchor_status" | "anchor_candidates">,
+  resourceName?: string | null,
 ): AnchorBadge | null {
   if (issue.anchor_status == null) return null;
   if (issue.anchor_status === "anchored" && issue.resource_ref != null) {
-    return { kind: "resource", ref: issue.resource_ref, label: issue.resource_id };
+    const label = !isBlank(resourceName) ? resourceName! : !isBlank(issue.resource_id) ? issue.resource_id : `#${issue.resource_ref}`;
+    return { kind: "resource", ref: issue.resource_ref, label };
   }
   const kind = issue.anchor_status === "anchored" ? "unanchored" : issue.anchor_status;
   return { kind, candidates: kind === "ambiguous" ? issue.anchor_candidates?.candidates?.length ?? 0 : 0 };
+}
+
+export interface FactRow { labelKey: string; value: string; kind?: "date" | "mono"; href?: string }
+
+/** The issue's key facts for the right rail, blank rows dropped (an alarm's "unknown" resource is not a fact). */
+export function factRows(
+  issue: Pick<HealthIssue, "resource_id" | "resource_ref" | "anchor_status" | "account_name" | "severity" | "source"
+    | "detected_at" | "trace_id" | "metric_data">,
+  anchor?: { name: string | null; type: string | null } | null,
+): FactRow[] {
+  const rows: FactRow[] = [];
+  const f = issueFacts(issue);
+  if (issue.anchor_status === "anchored" && issue.resource_ref != null) {
+    const name = !isBlank(anchor?.name) ? anchor!.name! : !isBlank(issue.resource_id) ? issue.resource_id : `#${issue.resource_ref}`;
+    rows.push({ labelKey: "facts.anchor", value: [name, anchor?.type].filter((x) => !isBlank(x)).join(" · "),
+                href: `/app/resources/${issue.resource_ref}` });
+  } else if (!isBlank(issue.resource_id)) {
+    rows.push({ labelKey: "facts.resource", value: issue.resource_id, kind: "mono" });
+  }
+  if (!isBlank(f.resourceType)) rows.push({ labelKey: "facts.type", value: f.resourceType! });
+  if (!isBlank(f.region)) rows.push({ labelKey: "facts.region", value: f.region! });
+  if (!isBlank(issue.account_name)) rows.push({ labelKey: "facts.account", value: issue.account_name! });
+  rows.push({ labelKey: "facts.severity", value: issue.severity.toUpperCase() });
+  if (!isBlank(issue.source)) rows.push({ labelKey: "facts.source", value: issue.source });
+  rows.push({ labelKey: "facts.detected", value: issue.detected_at, kind: "date" });
+  if (!isBlank(issue.trace_id)) rows.push({ labelKey: "facts.trace", value: issue.trace_id!, kind: "mono" });
+  return rows;
 }
 
 export type ResultOutcome = "pass" | "warning" | "fail" | "missing";

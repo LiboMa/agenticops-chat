@@ -15,6 +15,7 @@ import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
 import { useAcceptExecution, useCancelExecution } from "@/hooks/useFixExecutions";
 import { useSettings } from "@/hooks/useSettings";
+import { useResource } from "@/hooks/useResourceDetail";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
@@ -41,8 +42,8 @@ import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { planLabel, shortHash } from "@/lib/plans";
 import {
-  anchorBadge, approvalBlockedReason, canApprovePlan, issueFacts, issueStatuses, latestExecution, newestFirst, parseIssueTab,
-  ISSUE_TABS, type IssueTab,
+  anchorBadge, approvalBlockedReason, canApprovePlan, factRows, issueFacts, issueStatuses, latestExecution, newestFirst,
+  parseIssueTab, ISSUE_TABS, type IssueTab,
 } from "@/lib/issueDetail";
 import { confidenceBreakdown, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
 import { apiFetch } from "@/api/client";
@@ -65,6 +66,8 @@ export default function IssueDetail() {
   const fixPlans = useFixPlans({ health_issue_id: issueId });
   const executions = useIssueExecutions(issueId);
   const timeline = useIssueTimeline(issueId);
+  // The anchored resource, so the badge and the facts name it rather than the alarm's raw resource_id
+  const anchorRes = useResource(anomaly.data?.resource_ref ?? 0);
   const updateStatusMut = useUpdateIssueStatus();
   const cancelExecMut = useCancelExecution();
   const approveMut = useApproveFixPlan();
@@ -157,7 +160,7 @@ export default function IssueDetail() {
   const a = anomaly.data!;
   const latestPlan = fixPlans.data?.length ? fixPlans.data[0] : null;
   const statuses = issueStatuses(a, executions.data);
-  const badge = anchorBadge(a);
+  const badge = anchorBadge(a, anchorRes.data?.resource_name);
 
   /* -- Render ------------------------------------------------------ */
   return (
@@ -289,6 +292,7 @@ export default function IssueDetail() {
           rcaLoading={rcaLoading}
           onRunRca={triggerRca}
           timelineEvents={timeline.data}
+          anchor={{ name: anchorRes.data?.resource_name ?? null, type: anchorRes.data?.resource_type ?? null }}
           t={t}
         />
       )}
@@ -333,6 +337,7 @@ function IssueTab({
   rcaLoading,
   onRunRca,
   timelineEvents,
+  anchor,
   t,
 }: {
   issue: HealthIssue;
@@ -340,6 +345,7 @@ function IssueTab({
   rcaLoading: boolean;
   onRunRca: () => void;
   timelineEvents: PipelineEvent[] | undefined;
+  anchor: { name: string | null; type: string | null };
   t: (key: string) => string;
 }) {
   const f = issueFacts(a);
@@ -353,28 +359,18 @@ function IssueTab({
             dangerouslySetInnerHTML={{ __html: renderMarkdown(a.description) }}
           />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground block">{t("issues.resource")}</span>
-              <span className="font-mono text-foreground">{a.resource_id}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.type")}</span>
-              <span className="text-foreground">{f.resourceType ?? "—"}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.region")}</span>
-              <span className="text-foreground">{f.region ?? "—"}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.detected")}</span>
-              <span className="text-foreground">{formatFullDate(a.detected_at)}</span>
-            </div>
-            {a.account_name && (
-              <div>
-                <span className="text-muted-foreground block">{t("issues.account")}</span>
-                <span className="text-foreground">{a.account_name}</span>
+            {factRows(a, anchor).map((row) => (
+              <div key={row.labelKey}>
+                <span className="text-muted-foreground block">{t(row.labelKey)}</span>
+                {row.href ? (
+                  <Link to={row.href} className="text-primary hover:underline">{row.value}</Link>
+                ) : (
+                  <span className={row.kind === "mono" ? "font-mono text-foreground break-all" : "text-foreground"}>
+                    {row.kind === "date" ? formatFullDate(row.value) : row.value}
+                  </span>
+                )}
               </div>
-            )}
+            ))}
           </div>
 
           {f.metricName && (
