@@ -1,24 +1,21 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useChanges } from "@/hooks/useChanges";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useLocale } from "@/i18n/LocaleContext";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
-import { ChangeStepper } from "@/components/plans/ChangeStepper";
 import { PeriodButtons } from "@/components/plans/PeriodButtons";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { formatShortDate } from "@/lib/formatDate";
 import { CHANGE_STATUSES, type Period } from "@/lib/plans";
-import type { ChangeRequest, ChangeStatus } from "@/api/types";
+import { changeRow } from "@/lib/workItems";
+import type { ChangeStatus, RiskLevel } from "@/api/types";
 
 const LIST_LIMIT = 200;
 const selectClass = "border border-border bg-background text-sm rounded-lg px-3 py-1.5";
 
 export function ChangePlansTab() {
   const { t } = useLocale();
-  const navigate = useNavigate();
   const [status, setStatus] = useState<"" | ChangeStatus>("");
   const [account, setAccount] = useState("");
   const [requester, setRequester] = useState("");
@@ -40,15 +37,8 @@ export function ChangePlansTab() {
   }, [changes.data, requester]);
   const rows = requester ? (changes.data ?? []).filter((c) => c.requested_by === requester) : (changes.data ?? []);
 
-  const columns: Column<ChangeRequest>[] = [
-    { key: "id", header: "C#", render: (c) => <span className="font-mono text-xs text-primary">C#{c.id}</span>, sortable: true, sortValue: (c) => c.id },
-    { key: "title", header: t("plans.planTitle"), render: (c) => <span className="text-sm text-foreground">{c.title}</span> },
-    { key: "status", header: t("plans.status"), render: (c) => <ChangeStepper cr={c} compact />, sortable: true, sortValue: (c) => c.status },
-    { key: "risk", header: t("plans.risk"), render: (c) => c.risk_level ? <RiskLevelBadge level={c.risk_level} /> : <span className="text-xs text-muted-foreground">-</span> },
-    { key: "type", header: t("plans.type"), render: (c) => <span className="text-xs">{t(`plans.changeType.${c.effective_change_type ?? c.requested_change_type}`)}</span> },
-    { key: "by", header: t("plans.requestedBy"), render: (c) => <span className="text-xs font-mono text-muted-foreground">{c.requested_by}</span> },
-    { key: "updated", header: t("plans.updated"), render: (c) => <span className="text-xs text-muted-foreground">{formatShortDate(c.updated_at ?? c.created_at)}</span>, sortable: true, sortValue: (c) => c.updated_at ?? c.created_at ?? "" },
-  ];
+  const accountNames = useMemo(() => new Map((accounts.data ?? []).map((a) => [a.id, a.name])), [accounts.data]);
+  const accountName = (id: number | null) => (id == null ? null : accountNames.get(id) ?? null);
 
   return (
     <div className="space-y-4">
@@ -73,7 +63,13 @@ export function ChangePlansTab() {
         <ErrorBanner message={(changes.error as Error).message} onRetry={() => changes.refetch()} actionLabel={t("common.retry")} />
       ) : (
         <>
-          <DataTable columns={columns} data={rows} rowKey={(c) => c.id} onRowClick={(c) => navigate(`/app/changes/${c.id}`)} emptyMessage={t("plans.noChanges")} />
+          <WorkItemTable
+            rows={rows.map((c) => changeRow(c, accountName(c.account_id)))}
+            levelHeader={t("plans.risk")}
+            renderLevel={(r) => r.level ? <RiskLevelBadge level={r.level as RiskLevel} /> : <span className="text-xs text-muted-foreground">—</span>}
+            emptyMessage={t("plans.noChanges")}
+            t={t}
+          />
           {(changes.data?.length ?? 0) >= LIST_LIMIT && (
             <p className="text-xs text-muted-foreground">{t("plans.limitNote").replace("{n}", String(LIST_LIMIT))}</p>
           )}

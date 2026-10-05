@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useResources } from "@/hooks/useResources";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
 import { useLocale } from "@/i18n/LocaleContext";
-import { IssueRow } from "@/components/ui/IssueRow";
+import { WorkItemTable } from "@/components/ui/WorkItemTable";
+import { IssueQuickActions } from "@/components/ui/IssueQuickActions";
+import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { SignalsPanel } from "@/components/signals/SignalsPanel";
 import { Badge } from "@/components/ui/Badge";
 import { StatusIndicator } from "@/components/ui/StatusIndicator";
@@ -13,6 +15,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
+import { issueRow } from "@/lib/workItems";
 import type { Anomaly, Resource } from "@/api/types";
 
 /* ── Issues helpers ─────────────────────────────────────────────── */
@@ -121,7 +124,7 @@ export default function IssuesAndPlans() {
       </div>
 
       {view === "issues" ? (
-        <IssuesView navigate={navigate} t={t} />
+        <IssuesView t={t} />
       ) : view === "signals" ? (
         <SignalsPanel />
       ) : (
@@ -133,22 +136,21 @@ export default function IssuesAndPlans() {
 
 /* ── Issues View ────────────────────────────────────────────────── */
 
-function IssuesView({
-  navigate,
-  t,
-}: {
-  navigate: ReturnType<typeof useNavigate>;
-  t: (key: string) => string;
-}) {
+const selectClass =
+  "text-sm font-medium rounded-lg px-3 py-1.5 bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent border-none transition-colors cursor-pointer";
+
+function IssuesView({ t }: { t: (key: string) => string }) {
   const [phase, setPhase] = useState<Phase>("all");
   const [severity, setSeverity] = useState<Severity>("all");
+  const [account, setAccount] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
   // The view lives in the URL (ops events by default) and filters on the server: the list is paged.
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = resolveIssueScope(searchParams.get("scope"));
   const setScope = (s: IssueScope) => setSearchParams(s === "ops" ? {} : { scope: s });
-  const { data, isLoading, error, refetch } = useAnomalies({ scope });
+  const { data, isLoading, error, refetch } = useAnomalies({ scope, account_id: account ? Number(account) : undefined });
+  const accounts = useAccounts();
 
   const allIssues = data ?? [];
 
@@ -185,145 +187,30 @@ function IssuesView({
     return sortIssues(matched, sortKey);
   }, [allIssues, phase, severity, search, sortKey]);
 
-  const chips: { key: Phase; label: string; count: number }[] = [
+  // The rows carry only strings (issueRow is pure); the quick actions need the issue itself.
+  const byKey = useMemo(() => new Map(filtered.map((a) => [`I${a.id}`, a])), [filtered]);
+
+  const phases: { key: Phase; label: string; count: number }[] = [
     { key: "all", label: t("issues.all"), count: counts.all },
     { key: "active", label: t("issues.active"), count: counts.active },
     { key: "resolved", label: t("issues.resolved"), count: counts.resolved },
     { key: "dismissed", label: t("issues.dismissed"), count: counts.dismissed },
   ];
+  // The selected option is all a closed <select> shows, so each option names its filter.
+  const named = (filterKey: string, label: string) =>
+    t("workitem.filter.named").replace("{filter}", t(filterKey)).replace("{value}", label);
 
   return (
     <>
       {error && (
-        <ErrorBanner message={error.message} onRetry={() => refetch()} />
+        <ErrorBanner message={error.message} onRetry={() => refetch()} actionLabel={t("common.retry")} />
       )}
 
-      {/* Filter bar */}
-      <div className="space-y-3">
-        {/* Scope toggle: ops events / security findings / all */}
-        <div className="flex bg-secondary rounded-lg p-0.5 w-fit">
-          {ISSUE_SCOPES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setScope(s)}
-              className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                scope === s ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(`issues.scope.${s}`)}
-            </button>
-          ))}
-        </div>
-        {/* Phase chips row */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            {chips.map((chip) => (
-              <button
-                key={chip.key}
-                onClick={() => setPhase(chip.key)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                  phase === chip.key
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent"
-                }`}
-              >
-                {chip.label}
-                <span
-                  className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-xs rounded-full ${
-                    phase === chip.key
-                      ? "bg-primary-foreground/20 text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {chip.count}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Sort dropdown */}
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="text-sm font-medium rounded-lg px-3 py-1.5 bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent border-none transition-colors cursor-pointer"
-            >
-              <option value="newest">{t("issues.sortNewest")}</option>
-              <option value="oldest">{t("issues.sortOldest")}</option>
-              <option value="severity">{t("issues.sortSeverity")}</option>
-            </select>
-
-            {/* Search */}
-            <div className="relative">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t("issues.search")}
-                className="pl-9 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-64"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Severity filter row */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground mr-1">{t("issues.severity")}:</span>
-          {(["all", "critical", "high", "medium", "low"] as Severity[]).map((sev) => {
-            const active = severity === sev;
-            const count = sevCounts[sev] ?? 0;
-            const sevColors: Record<string, string> = {
-              all: active ? "bg-primary text-primary-foreground" : "",
-              critical: active ? "bg-red-500/20 text-red-500 ring-1 ring-red-500/30" : "hover:bg-red-500/10 hover:text-red-500",
-              high: active ? "bg-orange-500/20 text-orange-500 ring-1 ring-orange-500/30" : "hover:bg-orange-500/10 hover:text-orange-500",
-              medium: active ? "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 ring-1 ring-yellow-500/30" : "hover:bg-yellow-500/10 hover:text-yellow-600 dark:hover:text-yellow-400",
-              low: active ? "bg-blue-500/20 text-blue-500 ring-1 ring-blue-500/30" : "hover:bg-blue-500/10 hover:text-blue-500",
-            };
-            const badgeColors: Record<string, string> = {
-              all: active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground",
-              critical: active ? "bg-red-500/30 text-red-500" : "bg-red-500/10 text-red-500/70",
-              high: active ? "bg-orange-500/30 text-orange-500" : "bg-orange-500/10 text-orange-500/70",
-              medium: active ? "bg-yellow-500/30 text-yellow-600 dark:text-yellow-400" : "bg-yellow-500/10 text-yellow-600/70 dark:text-yellow-400/70",
-              low: active ? "bg-blue-500/30 text-blue-500" : "bg-blue-500/10 text-blue-500/70",
-            };
-            return (
-              <button
-                key={sev}
-                onClick={() => setSeverity(sev)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                  active ? sevColors[sev] : `text-muted-foreground ${sevColors[sev]}`
-                }`}
-              >
-                {sev === "all" ? t("issues.all") : sev}
-                <span className={`inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 text-[10px] rounded-full ${badgeColors[sev]}`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Issue list */}
-      {isLoading ? (
-        <Spinner />
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+      {/* Filters: one row (P15) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
           <svg
-            className="h-12 w-12 mb-3 opacity-30"
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -331,22 +218,61 @@ function IssuesView({
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
             />
           </svg>
-          <p className="text-sm">{t("issues.noIssues")}</p>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("issues.search")}
+            className="pl-9 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-56"
+          />
         </div>
-      ) : (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          {filtered.map((issue) => (
-            <IssueRow
-              key={issue.id}
-              issue={issue}
-              onClick={() => navigate(`/app/issues/${issue.id}`)}
-            />
+        <select value={phase} onChange={(e) => setPhase(e.target.value as Phase)} aria-label={t("workitem.filter.status")} className={selectClass}>
+          {phases.map((p) => (
+            <option key={p.key} value={p.key}>{named("workitem.filter.status", `${p.label} (${p.count})`)}</option>
           ))}
-        </div>
+        </select>
+        <select value={severity} onChange={(e) => setSeverity(e.target.value as Severity)} aria-label={t("workitem.filter.severity")} className={selectClass}>
+          {(["all", "critical", "high", "medium", "low"] as Severity[]).map((sev) => (
+            <option key={sev} value={sev}>
+              {named("workitem.filter.severity", `${sev === "all" ? t("issues.all") : sev} (${sevCounts[sev] ?? 0})`)}
+            </option>
+          ))}
+        </select>
+        <select value={scope} onChange={(e) => setScope(e.target.value as IssueScope)} aria-label={t("workitem.filter.scope")} className={selectClass}>
+          {ISSUE_SCOPES.map((s) => (
+            <option key={s} value={s}>{named("workitem.filter.scope", t(`issues.scope.${s}`))}</option>
+          ))}
+        </select>
+        <select value={account} onChange={(e) => setAccount(e.target.value)} aria-label={t("workitem.filter.account")} className={selectClass}>
+          <option value="">{named("workitem.filter.account", t("issues.all"))}</option>
+          {(accounts.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>{named("workitem.filter.account", a.name)}</option>
+          ))}
+        </select>
+        <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className={selectClass}>
+          <option value="newest">{t("issues.sortNewest")}</option>
+          <option value="oldest">{t("issues.sortOldest")}</option>
+          <option value="severity">{t("issues.sortSeverity")}</option>
+        </select>
+        <Link to="/app/signals" className="ml-auto text-sm text-primary hover:underline">{t("workitem.rawSignals")}</Link>
+      </div>
+
+      {/* Issue list */}
+      {isLoading ? (
+        <Spinner />
+      ) : (
+        <WorkItemTable
+          rows={filtered.map(issueRow)}
+          levelHeader={t("facts.severity")}
+          renderLevel={(r) => <SeverityBadge severity={r.level as Anomaly["severity"]} />}
+          rowActions={(r) => { const a = byKey.get(r.key); return a ? <IssueQuickActions issue={a} /> : null; }}
+          emptyMessage={t("issues.noIssues")}
+          t={t}
+        />
       )}
     </>
   );

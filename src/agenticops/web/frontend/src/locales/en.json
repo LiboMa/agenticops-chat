@@ -875,5 +875,21 @@
   "execution.status.succeeded": "Succeeded",
   "execution.status.failed": "Failed",
   "execution.status.rolled_back": "Rolled back",
-  "execution.status.aborted": "Aborted"
+  "execution.status.aborted": "Aborted",
+  "workitem.col.ref": "#",
+  "workitem.col.title": "Title",
+  "workitem.col.status": "Status",
+  "workitem.col.wait": "Waiting for / next step",
+  "workitem.col.account": "Account",
+  "workitem.col.updated": "Updated",
+  "workitem.quick.confirm": "Confirm",
+  "workitem.quick.confirmTitle": "Confirm this is a real issue",
+  "workitem.quick.confirmed": "Confirmed as a real issue",
+  "workitem.quick.statusDone": "{ref} is now {status}",
+  "workitem.quick.failed": "Failed: {error}",
+  "workitem.filter.named": "{filter}: {value}",
+  "workitem.filter.status": "Status",
+  "workitem.filter.severity": "Severity",
+  "workitem.filter.scope": "Scope",
+  "workitem.filter.account": "Account"
 }

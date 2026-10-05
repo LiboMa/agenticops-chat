@@ -875,5 +875,21 @@
   "execution.status.succeeded": "成功",
   "execution.status.failed": "失败",
   "execution.status.rolled_back": "已回滚",
-  "execution.status.aborted": "已中止"
+  "execution.status.aborted": "已中止",
+  "workitem.col.ref": "#",
+  "workitem.col.title": "标题",
+  "workitem.col.status": "状态",
+  "workitem.col.wait": "等谁 / 下一步",
+  "workitem.col.account": "账户",
+  "workitem.col.updated": "更新",
+  "workitem.quick.confirm": "确认",
+  "workitem.quick.confirmTitle": "确认这是真实问题",
+  "workitem.quick.confirmed": "已确认是真实问题",
+  "workitem.quick.statusDone": "{ref} 已改为「{status}」",
+  "workitem.quick.failed": "操作失败：{error}",
+  "workitem.filter.named": "{filter}：{value}",
+  "workitem.filter.status": "状态",
+  "workitem.filter.severity": "严重度",
+  "workitem.filter.scope": "范围",
+  "workitem.filter.account": "账户"
 }
