@@ -143,16 +143,19 @@ YAML 里 `hourly/minute/live` 等键名不会被解析成布尔值；但沿用�
 
 一个 daemon 线程，**只在调度器选出的那个 worker 里启动**（复用 `web/app.py` 的 `fcntl` 文件锁选举 / `AIOPS_SCHEDULER_WORKER`），启动方式照 `im/feishu_ws.start_feishu_ws`：崩溃自动重启、指数退避、`sensing_enabled=false` 则不启动。它是**变更触发刷新的唯一写入者**（`change_events` 写入、单资源增量 ingest、`change-event` 触发的图刷新都只从它发出）——4 个 uvicorn worker 各持线程锁的已知问题对这条路径不存在；其他 worker 的手动 / API / RCA 路径不变。
 
+**凭证（铁律 1–6 在常驻线程里怎么成立）**：线程常驻，但**凭证不常驻**。CloudTrail 用进程内的 `resolve_account_session` 会话（AssumeRole 经 `DeferredRefreshableCredentials` 自动续期，`GetCallerIdentity` 校验照旧）；kubectl 与 AWS CLI 探针每次都是一个**短命子进程**，每次调用前重新经 `get_subprocess_env_for_account` / `kubectl_env_for_cluster` 取冻结凭证——`resolver` 的文档明令禁止把冻结凭证交给长命进程，本设计不违反它：没有任何子进程活过一次调用。
+
 ### 7.2 循环：按 `next_check_at` 的优先队列，周期约 5 s，三类任务
 
 **(a) CloudTrail 游标拉取**（每账户 × 区域每 `sensing_cloudtrail_interval_seconds`）
-- 账户寻址客户端（照 `security/incremental_poll._get_client` 的写法，经 provider 层）；`lookup_events(StartTime=游标 − overlap)` 分页，到 `page_cap` 为止。
-- 跳过 `sensing_cloudtrail_ignore_prefixes` 开头的事件名；其余每条 → `change_events`（fingerprint = EventId，`event_time` = EventTime，`actor` = Username / userIdentity.arn，`detail` 按白名单）。`Resources[]` 里每个 `ResourceName` 都尝试锚定（`identity_resolver.resolve` 规则 ①–④：ARN ↔ 短 id、ELB ARN 名段、name）；一条事件涉及多个资源就写多行（fingerprint 加 `|resource_id`）。
+- 账户寻址客户端（照 `security/incremental_poll._get_client` 的写法，经 provider 层）；`lookup_events(StartTime=游标 − overlap, LookupAttributes=[{AttributeKey: ReadOnly, AttributeValue: "false"}])` 分页，到 `page_cap` 为止——**服务端先滤掉只读事件**，拉回的页数少一个量级。
+- 再在客户端跳过 `sensing_cloudtrail_ignore_prefixes` 开头的事件名（兜住少数 ReadOnly 标错的事件）；其余每条 → `change_events`（fingerprint = EventId，`event_time` = EventTime，`actor` = Username / userIdentity.arn，`detail` 按白名单）。`Resources[]` 里每个 `ResourceName` 都尝试锚定（`identity_resolver.resolve` 规则 ①–④：ARN ↔ 短 id、ELB ARN 名段、name）；一条事件涉及多个资源就写多行（fingerprint 加 `|resource_id`）。
 - 游标推进到本轮处理的最后一条 `EventTime`；错误 → `last_error`，退避，下一轮续。
 
 **(b) K8s events 拉取**（每集群每 `sensing_k8s_events_interval_seconds`）
 - `kubectl get events -A -o json`，经 `credentials/kube.kubectl_env_for_cluster`，沿用连接器的 byte cap 与超时；去重键 `metadata.uid + count`（K8s 事件会聚合计数，count 变化 = 新一次发生）；忽略清单滤噪音。
-- 按 `involvedObject`（kind/namespace/name）构造 `<cluster>/<Kind>/<ns>/<name>` 锚定；`event_time` 取 `eventTime` 或 `lastTimestamp`；`actor` = `source.component`。
+- 按 `involvedObject`（kind/namespace/name）构造 `<cluster>/<Kind>/<ns>/<name>` 锚定；`event_time` 取 `eventTime` 或 `lastTimestamp`；`actor` = `source.component`（这是控制器，不是人）。
+- **K8s 变更的真实操作者**（谁执行了 `kubectl scale`）只在 EKS 控制面审计日志里（CloudWatch Logs `/aws/eks/<cluster>/cluster`，需集群开启 `audit` 日志类型）。**P2 可选**：对 `live` / `minute` 集群按游标拉审计日志的 `create`/`update`/`patch`/`delete` 动词，把 `user.username` 回填到同资源、同时间窗的 `change_events.actor`。2.6.1 评测里 I#1 的 RCA 能说出 `sa-malibo`，就是 agent 临时查了这份日志。
 
 **(c) live 探针**（每个 `live` 资源每 `sensing_live_probe_interval_seconds`）
 - AWS：对应类型的单资源只读 describe（经 `run_aws_cli` 的只读路径 / provider 会话，账户寻址）；K8s：`kubectl get <kind> <name> -n <ns> -o json`。
@@ -230,7 +233,9 @@ YAML 里 `hourly/minute/live` 等键名不会被解析成布尔值；但沿用�
 
 **评测门禁 — 两条腿**
 - **每夜、$0、自动**：`scripts/measure_sensing.py`（扩展现有测量脚本，只读副本），算：锚定率按原因分布；`change_events` 各来源条数与未锚定率；新鲜度滞后 `observed_at − event_time` 的中位数 / p95 按级别；三级资源分布；预算触顶次数；Galaxy 每小时成本。调度 `SensingMetrics` 每日跑，结果写一张小表 `sensing_metrics`（日期、指标 JSON），Settings 感知卡显示趋势。
-- **每周、有费用、半自动**：chaos-lab 定位评测加三个**感知场景**：`sense-k8s-scale`（minute：改 Deployment 副本数 → 账本有事件、图可见，秒数）、`sense-aws-tag`（CloudTrail：给实例打标签 → 账本有事件带 actor，秒数，并区分"CloudTrail 可查"与"我们看到"）、`sense-live-endpoint`（live：缩容让 EndpointSlice 变化 → 可见秒数）。`location_eval.py --assert`：AC@1 ≥ 基线 − 0.1、图召回 ≥ 12/13、located ≥ 0.9、三个滞后不超过 §1 承诺。评测仍由人跑（要进实验室凭证，不进 CI），**阈值由脚本判**。顺手把每个用例的定位结果以 `location_verdict` 回填，让 `GET /api/rca/location-stats` 的 Top-1 变成活数据。
+- **每周、有费用、半自动**：chaos-lab 定位评测加三个**感知场景**：`sense-k8s-scale`（minute：改 Deployment 副本数 → 账本有事件、图可见，秒数）、`sense-aws-tag`（CloudTrail：给实例打标签 → 账本有事件带 actor，秒数，并区分"CloudTrail 可查"与"我们看到"）、`sense-live-endpoint`（live：缩容让 EndpointSlice 变化 → 可见秒数）。`location_eval.py --assert`：AC@1 ≥ 基线 − 0.1、图召回 ≥ 12/13、located ≥ 0.9、三个滞后不超过 §1 承诺。评测仍由人跑（要进实验室凭证，不进 CI；应用内调度器也当不了它的宿主——它要重启应用、从外部注入故障），**阈值由脚本判**。
+  - **方差策略**：13 个样本，一个用例 = 0.077，所以 AC@1 的容差 0.1 ≈ 一个用例、召回 ≥ 12/13 = 允许一个未命中；`rca_wait_s` 也进断言（每用例 ≤ 960 s）。样本扩到 ≥ 20 之前不收紧阈值。
+  - **持久化**：实验室应用的库每批都被重启清空，所以计分摘要照旧写进 `results/location-<ts>.json`（gitignored）并回填到评测报告文档；`location_verdict` 的回填在 cleanup **之前**完成，并把 `GET /api/rca/location-stats` 的结果一并捞进 results JSON——这样 Top-1 既是活数据，也不随库一起消失。
 
 ## 11 测试
 
