@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, changeFilters, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
+import { auditTabVisible, becameTerminalChange, CHANGE_TERMINAL_STATUSES, changeFilters, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, nextTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -123,5 +123,23 @@ describe("changeFilters — the Changes tab's URL (final review I2)", () => {
   it("drops what the API would refuse", () => {
     expect(changeFilters(new URLSearchParams("status=bogus&account_id=x&period=1y"))).toEqual(
       { status: undefined, account_id: undefined, requested_by: undefined, period: undefined });
+  });
+});
+
+describe("hub tabs — keyboard and who sees Audit (deferred minors M8 / M9)", () => {
+  const ids = ["fix", "changes", "audit"] as const;
+  it("arrow keys move and wrap; Home / End jump; other keys do nothing", () => {
+    expect(nextTab(ids, "fix", "ArrowRight")).toBe("changes");
+    expect(nextTab(ids, "audit", "ArrowRight")).toBe("fix");
+    expect(nextTab(ids, "fix", "ArrowLeft")).toBe("audit");
+    expect(nextTab(ids, "changes", "Home")).toBe("fix");
+    expect(nextTab(ids, "changes", "End")).toBe("audit");
+    expect(nextTab(ids, "changes", "a")).toBeNull();
+  });
+  it("Audit is offered only once bootstrap says so — never flashed while it loads", () => {
+    expect(auditTabVisible(undefined)).toBe(false);
+    expect(auditTabVisible({ auth_enabled: true, user: { is_admin: false } })).toBe(false);
+    expect(auditTabVisible({ auth_enabled: true, user: { is_admin: true } })).toBe(true);
+    expect(auditTabVisible({ auth_enabled: false, user: { is_admin: false } })).toBe(true);
   });
 });

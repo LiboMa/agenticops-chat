@@ -7,7 +7,7 @@ import { FixPlansTab } from "@/components/plans/FixPlansTab";
 import { ChangePlansTab } from "@/components/plans/ChangePlansTab";
 import { AuditTab } from "@/components/plans/AuditTab";
 import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
-import { hubTab, type HubTab } from "@/lib/plans";
+import { auditTabVisible, hubTab, nextTab, type HubTab } from "@/lib/plans";
 import { tabCounts } from "@/lib/attention";
 import { useAttention } from "@/hooks/useAttention";
 
@@ -22,7 +22,7 @@ export default function PlansAndChanges() {
   const attention = useAttention();
   const changesOn = settings.data?.change_management_enabled === true;
   // /api/audit needs an admin when auth is on (rbac audit.read): the tab is not offered to anyone else
-  const auditOn = !boot.data?.auth_enabled || !!boot.data?.user?.is_admin;
+  const auditOn = auditTabVisible(boot.data);
   const requested = hubTab(params.get("tab"));
   const tab: HubTab = requested === "audit" && !auditOn ? "fix" : requested;
   const counts = tabCounts(attention.data?.items ?? []);
@@ -45,18 +45,28 @@ export default function PlansAndChanges() {
           </button>
         )}
       </div>
-      <div role="tablist" aria-label={t("nav.plans")} className="flex gap-1 border-b border-border">
+      <div role="tablist" aria-label={t("nav.plans")} className="flex gap-1 border-b border-border"
+           onKeyDown={(e) => {
+             const to = nextTab(tabs.map((x) => x.id), tab, e.key);
+             if (!to) return;
+             e.preventDefault();
+             pick(to);
+             document.getElementById(`plans-tab-${to}`)?.focus();
+           }}>
         {tabs.map((x) => (
-          <button key={x.id} role="tab" type="button" aria-selected={tab === x.id} onClick={() => pick(x.id)}
+          <button key={x.id} id={`plans-tab-${x.id}`} role="tab" type="button" aria-selected={tab === x.id}
+                  aria-controls={`plans-panel-${x.id}`} tabIndex={tab === x.id ? 0 : -1} onClick={() => pick(x.id)}
                   className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${tab === x.id ? "border-primary font-semibold text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
             {x.label}
             {!!x.count && <span title={t("plans.tab.pending").replace("{n}", String(x.count))} className="rounded bg-selected px-1.5 text-[11px] font-semibold text-primary">{x.count}</span>}
           </button>
         ))}
       </div>
-      {tab === "fix" && <FixPlansTab />}
-      {tab === "changes" && (changesOn ? <ChangePlansTab /> : <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>)}
-      {tab === "audit" && <AuditTab />}
+      <div role="tabpanel" id={`plans-panel-${tab}`} aria-labelledby={`plans-tab-${tab}`}>
+        {tab === "fix" && <FixPlansTab />}
+        {tab === "changes" && (changesOn ? <ChangePlansTab /> : <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>)}
+        {tab === "audit" && <AuditTab />}
+      </div>
       {showNew && <NewChangeDialog onClose={() => setShowNew(false)} onCreated={(id) => { setShowNew(false); navigate(`/app/changes/${id}`); }} />}
     </div>
   );

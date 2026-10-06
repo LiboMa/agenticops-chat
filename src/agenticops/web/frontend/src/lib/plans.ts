@@ -56,6 +56,22 @@ export type HubTab = "fix" | "changes" | "audit";
 export function hubTab(raw: string | null): HubTab {
   return raw === "changes" || raw === "audit" ? raw : "fix";
 }
+/** The hub tablist's keyboard: ←/→ move and wrap, Home/End jump; null for any other key (WAI-ARIA tabs pattern). */
+export function nextTab<T extends string>(ids: readonly T[], current: T, key: string): T | null {
+  const i = ids.indexOf(current);
+  if (key === "ArrowRight") return ids[(i + 1) % ids.length];
+  if (key === "ArrowLeft") return ids[(i - 1 + ids.length) % ids.length];
+  if (key === "Home") return ids[0];
+  if (key === "End") return ids[ids.length - 1];
+  return null;
+}
+
+/** The Audit tab needs `audit.read` (admin when sign-in is on). Not offered until bootstrap says so — never flashed. */
+export function auditTabVisible(boot: { auth_enabled?: boolean; user?: { is_admin?: boolean } | null } | undefined): boolean {
+  if (!boot) return false;
+  return !boot.auth_enabled || !!boot.user?.is_admin;
+}
+
 /** An old /app/changes or /app/audit link (bookmarks, notifications) → its hub tab, with its query kept. */
 export function hubRedirect(tab: Exclude<HubTab, "fix">, search: string): string {
   const qs = new URLSearchParams(search);

@@ -182,8 +182,9 @@ export function HomePrefsDialog({ open, onOpenChange: setOpen }: { open: boolean
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-30px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-6 shadow-xl animate-[slideInRight_0.2s_ease-out]">
+        {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
+        <Dialog.Overlay className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/30 px-[15px]">
+        <Dialog.Content className="w-[min(460px,100%)] rounded-lg border border-border bg-card p-6 shadow-xl animate-[slideInRight_0.2s_ease-out]">
           <Dialog.Title className="text-lg font-semibold text-foreground">{t("home.prefsTitle")}</Dialog.Title>
           <Dialog.Description className="mt-2 text-sm text-muted-foreground">{t("home.prefsHint")}</Dialog.Description>
           <label className="mt-5 block text-sm font-medium text-foreground" htmlFor="home-choice">{t("home.defaultEntry")}</label>
@@ -201,6 +202,7 @@ export function HomePrefsDialog({ open, onOpenChange: setOpen }: { open: boolean
             </button>
           </div>
         </Dialog.Content>
+        </Dialog.Overlay>
       </Dialog.Portal>
     </Dialog.Root>
   );

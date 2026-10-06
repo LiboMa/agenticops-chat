@@ -999,5 +999,6 @@
   "workitem.future.issue.runApprove": "每个方案都等人「批准并执行」。",
   "workitem.future.issue.runManual": "自动修复已关闭：方案批准后，需要有人点「执行」才会运行。",
   "workitem.future.issue.runNeutral": "方案批准后才会运行。",
-  "plans.detail.withdrawnBy": "撤回人"
+  "plans.detail.withdrawnBy": "撤回人",
+  "plans.fixCapped": "只显示最新的 200 条，请用筛选缩小范围查看更早的方案。"
 }

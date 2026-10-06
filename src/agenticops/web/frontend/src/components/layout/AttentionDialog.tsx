@@ -22,8 +22,9 @@ export function AttentionDialog({ open, onOpenChange }: { open: boolean; onOpenC
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
-        <Dialog.Content className="fixed left-1/2 top-[12vh] z-50 max-h-[76vh] w-[min(560px,calc(100vw-30px))] -translate-x-1/2 overflow-y-auto rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
+        {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
+        <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/30 px-[15px] pt-[12vh]">
+        <Dialog.Content className="max-h-[76vh] w-[min(560px,100%)] overflow-y-auto rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
           <div className="mb-3 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-foreground">{t("attention.title")}</Dialog.Title>
             <Dialog.Close aria-label={t("common.close")} className="rounded px-2 text-lg text-muted-foreground hover:text-foreground">×</Dialog.Close>
@@ -48,6 +49,7 @@ export function AttentionDialog({ open, onOpenChange }: { open: boolean; onOpenC
             <p className="mt-3 text-xs text-muted-foreground">{t("attention.more").replace("{shown}", String(items.length)).replace("{total}", String(q.data.total))}</p>
           )}
         </Dialog.Content>
+        </Dialog.Overlay>
       </Dialog.Portal>
     </Dialog.Root>
   );

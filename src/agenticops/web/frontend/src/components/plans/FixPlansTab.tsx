@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useFixPlans } from "@/hooks/useFixPlans";
@@ -19,6 +19,7 @@ export function FixPlansTab() {
   const plans = useFixPlans({ kind: "fix", limit: 200, ...filters });
   const accounts = useAccounts();
   const [q, setQ] = useState(filters.q ?? "");
+  useEffect(() => setQ(filters.q ?? ""), [filters.q]);  // back / forward changes the URL: the box follows
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
@@ -55,6 +56,8 @@ export function FixPlansTab() {
       {plans.isLoading ? <Spinner label={t("common.loading")} />
         : plans.error ? <ErrorBanner message={plans.error.message} onRetry={() => plans.refetch()} actionLabel={t("common.retry")} />
         : (
+          <>
+          {(plans.data?.length ?? 0) >= 200 && <p className="text-xs text-muted-foreground">{t("plans.fixCapped")}</p>}
           <WorkItemTable
             rows={(plans.data ?? []).map((p) => fixPlanRow(p, accountName(p.account_id)))}
             levelHeader={t("plans.risk")}
@@ -63,6 +66,7 @@ export function FixPlansTab() {
             emptyMessage={filtered ? t("plans.fixEmptyFiltered") : t("plans.fixEmpty")}
             t={t}
           />
+          </>
         )}
     </div>
   );

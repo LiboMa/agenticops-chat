@@ -57,7 +57,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
         {boot.data?.features.attention && (
           <button type="button" onClick={() => setAttentionOpen(true)}
-                  aria-label={`${t("attention.title")} ${attention.data?.total ?? 0}`}
+                  aria-label={attention.data ? `${t("attention.title")} ${attention.data.total}` : t("attention.title")}
                   className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
             <span className="max-[1100px]:hidden">{t("attention.title")}</span>
             <b className="min-w-[20px] rounded-[4px] bg-selected px-1.5 text-center text-[11px] font-semibold">
