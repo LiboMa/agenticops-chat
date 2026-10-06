@@ -39,6 +39,7 @@ export default function PlanDetail() {
   const executeMut = useExecuteFixPlan();
   const { confirm, dialog } = useConfirm();
   const [open, setOpen] = useState<"approve" | "reject" | null>(null);
+  const [pinnedHash, setPinnedHash] = useState(""); // what the dialog shows is what it approves (final review I6)
   const back = <Link to="/app/plans" className="text-sm text-muted-foreground hover:text-foreground">← {t("nav.plans")}</Link>;
 
   if (!Number.isInteger(id) || id <= 0 || (q.error instanceof ApiError && q.error.status === 404)) {
@@ -71,7 +72,7 @@ export default function PlanDetail() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-2xl font-semibold text-foreground">{plan.title}</h1>
           <div className="flex gap-2">
-            {m.actions.approve && <button className={`${btn} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={approveMut.isPending} onClick={() => { approveMut.reset(); setOpen("approve"); }}>{t(copy.buttonKey)}</button>}
+            {m.actions.approve && <button className={`${btn} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={approveMut.isPending} onClick={() => { approveMut.reset(); setPinnedHash(plan.content_hash ?? ""); setOpen("approve"); }}>{t(copy.buttonKey)}</button>}
             {m.actions.reject && <button className={`${btn} border border-red-500/40 text-red-600`} disabled={rejectMut.isPending} onClick={() => { rejectMut.reset(); setOpen("reject"); }}>{t("issues.reject")}</button>}
             {m.actions.execute && <button className={`${btn} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={executeMut.isPending} onClick={onExecute}>{t("issues.execute")}</button>}
           </div>
@@ -115,7 +116,7 @@ export default function PlanDetail() {
       {open && (
         <ReasonDialog
           title={open === "approve" ? t(copy.titleKey).replace("{label}", label) : `${t("plans.rejectTitle")} ${label}`}
-          description={open === "approve" ? `${t(copy.noteKey)} ${t("plans.hash")} ${shortHash(plan.content_hash)}` : plan.title}
+          description={open === "approve" ? `${t(copy.noteKey)} ${t("plans.hash")} ${shortHash(pinnedHash)}` : plan.title}
           confirmText={open === "approve" ? t(copy.buttonKey) : t("issues.reject")}
           variant={open === "reject" ? "destructive" : "default"}
           required={open === "reject"}
@@ -124,7 +125,7 @@ export default function PlanDetail() {
           error={(open === "approve" ? approveMut.error : rejectMut.error)?.message ?? null}
           onConfirm={(reason) => {
             const done = { onSuccess: () => setOpen(null) };
-            if (open === "approve") approveMut.mutate({ id: plan.id, content_hash: plan.content_hash ?? "", reason: reason || undefined }, done);
+            if (open === "approve") approveMut.mutate({ id: plan.id, content_hash: pinnedHash, reason: reason || undefined }, done);
             else rejectMut.mutate({ id: plan.id, reason }, done);
           }}
           onClose={() => setOpen(null)}

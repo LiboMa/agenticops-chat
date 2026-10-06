@@ -141,6 +141,8 @@ export default function IssueDetail() {
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
+  // the hash the approve dialog shows is the hash it sends, even if a refresh lands under it (final review I6)
+  const [pinnedHash, setPinnedHash] = useState("");
   const [claimedName, setClaimedName] = useState("");
   const [acceptDecision, setAcceptDecision] = useState<"accepted" | "rejected" | null>(null);
 
@@ -233,6 +235,7 @@ export default function IssueDetail() {
 
   const openApproval = (kind: "approve" | "reject") => {
     (kind === "approve" ? approveMut : rejectMut).reset();
+    setPinnedHash(plan?.content_hash ?? "");
     setApprovalDialog(kind);
   };
   const openAccept = (decision: "accepted" | "rejected") => setAcceptDecision(decision);
@@ -448,7 +451,7 @@ export default function IssueDetail() {
             ? t(approveCopy.titleKey).replace("{label}", planLabel(plan, t))
             : `${t("plans.rejectTitle")} ${planLabel(plan, t)}`}
           description={approvalDialog === "approve"
-            ? `${t(approveCopy.noteKey)} ${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`
+            ? `${t(approveCopy.noteKey)} ${plan.title} · ${t("plans.hash")} ${shortHash(pinnedHash)}`
             : `${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`}
           confirmText={approvalDialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
           ack={approvalDialog === "approve" ? t("approval.ack") : undefined}
@@ -460,7 +463,7 @@ export default function IssueDetail() {
             const done = { onSuccess: () => setApprovalDialog(null) };
             if (approvalDialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: plan.id, content_hash: plan.content_hash ?? "", reason: r || undefined,
+              approveMut.mutate({ id: plan.id, content_hash: pinnedHash, reason: r || undefined,
                                   approved_by: !isAuthenticated && name ? name : undefined }, done);
             } else rejectMut.mutate({ id: plan.id, reason: r }, done);
           }}

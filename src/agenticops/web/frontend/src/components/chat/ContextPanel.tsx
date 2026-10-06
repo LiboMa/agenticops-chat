@@ -501,6 +501,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
   { fp: FixPlan; issueStatus?: string } & PlanActions) {
   const { t } = useLocale();
   const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
+  const [pinnedHash, setPinnedHash] = useState(""); // what the dialog shows is what it approves (final review I6)
   const [claimedName, setClaimedName] = useState("");
   const { isAuthenticated } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -517,7 +518,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
       <div className="flex gap-2">
         {canApprove && (
           <button
-            onClick={() => { approveMut.reset(); setDialog("approve"); }}
+            onClick={() => { approveMut.reset(); setPinnedHash(fp.content_hash ?? ""); setDialog("approve"); }}
             disabled={approveMut.isPending}
             className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
           >
@@ -555,7 +556,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
       {dialog && (
         <ReasonDialog
           title={dialog === "approve" ? t(approveCopy.titleKey).replace("{label}", planLabel(fp, t)) : `${t("plans.rejectTitle")} ${planLabel(fp, t)}`}
-          description={`${dialog === "approve" ? `${t(approveCopy.noteKey)} ` : ""}${fp.title} · ${t("plans.hash")} ${shortHash(fp.content_hash)}`}
+          description={`${dialog === "approve" ? `${t(approveCopy.noteKey)} ` : ""}${fp.title} · ${t("plans.hash")} ${shortHash(dialog === "approve" ? pinnedHash : fp.content_hash)}`}
           confirmText={dialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
           ack={dialog === "approve" ? t("approval.ack") : undefined}
           variant={dialog === "reject" ? "destructive" : "default"}
@@ -566,7 +567,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
             const done = { onSuccess: () => setDialog(null) };
             if (dialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: fp.id, content_hash: fp.content_hash ?? "", reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+              approveMut.mutate({ id: fp.id, content_hash: pinnedHash, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
             } else rejectMut.mutate({ id: fp.id, reason }, done);
           }}
           onClose={() => setDialog(null)}

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient, type QueryKey, type UseMutationOptions } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { FixPlan, PlanKind } from "@/api/types";
 import { toQuery } from "@/lib/plans";
@@ -36,39 +36,48 @@ export function useFixPlan(id: number, refetchInterval: number | false = false) 
   });
 }
 
+/** The approve / reject / execute mutations as options (useMutation and node tests share them). */
+type ApproveVars = { id: number; content_hash: string; reason?: string; approved_by?: string };
+export const approveFixPlanMutation = (qc: QueryClient): UseMutationOptions<FixPlan, Error, ApproveVars> => ({
+  // approved_by is the legacy claimed name: the backend audits it but never trusts it.
+  // content_hash is the plan content the approver was shown; the backend refuses (409) if it changed since.
+  mutationFn: ({ id, content_hash, reason, approved_by }: ApproveVars) =>
+    apiFetch<FixPlan>(`/fix-plans/${id}/approve`, {
+      method: "PUT",
+      body: JSON.stringify({ content_hash, reason, approved_by }),
+    }),
+  // settled, not succeeded: a refusal (409 — someone else moved the plan) must re-read it too (final review I6)
+  onSettled: (_data: unknown, _error: unknown, vars: { id: number }) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+});
+
+export const rejectFixPlanMutation = (qc: QueryClient): UseMutationOptions<FixPlan, Error, { id: number; reason: string }> => ({
+  mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+    apiFetch<FixPlan>(`/fix-plans/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+  // settled, not succeeded: a refusal (409 — someone else moved the plan) must re-read it too (final review I6)
+  onSettled: (_data: unknown, _error: unknown, vars: { id: number }) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+});
+
+export const executeFixPlanMutation = (qc: QueryClient): UseMutationOptions<unknown, Error, number> => ({
+  mutationFn: (id: number) =>
+    apiFetch<unknown>(`/fix-plans/${id}/execute`, { method: "POST" }),
+  onSettled: (_data: unknown, _error: unknown, id: number) =>
+    [...fixPlanMutationKeys(id), ["fix-executions", id]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+});
+
 export function useApproveFixPlan() {
   const qc = useQueryClient();
-  return useMutation({
-    // approved_by is the legacy claimed name: the backend audits it but never trusts it.
-    // content_hash is the plan content the approver was shown; the backend refuses (409) if it changed since.
-    mutationFn: ({ id, content_hash, reason, approved_by }:
-      { id: number; content_hash: string; reason?: string; approved_by?: string }) =>
-      apiFetch<FixPlan>(`/fix-plans/${id}/approve`, {
-        method: "PUT",
-        body: JSON.stringify({ content_hash, reason, approved_by }),
-      }),
-    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
-  });
+  return useMutation(approveFixPlanMutation(qc));
 }
 
 export function useRejectFixPlan() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      apiFetch<FixPlan>(`/fix-plans/${id}/reject`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      }),
-    onSuccess: (_data, vars) => fixPlanMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
-  });
+  return useMutation(rejectFixPlanMutation(qc));
 }
 
 export function useExecuteFixPlan() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<unknown>(`/fix-plans/${id}/execute`, { method: "POST" }),
-    onSuccess: (_data, id) =>
-      [...fixPlanMutationKeys(id), ["fix-executions", id]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
-  });
+  return useMutation(executeFixPlanMutation(qc));
 }
