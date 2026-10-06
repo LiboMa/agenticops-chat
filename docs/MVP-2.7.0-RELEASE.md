@@ -2,7 +2,7 @@
 
 > Version: 2.7.0 · Branch: `MVP-2.7.0`（从 `MVP-2.6.1` 的 `1ec53b3` 切出）· 起始日期：2026-10-05 · 主题：先把会「假通过」「串号」「多进程失效」的核心信任问题修掉，再按主人 10-05 交付的蓝白设计包分阶段改造界面
 >
-> **状态：S1（核心信任加固）已于 2026-10-05 由主人验收通过；S2（蓝白外壳与导航）已实现，作为 `MVP-2.7.0` 分支上的本地提交存在（未 push），等主人手动验收。S3–S7 尚未开始：每个阶段开工前先交详细计划给主人批准，上一阶段验收通过才进下一阶段。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
+> **状态：S1（核心信任加固）已于 2026-10-05、S2（蓝白外壳与导航）已于 2026-10-06 由主人验收通过；S3（方案与变更枢纽 +「需要你处理」）已实现，作为 `MVP-2.7.0` 分支上的本地提交存在（未 push），等主人手动验收。S4–S7 尚未开始：每个阶段开工前先交详细计划给主人批准，上一阶段验收通过才进下一阶段。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
 >
 > 全链规划（含 S1 详细计划）：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`
 > 设计输入：`docs/AgenticOps_BlueWhite_Review.zip`、`docs/superpowers/specs/2026-10-05-blue-white-sre-workspace-design.md`、`docs/ui-contracts/2026-10-05/`
@@ -16,8 +16,8 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **S1 核心信任加固** | 验收逐项绑定 check_id；会话归属 + private/workspace；单进程运行 + 事件循环不阻塞 | **已验收（2026-10-05）** |
-| **S2 蓝白外壳与导航**（P0+P1） | 配色、字体本地化、分组侧栏、顶栏、首页解析器、登录回跳、`/app/overview`、bootstrap + 偏好接口 | **已实现，待主人验收** |
-| S3 方案枢纽 + 待办（P4） | `/app/plans` 三标签 + `/app/plans/:id`、`GET /api/ui/attention`、方案编辑防过期 | 未开始 |
+| **S2 蓝白外壳与导航**（P0+P1） | 配色、字体本地化、分组侧栏、顶栏、首页解析器、登录回跳、`/app/overview`、bootstrap + 偏好接口 | **已验收（2026-10-06）** |
+| **S3 方案枢纽 + 待办**（P4） | `/app/plans` 三标签 + `/app/plans/:id`、`GET /api/ui/attention` + 顶栏「需要你处理」、如实的批准措辞 + 核对勾选、方案状态 CAS、编辑防过期 | **已实现，待主人验收** |
 | S4 Cases 与 Resources（P3） | 队列 + 阅读区双栏（保留 2.6.1 阶段卡）、HealthIssue hooks、笔记接口、账户范围 | 未开始 |
 | S5 Chat（P2） | 会话上下文与账户范围、`client_message_id` 幂等、附件、流错误 | 未开始 |
 | S6 报告与双语（P5） | 渲染服务 + 翻译、导出、发布确认 | 未开始 |
@@ -199,6 +199,110 @@
 - 恢复上次位置时对象会被请求两次（探测一次、页面一次）。
 - 两个标签页同时展开 / 收起侧栏分组时，412 后的重放会以整张列表覆盖另一个标签页的改动。
 - 表单输入框保留原有的边框 + 阴影焦点样式（同样可见），没有改用新的焦点环。
+
+## S3 方案与变更枢纽 +「需要你处理」
+
+设计：`docs/superpowers/specs/2026-10-06-mvp-2.7.0-s3-plans-attention-design.md`；实施计划：`docs/superpowers/plans/2026-10-06-mvp-2.7.0-s3-plans-attention.md`（主人 10-06 批准）。主人决定：
+- 版式用**列表 + 独立详情页**（设计稿的双栏留到 S4 和 Cases 一起做）；
+- 「需要你处理」**与详情页的「等你」口径一致**；
+- **所有批准对话框**都要勾选核对项，并按真实效果写「批准」或「批准并执行」。
+
+### 改了什么
+
+- **方案与变更枢纽** `/app/plans?tab=fix|changes|audit`：
+  - **修复方案标签**：修复方案第一次有了列表，筛选（状态分组 / 风险 / 账户 / 搜索编号、标题或资源）都写在 URL 里。
+  - **变更标签**：原 Changes 列表 +「新建变更」。
+  - **审计标签**：原 Audit；认证开启时只给管理员看，方案引用可点到方案页。
+  - 标签上的数字 = 该标签里「需要你处理」的条数。
+  - 侧栏「运维工具」里的变更 + 审计合成一项「方案与变更」：旧路径仍归它高亮；已保存的排序原位保留（v1 / v2 迁移都改名）。
+  - `/app/changes`、`/app/audit` 跳到对应标签并保留查询串；`/app/changes/:id` 不变；面包屑修好（`/app/changes/3` 显示「方案与变更 / C#3」）。
+- **修复方案详情** `/app/plans/:id`，按设计稿首屏顺序：
+  - 页头：方案标签、风险、状态、执行状态；
+  - 来源事件、目标资源（只有已锚定时才可点）、region、内容哈希；
+  - 改什么 / 检查项 / 回滚（复用 PlanView）；
+  - 审批记录（含审批理由）、执行记录；
+  - 页脚说明「审批绑定当前版本和目标范围」。
+  - 变更方案的 id 跳到它的变更单。不存在或无权查看时提示，不报错。
+- **如实的批准**：
+  - 批准按钮和对话框的标题、说明，按服务端给的效果写：自动执行开着写「批准并执行」，关着写「批准」，并说明「批准后需要再点执行」。覆盖事件详情、变更详情、方案详情和 Chat 面板四处。
+  - 四处批准都要先勾选「我已核对当前版本、目标范围、风险及恢复验证条件」。
+  - Chat 面板的执行确认不再是写死的英文；运行中、执行器关闭时不显示执行按钮。
+- **顶栏「需要你处理」**：
+  - 按钮在搜索左边，数字 = 弹框行数，≤1100px 只显示数字。
+  - 点开是一个模态框，每个工作项一行：标题、编号、一句话理由。点一行直接到决定它的位置（批准在方案页，澄清、验收、生成方案在对应卡片）。弹框里不直接批准。
+  - 每 30 秒刷新一次；批准、驳回、执行、变更动作、验收、事件状态、RCA 评价、设置改动之后立即刷新。
+- **防并发**：FixPlan 状态写入改为条件更新（`UPDATE … WHERE status=旧值`，0 行 → 409）。两个人同时批准同一方案时只有一个成功，只起一个执行；Web、CLI、agent、变更服务所有入口一起受保护。
+- **两个死角修好**：
+  - 方案被驳回后，事件页给「生成方案」（不再是没有按钮的「等审批人」）。
+  - 撤回已批准方案后，事件回到「已定位根因」（不再给出必然失败的「重试」）。
+- **「等谁」前后端一份规则**：`services/work_phases.py` 逐输入移植了前端的 `issuePhases` / `changePhases` / `currentFixPlan` / `inFlightAutoRun` / `notQueuedFrom`。两边共用夹具 `tests/fixtures/work_item_phase_cases.json` 和 `auto_run_cases.json`，pytest 与 vitest 各跑一遍。
+
+### 接口与契约补充
+
+- `GET /api/ui/attention?account_id&limit&cursor`（契约 `AttentionPage`）：
+  - 每行带 `ref`（`I#12` / `C#3`）和 `reason_detail`。
+  - `reason` 在契约四个值之外，多了 `review_required` 和 `execution_not_started`。
+  - 谁能看到按严格策略判断：申请人看不到自己变更的审批；草稿与澄清只给申请人（申请人不是登录用户时给管理员）。
+  - 行不因配置隐藏：执行器关闭时照样显示，动作标 `allowed:false`。
+  - 共约 6 个批量查询，不调模型，不访问云。
+  - bootstrap 的 `features.attention` 改为 true。
+- `GET /api/fix-plans` 与 `GET /api/fix-plans/{id}`：
+  - 每行带 `issue_title`、`issue_status`、`target` 和 `available_actions`（`{action, allowed, reason_code, effect}`）。
+  - `status` 接受逗号分隔的多个值（未知值返回 422）；新增 `q`。
+  - 改为普通 `def`，查询数固定。
+- `GET /api/changes/{id}` 带 `available_actions`。
+- 动作评估只用 `RbacPolicy.decide()`，看页面不会写审计行。`allowed` 等于路由实际行为；影子模式下仅靠宽容放行的动作标 `reason_code: "policy_shadow"`。
+- `PUT /api/fix-plans/{id}`：改内容字段必须带读取时的 `content_hash`，缺失返回 422，过期返回 409。`status:"rejected"` 别名不受影响。
+- `revision_guards` 仍为 false：防过期靠 `content_hash`，不用 If-Match。
+
+### S3 六个可达面
+
+- **CLI** — 非目标：`/approve` 的输出已经如实（修复方案只批准；变更会说明是否已排队）。CAS 在模型层自动覆盖 CLI。
+- **Web API** — 做：见上节。新端点的界面在下一行。
+- **Web UI** — 做：枢纽三标签、`/app/plans/:id`、跳转、侧栏合并、顶栏待办和弹框、四处批准、Chat 面板执行确认。
+- **Agent tool** — 非目标：agent 不看个人待办。CAS 在模型层覆盖 agent 的批准。
+- **Schedule** — 非目标。
+- **Notification** — 非目标：通知深链 `/app/changes/N`、`/app/issues/N` 行为不变。
+
+### 升级注意
+
+1. `/app/changes` 与 `/app/audit` 现在是枢纽的两个标签（旧链接自动跳转）；修复方案有自己的页面 `/app/plans/:id`。
+2. `PUT /api/fix-plans/{id}` 改内容要带 `content_hash`（仓库里没有界面或 CLI 调它；外部脚本需要补上）。
+3. 不需要迁移数据库。
+
+### 已知缺口
+
+- 事件上「等你」的几步（生成方案、重跑 RCA、标记解决、RCA 评价）后端没有权限检查，所以待办对所有登录用户显示。
+- 认证关闭时，所有人看到同一份全权列表（`web:anonymous`）。
+- CLI 批准修复方案不会自动执行，与 Web 不一致（既有行为）。
+- `generate-fix-plan`、`rca`、`PUT /api/health-issues/{id}`、`rca-feedback` 四个处理器仍是 `async def` 里做同步 DB 操作（S1 遗留）。
+
+### S3 验收清单（主人手动）
+
+见设计文档 A6 的十条：
+1. 侧栏与跳转
+2. 修复方案标签
+3. 方案详情
+4. 如实措辞（自动执行开 / 关）
+5. 防重复批准
+6. 待办（谁看得到、处理完减一、数字等于行数）
+7. 审计标签权限
+8. 编辑防过期
+9. 撤回死角
+10. 中英文
+
+### S3 门禁结果
+
+2026-10-06，在 `MVP-2.7.0` 上（S3 实现提交之后，主检出）：
+
+| 门禁 | 结果 | S2 结束时 |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6684 passed / 85 skipped / 3 failed**：<br>· 1 条是 S3 漏改的旧测试，已修（`6a219b4`），所在文件重跑 21/21 通过；<br>· 另 2 条由主检出里主人未提交的文件引起，与 S3 无关：`test_claude5_bedrock_models::test_defaults_upgraded`（`config/settings.yaml` 改了模型）和 `test_prompt_budget::test_no_cjk_in_base_prompts`（`reporter_agent.py` 新增一行中文提示词） | 6516 passed / 0 failed（worktree，无主人改动） |
+| `npx tsc --noEmit` | 0 错误 | 0 |
+| `npm test`（vitest） | **47 个文件 / 596 个测试全过** | 44 / 520 |
+| `npm run build` | 成功；产物无外部字体地址 | 成功 |
+
+无头浏览器走查和独立审查完成后，结果补在本节。
 
 ---
 

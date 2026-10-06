@@ -957,7 +957,9 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
   nothing) — otherwise Chat. A full URL (a notification link, a bookmark) always opens exactly that page.
 - **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
   included) after signing in; only same-origin `/app` pages are accepted as `next`.
-- **Sidebar**: *Daily work* (Chat, Issues, Reports), then the collapsible *Operations tools* (Changes, Audit,
+- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it for one row per item; a row opens the place it is decided (a plan's page for an approval, the issue's or change's card otherwise). Nothing is approved from the list.
+- **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
+- **Sidebar**: *Daily work* (Chat, Issues, Reports), then the collapsible *Operations tools* (Plans & changes,
   Resources, Schedules) and *Administration* (Runtime overview, Agent metrics, Skills, Galaxy, Security,
   Settings) — the group holding the current page opens by itself; drag to reorder inside a group. Below 800px
   the sidebar becomes a menu in the top bar.
@@ -974,8 +976,9 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
 | **Issue Detail** | The work-item template (see *Issue & Change UI* below): one status line with the one primary button and a **⋯** menu, four phase cards ① Diagnose (RCA, confidence against the auto-fix gate, root-cause location, a compact local graph, **Your verdict**) ② Plan (`I#N fix plan vN` + content hash) ③ Approve & run (approval, run evidence) ④ Accept, and a right rail of key facts + activity. `#diagnose` / `#plan` / `#run` / `#accept` / `#activity` open a card; an old `?tab=` link maps onto them |
 | **Resources** / **Resource Detail** | The resource inventory (`/app/resources`, its own sidebar entry; **Show absent** toggle). One resource: overview, its issues and fix plans, network / contains, tags — and the **Local graph** tab with its neighbourhood |
 | **Signals** | Every signal the Signal Gate judged (`/app/signals`): reached from the issue list's **Raw signals →** and an issue's rail, not from the sidebar |
-| **Changes** / **Change Detail** | Change requests (`/app/changes`, the same work-item table; **New change request** with optional steps + external ticket); the detail page is the same template with five phase cards ① Request ② Review (verdict, policy, shadow impact, the clarification box) ③ Plan (`C#N implementation plan vN` with `steps_diff`) ④ Approve & run ⑤ Accept, anchors `#request` … `#accept` / `#activity` |
-| **Audit** | Decision ledger, command ledger and the plan KPIs (`/app/audit`) |
+| **Plans & changes** / **Plan Detail** | One hub at `/app/plans` with three tabs (MVP-2.7.0 S3): **Fix plans** — every fix plan in the work-item table, status / risk / account / search filters kept in the URL, a row opens `/app/plans/:id`, which reads like an approval: origin issue, target, version and hash, what changes, checks, rollback, then the approval record and the runs; **Changes**; **Audit** (admins only when sign-in is on). Each tab shows how many of its items need you. Old `/app/changes` and `/app/audit` links land on their tab, query kept |
+| **Change Detail** | Change requests (the hub's **Changes** tab, the same work-item table; **New change request** with optional steps + external ticket); the detail page is the same template with five phase cards ① Request ② Review (verdict, policy, shadow impact, the clarification box) ③ Plan (`C#N implementation plan vN` with `steps_diff`) ④ Approve & run ⑤ Accept, anchors `#request` … `#accept` / `#activity` |
+| **Audit** | Decision ledger, command ledger and the plan KPIs (the hub's **Audit** tab) |
 | **Galaxy** | The resource starfield; `?focus=<resource id>` opens it centred on one resource |
 | **Security** | Posture scores and 30-day trend, category scores, findings, recommendations, exposure paths |
 | **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports |
