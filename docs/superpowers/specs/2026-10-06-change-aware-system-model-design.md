@@ -1,6 +1,6 @@
 # 变更感知的系统模型（Change-aware System Model）设计
 
-> **日期**：2026-10-06 · **分支**：`MVP-2.6.1`（实现落在哪个分支由主人在计划阶段定）· **状态**：待主人评审
+> **日期**：2026-10-06 · **分支**：`MVP-2.7.0`（主人 2026-10-06 裁定：在 MVP-2.7.0 上实现，并入 2.7.0 的发布规划——`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md` 的「核心能力轨 A1–A4」，A1–A4 即本文 §12 的 P1–P4，改名只为避开路线图里设计包的 P0–P6 优先级编号）· **状态**：主人已批准（2026-10-06「请实现在 MVP-2.7.0」）；A1 实施计划待出（预定路径 `docs/superpowers/plans/2026-10-06-change-aware-a1-ledger-minute.md`）
 > **来源**：2026-10-05/06 的架构讨论（brainstorm）。主人提出"系统性加强 RCA、资源构图精确性、实时性、易用性"，讨论收敛为三个子项目：**A' 变更感知的系统模型**（本 spec）→ B RCA 调查运行时 + 评测（已批准的 Harness 计划阶段 1–2）→ C 易用性作为 A/B 的验收要求。本 spec 只覆盖 A'。
 > **参考**：`RAW-Idea-latest-v3.md`（两条流水线一个闭环；Scan/Detect 作为后台数据飞轮；L3–L4 甜蜜点）、`docs/AGENTIC-SRE-READINESS-AUDIT-2026-08-29.md` §3.6（"当前 Graph 是资源图，不是运维知识图"）、`docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`、`docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`。
 
@@ -81,7 +81,7 @@
 
 ### 4.2 `change_cursors`（新表）—— 形状照抄 `SecurityPollCursor`，**不复用那张表**
 
-`(account_id, source, scope)` 唯一（AWS 的 scope = region；K8s 的 scope = cluster），`cursor`（ISO 时间或 resourceVersion）、`updated_at`、`last_error`、`last_error_at`。不复用 `security_poll_cursors` 的原因：安全轮询的语义是"高危事件 → Issue"，耦合会让一边的改动破坏另一边。
+`(account_id, source, scope)` 唯一（AWS 的 scope = region；K8s 的 scope = cluster），`cursor`（ISO 时间或 resourceVersion）、`updated_at`、`last_error`、`last_error_at`（`SecurityPollCursor` 没有这两列，本表加上）。不复用 `security_poll_cursors` 的原因：安全轮询的语义是"高危事件 → Issue"，耦合会让一边的改动破坏另一边。
 
 ### 4.3 `cloud_resources` 新增 5 列
 
@@ -141,7 +141,7 @@ YAML 里 `hourly/minute/live` 等键名不会被解析成布尔值；但沿用�
 
 ### 7.1 宿主
 
-一个 daemon 线程，**只在调度器选出的那个 worker 里启动**（复用 `web/app.py` 的 `fcntl` 文件锁选举 / `AIOPS_SCHEDULER_WORKER`），启动方式照 `im/feishu_ws.start_feishu_ws`：崩溃自动重启、指数退避、`sensing_enabled=false` 则不启动。它是**变更触发刷新的唯一写入者**（`change_events` 写入、单资源增量 ingest、`change-event` 触发的图刷新都只从它发出）——4 个 uvicorn worker 各持线程锁的已知问题对这条路径不存在；其他 worker 的手动 / API / RCA 路径不变。
+一个 daemon 线程，**只在持有调度器 flock 的那个进程里启动**（MVP-2.7.0 S1c 之后 `web/app.py` 的 `<data_dir>/.scheduler.lock` 就是单实例锁，`AIOPS_SCHEDULER_WORKER` 已删除；Worker 在 lifespan 的 `if _is_scheduler_worker:` 块里随调度器一起 `start()`，并在 `scheduler_instance.stop()` 旁 `stop()`）。线程形态照 `services/executor_service.ExecutorService` 的 `start()/stop()` + 循环内捕获异常（`im/feishu_ws` 没有重启 / 退避逻辑，不作样板）；崩溃自动重启、指数退避由 Worker 自带；`sensing_enabled=false` 则不启动。它是**变更触发刷新的唯一写入者**（`change_events` 写入、单资源增量 ingest、`change-event` 触发的图刷新都只从它发出）——4 个 uvicorn worker 各持线程锁的已知问题对这条路径不存在；其他 worker 的手动 / API / RCA 路径不变。
 
 **凭证（铁律 1–6 在常驻线程里怎么成立）**：线程常驻，但**凭证不常驻**。CloudTrail 用进程内的 `resolve_account_session` 会话（AssumeRole 经 `DeferredRefreshableCredentials` 自动续期，`GetCallerIdentity` 校验照旧）；kubectl 与 AWS CLI 探针每次都是一个**短命子进程**，每次调用前重新经 `get_subprocess_env_for_account` / `kubectl_env_for_cluster` 取冻结凭证——`resolver` 的文档明令禁止把冻结凭证交给长命进程，本设计不违反它：没有任何子进程活过一次调用。
 
