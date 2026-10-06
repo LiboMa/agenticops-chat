@@ -13,6 +13,7 @@ import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { approvalCopy, findAction } from "@/lib/approval";
 import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
 import { PlanView } from "@/components/plans/PlanView";
 import { StatusLine, type StatusLineAction } from "@/components/workitem/StatusLine";
@@ -44,6 +45,7 @@ type Pending = {
   extra?: { outcome: "completed" | "failed" };
   // approve: the hash the dialog shows is the hash it sends, even if a poll replaces the plan while it is open
   contentHash?: string;
+  ack?: string; // the review acknowledgement an approval waits for (MVP-2.7.0 S3)
 };
 
 /** The right rail's key facts, blank rows dropped. */
@@ -127,6 +129,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   // The plan an approve acts on (activeChangePlan, the backend's active_plan_for), so the dialog shows and sends its
   // content_hash
   const plan = m.plan;
+  // what approving really does (the server's effect): "Approve" or "Approve & run" (MVP-2.7.0 S3)
+  const approveCopy = approvalCopy(findAction(q.data?.available_actions, "approve")?.effect);
   const acct = cr.account_id != null ? accounts.data?.find((a) => a.id === cr.account_id) : undefined;
   // The graph's impact count only feeds the policy when enforced; until then the review card labels it
   const impactNote = settings.data?.policy_graph_impact_enforce ? undefined : t("changes.impactReference");
@@ -165,11 +169,12 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const openApprove = () =>
     openDialog({
       action: "approve",
-      title: `${t("changes.approveAndRun")} ${plan ? planLabel(plan, t) : `C#${cr.id}`}`,
+      title: t(approveCopy.titleKey).replace("{label}", plan ? planLabel(plan, t) : `C#${cr.id}`),
       description: plan
-        ? `${t("changes.approveRunsNote")} ${t("plans.hash")} ${shortHash(plan.content_hash)}`
-        : t("changes.approveRunsNote"),
-      confirmText: t("changes.approveAndRun"),
+        ? `${t(approveCopy.noteKey)} ${t("plans.hash")} ${shortHash(plan.content_hash)}`
+        : t(approveCopy.noteKey),
+      confirmText: t(approveCopy.buttonKey),
+      ack: t("approval.ack"),
       contentHash: plan?.content_hash ?? "",
     });
   const openReject = () =>
@@ -207,7 +212,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
   };
   const p = m.phase.primary;
   const primary: StatusLineAction | null = p && m.primaryKey
-    ? { key: p, label: t(m.primaryKey), run: primaryRun[p], disabled: act.isPending || (p === "copyAsNew" && accounts.isLoading) }
+    ? { key: p, label: p === "approveAndRun" ? t(approveCopy.buttonKey) : t(m.primaryKey), run: primaryRun[p], disabled: act.isPending || (p === "copyAsNew" && accounts.isLoading) }
     : null;
   const menu: StatusLineAction[] = m.menu.map((item) => {
     switch (item) {
@@ -308,7 +313,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
           <PhaseCard {...card("run")} summary={runSummary(cr, latestRun, t)}>
             <ChangeRunBody cr={cr} plan={plan} runs={m.runs} quietRunId={m.quietRunError ? latestRun?.id ?? null : null}
                            endsHere={!has("accept")} acceptNote={m.acceptNote}
-                           onApprove={openApprove} onReject={openReject} onRetry={onExecute} busy={act.isPending} t={t} />
+                           onApprove={openApprove} onReject={openReject} onRetry={onExecute} busy={act.isPending}
+                           approveLabel={t(approveCopy.buttonKey)} approveNote={t(approveCopy.noteKey)} t={t} />
           </PhaseCard>
         )}
 
@@ -351,6 +357,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
           description={pending.description}
           confirmText={pending.confirmText}
           variant={pending.variant}
+          ack={pending.ack}
           busy={act.isPending}
           error={act.error?.message ?? null}
           onConfirm={onDialogConfirm}

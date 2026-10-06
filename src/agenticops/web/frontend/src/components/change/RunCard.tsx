@@ -29,7 +29,7 @@ export function ClosedRecord({ cr, t }: { cr: ChangeRequestDetail; t: T }) {
  *  When the change ended here (no ⑤ is drawn), the acceptance is closed here too: the system's verdict note, or
  *  who judged the latest run. */
 export function ChangeRunBody({
-  cr, plan, runs, quietRunId, endsHere, acceptNote, onApprove, onReject, onRetry, busy, t,
+  cr, plan, runs, quietRunId, endsHere, acceptNote, onApprove, onReject, onRetry, busy, approveLabel, approveNote, t,
 }: {
   cr: ChangeRequestDetail;
   plan: FixPlan | null;
@@ -41,6 +41,8 @@ export function ChangeRunBody({
   onReject: () => void;
   onRetry: () => void;
   busy: boolean;
+  approveLabel: string;  // "Approve" or "Approve & run", by what approving really does (MVP-2.7.0 S3)
+  approveNote: string;
   t: T;
 }) {
   const muted = "text-muted-foreground";
@@ -64,11 +66,11 @@ export function ChangeRunBody({
 
       {cr.status === "planned" && (
         <div className="space-y-3 rounded-lg border border-border p-4">
-          <p className={muted}>{t("changes.approveRunsNote")}</p>
+          <p className={muted}>{approveNote}</p>
           <div className="flex flex-wrap items-center gap-3">
             <button onClick={onApprove} disabled={busy}
                     className="px-4 py-2 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium rounded-lg hover:bg-emerald-500/10 disabled:opacity-50 transition-colors">
-              {t("workitem.primary.approveAndRun")}
+              {approveLabel}
             </button>
             <button onClick={onReject} disabled={busy}
                     className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors">

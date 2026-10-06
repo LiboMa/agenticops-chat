@@ -16,6 +16,7 @@ import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { approvalCopy, findAction } from "@/lib/approval";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ChangeStatusBadge } from "@/components/plans/ChangeStatusBadge";
 import { ChangeStepper } from "@/components/plans/ChangeStepper";
@@ -506,6 +507,9 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
   const canApprove = canApprovePlan(fp, issueStatus);
   // a plan of a resolved / dismissed issue can still be rejected, not approved
   const blocked = approvalBlockedReason(fp, issueStatus);
+  // what approving really does, and whether a run can be queued now (in flight / executor off: no) — the server says
+  const approveCopy = approvalCopy(findAction(fp.available_actions, "approve")?.effect);
+  const execute = findAction(fp.available_actions, "execute");
 
   return (
     <>
@@ -517,7 +521,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
             disabled={approveMut.isPending}
             className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
           >
-            {t("issues.approve")}
+            {t(approveCopy.buttonKey)}
           </button>
         )}
         {(canApprove || blocked) && (
@@ -529,10 +533,10 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
             {t("issues.reject")}
           </button>
         )}
-        {fp.status === "approved" && (
+        {execute?.allowed && (
           <button
             onClick={async () => {
-              if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
+              if (!(await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") }))) return;
               executeMut.mutate(fp.id);
             }}
             disabled={executeMut.isPending}
@@ -550,9 +554,10 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
 
       {dialog && (
         <ReasonDialog
-          title={`${t(dialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} ${planLabel(fp, t)}`}
-          description={`${fp.title} · ${t("plans.hash")} ${shortHash(fp.content_hash)}`}
-          confirmText={dialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          title={dialog === "approve" ? t(approveCopy.titleKey).replace("{label}", planLabel(fp, t)) : `${t("plans.rejectTitle")} ${planLabel(fp, t)}`}
+          description={`${dialog === "approve" ? `${t(approveCopy.noteKey)} ` : ""}${fp.title} · ${t("plans.hash")} ${shortHash(fp.content_hash)}`}
+          confirmText={dialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
+          ack={dialog === "approve" ? t("approval.ack") : undefined}
           variant={dialog === "reject" ? "destructive" : "default"}
           required={dialog === "reject"}
           busy={approveMut.isPending || rejectMut.isPending}

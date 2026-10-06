@@ -11,7 +11,7 @@ type T = (key: string) => string;
 /** ③ Approve & run: who approved which version, approve / reject while the plan waits (the same handlers as the
  *  status line's primary), then every run's evidence. A run's failure sentence is the status line's, not here (P3). */
 export function RunBody({
-  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, autoRunSince, onApprove, onReject, approving, rejecting, t,
+  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, autoRunSince, onApprove, onReject, approving, rejecting, approveLabel, t,
 }: {
   plan: FixPlan | null;
   issueStatus: IssueStatus;
@@ -25,6 +25,7 @@ export function RunBody({
   onReject: () => void;
   approving: boolean;
   rejecting: boolean;
+  approveLabel: string;   // "Approve" or "Approve & run", by what approving really does (MVP-2.7.0 S3)
   t: T;
 }) {
   const approvable = !!plan && canApprovePlan(plan, issueStatus);
@@ -52,7 +53,7 @@ export function RunBody({
             {approvable && (
               <button onClick={onApprove} disabled={approving}
                       className="px-4 py-2 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium rounded-lg hover:bg-emerald-500/10 disabled:opacity-50 transition-colors">
-                {t("workitem.primary.approveAndRun")}
+                {approveLabel}
               </button>
             )}
             <button onClick={onReject} disabled={rejecting}

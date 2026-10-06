@@ -45,6 +45,9 @@ describe("approval copy — what approving really does (MVP-2.7.0 S3)", () => {
     expect(canConfirm({ busy: false, required: true, reason: " ", ack: false, acked: false })).toBe(false);
     expect(canConfirm({ busy: true, required: false, reason: "x", ack: false, acked: false })).toBe(false);
   });
+  it("a policy_shadow approve still reads by its effect", () => {
+    expect(approvalCopy(findAction([{ action: "approve", allowed: true, reason_code: "policy_shadow", effect: "approve_and_queue_execution" }], "approve")?.effect).buttonKey).toBe("approval.button.run");
+  });
   it("finds an action by name", () => {
     expect(findAction([{ action: "execute", allowed: true, reason_code: null, effect: "queue_execution" }], "execute")?.allowed).toBe(true);
     expect(findAction(undefined, "approve")).toBeNull();

@@ -21,6 +21,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { approvalCopy, findAction } from "@/lib/approval";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
@@ -207,6 +208,8 @@ export default function IssueDetail() {
   const a = anomaly.data!;
   const m = model!;
   const plan = m.plan;
+  // what approving really does (the server's effect): "Approve" or "Approve & run" (MVP-2.7.0 S3)
+  const approveCopy = approvalCopy(findAction(plan?.available_actions, "approve")?.effect);
   const runs = newestFirst(executions.data);
   const closed = a.status === "resolved" || a.status === "dismissed";
   const canApprove = !!plan && canApprovePlan(plan, a.status);
@@ -260,7 +263,7 @@ export default function IssueDetail() {
   };
   const p = m.phase.primary;
   const primary: StatusLineAction | null = p && m.primaryKey && primaryRun[p]
-    ? { key: p, label: t(m.primaryKey), run: primaryRun[p]!, disabled: primaryBusy[p] ?? false }
+    ? { key: p, label: p === "approveAndRun" ? t(approveCopy.buttonKey) : t(m.primaryKey), run: primaryRun[p]!, disabled: primaryBusy[p] ?? false }
     : null;
 
   const latestRun = m.latestRun;
@@ -375,7 +378,7 @@ export default function IssueDetail() {
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
                    error={runsFetchError} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
                    autoRunSince={m.autoRun?.startedAt ?? null}
-                   onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")}
+                   onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")} approveLabel={t(approveCopy.buttonKey)}
                    approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
         </PhaseCard>
 
@@ -441,10 +444,13 @@ export default function IssueDetail() {
       {plan && approvalDialog && (canApprove || blocked) && (
         <ReasonDialog
           title={approvalDialog === "approve"
-            ? t("workitem.approveTitle").replace("{label}", planLabel(plan, t))
+            ? t(approveCopy.titleKey).replace("{label}", planLabel(plan, t))
             : `${t("plans.rejectTitle")} ${planLabel(plan, t)}`}
-          description={`${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`}
-          confirmText={approvalDialog === "approve" ? t("workitem.primary.approveAndRun") : t("issues.reject")}
+          description={approvalDialog === "approve"
+            ? `${t(approveCopy.noteKey)} ${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`
+            : `${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`}
+          confirmText={approvalDialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
+          ack={approvalDialog === "approve" ? t("approval.ack") : undefined}
           variant={approvalDialog === "reject" ? "destructive" : "default"}
           required={approvalDialog === "reject"}
           busy={approveMut.isPending || rejectMut.isPending}
