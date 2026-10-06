@@ -109,3 +109,22 @@ def test_cli_execute_reports_a_lost_cas_instead_of_crashing(client):
     s = get_session()
     assert s.get(FixPlan, pid).status == "rejected" and s.query(FixExecution).filter_by(fix_plan_id=pid).count() == 0
     s.close()
+
+
+def test_an_approved_plan_cannot_be_withdrawn_while_its_auto_run_is_under_way(client):
+    """Final review I5: withdrawing mid-run would leave the executor mutating resources while the issue invites a new
+    plan. The route refuses (409) and the action says why (run_in_flight) — no button that the route then refuses."""
+    import json
+    from datetime import datetime, timezone
+    from agenticops.models import PipelineEvent
+    pid, iid = _plan(plan_status="approved", issue_status="fix_approved")
+    s = get_session()
+    s.add(PipelineEvent(health_issue_id=iid, event_type="execution_started", stage="execution", status="started",
+                        detail=json.dumps({"plan_id": pid}), created_at=datetime.now(timezone.utc)))
+    s.commit(); s.close()
+    reject = {a["action"]: a for a in client.get(f"/api/fix-plans/{pid}").json()["available_actions"]}["reject"]
+    assert (reject["allowed"], reject["reason_code"]) == (False, "run_in_flight")
+    assert client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "stop"}).status_code == 409
+    s = get_session()
+    assert s.get(FixPlan, pid).status == "approved" and s.get(HealthIssue, iid).status == "fix_approved"
+    s.close()

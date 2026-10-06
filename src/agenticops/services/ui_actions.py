@@ -73,6 +73,8 @@ def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight
         out.append(_action("approve", ok, code, fix_approve_effect()))
     if plan.status in ("draft", "pending_approval", "approved"):
         ok, code = route_allows(actor, "plan.reject", plan)
+        if ok and plan.status == "approved" and run_in_flight:
+            ok, code = False, "run_in_flight"   # withdrawing mid-run would leave the executor running (route: 409)
         out.append(_action("reject", ok, code, "update"))
     if plan.status == "approved":
         out.append(_execute(actor, "plan.execute", plan, "run_in_flight" if run_in_flight else None))

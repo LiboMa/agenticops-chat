@@ -2451,6 +2451,12 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
         authz.check(actor, "plan.reject", subject=plan)
     except authz.AuthzDenied as e:
         raise HTTPException(status_code=403, detail=str(e))
+    if plan.status == "approved":
+        # an approval's auto-run writes no row until it ends: withdrawing now would leave the executor running while
+        # the issue invites a new plan (final review I5)
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        if plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is in progress; it cannot be withdrawn now")
     old = plan.status
     try:
         transition_plan(plan, "rejected")
