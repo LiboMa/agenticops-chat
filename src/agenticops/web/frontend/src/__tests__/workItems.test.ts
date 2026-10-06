@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Anomaly, ChangeRequest } from "@/api/types";
-import { changeRow, issueRow } from "@/lib/workItems";
+import type { Anomaly, ChangeRequest, FixPlan } from "@/api/types";
+import { changeRow, fixPlanRow, issueRow } from "@/lib/workItems";
 
 const anomaly = (x: Partial<Anomaly>) => ({ id: 1, title: "EKS-agenticops-chaos-lab-RunningPods-Low", status: "root_cause_identified",
   severity: "high", resource_id: "unknown", resource_type: "unknown", account_name: "chaos-lab", detected_at: "2026-10-03T03:39:04",
@@ -84,5 +84,24 @@ describe("changeRow — more cases (fix round 1)", () => {
     expect(changeRow(cr({})).typeKey).toBe("plans.changeType.normal");
     expect(changeRow(cr({ effective_change_type: "emergency" })).typeKey).toBe("plans.changeType.emergency");
     expect(changeRow(cr({})).recurrence).toBe(1);
+  });
+});
+
+describe("fixPlanRow — the hub's fix-plan list (MVP-2.7.0 S3)", () => {
+  const base = { id: 9, plan_kind: "fix", health_issue_id: 12, change_request_id: null, title: "restart nginx",
+    risk_level: "L2", status: "pending_approval", plan_version: 2, created_at: "2026-10-06T10:00:00Z", updated_at: null,
+    issue_title: "nginx down", target: { resource_id: "arn:aws:ec2:us-east-1:1:instance/i-0abc", resource_ref: null,
+      anchor_status: null, resource_type: "EC2", region: "us-east-1" } } as unknown as FixPlan;
+  it("names the plan, its issue and target, and who it waits on", () => {
+    const r = fixPlanRow(base, "prod");
+    expect([r.key, r.ref, r.href, r.statusKey, r.waitKey, r.level, r.account]).toEqual(
+      ["P9", "I#12 v2", "/app/plans/9", "plans.planStatus.pending_approval", "workitem.wait.approver", "L2", "prod"]);
+    expect(r.subtitle).toBe("nginx down · i-0abc");
+    expect(r.dots.map((d) => d.state)).toEqual(["current", "future"]);
+  });
+  it("a legacy plan without a version reads v1; a rejected plan is closed", () => {
+    const r = fixPlanRow({ ...base, plan_version: 0, status: "rejected", target: null, issue_title: null } as unknown as FixPlan);
+    expect([r.ref, r.emphasis, r.subtitle, r.waitKey]).toEqual(["I#12 v1", "closed", null, null]);
+    expect(r.dots.map((d) => d.state)).toEqual(["failed", "future"]);
   });
 });

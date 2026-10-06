@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -103,5 +103,14 @@ describe("planCounts", () => {
     expect(planCounts({ steps: [], pre_checks: [], post_checks: [], rollback_plan: {} }).rollback).toBe(0);
     expect(planCounts({ steps: null as unknown as unknown[], pre_checks: undefined as unknown as unknown[], post_checks: [], rollback_plan: null as unknown as Record<string, unknown> }))
       .toEqual({ steps: 0, preChecks: 0, postChecks: 0, rollback: 0 });
+  });
+});
+
+describe("fixPlanFilters — the hub's URL", () => {
+  it("reads the groups, risk, account and search; drops junk", () => {
+    expect(fixPlanFilters(new URLSearchParams("status=awaiting&risk=L2&account=3&q=%20nginx%20"))).toEqual(
+      { status: "draft,pending_approval", risk_level: "L2", account_id: 3, q: "nginx" });
+    expect(fixPlanFilters(new URLSearchParams("status=bogus&risk=L9&account=-1&q="))).toEqual(
+      { status: undefined, risk_level: undefined, account_id: undefined, q: undefined });
   });
 });

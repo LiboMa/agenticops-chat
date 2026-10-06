@@ -937,5 +937,20 @@
   "plans.tab.fix": "Fix plans",
   "plans.tab.changes": "Changes",
   "plans.tab.audit": "Audit",
-  "plans.tab.pending": "{n} need your action"
+  "plans.tab.pending": "{n} need your action",
+  "plans.filter.status": "Status",
+  "plans.filter.allStatuses": "All statuses",
+  "plans.filter.allRisks": "All risk levels",
+  "plans.filter.account": "Account",
+  "plans.filter.allAccounts": "All accounts",
+  "plans.filter.search": "Search ID, title or resource",
+  "plans.filter.clear": "Clear filters",
+  "plans.group.awaiting": "Awaiting approval",
+  "plans.group.approved": "Approved",
+  "plans.group.executing": "Executing",
+  "plans.group.executed": "Executed",
+  "plans.group.failed": "Failed",
+  "plans.group.rejected": "Rejected",
+  "plans.fixEmpty": "No fix plans yet.",
+  "plans.fixEmptyFiltered": "No matching fix plans — clear the search or adjust the filters."
 }

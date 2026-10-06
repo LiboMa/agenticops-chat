@@ -1,4 +1,65 @@
-/** Plans & changes — filled in by the next task (MVP-2.7.0 S3 Task 7). */
+import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { useLocale } from "@/i18n/LocaleContext";
+import { useSettings } from "@/hooks/useSettings";
+import { useBootstrap } from "@/hooks/useBootstrap";
+import { apiFetch } from "@/api/client";
+import { FixPlansTab } from "@/components/plans/FixPlansTab";
+import { ChangePlansTab } from "@/components/plans/ChangePlansTab";
+import { AuditTab } from "@/components/plans/AuditTab";
+import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
+import { hubTab, type HubTab } from "@/lib/plans";
+import { ATTENTION_QUERY_KEY, tabCounts, type AttentionPage } from "@/lib/attention";
+
+/** Plans & changes (MVP-2.7.0 S3): fix plans, change requests and the audit trail, one tab each (?tab=). */
 export default function PlansAndChanges() {
-  return null;
+  const { t } = useLocale();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const boot = useBootstrap();
+  const settings = useSettings();
+  const [showNew, setShowNew] = useState(false);
+  const attention = useQuery({ queryKey: [...ATTENTION_QUERY_KEY], enabled: !!boot.data?.features.attention,
+    queryFn: () => apiFetch<AttentionPage>("/ui/attention?limit=100"), staleTime: 10_000 });
+  const changesOn = settings.data?.change_management_enabled === true;
+  // /api/audit needs an admin when auth is on (rbac audit.read): the tab is not offered to anyone else
+  const auditOn = !boot.data?.auth_enabled || !!boot.data?.user?.is_admin;
+  const requested = hubTab(params.get("tab"));
+  const tab: HubTab = requested === "audit" && !auditOn ? "fix" : requested;
+  const counts = tabCounts(attention.data?.items ?? []);
+  const tabs: { id: HubTab; label: string; count?: number }[] = [
+    { id: "fix", label: t("plans.tab.fix"), count: counts.fix },
+    { id: "changes", label: t("plans.tab.changes"), count: counts.changes },
+    ...(auditOn ? [{ id: "audit" as const, label: t("plans.tab.audit") }] : []),
+  ];
+  const pick = (next: HubTab) => setParams(next === "fix" ? {} : { tab: next }, { replace: true });
+  return (
+    <div className="mx-auto max-w-[1280px] space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">{t("nav.plans")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("plans.hub.intro")}</p>
+        </div>
+        {tab === "changes" && changesOn && (
+          <button onClick={() => setShowNew(true)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
+            + {t("plans.newChange")}
+          </button>
+        )}
+      </div>
+      <div role="tablist" aria-label={t("nav.plans")} className="flex gap-1 border-b border-border">
+        {tabs.map((x) => (
+          <button key={x.id} role="tab" type="button" aria-selected={tab === x.id} onClick={() => pick(x.id)}
+                  className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${tab === x.id ? "border-primary font-semibold text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            {x.label}
+            {!!x.count && <span title={t("plans.tab.pending").replace("{n}", String(x.count))} className="rounded bg-selected px-1.5 text-[11px] font-semibold text-primary">{x.count}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "fix" && <FixPlansTab />}
+      {tab === "changes" && (changesOn ? <ChangePlansTab /> : <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>)}
+      {tab === "audit" && <AuditTab />}
+      {showNew && <NewChangeDialog onClose={() => setShowNew(false)} onCreated={(id) => { setShowNew(false); navigate(`/app/changes/${id}`); }} />}
+    </div>
+  );
 }

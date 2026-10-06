@@ -64,6 +64,24 @@ export function hubRedirect(tab: Exclude<HubTab, "fix">, search: string): string
   return `/app/plans?tab=${tab}${rest ? `&${rest}` : ""}`;
 }
 
+/** The hub's status choices → the API's status list (draft and pending both wait for an approver). */
+export const PLAN_STATUS_GROUPS = { awaiting: "draft,pending_approval", approved: "approved", executing: "executing",
+  executed: "executed", failed: "failed", rejected: "rejected" } as const;
+export type PlanStatusGroup = keyof typeof PLAN_STATUS_GROUPS;
+
+export function fixPlanFilters(params: URLSearchParams): { status?: string; risk_level?: string; account_id?: number; q?: string } {
+  const group = params.get("status");
+  const risk = params.get("risk");
+  const account = Number(params.get("account"));
+  const q = params.get("q")?.trim();
+  return {
+    status: group && group in PLAN_STATUS_GROUPS ? PLAN_STATUS_GROUPS[group as PlanStatusGroup] : undefined,
+    risk_level: risk && /^L[0-3]$/.test(risk) ? risk : undefined,
+    account_id: Number.isInteger(account) && account > 0 ? account : undefined,
+    q: q ? q.slice(0, 100) : undefined,
+  };
+}
+
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */
 export function toQuery<T extends { [K in keyof T]: string | number | undefined | null }>(params: T): string {
   const qs = new URLSearchParams();

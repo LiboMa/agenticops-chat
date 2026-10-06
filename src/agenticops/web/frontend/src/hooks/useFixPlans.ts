@@ -15,6 +15,7 @@ export type FixPlanFilters = {
   health_issue_id?: number;
   account_id?: number;
   kind?: PlanKind;
+  q?: string;
   limit?: number;
 };
 

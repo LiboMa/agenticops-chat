@@ -206,6 +206,11 @@ export type FixPlanStatus =
 
 export type PlanKind = "fix" | "change";
 
+/** An action the actor may take and what it sets off (contract workspace-ui-1 UiAction; services/ui_actions). */
+export interface UiAction { action: string; allowed: boolean; reason_code: string | null; effect: string }
+export interface FixPlanTarget { resource_id: string | null; resource_ref: number | null; anchor_status: string | null;
+  resource_type: string | null; region: string | null }
+
 export interface FixPlan {
   id: number;
   plan_kind: PlanKind;
@@ -234,6 +239,10 @@ export interface FixPlan {
   content_hash: string | null;
   approved_hash: string | null;
   approved_version: number | null;
+  issue_title?: string | null;
+  issue_status?: IssueStatus | null;
+  target?: FixPlanTarget | null;
+  available_actions?: UiAction[];
 }
 
 export interface FixExecution {
@@ -1117,6 +1126,7 @@ export interface ChangeRequestDetail extends ChangeRequest {
   plans: FixPlan[];
   executions: FixExecution[];
   policy_decision: Record<string, unknown> | null;
+  available_actions?: UiAction[];
 }
 
 export interface ChangeTimelineEntry {

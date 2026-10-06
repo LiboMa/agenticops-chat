@@ -937,5 +937,20 @@
   "plans.tab.fix": "修复方案",
   "plans.tab.changes": "变更",
   "plans.tab.audit": "审计记录",
-  "plans.tab.pending": "{n} 项需要你处理"
+  "plans.tab.pending": "{n} 项需要你处理",
+  "plans.filter.status": "状态",
+  "plans.filter.allStatuses": "全部状态",
+  "plans.filter.allRisks": "全部风险",
+  "plans.filter.account": "账户",
+  "plans.filter.allAccounts": "全部账户",
+  "plans.filter.search": "搜索编号、名称或资源",
+  "plans.filter.clear": "清除筛选",
+  "plans.group.awaiting": "待审批",
+  "plans.group.approved": "已批准",
+  "plans.group.executing": "执行中",
+  "plans.group.executed": "已执行",
+  "plans.group.failed": "失败",
+  "plans.group.rejected": "已驳回",
+  "plans.fixEmpty": "还没有修复方案。",
+  "plans.fixEmptyFiltered": "没有符合条件的方案，请清除关键词或调整筛选。"
 }
