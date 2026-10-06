@@ -2389,7 +2389,7 @@ async def api_list_providers():
 
 
 def _issue_target(issue) -> dict:
-    md = issue.metric_data or {}
+    md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
     return {"resource_id": issue.resource_id or None, "resource_ref": issue.resource_ref,
             "anchor_status": issue.anchor_status, "resource_type": md.get("resource_type") or None,
             "region": md.get("region") or None}
@@ -2521,9 +2521,16 @@ def api_list_fix_plans(
             like = _like(term)
             conds = [FixPlan.title.ilike(like, escape="\\"), HealthIssue.title.ilike(like, escape="\\"),
                      HealthIssue.resource_id.ilike(like, escape="\\")]
-            num = re.fullmatch(r"[IiPp]?#?(\d{1,9})", term)
+            # I#n is an issue, P#n / #n a plan, a bare number either
+            num = re.fullmatch(r"([IiPp]?)(#?)(\d{1,9})", term)
             if num:
-                conds += [FixPlan.id == int(num.group(1)), FixPlan.health_issue_id == int(num.group(1))]
+                n = int(num.group(3))
+                is_issue = num.group(1).lower() == "i"
+                is_plan = num.group(1).lower() == "p" or (not num.group(1) and num.group(2) == "#")
+                if not is_plan:
+                    conds.append(FixPlan.health_issue_id == n)
+                if not is_issue:
+                    conds.append(FixPlan.id == n)
             query = query.filter(or_(*conds))
         plans = query.offset(offset).limit(limit).all()
         return _fix_plan_rows(session, plans, actor)
@@ -2633,6 +2640,9 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 raise HTTPException(status_code=422, detail="content_hash is required to edit a plan's content")
             conflict = approval_conflict(session, plan, data.content_hash)
             if conflict:
+                if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                    stamp_content(session, plan)
+                    session.commit()
                 raise HTTPException(status_code=409, detail=conflict)
         changed_old, changed_new = {}, {}
         for key, value in update_data.items():

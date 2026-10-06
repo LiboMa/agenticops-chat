@@ -10,7 +10,8 @@ export interface AttentionItem {
 }
 export interface AttentionPage { items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string }
 
-/** The hub's tab counts: approval and "not started" rows of fix plans → Fix plans; change rows → Changes. */
+/** The hub's tab counts: rows whose object is a fix plan (approval, approved-but-not-started) → Fix plans; change rows
+ *  → Changes. Counted over the items fetched (≤ 100). */
 export function tabCounts(items: AttentionItem[]): { fix: number; changes: number } {
   return {
     fix: items.filter((i) => i.entity.entity_type === "fix_plan").length,

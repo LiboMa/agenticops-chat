@@ -132,6 +132,7 @@ def _issue_items(s, actor, account_id, now) -> list[dict]:
         elif phase.sub == "notQueued":
             if plan is None or not ua.strictly_allowed(actor, "plan.execute", plan):
                 continue
+            entity = {"entity_type": "fix_plan", "entity_id": plan.id, "content_version": plan.plan_version}
             actions = [a for a in ua.plan_actions(plan, actor, issue_status=issue.status, run_in_flight=auto)
                        if a["action"] == "execute"] or [{"action": "execute", "allowed": False,
                                                           "reason_code": "state", "effect": "queue_execution"}]

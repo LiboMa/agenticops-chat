@@ -240,3 +240,12 @@ def test_auto_fix_off_hands_a_passing_rca_to_you(db):
     assert (row["reason"], row["reason_detail"], row["route"]) == ("review_required", "rca_ready", f"/app/issues/{iid}#plan")
     db.auto_fix_enabled = True
     assert _row(ADMIN, f"I{iid}") is None
+
+
+def test_a_not_started_plan_row_counts_toward_the_fix_plans_tab(db):
+    """Deferred minor M3: the row's object is the approved plan (route stays on the issue's run card)."""
+    iid, pid = _issue("fix_approved", plan="approved")
+    row = _row(ADMIN, f"I{iid}")
+    assert row["reason"] == "execution_not_started"
+    assert (row["entity"]["entity_type"], row["entity"]["entity_id"]) == ("fix_plan", pid)
+    assert row["route"] == f"/app/issues/{iid}#run"
