@@ -17,11 +17,12 @@ export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan
 
 export interface IssuePhaseInput {
   status: IssueStatus;
-  rca?: Pick<RCAResult, "confidence" | "evidence_verified" | "critic_verdict" | "human_verdict"> | null;
+  rca?: Pick<RCAResult, "confidence" | "evidence_verified" | "critic_verdict" | "human_verdict"> & Partial<Pick<RCAResult, "id">> | null;
   threshold?: number | null;
-  plan?: Pick<FixPlan, "status"> | null;
+  plan?: Pick<FixPlan, "status"> & Partial<Pick<FixPlan, "rca_result_id">> | null;
   latestRun?: Pick<FixExecution, "status" | "verification_status"> | null;
   autoRunInFlight?: boolean; // the approval's auto-run is under way: it has no run row until it ends (final review C1)
+  autoFixEnabled?: boolean;  // settings.auto_fix_enabled; undefined = not known (treated as on). Off = nobody hands the RCA to the SRE agent
 }
 
 export interface IssuePhaseResult {
@@ -69,8 +70,14 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
       if (i.rca.human_verdict === "correct") return result("plan", "toGenerate", "you", "generatePlan");
       const gate = confidenceBreakdown(i.rca, i.threshold).gatePassed;
       if (gate === null) return result("diagnose", "reviewOrPlan", "you", null);
-      return gate ? result("plan", "toGenerate", "sre_agent", "generatePlan")
-                  : result("diagnose", "needsReview", "you", "reviewRca");
+      if (!gate) return result("diagnose", "needsReview", "you", "reviewRca");
+      // a plan of THIS diagnosis was rejected (or withdrawn): the pipeline does not ask the SRE agent again — you do
+      if (i.plan?.status === "rejected" && i.rca.id != null && i.plan.rca_result_id === i.rca.id) {
+        return result("plan", "planRejected", "you", "generatePlan");
+      }
+      // auto-fix off: nothing hands a passing RCA to the SRE agent (trigger_auto_sre returns early) — you generate it
+      return i.autoFixEnabled === false ? result("plan", "toGenerate", "you", "generatePlan")
+        : result("plan", "toGenerate", "sre_agent", "generatePlan");
     }
     case "fix_planned":
       // the plan was rejected: nobody can approve it — a new plan is generated (the backend allows it: no locked plan)

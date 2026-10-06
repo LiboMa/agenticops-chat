@@ -46,6 +46,7 @@ export function issueDetailModel(input: {
   timelineFetchedAt?: number;             // when that copy was fetched (epoch ms; default now)
   timelineFailed?: boolean;               // the timeline's last fetch failed: none loaded, or a cached copy that may be old
   executorTimeout?: number | null;        // seconds a started auto-run counts as under way (settings)
+  autoFixEnabled?: boolean;               // settings.auto_fix_enabled (who generates a plan for a passing RCA)
   now?: number;
 }): IssueDetailModel {
   const { issue, rca, threshold } = input;
@@ -56,7 +57,7 @@ export function issueDetailModel(input: {
     : null;
   // undefined (still loading) keeps list mode — never a flash of "rerun RCA"; null means there is no RCA
   // likewise runs not known yet are undefined, loaded-and-none is null
-  const known = issuePhases({ status: issue.status, rca, threshold, plan, autoRunInFlight: !!autoRun,
+  const known = issuePhases({ status: issue.status, rca, threshold, plan, autoRunInFlight: !!autoRun, autoFixEnabled: input.autoFixEnabled,
                               latestRun: input.executions === undefined ? undefined : latestRun });
   const unknown = (failed: boolean | undefined): IssuePhaseResult =>
     ({ ...known, sub: failed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null });

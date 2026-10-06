@@ -111,6 +111,7 @@ export default function IssueDetail() {
     timelineFetchedAt: timeline.dataUpdatedAt,
     timelineFailed: !!timeline.error,
     executorTimeout: settings.data?.executor_total_timeout,
+    autoFixEnabled: settings.data?.auto_fix_enabled,
     now: Date.now(),
   }) : null;
   // "checking whether the run has started" ends with the grace: look again then, on a fresh timeline

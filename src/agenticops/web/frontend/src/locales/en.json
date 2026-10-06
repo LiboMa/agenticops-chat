@@ -993,5 +993,6 @@
   "attention.detail.rca_confirmed": "Diagnosis confirmed — generate a plan",
   "attention.detail.acceptance": "Run finished — waiting for your acceptance",
   "attention.detail.resolve": "Run finished — mark the issue resolved",
-  "attention.detail.change_draft": "Review not started — submit it"
+  "attention.detail.change_draft": "Review not started — submit it",
+  "attention.detail.rca_ready": "Diagnosis passed the gate — generate a plan (auto-fix is off)"
 }

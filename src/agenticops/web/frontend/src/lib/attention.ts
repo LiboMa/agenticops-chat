@@ -20,7 +20,7 @@ export function tabCounts(items: AttentionItem[]): { fix: number; changes: numbe
 
 const REASONS = new Set(["approval_required", "clarification_required", "verification_required", "execution_failed",
   "review_required", "execution_not_started"]);
-const DETAILS = new Set(["run_failed", "plan_rejected", "rca_missing", "rca_gate", "rca_rejected", "rca_confirmed",
+const DETAILS = new Set(["run_failed", "plan_rejected", "rca_missing", "rca_gate", "rca_rejected", "rca_confirmed", "rca_ready",
   "acceptance", "resolve", "change_draft"]);
 
 export const countLabel = (n: number): string => (n > 99 ? "99+" : String(n));

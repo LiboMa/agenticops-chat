@@ -229,3 +229,14 @@ def test_the_endpoint_shape_and_validation(db):
         assert c.get("/api/ui/attention?cursor=abc").status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_auto_fix_off_hands_a_passing_rca_to_you(db):
+    """Final review I4: with auto-fix off nothing asks the SRE agent for a plan, so a passing RCA waits on a person —
+    worded as passing the gate, not as a human confirmation."""
+    db.auto_fix_enabled = False
+    iid, _ = _issue("root_cause_identified", rca=0.9)
+    row = _row(ADMIN, f"I{iid}")
+    assert (row["reason"], row["reason_detail"], row["route"]) == ("review_required", "rca_ready", f"/app/issues/{iid}#plan")
+    db.auto_fix_enabled = True
+    assert _row(ADMIN, f"I{iid}") is None

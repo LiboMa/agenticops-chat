@@ -77,7 +77,8 @@ def gate_passed(rca: Any, threshold: Any) -> Optional[bool]:
 
 
 def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan: Any = UNKNOWN,
-                latest_run: Any = UNKNOWN, auto_run_in_flight: bool = False) -> Phase:
+                latest_run: Any = UNKNOWN, auto_run_in_flight: bool = False,
+                auto_fix_enabled: Optional[bool] = None) -> Phase:
     run = None if latest_run is UNKNOWN else latest_run
     if status in ("open", "investigating", "acknowledged"):
         return Phase("running", "rca_agent", None)
@@ -96,7 +97,15 @@ def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan:
         gate = gate_passed(rca, threshold)
         if gate is None:
             return Phase("reviewOrPlan", "you", None)
-        return Phase("toGenerate", "sre_agent", "generatePlan") if gate else Phase("needsReview", "you", "reviewRca")
+        if not gate:
+            return Phase("needsReview", "you", "reviewRca")
+        # a plan of THIS diagnosis was rejected (or withdrawn): nothing asks the SRE agent again — you do
+        known_plan = plan is not UNKNOWN and plan is not None
+        if (known_plan and _get(plan, "status") == "rejected" and _get(rca, "id") is not None
+                and _get(plan, "rca_result_id") == _get(rca, "id")):
+            return Phase("planRejected", "you", "generatePlan")
+        # auto-fix off: trigger_auto_sre returns early, so a passing RCA is handed to nobody — you generate the plan
+        return Phase("toGenerate", "you" if auto_fix_enabled is False else "sre_agent", "generatePlan")
     if status == "fix_planned":
         known = plan is not UNKNOWN and plan is not None
         if known and _get(plan, "status") == "rejected":

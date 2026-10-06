@@ -105,7 +105,8 @@ def _issue_items(s, actor, account_id, now) -> list[dict]:
         auto = (plan is not None and plan.status == "approved" and wp.in_flight_auto_run(
             events, plan.id, timeout_seconds=settings.executor_total_timeout, now=now) is not None)
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
-                               plan=plan, latest_run=run, auto_run_in_flight=auto)
+                               plan=plan, latest_run=run, auto_run_in_flight=auto,
+                               auto_fix_enabled=bool(settings.auto_fix_enabled))
         if phase.waiting_for not in wp.HUMAN or phase.primary is None:
             continue
         if phase.sub == "notQueued" and plan is not None and plan.status == "approved":
@@ -115,6 +116,8 @@ def _issue_items(s, actor, account_id, now) -> list[dict]:
         reason, detail, anchor = ISSUE_ROWS[phase.sub]
         if phase.sub == "needsReview" and rca is None:
             detail = "rca_missing"
+        if phase.sub == "toGenerate" and getattr(rca, "human_verdict", None) != "correct":
+            detail = "rca_ready"   # passed the gate, auto-fix off: nobody confirmed it, nobody asks the SRE agent
         entity = {"entity_type": "health_issue", "entity_id": issue.id, "content_version": None}
         route = f"/app/issues/{issue.id}#{anchor}" if anchor else None
         occurred = _aware(issue.last_seen or issue.detected_at)

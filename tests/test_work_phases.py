@@ -21,7 +21,7 @@ def _ts(s):
 def test_issue_phase_matches_the_page(case):
     inp = case["input"]
     kw = {py: inp[js] for js, py in (("rca", "rca"), ("plan", "plan"), ("latestRun", "latest_run")) if js in inp}
-    p = wp.issue_phase(inp["status"], threshold=inp.get("threshold"),
+    p = wp.issue_phase(inp["status"], threshold=inp.get("threshold"), auto_fix_enabled=inp.get("autoFixEnabled"),
                        auto_run_in_flight=inp.get("autoRunInFlight", False), **kw)
     e = case["expect"]
     assert (p.sub, p.waiting_for, p.primary) == (e["sub"], e["waitingFor"], e["primary"])
