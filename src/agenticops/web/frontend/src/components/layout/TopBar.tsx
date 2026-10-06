@@ -7,6 +7,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
 import { HomePrefsDialog, MobileNav } from "./Sidebar";
+import { AttentionDialog } from "./AttentionDialog";
+import { useBootstrap } from "@/hooks/useBootstrap";
+import { useAttention } from "@/hooks/useAttention";
+import { countLabel } from "@/lib/attention";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -22,6 +26,9 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { t, locale, setLocale } = useLocale();
   const { pathname } = useLocation();
   const crumb = breadcrumbFor(pathname);
+  const boot = useBootstrap();
+  const attention = useAttention();
+  const [attentionOpen, setAttentionOpen] = useState(false);
   const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
   const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
 
@@ -48,6 +55,16 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
+        {boot.data?.features.attention && (
+          <button type="button" onClick={() => setAttentionOpen(true)}
+                  aria-label={`${t("attention.title")} ${attention.data?.total ?? 0}`}
+                  className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
+            <span className="max-[1100px]:hidden">{t("attention.title")}</span>
+            <b className="min-w-[20px] rounded-[4px] bg-selected px-1.5 text-center text-[11px] font-semibold">
+              {attention.isLoading ? "…" : countLabel(attention.data?.total ?? 0)}
+            </b>
+          </button>
+        )}
         <button type="button" onClick={onSearch} aria-label={t("topbar.search")}
                 className="flex w-[205px] items-center gap-2 rounded-[5px] border border-border bg-canvas px-2.5 py-1.5 text-xs text-muted-foreground hover:border-primary/40 max-[1350px]:w-[165px] max-[1100px]:w-auto max-[600px]:hidden">
           <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
@@ -68,6 +85,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
         </div>
 
         <AvatarMenu />
+        <AttentionDialog open={attentionOpen} onOpenChange={setAttentionOpen} />
       </div>
     </header>
   );

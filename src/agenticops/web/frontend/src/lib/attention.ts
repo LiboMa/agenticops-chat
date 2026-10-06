@@ -17,3 +17,23 @@ export function tabCounts(items: AttentionItem[]): { fix: number; changes: numbe
     changes: items.filter((i) => i.entity.entity_type === "change_request").length,
   };
 }
+
+const REASONS = new Set(["approval_required", "clarification_required", "verification_required", "execution_failed",
+  "review_required", "execution_not_started"]);
+const DETAILS = new Set(["run_failed", "plan_rejected", "rca_missing", "rca_gate", "rca_rejected", "rca_confirmed",
+  "acceptance", "resolve", "change_draft"]);
+
+export const countLabel = (n: number): string => (n > 99 ? "99+" : String(n));
+
+/** The row's sentence: its detail when this client knows it, else its reason, else a neutral line (a newer server). */
+export function reasonKey(i: Pick<AttentionItem, "reason" | "reason_detail">): string {
+  if (i.reason_detail && DETAILS.has(i.reason_detail)) return `attention.detail.${i.reason_detail}`;
+  return REASONS.has(i.reason) ? `attention.reason.${i.reason}` : "attention.reason.unknown";
+}
+
+/** A row's route, only if it stays inside the app (never the login page, never a parent-path trick). */
+export function safeRoute(route: unknown): string | null {
+  if (typeof route !== "string" || !/^\/app\/[A-Za-z0-9/_#-]*$/.test(route)) return null;
+  if (route.includes("..") || route.startsWith("/app/login")) return null;
+  return route;
+}

@@ -7,7 +7,7 @@ import { toQuery } from "@/lib/plans";
  *  issue and its runs, which approve and execute move on the backend, and the issue timeline, where IssueDetail
  *  reads the approval's move and its auto-run's start (C1(c)). */
 export const fixPlanMutationKeys = (id: number): QueryKey[] =>
-  [["fix-plans"], ["fix-plan", id], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"], ["issue-timeline"]];
+  [["fix-plans"], ["fix-plan", id], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"], ["issue-timeline"], ["ui-attention"]];
 
 export type FixPlanFilters = {
   status?: string;

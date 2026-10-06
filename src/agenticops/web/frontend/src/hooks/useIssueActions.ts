@@ -13,6 +13,7 @@ export function useUpdateIssueStatus() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["anomaly", vars.id] });
       qc.invalidateQueries({ queryKey: ["anomalies"] });
+      qc.invalidateQueries({ queryKey: ["ui-attention"] });
     },
   });
 }

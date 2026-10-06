@@ -41,6 +41,7 @@ export function useRcaFeedback(issueId: number) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["anomaly-rca", issueId] });
+      queryClient.invalidateQueries({ queryKey: ["ui-attention"] });
     },
   });
 }

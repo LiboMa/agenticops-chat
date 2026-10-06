@@ -21,6 +21,7 @@ export function useCancelExecution() {
       qc.invalidateQueries({ queryKey: ["fix-executions"] });
       qc.invalidateQueries({ queryKey: ["issue-executions"] });
       qc.invalidateQueries({ queryKey: ["fix-plans"] });
+      qc.invalidateQueries({ queryKey: ["ui-attention"] });
     },
   });
 }
@@ -38,7 +39,7 @@ export function useAcceptExecution() {
     onSuccess: () => {
       // accepted resolves the issue; rejected returns it to root_cause_identified and disputes the RCA
       for (const key of ["issue-executions", "fix-executions", "anomaly", "anomalies", "anomaly-rca", "issue-timeline", "fix-plans",
-                         "plan-stats", "stats"]) {
+                         "plan-stats", "stats", "ui-attention"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
     },

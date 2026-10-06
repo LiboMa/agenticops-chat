@@ -7,7 +7,7 @@ export type ChangeFilters = { status?: ChangeStatus; account_id?: number; reques
 
 /** Every query a change mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
 export const changeMutationKeys = (id: number): QueryKey[] =>
-  [["changes"], ["change", id], ["change-timeline", id], ["fix-plans"], ["plan-stats"]];
+  [["changes"], ["change", id], ["change-timeline", id], ["fix-plans"], ["plan-stats"], ["ui-attention"]];
 
 export function useChanges(filters: ChangeFilters = {}) {
   return useQuery({
@@ -33,7 +33,7 @@ export function useCreateChange() {
   return useMutation({
     mutationFn: (body: ChangeRequestCreate) => apiFetch<ChangeRequest>("/changes", { method: "POST", body: JSON.stringify(body) }),
     // a create changes the list and the counts
-    onSuccess: () => [["changes"], ["plan-stats"]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+    onSuccess: () => [["changes"], ["plan-stats"], ["ui-attention"]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 

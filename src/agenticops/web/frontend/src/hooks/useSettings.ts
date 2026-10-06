@@ -66,6 +66,7 @@ export function useUpdateSettings() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["ui-attention"] });  // auto-fix / executor switches change what approving does
     },
   });
 }

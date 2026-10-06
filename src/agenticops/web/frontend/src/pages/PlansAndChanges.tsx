@@ -1,16 +1,15 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useSettings } from "@/hooks/useSettings";
 import { useBootstrap } from "@/hooks/useBootstrap";
-import { apiFetch } from "@/api/client";
 import { FixPlansTab } from "@/components/plans/FixPlansTab";
 import { ChangePlansTab } from "@/components/plans/ChangePlansTab";
 import { AuditTab } from "@/components/plans/AuditTab";
 import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
 import { hubTab, type HubTab } from "@/lib/plans";
-import { ATTENTION_QUERY_KEY, tabCounts, type AttentionPage } from "@/lib/attention";
+import { tabCounts } from "@/lib/attention";
+import { useAttention } from "@/hooks/useAttention";
 
 /** Plans & changes (MVP-2.7.0 S3): fix plans, change requests and the audit trail, one tab each (?tab=). */
 export default function PlansAndChanges() {
@@ -20,8 +19,7 @@ export default function PlansAndChanges() {
   const boot = useBootstrap();
   const settings = useSettings();
   const [showNew, setShowNew] = useState(false);
-  const attention = useQuery({ queryKey: [...ATTENTION_QUERY_KEY], enabled: !!boot.data?.features.attention,
-    queryFn: () => apiFetch<AttentionPage>("/ui/attention?limit=100"), staleTime: 10_000 });
+  const attention = useAttention();
   const changesOn = settings.data?.change_management_enabled === true;
   // /api/audit needs an admin when auth is on (rbac audit.read): the tab is not offered to anyone else
   const auditOn = !boot.data?.auth_enabled || !!boot.data?.user?.is_admin;
