@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, legacyPlansRedirect, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -54,25 +54,28 @@ describe("terminal sets are typed (M3)", () => {
 describe("planRoute / planRef (R2)", () => {
   it.each([
     { plan_kind: "change" as PlanKind, change_request_id: 7, health_issue_id: null, route: "/app/changes/7", ref: "C#7" },
-    { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/changes", ref: "-" },
-    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/issues/3", ref: "I#3" },
-    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/issues", ref: "-" },
+    { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=changes", ref: "-" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/plans/5", ref: "I#3" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans/5", ref: "-" },
   ])("$plan_kind change=$change_request_id issue=$health_issue_id -> $route / $ref", (row) => {
-    const fp = { plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
+    const fp = { id: 5, plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
     expect(planRoute(fp)).toBe(row.route);
     expect(planRef(fp)).toBe(row.ref);
   });
 });
 
-describe("legacyPlansRedirect", () => {
-  it.each([
-    { tab: null, to: "/app/changes" },
-    { tab: "changes", to: "/app/changes" },
-    { tab: "audit", to: "/app/audit" },
-    { tab: "fix", to: "/app/issues" },
-    { tab: "bogus", to: "/app/changes" },
-  ])("/app/plans?tab=$tab -> $to", ({ tab, to }) => {
-    expect(legacyPlansRedirect(tab)).toBe(to);
+describe("the Plans & changes hub (MVP-2.7.0 S3)", () => {
+  it.each([[null, "fix"], ["fix", "fix"], ["changes", "changes"], ["audit", "audit"], ["bogus", "fix"]])(
+    "tab %s → %s", (raw, tab) => expect(hubTab(raw)).toBe(tab));
+  it("an old /app/changes link keeps its query", () => {
+    expect(hubRedirect("changes", "?status=planned&account_id=3")).toBe("/app/plans?tab=changes&status=planned&account_id=3");
+    expect(hubRedirect("audit", "")).toBe("/app/plans?tab=audit");
+    expect(hubRedirect("audit", "?tab=x&period=7d")).toBe("/app/plans?tab=audit&period=7d");
+  });
+  it("a fix plan opens its own page; a change plan its change", () => {
+    expect(planRoute({ id: 9, plan_kind: "fix", change_request_id: null })).toBe("/app/plans/9");
+    expect(planRoute({ id: 9, plan_kind: "change", change_request_id: 3 })).toBe("/app/changes/3");
+    expect(planRoute({ id: 9, plan_kind: "change", change_request_id: null })).toBe("/app/plans?tab=changes");
   });
 });
 

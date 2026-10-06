@@ -90,7 +90,7 @@ export function AuditTab() {
         ? <Link to={`/app/changes/${entity_id}`} className="text-xs font-mono text-primary hover:underline">{label}</Link>
         : <span className="text-xs font-mono">{label}</span>;
     }
-    if (entity_type === "fix_plan") return <span className="text-xs font-mono">plan #{entity_id}</span>;
+    if (entity_type === "fix_plan") return <Link to={`/app/plans/${entity_id}`} className="text-xs font-mono text-primary hover:underline">plan #{entity_id}</Link>;
     const hasId = entity_id !== "-" && entity_id !== "";
     return <span className="text-xs font-mono">{entity_type}{hasId ? `#${entity_id}` : ""}</span>;
   };
@@ -171,7 +171,7 @@ export function AuditTab() {
             ? <Link to={`/app/changes/${c.change_request_id}`} className="text-xs font-mono text-primary hover:underline">{label}</Link>
             : <span className="text-xs font-mono">{label}</span>;
         }
-        if (c.fix_plan_id) return <span className="text-xs font-mono">plan #{c.fix_plan_id}</span>;
+        if (c.fix_plan_id) return <Link to={`/app/plans/${c.fix_plan_id}`} className="text-xs font-mono text-primary hover:underline">plan #{c.fix_plan_id}</Link>;
         return <span className="text-xs text-muted-foreground">-</span>;
       },
     },

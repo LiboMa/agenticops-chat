@@ -59,6 +59,7 @@ describe("probeFor — objects checked before they are reopened", () => {
   it("knows the four reopenable objects and their lists", () => {
     expect(probeFor("/app/issues/4")).toEqual({ api: "/health-issues/4", list: "/app/issues" });
     expect(probeFor("/app/changes/3")).toEqual({ api: "/changes/3", list: "/app/changes" });
+    expect(probeFor("/app/plans/12")).toEqual({ api: "/fix-plans/12", list: "/app/plans" });
     expect(probeFor("/app/reports/7")).toEqual({ api: "/reports/7", list: "/app/reports" });
     expect(probeFor("/app/chat/abc-1")).toEqual({ api: "/chat/sessions/abc-1", list: "/app/chat" });
   });

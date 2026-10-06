@@ -17,12 +17,13 @@ export const PLAN_TERMINAL_STATUSES: ReadonlySet<FixPlanStatus> =
   new Set<FixPlanStatus>(["executed", "failed", "rejected"]);
 
 type PlanLink = Pick<FixPlan, "plan_kind" | "change_request_id" | "health_issue_id">;
-/** A plan's detail route: its change request or its issue; the Changes / Issues list when the link is missing. */
-export function planRoute(fp: PlanLink): string {
+type PlanRouteLink = Pick<FixPlan, "id" | "plan_kind" | "change_request_id">;
+/** A plan's page: a fix plan its own (/app/plans/:id), a change plan its change request (MVP-2.7.0 S3). */
+export function planRoute(fp: PlanRouteLink): string {
   if (fp.plan_kind === "change") {
-    return fp.change_request_id != null ? `/app/changes/${fp.change_request_id}` : "/app/changes";
+    return fp.change_request_id != null ? `/app/changes/${fp.change_request_id}` : "/app/plans?tab=changes";
   }
-  return fp.health_issue_id != null ? `/app/issues/${fp.health_issue_id}` : "/app/issues";
+  return `/app/plans/${fp.id}`;
 }
 /** `C#N` for a change plan, `I#N` for a fix plan, `-` when the link is missing. */
 export function planRef(fp: PlanLink): string {
@@ -51,12 +52,16 @@ export function planCounts(plan: Pick<FixPlan, "steps" | "pre_checks" | "post_ch
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 
-/** Where an old `/app/plans?tab=` link lands now that the page is split: audit → Audit, fix → Issues (a fix plan
- *  lives under its issue), anything else → Changes. */
-export function legacyPlansRedirect(tab: string | null): string {
-  if (tab === "audit") return "/app/audit";
-  if (tab === "fix") return "/app/issues";
-  return "/app/changes";
+export type HubTab = "fix" | "changes" | "audit";
+export function hubTab(raw: string | null): HubTab {
+  return raw === "changes" || raw === "audit" ? raw : "fix";
+}
+/** An old /app/changes or /app/audit link (bookmarks, notifications) → its hub tab, with its query kept. */
+export function hubRedirect(tab: Exclude<HubTab, "fix">, search: string): string {
+  const qs = new URLSearchParams(search);
+  qs.delete("tab");
+  const rest = qs.toString();
+  return `/app/plans?tab=${tab}${rest ? `&${rest}` : ""}`;
 }
 
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */

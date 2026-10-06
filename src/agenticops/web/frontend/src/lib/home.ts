@@ -7,7 +7,7 @@ export type Home = "resume" | "chat" | "issues" | "reports";
 // Internal read routes only — the server keeps the same list (services/ui_preferences._ROUTES) and
 // tests/fixtures/ui_last_route_cases.json pins both.
 const ROUTES = [
-  /^\/app\/(chat|issues|reports|changes|resources|schedules|skills)(\/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?$/,
+  /^\/app\/(chat|issues|reports|changes|plans|resources|schedules|skills)(\/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?$/,
   /^\/app\/(audit|overview|agent-metrics|galaxy|security|settings|signals)$/,
 ];
 
@@ -51,11 +51,11 @@ export function loginPath(loc: { pathname: string; search: string; hash: string 
 
 /** The objects "resume" checks before reopening, and the list it falls back to when one is gone. */
 export function probeFor(route: string): { api: string; list: string } | null {
-  const m = route.match(/^\/app\/(issues|changes|reports|chat)\/([A-Za-z0-9][A-Za-z0-9_-]*)$/);
+  const m = route.match(/^\/app\/(issues|changes|reports|chat|plans)\/([A-Za-z0-9][A-Za-z0-9_-]*)$/);
   if (!m) return null;
   const [, kind, id] = m;
   const api = { issues: `/health-issues/${id}`, changes: `/changes/${id}`, reports: `/reports/${id}`,
-                chat: `/chat/sessions/${id}` }[kind]!;
+                chat: `/chat/sessions/${id}`, plans: `/fix-plans/${id}` }[kind]!;
   return { api, list: `/app/${kind}` };
 }
 

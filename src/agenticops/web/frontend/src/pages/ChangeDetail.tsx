@@ -103,8 +103,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   });
 
   const backLink = (
-    <Link to="/app/changes" className="text-sm text-muted-foreground hover:text-foreground">
-      ← {t("nav.changes")}
+    <Link to="/app/plans?tab=changes" className="text-sm text-muted-foreground hover:text-foreground">
+      ← {t("nav.plans")}
     </Link>
   );
   const notFoundNotice = (
@@ -261,8 +261,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
           menu={menu}
           error={error}
           onDismissError={() => { setMsg(null); act.reset(); }}
-          backTo="/app/changes"
-          backLabel={t("nav.changes")}
+          backTo="/app/plans?tab=changes"
+          backLabel={t("nav.plans")}
         />
 
         {cards.openable.length > 0 && (

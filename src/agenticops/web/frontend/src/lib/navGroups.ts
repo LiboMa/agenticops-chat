@@ -30,10 +30,9 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    // S3 merges Changes + Audit into "Plans & changes"
     id: "tools", labelKey: "nav.group.tools", items: [
-      { id: "changes", to: "/app/changes", icon: "clipboard", labelKey: "nav.changes" },
-      { id: "audit", to: "/app/audit", icon: "audit", labelKey: "nav.audit" },
+      // MVP-2.7.0 S3: Changes and Audit are tabs of Plans & changes; their old paths still belong here
+      { id: "plans", to: "/app/plans", icon: "clipboard", labelKey: "nav.plans", owns: ["/app/changes", "/app/audit"] },
       { id: "resources", to: "/app/resources", icon: "server", labelKey: "nav.resources" },
       { id: "schedules", to: "/app/schedules", icon: "calendar", labelKey: "nav.schedules" },
     ],
@@ -62,7 +61,9 @@ export const V1_DEFAULT = [
   "galaxy", "security",
 ];
 const V1_RENAMES: Record<string, string[]> = { plans: ["changes", "audit"] };
-const V1_TO_V2: Record<string, string> = { dashboard: "overview" };
+const V1_TO_V2: Record<string, string> = { dashboard: "overview", changes: "plans", audit: "plans" };
+// MVP-2.7.0 S3 merged changes + audit into plans: a saved v2 order keeps the entry where changes stood
+const V2_RENAMES: Record<string, string[]> = { changes: ["plans"], audit: ["plans"] };
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -74,7 +75,7 @@ export function migrateNavOrder(v1: unknown): NavOrder {
   if (!Array.isArray(v1) || !v1.every((x) => typeof x === "string")) return defaults;
   const normalized = reorderNavIds(v1 as string[], V1_DEFAULT, V1_RENAMES);
   if (same(normalized, V1_DEFAULT)) return defaults;
-  const renamed = normalized.map((id) => V1_TO_V2[id] ?? id);
+  const renamed = [...new Set(normalized.map((id) => V1_TO_V2[id] ?? id))];
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {
     const ids = g.items.map((i) => i.id);
@@ -91,7 +92,7 @@ export function normalizeOrder(stored: unknown): NavOrder {
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {
     const v = s[g.id];
-    out[g.id] = reorderNavIds(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [], defaults[g.id]);
+    out[g.id] = reorderNavIds(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [], defaults[g.id], V2_RENAMES);
   }
   return out;
 }
@@ -119,10 +120,12 @@ export function breadcrumbFor(pathname: string): { sectionKey: string | null; ob
   if (pathname === "/app/signals" || pathname.startsWith("/app/signals/")) return { sectionKey: "signals.title", object: null };
   const hit = entryForPath(pathname);
   if (!hit) return { sectionKey: null, object: null };
-  const id = pathname.slice(hit.entry.to.length + 1).split("/")[0] || null;
+  // the path's own base: an owned path (/app/changes/3 under Plans & changes) keeps its own reference
+  const base = owns(pathname, hit.entry.to) ? hit.entry.to : (hit.entry.owns ?? []).find((b) => owns(pathname, b)) ?? hit.entry.to;
+  const id = pathname.slice(base.length + 1).split("/")[0] || null;
   const refs: Record<string, (v: string) => string> = {
-    issues: (v) => `I#${v}`, changes: (v) => `C#${v}`, resources: (v) => `R#${v}`,
-    reports: (v) => `#${v}`, schedules: (v) => `#${v}`, skills: (v) => v,
+    "/app/issues": (v) => `I#${v}`, "/app/changes": (v) => `C#${v}`, "/app/resources": (v) => `R#${v}`,
+    "/app/reports": (v) => `#${v}`, "/app/schedules": (v) => `#${v}`, "/app/skills": (v) => v, "/app/plans": (v) => `#${v}`,
   };
   let raw = id;
   try {
@@ -130,6 +133,6 @@ export function breadcrumbFor(pathname: string): { sectionKey: string | null; ob
   } catch {
     /* a malformed escape (/app/issues/%) is shown as typed, never thrown into the whole shell */
   }
-  const ref = raw && refs[hit.entry.id] ? refs[hit.entry.id](raw) : null;  // chat ids are not shown
+  const ref = raw && refs[base] ? refs[base](raw) : null;  // chat ids are not shown
   return { sectionKey: hit.entry.labelKey, object: ref };
 }

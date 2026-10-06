@@ -931,5 +931,11 @@
   "login.invalid": "邮箱或密码不正确。",
   "login.failed": "登录失败，请重试。",
   "workitem.sub.planRejected": "方案已驳回",
-  "workitem.reason.planRejected": "方案已被驳回，需要生成新方案。"
+  "workitem.reason.planRejected": "方案已被驳回，需要生成新方案。",
+  "nav.plans": "方案与变更",
+  "plans.hub.intro": "审阅修复与变更方案，跟踪审批和执行记录。",
+  "plans.tab.fix": "修复方案",
+  "plans.tab.changes": "变更",
+  "plans.tab.audit": "审计记录",
+  "plans.tab.pending": "{n} 项需要你处理"
 }

@@ -931,5 +931,11 @@
   "login.invalid": "Wrong email or password.",
   "login.failed": "Sign-in failed. Try again.",
   "workitem.sub.planRejected": "Plan rejected",
-  "workitem.reason.planRejected": "The plan was rejected — generate a new one."
+  "workitem.reason.planRejected": "The plan was rejected — generate a new one.",
+  "nav.plans": "Plans & changes",
+  "plans.hub.intro": "Review fix and change plans, and follow their approvals and runs.",
+  "plans.tab.fix": "Fix plans",
+  "plans.tab.changes": "Changes",
+  "plans.tab.audit": "Audit",
+  "plans.tab.pending": "{n} need your action"
 }

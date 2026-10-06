@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { HomeResolver } from "@/components/layout/HomeResolver";
@@ -7,16 +7,16 @@ import { loginPath } from "@/lib/home";
 import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
-import { legacyPlansRedirect } from "@/lib/plans";
+import { hubRedirect } from "@/lib/plans";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
 const IssueDetail = lazy(() => import("@/pages/IssueDetail"));
-const Changes = lazy(() => import("@/pages/Changes"));
-const Audit = lazy(() => import("@/pages/Audit"));
 const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
+const PlansAndChanges = lazy(() => import("@/pages/PlansAndChanges"));
+const PlanDetail = lazy(() => import("@/pages/PlanDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ReportDetail = lazy(() => import("@/pages/ReportDetail"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
@@ -40,10 +40,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** `/app/plans` was split into Changes + Audit (MVP-2.6.1); an old bookmark lands on the page that replaced its tab. */
-function LegacyPlansRedirect() {
-  const [params] = useSearchParams();
-  return <Navigate to={legacyPlansRedirect(params.get("tab"))} replace />;
+/** /app/changes and /app/audit are tabs of Plans & changes since MVP-2.7.0 S3; old links keep their query. */
+function HubRedirect({ tab }: { tab: "changes" | "audit" }) {
+  const { search } = useLocation();
+  return <Navigate to={hubRedirect(tab, search)} replace />;
 }
 
 export default function App() {
@@ -102,28 +102,15 @@ export default function App() {
                 </Suspense>
               }
             />
-            <Route path="plans" element={<LegacyPlansRedirect />} />
-            <Route
-              path="changes"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Changes />
-                </Suspense>
-              }
-            />
+            <Route path="plans" element={<Suspense fallback={<Spinner />}><PlansAndChanges /></Suspense>} />
+            <Route path="plans/:id" element={<Suspense fallback={<Spinner />}><PlanDetail /></Suspense>} />
+            <Route path="changes" element={<HubRedirect tab="changes" />} />
+            <Route path="audit" element={<HubRedirect tab="audit" />} />
             <Route
               path="changes/:id"
               element={
                 <Suspense fallback={<Spinner />}>
                   <ChangeDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="audit"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <Audit />
                 </Suspense>
               }
             />

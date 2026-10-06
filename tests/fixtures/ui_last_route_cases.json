@@ -16,7 +16,9 @@
     "/app/galaxy",
     "/app/security",
     "/app/settings",
-    "/app/signals"
+    "/app/signals",
+    "/app/plans",
+    "/app/plans/12"
   ],
   "reject": [
     "",
@@ -35,6 +37,7 @@
     "/app/chat/..",
     "/app/issues/%2e%2e",
     "/app\\issues",
-    "/APP/issues"
+    "/APP/issues",
+    "/app/plans?tab=audit"
   ]
 }

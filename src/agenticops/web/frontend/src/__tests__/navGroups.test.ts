@@ -5,11 +5,12 @@ describe("NAV_GROUPS — the blue/white sidebar", () => {
   it("daily work, operations tools, administration; every old entry kept, Settings joins administration", () => {
     expect(NAV_GROUPS.map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([
       ["daily", ["chat", "issues", "reports"]],
-      ["tools", ["changes", "audit", "resources", "schedules"]],
+      ["tools", ["plans", "resources", "schedules"]],
       ["administration", ["overview", "agent-metrics", "skills", "galaxy", "security", "settings"]],
     ]);
     const all = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    for (const old of V1_DEFAULT) expect(all).toContain(old === "dashboard" ? "overview" : old);
+    const renamed: Record<string, string> = { dashboard: "overview", changes: "plans", audit: "plans" };  // S3 merged changes + audit
+    for (const old of V1_DEFAULT) expect(all).toContain(renamed[old] ?? old);
   });
 });
 
@@ -30,20 +31,29 @@ describe("migrateNavOrder", () => {
                  "dashboard", "agent-metrics", "skills"];
     expect(migrateNavOrder(own)).toEqual({
       daily: ["reports", "chat", "issues"],
-      tools: ["schedules", "resources", "audit", "changes"],
+      tools: ["schedules", "resources", "plans"],
       administration: ["security", "galaxy", "overview", "agent-metrics", "skills", "settings"],
     });
   });
 });
 
 describe("normalizeOrder / moveWithinGroup", () => {
+  it("a v2 order saved with changes + audit keeps the merged entry where changes was", () => {
+    expect(normalizeOrder({ tools: ["schedules", "changes", "resources", "audit"] }).tools).toEqual(["schedules", "plans", "resources"]);
+  });
+  it("old change paths belong to Plans & changes, with the right reference", () => {
+    expect(entryForPath("/app/changes/3")?.entry.id).toBe("plans");
+    expect(breadcrumbFor("/app/changes/3")).toEqual({ sectionKey: "nav.plans", object: "C#3" });
+    expect(breadcrumbFor("/app/plans/12")).toEqual({ sectionKey: "nav.plans", object: "#12" });
+    expect(breadcrumbFor("/app/audit")).toEqual({ sectionKey: "nav.plans", object: null });
+  });
   it("fills entries added since the order was saved and drops ones that are gone", () => {
     expect(normalizeOrder({ daily: ["reports", "gone", "chat"] }).daily).toEqual(["reports", "chat", "issues"]);
     expect(normalizeOrder(undefined)).toEqual(defaultOrder());
   });
   it("moves only inside one group", () => {
-    const o = moveWithinGroup(defaultOrder(), "tools", "schedules", "changes");
-    expect(o.tools).toEqual(["schedules", "changes", "audit", "resources"]);
+    const o = moveWithinGroup(defaultOrder(), "tools", "schedules", "plans");
+    expect(o.tools).toEqual(["schedules", "plans", "resources"]);
     expect(o.daily).toEqual(defaultOrder().daily);
   });
 });
@@ -51,7 +61,7 @@ describe("normalizeOrder / moveWithinGroup", () => {
 describe("entryForPath", () => {
   it.each([
     ["/app/chat/abc", "daily", "chat"], ["/app/issues/5", "daily", "issues"], ["/app/signals", "daily", "issues"],
-    ["/app/changes/3", "tools", "changes"], ["/app/resources/12", "tools", "resources"],
+    ["/app/changes/3", "tools", "plans"], ["/app/plans/9", "tools", "plans"], ["/app/resources/12", "tools", "resources"],
     ["/app/overview", "administration", "overview"], ["/app/skills/linux-admin", "administration", "skills"],
   ])("%s → %s / %s", (path, group, id) => {
     expect(entryForPath(path)).toMatchObject({ group, entry: { id } });
@@ -64,7 +74,7 @@ describe("entryForPath", () => {
 
 describe("breadcrumbFor", () => {
   it.each([
-    ["/app/issues", "nav.issues", null], ["/app/issues/5", "nav.issues", "I#5"], ["/app/changes/3", "nav.changes", "C#3"],
+    ["/app/issues", "nav.issues", null], ["/app/issues/5", "nav.issues", "I#5"], ["/app/changes/3", "nav.plans", "C#3"], ["/app/plans/12", "nav.plans", "#12"],
     ["/app/resources/12", "nav.resources", "R#12"], ["/app/reports/7", "nav.reports", "#7"],
     ["/app/skills/linux-admin", "nav.skills", "linux-admin"], ["/app/chat/3f2a-uuid", "nav.chat", null],
     ["/app/signals", "signals.title", null], ["/app/overview", "nav.overview", null], ["/app/nope", null, null],
