@@ -68,7 +68,7 @@ def test_bootstrap_features_say_only_what_is_built(env, monkeypatch):
     monkeypatch.setattr(env.settings, "change_management_enabled", True)
     features = env.client.get("/api/ui/bootstrap", headers=headers).json()["features"]
     assert features == {"context_chat": False, "revision_guards": False, "content_rendering": False,
-                        "report_export": False, "attention": False, "change_management": True, "chat_replay": False}
+                        "report_export": False, "attention": True, "change_management": True, "chat_replay": False}
     monkeypatch.setattr(env.settings, "change_management_enabled", False)
     assert env.client.get("/api/ui/bootstrap", headers=headers).json()["features"]["change_management"] is False
 

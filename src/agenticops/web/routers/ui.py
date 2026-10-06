@@ -7,13 +7,14 @@ says what this deployment can do; it never carries a secret or connector configu
 
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from agenticops.auth.actor import Actor
 from agenticops.config import get_trace_id, settings
 from agenticops.services import ui_preferences as prefs
-from agenticops.web.deps import require_authenticated_user
+from agenticops.web.deps import current_actor, require_authenticated_user
 
 router = APIRouter(tags=["workspace-ui"])
 
@@ -53,7 +54,7 @@ def _features() -> dict:
         "revision_guards": False,     # approvals are guarded by content_hash + 409 today, not If-Match
         "content_rendering": False,
         "report_export": False,
-        "attention": False,
+        "attention": True,
         "change_management": bool(settings.change_management_enabled),
         "chat_replay": False,
     }
@@ -136,3 +137,13 @@ async def api_update_preferences(response: Response, data: PreferencesUpdate, us
         return _ui_error(412, "revision_mismatch", "Preferences changed; fetch the latest and reconcile")
     response.headers["ETag"] = prefs.etag(doc["revision"])
     return doc
+
+
+@router.get("/api/ui/attention")
+def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int = Query(25, ge=1, le=100),
+                     cursor: Optional[str] = Query(None, pattern=r"^\d{1,6}$"),
+                     actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)) -> dict:
+    """Work that waits on this actor (contract workspace-ui-1 AttentionPage, plus `ref` / `reason_detail` and the
+    reasons review_required / execution_not_started). Plain def: it is DB work (S1 rule)."""
+    from agenticops.services.attention import attention_page
+    return attention_page(actor, account_id=account_id, limit=limit, offset=int(cursor or 0))
