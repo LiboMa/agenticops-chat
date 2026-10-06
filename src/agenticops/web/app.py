@@ -2029,15 +2029,15 @@ async def api_get_anomaly_rca(issue_id: int):
 
 
 @app.post("/api/anomalies/{issue_id}/rca", status_code=202)
-async def api_trigger_anomaly_rca(issue_id: int):
-    """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint)."""
-    return await api_trigger_rca(issue_id)
+async def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/anomalies/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_anomaly_fix_plan(issue_id: int):
-    """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint)."""
-    return await api_trigger_fix_plan(issue_id)
+async def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2065,9 +2065,9 @@ async def api_get_issue(issue_id: int):
 
 
 @app.put("/api/issues/{issue_id}/status", response_model=AnomalyResponse)
-async def api_update_issue_status(issue_id: int, update: AnomalyStatusUpdate):
-    """Update issue status."""
-    return await api_update_anomaly_status(issue_id, update)
+async def api_update_issue_status(issue_id: int, update: AnomalyStatusUpdate, actor: Actor = Depends(current_actor)):
+    """Update issue status (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_update_anomaly_status(issue_id, update, actor)
 
 
 @app.get("/api/issues/{issue_id}/rca", response_model=Optional[RCAResponse])
@@ -2077,15 +2077,15 @@ async def api_get_issue_rca(issue_id: int):
 
 
 @app.post("/api/issues/{issue_id}/rca", status_code=202)
-async def api_trigger_issue_rca(issue_id: int):
-    """Trigger RCA analysis for an issue."""
-    return await api_trigger_rca(issue_id)
+async def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA analysis for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_issue_fix_plan(issue_id: int):
-    """Trigger fix plan generation for an issue."""
-    return await api_trigger_fix_plan(issue_id)
+async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger fix plan generation for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
