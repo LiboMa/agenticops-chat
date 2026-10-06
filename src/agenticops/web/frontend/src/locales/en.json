@@ -998,5 +998,6 @@
   "plans.detail.account": "Account",
   "workitem.future.issue.runApprove": "Every plan waits for a person to approve & run.",
   "workitem.future.issue.runManual": "Auto-fix is off: an approved plan runs only when someone presses Execute.",
-  "workitem.future.issue.runNeutral": "A plan runs once it is approved."
+  "workitem.future.issue.runNeutral": "A plan runs once it is approved.",
+  "plans.detail.withdrawnBy": "Withdrawn by"
 }

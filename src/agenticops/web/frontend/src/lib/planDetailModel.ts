@@ -9,6 +9,7 @@ export interface PlanDetailModel {
   targetLink: string | null;
   accountId: number | null;   // the account the plan runs in — part of the content hash an approval binds (final review I3)
   pollMs: number | false;     // refresh while a run can still move (final review U7)
+  records: ("approved" | "withdrawn" | "rejected")[];  // the approval section's facts, in order (a withdrawal follows its approval)
 }
 
 const allowed = (plan: FixPlan, name: string) => {
@@ -34,5 +35,9 @@ export function planDetailModel(plan: FixPlan, runs: FixExecution[] | undefined)
     accountId: plan.account_id ?? null,
     pollMs: plan.status === "approved" || plan.status === "executing" || run?.status === "pending" || run?.status === "running"
       ? 5000 : false,
+    records: [
+      ...(plan.approved_by ? ["approved" as const] : []),
+      ...(plan.rejected_by ? [plan.approved_by ? "withdrawn" as const : "rejected" as const] : []),
+    ],
   };
 }

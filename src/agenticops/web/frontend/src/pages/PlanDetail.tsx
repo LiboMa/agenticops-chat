@@ -82,25 +82,30 @@ export default function PlanDetail() {
           {plan.target?.resource_id && <> · {t("plans.detail.target")}: {m.targetLink ? <Link className="text-primary hover:underline" to={m.targetLink}>{plan.target.resource_id}</Link> : <span className="font-mono">{plan.target.resource_id}</span>}</>}
           {m.accountId != null && <> · {t("plans.detail.account")}: <span className="text-foreground">{accounts.data?.find((a) => a.id === m.accountId)?.name ?? `#${m.accountId}`}</span></>}
           {plan.target?.region && <> · {plan.target.region}</>}
-          {" · "}{t("plans.hash")} {shortHash(plan.content_hash)}
         </p>
         {executeMut.error && <p role="alert" className="text-sm text-red-500">{executeMut.error.message}</p>}
       </header>
 
-      <PlanView plan={plan} t={t} />
+      <PlanView plan={plan} t={t} hideHeader />
 
       <section className="space-y-2 rounded-lg border border-border bg-card p-4">
         <h2 className="text-sm font-semibold text-foreground">{t("plans.detail.approval")}</h2>
-        {plan.approved_by ? (
+        {m.records.length === 0 && <p className="text-sm text-muted-foreground">{t("plans.detail.noApproval")}</p>}
+        {m.records.includes("approved") && (
           <p className="text-sm text-muted-foreground">
             {t("issues.approvedBy")}: <span className="text-foreground">{plan.approved_by}</span>
             {plan.approved_at && <> · {formatFullDate(plan.approved_at)}</>}
             {" · "}{t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} {shortHash(plan.approved_hash)}
             {typeof approvedReason === "string" && approvedReason && <span className="block text-foreground">{approvedReason}</span>}
           </p>
-        ) : plan.rejected_by ? (
-          <p className="text-sm text-muted-foreground">{t("plans.detail.rejectedBy")}: <span className="text-foreground">{plan.rejected_by}</span>{plan.rejection_reason && <span className="block text-foreground">{plan.rejection_reason}</span>}</p>
-        ) : <p className="text-sm text-muted-foreground">{t("plans.detail.noApproval")}</p>}
+        )}
+        {(m.records.includes("withdrawn") || m.records.includes("rejected")) && (
+          <p className="text-sm text-muted-foreground">
+            {t(m.records.includes("withdrawn") ? "plans.detail.withdrawnBy" : "plans.detail.rejectedBy")}: <span className="text-foreground">{plan.rejected_by}</span>
+            {plan.rejected_at && <> · {formatFullDate(plan.rejected_at)}</>}
+            {plan.rejection_reason && <span className="block text-foreground">{plan.rejection_reason}</span>}
+          </p>
+        )}
       </section>
 
       <section className="space-y-2 rounded-lg border border-border bg-card p-4">

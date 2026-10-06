@@ -48,6 +48,15 @@ describe("planDetailModel — final review I3 / U7", () => {
   });
 });
 
+describe("planDetailModel.records — the approval section's facts (deferred minor M2)", () => {
+  it("a withdrawn plan shows its approval AND who withdrew it; a rejected one only the rejection; none = empty", () => {
+    expect(planDetailModel(plan({ approved_by: "user:a", rejected_by: "user:b" }), []).records).toEqual(["approved", "withdrawn"]);
+    expect(planDetailModel(plan({ approved_by: null, rejected_by: "user:b" }), []).records).toEqual(["rejected"]);
+    expect(planDetailModel(plan({ approved_by: "user:a", rejected_by: null }), []).records).toEqual(["approved"]);
+    expect(planDetailModel(plan({ approved_by: null, rejected_by: null }), []).records).toEqual([]);
+  });
+});
+
 describe("approval copy — what approving really does (MVP-2.7.0 S3)", () => {
   it("says run only when the server will queue the run", () => {
     expect(approvalCopy("approve_and_queue_execution")).toEqual({ titleKey: "approval.title.run", buttonKey: "approval.button.run", noteKey: "approval.note.run" });

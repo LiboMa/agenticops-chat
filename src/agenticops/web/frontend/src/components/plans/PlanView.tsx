@@ -13,7 +13,10 @@ import { renderMarkdown } from "@/lib/renderMarkdown";
 /** A fix plan or a change's implementation plan, one rendering for both: name, version, hash and whether the
  *  approved hash still matches, the four counts, then the steps / checks / rollback. A change also passes its
  *  `steps_diff`; without one (a fix plan, or a request that brought no steps) there is no diff section. */
-export function PlanView({ plan, stepsDiff, t }: { plan: FixPlan; stepsDiff?: ChangeStepsDiff | null; t: (k: string) => string }) {
+export function PlanView({ plan, stepsDiff, hideHeader = false, t }: {
+  plan: FixPlan; stepsDiff?: ChangeStepsDiff | null; t: (k: string) => string;
+  hideHeader?: boolean;  // the page already shows the label, badges and title (PlanDetail): keep only counts + hash
+}) {
   const marks = planStepMarks(stepsDiff);
   const n = planCounts(plan);
   const list = (v: unknown) => (Array.isArray(v) ? v : []);
@@ -22,12 +25,16 @@ export function PlanView({ plan, stepsDiff, t }: { plan: FixPlan; stepsDiff?: Ch
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <RiskLevelBadge level={plan.risk_level} />
-          <FixPlanStatusBadge status={plan.status} />
-          <span className="text-sm font-medium text-muted-foreground">{planLabel(plan, t)}</span>
-        </div>
-        <h3 className="text-lg font-semibold text-foreground">{plan.title}</h3>
+        {!hideHeader && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <RiskLevelBadge level={plan.risk_level} />
+              <FixPlanStatusBadge status={plan.status} />
+              <span className="text-sm font-medium text-muted-foreground">{planLabel(plan, t)}</span>
+            </div>
+            <h3 className="text-lg font-semibold text-foreground">{plan.title}</h3>
+          </>
+        )}
         <p className="text-xs text-muted-foreground">
           {t("plan.counts")
             .replace("{steps}", String(n.steps))
