@@ -675,11 +675,35 @@ def validate_plan_transition(current: str, new: str) -> None:
         )
 
 
+class PlanStatusConflict(InvalidStatusTransition):
+    """The plan is no longer in the status the caller read — another request moved it first (409)."""
+
+
+def _persistent_session(obj):
+    """The session `obj` is persistent in, or None (a new / detached / unmapped object: nothing to guard)."""
+    from sqlalchemy import inspect as sa_inspect
+    if not isinstance(obj, Base):  # a stand-in (tests' mocks) has no row to guard; inspect() does not refuse those
+        return None
+    state = sa_inspect(obj)
+    return state.session if state.persistent else None
+
+
 def transition_plan(plan, new_status: str) -> None:
-    """Validate and apply a FixPlan status change; stamps updated_at."""
+    """Validate and apply a FixPlan status change; stamps updated_at. A persistent plan moves with
+    UPDATE … WHERE status=<the status it was read in> (MVP-2.7.0 S3): 0 rows = a concurrent writer won →
+    PlanStatusConflict, so two approvals (or an approve racing a reject) cannot both land."""
     validate_plan_transition(plan.status, new_status)
+    now = datetime.now(timezone.utc)
+    old = plan.status
+    session = _persistent_session(plan) if old != new_status else None
+    if session is not None:
+        moved = (session.query(type(plan))
+                 .filter(type(plan).id == plan.id, type(plan).status == old)
+                 .update({"status": new_status, "updated_at": now}, synchronize_session=False))
+        if not moved:
+            raise PlanStatusConflict(f"Plan #{plan.id} is no longer '{old}' (concurrent transition)")
     plan.status = new_status
-    plan.updated_at = datetime.now(timezone.utc)
+    plan.updated_at = now
 
 
 # ── ChangeRequest (MVP-2.6.0 Change Management) ───────────────────────

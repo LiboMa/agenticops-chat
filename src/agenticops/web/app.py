@@ -2421,6 +2421,17 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
         transition_plan(plan, "rejected")
     except InvalidStatusTransition as e:
         raise HTTPException(status_code=409, detail=str(e))
+    if old == "approved" and plan.health_issue_id:
+        # withdrawn before it ran: the issue goes back to root_cause_identified (the 2.6.1 back-edge) so its page
+        # offers a new plan instead of a retry the execute endpoint would refuse
+        from agenticops.services.issue_state import IssueStatusConflict, transition_issue
+        issue = session.get(HealthIssue, plan.health_issue_id)
+        if issue is not None and issue.status == "fix_approved":
+            try:
+                transition_issue(session, issue.id, "root_cause_identified", actor=actor.key,
+                                 reason=f"FixPlan #{plan.id} withdrawn before it ran", expected="fix_approved")
+            except IssueStatusConflict as e:
+                raise HTTPException(status_code=409, detail=str(e))
     plan.rejected_by = actor.key
     plan.rejected_at = datetime.now(timezone.utc)
     plan.rejection_reason = reason
@@ -2707,7 +2718,7 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
     """
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
-    from agenticops.models import transition_plan
+    from agenticops.models import InvalidStatusTransition, transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
@@ -2741,8 +2752,11 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         if plan_run_in_flight(session, plan.id):
             raise HTTPException(status_code=409, detail="A run of this plan is already in progress")
 
-        # Mark plan as executing (status verified 'approved' above — cannot raise); the issue moves with it
-        transition_plan(plan, "executing")
+        # Mark plan as executing; the issue moves with it
+        try:
+            transition_plan(plan, "executing")
+        except InvalidStatusTransition as e:  # a concurrent execute / withdraw moved it first (CAS)
+            raise HTTPException(status_code=409, detail=str(e))
         if plan.health_issue_id:
             from agenticops.services.issue_state import advance_issue
             advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,
