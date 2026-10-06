@@ -2671,7 +2671,7 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.auth.actor import cli_actor
-    from agenticops.models import transition_plan
+    from agenticops.models import InvalidStatusTransition, transition_plan
 
     actor = cli_actor()
     init_db()
@@ -2707,7 +2707,8 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
 
-        # Create FixExecution record (status verified 'approved' above — transition cannot raise)
+        # Create FixExecution record. The plan moves only if it is still 'approved' (compare-and-set, MVP-2.7.0 S3):
+        # someone may have withdrawn or queued it while the confirmation prompt waited.
         execution = FixExecution(
             fix_plan_id=plan.id,
             health_issue_id=plan.health_issue_id,
@@ -2715,7 +2716,11 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             executed_by=actor.key,
             started_at=datetime.now(timezone.utc),
         )
-        transition_plan(plan, "executing")
+        try:
+            transition_plan(plan, "executing")
+        except InvalidStatusTransition as e:
+            session.rollback()
+            return f"[yellow]{_safe_text(str(e))} — reload it and try again.[/yellow]"
         if plan.health_issue_id:  # the issue moves with its plan
             from agenticops.services.issue_state import advance_issue
             advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,

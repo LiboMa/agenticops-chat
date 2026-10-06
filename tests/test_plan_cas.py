@@ -84,3 +84,28 @@ def test_a_second_approval_of_the_same_plan_is_409_and_runs_once(client):
         assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": h}).status_code == 200
         assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": h}).status_code == 409
     assert run.call_count == 1
+
+
+def test_cli_execute_reports_a_lost_cas_instead_of_crashing(client):
+    """Final review I1: someone withdraws the plan while the CLI waits at «Confirm execution?» — /execute must answer
+    with a message, never raise out of the REPL, and create no run."""
+    from agenticops.cli import main as cli
+    from agenticops.models import FixExecution
+    pid, _ = _plan(plan_status="approved", issue_status="fix_approved")
+
+    def withdraw_then_confirm(*_a, **_k):
+        s = get_session()
+        try:
+            s.query(FixPlan).filter_by(id=pid).update({"status": "rejected"}); s.commit()
+        finally:
+            s.close()
+        return True
+
+    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
+         patch("rich.prompt.Confirm.ask", side_effect=withdraw_then_confirm), \
+         patch("agenticops.config.settings.executor_enabled", True):
+        out = cli._slash_execute(None, [str(pid)])
+    assert "no longer" in out.lower()
+    s = get_session()
+    assert s.get(FixPlan, pid).status == "rejected" and s.query(FixExecution).filter_by(fix_plan_id=pid).count() == 0
+    s.close()
