@@ -7,7 +7,7 @@ export interface PhaseView<I extends string = string> { id: I; state: PhaseState
 export type WaitingFor = "rca_agent" | "you" | "sre_agent" | "approver" | "executor" | "requester" | "acceptor" | null;
 export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveAndRun" | "retryExecution"
   | "acceptResult" | "markResolved" | null;
-export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan"
+export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan" | "planRejected"
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
   | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
   | "rcaUnavailable"                   // detail page only: the RCA failed to load, so where the issue stands is not known
@@ -73,6 +73,8 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
                   : result("diagnose", "needsReview", "you", "reviewRca");
     }
     case "fix_planned":
+      // the plan was rejected: nobody can approve it — a new plan is generated (the backend allows it: no locked plan)
+      if (i.plan?.status === "rejected") return result("plan", "planRejected", "you", "generatePlan");
       return result("run", "awaitingApproval", "approver", i.plan && APPROVABLE.has(i.plan.status) ? "approveAndRun" : null);
     case "fix_approved":
       // latestRun undefined = the runs are not known (list mode): approving queues the run, so never claim "not queued".

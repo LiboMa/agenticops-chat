@@ -87,6 +87,7 @@ export function issueDetailModel(input: {
       break;
     case "rcaRejected": reason = { key: "workitem.reason.rcaRejected" }; break;
     case "needsNewPlan": { const t = runText(latestRun); reason = t ? { text: t } : { key: "workitem.reason.runFailed" }; break; }
+    case "planRejected": reason = plan?.rejection_reason ? { text: plan.rejection_reason } : { key: "workitem.reason.planRejected" }; break;
     case "notQueued": reason = { key: "workitem.reason.notQueued" }; break;
     case "awaitingAcceptance": { const t = runText(latestRun); reason = t ? { text: t } : null; break; }
     default: reason = null;
@@ -108,7 +109,7 @@ export function issueDetailModel(input: {
   ];
 
   const tone = phase.sub === "needsNewPlan" ? "bad"
-    : ["needsReview", "rcaRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
+    : ["needsReview", "rcaRejected", "planRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
        "runsUnavailable", "rcaUnavailable", "runStateUnavailable"].includes(phase.sub) ? "warn"
     : phase.sub === "passed" || phase.sub === "resolved" ? "ok" : "info";
 

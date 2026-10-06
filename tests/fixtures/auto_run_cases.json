@@ -1,0 +1,19 @@
+{
+  "_comment": "An approval's auto-run (MVP-2.7.0 S3). in_flight: inFlightAutoRun / work_phases.in_flight_auto_run (expect = the start's created_at, or null). not_queued: notQueuedFrom / work_phases.not_queued_from (expect = when 'not queued' may be said, or null = at once). Details are objects or null only (the API sends parsed JSON).",
+  "in_flight": [
+    {"name": "started, nothing after", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 7}, "created_at": "2026-10-06T10:00:00Z"}], "expect": "2026-10-06T10:00:00Z"},
+    {"name": "started then completed", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 7}, "created_at": "2026-10-06T10:00:00Z"}, {"id": 2, "event_type": "execution_completed", "detail": {"plan_id": 7}, "created_at": "2026-10-06T10:03:00Z"}], "expect": null},
+    {"name": "another plan", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 8}, "created_at": "2026-10-06T10:00:00Z"}], "expect": null},
+    {"name": "stale", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 7}, "created_at": "2026-10-06T08:00:00Z"}], "expect": null},
+    {"name": "no events", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [], "expect": null},
+    {"name": "detail null", "plan_id": 7, "now": "2026-10-06T10:05:00Z", "timeout_seconds": 3600, "events": [{"id": 1, "event_type": "execution_started", "detail": null, "created_at": "2026-10-06T10:00:00Z"}], "expect": null}
+  ],
+  "not_queued": [
+    {"name": "no events", "plan": {"id": 7, "approved_at": "2026-10-06T10:00:00Z"}, "events": [], "expect": "2026-10-06T10:00:30Z"},
+    {"name": "started after approval", "plan": {"id": 7, "approved_at": "2026-10-06T10:00:00Z"}, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 7}, "created_at": "2026-10-06T10:00:05Z"}], "expect": null},
+    {"name": "started before approval", "plan": {"id": 7, "approved_at": "2026-10-06T10:00:00Z"}, "events": [{"id": 1, "event_type": "execution_started", "detail": {"plan_id": 7}, "created_at": "2026-10-06T09:59:00Z"}], "expect": "2026-10-06T10:00:30Z"},
+    {"name": "plan-less end", "plan": {"id": 7, "approved_at": "2026-10-06T10:00:00Z"}, "events": [{"id": 1, "event_type": "execution_completed", "detail": null, "created_at": "2026-10-06T10:01:00Z"}], "expect": null},
+    {"name": "other plan's end", "plan": {"id": 7, "approved_at": "2026-10-06T10:00:00Z"}, "events": [{"id": 1, "event_type": "execution_completed", "detail": {"plan_id": 8}, "created_at": "2026-10-06T10:01:00Z"}], "expect": "2026-10-06T10:00:30Z"},
+    {"name": "no approval time", "plan": {"id": 7, "approved_at": null}, "events": [], "expect": null}
+  ]
+}

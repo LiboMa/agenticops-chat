@@ -929,5 +929,7 @@
   "login.signIn": "Sign in",
   "login.signingIn": "Signing in…",
   "login.invalid": "Wrong email or password.",
-  "login.failed": "Sign-in failed. Try again."
+  "login.failed": "Sign-in failed. Try again.",
+  "workitem.sub.planRejected": "Plan rejected",
+  "workitem.reason.planRejected": "The plan was rejected — generate a new one."
 }

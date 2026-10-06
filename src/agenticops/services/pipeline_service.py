@@ -322,36 +322,38 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     logger.info("Auto-execute spawned for FixPlan #%d", fix_plan_id)
 
 
+def runs_in_flight(session, plans) -> set[int]:
+    """The ids of these fix plans whose approval auto-run is under way — one events query for all of them
+    (2026-10-05 final review C1 rule, ported to services/work_phases.in_flight_auto_run)."""
+    from agenticops.models import PipelineEvent
+    from agenticops.services.work_phases import in_flight_auto_run
+    by_issue: dict[int, list[int]] = {}
+    for p in plans:
+        if p.health_issue_id:
+            by_issue.setdefault(p.health_issue_id, []).append(p.id)
+    if not by_issue:
+        return set()
+    events = (session.query(PipelineEvent)
+              .filter(PipelineEvent.health_issue_id.in_(list(by_issue)),
+                      PipelineEvent.event_type.in_(("execution_started", "execution_completed")))
+              .all())
+    grouped: dict[int, list] = {}
+    for e in events:
+        grouped.setdefault(e.health_issue_id, []).append(e)
+    now = datetime.now(timezone.utc)
+    return {pid for iid, pids in by_issue.items() for pid in pids
+            if in_flight_auto_run(grouped.get(iid, []), pid, timeout_seconds=settings.executor_total_timeout,
+                                  now=now) is not None}
+
+
 def plan_run_in_flight(session, plan_id: int) -> bool:
     """Whether an auto-run of this fix plan is in progress (2026-10-05 final review C1).
 
-    _run_auto_execute writes no FixExecution row until the run ends, so the plan stays 'approved' throughout.
-    Its timeline events are the one signal every worker sees: the newest `execution_started` naming this plan
-    is in flight when no `execution_completed` on the issue came after it and it began less than
-    executor_total_timeout seconds ago (a run that died without a closing event goes stale). A ticketed run
-    (POST /execute, a change) is a pending/running row and moves the plan off 'approved' — not this signal.
-    """
-    from datetime import timedelta
-    from agenticops.models import FixPlan, PipelineEvent
+    _run_auto_execute writes no FixExecution row until the run ends, so the plan stays 'approved' throughout;
+    its timeline events are the signal (services/work_phases.in_flight_auto_run — the page's own rule)."""
+    from agenticops.models import FixPlan
     plan = session.get(FixPlan, plan_id)
-    if plan is None or not plan.health_issue_id:
-        return False
-    events = (session.query(PipelineEvent)
-              .filter(PipelineEvent.health_issue_id == plan.health_issue_id,
-                      PipelineEvent.event_type.in_(("execution_started", "execution_completed")))
-              .order_by(PipelineEvent.created_at.desc(), PipelineEvent.id.desc())
-              .all())
-    for e in events:  # newest first
-        if e.event_type == "execution_completed":
-            return False  # the newest start of this plan, if any, is older than this completion
-        try:
-            detail = json.loads(e.detail) if e.detail else None
-        except ValueError:
-            detail = None
-        if isinstance(detail, dict) and detail.get("plan_id") == plan_id:
-            started = e.created_at if e.created_at.tzinfo else e.created_at.replace(tzinfo=timezone.utc)
-            return datetime.now(timezone.utc) - started < timedelta(seconds=settings.executor_total_timeout)
-    return False
+    return plan is not None and bool(plan.health_issue_id) and plan_id in runs_in_flight(session, [plan])
 
 
 def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
