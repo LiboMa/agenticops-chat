@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { planDetailModel } from "@/lib/planDetailModel";
-import { approvalCopy, canConfirm, findAction } from "@/lib/approval";
+import { approvalCopy, canConfirm, findAction, runHintKey } from "@/lib/approval";
 import type { FixExecution, FixPlan } from "@/api/types";
 
 const plan = (over: Partial<FixPlan> = {}) => ({ id: 9, plan_kind: "fix", change_request_id: null, status: "pending_approval",
@@ -67,5 +67,15 @@ describe("approval copy — what approving really does (MVP-2.7.0 S3)", () => {
   it("finds an action by name", () => {
     expect(findAction([{ action: "execute", allowed: true, reason_code: null, effect: "queue_execution" }], "execute")?.allowed).toBe(true);
     expect(findAction(undefined, "approve")).toBeNull();
+  });
+});
+
+describe("runHintKey — the run card's promise before a plan exists (final review U8)", () => {
+  it("promises an automatic run only when auto-fix, the executor and L0/L1 auto-approval are all on", () => {
+    expect(runHintKey({ auto_fix_enabled: true, executor_enabled: true, executor_auto_approve_l0_l1: true })).toBe("workitem.future.issue.run");
+    expect(runHintKey({ auto_fix_enabled: true, executor_enabled: true, executor_auto_approve_l0_l1: false })).toBe("workitem.future.issue.runApprove");
+    expect(runHintKey({ auto_fix_enabled: false, executor_enabled: true, executor_auto_approve_l0_l1: true })).toBe("workitem.future.issue.runManual");
+    expect(runHintKey({ auto_fix_enabled: true, executor_enabled: false, executor_auto_approve_l0_l1: true })).toBe("workitem.future.issue.runManual");
+    expect(runHintKey(undefined)).toBe("workitem.future.issue.runNeutral");
   });
 });

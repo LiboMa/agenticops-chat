@@ -21,7 +21,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
-import { approvalCopy, findAction } from "@/lib/approval";
+import { approvalCopy, findAction, runHintKey } from "@/lib/approval";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
@@ -377,12 +377,12 @@ export default function IssueDetail() {
         </PhaseCard>
 
         <PhaseCard id="run" index={3} title={t("workitem.phase.run")} state={state("run")} summary={runSummary}
-                   futureHint={t("workitem.future.issue.run")}
+                   futureHint={t(runHintKey(settings.data))}
                    open={cards.isOpen("run")} onToggle={(o) => cards.toggleCard("run", o)}>
           <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
                    error={runsFetchError} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
                    autoRunSince={m.autoRun?.startedAt ?? null}
-                   onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")} approveLabel={t(approveCopy.buttonKey)}
+                   onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")} approveLabel={t(approveCopy.buttonKey)} runHint={t(runHintKey(settings.data))}
                    approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
         </PhaseCard>
 

@@ -19,3 +19,11 @@ export function approvalCopy(effect: string | null | undefined): ApprovalCopy {
 export function canConfirm(o: { busy: boolean; required: boolean; reason: string; ack: boolean; acked: boolean }): boolean {
   return !o.busy && (!o.required || o.reason.trim() !== "") && (!o.ack || o.acked);
 }
+
+/** What the issue's run card promises before there is a plan (final review U8): an automatic run only when auto-fix,
+ *  the executor and L0/L1 auto-approval are all on (pipeline_service.trigger_auto_approve / trigger_auto_execute). */
+export function runHintKey(s: { auto_fix_enabled?: boolean; executor_enabled?: boolean; executor_auto_approve_l0_l1?: boolean } | undefined): string {
+  if (!s) return "workitem.future.issue.runNeutral";
+  if (!s.auto_fix_enabled || !s.executor_enabled) return "workitem.future.issue.runManual";
+  return s.executor_auto_approve_l0_l1 ? "workitem.future.issue.run" : "workitem.future.issue.runApprove";
+}

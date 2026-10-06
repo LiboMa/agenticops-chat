@@ -11,7 +11,7 @@ type T = (key: string) => string;
 /** ③ Approve & run: who approved which version, approve / reject while the plan waits (the same handlers as the
  *  status line's primary), then every run's evidence. A run's failure sentence is the status line's, not here (P3). */
 export function RunBody({
-  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, autoRunSince, onApprove, onReject, approving, rejecting, approveLabel, t,
+  plan, issueStatus, runs, loading, error, onRetryFetch, quietRunId, autoRunSince, onApprove, onReject, approving, rejecting, approveLabel, runHint, t,
 }: {
   plan: FixPlan | null;
   issueStatus: IssueStatus;
@@ -26,6 +26,7 @@ export function RunBody({
   approving: boolean;
   rejecting: boolean;
   approveLabel: string;   // "Approve" or "Approve & run", by what approving really does (MVP-2.7.0 S3)
+  runHint: string;        // what happens once a plan exists (lib/approval.runHintKey)
   t: T;
 }) {
   const approvable = !!plan && canApprovePlan(plan, issueStatus);
@@ -79,7 +80,7 @@ export function RunBody({
           {runs.length > 0 && <RunList runs={runs} quietRunId={quietRunId} t={t} />}
         </div>
       ) : runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t(plan ? "issues.noExecutions" : "workitem.future.issue.run")}</p>
+        <p className="text-sm text-muted-foreground">{plan ? t("issues.noExecutions") : runHint}</p>
       ) : (
         <RunList runs={runs} quietRunId={quietRunId} t={t} />
       )}
