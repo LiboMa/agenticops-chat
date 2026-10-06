@@ -2388,13 +2388,48 @@ async def api_list_providers():
 # ============================================================================
 
 
-def _fix_plan_response(session, plan) -> FixPlanResponse:
-    resp = FixPlanResponse.model_validate(plan)
-    if plan.health_issue_id:
-        resp.account_id = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
-    elif plan.change_request_id:
-        resp.account_id = session.query(ChangeRequest.account_id).filter_by(id=plan.change_request_id).scalar()
-    return resp
+def _issue_target(issue) -> dict:
+    md = issue.metric_data or {}
+    return {"resource_id": issue.resource_id or None, "resource_ref": issue.resource_ref,
+            "anchor_status": issue.anchor_status, "resource_type": md.get("resource_type") or None,
+            "region": md.get("region") or None}
+
+
+def _fix_plan_rows(session, plans, actor: Optional[Actor]) -> list:
+    """Responses for these plans with their issue's context and the actor's actions — a fixed number of queries
+    whatever the count (MVP-2.7.0 S3)."""
+    from agenticops.services.pipeline_service import runs_in_flight
+    from agenticops.services.ui_actions import plan_actions
+    issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
+    issues = ({i.id: i for i in session.query(HealthIssue).filter(HealthIssue.id.in_(issue_ids)).all()}
+              if issue_ids else {})
+    cr_ids = {p.change_request_id for p in plans if p.change_request_id}
+    cr_accounts = (dict(session.query(ChangeRequest.id, ChangeRequest.account_id)
+                        .filter(ChangeRequest.id.in_(cr_ids)).all()) if cr_ids else {})
+    approved = [p for p in plans if p.status == "approved"]
+    flying = runs_in_flight(session, approved) if approved and actor is not None else set()
+    out = []
+    for p in plans:
+        resp = FixPlanResponse.model_validate(p)
+        issue = issues.get(p.health_issue_id)
+        if issue is not None:
+            resp.account_id, resp.issue_title, resp.issue_status = issue.account_id, issue.title, issue.status
+            resp.target = _issue_target(issue)
+        elif p.change_request_id:
+            resp.account_id = cr_accounts.get(p.change_request_id)
+        if actor is not None:
+            resp.available_actions = plan_actions(p, actor, issue_status=issue.status if issue else None,
+                                                  run_in_flight=p.id in flying)
+        out.append(resp)
+    return out
+
+
+def _fix_plan_response(session, plan, actor: Optional[Actor] = None) -> FixPlanResponse:
+    return _fix_plan_rows(session, [plan], actor)[0]
+
+
+def _like(term: str) -> str:
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
@@ -2441,62 +2476,61 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
 
 
 @app.get("/api/fix-plans", response_model=List[FixPlanResponse])
-async def api_list_fix_plans(
+def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
     account_id: Optional[int] = Query(None),
     kind: Optional[str] = Query(None, pattern="^(fix|change)$"),
+    q: Optional[str] = Query(None, max_length=100),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
+    actor: Actor = Depends(current_actor),
 ):
-    """List fix plans with filtering (`kind` = fix | change)."""
+    """List fix plans (`kind` = fix | change; `status` = one or a comma list; `q` = id / title / target)."""
+    import re
+    from agenticops.models import VALID_PLAN_STATUSES
+    statuses = [x.strip() for x in status.split(",") if x.strip()] if status else []
+    bad = [x for x in statuses if x not in VALID_PLAN_STATUSES]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"invalid status {bad}; expected one of {sorted(VALID_PLAN_STATUSES)}")
     with get_db_session() as session:
-        query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
-
+        query = session.query(FixPlan).order_by(FixPlan.created_at.desc(), FixPlan.id.desc())
         if kind:
             query = query.filter_by(plan_kind=kind)
-        if status:
-            query = query.filter_by(status=status)
+        if statuses:
+            query = query.filter(FixPlan.status.in_(statuses))
         if risk_level:
             query = query.filter_by(risk_level=risk_level)
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
-        if account_id is not None:
-            # a fix plan's account is its HealthIssue's, a change plan's is its ChangeRequest's
+        term = (q or "").strip()
+        if account_id is not None or term:
+            # a fix plan's account / target is its HealthIssue's, a change plan's account its ChangeRequest's
             query = (query.outerjoin(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
-                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id)
-                          .filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id)))
-
+                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id))
+        if account_id is not None:
+            query = query.filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id))
+        if term:
+            like = _like(term)
+            conds = [FixPlan.title.ilike(like, escape="\\"), HealthIssue.title.ilike(like, escape="\\"),
+                     HealthIssue.resource_id.ilike(like, escape="\\")]
+            num = re.fullmatch(r"[IiPp]?#?(\d{1,9})", term)
+            if num:
+                conds += [FixPlan.id == int(num.group(1)), FixPlan.health_issue_id == int(num.group(1))]
+            query = query.filter(or_(*conds))
         plans = query.offset(offset).limit(limit).all()
-        # Resolve account_id from the plan's parent: its HealthIssue (fix) or its ChangeRequest (change)
-        issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
-        issue_accounts: dict[int, Optional[int]] = {}
-        if issue_ids:
-            rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
-            issue_accounts = {iid: aid for iid, aid in rows}
-        cr_ids = {p.change_request_id for p in plans if p.change_request_id}
-        cr_accounts: dict[int, Optional[int]] = {}
-        if cr_ids:
-            rows = session.query(ChangeRequest.id, ChangeRequest.account_id).filter(ChangeRequest.id.in_(cr_ids)).all()
-            cr_accounts = {cid: aid for cid, aid in rows}
-        results = []
-        for p in plans:
-            resp = FixPlanResponse.model_validate(p)
-            resp.account_id = (issue_accounts.get(p.health_issue_id) if p.health_issue_id
-                               else cr_accounts.get(p.change_request_id))
-            results.append(resp)
-        return results
+        return _fix_plan_rows(session, plans, actor)
 
 
 @app.get("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
-async def api_get_fix_plan(plan_id: int):
-    """Get fix plan by ID."""
+def api_get_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Get fix plan by ID, with its issue's context and the actor's actions."""
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
@@ -2576,6 +2610,7 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
             raise HTTPException(status_code=409, detail=refusal)
         update_data = data.model_dump(exclude_unset=True)
         status_alias = update_data.pop("status", None)
+        update_data.pop("content_hash", None)
         if status_alias is not None and status_alias != "rejected":
             raise HTTPException(status_code=400, detail="Status changes must use /approve, /reject or /execute")
         content_present = any(k in update_data for k in _FIXPLAN_CONTENT_FIELDS)
@@ -2587,6 +2622,12 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 authz.check(actor, "plan.edit", subject=plan)
             except authz.AuthzDenied as e:
                 raise HTTPException(status_code=403, detail=str(e))
+            # MVP-2.7.0 S3: an edit names the content it was made against — a plan changed since is refused
+            if not data.content_hash:
+                raise HTTPException(status_code=422, detail="content_hash is required to edit a plan's content")
+            conflict = approval_conflict(session, plan, data.content_hash)
+            if conflict:
+                raise HTTPException(status_code=409, detail=conflict)
         changed_old, changed_new = {}, {}
         for key, value in update_data.items():
             current = getattr(plan, key)
@@ -2603,7 +2644,7 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
             plan.updated_at = datetime.now(timezone.utc)  # bump only when content actually changed
             stamp_content(session, plan)
         session.flush()
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
@@ -2666,7 +2707,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
         # Capture plan_id before session closes
         approved_plan_id = plan.id
         session.flush()
-        response = _fix_plan_response(session, plan)
+        response = _fix_plan_response(session, plan, actor)
 
     # Chain to auto-execute (outside DB session)
     try:
@@ -2687,7 +2728,7 @@ async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Acto
             raise HTTPException(status_code=404, detail="Fix plan not found")
         _reject_plan(session, plan, actor, data.reason)
         session.flush()
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)

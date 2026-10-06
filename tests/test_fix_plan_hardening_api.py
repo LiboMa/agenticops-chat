@@ -208,7 +208,7 @@ def test_put_no_longer_accepts_status_or_approver(client):
     assert r.status_code == 422
     r = client.put(f"/api/fix-plans/{pid}", json={"status": "approved"})
     assert r.status_code == 400
-    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed"})
+    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed", "content_hash": _hash(pid)})
     assert r.status_code == 200 and r.json()["title"] == "renamed"
 
 
@@ -311,7 +311,7 @@ def test_editable_plan_content_edit_audited_once(client):
     one plan.edited row records only the changed field old→new."""
     pid = _plan(status="draft")
     before = _plan_state(pid)
-    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed"})
+    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed", "content_hash": _hash(pid)})
     assert r.status_code == 200 and r.json()["title"] == "renamed"
     status, title, summary, updated_at = _plan_state(pid)
     assert title == "renamed" and summary == "s"
@@ -358,7 +358,7 @@ def test_content_edit_requires_plan_edit_permission(client):
     app.dependency_overrides[deps.current_actor] = lambda: writer
     try:
         with patch.object(settings, "rbac_enforce", True):
-            assert client.put(f"/api/fix-plans/{pid}", json={"title": "ok"}).status_code == 200
+            assert client.put(f"/api/fix-plans/{pid}", json={"title": "ok", "content_hash": _hash(pid)}).status_code == 200
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
 

@@ -117,7 +117,9 @@ def api_list_changes(
 
 
 @router.get("/{cr_id}", response_model=ChangeRequestDetail)
-def api_get_change(cr_id: int):
+def api_get_change(cr_id: int, actor: Actor = Depends(current_actor)):
+    from agenticops.models import ChangeRequest
+    from agenticops.services.ui_actions import change_actions
     snap = _call(cs.get_change, cr_id)
     with get_db_session() as session:
         plans = session.query(FixPlan).filter_by(change_request_id=cr_id).order_by(FixPlan.created_at.desc()).all()
@@ -128,6 +130,8 @@ def api_get_change(cr_id: int):
         snap["plans"] = [FixPlanResponse.model_validate(p).model_copy(update={"account_id": snap["account_id"]})
                          for p in plans]
         snap["executions"] = [FixExecutionResponse.model_validate(e) for e in executions]
+        snap["available_actions"] = change_actions(session.get(ChangeRequest, cr_id), actor,
+                                                   plan=cs.active_plan_for(session, cr_id))
     snap["policy_decision"] = _last_policy_decision(cr_id)
     return snap
 

@@ -371,6 +371,9 @@ class FixPlanUpdate(BaseModel):
     estimated_impact: Optional[str] = None
     pre_checks: Optional[List] = None
     post_checks: Optional[List] = None
+    content_hash: Optional[str] = Field(None, max_length=64,
+                                        description="content_hash of the plan as read; required with any content field "
+                                                    "(422 without, 409 when the plan changed since)")
     status: Optional[str] = Field(None, description="DEPRECATED alias for POST /reject (only 'rejected' is accepted)")
 
 
@@ -414,6 +417,11 @@ class FixPlanResponse(BaseModel):
     content_hash: Optional[str] = None
     approved_hash: Optional[str] = None
     approved_version: Optional[int] = None
+    # MVP-2.7.0 S3 read context (never part of the content hash)
+    issue_title: Optional[str] = None
+    issue_status: Optional[str] = None
+    target: Optional[dict] = None   # {resource_id, resource_ref, anchor_status, resource_type, region} of its issue
+    available_actions: List[dict] = Field(default_factory=list)   # services/ui_actions.plan_actions
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -966,6 +974,7 @@ class ChangeRequestDetail(ChangeRequestResponse):
     executions: List[FixExecutionResponse] = Field(default_factory=list)
     # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)
     policy_decision: Optional[dict] = None
+    available_actions: List[dict] = Field(default_factory=list)  # services/ui_actions.change_actions
 
 
 class ChangeReasonBody(BaseModel):
