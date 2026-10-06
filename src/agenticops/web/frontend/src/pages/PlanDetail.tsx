@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useApproveFixPlan, useExecuteFixPlan, useFixPlan, useRejectFixPlan } from "@/hooks/useFixPlans";
 import { useFixExecutions } from "@/hooks/useFixExecutions";
 import { useEntityAudit } from "@/hooks/useEntityAudit";
+import { useAccounts } from "@/hooks/useAccounts";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ApiError } from "@/api/client";
 import { PlanView } from "@/components/plans/PlanView";
@@ -25,8 +26,13 @@ import { formatFullDate } from "@/lib/formatDate";
 export default function PlanDetail() {
   const { t } = useLocale();
   const id = Number(useParams().id);
-  const q = useFixPlan(id);
-  const runs = useFixExecutions(id);
+  // poll while a run can still move (approved / executing / a run in flight) — the model decides, from the last data
+  const [pollMs, setPollMs] = useState<number | false>(false);
+  const q = useFixPlan(id, pollMs);
+  const runs = useFixExecutions(id, pollMs);
+  const accounts = useAccounts();
+  const nextPoll = q.data ? planDetailModel(q.data, runs.data).pollMs : false;
+  useEffect(() => setPollMs(nextPoll), [nextPoll]);
   const audit = useEntityAudit("fix_plan", id);
   const approveMut = useApproveFixPlan();
   const rejectMut = useRejectFixPlan();
@@ -73,6 +79,7 @@ export default function PlanDetail() {
         <p className="text-sm text-muted-foreground">
           {plan.health_issue_id != null && <>{t("plans.detail.origin")}: <Link className="text-primary hover:underline" to={`/app/issues/${plan.health_issue_id}`}>I#{plan.health_issue_id} {plan.issue_title}</Link></>}
           {plan.target?.resource_id && <> · {t("plans.detail.target")}: {m.targetLink ? <Link className="text-primary hover:underline" to={m.targetLink}>{plan.target.resource_id}</Link> : <span className="font-mono">{plan.target.resource_id}</span>}</>}
+          {m.accountId != null && <> · {t("plans.detail.account")}: <span className="text-foreground">{accounts.data?.find((a) => a.id === m.accountId)?.name ?? `#${m.accountId}`}</span></>}
           {plan.target?.region && <> · {plan.target.region}</>}
           {" · "}{t("plans.hash")} {shortHash(plan.content_hash)}
         </p>

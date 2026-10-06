@@ -32,6 +32,22 @@ describe("planDetailModel", () => {
   });
 });
 
+describe("planDetailModel — final review I3 / U7", () => {
+  it("names the account the plan runs in (the approval binds it: account is in the content hash)", () => {
+    expect(planDetailModel(plan({ account_id: 4 }), []).accountId).toBe(4);
+    expect(planDetailModel(plan({ account_id: null }), []).accountId).toBeNull();
+  });
+  it("polls while a run can move: approved, executing, or a run in flight; quiet otherwise", () => {
+    expect(planDetailModel(plan({ status: "approved" }), []).pollMs).toBe(5000);
+    expect(planDetailModel(plan({ status: "executing" }), []).pollMs).toBe(5000);
+    const running = [{ id: 2, status: "running", created_at: "2026-10-06T10:00:00Z" }] as unknown as FixExecution[];
+    expect(planDetailModel(plan({ status: "executed" }), running).pollMs).toBe(5000);
+    expect(planDetailModel(plan({ status: "pending_approval" }), []).pollMs).toBe(false);
+    const done = [{ id: 2, status: "succeeded", created_at: "2026-10-06T10:00:00Z" }] as unknown as FixExecution[];
+    expect(planDetailModel(plan({ status: "executed" }), done).pollMs).toBe(false);
+  });
+});
+
 describe("approval copy — what approving really does (MVP-2.7.0 S3)", () => {
   it("says run only when the server will queue the run", () => {
     expect(approvalCopy("approve_and_queue_execution")).toEqual({ titleKey: "approval.title.run", buttonKey: "approval.button.run", noteKey: "approval.note.run" });

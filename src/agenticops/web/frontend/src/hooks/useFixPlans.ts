@@ -27,11 +27,12 @@ export function useFixPlans(filters: FixPlanFilters = {}) {
   });
 }
 
-export function useFixPlan(id: number) {
+export function useFixPlan(id: number, refetchInterval: number | false = false) {
   return useQuery({
     queryKey: ["fix-plan", id],
     queryFn: () => apiFetch<FixPlan>(`/fix-plans/${id}`),
     enabled: id > 0,
+    refetchInterval,
   });
 }
 

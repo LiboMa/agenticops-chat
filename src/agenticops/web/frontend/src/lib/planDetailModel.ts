@@ -7,6 +7,8 @@ export interface PlanDetailModel {
   actions: { approve: UiAction | null; reject: UiAction | null; execute: UiAction | null };
   runKey: "plans.run.notRun" | "plans.run.running" | "plans.run.done" | "plans.run.failed";
   targetLink: string | null;
+  accountId: number | null;   // the account the plan runs in — part of the content hash an approval binds (final review I3)
+  pollMs: number | false;     // refresh while a run can still move (final review U7)
 }
 
 const allowed = (plan: FixPlan, name: string) => {
@@ -29,5 +31,8 @@ export function planDetailModel(plan: FixPlan, runs: FixExecution[] | undefined)
     actions: { approve: allowed(plan, "approve"), reject: allowed(plan, "reject"), execute: allowed(plan, "execute") },
     runKey,
     targetLink: t && t.anchor_status === "anchored" && t.resource_ref != null ? `/app/resources/${t.resource_ref}` : null,
+    accountId: plan.account_id ?? null,
+    pollMs: plan.status === "approved" || plan.status === "executing" || run?.status === "pending" || run?.status === "running"
+      ? 5000 : false,
   };
 }

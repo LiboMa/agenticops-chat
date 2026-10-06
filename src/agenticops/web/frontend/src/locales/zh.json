@@ -994,5 +994,6 @@
   "attention.detail.acceptance": "执行已结束，待你验收",
   "attention.detail.resolve": "执行已结束，待标记已解决",
   "attention.detail.change_draft": "评审尚未开始，需要提交评审",
-  "attention.detail.rca_ready": "诊断已过闸门，需要生成方案（自动修复已关闭）"
+  "attention.detail.rca_ready": "诊断已过闸门，需要生成方案（自动修复已关闭）",
+  "plans.detail.account": "账户"
 }

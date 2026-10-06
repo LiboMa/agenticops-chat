@@ -2,13 +2,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { FixExecution } from "@/api/types";
 
-export function useFixExecutions(planId: number) {
+export function useFixExecutions(planId: number, refetchInterval: number | false = false) {
   return useQuery({
     queryKey: ["fix-executions", planId],
     queryFn: () =>
       apiFetch<FixExecution[]>(`/fix-executions?fix_plan_id=${planId}`),
     enabled: planId > 0,
     staleTime: 15_000,
+    refetchInterval,
   });
 }
 
