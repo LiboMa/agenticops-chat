@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
+import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, changeFilters, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -112,5 +112,16 @@ describe("fixPlanFilters — the hub's URL", () => {
       { status: "draft,pending_approval", risk_level: "L2", account_id: 3, q: "nginx" });
     expect(fixPlanFilters(new URLSearchParams("status=bogus&risk=L9&account=-1&q="))).toEqual(
       { status: undefined, risk_level: undefined, account_id: undefined, q: undefined });
+  });
+});
+
+describe("changeFilters — the Changes tab's URL (final review I2)", () => {
+  it("an old /app/changes?status=planned link filters the tab, with the API's own names", () => {
+    expect(changeFilters(new URLSearchParams("tab=changes&status=planned&account_id=3&requested_by=user%3Abob&period=30d"))).toEqual(
+      { status: "planned", account_id: 3, requested_by: "user:bob", period: "30d" });
+  });
+  it("drops what the API would refuse", () => {
+    expect(changeFilters(new URLSearchParams("status=bogus&account_id=x&period=1y"))).toEqual(
+      { status: undefined, account_id: undefined, requested_by: undefined, period: undefined });
   });
 });

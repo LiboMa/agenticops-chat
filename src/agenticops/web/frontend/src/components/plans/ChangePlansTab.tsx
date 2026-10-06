@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useChanges } from "@/hooks/useChanges";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useLocale } from "@/i18n/LocaleContext";
@@ -7,7 +8,7 @@ import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { PeriodButtons } from "@/components/plans/PeriodButtons";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { CHANGE_STATUSES, type Period } from "@/lib/plans";
+import { CHANGE_STATUSES, changeFilters, type Period } from "@/lib/plans";
 import { changeRow } from "@/lib/workItems";
 import type { ChangeStatus, RiskLevel } from "@/api/types";
 
@@ -16,11 +17,23 @@ const selectClass = "border border-border bg-background text-sm rounded-lg px-3 
 
 export function ChangePlansTab() {
   const { t } = useLocale();
-  const [status, setStatus] = useState<"" | ChangeStatus>("");
-  const [account, setAccount] = useState("");
-  const [requester, setRequester] = useState("");
+  // The filters live in the URL (hub tab ?tab=changes&status=…), so a link or a refresh shows the same list.
   // Default: all periods (M22) — an open change older than 30 days must not vanish from the list.
-  const [period, setPeriod] = useState<Period | undefined>(undefined);
+  const [params, setParams] = useSearchParams();
+  const f = changeFilters(params);
+  const status = f.status ?? "";
+  const account = f.account_id ? String(f.account_id) : "";
+  const requester = f.requested_by ?? "";
+  const period = f.period;
+  const set = (key: string, value: string | undefined) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    setParams(next, { replace: true });
+  };
+  const setStatus = (v: "" | ChangeStatus) => set("status", v);
+  const setAccount = (v: string) => set("account_id", v);
+  const setRequester = (v: string) => set("requested_by", v);
+  const setPeriod = (v: Period | undefined) => set("period", v);
   const changes = useChanges({
     status: status || undefined,
     account_id: account ? Number(account) : undefined,

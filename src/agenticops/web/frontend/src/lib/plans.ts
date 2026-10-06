@@ -82,6 +82,20 @@ export function fixPlanFilters(params: URLSearchParams): { status?: string; risk
   };
 }
 
+/** The Changes tab's filters from the URL, under the API's own names — so an old /app/changes?status=planned link
+ *  (bookmark, notification) still filters the list after its redirect (final review I2). */
+export function changeFilters(params: URLSearchParams): { status?: ChangeStatus; account_id?: number; requested_by?: string; period?: Period } {
+  const status = params.get("status");
+  const account = Number(params.get("account_id"));
+  const period = params.get("period");
+  return {
+    status: status && (CHANGE_STATUSES as readonly string[]).includes(status) ? (status as ChangeStatus) : undefined,
+    account_id: Number.isInteger(account) && account > 0 ? account : undefined,
+    requested_by: params.get("requested_by") || undefined,
+    period: period && (PERIODS as readonly string[]).includes(period) ? (period as Period) : undefined,
+  };
+}
+
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */
 export function toQuery<T extends { [K in keyof T]: string | number | undefined | null }>(params: T): string {
   const qs = new URLSearchParams();
