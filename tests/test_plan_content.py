@@ -223,7 +223,9 @@ def test_the_web_approval_binds_to_the_content_it_was_shown(db, client):
     plan = _fix_plan(db)
     shown = client.get(f"/api/fix-plans/{plan.id}").json()
     assert (shown["plan_version"], shown["content_hash"], shown["approved_hash"]) == (1, plan.content_hash, None)
-    assert client.put(f"/api/fix-plans/{plan.id}", json={"steps": [{"command": "echo b"}]}).status_code == 200
+    # an editor changes the plan meanwhile (naming the content it edited — MVP-2.7.0 S3)
+    assert client.put(f"/api/fix-plans/{plan.id}", json={"steps": [{"command": "echo b"}],
+                                                         "content_hash": shown["content_hash"]}).status_code == 200
     with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
         stale = client.put(f"/api/fix-plans/{plan.id}/approve", json={"content_hash": shown["content_hash"]})
         assert stale.status_code == 409
