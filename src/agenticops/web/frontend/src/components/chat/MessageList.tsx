@@ -8,6 +8,8 @@ import type { ChatMessage } from "@/api/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { renderMessageMarkdown } from "@/lib/markdownCache";
 import { contextRefFromPath, type ContextRef } from "@/lib/contextRef";
+import { messageStatusKey } from "@/lib/chatMessageStatus";
+import { useLocale } from "@/i18n/LocaleContext";
 
 interface Props {
   messages: ChatMessage[];
@@ -204,6 +206,8 @@ function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
   streaming?: boolean;
   onSuggestionPick?: (text: string) => void;
 }) {
+  const { t } = useLocale();
+  const statusKey = messageStatusKey(msg);
   return (
     <div className={msg.role === "user" ? "flex justify-end" : "flex gap-3"}>
       {msg.role === "assistant" && (
@@ -226,18 +230,19 @@ function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
         )}
         {msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-1">
-            {msg.tool_calls.map((t, i) => (<ToolCallChip key={i} name={t.name} status={t.status} />))}
+            {msg.tool_calls.map((tc, i) => (<ToolCallChip key={tc.call_id ?? i} name={tc.name} status={tc.status} outcome={tc.outcome} />))}
           </div>
         )}
         <div
           className="text-sm text-foreground leading-relaxed report-content max-w-none"
           dangerouslySetInnerHTML={{ __html: renderMessageMarkdown(msg.id, msg.content) }}
         />
-        {/* Failed stream persisted with an error (e.g. model unavailable) —
-            render it instead of leaving an empty bubble. */}
-        {msg.role === "assistant" && msg.token_usage?.error && (
-          <div className="text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg px-3 py-2 whitespace-pre-wrap break-words">
-            ⚠ {msg.token_usage.error}
+        {/* S5: an interrupted or failed reply says so — by its kind of failure, never the raw exception */}
+        {statusKey && (
+          <div className={`text-xs rounded-lg px-3 py-2 border ${statusKey === "chat.status.interrupted"
+            ? "text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30"
+            : "text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900"}`}>
+            {t(statusKey)}
           </div>
         )}
         {msg.role === "assistant" && msg.token_usage && !msg.token_usage.error && (

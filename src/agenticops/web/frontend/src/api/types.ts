@@ -740,7 +740,7 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  tool_calls?: Array<{ name: string; status: string }>;
+  tool_calls?: Array<{ name: string; status: string; call_id?: string; outcome?: "ok" | "error" | "unknown" }>;
   token_usage?: {
     input: number;
     output: number;
@@ -749,6 +749,7 @@ export interface ChatMessage {
     cost_usd?: number;
     model?: string;
     error?: string; // persisted when the stream failed (e.g. model unavailable)
+    error_code?: string; // S5: throttled | model_unavailable | context_too_long | internal
   };
   trace_id?: string;
   cost_usd?: number;

@@ -19,6 +19,8 @@ interface Props {
   disabled?: boolean;
   streaming?: boolean;
   sessionId?: string | null;
+  /** S5: put this text in the composer (a starter prompt); a new nonce applies it again. Never sends. */
+  prefill?: { text: string; nonce: number } | null;
 }
 
 // Attachment carries a stable id so removal + React keys never use the array index
@@ -35,7 +37,7 @@ function nextAttachId(): string {
   return `att-${_attachSeq}`;
 }
 
-export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: Props) {
+export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, prefill }: Props) {
   const { t } = useLocale();
   // S5: what the server accepts (bootstrap upload_policy), so the composer and the server agree
   const boot = useBootstrap();
@@ -62,6 +64,12 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     const keptNames = new Set(kept.map((f) => f.name));
     setReselect(d.unsentFiles.filter((n) => !keptNames.has(n)));
   }, [key, filesKey]);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInput(prefill.text);
+    textareaRef.current?.focus();
+  }, [prefill]);
 
   // Every edit is kept: the text (and the names of attached files) in localStorage, the files in memory
   useEffect(() => {
@@ -176,7 +184,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     >
       {/* Attachment badges (keyed by stable id, removable by id) */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-2 max-w-4xl mx-auto">
+        <div className="flex flex-wrap items-center gap-2 mb-2 max-w-[760px] mx-auto">
           {attachments.map((a) => (
             <span key={a.id} className="inline-flex items-center gap-1.5 text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg border border-primary-200">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -198,16 +206,16 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
 
       {/* Validation error */}
       {reselect.length > 0 && (
-        <div role="status" className="max-w-4xl mx-auto mb-2 flex items-start justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <div role="status" className="max-w-[760px] mx-auto mb-2 flex items-start justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
           <span>{t("chat.draft.reselect").replace("{n}", String(reselect.length)).replace("{names}", reselect.join(", "))}</span>
           <button type="button" onClick={() => setReselect([])} className="shrink-0 underline">{t("home.dismiss")}</button>
         </div>
       )}
       {attachError && (
-        <div className="max-w-4xl mx-auto mb-2 text-xs text-red-500">{attachError}</div>
+        <div className="max-w-[760px] mx-auto mb-2 text-xs text-red-500">{attachError}</div>
       )}
 
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-[760px] mx-auto">
         <div className="flex items-center gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
           {/* Hidden file input (multiple) */}
           <input
@@ -245,7 +253,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
                 handleSend();
               }
             }}
-            placeholder="Ask about AWS resources… (paste/drag files, Cmd+Enter to send)"
+            placeholder={t("chat.input.placeholder")}
             disabled={disabled}
             rows={1}
             className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40 overflow-y-auto"

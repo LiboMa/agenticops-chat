@@ -7,6 +7,7 @@ import {
   useUpdateChatSession,
 } from "@/hooks/useChatSessions";
 import { useLocale } from "@/i18n/LocaleContext";
+import { sessionRowLabel } from "@/lib/chatMessageStatus";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { sortSessions, filterArchived } from "@/lib/sortSessions";
 import { groupSessions } from "@/lib/groupSessions";
@@ -235,6 +236,11 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                             >
                               {s.name}
                             </p>
+                            {/* S5: what the chat is about — its linked object, or an independent request */}
+                            {(() => { const l = sessionRowLabel(s); return (
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {l.text ? <span className="font-mono">{l.text}</span> : t(l.key!)}
+                              </p>); })()}
                           </div>
                         )}
 
