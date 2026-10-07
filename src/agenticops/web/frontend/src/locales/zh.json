@@ -1073,5 +1073,6 @@
   "chat.independent": "独立请求",
   "chat.viewIssue": "查看事件",
   "chat.viewChange": "查看变更",
-  "chat.input.placeholder": "询问你的资源……（可粘贴或拖入文件，Cmd/Ctrl+Enter 发送）"
+  "chat.input.placeholder": "询问你的资源……（可粘贴或拖入文件，Cmd/Ctrl+Enter 发送）",
+  "chat.attach.button": "添加附件"
 }

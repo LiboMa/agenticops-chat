@@ -266,6 +266,10 @@ def test_a_cancelled_stream_never_leaves_the_chat_busy(env, monkeypatch):
         pass
     assert _users(pk)[0].dispatch_state == "interrupted"
     assert sid not in webapp._streaming_sessions
+    s = get_session()
+    reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
+    s.close()
+    assert (reply.content, reply.dispatch_state) == ("par", "interrupted")  # the partial reply is kept, labelled
     monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: type("A", (), {
         "stream_async": lambda self, c: _one()})())
     assert _send(client, sid).status_code == 200

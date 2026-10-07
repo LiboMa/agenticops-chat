@@ -1073,5 +1073,6 @@
   "chat.independent": "Independent request",
   "chat.viewIssue": "View issue",
   "chat.viewChange": "View change",
-  "chat.input.placeholder": "Ask about your resources… (paste or drop files, Cmd/Ctrl+Enter to send)"
+  "chat.input.placeholder": "Ask about your resources… (paste or drop files, Cmd/Ctrl+Enter to send)",
+  "chat.attach.button": "Attach files"
 }

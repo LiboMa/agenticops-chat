@@ -4613,7 +4613,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             # the dispatch is still closed, as interrupted — a chat is never left busy (S5)
             if not closed:
                 try:
-                    chat_dispatch.set_state(user_message_id, "interrupted")
+                    chat_dispatch.close_interrupted(db_session_pk, user_message_id, accumulated,
+                                                    tool_calls or None, _chat_trace_id)
                 except Exception:
                     logger.warning("Could not close chat dispatch %s", user_message_id, exc_info=True)
             _streaming_sessions.discard(session_id)

@@ -235,7 +235,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
             className="self-center w-8 h-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-primary-600 hover:bg-muted disabled:opacity-50 transition-colors"
-            title="Attach file"
+            title={t("chat.attach.button")} aria-label={t("chat.attach.button")}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -262,7 +262,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             <button
               onClick={onCancel}
               className="self-center w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors flex-shrink-0"
-              title="Stop"
+              title={t("chat.stop")} aria-label={t("chat.stop")}
             >
               <span className="w-3 h-3 bg-white rounded-sm" />
             </button>
@@ -271,7 +271,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
               onClick={handleSend}
               disabled={(!input.trim() && attachments.length === 0) || disabled}
               className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
-              title="Send"
+              title={t("chat.send")} aria-label={t("chat.send")}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />

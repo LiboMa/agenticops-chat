@@ -58,6 +58,18 @@ def set_state(message_id: int, state: str) -> None:
             {"dispatch_state": state}, synchronize_session=False)
 
 
+def close_interrupted(session_pk: int, user_message_id: int, partial: str, tool_calls, trace_id: str | None) -> None:
+    """A stream that was cancelled (the client went away) keeps what it had written, labelled interrupted — never
+    stored as a complete reply, never dropped (S5)."""
+    from agenticops.models import ChatSession
+    with get_db_session() as db:
+        if db.get(ChatSession, session_pk) is not None:
+            db.add(ChatMessage(session_id=session_pk, role="assistant", content=partial or "", tool_calls=tool_calls,
+                               trace_id=trace_id, dispatch_state="interrupted"))
+        db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
+            {"dispatch_state": "interrupted"}, synchronize_session=False)
+
+
 def interrupt_stale() -> int:
     """Startup: every dispatch an earlier process left open was cut off — say so."""
     with get_db_session() as db:
