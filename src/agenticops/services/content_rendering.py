@@ -7,8 +7,11 @@ masked first and checked after (services/content_protect) — a result that lost
 `stale`. One lock per (report, version, language) and the source hash deduplicate the work.
 """
 import logging
+import re
 import threading
 from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
 
 from agenticops.config import settings
 from agenticops.models import ContentRendering, Report, get_db_session
@@ -17,6 +20,13 @@ from agenticops.services.content_protect import ProtectedValuesChanged, protect,
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("zh", "en")
+# A long report takes the model a while: botocore's 60 s default read timeout would cut it off and retry (billed
+# again) — the reporter agent uses 300 s for the same reason (S6 review)
+BEDROCK_READ_TIMEOUT_S = 300
+
+
+class TranslationTruncated(RuntimeError):
+    """The model stopped at its output limit: half a report is never shown — the rendering fails as too_long."""
 _NAMES = {"zh": "Simplified Chinese", "en": "English"}
 _locks: dict[tuple, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -51,12 +61,37 @@ def rendering_view(db, report: Report, version: int, language: str) -> dict:
 
 
 def _call_model(prompt: str, model_id: str, max_tokens: int) -> str:
-    """One Bedrock converse call at temperature 0 (the Signal Gate / RCA critic pattern)."""
+    """One Bedrock converse call at temperature 0 (the Signal Gate / RCA critic pattern), with a long read timeout
+    and at most one retry; a reply cut at the output limit raises TranslationTruncated."""
+    from botocore.config import Config
     from agenticops.config import get_bedrock_boto_session
-    client = get_bedrock_boto_session().client("bedrock-runtime")
+    client = get_bedrock_boto_session().client(
+        "bedrock-runtime", config=Config(read_timeout=BEDROCK_READ_TIMEOUT_S, retries={"max_attempts": 2}))
     resp = client.converse(modelId=model_id, messages=[{"role": "user", "content": [{"text": prompt}]}],
                            inferenceConfig={"maxTokens": max_tokens, "temperature": 0})
+    if resp.get("stopReason") == "max_tokens":
+        raise TranslationTruncated("the translation hit the model's output limit")
     return resp["output"]["message"]["content"][0]["text"]
+
+
+_FENCED_REPLY = re.compile(r"^\s*```[A-Za-z]*\n(.*)\n```\s*$", re.S)
+
+
+def _unwrap(reply: str, masked: str) -> str:
+    """Remove what a model adds around a translation: one outer code fence, and a lead-in line ("Here is the
+    translation:") that the source does not have. Placeholders are never touched."""
+    text = (reply or "").strip()
+    m = _FENCED_REPLY.match(text)
+    if m and not masked.lstrip().startswith("```"):
+        text = m.group(1).strip()
+    first, _, rest = text.partition("\n")
+    src_first = masked.lstrip().partition("\n")[0]
+    if rest and first.rstrip().endswith((":", "：")) and "⟦P" not in first and not src_first.rstrip().endswith((":", "：")):
+        text = rest.strip()
+        m = _FENCED_REPLY.match(text)
+        if m and not masked.lstrip().startswith("```"):
+            text = m.group(1).strip()
+    return text
 
 
 def _prompt(masked: str, language: str) -> str:
@@ -66,16 +101,23 @@ def _prompt(masked: str, language: str) -> str:
 
 
 def _save(report_id: int, version: int, language: str, source_hash: str, **fields) -> None:
-    with get_db_session() as db:
-        row = _row(db, report_id, version, language)
-        if row is None:
-            row = ContentRendering(entity_type="report", entity_id=report_id, source_version=version,
-                                   language=language, source_hash=source_hash, status="pending")
-            db.add(row)
-        row.source_hash = source_hash
-        row.generated_at = datetime.now(timezone.utc)
-        for k, v in fields.items():
-            setattr(row, k, v)
+    """Upsert one rendering row. Two requests inserting the same key at once: the loser updates (S6 review)."""
+    for attempt in (1, 2):
+        try:
+            with get_db_session() as db:
+                row = _row(db, report_id, version, language)
+                if row is None:
+                    row = ContentRendering(entity_type="report", entity_id=report_id, source_version=version,
+                                           language=language, source_hash=source_hash, status="pending")
+                    db.add(row)
+                row.source_hash = source_hash
+                row.generated_at = datetime.now(timezone.utc)
+                for k, v in fields.items():
+                    setattr(row, k, v)
+            return
+        except IntegrityError:
+            if attempt == 2:
+                raise
 
 
 def translate_now(report_id: int, version: int, language: str) -> None:
@@ -89,24 +131,32 @@ def translate_now(report_id: int, version: int, language: str) -> None:
             existing = _row(db, report_id, version, language)
             if existing is not None and existing.status == "ready" and existing.source_hash == source_hash:
                 return
-        _save(report_id, version, language, source_hash, status="pending", error_code=None, body_markdown=None)
-        masked, values = protect(source)
-        model_id = settings.report_translation_model_id or settings.bedrock_model_id_cheap
-        try:
-            translated = _call_model(_prompt(masked, language), model_id, min(16000, 2 * len(masked) // 3 + 1000))
-            body = restore(translated.strip(), values)
+        try:  # any failure below ends `failed` — a row is never left pending (S6 review)
+            _save(report_id, version, language, source_hash, status="pending", error_code=None, body_markdown=None)
+            masked, values = protect(source)
+            model_id = settings.report_translation_model_id or settings.bedrock_model_id_cheap
+            cap = max(4000, settings.bedrock_max_tokens)
+            translated = _call_model(_prompt(masked, language), model_id, min(cap, 2 * len(masked) // 3 + 1000))
+            body = restore(_unwrap(translated, masked), values)
             if protected_hash(body) != protected_hash(source):
                 raise ProtectedValuesChanged("restored values differ from the source")
+            _save(report_id, version, language, source_hash, status="ready", error_code=None, body_markdown=body,
+                  protected_value_hash=protected_hash(source))
         except ProtectedValuesChanged as e:
             logger.warning("Report %s %s translation refused: %s", report_id, language, e)
-            _save(report_id, version, language, source_hash, status="failed", error_code="protected_values_changed")
-            return
+            _fail(report_id, version, language, source_hash, "protected_values_changed")
+        except TranslationTruncated:
+            _fail(report_id, version, language, source_hash, "too_long")
         except Exception:
             logger.warning("Report %s %s translation failed", report_id, language, exc_info=True)
-            _save(report_id, version, language, source_hash, status="failed", error_code="model_failed")
-            return
-        _save(report_id, version, language, source_hash, status="ready", error_code=None, body_markdown=body,
-              protected_value_hash=protected_hash(source))
+            _fail(report_id, version, language, source_hash, "model_failed")
+
+
+def _fail(report_id: int, version: int, language: str, source_hash: str, code: str) -> None:
+    try:
+        _save(report_id, version, language, source_hash, status="failed", error_code=code, body_markdown=None)
+    except Exception:
+        logger.error("Could not record the failed translation of report %s %s", report_id, language, exc_info=True)
 
 
 def _start(report_id: int, version: int, language: str) -> None:

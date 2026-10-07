@@ -1126,5 +1126,6 @@
   "reports.error.model_failed": "The translation model did not answer.",
   "reports.error.interrupted": "The translation was interrupted by a restart.",
   "reports.error.publish_in_flight": "This publish is still being sent.",
-  "reports.error.idempotency_key_required": "The publish could not be sent; reopen the dialog and try again."
+  "reports.error.idempotency_key_required": "The publish could not be sent; reopen the dialog and try again.",
+  "reports.error.too_long": "This report is too long to translate in one pass."
 }

@@ -198,3 +198,57 @@ def test_list_and_get_carry_language_status(env):
     assert rows[a] == {"en": "ready", "zh": "ready"}
     assert rows[b] == {"zh": "ready", "en": "missing"}
     assert client.get(f"/api/reports/{b}").json()["language_status"] == {"zh": "ready", "en": "missing"}
+
+
+# ── S6 review: the worker never leaves a row pending; model wrapping is removed; long reports are bounded ──
+
+def test_a_reply_wrapped_in_a_fence_or_a_preamble_is_unwrapped(env):
+    client, calls, cr = env
+    rid = _report()
+    calls["reply"] = lambda masked: "Here is the translation:\n\n```markdown\n" + masked.replace("Daily report", "日报") + "\n```"
+    cr.translate_now(rid, 1, "zh")
+    body = _get(client, rid, "zh").json()
+    assert body["status"] == "ready"
+    assert not body["body_markdown"].startswith("Here is") and not body["body_markdown"].startswith("```markdown")
+
+
+def test_a_database_error_in_the_worker_never_leaves_it_pending(env, monkeypatch):
+    client, calls, cr = env
+    rid = _report()
+    real = cr._save
+    def flaky(*a, **k):
+        if k.get("status") == "ready":
+            raise RuntimeError("database is locked")
+        return real(*a, **k)
+    monkeypatch.setattr(cr, "_save", flaky)
+    cr.translate_now(rid, 1, "zh")
+    monkeypatch.setattr(cr, "_save", real)
+    assert _get(client, rid, "zh").json()["status"] == "failed"
+
+
+def test_a_concurrent_insert_of_the_same_key_updates_instead_of_failing(env):
+    _, _, cr = env
+    rid = _report()
+    s = get_session()
+    s.add(ContentRendering(entity_type="report", entity_id=rid, source_version=1, language="zh", source_hash="h",
+                           status="pending"))
+    s.commit(); s.close()
+    cr._save(rid, 1, "zh", "h", status="failed", error_code="model_failed")
+    s = get_session()
+    assert s.query(ContentRendering).count() == 1
+    s.close()
+
+
+def test_a_truncated_reply_fails_instead_of_showing_half(env):
+    client, calls, cr = env
+    rid = _report()
+    def _cut(masked):
+        raise cr.TranslationTruncated("max_tokens")
+    calls["reply"] = _cut
+    cr.translate_now(rid, 1, "zh")
+    assert _get(client, rid, "zh").json()["error_code"] == "too_long"
+
+
+def test_the_model_client_has_a_long_read_timeout():
+    from agenticops.services import content_rendering as cr
+    assert cr.BEDROCK_READ_TIMEOUT_S >= 300

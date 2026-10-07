@@ -1126,5 +1126,6 @@
   "reports.error.model_failed": "翻译模型没有响应。",
   "reports.error.interrupted": "翻译被服务重启打断。",
   "reports.error.publish_in_flight": "这次发布还在发送中。",
-  "reports.error.idempotency_key_required": "发布未能发送；请重新打开对话框再试。"
+  "reports.error.idempotency_key_required": "发布未能发送；请重新打开对话框再试。",
+  "reports.error.too_long": "这份报告太长，无法一次翻译完。"
 }
