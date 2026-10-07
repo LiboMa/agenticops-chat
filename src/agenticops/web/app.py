@@ -3462,6 +3462,36 @@ def api_report_rendering(report_id: int, version: int = Query(..., ge=1),
         return rendering_view(db, report, version, language)
 
 
+@app.get("/api/reports/{report_id}/export")
+def api_export_report(report_id: int, version: int = Query(..., ge=1),
+                      language: Literal["zh", "en", "zh-en"] = Query(...),
+                      format: Literal["html", "pdf", "docx"] = Query("html"), actor: Actor = Depends(current_actor)):
+    """Download one report version in zh, en or both (MVP-2.7.0 S6). Every language asked for must be ready —
+    never replaced by the other; never publishes."""
+    from fastapi.responses import Response as _Response
+    from agenticops.services import report_access, report_export
+    from agenticops.services.content_rendering import rendering_view
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+        if format not in report_export.available_formats():
+            raise HTTPException(422, detail={"detail": f"{format} export is not available on this server",
+                                             "code": "format_unavailable"})
+        papers = []
+        for lang in (["zh", "en"] if language == "zh-en" else [language]):
+            view = rendering_view(db, report, version, lang)
+            if view["status"] != "ready":
+                raise HTTPException(409, detail={"detail": f"The {lang} rendering is {view['status']}",
+                                                 "code": "rendering_not_ready"})
+            papers.append((lang, view["body_markdown"]))
+        body, content_type, ext = report_export.build_export(report, papers, format)
+        name = report_export.filename(report, language, ext)
+        etag = f'"{report.content_hash or ""}-{language}-{format}"'
+    return _Response(content=body, media_type=content_type,
+                     headers={"Content-Disposition": f'attachment; filename="{name}"', "ETag": etag})
+
+
 @app.post("/api/content/report/{report_id}/translations", status_code=202)
 def api_report_translations(report_id: int, payload: TranslationRequest, actor: Actor = Depends(current_actor)):
     """Prepare zh / en renderings (MVP-2.7.0 S6): ready ones are returned, missing / failed / stale ones queued."""
