@@ -3700,9 +3700,14 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest, http
                     raise HTTPException(409, detail={"detail": f"The {lang} rendering is {view['status']}",
                                                      "code": "rendering_not_ready"})
                 bodies.append(view["body_markdown"])
-            return {"title": f"{rep.title} (v{request.version} · {request.language})", "summary": rep.summary,
-                    "content": "\n\n---\n\n".join(bodies), "report_type": rep.report_type,
-                    "meta": dict(rep.report_metadata or {})}, None
+            # the summary is in the pinned language (the stored one is the source's); the object key carries the version
+            # and language, so a later publish in another language never overwrites this one's files (S6 review)
+            joined = "\n\n---\n\n".join(bodies)
+            summary = rep.summary if request.language == (rep.source_language or "en") else joined[:500]
+            meta = dict(rep.report_metadata or {})
+            meta["publish_variant"] = f"_v{request.version}_{request.language}"
+            return {"title": f"{rep.title} (v{request.version} · {request.language})", "summary": summary,
+                    "content": joined, "report_type": rep.report_type, "meta": meta}, None
     if (report_id, idem_key) in _publishing_keys:
         raise HTTPException(409, detail={"detail": "This publish is still being sent", "code": "publish_in_flight"})
     pinned, prior = await asyncio.to_thread(_pinned)

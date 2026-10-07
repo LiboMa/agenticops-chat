@@ -122,3 +122,27 @@ def test_a_concurrent_repeat_of_a_key_in_flight_is_refused(env):
         assert r.status_code == 409 and r.json()["detail"]["code"] == "publish_in_flight" and sent == []
     finally:
         webapp._publishing_keys.discard((rid, KEY))
+
+
+# ── S6 review I2: a later publish in another language never overwrites an earlier one's files ──
+
+def test_publish_pins_the_object_key_variant_and_the_summary_language(env):
+    client, sent = env
+    rid = _report(zh_ready=True)
+    _publish(client, rid, body={"channel_name": "ops-reports", "formats": ["html"], "version": 1, "language": "zh"})
+    assert sent[0]["report_metadata"]["publish_variant"] == "_v1_zh"
+    assert "日报" in sent[0]["summary"] and "all fine" not in sent[0]["summary"]
+
+
+def test_the_sns_object_key_carries_the_variant(monkeypatch):
+    import asyncio
+    import agenticops.notify.notifier as notifier
+    import agenticops.notify.report_formatter as rf
+    keys = []
+    n = notifier.SNSReportNotifier({"topic_arn": "arn:aws:sns:us-east-1:1:t", "s3_bucket": "b", "region": "us-east-1"})
+    monkeypatch.setattr(rf, "format_report", lambda **kw: [rf.FormattedReport("html", b"<html></html>", "text/html", ".html")])
+    monkeypatch.setattr(n, "_upload_to_s3", lambda key, content, ct: keys.append(key) or "https://x")
+    monkeypatch.setattr(n, "_publish_report_message", lambda *a, **k: "m1")
+    asyncio.run(n.send_report(report_id=5, title="t", summary="s", content_markdown="x", report_type="daily",
+                              formats=["html"], report_metadata={"publish_variant": "_v1_zh"}))
+    assert keys and keys[0].endswith("/5_v1_zh.html")
