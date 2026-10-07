@@ -1,10 +1,14 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  acceptAttr,
+  FALLBACK_POLICY,
+  attachmentErrorText,
+  attachmentRules,
   filesFromPaste,
   filesFromDrop,
   validateFiles,
 } from "@/lib/attachments";
+import { useBootstrap } from "@/hooks/useBootstrap";
+import { useLocale } from "@/i18n/LocaleContext";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
@@ -30,6 +34,10 @@ function nextAttachId(): string {
 }
 
 export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: Props) {
+  const { t } = useLocale();
+  // S5: what the server accepts (bootstrap upload_policy), so the composer and the server agree
+  const policy = useBootstrap().data?.upload_policy ?? FALLBACK_POLICY;
+  const rules = useMemo(() => attachmentRules(policy), [policy]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -42,12 +50,12 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     if (incoming.length === 0) return;
     setAttachments((prev) => {
       const existing = prev.map((a) => a.file);
-      const { accepted, errors } = validateFiles(existing, incoming);
-      setAttachError(errors.length > 0 ? errors.join("; ") : null);
+      const { accepted, errors } = validateFiles(existing, incoming, rules);
+      setAttachError(errors.length > 0 ? errors.map((e) => attachmentErrorText(e, t)).join("; ") : null);
       if (accepted.length === 0) return prev;
       return [...prev, ...accepted.map((f) => ({ id: nextAttachId(), file: f }))];
     });
-  }, []);
+  }, [rules, t]);
 
   // Auto-grow the textarea up to its max height (open-webui-style), then scroll.
   useEffect(() => {
@@ -169,7 +177,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
             type="file"
             multiple
             className="hidden"
-            accept={acceptAttr}
+            accept={rules.accept}
             onChange={handleFileSelect}
           />
 

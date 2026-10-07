@@ -1052,5 +1052,8 @@
   "chat.error.session_busy": "This chat still has a reply running — wait for it or stop it.",
   "chat.error.duplicate_in_flight": "This message is already being answered.",
   "chat.error.network": "The connection dropped — the reply may still be running. The history has been reloaded.",
-  "chat.error.http": "The message could not be sent."
+  "chat.error.http": "The message could not be sent.",
+  "chat.attach.type": "{name}: this file type cannot be attached",
+  "chat.attach.size": "{name}: too large (max {limit})",
+  "chat.attach.count": "Up to {limit} attachments per message"
 }

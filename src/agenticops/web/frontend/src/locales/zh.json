@@ -1052,5 +1052,8 @@
   "chat.error.session_busy": "这个对话还有一条回复在进行，请等待或停止它。",
   "chat.error.duplicate_in_flight": "这条消息已经在回复中。",
   "chat.error.network": "连接中断，回复可能仍在进行。已重新读取历史。",
-  "chat.error.http": "消息未能发送。"
+  "chat.error.http": "消息未能发送。",
+  "chat.attach.type": "{name}：不支持这种文件类型",
+  "chat.attach.size": "{name}：文件过大（上限 {limit}）",
+  "chat.attach.count": "每条消息最多 {limit} 个附件"
 }
