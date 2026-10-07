@@ -14,6 +14,7 @@ export interface IssueFacts {
   metricName: string | null;
   expected: unknown;
   actual: unknown;
+  deviation: number | null;
 }
 
 /** The facts the legacy /issues shape lifted out of metric_data, null where the issue carries none. */
@@ -21,7 +22,8 @@ export function issueFacts(issue: Pick<HealthIssue, "metric_data">): IssueFacts 
   const md = issue.metric_data ?? {};
   const str = (k: string) => (typeof md[k] === "string" && md[k] ? (md[k] as string) : null);
   return { resourceType: str("resource_type"), region: str("region"), metricName: str("metric_name"),
-           expected: md.expected_value ?? null, actual: md.actual_value ?? null };
+           expected: md.expected_value ?? null, actual: md.actual_value ?? null,
+           deviation: typeof md.deviation_percent === "number" ? md.deviation_percent : null };
 }
 
 export interface IssueStatuses {

@@ -5,7 +5,7 @@ import { useResource, useResourceIssues } from "@/hooks/useResourceDetail";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
 import { GalaxyIssueDialog } from "@/components/galaxy/GalaxyIssueDialog";
 import { GalaxyRawDataPanel } from "@/components/galaxy/GalaxyRawDataPanel";
-import type { Anomaly, GalaxyGraphNode, GalaxyHealth } from "@/api/types";
+import type { GalaxyGraphNode, GalaxyHealth, HealthIssue } from "@/api/types";
 import { normalizeHealth } from "@/lib/galaxyHealth";
 
 const HEALTH_STYLE: Record<GalaxyHealth, { bg: string; fg: string; sym: string }> = {
@@ -31,7 +31,7 @@ export function GalaxyNodePanel({ node, onClose }: { node: GalaxyGraphNode; onCl
 
   const resource = useResource(pk);
   const issues = useResourceIssues(pk, isResource);
-  const [openIssue, setOpenIssue] = useState<Anomaly | null>(null);
+  const [openIssue, setOpenIssue] = useState<HealthIssue | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
   // Panel ESC closes the panel — but ONLY when no second-layer surface (issue

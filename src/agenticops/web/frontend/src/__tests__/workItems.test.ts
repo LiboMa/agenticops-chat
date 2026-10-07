@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
-import type { Anomaly, ChangeRequest, FixPlan } from "@/api/types";
+import type { ChangeRequest, FixPlan, HealthIssue } from "@/api/types";
 import { changeRow, fixPlanRow, issueRow } from "@/lib/workItems";
 
-const anomaly = (x: Partial<Anomaly>) => ({ id: 1, title: "EKS-agenticops-chaos-lab-RunningPods-Low", status: "root_cause_identified",
-  severity: "high", resource_id: "unknown", resource_type: "unknown", account_name: "chaos-lab", detected_at: "2026-10-03T03:39:04",
-  ...x }) as Anomaly;
+// A HealthIssue (MVP-2.7.0 S4): the resource type and region live in metric_data, as GET /api/health-issues sends them
+const anomaly = ({ resource_type, region, ...x }: Partial<HealthIssue> & { resource_type?: string; region?: string }) =>
+  ({ id: 1, title: "EKS-agenticops-chaos-lab-RunningPods-Low", status: "root_cause_identified", severity: "high",
+     resource_id: "unknown", account_name: "chaos-lab", detected_at: "2026-10-03T03:39:04", occurrence_count: 1,
+     metric_data: { ...(resource_type ? { resource_type } : {}), ...(region ? { region } : {}) },
+     ...x }) as HealthIssue;
 
 describe("issueRow (list mode, R2)", () => {
   it("I#1: locale status, the same wait key the page would say in list mode, no raw enum", () => {
@@ -61,6 +64,15 @@ describe("issueRow — row cues (fix round 1)", () => {
   });
   it("fix_approved in list mode waits for the executor, never 'you' (not queued)", () => {
     expect(issueRow(anomaly({ status: "fix_approved" })).waitKey).toBe("workitem.wait.executor");
+  });
+  it("the row link keeps the queue's query, so selecting a case keeps the filters (S4)", () => {
+    expect(issueRow(anomaly({}), "?status=active&q=cpu").href).toBe("/app/issues/1?status=active&q=cpu");
+    expect(issueRow(anomaly({}), "").href).toBe("/app/issues/1");
+  });
+  it("the subtitle comes from metric_data, which the HealthIssue shape carries (S4)", () => {
+    expect(issueRow(anomaly({ resource_type: "EKS", resource_id: "i-0ab", region: "ap-southeast-1" })).subtitle)
+      .toBe("EKS · i-0ab · ap-southeast-1");
+    expect(issueRow(anomaly({ occurrence_count: 3 })).recurrence).toBe(3);
   });
 });
 

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { Resource, Anomaly, FixPlanWithExecutions, RelatedResources } from "@/api/types";
+import type { Resource, HealthIssue, FixPlanWithExecutions, RelatedResources } from "@/api/types";
 
 export function useResource(id: number) {
   return useQuery({
@@ -13,7 +13,7 @@ export function useResource(id: number) {
 export function useResourceIssues(id: number, enabled: boolean) {
   return useQuery({
     queryKey: ["resourceIssues", id],
-    queryFn: () => apiFetch<Anomaly[]>(`/resources/${id}/issues`),
+    queryFn: () => apiFetch<HealthIssue[]>(`/resources/${id}/issues`),
     enabled: id > 0 && enabled,
     staleTime: 30_000,
   });

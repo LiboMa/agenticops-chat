@@ -21,6 +21,9 @@ export interface Resource {
   updated_at: string;
   scanned_at?: string | null;
   absent_since?: string | null; // set when the latest complete scan no longer saw it
+  // The list only (MVP-2.7.0 S4): open anchored issues and their worst health; no open issue = unknown, never healthy
+  open_issues?: number;
+  health?: "unknown" | "notice" | "warning" | "critical" | null;
 }
 
 export interface PaginatedResources {
@@ -67,38 +70,13 @@ export interface Signal {
   trace_id: string | null;
 }
 
-export interface Anomaly {
-  id: number;
-  resource_id: string;
-  provider?: string;
-  resource_type: string;
-  region: string;
-  anomaly_type: string;
-  severity: "critical" | "high" | "medium" | "low";
-  title: string;
-  description: string;
-  metric_name: string | null;
-  expected_value: number | null;
-  actual_value: number | null;
-  deviation_percent: number | null;
-  status: IssueStatus;
-  detected_at: string;
-  resolved_at: string | null;
-  trace_id: string | null;
-  occurrence_count?: number;
-  merged_alerts?: MergedAlert[];
-  account_id: number | null;
-  account_name: string | null;
-  issue_type?: string;
-}
-
 /** GET /api/health-issues/{id} (HealthIssueResponse) — IssueDetail's source; the legacy /issues shape drops
  *  trace_id and merged_alerts. */
 export interface HealthIssue {
   id: number;
   resource_id: string;
   provider: string | null;
-  severity: Anomaly["severity"];
+  severity: "critical" | "high" | "medium" | "low";
   source: string;
   title: string;
   description: string;
@@ -120,6 +98,7 @@ export interface HealthIssue {
   anchor_status: AnchorStatus | null;
   anchor_candidates: { rule?: string | null; candidates?: { ref: number; account_id: number; reason: string }[] } | null;
   observed_at: string | null;
+  available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
 
 /** RCA root-cause location (MVP-2.6.1): ranked candidates, each cited by evidence ids, and the causal path. */

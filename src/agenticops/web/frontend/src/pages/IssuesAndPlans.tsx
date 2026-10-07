@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useAnomalies } from "@/hooks/useAnomalies";
+import { useHealthIssues } from "@/hooks/useHealthIssues";
 import { useResources } from "@/hooks/useResources";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
@@ -15,8 +15,9 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES, isSecurityIssue, resolveIssueScope, type IssueScope } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
+import { issueFacts } from "@/lib/issueDetail";
 import { legacyIssuesViewRedirect } from "@/lib/workitemRoutes";
-import type { Anomaly, Resource } from "@/api/types";
+import type { HealthIssue, Resource } from "@/api/types";
 
 /* ── Issues helpers ─────────────────────────────────────────────── */
 
@@ -44,19 +45,19 @@ function getPhase(status: string): Phase {
   return "all";
 }
 
-function matchesSearch(issue: Anomaly, query: string): boolean {
+function matchesSearch(issue: HealthIssue, query: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
   return (
     issue.title.toLowerCase().includes(q) ||
     issue.resource_id.toLowerCase().includes(q) ||
-    issue.region.toLowerCase().includes(q)
+    (issueFacts(issue).region ?? "").toLowerCase().includes(q)
   );
 }
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
-function sortIssues(issues: Anomaly[], key: SortKey): Anomaly[] {
+function sortIssues(issues: HealthIssue[], key: SortKey): HealthIssue[] {
   const sorted = [...issues];
   switch (key) {
     case "newest":
@@ -106,7 +107,7 @@ function IssuesView({ t }: { t: (key: string) => string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = resolveIssueScope(searchParams.get("scope"));
   const setScope = (s: IssueScope) => setSearchParams(s === "ops" ? {} : { scope: s });
-  const { data, isLoading, error, refetch } = useAnomalies({ scope, account_id: account ? Number(account) : undefined });
+  const { data, isLoading, error, refetch } = useHealthIssues({ scope, account_id: account ? Number(account) : undefined });
   const accounts = useAccounts();
 
   const allIssues = data ?? [];
@@ -223,11 +224,11 @@ function IssuesView({ t }: { t: (key: string) => string }) {
         <Spinner />
       ) : (
         <WorkItemTable
-          rows={filtered.map(issueRow)}
+          rows={filtered.map((a) => issueRow(a))}
           levelHeader={t("facts.severity")}
-          renderLevel={(r) => <SeverityBadge severity={r.level as Anomaly["severity"]} />}
+          renderLevel={(r) => <SeverityBadge severity={r.level as HealthIssue["severity"]} />}
           timeHeader={t("issues.detected")}
-          rowExtra={(r) => isSecurityIssue(byKey.get(r.key)?.anomaly_type) && (
+          rowExtra={(r) => isSecurityIssue(byKey.get(r.key)?.source) && (
             <Link to="/app/security" onClick={(e) => e.stopPropagation()} className="text-primary hover:underline">
               {t("issues.openSecurity")} →
             </Link>

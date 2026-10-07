@@ -1,5 +1,5 @@
-import type { Anomaly, ChangeRequest, FixPlan } from "@/api/types";
-import { isBlank } from "@/lib/issueDetail";
+import type { ChangeRequest, FixPlan, HealthIssue } from "@/api/types";
+import { isBlank, issueFacts } from "@/lib/issueDetail";
 import { issuePhases, type PhaseState, type PhaseView } from "@/lib/issuePhases";
 import { PLAN_TERMINAL_STATUSES, planRef } from "@/lib/plans";
 import { changePhases } from "@/lib/changePhases";
@@ -23,12 +23,14 @@ export function shortId(id: string): string {
   return rid.length > 28 ? "…" + rid.slice(-28) : rid;
 }
 
-/** An issue list row. The list has no RCA or runs, so the wait comes from list-mode issuePhases (R2). */
-export function issueRow(a: Anomaly): WorkItemRow {
+/** An issue list row. The list has no RCA or runs, so the wait comes from list-mode issuePhases (R2). `search` is
+ *  the queue's query string, kept on the row link so selecting a case keeps the filters (MVP-2.7.0 S4). */
+export function issueRow(a: HealthIssue, search = ""): WorkItemRow {
   const p = issuePhases({ status: a.status });
-  const [type, id, region] = [a.resource_type, a.resource_id, a.region].map((x) => (isBlank(x) ? null : x));
+  const facts = issueFacts(a);
+  const [type, id, region] = [facts.resourceType, a.resource_id, facts.region].map((x) => (isBlank(x) ? null : x));
   const closed = a.status === "resolved" || a.status === "dismissed";
-  return { key: `I${a.id}`, ref: `I#${a.id}`, href: `/app/issues/${a.id}`, title: a.title,
+  return { key: `I${a.id}`, ref: `I#${a.id}`, href: `/app/issues/${a.id}${search}`, title: a.title,
            subtitle: [type, id && shortId(id), region].filter(Boolean).join(" · ") || null,
            subtitleFull: [type, id, region].filter(Boolean).join(" · ") || null,
            statusKey: `issues.status.${a.status}`, dots: p.phases, waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : null,

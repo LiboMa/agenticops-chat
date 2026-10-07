@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
-import type { Anomaly } from "@/api/types";
+import type { HealthIssue } from "@/api/types";
+import { issueFacts } from "@/lib/issueDetail";
 
 const SEV_COLOR: Record<string, string> = {
   critical: "#d03b3b", high: "#fab219", medium: "#fab219", low: "#7d8590",
@@ -16,8 +17,10 @@ const SEV_COLOR: Record<string, string> = {
  * the next issue. ESC closes ONLY this dialog (parent panel suppresses its own
  * ESC while this is mounted).
  */
-export function GalaxyIssueDialog({ issue, onClose }: { issue: Anomaly; onClose: () => void }) {
+export function GalaxyIssueDialog({ issue, onClose }: { issue: HealthIssue; onClose: () => void }) {
   const { t } = useLocale();
+  // A HealthIssue keeps its metric and resource facts in metric_data (they read empty when taken off the top level)
+  const f = issueFacts(issue);
   const navigate = useNavigate();
   const rca = useAnomalyRca(issue.id);
 
@@ -92,18 +95,18 @@ export function GalaxyIssueDialog({ issue, onClose }: { issue: Anomaly; onClose:
           )}
 
           {/* Metric callout — the numbers that triggered it, made prominent */}
-          {issue.metric_name && issue.actual_value != null && (
+          {f.metricName && f.actual != null && (
             <section className="flex items-baseline gap-4 rounded-lg bg-muted/40 px-3.5 py-2.5">
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{issue.metric_name}</div>
-                <div className="text-lg font-semibold text-foreground tabular-nums">{issue.actual_value}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{f.metricName}</div>
+                <div className="text-lg font-semibold text-foreground tabular-nums">{String(f.actual)}</div>
               </div>
-              {issue.expected_value != null && (
+              {f.expected != null && (
                 <div className="text-xs text-muted-foreground">
-                  {t("galaxy.expected")} <span className="tabular-nums">{issue.expected_value}</span>
-                  {issue.deviation_percent != null && (
+                  {t("galaxy.expected")} <span className="tabular-nums">{String(f.expected)}</span>
+                  {f.deviation != null && (
                     <span className="ml-1 text-amber-600 dark:text-amber-400">
-                      ({issue.deviation_percent > 0 ? "+" : ""}{issue.deviation_percent}%)
+                      ({f.deviation > 0 ? "+" : ""}{f.deviation}%)
                     </span>
                   )}
                 </div>
@@ -116,8 +119,8 @@ export function GalaxyIssueDialog({ issue, onClose }: { issue: Anomaly; onClose:
             <SectionTitle>{t("galaxy.details")}</SectionTitle>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
               <Field k={t("galaxy.resourceId")} v={issue.resource_id} />
-              <Field k={t("galaxy.type")} v={issue.resource_type} />
-              <Field k={t("galaxy.region")} v={issue.region} />
+              <Field k={t("galaxy.type")} v={f.resourceType ?? "—"} />
+              <Field k={t("galaxy.region")} v={f.region ?? "—"} />
               <Field k={t("issues.detected")} v={new Date(issue.detected_at).toLocaleString()} />
             </dl>
           </section>

@@ -3,7 +3,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueFeedback } from "@/hooks/useAgentMemory";
 import { useLocale } from "@/i18n/LocaleContext";
-import type { Anomaly, IssueStatus } from "@/api/types";
+import type { HealthIssue, IssueStatus } from "@/api/types";
 
 /** Statuses where the resolve / confirm / dismiss quick actions are offered; resolved and dismissed offer reopen. */
 const ACTIONABLE = new Set<string>([
@@ -18,7 +18,7 @@ const ACTIONABLE = new Set<string>([
 ]);
 
 /** The issue list's row quick actions (R3), icon buttons in WorkItemTable's rowActions column. */
-export function IssueQuickActions({ issue }: { issue: Anomaly }) {
+export function IssueQuickActions({ issue }: { issue: HealthIssue }) {
   const { t } = useLocale();
   const isClosed = issue.status === "resolved" || issue.status === "dismissed";
   const canAct = ACTIONABLE.has(issue.status);

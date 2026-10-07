@@ -31,9 +31,12 @@ describe("issueFacts", () => {
   it("lifts the resource and metric facts out of metric_data, null where the issue has none", () => {
     expect(issueFacts(issue({ metric_data: { resource_type: "EC2", region: "us-east-1", metric_name: "CPU",
                                              expected_value: 70, actual_value: 97 } })))
-      .toEqual({ resourceType: "EC2", region: "us-east-1", metricName: "CPU", expected: 70, actual: 97 });
+      .toEqual({ resourceType: "EC2", region: "us-east-1", metricName: "CPU", expected: 70, actual: 97,
+                 deviation: null });
     expect(issueFacts(issue())).toEqual({ resourceType: null, region: null, metricName: null, expected: null,
-                                          actual: null });
+                                          actual: null, deviation: null });
+    expect(issueFacts(issue({ metric_data: { deviation_percent: 42 } })).deviation).toBe(42);
+    expect(issueFacts(issue({ metric_data: { deviation_percent: "42" } })).deviation).toBeNull();
   });
 });
 

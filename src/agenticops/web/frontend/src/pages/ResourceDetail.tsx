@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatShortDate } from "@/lib/formatDate";
 import { LocalGraph } from "@/components/graph/LocalGraph";
-import type { Anomaly, FixPlanWithExecutions, RelatedResourceItem } from "@/api/types";
+import type { FixPlanWithExecutions, HealthIssue, RelatedResourceItem } from "@/api/types";
 
 const INFRA_TYPES = new Set([
   "VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "TGW",
@@ -114,7 +114,7 @@ function OverviewTab({ metadata }: { metadata: Record<string, unknown> }) {
   );
 }
 
-function IssuesTab({ data, isLoading }: { data?: Anomaly[]; isLoading: boolean }) {
+function IssuesTab({ data, isLoading }: { data?: HealthIssue[]; isLoading: boolean }) {
   if (isLoading) return <Spinner />;
   if (!data?.length) return <p className="text-sm text-muted-foreground">No issues found.</p>;
   return (
