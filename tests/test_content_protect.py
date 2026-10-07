@@ -54,3 +54,31 @@ def test_text_without_values():
 def test_a_placeholder_like_string_in_the_source_is_itself_protected():
     masked, values = protect("literal ⟦P0⟧ here")
     assert "⟦P0⟧" in values and restore(masked, values) == "literal ⟦P0⟧ here"
+
+
+# ── S6 review: Chinese text sits right next to values (no spaces); \b treats CJK as word characters ──
+
+@pytest.mark.parametrize("text,value", [
+    ("问题I#12已修复", "I#12"),
+    ("实例i-0abc123重启后正常", "i-0abc123"),
+    ("证据E-301显示", "E-301"),
+    ("检查pc-2通过", "pc-2"),
+    ("地址10.0.0.12不可达", "10.0.0.12"),
+])
+def test_a_value_next_to_chinese_is_protected_whole(text, value):
+    masked, values = protect(text)
+    assert value in values and value not in masked
+
+
+def test_an_en_to_zh_round_trip_without_spaces_passes():
+    src = "Issue I#12 on i-0abc123 is fixed (E-301)."
+    masked, values = protect(src)
+    translated = masked.replace("Issue ", "问题").replace(" on ", "上的").replace(" is fixed ", "已修复").replace(".", "。")
+    body = restore(translated, values)
+    assert protected_hash(body) == protected_hash(src)
+
+
+def test_an_arn_or_url_ends_before_chinese_text():
+    masked, values = protect("见arn:aws:iam::123456789012:role/ops，以及https://example.com/x。然后")
+    assert "arn:aws:iam::123456789012:role/ops" in values and "https://example.com/x" in values
+    assert "以及" in masked and "然后" in masked

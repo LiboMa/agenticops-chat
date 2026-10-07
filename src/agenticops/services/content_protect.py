@@ -6,18 +6,21 @@ Pure, so tests pin it."""
 import hashlib
 import re
 
+# ASCII word boundaries: Python's \b treats CJK as word characters, so a value written right next to Chinese text
+# ("问题I#12已修复") would not match whole (S6 review). URLs and ARNs end at the first non-ASCII character.
+_L, _R = r"(?<![A-Za-z0-9_])", r"(?![A-Za-z0-9_])"
 _PATTERNS = [
     r"`{3}.*?`{3}",                                         # fenced code blocks (commands, output)
     r"`[^`\n]+`",                                           # inline code
     r"⟦P\d+⟧",                                              # a placeholder-looking string in the source itself
-    r"https?://[^\s)>\]]+",                                 # URLs
-    r"\barn:[A-Za-z0-9-]+:[^\s,;)]+",                       # ARNs
-    r"\b[IRCP]#\d+\b",                                      # object refs: issue, resource, change, plan
-    r"\bE-?\d+\b",                                          # evidence refs
-    r"\bpc-\d+\b",                                          # post-check ids
-    r"\b(?:i|vol|sg|subnet|vpc|eni|ami|rtb|igw|nat|db|cluster|snap|lt|eipalloc|acl)-[0-9a-z][0-9a-z-]*\b",
-    r"\b\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?\b",            # IPv4 (and CIDR)
-    r"\b[a-z]{2}-[a-z]+-\d\b",                              # AWS regions (us-east-1)
+    r"https?://[!-~]+?(?=[\s)>\],;。，；：）]|[^\x00-\x7f]|$)",  # URLs (ASCII only, trailing punctuation left out)
+    _L + r"arn:[A-Za-z0-9-]+:[!-~]+?(?=[\s,;)]|[^\x00-\x7f]|$)",   # ARNs
+    _L + r"[IRCP]#\d+" + _R,                                 # object refs: issue, resource, change, plan
+    _L + r"E-?\d+" + _R,                                     # evidence refs
+    _L + r"pc-\d+" + _R,                                     # post-check ids
+    _L + r"(?:i|vol|sg|subnet|vpc|eni|ami|rtb|igw|nat|db|cluster|snap|lt|eipalloc|acl)-[0-9a-z][0-9a-z-]*" + _R,
+    _L + r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?" + _R,        # IPv4 (and CIDR)
+    _L + r"[a-z]{2}-[a-z]+-\d" + _R,                         # AWS regions (us-east-1)
     r"\d+(?:[.,:]\d+)*%?",                                  # every remaining number
 ]
 _RX = re.compile("|".join(f"(?:{p})" for p in _PATTERNS), re.S)
