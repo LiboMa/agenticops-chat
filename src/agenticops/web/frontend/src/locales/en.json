@@ -1006,5 +1006,13 @@
   "scope.notApplied": "This page is not filtered by account",
   "scope.locked": "A detail page shows its own record's account",
   "scope.adopted": "Account scope set from the link: {name}",
-  "attention.scopedTo": "Filtered to {name}"
+  "attention.scopedTo": "Filtered to {name}",
+  "cases.queue": "Issue queue",
+  "cases.searchPlaceholder": "Title, resource or I#12",
+  "cases.allSeverities": "All severities",
+  "cases.sort": "Sort",
+  "cases.capped": "Showing the first {n} — narrow the filters to see the rest",
+  "cases.empty": "No matching records",
+  "cases.clear": "Clear filters",
+  "cases.selectPrompt": "Select a record from the list"
 }

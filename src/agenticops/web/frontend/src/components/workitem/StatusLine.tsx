@@ -23,7 +23,8 @@ export interface StatusLineProps {
   error?: string | null;             // a 409/403 message, shown in an ErrorBanner under the line
   onDismissError?: () => void;
   errorActionLabel?: string;         // the banner's button; default "Close" (a failed fetch passes "Retry")
-  backTo: string; backLabel: string;
+  // the way back: a link, or a callback (history back); neither = no back control (the Cases split view)
+  backTo?: string; backLabel?: string; onBack?: () => void;
 }
 
 const DOT: Record<StatusLineProps["tone"], string> = {
@@ -33,7 +34,7 @@ const DOT: Record<StatusLineProps["tone"], string> = {
 /** The work item's one status indicator: where it is, why, who moves it next, and the one primary button. */
 export function StatusLine({
   refLabel, title, badges, statusLabel, tone, reason, waiting, primary, menu, error, onDismissError, errorActionLabel,
-  backTo, backLabel,
+  backTo, backLabel, onBack,
 }: StatusLineProps) {
   const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
@@ -78,9 +79,15 @@ export function StatusLine({
     <div className="space-y-2">
       <Card>
         <CardBody className="space-y-3">
-          <Link to={backTo} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            ← {backLabel}
-          </Link>
+          {onBack ? (
+            <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              ← {backLabel}
+            </button>
+          ) : backTo ? (
+            <Link to={backTo} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              ← {backLabel}
+            </Link>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs px-2 py-0.5 rounded bg-secondary text-muted-foreground">{refLabel}</span>
             {badges}

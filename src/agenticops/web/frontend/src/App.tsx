@@ -12,8 +12,9 @@ import { hubRedirect } from "@/lib/plans";
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
-const IssuesAndPlans = lazy(() => import("@/pages/IssuesAndPlans"));
-const IssueDetail = lazy(() => import("@/pages/IssueDetail"));
+const Cases = lazy(() => import("@/pages/Cases"));
+const CasePlaceholder = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CasePlaceholder })));
+const CaseReading = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CaseReading })));
 const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
 const PlansAndChanges = lazy(() => import("@/pages/PlansAndChanges"));
 const PlanDetail = lazy(() => import("@/pages/PlanDetail"));
@@ -86,22 +87,11 @@ export default function App() {
                 </Suspense>
               }
             />
-            <Route
-              path="issues"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <IssuesAndPlans />
-                </Suspense>
-              }
-            />
-            <Route
-              path="issues/:id"
-              element={
-                <Suspense fallback={<Spinner />}>
-                  <IssueDetail />
-                </Suspense>
-              }
-            />
+            {/* Cases (MVP-2.7.0 S4): a layout route, so the queue stays mounted while you move between cases */}
+            <Route path="issues" element={<Suspense fallback={<Spinner />}><Cases /></Suspense>}>
+              <Route index element={<Suspense fallback={<Spinner />}><CasePlaceholder /></Suspense>} />
+              <Route path=":id" element={<Suspense fallback={<Spinner />}><CaseReading /></Suspense>} />
+            </Route>
             <Route path="plans" element={<Suspense fallback={<Spinner />}><PlansAndChanges /></Suspense>} />
             <Route path="plans/:id" element={<Suspense fallback={<Spinner />}><PlanDetail /></Suspense>} />
             <Route path="changes" element={<HubRedirect tab="changes" />} />

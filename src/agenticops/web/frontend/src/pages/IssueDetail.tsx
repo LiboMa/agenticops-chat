@@ -53,7 +53,11 @@ import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/
 /*  Main component                                                     */
 /* ================================================================== */
 
-export default function IssueDetail() {
+/** `embedded`: the Cases split view's reading pane (one column, no way back — the queue is beside it). `back`: how
+ *  a full-screen case returns to the queue (history back, or a link to the list under the same query). */
+export default function IssueDetail({ embedded = false, back }: {
+  embedded?: boolean; back?: { onBack?: () => void; to?: string };
+} = {}) {
   const { id } = useParams<{ id: string }>();
   const issueId = Number(id);
   const { t } = useLocale();
@@ -304,7 +308,7 @@ export default function IssueDetail() {
 
   /* -- Render ------------------------------------------------------ */
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={embedded ? "grid gap-4" : "grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]"}>
       <div className="space-y-4 min-w-0">
         <StatusLine
           refLabel={`I#${a.id}`}
@@ -319,7 +323,8 @@ export default function IssueDetail() {
           error={actionError ?? fetchError?.message ?? null}
           onDismissError={() => (actionError ? setActionError(null) : fetchError?.retry())}
           errorActionLabel={actionError ? undefined : t("common.retry")}
-          backTo="/app/issues"
+          backTo={embedded ? undefined : back?.to ?? (back?.onBack ? undefined : "/app/issues")}
+          onBack={embedded ? undefined : back?.onBack}
           backLabel={t("nav.issues")}
         />
         {actionInfo && (

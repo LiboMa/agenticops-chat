@@ -1006,5 +1006,13 @@
   "scope.notApplied": "本页不按账户筛选",
   "scope.locked": "详情页显示该记录自己的账户",
   "scope.adopted": "已按链接设置账户范围：{name}",
-  "attention.scopedTo": "已按 {name} 筛选"
+  "attention.scopedTo": "已按 {name} 筛选",
+  "cases.queue": "事件队列",
+  "cases.searchPlaceholder": "标题、资源或 I#12",
+  "cases.allSeverities": "全部严重度",
+  "cases.sort": "排序",
+  "cases.capped": "只显示前 {n} 条，缩小筛选范围可看到其余记录",
+  "cases.empty": "没有匹配的记录",
+  "cases.clear": "清除筛选",
+  "cases.selectPrompt": "请选择列表中的记录"
 }
