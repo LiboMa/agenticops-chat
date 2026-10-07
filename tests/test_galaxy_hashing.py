@@ -41,3 +41,19 @@ def test_compute_diff():
     assert d.changed == {2}
     assert d.removed == {3}
     assert d.dirty == {2, 4}
+
+
+def test_k8s_pod_status_and_unresolved_refs_do_not_change_the_hash():
+    import copy
+
+    base = {"resource_type": "K8s_Deployment", "resource_id": "c/Deployment/shop/checkout", "name": "checkout",
+            "tags": {}, "raw_data": {"cluster": "c", "namespace": "shop", "template_labels": {"app": "checkout"},
+                                     "pod_summary": {"ready": 3, "desired": 3, "restarts": 0, "nodes": ["ip-a"]}}}
+    later = copy.deepcopy(base)
+    later["raw_data"]["pod_summary"] = {"ready": 1, "desired": 3, "restarts": 7, "nodes": ["ip-b"],
+                                        "last_termination_reason": "OOMKilled", "waiting_reasons": ["CrashLoopBackOff"]}
+    later["raw_data"]["unresolved_refs"] = [{"kind": "ConfigMap", "name": "app-config"}]
+    assert content_hash(later) == content_hash(base)
+    relabeled = copy.deepcopy(base)
+    relabeled["raw_data"]["template_labels"] = {"app": "checkout", "version": "2"}
+    assert content_hash(relabeled) != content_hash(base)

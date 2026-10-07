@@ -2,19 +2,18 @@
 # Evidence scenario: delete the backend Service (endpoints go empty), and restore.
 set -euo pipefail
 NS="chaos-lab"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The Service's source of truth is the workload manifest. A `kubectl get -o yaml` backup cannot be re-applied
+# (it carries resourceVersion, so the create is rejected), and a retried break overwrote it with nothing.
+MANIFEST="${SCRIPT_DIR}/../../workloads/backend-deployment.yaml"
 ACTION="${1:-}"
 case "${ACTION}" in
   break)
-    kubectl get svc backend -n "${NS}" -o yaml > /tmp/agenticops-backend-svc.yaml 2>/dev/null || true
     kubectl delete svc backend -n "${NS}" --ignore-not-found
     echo "backend Service deleted — frontend can no longer resolve it."
     ;;
   restore)
-    if [[ -f /tmp/agenticops-backend-svc.yaml ]]; then
-      kubectl apply -f /tmp/agenticops-backend-svc.yaml || true
-    else
-      kubectl expose deployment backend -n "${NS}" --name=backend --port=6379 --target-port=6379 2>/dev/null || true
-    fi
+    kubectl apply -f "${MANIFEST}"
     echo "backend Service restored."
     ;;
   *) echo "Usage: service-deleted.sh [break|restore]"; exit 1;;

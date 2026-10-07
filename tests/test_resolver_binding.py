@@ -77,8 +77,9 @@ def two_accounts(db_session, monkeypatch):
 
 def test_bound_to_a_refuses_b_even_when_cached(two_accounts):
     a, b, _ = two_accounts
-    _session_cache["aws:acctB:us-east-1"] = _fake_session()  # a cached OTHER-account session
-    _session_cache["222:us-east-1"] = _session_cache["aws:acctB:us-east-1"]
+    name_key, id_key = resolver.session_cache_keys(resolver.get_account_snapshot("acctB"), "us-east-1")
+    _session_cache[name_key] = _fake_session()  # a cached OTHER-account session
+    _session_cache[id_key] = _session_cache[name_key]
     with run_context(bound_account_id=a.id):
         with pytest.raises(AccountResolutionError) as e:
             resolver.resolve_account_session("acctB", "us-east-1")

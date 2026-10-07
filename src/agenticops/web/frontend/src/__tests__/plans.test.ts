@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { becameTerminalChange, CHANGE_TERMINAL_STATUSES, isTerminalChange, planRef, planRoute, resolvePlansTab, toQuery } from "@/lib/plans";
+import { auditTabVisible, becameTerminalChange, CHANGE_TERMINAL_STATUSES, changeFilters, fixPlanFilters, isTerminalChange, hubRedirect, hubTab, nextTab, planCounts, planLabel, planRef, planRoute, shortHash, toQuery } from "@/lib/plans";
 import type { ChangeStatus, PlanKind } from "@/api/types";
 
 describe("toQuery", () => {
@@ -55,24 +55,91 @@ describe("planRoute / planRef (R2)", () => {
   it.each([
     { plan_kind: "change" as PlanKind, change_request_id: 7, health_issue_id: null, route: "/app/changes/7", ref: "C#7" },
     { plan_kind: "change" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=changes", ref: "-" },
-    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/issues/3", ref: "I#3" },
-    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans?tab=fix", ref: "-" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: 3, route: "/app/plans/5", ref: "I#3" },
+    { plan_kind: "fix" as PlanKind, change_request_id: null, health_issue_id: null, route: "/app/plans/5", ref: "-" },
   ])("$plan_kind change=$change_request_id issue=$health_issue_id -> $route / $ref", (row) => {
-    const fp = { plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
+    const fp = { id: 5, plan_kind: row.plan_kind, change_request_id: row.change_request_id, health_issue_id: row.health_issue_id };
     expect(planRoute(fp)).toBe(row.route);
     expect(planRef(fp)).toBe(row.ref);
   });
 });
 
-describe("resolvePlansTab", () => {
+describe("the Plans & changes hub (MVP-2.7.0 S3)", () => {
+  it.each([[null, "fix"], ["fix", "fix"], ["changes", "changes"], ["audit", "audit"], ["bogus", "fix"]])(
+    "tab %s → %s", (raw, tab) => expect(hubTab(raw)).toBe(tab));
+  it("an old /app/changes link keeps its query", () => {
+    expect(hubRedirect("changes", "?status=planned&account_id=3")).toBe("/app/plans?tab=changes&status=planned&account_id=3");
+    expect(hubRedirect("audit", "")).toBe("/app/plans?tab=audit");
+    expect(hubRedirect("audit", "?tab=x&period=7d")).toBe("/app/plans?tab=audit&period=7d");
+  });
+  it("a fix plan opens its own page; a change plan its change", () => {
+    expect(planRoute({ id: 9, plan_kind: "fix", change_request_id: null })).toBe("/app/plans/9");
+    expect(planRoute({ id: 9, plan_kind: "change", change_request_id: 3 })).toBe("/app/changes/3");
+    expect(planRoute({ id: 9, plan_kind: "change", change_request_id: null })).toBe("/app/plans?tab=changes");
+  });
+});
+
+describe("planLabel / shortHash", () => {
+  // the words come from the locale; the shape mirrors services/plan_content.plan_label
+  const t = (k: string) => ({ "plans.fixPlan": "fix plan", "plans.implementationPlan": "implementation plan" })[k] ?? k;
   it.each([
-    { requested: null, changesOn: true, result: "changes" },
-    { requested: null, changesOn: false, result: "fix" },
-    { requested: "changes", changesOn: false, result: "fix" },
-    { requested: "audit", changesOn: false, result: "audit" },
-    { requested: "fix", changesOn: true, result: "fix" },
-    { requested: "bogus", changesOn: true, result: "changes" },
-  ])("$requested with changesOn=$changesOn -> $result", ({ requested, changesOn, result }) => {
-    expect(resolvePlansTab(requested, changesOn)).toBe(result);
+    { plan_kind: "fix" as PlanKind, health_issue_id: 12, change_request_id: null, plan_version: 2, label: "I#12 fix plan v2" },
+    { plan_kind: "change" as PlanKind, health_issue_id: null, change_request_id: 3, plan_version: 1, label: "C#3 implementation plan v1" },
+    { plan_kind: "fix" as PlanKind, health_issue_id: 4, change_request_id: null, plan_version: 0, label: "I#4 fix plan v1" },
+  ])("$label", ({ label, ...fp }) => {
+    expect(planLabel(fp, t)).toBe(label);
+  });
+  it("shortens a content hash to 8 characters; no hash is an em dash", () => {
+    expect(shortHash("0123456789abcdef")).toBe("01234567");
+    expect(shortHash(null)).toBe("—");
+  });
+});
+
+describe("planCounts", () => {
+  it("counts steps / pre / post checks; rollback = its steps, or 1 for a non-empty plan without a steps list", () => {
+    expect(planCounts({ steps: [{}, {}], pre_checks: [{}], post_checks: [{}, {}, {}], rollback_plan: { steps: ["a", "b"] } }))
+      .toEqual({ steps: 2, preChecks: 1, postChecks: 3, rollback: 2 });
+    expect(planCounts({ steps: [], pre_checks: [], post_checks: [], rollback_plan: { description: "undo" } }).rollback).toBe(1);
+    expect(planCounts({ steps: [], pre_checks: [], post_checks: [], rollback_plan: {} }).rollback).toBe(0);
+    expect(planCounts({ steps: null as unknown as unknown[], pre_checks: undefined as unknown as unknown[], post_checks: [], rollback_plan: null as unknown as Record<string, unknown> }))
+      .toEqual({ steps: 0, preChecks: 0, postChecks: 0, rollback: 0 });
+  });
+});
+
+describe("fixPlanFilters — the hub's URL", () => {
+  it("reads the groups, risk and search; drops junk; the account is the top bar's scope, never read here (S4)", () => {
+    expect(fixPlanFilters(new URLSearchParams("status=awaiting&risk=L2&account=3&q=%20nginx%20"))).toEqual(
+      { status: "draft,pending_approval", risk_level: "L2", q: "nginx" });
+    expect(fixPlanFilters(new URLSearchParams("status=bogus&risk=L9&account=-1&q="))).toEqual(
+      { status: undefined, risk_level: undefined, q: undefined });
+  });
+});
+
+describe("changeFilters — the Changes tab's URL (final review I2)", () => {
+  it("an old /app/changes?status=planned link filters the tab, with the API's own names", () => {
+    expect(changeFilters(new URLSearchParams("tab=changes&status=planned&account_id=3&requested_by=user%3Abob&period=30d"))).toEqual(
+      { status: "planned", requested_by: "user:bob", period: "30d" });
+  });
+  it("drops what the API would refuse", () => {
+    expect(changeFilters(new URLSearchParams("status=bogus&account_id=x&period=1y"))).toEqual(
+      { status: undefined, requested_by: undefined, period: undefined });
+  });
+});
+
+describe("hub tabs — keyboard and who sees Audit (deferred minors M8 / M9)", () => {
+  const ids = ["fix", "changes", "audit"] as const;
+  it("arrow keys move and wrap; Home / End jump; other keys do nothing", () => {
+    expect(nextTab(ids, "fix", "ArrowRight")).toBe("changes");
+    expect(nextTab(ids, "audit", "ArrowRight")).toBe("fix");
+    expect(nextTab(ids, "fix", "ArrowLeft")).toBe("audit");
+    expect(nextTab(ids, "changes", "Home")).toBe("fix");
+    expect(nextTab(ids, "changes", "End")).toBe("audit");
+    expect(nextTab(ids, "changes", "a")).toBeNull();
+  });
+  it("Audit is offered only once bootstrap says so — never flashed while it loads", () => {
+    expect(auditTabVisible(undefined)).toBe(false);
+    expect(auditTabVisible({ auth_enabled: true, user: { is_admin: false } })).toBe(false);
+    expect(auditTabVisible({ auth_enabled: true, user: { is_admin: true } })).toBe(true);
+    expect(auditTabVisible({ auth_enabled: false, user: { is_admin: false } })).toBe(true);
   });
 });

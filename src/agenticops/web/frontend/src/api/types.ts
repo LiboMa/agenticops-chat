@@ -19,6 +19,11 @@ export interface Resource {
   tags: Record<string, string>;
   created_at: string;
   updated_at: string;
+  scanned_at?: string | null;
+  absent_since?: string | null; // set when the latest complete scan no longer saw it
+  // The list only (MVP-2.7.0 S4): open anchored issues and their worst health; no open issue = unknown, never healthy
+  open_issues?: number;
+  health?: "unknown" | "notice" | "warning" | "critical" | null;
 }
 
 export interface PaginatedResources {
@@ -65,30 +70,56 @@ export interface Signal {
   trace_id: string | null;
 }
 
-export interface Anomaly {
+/** GET /api/health-issues/{id} (HealthIssueResponse) — IssueDetail's source; the legacy /issues shape drops
+ *  trace_id and merged_alerts. */
+export interface HealthIssue {
   id: number;
   resource_id: string;
-  provider?: string;
-  resource_type: string;
-  region: string;
-  anomaly_type: string;
+  provider: string | null;
   severity: "critical" | "high" | "medium" | "low";
+  source: string;
   title: string;
   description: string;
-  metric_name: string | null;
-  expected_value: number | null;
-  actual_value: number | null;
-  deviation_percent: number | null;
+  alarm_name: string | null;
+  metric_data: Record<string, unknown>;
+  related_changes: unknown[];
   status: IssueStatus;
   detected_at: string;
+  detected_by: string;
   resolved_at: string | null;
   trace_id: string | null;
-  occurrence_count?: number;
-  merged_alerts?: MergedAlert[];
+  occurrence_count: number;
+  merged_alerts: MergedAlert[];
   account_id: number | null;
   account_name: string | null;
-  issue_type?: string;
+  issue_type: string;
+  // The anchor (MVP-2.6.1): the resource it resolved to, or why not; all null before the resolver reaches it
+  resource_ref: number | null;
+  anchor_status: AnchorStatus | null;
+  anchor_candidates: { rule?: string | null; candidates?: { ref: number; account_id: number; reason: string }[] } | null;
+  observed_at: string | null;
+  available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
+
+/** RCA root-cause location (MVP-2.6.1): ranked candidates, each cited by evidence ids, and the causal path. */
+export interface RcaLocationCandidate {
+  ref: number;
+  rank: number;
+  type: string | null;
+  name: string | null;
+  resource_id: string | null;
+  supporting: string[];
+  refuting: string[];
+}
+
+export interface RcaLocation {
+  candidates: RcaLocationCandidate[];
+  path: (LocationPathEdge & { src_name?: string | null; dst_name?: string | null; provenance?: string })[];
+  dropped: string[];
+}
+
+export type LocationStatus = "valid" | "partial" | "invalid" | "absent";
+export type LocationVerdict = "correct" | "partial" | "incorrect";
 
 export interface RCAResult {
   id: number;
@@ -100,7 +131,7 @@ export interface RCAResult {
   contributing_factors: string[];
   recommendations: string[];
   related_resources: string[];
-  llm_model: string;
+  model_id: string;
   created_at: string;
   // RCA quality (MVP-2.2.0)
   evidence?: { type: string; ref: string; summary: string }[];
@@ -108,6 +139,13 @@ export interface RCAResult {
   critic_verdict?: string | null;
   critic_notes?: string | null;
   human_verdict?: "correct" | "incorrect" | null;
+  // Root-cause location (MVP-2.6.1); a location verdict is accepted only while the status is valid or partial
+  location?: RcaLocation | null;
+  location_status?: LocationStatus | null;
+  location_build_id?: number | null;
+  location_verdict?: LocationVerdict | null;
+  location_verdict_by?: string | null;
+  location_verdict_at?: string | null;
 }
 
 export interface Report {
@@ -147,6 +185,11 @@ export type FixPlanStatus =
 
 export type PlanKind = "fix" | "change";
 
+/** An action the actor may take and what it sets off (contract workspace-ui-1 UiAction; services/ui_actions). */
+export interface UiAction { action: string; allowed: boolean; reason_code: string | null; effect: string }
+export interface FixPlanTarget { resource_id: string | null; resource_ref: number | null; anchor_status: string | null;
+  resource_type: string | null; region: string | null }
+
 export interface FixPlan {
   id: number;
   plan_kind: PlanKind;
@@ -170,6 +213,15 @@ export interface FixPlan {
   created_at: string;
   updated_at: string | null;
   account_id: number | null;
+  // Content identity (MVP-2.6.1): an approval sends content_hash back and is refused (409) if the plan changed
+  plan_version: number;
+  content_hash: string | null;
+  approved_hash: string | null;
+  approved_version: number | null;
+  issue_title?: string | null;
+  issue_status?: IssueStatus | null;
+  target?: FixPlanTarget | null;
+  available_actions?: UiAction[];
 }
 
 export interface FixExecution {
@@ -186,7 +238,26 @@ export interface FixExecution {
   rollback_results: unknown[];
   error_message: string | null;
   duration_ms: number;
+  // Verification (MVP-2.6.1): passed | failed | pending_acceptance; null = the run closed without a verdict
+  verification_status: VerificationStatus | null;
+  verification_reason: string | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  acceptance_note: string | null;
   created_at: string;
+  // MVP-2.7.0: the run's results paired with its own plan's declared checks (verification.bind_results)
+  post_check_binding?: PostCheckBinding[];
+}
+
+export type VerificationStatus = "passed" | "failed" | "pending_acceptance";
+
+/** One declared post-check (check_id pc-n) and what was reported for it, or one stray result after them. */
+export interface PostCheckBinding {
+  check_id: string | null;
+  check: string | null;
+  result_status: "pass" | "warning" | "fail" | "missing" | null;
+  results: number;
+  problem: null | "missing" | "duplicate" | "undeclared" | "unbound";
 }
 
 /* ------------------------------------------------------------------ */
@@ -645,13 +716,31 @@ export interface ChatSession {
   model_id: string | null;
   /** Per-session effort (thinking) override: off|standard|deep; null = Auto */
   effort?: string | null;
+  /** MVP-2.7.0: private = its owner and admins; workspace = everyone (auth off: always workspace) */
+  visibility?: "private" | "workspace";
+  owned_by_me?: boolean;
+  /** may rename / pin / archive / switch model / delete it (its owner or an admin; anyone if it has no owner) */
+  can_manage?: boolean;
+  /** MVP-2.7.0 S5: what the chat is about and the account it is bound to (services/chat_context) */
+  context?: ChatContextView | null;
 }
+
+/** A chat's context as the server resolved it; locked at the first sent message. */
+export interface ChatContextView {
+  primary: { entity_type: "health_issue" | "change_request"; entity_id: number; ref: string; title: string | null } | null;
+  account_id: number | null;
+  account_name: string | null;
+  region: string | null;
+  scope_locked: boolean;
+}
+
+export type DispatchState = "accepted" | "running" | "completed" | "failed" | "interrupted";
 
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  tool_calls?: Array<{ name: string; status: string }>;
+  tool_calls?: Array<{ name: string; status: string; call_id?: string; outcome?: "ok" | "error" | "unknown" }>;
   token_usage?: {
     input: number;
     output: number;
@@ -660,6 +749,7 @@ export interface ChatMessage {
     cost_usd?: number;
     model?: string;
     error?: string; // persisted when the stream failed (e.g. model unavailable)
+    error_code?: string; // S5: throttled | model_unavailable | context_too_long | internal
   };
   trace_id?: string;
   cost_usd?: number;
@@ -667,6 +757,9 @@ export interface ChatMessage {
   suggestions?: string[];
   attachments?: Array<{ filename: string; size: number }>;
   created_at: string;
+  /** S5: the sender's id and where the dispatch stands; null/absent on older rows = completed */
+  client_message_id?: string | null;
+  dispatch_state?: DispatchState | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {
@@ -842,32 +935,8 @@ export interface FixPlanWithExecutions {
   executions: FixExecution[];
 }
 
-export type GalaxyHealth = "healthy" | "warning" | "critical";
-
-export interface GalaxyNode {
-  id: string;
-  kind: "account" | "group" | "resource";
-  name: string;
-  resource_type?: string;
-  region?: string;
-  provider?: string;
-  account_id?: number | null;
-  resource_count?: number;
-  open_issues?: number;
-  health?: GalaxyHealth;
-  types?: Record<string, number>;
-  group_kind?: string;
-  member_count?: number;
-}
-
-export interface GalaxyEdge {
-  source: string;
-  target: string;
-  relation_type: string;
-  provenance: "rule" | "llm";
-  evidence?: string;
-  confidence?: number;
-}
+// Four values, worst open issue first; `unknown` = no open issue (not "healthy"). See lib/galaxyHealth.ts.
+export type GalaxyHealth = "unknown" | "notice" | "warning" | "critical";
 
 export interface GalaxyBuildInfo {
   id: number;
@@ -890,18 +959,6 @@ export interface GalaxyStatus {
   next_check_minutes: number;
 }
 
-export interface GalaxyOverview {
-  nodes: GalaxyNode[];
-  edges: GalaxyEdge[];
-  build_id: number | null;
-}
-
-export interface GalaxyExpand {
-  nodes: GalaxyNode[];
-  edges: GalaxyEdge[];
-  truncated: boolean;
-}
-
 // Full starfield payload (slim). Node/edge keys are shortened server-side.
 export interface GalaxyGraphNode {
   id: string;
@@ -910,6 +967,7 @@ export interface GalaxyGraphNode {
   type: string;
   acct?: number | null;
   health?: GalaxyHealth;
+  absent?: boolean; // resource nodes: the latest scan no longer saw it
   members?: number;
 }
 export interface GalaxyGraphEdge {
@@ -1034,12 +1092,37 @@ export interface ChangeRequest {
   chat_session_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+  proposed_steps: ChangeProposedStep[] | null; // the requester's own steps (MVP-2.6.1)
+  external_ref: ChangeExternalRef | null; // the ticket in another system it came from
+  steps_diff: ChangeStepsDiff | null; // the plan against proposed_steps (services/change_steps.diff_steps)
+  needs_review_reason: string | null; // why it waits for a human verdict
+}
+
+export interface ChangeProposedStep {
+  action: string;
+  command: string;
+}
+
+export interface ChangeExternalRef {
+  system: string;
+  ticket_id: string;
+  url?: string | null;
+  requested_by?: string | null;
+}
+
+/** Step numbers are 1-based; commands are whitespace-normalized. */
+export interface ChangeStepsDiff {
+  added: { plan_step: number; command: string }[];
+  removed: { proposed_step: number; command: string }[];
+  modified: { proposed_step: number; plan_step: number; proposed: string; plan: string }[];
+  unchanged: number;
 }
 
 export interface ChangeRequestDetail extends ChangeRequest {
   plans: FixPlan[];
   executions: FixExecution[];
   policy_decision: Record<string, unknown> | null;
+  available_actions?: UiAction[];
 }
 
 export interface ChangeTimelineEntry {
@@ -1059,6 +1142,8 @@ export interface ChangeRequestCreate {
   targets: string[];
   requested_change_type: "normal" | "emergency";
   justification?: string;
+  proposed_steps?: ChangeProposedStep[];
+  external_ref?: ChangeExternalRef;
 }
 
 export interface PlanStats {
@@ -1099,4 +1184,118 @@ export interface CommandAudit {
   trace_id: string | null;
   fix_plan_id: number | null;
   change_request_id: number | null;
+}
+
+// ── Local graph: GET /api/graph/focus (MVP-2.6.1 spec §3.E.3) ──
+
+export type AnchorStatus = "anchored" | "ambiguous" | "account_level" | "unanchored";
+
+export interface FocusNode {
+  ref: number;
+  type: string;
+  name: string;
+  account_id: number;
+  region: string | null;
+  absent: boolean;
+  hops: number;
+  health: GalaxyHealth;
+  issue_ids: number[];
+  anomalous: boolean;
+  signal_at: string | null;
+}
+
+export interface FocusEdge {
+  src: number;
+  dst: number;
+  relation_type: string;
+  provenance: string; // rule | llm
+  evidence: string;
+  direction_label: "downstream" | "upstream" | "both" | "none";
+  observed_at: string | null;
+}
+
+// Another resource whose signals the Signal Gate merged into the issue
+export interface FocusMerged {
+  resource_id: string;
+  ref: number | null;
+  type: string | null;
+  name: string | null;
+  anchor_status: AnchorStatus;
+  signals: number;
+  last_at: string | null;
+}
+
+// Another open issue within 2 structural hops whose signal falls in the window
+export interface FocusCandidate {
+  issue_id: number;
+  ref: number;
+  hops: number;
+  severity: string;
+  title: string;
+  status: string;
+  signal_at: string;
+}
+
+export interface GraphFocus {
+  build_id: number | null;
+  nodes: FocusNode[];
+  edges: FocusEdge[];
+  truncated: boolean;
+  truncated_reason: string | null;
+  depth: number;
+  anchor: {
+    kind: "issue" | "resource" | "change_request";
+    id: number;
+    status: AnchorStatus;
+    rule: string | null;
+    candidates: Record<string, unknown>[];
+    refs: number[];
+  };
+  blast: { structural: number; potential: number; observed: number; truncated: boolean };
+  window: { start: string; end: string };
+  related: { merged: FocusMerged[]; candidates: FocusCandidate[]; truncated: boolean };
+}
+
+// One edge of an RCA result's location.path (services/rca_location._path)
+export interface LocationPathEdge {
+  src_ref: number;
+  dst_ref: number;
+  relation_type: string;
+  src_name?: string;
+  dst_name?: string;
+  provenance?: string;
+}
+
+// ── Pull connectors (GET /api/connectors, MVP-2.6.1 spec §3.B.6) ──
+export type ConnectorRunStatus = "complete" | "partial" | "failed";
+
+export interface ConnectorRun {
+  id: number;
+  account: string | null;
+  scope: string; // e.g. the cluster name
+  trigger: "schedule" | "manual" | "rca";
+  status: ConnectorRunStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  counts: Record<string, number>; // created / updated / absent / returned / signals / signal_errors
+  error: string | null;
+}
+
+export interface ConnectorStatus {
+  name: string;
+  enabled: boolean;
+  running: boolean;
+  schedule: { name: string; cron_expression: string; is_enabled: boolean } | null;
+  recent_runs: ConnectorRun[];
+}
+
+// ── RCA location stats (GET /api/rca/location-stats, spec §3.C.4) ──
+export interface RcaLocationStats {
+  days: number;
+  top1: number | null; // correct / judged; null when nothing is judged
+  judged: number;
+  anchoring_rate: number | null; // (anchored + account_level) / issues naming a resource_id
+  issues_with_resource_id: number;
+  anchor_status_counts: Record<AnchorStatus, number>;
+  location_status_counts: Record<LocationStatus, number>;
 }

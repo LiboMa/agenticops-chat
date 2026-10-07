@@ -333,91 +333,66 @@ class TestRunKubectl:
 # ── _execute_kubectl ─────────────────────────────────────────────────
 
 class TestExecuteKubectl:
-    """Cover _execute_kubectl lines 222-269."""
+    """_execute_kubectl: account-scoped env only (MVP-2.6.1 spec §3.B.4); the transport error shapes."""
 
-    @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
-    def test_kubectl_with_kubeconfig_env(self, mock_run):
+    ENV = {"PATH": "/usr/bin", "KUBECONFIG": "/data/kube/1/us-east-1/c1.kubeconfig"}
+
+    def _run(self, mock_run, command="get pods", namespace="default"):
         from agenticops.skills.execution import _execute_kubectl
 
-        # Make the file "exist"
-        with patch("os.path.isfile", return_value=True):
-            mock_run.return_value = MagicMock(returncode=0, stdout="pod/app Running")
+        with patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1")), \
+             patch("agenticops.credentials.kube.kubectl_env_for_cluster", return_value=dict(self.ENV)):
+            return _execute_kubectl("c1", command, "", namespace)
+
+    @patch("agenticops.skills.execution.subprocess.run")
+    def test_kubectl_runs_with_the_resolved_env(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="pod/app Running")
+        assert "pod/app" in self._run(mock_run)
+        assert mock_run.call_args.kwargs["env"] == self.ENV
+
+    @patch("agenticops.skills.execution.subprocess.run")
+    def test_kubectl_no_cluster_even_with_ambient_kubeconfig(self, mock_run, tmp_path):
+        from agenticops.skills.execution import _execute_kubectl
+
+        ambient = tmp_path / "kubeconfig"
+        ambient.write_text("apiVersion: v1\n")
+        with patch.dict("os.environ", {"KUBECONFIG": str(ambient)}):
             result = _execute_kubectl("", "get pods", "", "default")
-            assert "pod/app" in result
+        assert "No cluster_name" in result
+        assert not mock_run.called
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {}, clear=False)
-    def test_kubectl_no_cluster_no_kubeconfig(self, mock_run):
+    def test_kubectl_update_kubeconfig_failure(self, mock_run):
+        from agenticops.credentials.kube import KubeconfigError
         from agenticops.skills.execution import _execute_kubectl
 
-        # Remove KUBECONFIG if present
-        import os
-        os.environ.pop("KUBECONFIG", None)
-        result = _execute_kubectl("", "get pods", "", "default")
-        assert "No cluster_name" in result or "Error" in result
-
-    @patch("agenticops.skills.execution.subprocess.run")
-    @patch("agenticops.credentials.resolver.get_subprocess_env_for_account", return_value={})
-    @patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1"))
-    @patch.dict("os.environ", {}, clear=False)
-    def test_kubectl_update_kubeconfig_failure(self, mock_find, mock_env, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        import os
-        os.environ.pop("KUBECONFIG", None)
-        mock_run.return_value = MagicMock(
-            returncode=1, stderr="cluster not found"
-        )
-        result = _execute_kubectl("bad-cluster", "get pods", "us-east-1", "default")
+        with patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1")), \
+             patch("agenticops.credentials.kube.kubectl_env_for_cluster", side_effect=KubeconfigError("cluster not found")):
+            result = _execute_kubectl("bad-cluster", "get pods", "us-east-1", "default")
         assert "Failed to update kubeconfig" in result
+        assert not mock_run.called
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
     def test_kubectl_error_exit_code(self, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        with patch("os.path.isfile", return_value=True):
-            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-            result = _execute_kubectl("", "get pods -n nope", "", "nope")
-            assert "kubectl error" in result
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        assert "kubectl error" in self._run(mock_run, command="get pods -n nope", namespace="nope")
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
     def test_kubectl_timeout(self, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        with patch("os.path.isfile", return_value=True):
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="kubectl", timeout=30)
-            result = _execute_kubectl("", "get pods", "", "default")
-            assert "timed out" in result
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="kubectl", timeout=30)
+        assert "timed out" in self._run(mock_run)
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
     def test_kubectl_not_found(self, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        with patch("os.path.isfile", return_value=True):
-            mock_run.side_effect = FileNotFoundError()
-            result = _execute_kubectl("", "get pods", "", "default")
-            assert "kubectl not found" in result
+        mock_run.side_effect = FileNotFoundError()
+        assert "kubectl not found" in self._run(mock_run)
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
     def test_kubectl_generic_exception(self, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        with patch("os.path.isfile", return_value=True):
-            mock_run.side_effect = RuntimeError("oops")
-            result = _execute_kubectl("", "version", "", "default")
-            assert "kubectl error" in result
+        mock_run.side_effect = RuntimeError("oops")
+        assert "kubectl error" in self._run(mock_run, command="version")
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/kubeconfig"}, clear=False)
     def test_kubectl_empty_output(self, mock_run):
-        from agenticops.skills.execution import _execute_kubectl
-
-        with patch("os.path.isfile", return_value=True):
-            mock_run.return_value = MagicMock(returncode=0, stdout="  ", stderr="")
-            result = _execute_kubectl("", "get pods", "", "default")
-            assert result == "(no output)"
+        mock_run.return_value = MagicMock(returncode=0, stdout="  ", stderr="")
+        assert self._run(mock_run) == "(no output)"

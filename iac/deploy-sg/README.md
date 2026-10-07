@@ -9,7 +9,7 @@ User → agenticops.tinyboat.blog (Route53)
      → CloudFront (SSL: *.tinyboat.blog ACM cert)
      → ALB (HTTP, CloudFront-only ingress)
      → EC2 c5.xlarge (public subnet, SSH enabled)
-         ├── uvicorn (port 8000, 2 workers)
+         ├── uvicorn (port 8000, 1 process — required)
          ├── Feishu WebSocket bot
          └── Slack Socket Mode bot
 ```

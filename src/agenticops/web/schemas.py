@@ -5,9 +5,9 @@ routers a dependency-leaf module to import from (avoids app<->router import cycl
 """
 
 from datetime import datetime
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AccountCreate(BaseModel):
@@ -74,6 +74,11 @@ class ResourceResponse(BaseModel):
     tags: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+    scanned_at: Optional[datetime] = None
+    absent_since: Optional[datetime] = None  # set when the latest complete scan no longer saw the row
+    # The list's health column (MVP-2.7.0 S4): open anchored issues + unknown|notice|warning|critical
+    open_issues: int = 0
+    health: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -95,6 +100,8 @@ class ResourceResponse(BaseModel):
             tags=r.tags if isinstance(r.tags, dict) else {},
             created_at=r.created_at,
             updated_at=r.updated_at,
+            scanned_at=getattr(r, "scanned_at", None),
+            absent_since=getattr(r, "absent_since", None),
         )
 
 
@@ -147,6 +154,13 @@ class RCAResponse(BaseModel):
     critic_verdict: Optional[str] = None
     critic_notes: Optional[str] = None
     human_verdict: Optional[str] = None
+    # Root-cause location (MVP-2.6.1)
+    location: Optional[dict] = None
+    location_status: Optional[str] = None
+    location_build_id: Optional[int] = None
+    location_verdict: Optional[str] = None
+    location_verdict_by: Optional[str] = None
+    location_verdict_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -281,8 +295,22 @@ class HealthIssueResponse(BaseModel):
     account_id: Optional[int] = None
     account_name: Optional[str] = None
     issue_type: str = "other"
+    # The anchor (MVP-2.6.1): the resource it resolved to, or why not — IssueDetail's anchor badge reads these
+    resource_ref: Optional[int] = None
+    anchor_status: Optional[str] = None
+    anchor_candidates: Optional[dict] = None
+    observed_at: Optional[datetime] = None
+    # What the viewer may do here (MVP-2.7.0 S4: "note"), from ui_actions.route_allows — the detail route fills it
+    available_actions: List[dict] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("anchor_candidates", mode="before")
+    @classmethod
+    def _candidates_or_none(cls, value):
+        """A non-dict value (a legacy or hand-edited row) reads as None, as graph/api and graph/evidence read it —
+        one such row must not 500 every issue list. On the model, so model_validate callers get it too."""
+        return value if isinstance(value, dict) else None
 
     @classmethod
     def from_issue(cls, issue, account_name: Optional[str] = None) -> "HealthIssueResponse":
@@ -309,7 +337,26 @@ class HealthIssueResponse(BaseModel):
             account_id=issue.account_id,
             account_name=account_name,
             issue_type=getattr(issue, "issue_type", "other") or "other",
+            resource_ref=issue.resource_ref,
+            anchor_status=issue.anchor_status,
+            anchor_candidates=issue.anchor_candidates,
+            observed_at=issue.observed_at,
         )
+
+
+class IssueNoteRequest(BaseModel):
+    """A note on an issue (MVP-2.7.0 S4). The author is the session actor, never the body — extra fields are refused.
+    The 8000-character limit and the trim are services/issue_notes.clean_note's; this cap only bounds the body."""
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(..., max_length=8100)
+
+
+class IssueNote(BaseModel):
+    event_id: int
+    health_issue_id: int
+    content: str
+    actor: str
+    created_at: datetime
 
 
 # ============================================================================
@@ -344,10 +391,16 @@ class FixPlanUpdate(BaseModel):
     estimated_impact: Optional[str] = None
     pre_checks: Optional[List] = None
     post_checks: Optional[List] = None
+    content_hash: Optional[str] = Field(None, max_length=64,
+                                        description="content_hash of the plan as read; required with any content field "
+                                                    "(422 without, 409 when the plan changed since)")
     status: Optional[str] = Field(None, description="DEPRECATED alias for POST /reject (only 'rejected' is accepted)")
 
 
 class FixPlanApproveBody(BaseModel):
+    content_hash: str = Field(..., max_length=64,
+                              description="content_hash of the plan as reviewed; a plan changed since (or an empty "
+                                          "hash) is refused (409)")
     approved_by: Optional[str] = Field(None, max_length=100, description="Legacy claimed name; audited, never trusted")
     reason: Optional[str] = Field(None, max_length=2000)
 
@@ -380,8 +433,26 @@ class FixPlanResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     account_id: Optional[int] = None
+    plan_version: int = 1
+    content_hash: Optional[str] = None
+    approved_hash: Optional[str] = None
+    approved_version: Optional[int] = None
+    # MVP-2.7.0 S3 read context (never part of the content hash)
+    issue_title: Optional[str] = None
+    issue_status: Optional[str] = None
+    target: Optional[dict] = None   # {resource_id, resource_ref, anchor_status, resource_type, region} of its issue
+    available_actions: List[dict] = Field(default_factory=list)   # services/ui_actions.plan_actions
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("steps", "pre_checks", "post_checks", "rollback_plan", mode="before")
+    @classmethod
+    def _decode_legacy_json(cls, value, info):
+        """Legacy rows hold these JSON columns as JSON *strings* (an agent passed pre-encoded JSON); decode
+        them so one such row cannot 500 every fix-plan list. Undecodable text is kept, wrapped, not dropped.
+        The same function gives the verdict its post-checks, so the page and the verdict count the same ones."""
+        from agenticops.services.verification import decode_legacy_json
+        return decode_legacy_json(value, dict if info.field_name == "rollback_plan" else list)
 
 
 class FixExecutionResponse(BaseModel):
@@ -399,9 +470,35 @@ class FixExecutionResponse(BaseModel):
     rollback_results: list
     error_message: Optional[str]
     duration_ms: int
+    verification_status: Optional[str] = None
+    verification_reason: Optional[str] = None
+    accepted_by: Optional[str] = None
+    accepted_at: Optional[datetime] = None
+    acceptance_note: Optional[str] = None
     created_at: datetime
+    # One row per declared post-check of this run's own plan, then stray results (verification.bind_results):
+    # {check_id, check, result_status, results, problem: null|missing|duplicate|undeclared|unbound}
+    post_check_binding: list = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _bind_post_checks(cls, value, handler):
+        """Read from a FixExecution row, pair its results with its plan's checks — the same function the
+        verdict uses, so the page shows exactly what a reason like "no result for post-check pc-2" means."""
+        model = handler(value)
+        plan = getattr(value, "fix_plan", None)
+        if plan is not None and not model.post_check_binding:
+            from agenticops.services.verification import bind_results
+            model.post_check_binding = bind_results(plan.post_checks, model.post_check_results)
+        return model
+
+
+class ExecutionAcceptBody(BaseModel):
+    """A human's verdict on an execution pending acceptance; the identity is the authenticated session."""
+    decision: str = Field(..., pattern="^(accepted|rejected)$")
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 # ============================================================================
@@ -607,8 +704,25 @@ class ReportFromSessionRequest(BaseModel):
     format: str = Field(default="markdown", pattern="^(markdown|html|pdf|docx)$")
 
 
+class EntityRefIn(BaseModel):
+    """What a chat is about (MVP-2.7.0 S5): an issue or a change; the server reads the rest from the object."""
+    model_config = ConfigDict(extra="forbid")
+    entity_type: Literal["health_issue", "change_request"]
+    entity_id: int = Field(..., ge=1)
+
+
+class ChatContextIn(BaseModel):
+    """A chat's context (services/chat_context): a linked object, or none (an independent request), and an account.
+    A linked object's account is its own — a different account_id here is refused (409)."""
+    model_config = ConfigDict(extra="forbid")
+    primary: Optional[EntityRefIn] = None
+    account_id: Optional[int] = Field(None, ge=1)
+    region: Optional[str] = Field(None, max_length=80)
+
+
 class ChatSessionCreate(BaseModel):
     name: Optional[str] = None
+    context: Optional[ChatContextIn] = None
 
 
 class ChatSessionUpdate(BaseModel):
@@ -620,11 +734,18 @@ class ChatSessionUpdate(BaseModel):
     model_id: Optional[str] = None
     # "" = set Auto (stored NULL); omitted = don't change; else off|standard|deep
     effort: Optional[str] = None
+    # Who sees the session (MVP-2.7.0): only its owner or an admin may change it
+    visibility: Optional[Literal["private", "workspace"]] = None
+    # The chat's context (S5): changeable until the first message is sent (409 context_locked after)
+    context: Optional[ChatContextIn] = None
 
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
+    # MVP-2.7.0 S5 (services/chat_dispatch): the sender's id for this message — a repeat is replayed or refused,
+    # never run twice. Multipart sends carry it as a form field of the same name.
+    client_message_id: str = Field(..., pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 class ChatMessageResponse(BaseModel):
@@ -638,6 +759,9 @@ class ChatMessageResponse(BaseModel):
     attachments: Optional[list] = None
     suggestions: Optional[list] = None
     created_at: datetime
+    # S5: accepted|running|completed|failed|interrupted (None on older rows = completed)
+    client_message_id: Optional[str] = None
+    dispatch_state: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -657,6 +781,14 @@ class ChatSessionResponse(BaseModel):
     model_id: Optional[str] = None
     # Per-session effort (thinking) override; None = Auto
     effort: Optional[str] = None
+    # MVP-2.7.0: private = its owner and admins; workspace = everyone. owned_by_me is for the caller.
+    visibility: str = "workspace"
+    owned_by_me: bool = False
+    # Whether the caller may rename / pin / archive / switch model / delete it (owner or admin; anyone for an
+    # ownerless session) — reading and sending only need it to be visible
+    can_manage: bool = True
+    # S5: {primary: {entity_type, entity_id, ref, title} | null, account_id, account_name, region, scope_locked}
+    context: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -802,6 +934,20 @@ class AuditLogResponse(BaseModel):
 # ============================================================================
 
 
+class ChangeProposedStep(BaseModel):
+    """One of the requester's own steps (the fix_plans.steps shape; caps mirror services/change_steps)."""
+    action: str = Field("", max_length=500)
+    command: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeExternalRef(BaseModel):
+    """The ticket in another system a request came from (caps mirror change_service._external_ref)."""
+    system: str = Field(..., pattern="^[a-z0-9_-]{1,50}$")
+    ticket_id: str = Field(..., min_length=1, max_length=200)
+    url: Optional[str] = Field(None, max_length=1000, pattern="^[Hh][Tt][Tt][Pp][Ss]?://")
+    requested_by: Optional[str] = Field(None, max_length=255)
+
+
 class ChangeRequestCreate(BaseModel):
     # Caps mirror change_service.create_change_request so an over-cap body is 422 at validation, before
     # the service is entered (title 300 / description 8000 / justification 2000 / 20 targets, 200 chars each).
@@ -811,6 +957,21 @@ class ChangeRequestCreate(BaseModel):
     targets: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
     requested_change_type: str = Field("normal", pattern="^(normal|emergency)$")
     justification: str = Field("", max_length=2000)
+    proposed_steps: Optional[List[ChangeProposedStep]] = Field(None, max_length=50)
+    external_ref: Optional[ChangeExternalRef] = None
+
+
+class ChangeIntakeBody(BaseModel):
+    """POST /api/changes/intake (spec §3.D.3). `requested_by` is the external requester's claimed name, kept as
+    external_ref.requested_by — never an identity (the requester is webhook:<external_ref.system>)."""
+    title: str = Field(..., min_length=1, max_length=300)
+    description: str = Field(..., min_length=1, max_length=8000)
+    justification: str = Field("", max_length=2000)
+    account: Optional[str] = None
+    target_hints: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
+    proposed_steps: Optional[List[ChangeProposedStep]] = Field(None, max_length=50)
+    external_ref: ChangeExternalRef
+    requested_by: Optional[str] = Field(None, max_length=255)
 
 
 class ChangeRequestResponse(BaseModel):
@@ -849,6 +1010,10 @@ class ChangeRequestResponse(BaseModel):
     chat_session_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    proposed_steps: Optional[list] = None
+    external_ref: Optional[dict] = None
+    steps_diff: Optional[dict] = None
+    needs_review_reason: Optional[str] = None
 
 
 class ChangeRequestDetail(ChangeRequestResponse):
@@ -856,10 +1021,17 @@ class ChangeRequestDetail(ChangeRequestResponse):
     executions: List[FixExecutionResponse] = Field(default_factory=list)
     # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)
     policy_decision: Optional[dict] = None
+    available_actions: List[dict] = Field(default_factory=list)  # services/ui_actions.change_actions
 
 
 class ChangeReasonBody(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChangeApproveBody(ChangeReasonBody):
+    content_hash: str = Field(..., max_length=64,
+                              description="content_hash of the implementation plan as reviewed (409 when it changed "
+                                          "or is empty)")
 
 
 class ChangeClarifyBody(BaseModel):

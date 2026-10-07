@@ -1,51 +1,71 @@
-// Single source of truth for chat attachment types + limits (mirrors backend
-// file_reader.py caps so client validation never disagrees with the server).
+// Chat attachment rules (MVP-2.7.0 S5): they come from the server — GET /api/ui/bootstrap `upload_policy`, built
+// from chat/file_reader in the send handler's own dispatch order (image → native document → text fallback) — so the
+// composer and the server never disagree. FALLBACK_POLICY mirrors that policy for the moment before bootstrap loads.
 
-export const MAX_ATTACHMENTS = 5;
+export interface UploadPolicy {
+  max_files: number; image_max_bytes: number; document_max_bytes: number; text_fallback_max_bytes: number;
+  image_extensions: string[]; document_extensions: string[]; text_extensions: string[];
+}
 
-// Per-extension-class size caps — MUST match how app.py routes each upload
-// through file_reader.py (verified against the live classification):
-//   image    (is_image_file)    → MAX_IMAGE_SIZE     5 MB
-//   document (is_document_file) → MAX_DOCUMENT_SIZE  5 MB  ← txt/md/csv land HERE
-//   text/else (read_upload_bytes) → MAX_FILE_SIZE    512 KB
-// NOTE: .txt/.md/.csv are DOCUMENTS server-side (5 MB), NOT the 512 KB text path.
-// Only log/json/yaml/yml/py/sh/xml/tf fall through to the 512 KB else-branch.
 const KB = 1024;
 const MB = 1024 * 1024;
-const MAX_TEXT_SIZE = 512 * KB;
-const MAX_IMAGE_SIZE = 5 * MB;
-const MAX_DOCUMENT_SIZE = 5 * MB;
 
-const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp"];
-// Document branch server-side (is_document_file): 5 MB cap.
-const DOCUMENT_EXTS = ["pdf", "docx", "txt", "md", "csv"];
-// Else/text branch server-side (read_upload_bytes): 512 KB cap.
-const TEXT_EXTS = ["log", "json", "yaml", "yml", "py", "sh", "xml", "tf"];
+export const FALLBACK_POLICY: UploadPolicy = {
+  max_files: 5, image_max_bytes: 5 * MB, document_max_bytes: 5 * MB, text_fallback_max_bytes: 512 * KB,
+  image_extensions: [".gif", ".jpeg", ".jpg", ".png", ".webp"],
+  document_extensions: [".csv", ".doc", ".docx", ".html", ".md", ".pdf", ".txt", ".xls", ".xlsx"],
+  text_extensions: [".cfg", ".conf", ".hcl", ".ini", ".js", ".json", ".log", ".py", ".sh", ".tf", ".toml", ".ts",
+                    ".xml", ".yaml", ".yml"],
+};
 
-export const ACCEPTED_EXTENSIONS: string[] = [...IMAGE_EXTS, ...DOCUMENT_EXTS, ...TEXT_EXTS];
-
-/** value for an <input accept="..."> attribute, derived from ACCEPTED_EXTENSIONS. */
-export const acceptAttr: string = ACCEPTED_EXTENSIONS.map((e) => `.${e}`).join(",");
+export interface AttachmentRules {
+  max: number;
+  accept: string;                       // for <input accept="…">
+  maxSizeFor(name: string): number;     // by the type class the server routes it to; unknown → the text cap
+  accepted(name: string): boolean;
+}
 
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
 }
 
-/** Size cap for a file by its extension class. Unknown → text cap (smallest). */
-export function maxSizeForFile(name: string): number {
-  const ext = extOf(name);
-  if (IMAGE_EXTS.includes(ext)) return MAX_IMAGE_SIZE;
-  if (DOCUMENT_EXTS.includes(ext)) return MAX_DOCUMENT_SIZE;
-  return MAX_TEXT_SIZE;
+const bare = (exts: string[]) => exts.map((e) => e.replace(/^\./, "").toLowerCase());
+
+export function attachmentRules(policy: UploadPolicy): AttachmentRules {
+  const images = bare(policy.image_extensions), documents = bare(policy.document_extensions);
+  const texts = bare(policy.text_extensions);
+  const all = [...images, ...documents, ...texts];
+  return {
+    max: policy.max_files,
+    accept: all.map((e) => `.${e}`).join(","),
+    maxSizeFor(name) {
+      const ext = extOf(name);
+      if (images.includes(ext)) return policy.image_max_bytes;
+      if (documents.includes(ext)) return policy.document_max_bytes;
+      return policy.text_fallback_max_bytes;
+    },
+    accepted: (name) => all.includes(extOf(name)),
+  };
 }
 
-function isAccepted(name: string): boolean {
-  return ACCEPTED_EXTENSIONS.includes(extOf(name));
-}
+const DEFAULT_RULES = attachmentRules(FALLBACK_POLICY);
+export const MAX_ATTACHMENTS = DEFAULT_RULES.max;
+export const acceptAttr: string = DEFAULT_RULES.accept;
+export const maxSizeForFile = (name: string) => DEFAULT_RULES.maxSizeFor(name);
 
 function humanSize(bytes: number): string {
   return bytes >= MB ? `${Math.round(bytes / MB)} MB` : `${Math.round(bytes / KB)} KB`;
+}
+
+/** Why a file was not attached; the composer words it in the user's language (attachmentErrorText). */
+export type AttachmentError = { kind: "type"; name: string } | { kind: "size"; name: string; limit: number }
+  | { kind: "count"; limit: number };
+
+export function attachmentErrorText(e: AttachmentError, t: (k: string) => string): string {
+  const name = "name" in e ? e.name : "";
+  const limit = e.kind === "size" ? humanSize(e.limit) : e.kind === "count" ? String(e.limit) : "";
+  return t(`chat.attach.${e.kind}`).replace("{name}", name).replace("{limit}", limit);
 }
 
 // Minimal structural shapes (NOT the DOM DataTransfer/ClipboardEvent, which are
@@ -89,7 +109,7 @@ export function fileKey(f: File): string {
 
 export interface ValidationResult {
   accepted: File[];
-  errors: string[];
+  errors: AttachmentError[];
 }
 
 /**
@@ -101,25 +121,25 @@ export interface ValidationResult {
  * Duplicates are silently skipped (no error noise — re-pasting the same screenshot
  * is a common, benign action).
  */
-export function validateFiles(existing: File[], incoming: File[]): ValidationResult {
+export function validateFiles(existing: File[], incoming: File[], rules: AttachmentRules = DEFAULT_RULES): ValidationResult {
   const accepted: File[] = [];
-  const errors: string[] = [];
+  const errors: AttachmentError[] = [];
   const seen = new Set(existing.map(fileKey)); // dedup vs current selection + within batch
   let count = existing.length;
   for (const f of incoming) {
     const key = fileKey(f);
     if (seen.has(key)) continue; // duplicate — skip silently
-    if (!isAccepted(f.name)) {
-      errors.push(`${f.name}: type not supported`);
+    if (!rules.accepted(f.name)) {
+      errors.push({ kind: "type", name: f.name });
       continue;
     }
-    const cap = maxSizeForFile(f.name);
+    const cap = rules.maxSizeFor(f.name);
     if (f.size > cap) {
-      errors.push(`${f.name}: too large (max ${humanSize(cap)})`);
+      errors.push({ kind: "size", name: f.name, limit: cap });
       continue;
     }
-    if (count >= MAX_ATTACHMENTS) {
-      errors.push(`too many files (max ${MAX_ATTACHMENTS})`);
+    if (count >= rules.max) {
+      errors.push({ kind: "count", limit: rules.max });
       break;
     }
     seen.add(key);

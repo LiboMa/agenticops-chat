@@ -3,9 +3,11 @@
 import hashlib
 import logging
 import re
-from typing import Callable
+from datetime import datetime, timezone
+from typing import Callable, Optional
 
-from agenticops.integrations.base import AlertPayload
+from agenticops.galaxy.rules import arn_region
+from agenticops.integrations.base import HINT_KEYS, AlertPayload
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,63 @@ def _tags_list_to_dict(tags: list) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Identity hints + fault time (MVP-2.6.1 spec §3.B.5) — only what the source itself carries
+# ---------------------------------------------------------------------------
+
+_EPOCH_MS_FLOOR = 1e11  # an epoch above this is milliseconds (1e11 seconds is the year 5138)
+_OLDEST_PLAUSIBLE_YEAR = 2000  # Go's zero time 0001-01-01 (Alertmanager endsAt) means "not set"
+_NUMERIC_RE = re.compile(r"\d+(\.\d+)?")
+
+
+def _observed_at(value) -> Optional[datetime]:
+    """When the source says the fault happened, as aware UTC; None for anything that is not a plausible time.
+
+    Accepts ISO-8601 text (Alertmanager's nanosecond fractions are cut to microseconds, naive text is UTC)
+    and epoch seconds or milliseconds as a number or a digit string (Datadog webhook templates).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, (int, float)) or (isinstance(value, str) and _NUMERIC_RE.fullmatch(value.strip())):
+            seconds = float(value)
+            if seconds > _EPOCH_MS_FLOOR:
+                seconds /= 1000
+            dt = datetime.fromtimestamp(seconds, tz=timezone.utc)
+        elif isinstance(value, str) and value.strip():
+            dt = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", value.strip()))
+        else:
+            return None
+    except (ValueError, OverflowError, OSError):
+        return None
+    dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return dt if dt.year >= _OLDEST_PLAUSIBLE_YEAR else None
+
+
+def _hints(**values) -> dict[str, str]:
+    """The hints a source filled: plain str/int values, stripped; empty, bool and nested values are dropped."""
+    out: dict[str, str] = {}
+    for key, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            continue
+        if str(value).strip():
+            out[key] = str(value).strip()
+    return out
+
+
+def _known_hints(values) -> dict[str, str]:
+    """A free-form dict (generic `hints`, PagerDuty custom_details) filtered to HINT_KEYS."""
+    return _hints(**{k: values.get(k) for k in HINT_KEYS}) if isinstance(values, dict) else {}
+
+
+def _label_hints(labels: dict) -> dict[str, str]:
+    """Prometheus / Grafana labels (kube-state-metrics names). `service` is left out: kube-prometheus relabels
+    the scrape target's Service onto every series, so it names the exporter, not the faulty object."""
+    return _hints(account=labels.get("account"), region=labels.get("region"), cluster=labels.get("cluster"),
+                  namespace=labels.get("namespace"), pod=labels.get("pod"),
+                  workload=labels.get("deployment") or labels.get("statefulset") or labels.get("daemonset"))
+
+
+# ---------------------------------------------------------------------------
 # Source parsers
 # ---------------------------------------------------------------------------
 
@@ -160,6 +219,11 @@ def parse_datadog(body: dict) -> AlertPayload:
 
     resource_hint = _extract_resource_hint_from_tags(raw_tags)
     tags = _tags_list_to_dict(raw_tags)
+    hints = _hints(account=tags.get("aws_account"), region=tags.get("region"),
+                   cluster=tags.get("kube_cluster_name"), namespace=tags.get("kube_namespace"),
+                   workload=(tags.get("kube_deployment") or tags.get("kube_stateful_set")
+                             or tags.get("kube_daemon_set")),
+                   pod=tags.get("pod_name"), service=tags.get("kube_service"))
 
     return AlertPayload(
         source="datadog",
@@ -170,6 +234,8 @@ def parse_datadog(body: dict) -> AlertPayload:
         resource_hint=resource_hint,
         tags=tags,
         raw=body,
+        hints=hints,
+        observed_at=_observed_at(body.get("date_happened") or body.get("date") or body.get("last_updated")),
     )
 
 
@@ -218,6 +284,8 @@ def parse_pagerduty(body: dict) -> AlertPayload:
         resource_hint=resource_hint,
         tags={},
         raw=body,
+        hints=_known_hints(custom_details),
+        observed_at=_observed_at(payload.get("timestamp")),
     )
 
 
@@ -289,6 +357,8 @@ def parse_grafana_all(body: dict) -> list[AlertPayload]:
             raw=body,
             kind="resolution" if resolved else "alert",
             issue_type=classify_issue_type(title, alertname=alertname),
+            hints=_label_hints(labels),
+            observed_at=_observed_at(alert.get("startsAt")),
         ))
     return out
 
@@ -368,6 +438,8 @@ def parse_prometheus_all(body: dict) -> list[AlertPayload]:
             raw=body,
             kind="resolution" if resolved else "alert",
             issue_type=classify_issue_type(title, alertname=title),
+            hints=_label_hints(labels),
+            observed_at=_observed_at(alert.get("startsAt")),
         ))
     return out
 
@@ -437,6 +509,14 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
         tags["state"] = state_value
 
     trigger_dict = trigger if isinstance(trigger, dict) else {}
+    # "Region" is a display name ("Asia Pacific (Singapore)"); the region code lives in the AlarmArn.
+    hints = _hints(account=body.get("AWSAccountId"), region=arn_region(str(body.get("AlarmArn") or "")))
+    if trigger_dict.get("Namespace") == "ContainerInsights":  # EKS / K8s; ECS uses ECS/ContainerInsights
+        raw_dims = trigger_dict.get("Dimensions")  # hints are best-effort: a malformed list never fails the parse
+        dims = {d["name"]: d.get("value") for d in (raw_dims if isinstance(raw_dims, list) else [])
+                if isinstance(d, dict) and isinstance(d.get("name"), str)}
+        hints.update(_hints(cluster=dims.get("ClusterName"), namespace=dims.get("Namespace"),
+                            pod=dims.get("FullPodName") or dims.get("PodName"), service=dims.get("Service")))
     return AlertPayload(
         source="cloudwatch",
         external_id=str(external_id),
@@ -452,6 +532,9 @@ def parse_cloudwatch(body: dict) -> AlertPayload:
             namespace=str(trigger_dict.get("Namespace", "")),
             metric=str(trigger_dict.get("MetricName", "")),
         ),
+        hints=hints,
+        observed_at=_observed_at(body.get("StateChangeTime")),
+        alarm_name=str(alarm_name or ""),
     )
 
 
@@ -499,6 +582,8 @@ def parse_generic(body: dict) -> AlertPayload:
         resource_hint=resource_hint,
         tags=raw_tags,
         raw=body,
+        hints=_known_hints(body.get("hints")),
+        observed_at=_observed_at(body.get("observed_at") or body.get("timestamp")),
     )
 
 

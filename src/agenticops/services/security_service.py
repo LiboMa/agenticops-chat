@@ -9,6 +9,7 @@ from agenticops.models import (
     SecuritySnapshot,
     get_db_session,
 )
+from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
 
 _SECURITY_DETECTORS = ("security_poll", "security_posture")
 
@@ -25,7 +26,7 @@ def security_summary() -> dict:
     with get_db_session() as session:
         rows = (session.query(HealthIssue)
                 .filter(HealthIssue.detected_by.in_(_SECURITY_DETECTORS))
-                .filter(HealthIssue.status != "resolved").all())
+                .filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES)).all())
         total_open = len(rows)
         accounts = []
         for snap in _latest_snapshots(session):

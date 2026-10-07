@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenticOps 2.5.0 → 2.6.1 更新全景</title>
+<style>
+:root{
+  --surface:#fcfcfb; --page:#f9f9f7; --white:#ffffff;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10); --wash:#f4f3f0;
+  --s1:#2a78d6; --s2:#eb6834;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --accent:#2a78d6; --accent-wash:#eef4fc;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+*{box-sizing:border-box}
+html{font-size:15px;scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);line-height:1.65}
+.wrap{display:grid;grid-template-columns:232px minmax(0,1fr);max-width:1420px;margin:0 auto}
+nav.toc{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 14px 28px 22px;border-right:1px solid var(--grid);font-size:13.5px}
+nav.toc .h{font-weight:650;margin:0 0 10px 8px;color:var(--ink)}
+nav.toc a{display:block;padding:4px 8px;color:var(--ink2);text-decoration:none;border-radius:4px;border-left:2px solid transparent;line-height:1.45;margin-bottom:2px}
+nav.toc a:hover{background:var(--wash)}
+nav.toc a.on{color:var(--ink);background:var(--accent-wash);border-left-color:var(--accent)}
+main{padding:32px 44px 80px;max-width:1170px;min-width:0}
+header.top{margin:0 0 22px}
+h1{font-size:28px;line-height:1.3;margin:0 0 8px}
+.sub{color:var(--ink2);font-size:13.5px}
+section{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px 28px;margin:0 0 24px;scroll-margin-top:12px}
+h2{font-size:21px;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--grid)}
+h2 .no{color:var(--muted);font-weight:500;margin-right:8px}
+h3{font-size:16.5px;margin:24px 0 10px}
+h4{font-size:14.5px;margin:16px 0 6px}
+p{margin:8px 0}
+ul,ol{margin:8px 0;padding-left:22px}
+li{margin:3px 0}
+code{font-family:var(--mono);font-size:0.86em;background:#f0efec;padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+a{color:#1c5cab}
+table{border-collapse:collapse;width:100%;margin:10px 0 14px;font-size:13.5px;background:var(--white)}
+th,td{border-bottom:1px solid var(--grid);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--wash);font-weight:600;color:var(--ink2)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.nw,th.nw{white-space:nowrap}
+tr.hl td{background:#f7f9fd}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;line-height:1.5;padding:1px 9px;border-radius:10px;background:var(--wash);white-space:nowrap;border:1px solid var(--border);color:var(--ink)}
+.st::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.st.ok::before{background:var(--good)}
+.st.no::before{background:var(--crit)}
+.st.ut::before{background:var(--s1)}
+.st.wip::before{background:var(--warn)}
+.st.dec::before{background:var(--serious)}
+.st.int::before{background:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 6px}
+.kpi{border:1px solid var(--border);border-radius:8px;padding:12px 16px;background:var(--white)}
+.kpi .l{font-size:12.5px;color:var(--ink2)}
+.kpi .v{font-size:23px;font-weight:650;margin:2px 0 3px;line-height:1.3}
+.kpi .s{font-size:12px;color:var(--muted);line-height:1.5}
+.story{margin:6px 0 0;padding-left:0;list-style:none;counter-reset:s}
+.story li{position:relative;padding:6px 0 6px 34px;border-bottom:1px dashed var(--grid);counter-increment:s}
+.story li::before{content:counter(s);position:absolute;left:0;top:7px;width:22px;height:22px;border-radius:50%;background:var(--accent-wash);color:#1c5cab;font-size:12px;font-weight:650;text-align:center;line-height:22px}
+.note{background:#f6f6f3;border-left:3px solid var(--axis);padding:10px 14px;font-size:13.5px;color:var(--ink2);margin:12px 0;border-radius:0 4px 4px 0}
+.concl{border:1px solid var(--border);border-left:4px solid var(--ink);background:var(--white);padding:12px 18px;margin:14px 0;border-radius:0 6px 6px 0}
+.concl p{margin:6px 0}
+.plan{border:1px solid var(--border);border-left:4px solid var(--s1);border-radius:6px;padding:12px 20px 14px;margin:16px 0;background:var(--white)}
+.plan h3{margin:6px 0 8px}
+.plan .meas{font-size:13px;color:var(--ink2);background:var(--wash);padding:8px 12px;border-radius:4px;margin-top:8px}
+.tag{display:inline-block;font-size:11.5px;border-radius:3px;padding:0 6px;font-weight:600;line-height:1.7;white-space:nowrap}
+.tag.code{background:#e5eefb;color:#184f95}
+.tag.llm{background:#fce9df;color:#9a3f17}
+.tag.hum{background:#e3f2e9;color:#1d5e3f}
+.flow{margin:12px 0}
+.step{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:start;border:1px solid var(--border);border-radius:6px;padding:8px 12px;background:var(--white);font-size:13.5px}
+.step .k{font-weight:600}
+.step ul{margin:4px 0 0;padding-left:18px}
+.dn{padding-left:44px;color:var(--muted);line-height:1;font-size:15px;margin:3px 0}
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0}
+.chain .c{border:1px solid var(--border);background:var(--white);padding:5px 10px;border-radius:5px;font-size:13px}
+.chain .a{color:var(--muted)}
+.tl{display:grid;grid-template-columns:1fr 1.15fr 1.3fr 1.75fr;margin-top:14px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--white)}
+.tl .ph{padding:9px 12px;font-weight:650;font-size:14px;background:var(--accent-wash);border-top:5px solid var(--s1);border-right:1px solid var(--white)}
+.tl .ph small{display:block;font-weight:400;font-size:12px;color:var(--ink2)}
+.tl .p1{border-top-color:#9ec5f4}.tl .p2{border-top-color:#6da7ec}.tl .p3{border-top-color:#3987e5}.tl .p4{border-top-color:#1c5cab}
+.tl .ev{padding:10px 12px 2px;border-right:1px solid var(--grid)}
+.tl .ev:last-child{border-right:none}
+.tl .ev div{margin:0 0 10px;font-size:13px;line-height:1.5;padding-left:12px;position:relative}
+.tl .ev div::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:var(--axis)}
+.tl .ev b{font-variant-numeric:tabular-nums}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+figure{margin:14px 0 18px}
+figure svg{width:100%;height:auto;display:block;background:var(--white);border:1px solid var(--border);border-radius:6px}
+figcaption{font-size:12.5px;color:var(--ink2);margin-top:6px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:var(--ink2);margin:6px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px}
+.sw.box{background:var(--white);border:1.2px solid var(--ink2);width:18px;height:12px;border-radius:3px}
+.sw.term{background:#f0efec;border:2px solid var(--ink);width:18px;height:12px;border-radius:3px}
+.sw.ghost{border:1.2px dashed var(--muted);width:18px;height:12px;border-radius:3px}
+.sw.line{width:22px;height:0;border-top:1.6px solid var(--ink2);border-radius:0}
+.sw.dash{width:22px;height:0;border-top:1.6px dashed var(--ink2);border-radius:0}
+/* state machines + architecture */
+.sm .n rect{fill:#ffffff;stroke:#52514e;stroke-width:1.2}
+.sm .n.term rect{fill:#f0efec;stroke:#0b0b0b;stroke-width:2}
+.sm .n.ghost rect{fill:none;stroke:#898781;stroke-width:1.2;stroke-dasharray:4 3}
+.sm .n.ghost text{fill:#52514e}
+.sm text{font-family:var(--mono);font-size:13px;fill:#0b0b0b;text-anchor:middle;dominant-baseline:central}
+.sm .e{fill:none;stroke:#52514e;stroke-width:1.4}
+.sm .e.back{stroke-dasharray:5 4}
+.sm .lbl{font-family:var(--sans);font-size:12px;fill:#52514e}
+.sm .lbl.s{text-anchor:start}
+.arch rect{fill:#ffffff;stroke:#c3c2b7;stroke-width:1.2}
+.arch rect.hl{fill:#eef4fc;stroke:#6da7ec}
+.arch rect.dashed{fill:#fbfbf9;stroke:#898781;stroke-dasharray:5 4}
+.arch text{font-family:var(--sans);text-anchor:middle;dominant-baseline:central;fill:#0b0b0b}
+.arch .t1{font-size:14px;font-weight:600}
+.arch .t2{font-size:12px;fill:#52514e}
+.arch .e{fill:none;stroke:#52514e;stroke-width:1.4}
+.arch .lbl{font-size:12px;fill:#52514e}
+/* charts */
+.chart text{font-family:var(--sans);font-size:11px;fill:#898781}
+.chart .val{fill:#52514e}
+.chart .grid{stroke:#e1e0d9;stroke-width:1}
+.chart .base{stroke:#c3c2b7;stroke-width:1}
+.chart .hit{fill:transparent}
+.chart g.g:hover .hit{fill:rgba(11,11,11,0.045)}
+.chart .s1{fill:#2a78d6}
+.chart .s2{fill:#eb6834}
+.chart .ann{fill:#52514e;font-size:11.5px}
+.small{font-size:12.5px;color:var(--ink2)}
+.src{font-size:12.5px;color:var(--ink2)}
+.src li{margin:2px 0}
+@media (max-width:1050px){.wrap{display:block} nav.toc{display:none} main{padding:20px} .kpis{grid-template-columns:1fr 1fr} .grid2{grid-template-columns:1fr} .tl{grid-template-columns:1fr 1fr}}
+@media print{
+  nav.toc{display:none}
+  .wrap{display:block;max-width:none}
+  main{padding:0;max-width:none}
+  body{background:#fff;font-size:12px}
+  section{border:none;padding:0 0 10px;margin:0 0 14px;break-inside:auto}
+  table,figure,.plan,.kpi,.step,.concl{break-inside:avoid}
+  h2,h3{break-after:avoid}
+  a{color:inherit;text-decoration:none}
+}
+@page{size:A4;margin:14mm}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="目录">
+  <div class="h">目录</div>
+  <a href="#s1">1 一页总览</a>
+  <a href="#s2">2 版本时间线</a>
+  <a href="#s3">3 2.5.0 基线</a>
+  <a href="#s4">4 2.5.x：模型与技能</a>
+  <a href="#s5">5 2.6.0：变更管理</a>
+  <a href="#s6">6 2.6.1：五个计划</a>
+  <a href="#s7">7 用户可达面对照</a>
+  <a href="#s8">8 实测证据</a>
+  <a href="#s9">9 Galaxy 收敛情况</a>
+  <a href="#s10">10 已知缺口与待主人决定</a>
+  <a href="#s11">11 下一步</a>
+  <a href="#src">资料来源</a>
+</nav>
+<main>
+<header class="top">
+  <h1>AgenticOps 2.5.0 → 2.6.1 更新全景</h1>
+  <div class="sub">写给项目主人。范围：2.5.0 交付（<code>a89f194</code>，2026-08-31）到 <code>fe7e9fd</code>（2026-10-03，联合 E2E 期间最后一个 2.6.1 提交），另记之后的两个本地提交（当前 HEAD <code>e762b9a</code>）。
+  数字取自仓库内的发布说明、E2E 报告、评测报告，以及控制器的「2026-10-03 实测」数据（2026-10-04 补充核对）；出处见文末。
+  <br>当前状态：2.6.1 联合 live E2E 进行中；Plan A 已推送，Plan B–E 仍在本地，未推送。</div>
+</header>
+
+<!-- ============================ 1 ============================ -->
+<section id="s1">
+<h2><span class="no">1</span>一页总览</h2>
+<ol class="story">
+  <li><b>2.5.0 · 云安全审查 P1</b>（08-31 交付，<code>a89f194</code>）：双频确定性采集、可复现的 CIS 评分、含 NACL 的三态可达性、证据接地的建议器（唯一用 LLM 的环节）。</li>
+  <li><b>2.5.x · 模型与技能</b>（09-03 ~ 09-08）：接入 Claude 5 家族，thinking 请求形状按模型版本选（≥ 4.6 用 adaptive，&lt; 4.6 用 <code>budget_tokens</code>）；OpenAI 模型在 Bedrock 上与 Claude 同等可用；技能可从 URL / git / zip 导入，发布前扫描整包，自带脚本可在沙箱里跑（默认关）。</li>
+  <li><b>2.6.0 · 变更管理：变更不再冒充事件</b>（<code>2bc2034</code>，09-27）：日常变更走 工单 → SRE 只读审核 → 策略 → 人工审批 → Executor，不再需要假的 HealthIssue。RBAC 影子模式，审批人取会话身份，决策和命令各记一本账。</li>
+  <li><b>2.6.1 · 图驱动的 RCA 定位闭环</b>：Issue 锚到库存里的资源 → 规范关系表 <code>resource_relations</code> → RCA 用工具取局部图证据，输出的结构化定位经 fail-closed 校验 → 人判定定位对错，有统计。</li>
+  <li><b>2.6.1 · 审批绑定内容，执行后验收</b>：方案带 <code>plan_version</code> + <code>content_hash</code>，审批必须带上审批人看过的哈希；每次执行给一个确定性判定，缺结果永远不算通过；HealthIssue 状态只有一个写入口。</li>
+  <li><b>2.6.1 · 界面三分</b>：侧栏改为 问题 / 变更 / 审计；IssueDetail 拆成五个 tab，ChangeDetail 首屏一句话说清状态，三处页面画出局部关系图。</li>
+  <li><b>现在</b>：Plan A 已于 09-30 推送（<code>ab4093c</code> + tag <code>v2.6.1</code>，tag 只含 Plan A）；B–E 与之后的「批准即执行」（HEAD <code>e762b9a</code>）未推；联合 E2E 已完成清单第 1、4、5 项和第 6 项的 API 部分，第 2、3 项、第 6 项的界面部分和第 7 项待主人走查。</li>
+</ol>
+<div class="kpis">
+  <div class="kpi"><div class="l">提交数</div><div class="v">267</div><div class="s">153（<code>a89f194</code>→<code>2bc2034</code>，2.6.0）+ 114（<code>2bc2034</code>→<code>fe7e9fd</code>，2.6.1）；另有本地 2 个（<code>6cf348e</code>、<code>e762b9a</code>）</div></div>
+  <div class="kpi"><div class="l">代码改动（src + tests）</div><div class="v">343 个文件</div><div class="s">+50763 / −4264，<code>a89f194</code>→<code>fe7e9fd</code>（2026-10-03 实测）</div></div>
+  <div class="kpi"><div class="l">全量 pytest passed</div><div class="v">4333 → 5450 → 6350</div><div class="s">2.5.0 线 / 2.6.0 / 2.6.1@<code>fe7e9fd</code>，均 85 skipped；HEAD <code>e762b9a</code> 为 6357 passed；前端 vitest 27 个文件 / 279 个测试</div></div>
+  <div class="kpi"><div class="l">RCA 定位 AC@1</div><div class="v">0.00 → 0.77</div><div class="s">拓扑证据 off → on #2，chaos-lab 13 个场景</div></div>
+  <div class="kpi"><div class="l">图召回率</div><div class="v">13 / 13</div><div class="s">三个计分批次都是；硬门槛 ≥ 12/13</div></div>
+  <div class="kpi"><div class="l">Issue 锚定率</div><div class="v">66.1% <span class="st no">未达标</span></div><div class="s">目标 ≥ 95%；（562 + 25）/ 888；按设计不放宽规则，如实报告原因分布</div></div>
+</div>
+</section>
+
+<!-- ============================ 2 ============================ -->
+<section id="s2">
+<h2><span class="no">2</span>版本时间线</h2>
+<div class="tl">
+  <div class="ph p1">2.5.0 云安全审查<small>08-29 ~ 08-31</small></div>
+  <div class="ph p2">2.5.x 模型与技能<small>09-03 ~ 09-08</small></div>
+  <div class="ph p3">2.6.0 变更管理<small>09-16 ~ 09-27</small></div>
+  <div class="ph p4">2.6.1 图 + Issue / Change<small>09-28 ~ 进行中</small></div>
+  <div class="ev">
+    <div><b>08-29</b> P1 设计（spec 2026-08-29）</div>
+    <div><b>08-31</b> Stages 0–7 交付 <code>a89f194</code>；主人确认后推送到 <code>origin/MVP-2.5.0</code></div>
+  </div>
+  <div class="ev">
+    <div><b>09-03</b> <code>5308856</code> Claude 5 家族 + 按模型选 thinking 形状</div>
+    <div><b>09-03</b> <code>410633c</code> OpenAI 模型在 Bedrock 上一等公民</div>
+    <div><b>09-07 / 09-08</b> 技能广域加载、整包安全门、脚本沙箱；与 <code>main</code> 合流</div>
+  </div>
+  <div class="ev">
+    <div><b>09-16</b> 变更管理 P1 设计（spec 2026-09-16）</div>
+    <div><b>09-26</b> dev 机 live E2E，部署 <code>5f95120</code>，设计 §7 七步全过</div>
+    <div><b>09-27</b> <code>2bc2034</code> = <code>origin/MVP-2.5.0</code> 头（含 E2E 修复 <code>1633ea9</code> / <code>518f1cd</code> 与 E2E 报告）</div>
+  </div>
+  <div class="ev">
+    <div><b>09-28</b> 设计 + 计划 A–E</div>
+    <div><b>09-29</b> 发布说明草稿</div>
+    <div><b>09-30</b> Plan A <code>ab4093c</code> 提交，经主人同意当天推送，打 annotated tag <code>v2.6.1</code>；图事实实测（锚定率、查询性能）</div>
+    <div><b>10-02</b> 最终门禁：pytest 6347 passed（<code>0c745cc</code>）；前端四道门（<code>c7630e7</code>）</div>
+    <div><b>10-02 / 10-03</b> 联合 E2E（chaos-lab）：定位评测三个计分批次；修复 RCA 重采偏差 <code>b401d36</code> + <code>fe7e9fd</code>（10-03 10:26 +0800），pytest 6350 passed</div>
+    <div><b>10-03</b> Galaxy 收敛检查（第 9 节）；之后在本地实现「批准即执行」（<code>6cf348e</code> 红测、<code>e762b9a</code> 实现，第 11 节）</div>
+  </div>
+</div>
+<h3>推送与 tag 状态</h3>
+<table>
+<tr><th>段</th><th>代码</th><th>远端状态</th></tr>
+<tr><td class="nw">2.5.0</td><td><code>a89f194</code></td><td>已推送 <code>origin/MVP-2.5.0</code>（主人 2026-08-31 确认）</td></tr>
+<tr><td class="nw">2.5.x</td><td><code>5308856</code>、<code>410633c</code>、09-07 / 09-08 的技能提交</td><td>在 <code>MVP-2.5.0</code> 分支上，包含在 <code>origin/MVP-2.5.0</code> 里（<code>a89f194</code> 与 <code>2bc2034</code> 之间）</td></tr>
+<tr><td class="nw">2.6.0</td><td><code>2bc2034</code>：<code>a89f194</code> 之后 153 个提交；src + tests 187 个文件，+30008 / −2413</td><td><code>origin/MVP-2.5.0</code> 头。变更管理落在 <code>MVP-2.5.0</code> 分支，没有单独的 2.6.0 分支</td></tr>
+<tr><td class="nw">2.6.1 Plan A</td><td><code>ab4093c</code></td><td>2026-09-30 已推送 <code>origin/MVP-2.6.1</code>；annotated tag <code>v2.6.1</code> → <code>ab4093c</code>，是仓库唯一的 tag（目前只含 Plan A；2.6.0 没有 tag，它在 <code>MVP-2.5.0</code> 分支的 <code>2bc2034</code>）</td></tr>
+<tr><td class="nw">2.6.1 Plan B–E</td><td>到 <code>fe7e9fd</code>：<code>2bc2034</code> 之后共 114 个提交；src + tests 235 个文件，+21465 / −2561</td><td>本地，<b>未推送</b>；等联合 E2E 通过 + 主人确认</td></tr>
+<tr><td class="nw">批准即执行</td><td><code>6cf348e</code>（红测）+ <code>e762b9a</code>（实现）</td><td>本地，<b>未推送</b>（第 11 节）</td></tr>
+</table>
+</section>
+
+<!-- ============================ 3 ============================ -->
+<section id="s3">
+<h2><span class="no">3</span>2.5.0 基线（简述）</h2>
+<p>一句话：把散落在云厂商各服务里的安全信号收敛成一份准实时、可复现、消除误报的安全态势。它是本文的起点，所以只列要点。</p>
+<div class="grid2">
+<div>
+<h4>四条精确度原则（研发宪法）</h4>
+<ol>
+  <li>采集只采信官方判定，采集层零 LLM。</li>
+  <li>精确度来自跨源关联，不来自单点告警。</li>
+  <li>可达性用确定性图算法，保守偏报：数据不全标 <code>undetermined</code>，不标「安全」。</li>
+  <li>评分对标 CIS 客观基线；LLM 建议必须证据接地并过 critic，被驳回即丢弃。</li>
+</ol>
+</div>
+<div>
+<h4>真实账户只读 E2E（2 个账户，含中国区）</h4>
+<ul>
+  <li>Global 账户三态齐现：9 <code>reachable</code> / 22 <code>undetermined</code> / 2 <code>not_reachable</code></li>
+  <li>1110 条安全信号 → 865 条 merged（78% 去重），仅 245 条 promoted</li>
+  <li>8 条建议全部被 critic 判为 <code>supported</code> 后入库</li>
+  <li>中国区 IAM / S3 / CloudTrail 令牌失效 → 跳过 + WARNING，快照照常产出</li>
+  <li>Stage 7 全量回归 3859 passed</li>
+</ul>
+</div>
+</div>
+<table>
+<tr><th>组件</th><th>文件</th><th>要点</th></tr>
+<tr><td>双频采集</td><td><code>security/posture_snapshot.py</code>、<code>incremental_poll.py</code></td><td>慢频态势快照（默认 60 分钟）+ 快频增量（默认 10 分钟，cursor 只在成功时前移）；逐源 fail-soft；全程经 provider 层取目标账户凭证</td></tr>
+<tr><td>CIS 评分</td><td><code>security/scoring.py</code></td><td>纯函数（无 random / time / LLM），同一快照两次算分结果一致；可达性与建议不改分数</td></tr>
+<tr><td>三态可达性</td><td><code>security/reachability.py</code></td><td>SG + 公网 IP + 子网 / IGW 路由 + NACL 有序规则 + 运行态；缺路由或 NACL 数据 → <code>undetermined</code></td></tr>
+<tr><td>建议器</td><td><code>security/advisor.py</code></td><td>parse → 对照库存接地 → 逐条 critic → fail-closed（未接地 / 被驳回 / 任何异常 → 0 行）</td></tr>
+<tr><td>发现入库</td><td><code>signal_gate.process_signal</code></td><td>→ HealthIssue（<code>auto_rca=False</code>），不新造发现表</td></tr>
+<tr><td>交付面</td><td colspan="2"><code>/api/security/{summary,trend,findings,recommendations,attack-paths}</code>、<code>security-review</code> 报告、<code>/app/security</code>、Dashboard 高亮卡</td></tr>
+</table>
+</section>
+
+<!-- ============================ 4 ============================ -->
+<section id="s4">
+<h2><span class="no">4</span>2.5.x：模型与技能（09-03 ~ 09-08）</h2>
+<p>这些改动在 2.5.0 交付（08-31）之后、2.6.0 之前落在 <code>MVP-2.5.0</code> 分支上，没有单独的版本号。2.5.0 发布说明里的 <b>4333 passed / 85 skipped</b> 和前端 vitest 53 是包含这批改动之后的数字。</p>
+
+<h3>4.1 Claude 5 家族（<code>5308856</code>，09-03）</h3>
+<ul>
+  <li>Opus 5 / Sonnet 5 / Fable 5.1 只能通过 <code>INFERENCE_PROFILE</code> 调用，id 为 <code>global.anthropic.*</code>。</li>
+  <li>版本号只有一段（<code>claude-opus-5</code>，没有小版本）。计费 key 和模型选择器标签的正则、<code>MODEL_WINDOW_DEFAULTS</code> 都已覆盖这种 id。漏掉一个家族，它会静默按 $0 计费，并回落到全局窗口。</li>
+  <li><code>MODEL_WINDOW_DEFAULTS</code> 取第一个匹配的子串，所以具体家族必须排在它的前缀前面（<code>claude-fable-5-1</code> 在 <code>claude-fable-5</code> 前）。<code>tests/test_claude5_bedrock_models.py</code> 钉住了这个顺序。</li>
+  <li>仓库里提交的默认模型：main Opus 5、sre Fable 5.1、rca / executor Opus 4.6、scan / detect / reporter Sonnet 4.6。</li>
+</ul>
+<table>
+<tr><th>模型</th><th>extended-thinking 请求形状</th><th>发错形状的后果</th></tr>
+<tr><td class="nw">Claude ≥ 4.6</td><td><code>{"thinking":{"type":"adaptive"},"output_config":{"effort":"low|medium|high|xhigh|max"}}</code></td><td>带旧的 <code>budget_tokens</code> → 400</td></tr>
+<tr><td class="nw">Claude &lt; 4.6（Haiku 4.5 及更早）</td><td><code>budget_tokens</code></td><td>拒绝 <code>adaptive</code></td></tr>
+<tr><td class="nw">非 Anthropic</td><td>有意保留 <code>budget_tokens</code> 形状，由 <code>bedrock_model_kwargs</code> 读它，转成该模型原生的 <code>reasoning_effort</code></td><td>—</td></tr>
+</table>
+<p class="small"><code>thinking_fields_for_budget(budget, max_tokens, model_id)</code> 的 <code>model_id</code> 是必填参数：两种形状互斥，猜错时请求会直接失败，不会降级。budget 仍是内部计量单位（2.2.1 的升级逻辑不变），按区间映射到 effort：2048 low · 4096 medium · 8192 high · 12288 xhigh · 更高为 max。</p>
+
+<h3>4.2 OpenAI 模型接入 Bedrock（<code>410633c</code>，09-03）</h3>
+<ul>
+  <li>动态模型列表同时列出 Anthropic 与 OpenAI：<code>gpt-oss-*</code> 用 ON_DEMAND 原始 id；<code>gpt-5.6-*</code> 经 <code>global.openai.*</code> 推理配置文件调用。</li>
+  <li>Anthropic 专有的请求特性（prompt cache 的 cachePoint、extended thinking）在 <code>agents/preamble.bedrock_model_kwargs</code> 里按模型家族开关，从不发给非 Claude 模型。</li>
+</ul>
+
+<h3>4.3 技能：广域加载、整包安全门、脚本沙箱（09-07 / 09-08）</h3>
+<p>三者都沿用「一律草稿 + 安全门 + 人类发布」的信任模型。</p>
+<table>
+<tr><th>能力</th><th>做了什么</th><th>安全边界</th><th>如实写明的限制</th></tr>
+<tr><td class="nw">广域加载<br><code>skills/sources.py</code></td>
+<td>从 <code>http(s)</code> 归档或单个 <code>SKILL.md</code>、git 仓库（<code>git+https://…[@ref][#subdir]</code>，<code>--depth 1</code>）、本地 zip / tar.gz / 目录导入，递归发现所有含 <code>SKILL.md</code> 的目录。三个面：CLI <code>aiops skills import</code>、API <code>POST /api/skills/import-source</code>、Web UI Skills → Import →「URL / Git 仓库」</td>
+<td>逐包 fail-closed：kebab-case 名、无符号链接、无穿越条目、后缀白名单（无后缀文件整包拒绝）、文件数与字节上限；staging + <code>os.replace</code> 原子落盘；一律进草稿（<code>created_by=imported</code> + 溯源戳）；导入过程绝不执行包内脚本</td>
+<td>不做包签名 / commit pin。单文件 URL 必须带 name + description frontmatter（live 复现过一个 290 KB 的 HTML 被装成草稿，已修）</td></tr>
+<tr><td class="nw">整包安全门<br><code>skills/security.py</code></td>
+<td><code>promote_skill</code> 调 <code>scan_skill_bundle</code>，扫 SKILL.md 正文 + 包内所有 <code>.sh</code> / <code>.py</code></td>
+<td><code>.py</code> 用 <code>ast</code> 解析并跟踪名字绑定（<code>model.eval()</code> 不再被误杀）；<code>.sh</code> 逐行匹配；不是目录、或 <code>.py</code> 无法解析，都按拒绝处理（fail-closed）</td>
+<td><code>_py_prepass</code> 用 <code>ast.walk</code> 收集绑定，不看可达性也不看作用域，有三种表现：别名合并；import 绑定后写覆盖前写（这一种是 fail-closed）；常量的死代码重赋值（这一种会漏报，fail-open）。它只是人工发布前的确定性预过滤，挡不住刻意的混淆</td></tr>
+<tr><td class="nw">脚本沙箱<br><code>skills/sandbox.py</code></td>
+<td>已发布技能自带的 <code>*.py</code> / <code>*.sh</code> 可经 executor 工具 <code>run_skill_script</code> 运行。<b>默认关</b>（<code>skills_sandbox_enabled: false</code>），关着时这个工具不出现在工具表里</td>
+<td>环境变量从空字典构建（只有 PATH / HOME / LANG，结构上不可能带 <code>AWS_*</code>）；用 <code>unshare -n</code> / <code>sandbox-exec</code> 隔离网络，拿不到隔离器就拒绝运行；解释器按后缀白名单选，<code>shell=False</code>；一次性 <code>mkdtemp</code> 工作目录；超时杀整个进程组；输出用 <code>selectors</code> 读，按字节截断</td>
+<td>文件系统写入不受限；<code>setsid()</code> 出去的孙进程不会被回收（stderr 会如实说明）；Linux 的 <code>unshare -n</code> 分支在 darwin 上没演练过；没有容器化</td></tr>
+</table>
+</section>
+
+<!-- ============================ 5 ============================ -->
+<section id="s5">
+<h2><span class="no">5</span>2.6.0：变更管理（ITSM）</h2>
+<p>以前给运行中的系统做日常变更（加 tag、扩缩容、改配置）只有两条路：造一个假 HealthIssue 走事件修复流，或者在 Chat 里直接写命令。前者把变更记成了事故，后者不留任何变更记录。2.6.0 补上第三条：<b>工单 → SRE 合法性审核 → 审批 → Executor</b>，不需要任何 HealthIssue。</p>
+<table>
+<tr><th>维度</th><th>Incident（既有自动修复流）</th><th>Change（2.6.0 新增）</th></tr>
+<tr><td>起点</td><td>告警 / 异常 → HealthIssue → RCA</td><td>人（或外部系统）主动发起的变更意图</td></tr>
+<tr><td>计划来源</td><td>RCA 结论驱动</td><td>SRE 合法性审核驱动</td></tr>
+<tr><td>是否需要 HealthIssue</td><td>是</td><td><b>否</b></td></tr>
+<tr><td>审批</td><td>L0 / L1 自动，L2 / L3 人工</td><td>默认全部人工；standard 变更可选自动（需两个开关同时打开）</td></tr>
+<tr><td>账本</td><td><code>pipeline_events</code> + <code>fix_executions</code></td><td><code>audit_logs</code>（决策）+ <code>command_audits</code>（命令）+ <code>pipeline_events</code></td></tr>
+</table>
+
+<h3>5.1 数据流</h3>
+<div class="legend"><span><span class="tag code">代码</span> 确定性代码</span><span><span class="tag llm">LLM</span> 模型判断</span><span><span class="tag hum">人</span> 人的动作</span></div>
+<div class="flow">
+  <div class="step"><div class="k">入口 <span class="tag hum">人</span></div><div>Chat（Web SSE / CLI <code>/change</code>）、Web 表单 <code>POST /api/changes</code>；外部 Webhook 入口在 2.6.0 只预留（2.6.1 的 intake 补上）</div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">建单 <span class="tag code">代码</span></div><div><code>change_service.create_change_request(source, actor, …)</code>：authz <code>change.request</code> · CR=<code>draft</code> · 审计 <code>change.requested</code> · 通知</div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">开审 <span class="tag code">代码</span></div><div><code>start_review</code>：CR=<code>under_review</code>，看门狗 <code>change_review_timeout_seconds</code>（600）；超时回退 <code>draft</code>，靠 <code>review_attempt</code> 计数区分是哪一次审核，迟到的回滚只更新 0 行</div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">SRE Mode C<br><span class="small">只读</span></div><div><ul>
+    <li><span class="tag code">代码</span> ground / attach 目标：目标必须在库存里，或经代码只读 describe 实证，否则不出计划（fail-closed）</li>
+    <li><span class="tag llm">LLM</span> 风险 L0–L3 + <code>action_type</code>，量表与 fix 相同</li>
+    <li><span class="tag code">代码</span> <code>evaluate_change_policy</code>：policy_engine 按 plan_kind=change、emergency、action_type、冻结期、爆炸半径判定</li>
+    <li><span class="tag code">代码</span> <code>save_fix_plan(plan_kind="change")</code>：<code>rollback_plan</code> 与 <code>post_checks</code> 必须非空，否则 409</li>
+    <li><span class="tag code">代码</span> <code>submit_change_review</code>：由代码写状态，策略在这里重新评估一次，以代码结果为准（<code>block</code> 强制 rejected）</li>
+  </ul></div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">结论 <span class="tag code">代码</span></div><div><code>rejected</code> / <code>needs_clarification</code> → 审计 + 通知；<code>planned</code> → 策略为 auto_approve <b>且</b> <code>change_auto_approve_standard=true</code> 时自动审批（<code>agent:auto-pipeline</code>，记规则名），否则 plan=<code>pending_approval</code> + 带深链的通知</div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">审批 <span class="tag hum">人</span></div><div>Web / CLI：authz <code>change.approve</code> + SoD，理由必填，写审计 → plan=<code>approved</code>，CR=<code>approved</code></div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">执行 <span class="tag code">代码</span> <span class="tag llm">LLM</span></div><div><code>request_execution</code> → FixExecution(pending) → ExecutorService 队列 → <code>executor_agent(fix_plan_id)</code>；<code>get_approved_fix_plan</code> 这道门不变</div></div>
+  <div class="dn">↓</div>
+  <div class="step"><div class="k">终态 <span class="tag code">代码</span></div><div><code>on_execution_result</code> 是唯一写 CR 终态的地方：<code>completed</code> / <code>needs_review</code> / <code>failed</code> / <code>rolled_back</code> → 审计 + 通知</div></div>
+</div>
+<div class="note"><b>命令账本</b>：<code>run_aws_cli</code> / <code>run_on_host</code> / <code>run_kubectl</code> / <code>run_skill_script</code> 的每条写级命令都经 <code>command_audit.record_command</code> 记账，附带 Run Context（actor、fix_plan_id、change_request_id、trace_id、agent）。命令命中 <code>policies.yaml</code> 的 <code>change_required</code>、且 Run Context 里没有已审批的计划时，拒绝执行（<code>outcome=refused</code>），并提示改走 <code>/change</code>。<br>
+<b>三条不变量</b>：CR 终态只由 <code>on_execution_result</code> 写；任何目标资源不可实证则不出计划；自动审批必须同时满足 yaml 规则与 settings 开关。</div>
+
+<h3>5.2 一张 Plan 表两种来源 + 工单表</h3>
+<ul>
+  <li><code>fix_plans</code> 新增 <code>plan_kind</code>（<code>fix</code> | <code>change</code>）、<code>change_request_id</code>、<code>rejected_by/at/reason</code>、<code>updated_at</code>；<code>health_issue_id</code> / <code>rca_result_id</code> 改为可空。</li>
+  <li>CHECK 约束 <code>ck_fix_plans_origin</code> 强制二选一：fix 必须有 issue + rca 且无 CR，change 必须有 CR 且无 issue / rca。</li>
+  <li>新表 <code>change_requests</code>：<code>target_resources</code> 只装 grounding 通过、带 <code>evidence</code> 的资源。</li>
+  <li>迁移 <code>_migrate_2_6_0</code>：SQLite 走 12 步重建表（首次重建前把库复制为 <code>&lt;db&gt;.bak-pre-2.6.0</code>），PostgreSQL 走 <code>ALTER</code>；迁移失败即抛出，进程不启动。</li>
+</ul>
+
+<h3>5.3 两个状态机</h3>
+<figure>
+<svg class="sm" viewBox="0 0 1170 356" role="img" aria-labelledby="crT">
+<title id="crT">ChangeRequest 12 态状态机</title>
+<defs><marker id="aCR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<g marker-end="url(#aCR)">
+<path class="e" d="M130,130 H180"/>
+<path class="e" d="M330,130 H380"/>
+<path class="e" d="M500,130 H545"/>
+<path class="e" d="M665,130 H710"/>
+<path class="e" d="M834,130 H1030"/>
+<path class="e" d="M834,118 L1030,46"/>
+<path class="e" d="M808,148 L878,212"/>
+<path class="e" d="M772,148 V330 H1030"/>
+<path class="e" d="M972,212 L1040,148"/>
+<path class="e" d="M972,248 L1040,312"/>
+<path class="e" d="M240,148 V212"/>
+<path class="e" d="M270,212 V148"/>
+<path class="e" d="M330,148 L392,212"/>
+<path class="e" d="M440,148 V212"/>
+<path class="e back" d="M205,148 Q155,198 105,148"/>
+<path class="e" d="M110,112 L380,46"/>
+<path class="e" d="M440,112 V58"/>
+<path class="e" d="M580,112 L500,52"/>
+<path class="e" d="M165,230 H130"/>
+</g>
+<g class="n"><rect x="10" y="112" width="120" height="36" rx="6"/><text x="70" y="130">draft</text></g>
+<g class="n"><rect x="180" y="112" width="150" height="36" rx="6"/><text x="255" y="130">under_review</text></g>
+<g class="n"><rect x="380" y="112" width="120" height="36" rx="6"/><text x="440" y="130">planned</text></g>
+<g class="n"><rect x="545" y="112" width="120" height="36" rx="6"/><text x="605" y="130">approved</text></g>
+<g class="n"><rect x="710" y="112" width="124" height="36" rx="6"/><text x="772" y="130">executing</text></g>
+<g class="n"><rect x="860" y="212" width="130" height="36" rx="6"/><text x="925" y="230">needs_review</text></g>
+<g class="n"><rect x="165" y="212" width="180" height="36" rx="6"/><text x="255" y="230">needs_clarification</text></g>
+<g class="n term"><rect x="1030" y="22" width="130" height="36" rx="6"/><text x="1095" y="40">rolled_back</text></g>
+<g class="n term"><rect x="1030" y="112" width="130" height="36" rx="6"/><text x="1095" y="130">completed</text></g>
+<g class="n term"><rect x="1030" y="312" width="130" height="36" rx="6"/><text x="1095" y="330">failed</text></g>
+<g class="n term"><rect x="380" y="212" width="120" height="36" rx="6"/><text x="440" y="230">rejected</text></g>
+<g class="n term"><rect x="380" y="22" width="120" height="36" rx="6"/><text x="440" y="40">cancelled</text></g>
+<g class="n ghost"><rect x="20" y="212" width="110" height="36" rx="6"/><text x="75" y="230">cancelled</text></g>
+<text class="lbl" x="155" y="190">看门狗回退</text>
+<text class="lbl" x="925" y="272">人工裁定</text>
+</svg>
+<div class="legend"><span><span class="sw box"></span>进行中状态</span><span><span class="sw term"></span>终态</span><span><span class="sw ghost"></span>同一终态的重复画法（避免连线交叉）</span><span><span class="sw dash"></span>回退边</span></div>
+<figcaption>ChangeRequest（12 态），由 <code>validate_change_transition()</code> 强制，非法转换 409。<code>needs_review</code> 只能由人裁定为 <code>completed</code> / <code>failed</code>，重做必须新建变更单。</figcaption>
+</figure>
+<figure>
+<svg class="sm" viewBox="0 0 910 240" role="img" aria-labelledby="fpT">
+<title id="fpT">FixPlan 状态机（fix 与 change 两种来源共用）</title>
+<defs><marker id="aFP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<g marker-end="url(#aFP)">
+<path class="e" d="M120,110 H180"/>
+<path class="e" d="M350,110 H410"/>
+<path class="e" d="M530,110 H590"/>
+<path class="e" d="M710,110 H780"/>
+<path class="e" d="M700,128 L790,192"/>
+<path class="e" d="M65,92 Q267,10 470,92"/>
+<path class="e" d="M100,128 L215,192"/>
+<path class="e" d="M265,128 V192"/>
+<path class="e" d="M430,128 L322,192"/>
+</g>
+<g class="n"><rect x="10" y="92" width="110" height="36" rx="6"/><text x="65" y="110">draft</text></g>
+<g class="n"><rect x="180" y="92" width="170" height="36" rx="6"/><text x="265" y="110">pending_approval</text></g>
+<g class="n"><rect x="410" y="92" width="120" height="36" rx="6"/><text x="470" y="110">approved</text></g>
+<g class="n"><rect x="590" y="92" width="120" height="36" rx="6"/><text x="650" y="110">executing</text></g>
+<g class="n term"><rect x="780" y="92" width="120" height="36" rx="6"/><text x="840" y="110">executed</text></g>
+<g class="n term"><rect x="780" y="192" width="120" height="36" rx="6"/><text x="840" y="210">failed</text></g>
+<g class="n term"><rect x="205" y="192" width="120" height="36" rx="6"/><text x="265" y="210">rejected</text></g>
+<text class="lbl s" x="374" y="174">执行前撤回</text>
+</svg>
+<figcaption>FixPlan（两种来源共用），由 <code>validate_plan_transition()</code> 强制，取代了原来 6 处直接赋值。<code>approved → rejected</code> 表示在执行前撤回。注意：FixPlan 的状态写入<b>不是</b> CAS（既有缺口）；ChangeRequest 和 HealthIssue 的状态写入是 <code>UPDATE … WHERE status=:expected</code> + 行数校验。</figcaption>
+</figure>
+
+<h3>5.4 RBAC 影子模式与审批人身份绑定</h3>
+<ul>
+  <li>只有一个入口 <code>authz.check(actor, permission, subject=…)</code>。actor 取自认证会话，不取请求体。<code>config/rbac.yaml</code> 把权限项映射到已有的 <code>users.permissions</code>（read / write / admin），不建 Role 表。</li>
+  <li>actor 有六类：<code>user:&lt;email&gt;</code> / <code>web:anonymous</code>（认证关闭时，全权）/ <code>cli:&lt;user&gt;</code> / <code>agent:&lt;name&gt;</code> / <code>im:…</code> / <code>webhook:…</code>。</li>
+  <li><b>影子模式</b>（<code>rbac_enforce=false</code>，默认）：照常判定，拒绝只写一条 <code>audit_logs(authz.denied_shadow)</code> 然后放行；<code>true</code> 时返回 403。</li>
+  <li><b>审批人绑定</b>：approve 接口一律把 Run Context 里的 actor 写入 <code>approved_by</code>。认证关闭时，请求体里的名字只作为 <code>details.claimed_name</code> 记进审计。</li>
+</ul>
+<table>
+<tr><th>规则</th><th>含义</th><th>影子模式下</th><th class="nw">引入</th></tr>
+<tr><td><code>approver_must_differ_from_field</code>（SoD）</td><td>审批人不得等于申请人</td><td>只审计，放行；匿名 web actor 跳过</td><td class="nw">2.6.0</td></tr>
+<tr><td><code>actor_must_match_field_unless_admin</code></td><td>只有申请人或 admin 可 <code>change.cancel</code> / <code>change.clarify</code></td><td>只审计，放行</td><td class="nw">2.6.0</td></tr>
+<tr><td><code>no-agent-approval-above-l1</code>（<code>enforce: always</code>）</td><td>agent 不得审批 L2 / L3；缺 subject 时 fail-closed</td><td><b>照样生效</b></td><td class="nw">2.6.0</td></tr>
+<tr><td><code>no-webhook-approve-or-execute</code></td><td><code>webhook:*</code> 永远不能 approve / execute（2.6.1 的验收也包括在内）</td><td><b>照样生效</b></td><td class="nw">2.6.1（Plan D intake）</td></tr>
+</table>
+
+<h3>5.5 两本账与统计</h3>
+<table>
+<tr><th>账本</th><th>记什么</th><th>写入语义</th></tr>
+<tr><td><code>audit_logs</code>（新增 <code>actor</code> 列）</td><td>所有人工 / 自动决策：requested、reviewed、approved、rejected、execution_started、completed、failed…，以及 <code>authz.denied</code> / <code>authz.denied_shadow</code></td><td>与状态变更同事务；审计写失败则一起回滚，状态不变</td></tr>
+<tr><td><code>command_audits</code>（新表）</td><td>工具层每条写级命令：tier、outcome（executed / refused / blocked / error）、脱敏后的命令、actor、fix_plan_id、change_request_id、trace_id；只读命令不记</td><td>fail-soft：出异常只记 debug 日志，永不影响工具返回</td></tr>
+</table>
+<p><code>GET /api/plans/stats</code>（<code>services/plan_stats_service.py</code>，纯聚合）返回：<code>totals.by_kind_status</code>、<code>approvals</code>（auto / human / rejected / authz_denied / authz_denied_shadow）、<code>lead_time</code>（p50 / p90）、<code>outcomes</code>、<code>breakdown</code>、<code>series</code>、<code>commands</code>。保留期 <code>audit_retention_days</code> 默认 365 天。</p>
+
+<h3>5.6 可达面（2.6.0）</h3>
+<table>
+<tr><th>面</th><th class="nw">做 / 非目标</th><th>要点</th></tr>
+<tr><td>CLI</td><td><span class="st ok">做</span></td><td><code>/change</code>、<code>/changes</code>、<code>/approve</code>、<code>/reject C&lt;id&gt;</code>、<code>/execute</code>；actor 固定为 <code>cli:&lt;os user&gt;</code></td></tr>
+<tr><td>Web API</td><td><span class="st ok">做</span></td><td><code>/api/changes</code> 全生命周期、<code>/api/plans/stats</code>、<code>/api/audit*</code>、<code>/api/command-audits</code>；FixPlan 接口加固</td></tr>
+<tr><td>Web UI</td><td><span class="st ok">做</span></td><td><code>/app/plans</code>（三个 tab）+ <code>/app/changes/:id</code>；审批改走 <code>ReasonDialog</code></td></tr>
+<tr><td>Agent tool</td><td><span class="st ok">做</span></td><td>Main 5 个变更工具，SRE 4 个审核工具；审批不是 agent 能做的动作</td></tr>
+<tr><td>Schedule</td><td><span class="st int">非目标</span></td><td>不做变更窗口</td></tr>
+<tr><td>Notification</td><td><span class="st ok">做</span></td><td><code>change_requested</code> / <code>change_pending_approval</code> / <code>change_result</code></td></tr>
+<tr><td>Webhook</td><td><span class="st int">非目标</span></td><td>只预留 <code>source=webhook</code> 与统一入口</td></tr>
+</table>
+<p class="small">与 2.6.1 的逐面对照见第 7 节。</p>
+
+<h3>5.7 Live E2E 证据（dev 机，2026-09-26）</h3>
+<p class="small">环境：dev 单机，部署 <code>5f95120</code>；4 个 uvicorn worker、SQLite、API 鉴权开、<code>rbac_enforce=false</code>；目标账户 Agenticops-Global（ap-southeast-1），凭证经 provider 层解析。AWS 写入只限一台实验实例上的 EC2 tag，全部撤回，实例最后仍是 10 个 tag。</p>
+<table>
+<tr><th class="nw">步</th><th>内容</th><th class="nw">结果</th><th>关键证据</th></tr>
+<tr><td>0</td><td>部署 + 线上库迁移</td><td><span class="st ok">零丢失</span></td><td>fix_plans 110 / fix_executions 33 / pipeline_events 793 / health_issues 118 行，缺失 0、改动 0；<code>integrity_check</code> ok；8 个外键孤儿迁移前后一致（早于本版）</td></tr>
+<tr><td>1</td><td>Chat 加 tag → C#1，SRE 审核</td><td><span class="st ok">PASS</span></td><td>端到端 80 s；Main 只调 <code>get_active_account</code> → <code>request_change</code> → <code>review_change</code>；L1，计划 #111，<code>health_issue_id IS NULL</code></td></tr>
+<tr><td>2</td><td>审批前零写命令</td><td><span class="st ok">PASS</span></td><td>C#1–C#4 在 <code>approved_at</code> 之前 <code>outcome=executed</code> 的计数都是 0</td></tr>
+<tr><td>3</td><td>Web 审批 → 执行 → completed</td><td><span class="st ok">PASS</span></td><td><code>approved_by=user:admin</code> 取自会话；SoD 影子拒绝记为 audit 4；执行 #34，两个 post-check 都 pass</td></tr>
+<tr><td>4</td><td>审计页两本账</td><td><span class="st ok">PASS</span></td><td>C#1 有 8 条决策记录，actor 无空值</td></tr>
+<tr><td>5</td><td>第二张单删 tag</td><td><span class="st ok">PASS</span></td><td>C#2 / 计划 #114 / 执行 #35；stats <code>change.completed=2</code>，human 2 / auto 0，success_rate 1.0</td></tr>
+<tr><td>6</td><td><code>rbac_enforce=true</code> 下自批</td><td><span class="st ok">PASS</span></td><td>403（在一次性进程里验证，服务本身仍是影子模式）；C#4 保持 <code>planned</code>；<code>authz.denied</code> 入账</td></tr>
+<tr><td>7</td><td>直接写命令 / <code>change_required</code></td><td><span class="st ok">PASS（工具层）</span></td><td>确认后的写命令被记账；<code>modify-security-group</code> 被拒，请求没有发到 AWS</td></tr>
+</table>
+<ul class="small">
+  <li><b>验收 1–8</b>：1、2、6、7 live 验证；3、4、5 在走到的路径上 live 验证，其余由具名测试覆盖；8 只有测试覆盖。</li>
+  <li><b>E2E 中发现并修复</b>：BUG-1 旧计划的 JSON 字符串列让 <code>GET /api/fix-plans</code> 500（<code>1633ea9</code>）；BUG-2 顶栏标题错误、BUG-3 策略理由重复显示（<code>518f1cd</code>）。</li>
+  <li><b>观察</b>：每张单的时间线有两条 <code>policy_decision</code> 事件（只影响观感）；部署后 15:00 UTC 那一小时发出 501 条通知；<code>_migrate_2_6_0</code> 的锁只在进程内，4 个 worker 同时启动可能竞争迁移（本次用单进程 <code>init_db()</code> 避开了）。</li>
+  <li><b>门禁</b>（<code>518f1cd</code>）：5450 passed / 85 skipped / 3 failed，三个失败逐一核实——本机 DNS 假失败、一处未提交的本地改动、一次 hypothesis 超时（单独跑 9/9 通过）；前端 vitest 190。</li>
+</ul>
+</section>
+
+<!-- ============================ 6 ============================ -->
+<section id="s6">
+<h2><span class="no">6</span>2.6.1：五个计划</h2>
+<p>2.6.1 之前存在这些问题：Issue 指向哪个资源，靠模糊匹配取第一条；RCA 拿到的拓扑只是提示词里的一段文字，说不清根因在哪个资源，也没人能判它对不对；审批批的是方案 id，不是方案内容；执行完没有统一的验证；Issue 状态散在二十多处直接赋值。2.6.1 把这些接成一个闭环。</p>
+
+<h3>6.1 架构与数据流</h3>
+<figure>
+<svg class="arch" viewBox="0 0 1100 655" role="img" aria-labelledby="arT">
+<title id="arT">2.6.1 架构与数据流</title>
+<defs><marker id="aAR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<rect x="20" y="20" width="450" height="52" rx="6"/>
+<text class="t1" x="245" y="38">推送：webhook 告警</text>
+<text class="t2" x="245" y="58">令牌 / HMAC 校验 · 6 个解析器补全 observed_at</text>
+<rect x="630" y="20" width="450" height="52" rx="6"/>
+<text class="t1" x="855" y="38">拉取：K8s 连接器 + resource-scan 调度</text>
+<text class="t2" x="855" y="58">kubectl 只读、账户寻址 · W2 扫描（AWS）标缺席</text>
+<rect x="20" y="110" width="450" height="52" rx="6"/>
+<text class="t1" x="245" y="128">process_signal（Signal Gate）</text>
+<text class="t2" x="245" y="148">唯一的 Issue 入口：去重 / 去噪 / 合并</text>
+<rect x="630" y="110" width="450" height="52" rx="6"/>
+<text class="t1" x="855" y="128">ingest()（K8s）· scanner（W2）</text>
+<text class="t2" x="855" y="148">→ cloud_resources（缺席记 absent_since，不删）· connector_runs</text>
+<rect class="hl" x="20" y="200" width="450" height="52" rx="6"/>
+<text class="t1" x="245" y="218">IdentityResolver</text>
+<text class="t2" x="245" y="238">→ HealthIssue.resource_ref / anchor_status</text>
+<rect class="hl" x="630" y="200" width="450" height="90" rx="6"/>
+<text class="t1" x="855" y="220">Galaxy build：derive_rule_graph</text>
+<text class="t2" x="855" y="244">① 规则关系 → resource_relations，设 rules_published_at</text>
+<text class="t2" x="855" y="266">② LLM 阶段：可失败，不影响 ①；llm=False 时跳过</text>
+<rect class="hl" x="325" y="330" width="450" height="52" rx="6"/>
+<text class="t1" x="550" y="348">GraphQueryService</text>
+<text class="t2" x="550" y="368">有方向 · 有上限 · 按 build 版本 · 只读同一账户</text>
+<rect x="20" y="430" width="250" height="52" rx="6"/>
+<text class="t1" x="145" y="448">/api/graph/focus → LocalGraph</text>
+<text class="t2" x="145" y="468">Issue / Resource / Change 详情页</text>
+<rect x="290" y="430" width="250" height="52" rx="6"/>
+<text class="t1" x="415" y="448">get_topology_evidence</text>
+<text class="t2" x="415" y="468">RCA 工具：有界的局部图证据包</text>
+<rect x="560" y="430" width="250" height="52" rx="6"/>
+<text class="t1" x="685" y="448">estimate_blast_radius</text>
+<text class="t2" x="685" y="468">策略的潜在影响，默认影子模式</text>
+<rect x="830" y="430" width="250" height="52" rx="6"/>
+<text class="t1" x="955" y="448">定位评测</text>
+<text class="t2" x="955" y="468">图召回率（chaos-lab 13/13）</text>
+<rect x="165" y="520" width="500" height="52" rx="6"/>
+<text class="t1" x="415" y="538">save_rca_result(location) → fail-closed 校验</text>
+<text class="t2" x="415" y="558">→ RCAResult.location_status：valid / partial / invalid / absent</text>
+<rect x="115" y="600" width="600" height="40" rx="6"/>
+<text class="t2" x="415" y="620" style="fill:#0b0b0b;font-size:13px">人工 location_verdict → /api/rca/location-stats → AgentMetrics 定位卡</text>
+<rect class="dashed" x="760" y="520" width="320" height="120" rx="6"/>
+<text class="t1" x="920" y="550">只观测，不驱动</text>
+<text class="t2" x="920" y="576">critic、置信度门、自动修复都不读定位；</text>
+<text class="t2" x="920" y="596">潜在影响进策略默认是影子模式</text>
+<text class="t2" x="920" y="616">（policy_graph_impact_enforce=false）</text>
+<g marker-end="url(#aAR)">
+<path class="e" d="M245,72 V110"/>
+<path class="e" d="M855,72 V110"/>
+<path class="e" d="M245,162 V200"/>
+<path class="e" d="M855,162 V200"/>
+<path class="e" d="M630,226 H470"/>
+<path class="e" d="M855,290 V356 H775"/>
+<path class="e" d="M145,406 V430"/>
+<path class="e" d="M415,406 V430"/>
+<path class="e" d="M685,406 V430"/>
+<path class="e" d="M955,406 V430"/>
+<path class="e" d="M415,482 V520"/>
+<path class="e" d="M415,572 V600"/>
+</g>
+<path class="e" d="M550,382 V406"/>
+<path class="e" d="M145,406 H955"/>
+<text class="lbl" x="550" y="212">每次构建完成后重新锚定</text>
+</svg>
+<figcaption>据 <code>MVP-2.6.1-RELEASE.md</code>「架构与数据流」重画。蓝底框是 2.6.1 新增或重写的核心件。</figcaption>
+</figure>
+<p><b>修复 / 变更两条流的共同骨架：</b></p>
+<div class="chain">
+  <span class="c"><code>plan_version</code> + <code>content_hash</code></span><span class="a">→</span>
+  <span class="c">approve(<code>content_hash</code>)</span><span class="a">→</span>
+  <span class="c">执行前比对批准哈希</span><span class="a">→</span>
+  <span class="c">Executor</span><span class="a">→</span>
+  <span class="c"><code>verification.evaluate()</code></span><span class="a">→</span>
+  <span class="c"><code>passed</code> / <code>failed</code> / <code>pending_acceptance</code></span><span class="a">→</span>
+  <span class="c"><code>transition_issue</code> / <code>on_execution_result</code></span><span class="a">→</span>
+  <span class="c">人工验收</span>
+</div>
+<div class="note">三条不变量：锚定不上就明说（<code>unanchored</code> / <code>ambiguous</code> / <code>account_level</code>），绝不取第一条；缺验证结果永远不算 <code>passed</code>；HealthIssue 状态只由 <code>transition_issue</code> 写（有 grep 测试守着）。</div>
+
+<h3>6.2 五个计划</h3>
+<div class="plan">
+<h3>A · 图事实层</h3>
+<ul>
+  <li><b>IdentityResolver</b>（<code>services/identity_resolver.py</code>）：确定性规则按顺序执行，依次是 <code>resource_id</code>（含 ARN ↔ 短 id）、<code>elb_arn</code>、<code>name</code>、<code>account_level</code>、<code>k8s_hints</code>、<code>alarm_name</code>，第一条命中的规则说了算。同一规则命中多个物理资源时记为 <code>ambiguous</code>，并写下候选。锚不上时写明原因（<code>none</code> / <code>unknown_account</code> / <code>account_conflict</code> / <code>account_unknown</code>）。跨账户同 id 不会锚错账户。</li>
+  <li><code>HealthIssue</code> 新增 <code>resource_ref</code>、<code>anchor_status</code>、<code>anchor_candidates</code>、<code>observed_at</code>。<code>issue_account_claim</code> 用来找回 Issue 当初声明的账户，找不到就不跨账户去猜。</li>
+  <li>新增规范关系表 <code>resource_relations</code>，以及关系注册表 <code>graph/relations.py</code>（每种关系的故障传播方向）；UI、RCA、策略读的是同一份。</li>
+  <li><b>Galaxy</b>：规则关系在 LLM 阶段<b>之前</b>发布（<code>rules_published_at</code>），LLM 失败不再遮住规则层；新增 rule-only 刷新 <code>build_graph(trigger, llm=False)</code>；每次构建完成都重新锚定。健康叠加改为四值：<code>unknown</code> / <code>notice</code> / <code>warning</code> / <code>critical</code>，从不显示「健康」。</li>
+  <li><b>GraphQueryService</b>（<code>graph/query_service.py</code>）：有方向、有上限、按 build 版本读；旧的 <code>graph/context.py</code>（上下游方向是反的）已退役。</li>
+</ul>
+<div class="meas">实测（本地库只读副本，09-30）：2 跳邻域 SQL 最多 4 条；p50 4.1 ms、p95 6.1 ms、最大 43.3 ms（457 个锚定资源 × 3 轮 = 1371 次调用，截断 0 次）。锚定率 66.1%，<b>未达标</b>。36 组跨账户重复 id 错配 0；<code>resolve()</code> 探测 72/72 都锚到持有账户。</div>
+</div>
+
+<div class="plan">
+<h3>B · 拉取式连接器、缺席判定、告警鉴权</h3>
+<ul>
+  <li>契约在 <code>connectors/base.py</code>，唯一写入口是 <code>connectors/ingest.py</code>：实体写进 <code>cloud_resources</code>（<code>provider=kubernetes</code>），每次运行写一行 <code>connector_runs</code>（complete / partial / failed）。<b>部分采集不做缺席判定</b>；缺席只记 <code>absent_since</code>，从不删除。</li>
+  <li><b>K8s 连接器</b>（<code>connectors/k8s.py</code>）：每种 kind 一次只读 <code>kubectl get</code>（12 种 kind，裸 Pod 记为 <code>K8s_Pod</code>）。env 只来自 <code>kubectl_env_for_cluster</code>：目标账户的凭证加一份私有 kubeconfig，从不碰 <code>~/.kube/config</code>。Secret 只保留 <code>type</code>。单次输出有字节上限，超出则该 kind 记为部分采集。</li>
+  <li><b>墓碑规则</b>：W2 扫描证明一个集群已经不在了，下一次发现运行就把它下面的 K8s 行标为缺席；这个墓碑目标不调 kubectl，也不取凭证。</li>
+  <li><b>AWS 缺席判定</b>：W2 扫描完整列出某个 (type, region) 之后，把这次没看到的 <code>provider="aws"</code> 行标为缺席。新的 <code>resource-scan</code> 调度（默认每 60 分钟）定时跑这个扫描。所有计数和列表都用同一个「存在」定义 <code>inventory.PRESENT</code>（<code>absent_since IS NULL</code>）。</li>
+  <li><b>告警 webhook</b>：配置 <code>webhook_secret</code> 后，必须带令牌（<code>Authorization: Bearer</code> / <code>X-AIOps-Token</code> / <code>?token=</code>）或 HMAC，否则 401；6 个解析器补全 <code>observed_at</code>。</li>
+</ul>
+<div class="meas">实测（chaos-lab）：每次运行都是 <code>partial</code>（实验集群的 RBAC 有意不给读 secrets），创建 129 个 K8s 对象，<code>absent</code> 0；库里没有 <code>K8s_Secret</code> 行；计数不变式 <code>/api/stats</code> 167 = <code>/api/resources</code> 167 = 各类型计数之和 167。webhook 不带令牌 / 令牌错 → 401，令牌正确 → 201。</div>
+</div>
+
+<div class="plan">
+<h3>C · RCA 定位闭环与评测</h3>
+<ul>
+  <li><b>证据工具</b> <code>get_topology_evidence(issue_id, depth, window_minutes)</code>（<code>graph/evidence.py</code>）返回：锚点周围有方向的边；邻居在时间窗内的未关闭 Issue、信号和变更；确定性的根因候选和理由；证据引用 <code>graph:edge:…</code> / <code>graph:node:…</code>。这个工具不用 LLM。没有已发布构建或缺少锚点时，返回 <code>available:false</code> 并写明原因。</li>
+  <li><b>K8s 锚点重采</b>：集群上次成功采集早于 <code>rca_k8s_recollect_min_age_seconds</code>（120 s），或者早于故障起点，就先重采一次；「早于故障起点」这个条件是联合 E2E 中补上的（<code>fe7e9fd</code>）。重采失败记为 <code>stale</code>，RCA 继续。</li>
+  <li><b>结构化定位</b> <code>save_rca_result(location=…)</code>：最多 3 个排序候选 + 一条路径；<code>services/rca_location</code> 做 fail-closed 校验，结果为 <code>valid</code> / <code>partial</code> / <code>invalid</code> / <code>absent</code>。存下的路径应读作「一组逐条校验过的边」，不是验证过的因果链（C-1）。</li>
+  <li><b>人工判定 + 统计</b>：<code>location_verdict</code> 取 correct / partial / incorrect，判定人取会话 actor；统计走 <code>GET /api/rca/location-stats</code>，显示在 AgentMetrics 定位卡片上。</li>
+  <li><b>策略影子模式</b>：<code>estimate_blast_radius</code> 计算已发布图上的潜在影响（下游、只走 rule 关系、≤ 3 跳），结果记为 <code>shadow_blast_radius</code>，策略规则看不到它。</li>
+  <li><b>证据门变严</b>（C-M6）：证据检查不再拿 <code>save_rca_result</code> 自己的输入当依据。</li>
+  <li><b>评测</b>：<code>infra/eks-chaos-lab/e2e/ground_truth.yaml</code>（13 个场景的真值）+ <code>location_eval.py</code>（AC@1 / AC@3 / MRR、图召回率）。</li>
+</ul>
+<div class="meas">实测见第 8 节：AC@1 off 0.00 → on #1 0.38 → on #2 0.77；located 15% → 100%；图召回率 13/13。</div>
+</div>
+
+<div class="plan">
+<h3>D · Issue / Change 逻辑</h3>
+<ul>
+  <li><b>审批绑定内容</b>：<code>fix_plans</code> 新增 <code>plan_version</code> / <code>content_hash</code> / <code>approved_hash</code> / <code>approved_version</code>。哈希覆盖 steps、rollback、前后检查、账户和风险，不含说明文字。审批必须带上看过的哈希：缺哈希 422，方案已变 409。执行门会重算哈希，内容漂移就拒绝执行、撤回方案，Issue 回到 <code>root_cause_identified</code>。</li>
+  <li><b>变更单自带步骤</b>：<code>proposed_steps</code>（≤ 50 步）+ <code>external_ref</code>。SRE 负责校验，<code>steps_diff</code> 由代码计算；含 blocked 命令的单直接 rejected。</li>
+  <li><b>外部入口</b> <code>POST /api/changes/intake</code>：HMAC 签名；<code>change_intake_secret</code> 为空时接口返回 404。同一外部工单再次提交，返回仍在进行中的那张单（新建 201 / 已有 200）。申请人记为 <code>webhook:&lt;system&gt;</code>，永远不能批准、执行或验收。</li>
+  <li><b>统一的执行后验证</b> <code>services/verification.evaluate</code>：每次执行只给一个判定。缺 post-check、结果不全、有 warning、某一步没报告成功，都判为 <code>pending_acceptance</code>，<b>永远不算 passed</b>。人工验收走 <code>POST /api/fix-executions/{id}/accept</code> 或 CLI <code>/accept</code>。</li>
+  <li><b>唯一的状态写入口</b> <code>services/issue_state.transition_issue</code>：校验边 + CAS + 写 <code>status_changed</code> 事件。<code>tests/test_issue_status_writes.py</code> 扫描 <code>src/</code>，发现别处写状态就失败。</li>
+  <li><b><code>dismissed</code></b>：抑制同指纹的重复，但不算「未关闭」；<code>dismissed → open</code> 可重开。HealthIssue 因此是 10 态。Main 新增 <code>get_plan</code> / <code>get_execution_result</code>。</li>
+</ul>
+<table>
+<tr><th>判定</th><th>修复（fix）</th><th>变更（change）</th></tr>
+<tr><td><code>passed</code></td><td>→ <code>resolved</code>（<code>executor_auto_resolve=false</code> 时停在 <code>fix_executed</code>）</td><td>→ <code>completed</code></td></tr>
+<tr><td><code>pending_acceptance</code></td><td>→ <code>fix_executed</code>，等人验收；通知 <code>execution_pending_acceptance</code></td><td>运行成功但判定不是 passed → <code>needs_review</code> + <code>needs_review_reason</code>；同样通知</td></tr>
+<tr><td><code>failed</code></td><td>→ <code>root_cause_identified</code>，RCA 标为 disputed</td><td>由 <code>on_execution_result</code> 写 <code>failed</code> / <code>rolled_back</code></td></tr>
+</table>
+<figure>
+<svg class="sm" viewBox="0 0 900 225" role="img" aria-labelledby="hiT">
+<title id="hiT">HealthIssue 10 态：主线、2.6.1 回退边与 dismissed</title>
+<defs><marker id="aHI" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<g marker-end="url(#aHI)">
+<path class="e" d="M100,40 H135"/>
+<path class="e" d="M265,40 H300"/>
+<path class="e" d="M430,40 H465"/>
+<path class="e" d="M665,40 H700"/>
+<path class="e" d="M760,58 V152"/>
+<path class="e" d="M700,170 H630"/>
+<path class="e" d="M500,170 H440"/>
+<path class="e" d="M310,170 H260"/>
+<path class="e back" d="M730,152 L630,58"/>
+<path class="e back" d="M565,152 V58"/>
+<path class="e back" d="M410,152 L500,58"/>
+<path class="e back" d="M55,152 V58"/>
+</g>
+<g class="n"><rect x="10" y="22" width="90" height="36" rx="6"/><text x="55" y="40">open</text></g>
+<g class="n"><rect x="135" y="22" width="130" height="36" rx="6"/><text x="200" y="40">investigating</text></g>
+<g class="n"><rect x="300" y="22" width="130" height="36" rx="6"/><text x="365" y="40">acknowledged</text></g>
+<g class="n"><rect x="465" y="22" width="200" height="36" rx="6"/><text x="565" y="40">root_cause_identified</text></g>
+<g class="n"><rect x="700" y="22" width="120" height="36" rx="6"/><text x="760" y="40">fix_planned</text></g>
+<g class="n"><rect x="700" y="152" width="120" height="36" rx="6"/><text x="760" y="170">fix_approved</text></g>
+<g class="n"><rect x="500" y="152" width="130" height="36" rx="6"/><text x="565" y="170">fix_executing</text></g>
+<g class="n"><rect x="310" y="152" width="130" height="36" rx="6"/><text x="375" y="170">fix_executed</text></g>
+<g class="n term"><rect x="150" y="152" width="110" height="36" rx="6"/><text x="205" y="170">resolved</text></g>
+<g class="n"><rect x="10" y="152" width="100" height="36" rx="6"/><text x="60" y="170">dismissed</text></g>
+<text class="lbl s" x="64" y="105">重开</text>
+<text class="lbl s" x="10" y="206">任一非终态 → dismissed</text>
+<text class="lbl s" x="578" y="112">2.6.1 回退边</text>
+</svg>
+<div class="legend"><span><span class="sw line"></span>主线</span><span><span class="sw dash"></span>回退边 / 重开</span><span><span class="sw term"></span>终态</span></div>
+<figcaption>只画主线、2.6.1 新增的三条回到 <code>root_cause_identified</code> 的回退边（批准后方案变了、运行失败、验证失败或验收被拒）和 <code>dismissed</code>；完整边集以 <code>validate_status_transition()</code> 为准。agent 的状态工具不能进出 <code>fix_approved</code> / <code>fix_executing</code> / <code>fix_executed</code>，这三个状态只能由方案的审批、执行和人工验收推进。</figcaption>
+</figure>
+</div>
+
+<div class="plan">
+<h3>E · 界面</h3>
+<ul>
+  <li><b>侧栏三分</b>：问题 / 变更 / 审计。<code>/app/audit</code> 独立成页；<code>/app/plans</code> 重定向到 <code>/app/changes</code>（<code>?tab=fix</code> → <code>/app/issues</code>，<code>?tab=audit</code> → <code>/app/audit</code>）；删除 <code>PlansAndChanges.tsx</code> 与 <code>FixPlansTab.tsx</code>。</li>
+  <li><b>问题列表三个视图</b>：运维事件（默认）/ 安全发现 / 全部，写进 URL 的 <code>?scope=</code>，由服务端按 <code>security_</code> 前缀过滤。</li>
+  <li><b>IssueDetail</b>：顶部有 业务 / 执行 / 验证 三个状态标签、锚点徽标和待验收横幅；下面五个 tab，写进 <code>?tab=</code>：调查（RCA + 定位卡 + 局部图 + 定位判定）、修复方案（版本 + 哈希）、执行记录、验证、时间线。</li>
+  <li><b>ChangeDetail</b>：首屏一句话（状态 · 原因 · 待办 · 主操作），下面依次是申请、实施方案 vN（含 <code>steps_diff</code> 与哈希）、审批（「策略建议」与「实际审批」分开显示，影子模式下的潜在影响标「仅供参考」）、执行证据、验收卡。</li>
+  <li><b>局部关系图</b> <code>components/graph/LocalGraph.tsx</code>：用在 IssueDetail、ResourceDetail（新 tab）和 ChangeDetail 审批卡三处。画四种关系、三层爆炸半径（数字直接取 API），附一个键盘可达的列表视图；节点可以「在全景图中查看」，跳到 Galaxy 的 <code>?focus=</code>。</li>
+  <li>Settings 新增连接器卡片；AgentMetrics 新增 RCA 定位卡片（7 / 30 / 90 天）；Chat 里的 <code>C#</code> 引用也能打开 ContextPanel；FixPlanCard 标题统一成「I#12 修复方案 v2」「C#3 实施方案 v1」+ 短哈希。</li>
+</ul>
+<div class="meas">前端门禁：<code>tsc</code> 0 错误；vitest 27 个文件 / 279 个测试；<code>vite build</code> 成功；locale-parity 通过。界面本身的走查（联合 E2E 清单第 7 项）待主人进行。</div>
+</div>
+
+<h3>6.3 数据模型变化</h3>
+<table>
+<tr><th>表</th><th>变化</th></tr>
+<tr><td><code>health_issues</code></td><td>+ <code>resource_ref</code>（FK，带索引）、<code>anchor_status</code>、<code>anchor_candidates</code>（JSON）、<code>observed_at</code></td></tr>
+<tr><td><code>cloud_resources</code></td><td>+ <code>absent_since</code>、<code>content_changed_at</code></td></tr>
+<tr><td><code>galaxy_builds</code></td><td>+ <code>rules_published_at</code>；rule-only 刷新用已有的 <code>trigger</code> 列区分（<code>k8s-discovery</code> / <code>rca-recollect</code>，token 记 0）</td></tr>
+<tr><td><code>resource_relations</code></td><td>新表：规范关系</td></tr>
+<tr><td><code>connector_runs</code></td><td>新表：连接器运行记录</td></tr>
+<tr><td><code>rca_results</code></td><td>+ <code>location</code>、<code>location_status</code>、<code>location_build_id</code>、<code>location_verdict</code>、<code>location_verdict_by</code>、<code>location_verdict_at</code></td></tr>
+<tr><td><code>fix_plans</code></td><td>+ <code>plan_version</code>、<code>content_hash</code>、<code>approved_hash</code>、<code>approved_version</code></td></tr>
+<tr><td><code>change_requests</code></td><td>+ <code>proposed_steps</code>、<code>external_ref</code>、<code>external_system</code> + <code>external_ticket_id</code>（联合索引）、<code>steps_diff</code>、<code>needs_review_reason</code></td></tr>
+<tr><td><code>fix_executions</code></td><td>+ <code>verification_status</code>、<code>verification_reason</code>、<code>accepted_by</code>、<code>accepted_at</code>、<code>acceptance_note</code></td></tr>
+</table>
+<p class="small">迁移 <code>_migrate_2_6_1</code> 沿用 2.6.0 的写法（新表用 <code>create_all</code>，新列用幂等的 <code>ADD COLUMN</code>），之后有三项 fail-soft 回填：给 Issue 补锚点；历史 RCA 的 <code>location_status</code> 置为 <code>absent</code>；给方案补 <code>content_hash</code>，已批准的同时补批准哈希。回填失败的方案没有批准哈希，会在执行门被拒，需要重新批准。</p>
+
+<h3>6.4 重要的新配置</h3>
+<table>
+<tr><th>键</th><th class="nw">默认</th><th>说明</th></tr>
+<tr><td><code>k8s_connector_enabled</code> / <code>k8s_discovery_interval_minutes</code></td><td class="nw"><code>true</code> / <code>10</code></td><td>K8s 连接器总开关与 <code>k8s-discovery</code> 调度间隔（启动时种子化一次，已有的行不覆盖）</td></tr>
+<tr><td><code>resource_scan_interval_minutes</code></td><td class="nw"><code>60</code></td><td><code>resource-scan</code> 调度间隔；每个部署都会受影响（见第 10 节 B-0）</td></tr>
+<tr><td><code>rca_topology_context_enabled</code></td><td class="nw"><code>true</code>（已有）</td><td>语义改为「是否注入 <code>get_topology_evidence</code> 工具」</td></tr>
+<tr><td><code>rca_topology_window_before_minutes</code> / <code>…_after_minutes</code></td><td class="nw"><code>30</code> / <code>10</code></td><td>证据包时间窗</td></tr>
+<tr><td><code>rca_k8s_recollect_min_age_seconds</code> / <code>…_timeout_seconds</code></td><td class="nw"><code>120</code> / <code>60</code></td><td>RCA 定向重采的最小间隔与超时；早于故障起点的采集不受最小间隔保护</td></tr>
+<tr><td><code>policy_graph_impact_enforce</code></td><td class="nw"><code>false</code></td><td>潜在影响是否真正参与策略规则（false = 影子模式）；<code>GET /api/settings</code> 只读可见，PATCH 返回 400</td></tr>
+<tr><td><code>webhook_secret</code> / <code>change_intake_secret</code></td><td class="nw"><code>''</code></td><td>真实值只经环境变量注入，绝不提交；前者为空时 webhook 不校验，后者为空时 intake 返回 404</td></tr>
+<tr><td><code>intake_signature_window_seconds</code></td><td class="nw"><code>300</code></td><td>两处 HMAC 的时间窗</td></tr>
+<tr><td><code>graph_query_node_cap</code> / <code>edge_cap</code> / <code>max_depth</code></td><td class="nw"><code>200</code> / <code>500</code> / <code>2</code></td><td>GraphQueryService 默认上限</td></tr>
+<tr><td><code>galaxy_llm_exclude_types</code></td><td class="nw">追加 13 个 <code>K8s_*</code></td><td>K8s 关系走确定性规则，不送 LLM</td></tr>
+</table>
+</section>
+
+<!-- ============================ 7 ============================ -->
+<section id="s7">
+<h2><span class="no">7</span>用户可达面对照</h2>
+<table>
+<tr><th class="nw">面</th><th>2.6.0</th><th>2.6.1</th></tr>
+<tr><td class="nw"><b>CLI</b></td>
+<td><span class="st ok">做</span> <code>/change &lt;描述&gt; [--account] [--emergency]</code>、<code>/changes</code>、<code>/approve &lt;plan_id|C&lt;id&gt;&gt;</code>（变更理由必填）、<code>/reject C&lt;id&gt;</code>、<code>/execute</code>；actor 固定为 <code>cli:&lt;os user&gt;</code>。非目标：非 REPL 的 <code>aiops changes …</code></td>
+<td><span class="st ok">做</span> <code>aiops connectors list</code> / <code>run &lt;name&gt;</code>；<code>/approve C&lt;id&gt;</code> 先显示版本 + 内容哈希再确认；新增 <code>/accept &lt;I&lt;id&gt;|C&lt;id&gt;&gt; yes|no &lt;理由&gt;</code>。非目标：定位判定、拓扑查看（走 Web）</td></tr>
+<tr><td class="nw"><b>Web API</b></td>
+<td><span class="st ok">做</span> <code>/api/changes</code> 全生命周期、<code>/api/plans/stats</code>、<code>/api/audit*</code>、<code>/api/command-audits</code>；FixPlan approve 取会话身份，新增 reject，<code>PUT</code> 不再收 <code>status</code> / <code>approved_by</code>；全局搜索加 <code>change_requests</code> 组；写接口都过 <code>authz.check</code></td>
+<td><span class="st ok">做</span> <code>/api/connectors</code>（run 返回 202 / 404 / 409）、<code>/api/graph/focus</code>、<code>/api/rca/location-stats</code>、<code>rca-feedback</code> 加 <code>location_verdict</code>、<code>/api/fix-executions/{id}/accept</code>；approve 必须带 <code>content_hash</code>；<code>POST /api/changes/intake</code>（<b>有意不做 UI</b>，给外部 ITSM 用）；issues / anomalies 支持 <code>scope=</code></td></tr>
+<tr><td class="nw"><b>Web UI</b></td>
+<td><span class="st ok">做</span> <code>/app/plans</code>（Fix Plans / Change Plans / Audit 三个 tab）+ <code>/app/changes/:id</code>；<code>components/plans/</code> 13 个组件；Dashboard「Active Plans」合并两类；旧界面审批改走 <code>ReasonDialog</code></td>
+<td><span class="st ok">做</span> 侧栏 问题 / 变更 / 审计；IssueDetail 五个 tab + 待验收横幅；ChangeDetail 首屏一句话 + 验收卡；LocalGraph 三处；Galaxy <code>?focus=</code>；Settings 连接器卡片；AgentMetrics 定位卡片；Chat <code>C#</code> 面板</td></tr>
+<tr><td class="nw"><b>Agent tool</b></td>
+<td><span class="st ok">做</span> Main：<code>request_change</code> / <code>review_change</code> / <code>get_change_request</code> / <code>list_change_requests</code> / <code>execute_change</code>；SRE：<code>ground_change_targets</code> / <code>attach_change_target</code> / <code>evaluate_change_policy</code> / <code>submit_change_review</code>。审批 / 拒绝不是 agent 动作</td>
+<td><span class="st ok">做</span> RCA：<code>get_topology_evidence</code>、<code>save_rca_result(location)</code>；Main：<code>get_plan</code>、<code>get_execution_result</code>、返回完整内容的 <code>get_change_request</code>，<code>request_change</code> 支持 <code>proposed_steps</code> / <code>external_ref</code>。非目标：触发连接器的工具；审批 / 验收仍不是 agent 动作</td></tr>
+<tr><td class="nw"><b>Schedule</b></td>
+<td><span class="st int">非目标</span> 变更窗口（Scheduler 只有 <code>@once</code>）</td>
+<td><span class="st ok">做</span> <code>k8s-discovery</code>（10 分钟）、<code>resource-scan</code>（60 分钟），都在启动时种子化；重新锚定挂在每次构建完成之后，不另开调度</td></tr>
+<tr><td class="nw"><b>Notification</b></td>
+<td><span class="st ok">做</span> <code>change_requested</code>、<code>change_pending_approval</code>（带深链）、<code>change_result</code>。非目标：IM 审批卡片</td>
+<td><span class="st ok">做</span> <code>execution_pending_acceptance</code>（fix 与 change 共用）；<code>change_result</code> 在 <code>needs_review</code> 时附带原因。非目标：连接器失败通知</td></tr>
+<tr><td class="nw"><b>Webhook</b></td>
+<td><span class="st int">非目标</span> 只预留 <code>change_requests.source</code> 的 <code>webhook</code> 值与统一入口</td>
+<td><span class="st ok">做</span> 告警 webhook 的令牌 / HMAC 校验 + <code>observed_at</code> 补全；变更 intake（HMAC）。非目标：ServiceNow / GitHub 专用适配器、往外部回写状态</td></tr>
+</table>
+</section>
+
+<!-- ============================ 8 ============================ -->
+<section id="s8">
+<h2><span class="no">8</span>实测证据</h2>
+<h3>8.1 RCA 定位评测（chaos-lab，13 个场景 × 3 个计分批次）</h3>
+<p class="small">集群 <code>agenticops-chaos-lab</code>（us-east-1，EKS 1.32，3 个节点）；应用跑在集群内，SQLite 放在 emptyDir 上。rca 模型 Opus 4.6，critic 模型 Haiku 4.5。off 与 on #1 跑的是 <code>f4127b3</code>，on #2 跑的是 <code>fe7e9fd</code>：两者唯一的代码差别是重采修复，只经 <code>get_topology_evidence</code> 生效，off 时 RCA 拿不到这个工具，所以一个 off 批次可以同时作两个 on 批次的基线。</p>
+<table>
+<tr><th>指标</th><th class="num">off</th><th class="num">on #1（<code>f4127b3</code>）</th><th class="num">on #2（<code>fe7e9fd</code>）</th></tr>
+<tr><td>runs / valid / invalid</td><td class="num">13 / 13 / 0</td><td class="num">13 / 13 / 0</td><td class="num">13 / 13 / 0</td></tr>
+<tr class="hl"><td>AC@1</td><td class="num">0.00</td><td class="num">0.38</td><td class="num"><b>0.77</b></td></tr>
+<tr><td>AC@3</td><td class="num">0.00</td><td class="num">0.38</td><td class="num"><b>0.77</b></td></tr>
+<tr><td>MRR</td><td class="num">0.00</td><td class="num">0.38</td><td class="num"><b>0.77</b></td></tr>
+<tr><td>located</td><td class="num">0.15</td><td class="num">1.00</td><td class="num"><b>1.00</b></td></tr>
+<tr><td>图召回率</td><td class="num">1.00</td><td class="num">1.00</td><td class="num"><b>1.00</b></td></tr>
+<tr><td>耗时 / 费用 / token</td><td class="num">46 min 42 s / $19.20 / 4,782,067</td><td class="num">40 min 10 s / $16.38 / 3,291,466</td><td class="num">40 min 58 s / $14.52 / 3,346,498</td></tr>
+</table>
+<p class="small">所有命中都在第 1 位，所以 AC@1 = AC@3 = MRR。13 个样本、每个只跑一遍，AC@k 只作参考，不设门槛。另有一个更早的 off 批次（6/13 valid）作废、不计分：它暴露了三个实验环境问题，已用 <code>4967eb5</code>、<code>ffc9de1</code>、<code>3907747</code>、<code>c3137c5</code> 修好。</p>
+<table>
+<tr><th>场景</th><th>off</th><th>on #1</th><th>on #2</th><th>on #2 的第一候选</th></tr>
+<tr><td>scale-to-zero</td><td>— · absent</td><td>— · valid</td><td><b>1</b> · valid</td><td>Deployment chaos-lab/backend</td></tr>
+<tr><td>bad-image</td><td>— · absent</td><td>1 · partial</td><td><b>1</b> · partial</td><td>Deployment chaos-lab/frontend</td></tr>
+<tr><td>crashloop-config</td><td>— · valid</td><td>1 · valid</td><td><b>1</b> · valid</td><td>ConfigMap chaos-lab/nginx-config</td></tr>
+<tr><td>node-drained</td><td>— · valid</td><td>— · valid</td><td>— · valid</td><td>EKS cluster <code>agenticops-chaos-lab</code></td></tr>
+<tr><td>resource-stress</td><td>— · absent</td><td>— · valid</td><td><b>1</b> · valid</td><td>Pod chaos-lab/stress-test</td></tr>
+<tr><td>netpol-block</td><td>— · absent</td><td>1 · valid</td><td><b>1</b> · valid</td><td>NetworkPolicy chaos-lab/chaos-block-backend</td></tr>
+<tr><td>coredns-down</td><td>— · absent</td><td>— · valid</td><td><b>1</b> · valid</td><td>Deployment kube-system/coredns</td></tr>
+<tr><td>service-deleted</td><td>— · absent</td><td>— · valid</td><td>— · valid</td><td>Deployment chaos-lab/backend</td></tr>
+<tr><td>l2-payment-svc</td><td>— · absent</td><td>1 · valid</td><td><b>1</b> · valid</td><td>Deployment chaos-lab/payment-svc</td></tr>
+<tr><td>l2-checkout-api</td><td>— · absent</td><td>— · valid</td><td><b>1</b> · valid</td><td>Deployment chaos-lab/checkout-api</td></tr>
+<tr><td>l2-session-store</td><td>— · absent</td><td>— · valid</td><td><b>1</b> · valid</td><td>Deployment chaos-lab/session-store</td></tr>
+<tr><td>l2-inventory-db</td><td>— · absent</td><td>1 · partial</td><td><b>1</b> · valid</td><td>Deployment chaos-lab/inventory-db</td></tr>
+<tr><td>l2-notification-worker</td><td>— · absent</td><td>— · valid</td><td>— · valid</td><td>EKS cluster <code>agenticops-chaos-lab</code></td></tr>
+</table>
+<p class="small">单元格格式：排名 · <code>location_status</code>（— 表示真值不在候选里）。</p>
+<h4>评测发现（摘要）</h4>
+<ul>
+  <li><b>重采偏差</b>（已修，<code>b401d36</code> 红测 + <code>fe7e9fd</code> 修复）：on #1 未命中 8/13，其中 5 个把上一个用例的对象排在了第一位。原因是用例连着跑，上次采集总是新于 120 s，重采被跳过，读到的是故障发生之前的快照。修复后 on #2 新增 5 个第 1 位命中。</li>
+  <li><b>观察者污染</b>（on #1 scale-to-zero）：第一候选是应用自己的 Deployment——它刚被评测前置步骤重启，于是成了图里「最新的变化」。</li>
+  <li><b>RCA 正文对、结构化定位的层级不对</b>（node-drained）：正文点出了被 cordon 的节点和完整因果链，结构化定位却给了集群行。这个节点在图里能走到，所以问题出在模型的选择，不是缺数据。</li>
+  <li><b>已删除对象作根因</b>（service-deleted）：真值是已被删除的 Service（库里是缺席行）；本版没有解决这类定位。</li>
+  <li><b>bad-image 为 partial</b>：RCA 提出的路径边不在被校验的那次构建里，校验器按 fail-closed 丢掉整条路径，保留第 1 位候选；命中照样计分。</li>
+</ul>
+
+<h3>8.2 2.6.1 验收标准 1–13</h3>
+<table>
+<tr><th class="nw">#</th><th>标准</th><th class="nw">状态</th><th>证据</th></tr>
+<tr><td>1</td><td>锚定率 ≥ 95%；36 组跨账户重复 id 一次都不错配</td><td><span class="st no">未达标</span><br><span class="st ok">达标</span></td><td>锚定率（562 + 25）/ 888 = 66.1%，未达标；重复 id 部分达标：错配 0，<code>resolve()</code> 探测 72/72</td></tr>
+<tr><td>2</td><td>2 跳邻域 SQL ≤ 5；本地库 p95 &lt; 200 ms</td><td><span class="st ok">达标</span></td><td>SQL 最多 4 条；p50 4.1 ms / p95 6.1 ms / 最大 43.3 ms</td></tr>
+<tr><td>3</td><td>图召回率 ≥ 12/13（硬门槛）</td><td><span class="st ok">达标</span></td><td>13/13，三个批次都是</td></tr>
+<tr><td>4</td><td>on 批次 valid + partial ≥ 90%；无效引用绝不记成 valid</td><td><span class="st ok">达标</span></td><td>两个 on 批次都是 13/13 = 100%；抽查 on #2，没有记成 <code>invalid</code> 的</td></tr>
+<tr><td>5</td><td>AC@1 / AC@3 / MRR 的 off / on 对照如实报告，不设门槛</td><td><span class="st ok">已报告</span></td><td>off 0.00 → on #1 0.38 → on #2 0.77</td></tr>
+<tr><td>6</td><td>连接器安全：Secret 无 data；部分采集不产生 absent；kubectl env 里没有非目标账户的 <code>AWS_*</code></td><td><span class="st ut">单测覆盖</span></td><td>chaos-lab：每次都是 partial，absent 0；库里没有 Secret 行，所以「Secret 无 data」没有在真实集群上检验到；kubectl env 没有在真实集群上检查</td></tr>
+<tr><td>7</td><td>配置令牌后，不带令牌的 webhook 401；6 个解析器都取到 <code>observed_at</code></td><td><span class="st ut">单测覆盖</span><br><span class="st ok">令牌实测</span></td><td>不带令牌 / 令牌错 401，令牌正确 201；解析器部分只有单测</td></tr>
+<tr><td>8</td><td>过期哈希审批 409；哈希不一致拒绝执行；状态只经 <code>transition_issue</code> 写</td><td><span class="st ut">单测覆盖，未实测</span></td><td>修复流走查（清单第 2 项）还没做</td></tr>
+<tr><td>9</td><td>dismissed / resolved 不给节点上色；没有 Issue 的节点为 <code>unknown</code>；UI 的三层爆炸半径与 API 一致</td><td><span class="st ut">单测覆盖</span></td><td>后端单测 + 前端 vitest</td></tr>
+<tr><td>10</td><td>规则关系行数 = rule_graph 中资源到资源的边数；方向测试通过</td><td><span class="st ut">单测覆盖</span></td><td>锁着旧（反向）方向的测试已删除</td></tr>
+<tr><td>11</td><td><code>pending_acceptance</code> 时 IssueDetail 与 ChangeDetail 顶部显示同一条原因</td><td><span class="st wip">进行中</span></td><td>前端 vitest 已覆盖；还差联合 E2E 走查</td></tr>
+<tr><td>12</td><td>intake：签名错 401、未配置 404、同一工单重复提交得到同一张单；<code>webhook:*</code> 批准在影子模式下也 403</td><td><span class="st ok">达标</span></td><td>chaos-lab 实测通过；开着 API 鉴权时，未配置的 intake 对匿名调用者返回通用 401，登录后返回 404</td></tr>
+<tr><td>13</td><td>全量测试 + 前端四道门通过；联合 E2E 跑完并经主人确认后才推送</td><td><span class="st wip">进行中</span></td><td>门禁通过：6350 passed / 85 skipped，外加 1 个已知的本机 DNS 假失败；vitest 27 / 279。联合 E2E 进行中，B–E 未推送</td></tr>
+</table>
+
+<h3>8.3 联合 live E2E 清单（路线 A，chaos-lab）</h3>
+<table>
+<tr><th class="nw">#</th><th>项</th><th class="nw">状态</th><th>说明</th></tr>
+<tr><td>1</td><td>定位评测</td><td><span class="st ok">完成</span></td><td>AC@1 off 0.00 → on #1 0.38 → on #2 0.77；located 15% → 100%；图召回率 13/13</td></tr>
+<tr><td>2</td><td>修复流</td><td><span class="st wip">待主人</span></td><td>I#1 是一个实时故障：chaos-lab 的 backend / frontend 被缩到 0 副本。RCA 把 <code>Deployment chaos-lab/backend</code> 排在第 1 位，但置信度 0.57、critic 判 <code>weak</code>，于是进了 <code>needs_review</code>，没有自动生成方案（设计如此）。I#1 的 <code>anchor_status</code> 是 <code>anchored</code>，锚在 EKS 集群行 <code>agenticops-chaos-lab</code>（<code>resource_ref</code> 36）上；它的 <code>resource_id</code> 是字面值 <code>"unknown"</code>。走查从 IssueDetail 的「Generate fix plan」开始。<code>case-6 verify.sh</code> 需要 eks-lab 集群，路线 A 不跑</td></tr>
+<tr><td>3</td><td>变更流</td><td><span class="st wip">已尝试，未完成</span></td><td>C#1（由 intake 建单，L1，plan #1）09:55:56（UTC）由 <code>user:admin</code> 批准，09:56:11 点击执行（executor 09:56:17 接手，09:56:39 中止）。executor 在 pre-check #1 中止：<i>"Deployment frontend reports 0 ready replicas (expected 3/3)"</i>，因为 I#1 的故障还在。pre-check 正确地拒绝了改动一个不健康的 Deployment，安全侧算通过；但变更流的正常路径和验收卡都还没走到。准备时冲突：C#1 的目标与实时故障 I#1 是同一个 Deployment</td></tr>
+<tr><td>4</td><td>变更 intake</td><td><span class="st ok">通过</span></td><td>错签、过期时间戳 401；正确签名 201（<code>requested_by=webhook:e2e-itsm</code>）；同一工单再提交 200、同一张单；<code>webhook:*</code> 批准 / 执行 403（在 pod 内调服务层验证）</td></tr>
+<tr><td>5</td><td>告警 webhook 令牌</td><td><span class="st ok">通过</span></td><td>不带令牌 / 令牌错 401；令牌正确 201（Signal #1 → HealthIssue #1）</td></tr>
+<tr><td>6</td><td>连接器</td><td><span class="st ok">API 部分通过</span><br><span class="st wip">界面部分待主人</span></td><td>129 个 K8s 对象；build #3 175 节点 / 260 边；计数不变式 167 = 167 = 167。「立即运行」的 409 锁在进程内，pod 跑 4 个 worker，这一步预计结果不确定</td></tr>
+<tr><td>7</td><td>UI 走查</td><td><span class="st wip">待主人</span></td><td>问题三视图、IssueDetail 五个 tab、ChangeDetail、审计页、Chat 面板、AgentMetrics 定位卡、中英切换、LocalGraph 三处、Galaxy <code>?focus=</code>、浏览器控制台无报错</td></tr>
+</table>
+<p class="small">E2E 期间的写入只发生在 chaos-lab 集群内（13 个评测故障注入后都已恢复；I#1 故障保留用于走查），以及 ECR 镜像 tag 和 S3 源码归档；没有写任何 AWS 账户资源。dev 机只用了 <code>/tmp</code> 下的构建目录，运行中的服务、它的库、agent-memory 和 skills 都没动。</p>
+</section>
+
+<!-- ============================ 9 ============================ -->
+<section id="s9">
+<h2><span class="no">9</span>Galaxy 收敛情况</h2>
+<p>主人的问题：「Galaxy 的图是否已经收敛完成？」以下是 chaos-lab 集群上 2026-10-03 的实测，构建 #1–#14 全部 completed。</p>
+<div class="concl">
+<p><b>规则层已收敛</b>：963 个节点、415 条规则关系，连续 9 个构建（#6–#14）没有变化。</p>
+<p><b>LLM 层没有完全收敛</b>：每小时仍有 3 个会送 LLM 的资源（2 个 AutoScaling、1 个 RDS）因为内容哈希每次都变，被重新增强一遍，约 $0.033/小时（≈ $0.8/天/账户）；总边数（含 LLM 边）在 1205 和 1208 之间摆动。</p>
+<p>已确认的原因：RDS 的 <code>LatestRestorableTime</code>（以及 <code>CertificateDetails.ValidTill</code>）不在 <code>galaxy/hashing.VOLATILE_KEYS</code> 里；AutoScaling 是哪个字段在变，还没定位。另外有 8 个 IAMRole 每次的哈希也在变：它们不送 LLM、没有费用，但会让每小时的构建都无法跳过。这违背了「库存不变则 $0」的设计承诺，是一个待修的小缺陷（<span class="st no">未修</span>）。</p>
+<p class="small">前端的 d3-force 布局每次加载后几秒内就停下（alphaDecay 0.018），这一点没有问题。</p>
+</div>
+<figure>
+<div class="legend" style="margin:0 0 6px"><span><span class="sw" style="background:#2a78d6"></span>节点数</span><span><span class="sw" style="background:#eb6834"></span>边数</span></div>
+<svg class="chart" viewBox="0 0 1000 300" role="img" aria-labelledby="gT"><title id="gT">Galaxy 构建 #1–#14 的节点数与边数</title>
+<line class="base" x1="56" x2="984" y1="252.0" y2="252.0"/>
+<text x="48" y="256.0" text-anchor="end">0</text>
+<line class="grid" x1="56" x2="984" y1="183.7" y2="183.7"/>
+<text x="48" y="187.7" text-anchor="end">400</text>
+<line class="grid" x1="56" x2="984" y1="115.4" y2="115.4"/>
+<text x="48" y="119.4" text-anchor="end">800</text>
+<line class="grid" x1="56" x2="984" y1="47.1" y2="47.1"/>
+<text x="48" y="51.1" text-anchor="end">1,200</text>
+<line class="base" x1="387.4" x2="387.4" y1="22" y2="252"/>
+<text class="ann" x="393.4" y="22">#6 起：整点 resource-scan 拉入整个 AWS 账户；规则层 963 节点 / 415 规则关系不再变化</text>
+<g class="g"><rect class="hit" x="57.0" y="26" width="64.3" height="226"><title>#1（03:36 scan）：节点 46 · 边 53 · 规则关系 3 · LLM 边丢弃 9 · 费用 $0.0375</title></rect><path class="s1" d="M68.1,252.0 V248.1 Q68.1,244.1 72.1,244.1 H84.1 Q88.1,244.1 88.1,248.1 V252.0 Z"><title>#1 节点 46</title></path><path class="s2" d="M90.1,252.0 V246.9 Q90.1,242.9 94.1,242.9 H106.1 Q110.1,242.9 110.1,246.9 V252.0 Z"><title>#1 边 53</title></path><text class="val" x="78.1" y="239.1" text-anchor="middle">46</text><text class="val" x="100.1" y="237.9" text-anchor="middle">53</text><text x="89.1" y="268" text-anchor="middle" style="fill:#52514e">#1</text><text x="89.1" y="283" text-anchor="middle">scan</text></g>
+<g class="g"><rect class="hit" x="123.3" y="26" width="64.3" height="226"><title>#2（k8s-discovery）：节点 175 · 边 259 · 规则关系 — · LLM 边丢弃 — · 费用 $0</title></rect><path class="s1" d="M134.4,252.0 V226.1 Q134.4,222.1 138.4,222.1 H150.4 Q154.4,222.1 154.4,226.1 V252.0 Z"><title>#2 节点 175</title></path><path class="s2" d="M156.4,252.0 V211.8 Q156.4,207.8 160.4,207.8 H172.4 Q176.4,207.8 176.4,211.8 V252.0 Z"><title>#2 边 259</title></path><text class="val" x="144.4" y="217.1" text-anchor="middle">175</text><text class="val" x="166.4" y="202.8" text-anchor="middle">259</text><text x="155.4" y="268" text-anchor="middle" style="fill:#52514e">#2</text><text x="155.4" y="283" text-anchor="middle">k8s</text></g>
+<g class="g"><rect class="hit" x="189.6" y="26" width="64.3" height="226"><title>#3（03:37 manual）：节点 175 · 边 260 · 规则关系 210 · LLM 边丢弃 0 · 费用 $0</title></rect><path class="s1" d="M200.7,252.0 V226.1 Q200.7,222.1 204.7,222.1 H216.7 Q220.7,222.1 220.7,226.1 V252.0 Z"><title>#3 节点 175</title></path><path class="s2" d="M222.7,252.0 V211.6 Q222.7,207.6 226.7,207.6 H238.7 Q242.7,207.6 242.7,211.6 V252.0 Z"><title>#3 边 260</title></path><text x="221.7" y="268" text-anchor="middle" style="fill:#52514e">#3</text><text x="221.7" y="283" text-anchor="middle">manual</text></g>
+<g class="g"><rect class="hit" x="255.9" y="26" width="64.3" height="226"><title>#4（rca-recollect）：节点 175 · 边 257 · 规则关系 — · LLM 边丢弃 — · 费用 $0（rule-only）</title></rect><path class="s1" d="M267.0,252.0 V226.1 Q267.0,222.1 271.0,222.1 H283.0 Q287.0,222.1 287.0,226.1 V252.0 Z"><title>#4 节点 175</title></path><path class="s2" d="M289.0,252.0 V212.1 Q289.0,208.1 293.0,208.1 H305.0 Q309.0,208.1 309.0,212.1 V252.0 Z"><title>#4 边 257</title></path><text x="288.0" y="268" text-anchor="middle" style="fill:#52514e">#4</text><text x="288.0" y="283" text-anchor="middle">rca</text></g>
+<g class="g"><rect class="hit" x="322.1" y="26" width="64.3" height="226"><title>#5（auto）：节点 175 · 边 257 · 规则关系 — · LLM 边丢弃 — · 费用 $0</title></rect><path class="s1" d="M333.3,252.0 V226.1 Q333.3,222.1 337.3,222.1 H349.3 Q353.3,222.1 353.3,226.1 V252.0 Z"><title>#5 节点 175</title></path><path class="s2" d="M355.3,252.0 V212.1 Q355.3,208.1 359.3,208.1 H371.3 Q375.3,208.1 375.3,212.1 V252.0 Z"><title>#5 边 257</title></path><text x="354.3" y="268" text-anchor="middle" style="fill:#52514e">#5</text><text x="354.3" y="283" text-anchor="middle">auto</text></g>
+<g class="g"><rect class="hit" x="388.4" y="26" width="64.3" height="226"><title>#6（05:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 112 · 费用 $0.254</title></rect><path class="s1" d="M399.6,252.0 V91.5 Q399.6,87.5 403.6,87.5 H415.6 Q419.6,87.5 419.6,91.5 V252.0 Z"><title>#6 节点 963</title></path><path class="s2" d="M421.6,252.0 V50.2 Q421.6,46.2 425.6,46.2 H437.6 Q441.6,46.2 441.6,50.2 V252.0 Z"><title>#6 边 1205</title></path><text class="val" x="409.6" y="82.5" text-anchor="middle">963</text><text class="val" x="431.6" y="41.2" text-anchor="middle">1205</text><text x="420.6" y="268" text-anchor="middle" style="fill:#52514e">#6</text><text x="420.6" y="283" text-anchor="middle">05:00</text></g>
+<g class="g"><rect class="hit" x="454.7" y="26" width="64.3" height="226"><title>#7（06:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M465.9,252.0 V91.5 Q465.9,87.5 469.9,87.5 H481.9 Q485.9,87.5 485.9,91.5 V252.0 Z"><title>#7 节点 963</title></path><path class="s2" d="M487.9,252.0 V50.2 Q487.9,46.2 491.9,46.2 H503.9 Q507.9,46.2 507.9,50.2 V252.0 Z"><title>#7 边 1205</title></path><text x="486.9" y="268" text-anchor="middle" style="fill:#52514e">#7</text><text x="486.9" y="283" text-anchor="middle">06:00</text></g>
+<g class="g"><rect class="hit" x="521.0" y="26" width="64.3" height="226"><title>#8（07:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M532.1,252.0 V91.5 Q532.1,87.5 536.1,87.5 H548.1 Q552.1,87.5 552.1,91.5 V252.0 Z"><title>#8 节点 963</title></path><path class="s2" d="M554.1,252.0 V50.2 Q554.1,46.2 558.1,46.2 H570.1 Q574.1,46.2 574.1,50.2 V252.0 Z"><title>#8 边 1205</title></path><text x="553.1" y="268" text-anchor="middle" style="fill:#52514e">#8</text><text x="553.1" y="283" text-anchor="middle">07:00</text></g>
+<g class="g"><rect class="hit" x="587.3" y="26" width="64.3" height="226"><title>#9（08:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M598.4,252.0 V91.5 Q598.4,87.5 602.4,87.5 H614.4 Q618.4,87.5 618.4,91.5 V252.0 Z"><title>#9 节点 963</title></path><path class="s2" d="M620.4,252.0 V50.2 Q620.4,46.2 624.4,46.2 H636.4 Q640.4,46.2 640.4,50.2 V252.0 Z"><title>#9 边 1205</title></path><text x="619.4" y="268" text-anchor="middle" style="fill:#52514e">#9</text><text x="619.4" y="283" text-anchor="middle">08:00</text></g>
+<g class="g"><rect class="hit" x="653.6" y="26" width="64.3" height="226"><title>#10（09:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M664.7,252.0 V91.5 Q664.7,87.5 668.7,87.5 H680.7 Q684.7,87.5 684.7,91.5 V252.0 Z"><title>#10 节点 963</title></path><path class="s2" d="M686.7,252.0 V50.2 Q686.7,46.2 690.7,46.2 H702.7 Q706.7,46.2 706.7,50.2 V252.0 Z"><title>#10 边 1205</title></path><text x="685.7" y="268" text-anchor="middle" style="fill:#52514e">#10</text><text x="685.7" y="283" text-anchor="middle">09:00</text></g>
+<g class="g"><rect class="hit" x="719.9" y="26" width="64.3" height="226"><title>#11（10:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M731.0,252.0 V91.5 Q731.0,87.5 735.0,87.5 H747.0 Q751.0,87.5 751.0,91.5 V252.0 Z"><title>#11 节点 963</title></path><path class="s2" d="M753.0,252.0 V50.2 Q753.0,46.2 757.0,46.2 H769.0 Q773.0,46.2 773.0,50.2 V252.0 Z"><title>#11 边 1205</title></path><text x="752.0" y="268" text-anchor="middle" style="fill:#52514e">#11</text><text x="752.0" y="283" text-anchor="middle">10:00</text></g>
+<g class="g"><rect class="hit" x="786.1" y="26" width="64.3" height="226"><title>#12（11:00）：节点 963 · 边 1208 · 规则关系 415 · LLM 边丢弃 2 · 费用 ≈ $0.033</title></rect><path class="s1" d="M797.3,252.0 V91.5 Q797.3,87.5 801.3,87.5 H813.3 Q817.3,87.5 817.3,91.5 V252.0 Z"><title>#12 节点 963</title></path><path class="s2" d="M819.3,252.0 V49.7 Q819.3,45.7 823.3,45.7 H835.3 Q839.3,45.7 839.3,49.7 V252.0 Z"><title>#12 边 1208</title></path><text class="val" x="829.3" y="40.7" text-anchor="middle">1208</text><text x="818.3" y="268" text-anchor="middle" style="fill:#52514e">#12</text><text x="818.3" y="283" text-anchor="middle">11:00</text></g>
+<g class="g"><rect class="hit" x="852.4" y="26" width="64.3" height="226"><title>#13（12:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M863.6,252.0 V91.5 Q863.6,87.5 867.6,87.5 H879.6 Q883.6,87.5 883.6,91.5 V252.0 Z"><title>#13 节点 963</title></path><path class="s2" d="M885.6,252.0 V50.2 Q885.6,46.2 889.6,46.2 H901.6 Q905.6,46.2 905.6,50.2 V252.0 Z"><title>#13 边 1205</title></path><text x="884.6" y="268" text-anchor="middle" style="fill:#52514e">#13</text><text x="884.6" y="283" text-anchor="middle">12:00</text></g>
+<g class="g"><rect class="hit" x="918.7" y="26" width="64.3" height="226"><title>#14（13:00）：节点 963 · 边 1205 · 规则关系 415 · LLM 边丢弃 5 · 费用 ≈ $0.033</title></rect><path class="s1" d="M929.9,252.0 V91.5 Q929.9,87.5 933.9,87.5 H945.9 Q949.9,87.5 949.9,91.5 V252.0 Z"><title>#14 节点 963</title></path><path class="s2" d="M951.9,252.0 V50.2 Q951.9,46.2 955.9,46.2 H967.9 Q971.9,46.2 971.9,50.2 V252.0 Z"><title>#14 边 1205</title></path><text x="950.9" y="268" text-anchor="middle" style="fill:#52514e">#14</text><text x="950.9" y="283" text-anchor="middle">13:00</text></g>
+</svg>
+<figcaption>每次构建的节点数与边数。鼠标悬停在某次构建上可看该次的全部数字。#6 起整点 <code>resource-scan</code> 把整个 AWS 账户拉进库存。</figcaption>
+</figure>
+<figure>
+<svg class="chart" viewBox="0 0 1000 230" role="img" aria-labelledby="cT"><title id="cT">Galaxy 构建 #1–#14 的 LLM 费用（美元）</title>
+<line class="base" x1="56" x2="984" y1="178.0" y2="178.0"/>
+<text x="48" y="182.0" text-anchor="end">$0.00</text>
+<line class="grid" x1="56" x2="984" y1="127.3" y2="127.3"/>
+<text x="48" y="131.3" text-anchor="end">$0.10</text>
+<line class="grid" x1="56" x2="984" y1="76.7" y2="76.7"/>
+<text x="48" y="80.7" text-anchor="end">$0.20</text>
+<line class="grid" x1="56" x2="984" y1="26.0" y2="26.0"/>
+<text x="48" y="30.0" text-anchor="end">$0.30</text>
+<g class="g"><rect class="hit" x="57.0" y="22" width="64.3" height="156"><title>#1（scan）：费用 $0.0375</title></rect><path class="s1" d="M77.1,178.0 V163.0 Q77.1,159.0 81.1,159.0 H97.1 Q101.1,159.0 101.1,163.0 V178.0 Z"><title>#1 $0.0375</title></path><text class="val" x="89.1" y="153.0" text-anchor="middle">$0.0375</text><text x="89.1" y="194" text-anchor="middle" style="fill:#52514e">#1</text><text x="89.1" y="209" text-anchor="middle">scan</text></g>
+<g class="g"><rect class="hit" x="123.3" y="22" width="64.3" height="156"><title>#2（k8s-discovery）：费用 $0</title></rect><text class="val" x="155.4" y="172" text-anchor="middle">$0</text><text x="155.4" y="194" text-anchor="middle" style="fill:#52514e">#2</text><text x="155.4" y="209" text-anchor="middle">k8s</text></g>
+<g class="g"><rect class="hit" x="189.6" y="22" width="64.3" height="156"><title>#3（manual）：费用 $0（没有需要送 LLM 的资源）</title></rect><text class="val" x="221.7" y="172" text-anchor="middle">$0</text><text x="221.7" y="194" text-anchor="middle" style="fill:#52514e">#3</text><text x="221.7" y="209" text-anchor="middle">manual</text></g>
+<g class="g"><rect class="hit" x="255.9" y="22" width="64.3" height="156"><title>#4（rca-recollect）：费用 $0（rule-only）</title></rect><text class="val" x="288.0" y="172" text-anchor="middle">$0</text><text x="288.0" y="194" text-anchor="middle" style="fill:#52514e">#4</text><text x="288.0" y="209" text-anchor="middle">rca</text></g>
+<g class="g"><rect class="hit" x="322.1" y="22" width="64.3" height="156"><title>#5（auto）：费用 $0</title></rect><text class="val" x="354.3" y="172" text-anchor="middle">$0</text><text x="354.3" y="194" text-anchor="middle" style="fill:#52514e">#5</text><text x="354.3" y="209" text-anchor="middle">auto</text></g>
+<g class="g"><rect class="hit" x="388.4" y="22" width="64.3" height="156"><title>#6（05:00）：费用 $0.254</title></rect><path class="s1" d="M408.6,178.0 V53.3 Q408.6,49.3 412.6,49.3 H428.6 Q432.6,49.3 432.6,53.3 V178.0 Z"><title>#6 $0.254</title></path><text class="val" x="420.6" y="43.3" text-anchor="middle">$0.254</text><text x="420.6" y="194" text-anchor="middle" style="fill:#52514e">#6</text><text x="420.6" y="209" text-anchor="middle">05:00</text></g>
+<g class="g"><rect class="hit" x="454.7" y="22" width="64.3" height="156"><title>#7（06:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M474.9,178.0 V165.3 Q474.9,161.3 478.9,161.3 H494.9 Q498.9,161.3 498.9,165.3 V178.0 Z"><title>#7 ≈ $0.033</title></path><text x="486.9" y="194" text-anchor="middle" style="fill:#52514e">#7</text><text x="486.9" y="209" text-anchor="middle">06:00</text></g>
+<g class="g"><rect class="hit" x="521.0" y="22" width="64.3" height="156"><title>#8（07:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M541.1,178.0 V165.3 Q541.1,161.3 545.1,161.3 H561.1 Q565.1,161.3 565.1,165.3 V178.0 Z"><title>#8 ≈ $0.033</title></path><text x="553.1" y="194" text-anchor="middle" style="fill:#52514e">#8</text><text x="553.1" y="209" text-anchor="middle">07:00</text></g>
+<g class="g"><rect class="hit" x="587.3" y="22" width="64.3" height="156"><title>#9（08:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M607.4,178.0 V165.3 Q607.4,161.3 611.4,161.3 H627.4 Q631.4,161.3 631.4,165.3 V178.0 Z"><title>#9 ≈ $0.033</title></path><text x="619.4" y="194" text-anchor="middle" style="fill:#52514e">#9</text><text x="619.4" y="209" text-anchor="middle">08:00</text></g>
+<g class="g"><rect class="hit" x="653.6" y="22" width="64.3" height="156"><title>#10（09:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M673.7,178.0 V165.3 Q673.7,161.3 677.7,161.3 H693.7 Q697.7,161.3 697.7,165.3 V178.0 Z"><title>#10 ≈ $0.033</title></path><text x="685.7" y="194" text-anchor="middle" style="fill:#52514e">#10</text><text x="685.7" y="209" text-anchor="middle">09:00</text></g>
+<g class="g"><rect class="hit" x="719.9" y="22" width="64.3" height="156"><title>#11（10:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M740.0,178.0 V165.3 Q740.0,161.3 744.0,161.3 H760.0 Q764.0,161.3 764.0,165.3 V178.0 Z"><title>#11 ≈ $0.033</title></path><text x="752.0" y="194" text-anchor="middle" style="fill:#52514e">#11</text><text x="752.0" y="209" text-anchor="middle">10:00</text></g>
+<g class="g"><rect class="hit" x="786.1" y="22" width="64.3" height="156"><title>#12（11:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M806.3,178.0 V165.3 Q806.3,161.3 810.3,161.3 H826.3 Q830.3,161.3 830.3,165.3 V178.0 Z"><title>#12 ≈ $0.033</title></path><text x="818.3" y="194" text-anchor="middle" style="fill:#52514e">#12</text><text x="818.3" y="209" text-anchor="middle">11:00</text></g>
+<g class="g"><rect class="hit" x="852.4" y="22" width="64.3" height="156"><title>#13（12:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M872.6,178.0 V165.3 Q872.6,161.3 876.6,161.3 H892.6 Q896.6,161.3 896.6,165.3 V178.0 Z"><title>#13 ≈ $0.033</title></path><text x="884.6" y="194" text-anchor="middle" style="fill:#52514e">#13</text><text x="884.6" y="209" text-anchor="middle">12:00</text></g>
+<g class="g"><rect class="hit" x="918.7" y="22" width="64.3" height="156"><title>#14（13:00）：费用 ≈ $0.033</title></rect><path class="s1" d="M938.9,178.0 V165.3 Q938.9,161.3 942.9,161.3 H958.9 Q962.9,161.3 962.9,165.3 V178.0 Z"><title>#14 ≈ $0.033</title></path><text x="950.9" y="194" text-anchor="middle" style="fill:#52514e">#14</text><text x="950.9" y="209" text-anchor="middle">13:00</text></g>
+<text class="val" x="718.9" y="149.3" text-anchor="middle">#7–#14 每次 ≈ $0.033（≈ $0.8/天/账户）</text>
+</svg>
+<figcaption>每次构建的 LLM 费用（美元）。#1 是首次 scan 后的构建（LLM 增强 46 个资源）；#2–#5 没有需要送 LLM 的资源，#4 是 rule-only 刷新，token 记 0。</figcaption>
+</figure>
+<table>
+<tr><th class="num">构建</th><th>时间</th><th>触发</th><th class="num">节点</th><th class="num">边</th><th class="num">规则关系</th><th class="num">LLM 边被丢弃</th><th class="num">费用</th></tr>
+<tr><td class="num">#1</td><td>03:36</td><td><code>scan</code></td><td class="num">46</td><td class="num">53</td><td class="num">3</td><td class="num">9</td><td class="num">$0.0375</td></tr>
+<tr><td class="num">#2</td><td>03:36</td><td><code>k8s-discovery</code></td><td class="num">175</td><td class="num">259</td><td class="num">210</td><td class="num">0</td><td class="num">$0</td></tr>
+<tr><td class="num">#3</td><td>03:37</td><td><code>manual</code></td><td class="num">175</td><td class="num">260</td><td class="num">210</td><td class="num">0</td><td class="num">$0</td></tr>
+<tr><td class="num">#4</td><td>03:39</td><td><code>rca-recollect</code></td><td class="num">175</td><td class="num">257</td><td class="num">207</td><td class="num">0</td><td class="num">$0（rule-only）</td></tr>
+<tr><td class="num">#5</td><td>04:00</td><td><code>auto</code></td><td class="num">175</td><td class="num">257</td><td class="num">207</td><td class="num">0</td><td class="num">$0</td></tr>
+<tr class="hl"><td class="num">#6</td><td>05:00</td><td><code>auto</code></td><td class="num">963</td><td class="num">1205</td><td class="num">415</td><td class="num">112</td><td class="num">$0.254</td></tr>
+<tr><td class="num">#7–#11</td><td>06:00–10:00</td><td><code>auto</code></td><td class="num">963</td><td class="num">1205</td><td class="num">415</td><td class="num">5</td><td class="num">≈ $0.033 / 次</td></tr>
+<tr><td class="num">#12</td><td>11:00</td><td><code>auto</code></td><td class="num">963</td><td class="num">1208</td><td class="num">415</td><td class="num">2</td><td class="num">≈ $0.033</td></tr>
+<tr><td class="num">#13–#14</td><td>12:00–13:00</td><td><code>auto</code></td><td class="num">963</td><td class="num">1205</td><td class="num">415</td><td class="num">5</td><td class="num">≈ $0.033 / 次</td></tr>
+</table>
+<p class="small">时间为 2026-10-03 UTC（库内时间）。「规则关系」是该构建发布到 <code>resource_relations</code> 的 rule 行数。「LLM 边被丢弃」指未通过 fail-closed 校验、没有入图的 LLM 边。当前在场库存 953 行（aws 824、kubernetes 129），缺席 0。</p>
+</section>
+
+<!-- ============================ 10 ============================ -->
+<section id="s10">
+<h2><span class="no">10</span>已知缺口与待主人决定</h2>
+<p class="small">只列最重要的几项；完整清单见 <code>MVP-2.6.1-RELEASE.md</code>「已知偏差与限制」和「加固清单」。</p>
+<table>
+<tr><th style="width:130px">项</th><th>说明</th><th>影响</th><th class="nw">状态</th></tr>
+<tr><td>锚定率 66.1%（A-1）</td><td>297 条 <code>unanchored</code> 里，291 条是库存里没有这个资源，多为没有扫描器列举的类型（<code>arn:cloudformation</code> 39、<code>arn:elasticloadbalancing</code> 38、<code>arn:iam</code> 35、<code>arn:rds</code> 25…），6 条是没有账户也没有信号记录；另有 4 条 <code>ambiguous</code></td><td>这些 Issue 拿不到局部图和证据包；按设计不为达标放宽规则</td><td><span class="st no">未修</span></td></tr>
+<tr><td>4 个 worker vs 进程内锁</td><td><code>docker/Dockerfile</code> 和 dev 机 systemd（<code>iac/deploy-sg/deploy.sh</code>）都跑 <code>--workers 4</code>，而 spec §10.3 假定单进程。三把锁都是进程内的 <code>threading.Lock</code>：连接器运行锁（409 + 运行中徽标）、Galaxy <code>_RULE_LOCK</code>、intake 去重 <code>_intake_lock</code>。相关的既有问题：2.6.0 的迁移锁也只在进程内；4 个 worker 启动时 <code>init_db</code> 的 <code>create_all</code> 会互相竞争</td><td>第二次「立即运行」可能落到另一个 worker，变成并行运行；两个 worker 可能同时发布规则关系；同一工单两次投递可能各建一张单。这些是读代码发现的，没有在 live 环境触发</td><td><span class="st dec">待主人决定</span><br><span class="small">建议：2.6.1 记为已知缺口，2.6.2 换成 DB 级锁</span></td></tr>
+<tr><td>Galaxy 易变字段让哈希每次都变</td><td>见第 9 节：RDS 的 <code>LatestRestorableTime</code> / <code>CertificateDetails.ValidTill</code> 不在 <code>VOLATILE_KEYS</code> 里；AutoScaling 的变化字段还没定位；8 个 IAMRole 哈希每次都变</td><td>≈ $0.033/小时（≈ $0.8/天/账户）；每小时的构建都跳不过</td><td><span class="st no">未修</span></td></tr>
+<tr><td>PARK-S5（既有问题）</td><td><code>validate_api_key</code> 返回的 <code>User</code> 已经脱离了会话，读它的列会抛错</td><td>用 API key 调用、且要解析 <code>current_actor</code> 的接口很可能 500</td><td><span class="st no">未修</span><br><span class="small">需主人知悉</span></td></tr>
+<tr><td>C-1 / P-1 用 Host 头绕过 API 鉴权</td><td>APIAuthMiddleware 原来按 <code>request.url.path</code> 判断路径，而这个值受 Host 头影响。分支上的 <code>3cb7b6e</code> 改为读 <code>request.scope["path"]</code>；origin/main 上还是旧代码（<code>src/agenticops/web/app.py:4313</code>）</td><td>main 上可以绕过 API 鉴权</td><td><span class="st ok">已修于分支</span><br><span class="st dec">回移 main 待主人决定</span></td></tr>
+<tr><td>C-M6 证据门变严</td><td>证据检查不再拿 <code>save_rca_result</code> 自己的输入当依据；一条对不上的引用让置信度 ×0.6（0.9 → 0.54，低于 0.6 的门槛）</td><td>部署后预期 <code>needs_review</code> 上升、自动修复下降。可对照联合 E2E 的 I#1：第 1 位定位正确，但置信度 0.57 + critic <code>weak</code> → <code>needs_review</code>（是否由这一变化导致，没有单独核实）</td><td><span class="st int">有意变更（升级提示）</span></td></tr>
+<tr><td>B-0 每小时一轮只读扫描</td><td>升级后启动时种子化 <code>resource-scan</code>（默认 60 分钟），每个部署从此每小时对所有启用的 AWS 账户发一轮只读调用，并把没看到的资源标为缺席</td><td>多了 API 流量；可以在 Schedules 里改间隔或停用（已有的行不会被覆盖）；它和 <code>galaxy-auto-build</code> 都在整点，调度器串行执行（B-6）</td><td><span class="st int">有意变更（升级提示）</span></td></tr>
+<tr><td>E-F2 / I-1 关单时不撤回方案</td><td>Issue 转为 <code>resolved</code> / <code>dismissed</code> 时，它名下未终结的修复方案不会撤回（变更侧有撤回）。界面已不再给这类方案显示「批准」（<code>94530d0</code>），但方案仍停在 <code>pending_approval</code></td><td>要在同一事务里撤回，属于行为变更</td><td><span class="st dec">待主人决定</span></td></tr>
+</table>
+</section>
+
+<!-- ============================ 11 ============================ -->
+<section id="s11">
+<h2><span class="no">11</span>下一步</h2>
+<ol>
+  <li><b>主人走查剩余项</b>：
+    <ul>
+      <li>第 2 项修复流：从 IssueDetail 的「Generate fix plan」开始，包括「批准后改方案 → 执行被拒 → 回到 <code>root_cause_identified</code>」。</li>
+      <li>第 3 项变更流：先解开准备时的冲突（C#1 与实时故障 I#1 是同一个 Deployment），再走正常路径和验收卡。</li>
+      <li>第 6 项连接器卡片的界面部分：409 在 4 个 worker 下不一定能复现。</li>
+      <li>第 7 项 UI 走查。</li>
+    </ul></li>
+  <li><b>走查结束后轮换</b>本次 E2E 用到的密钥。</li>
+  <li><b>文档提交与推送只在主人确认之后</b>：包括 E2E 报告和发布说明的回填，推送用 <code>git push --no-verify</code>。tag <code>v2.6.1</code> 目前指向 <code>ab4093c</code>（只含 Plan A，也是仓库里唯一的 tag），B–E 推送后 tag 怎么处理由主人定。</li>
+  <li><b>推送获准后重部署 dev 机</b>：先备份机器本地的 agent-memory / skills（2.6.0 部署时它们挡过 <code>git checkout</code>），再经 <code>iac/deploy-sg/deploy.sh</code> 重部署。</li>
+  <li><b>主人提出、正在进行的两件事</b>：
+    <table>
+    <tr><th>请求</th><th>现状</th><th class="nw">状态</th></tr>
+    <tr><td>变更单在人工批准后自动执行（修复方案本来就是批准即执行，变更单以前还要再点一次 Execute）</td><td>新增 <code>change_service.approve_and_execute</code>，Web API 的批准路由、CLI <code>/approve C&lt;id&gt;</code> 和策略自动审批都改走它。运行排不进队时，变更单停在 <code>approved</code>，并发 <code>execution_not_queued</code> 通知；手动 Execute 只保留作重试；ChangeDetail 显示「批准并执行」/「重试执行」。红测 <code>6cf348e</code>、实现 <code>e762b9a</code>，未推送；门禁 pytest 6357 passed / 85 skipped（另 1 个已知本机 DNS 假失败），tsc 0、vitest 27 / 279、build 通过</td><td><span class="st wip">已在本地实现，待部署后在 chaos-lab 实测</span></td></tr>
+    <tr><td>Issue / 修复方案 / Change 三个页面的前端改版</td><td>三套方案起草中：<code>docs/design/2026-10-03-issue-change-ui-proposals.html</code></td><td><span class="st wip">起草中</span></td></tr>
+    </table></li>
+  <li><b>等主人拍板的决定</b>：4 个 worker 下的锁（第 10 节）；C-1 是否回移 main；E-F2 关单时是否撤回方案；看过联合 E2E 的统计之后，何时打开 <code>policy_graph_impact_enforce</code>（打开前先做加固清单里的 C T6 三项）。</li>
+</ol>
+</section>
+
+<section id="src">
+<h2>资料来源</h2>
+<ul class="src">
+  <li><code>docs/MVP-2.5.0-RELEASE.md</code> —— 2.5.0 基线、09-07 / 09-08 追加交付、4333 / 85 与 vitest 53</li>
+  <li><code>CLAUDE.md</code>（worktree）—— Claude 5 / adaptive thinking、OpenAI 多 provider、技能广域加载 + 沙箱、2.6.1 模块与配置、状态机</li>
+  <li><code>docs/MVP-2.6.0-RELEASE.md</code>、<code>docs/MVP-2.6.0-E2E-REPORT.md</code> —— 变更管理设计与 dev live E2E</li>
+  <li><code>docs/MVP-2.6.1-RELEASE.md</code> —— 计划 A–E、可达面、验收 1–13、已知偏差与加固清单</li>
+  <li><code>docs/MVP-2.6.1-E2E-REPORT.md</code>、<code>docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md</code>、<code>docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md</code> —— 联合 E2E、定位评测、锚定率与查询性能</li>
+  <li>控制器「2026-10-03 实测」—— git 提交数与 diff 统计、推送 / tag 状态、各版本测试计数、Galaxy 构建 #1–#14、清单第 3 项的尝试、4 worker 发现、批准即执行的本地实现</li>
+  <li>控制器 2026-10-04 补充核对（只读查 lab 库与 git；时间为库内 UTC）—— Galaxy 构建时间、触发与费用，<code>ab4093c</code> / <code>fe7e9fd</code> 的提交时间，tag 情况，C#1 时间线，I#1 锚点，HEAD <code>e762b9a</code> 及其门禁</li>
+</ul>
+</section>
+</main>
+</div>
+<script>
+(function(){
+  var links = document.querySelectorAll('nav.toc a');
+  if (!links.length || !('IntersectionObserver' in window)) return;
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var obs = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (!e.isIntersecting) return;
+      links.forEach(function(l){ l.classList.remove('on'); });
+      var a = map[e.target.id];
+      if (a) a.classList.add('on');
+    });
+  }, {rootMargin: '-10% 0px -80% 0px'});
+  document.querySelectorAll('main section[id]').forEach(function(s){ obs.observe(s); });
+})();
+</script>
+</body>
+</html>

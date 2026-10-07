@@ -58,11 +58,16 @@ export function useUpdateChatSession() {
       model_id?: string;
       /** "" = Auto; else off|standard|deep; omit = don't change */
       effort?: string;
+      /** who sees it — only its owner (or an admin) may change this */
+      visibility?: "private" | "workspace";
     }) =>
       apiFetch<ChatSession>(`/chat/sessions/${sessionId}`, {
         method: "PATCH",
         body: JSON.stringify(fields),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions"] }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      qc.invalidateQueries({ queryKey: ["chat-session", vars.sessionId] });
+    },
   });
 }

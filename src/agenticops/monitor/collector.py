@@ -55,6 +55,7 @@ class MetricsCollector:
             query = session.query(CloudResource).filter_by(
                 account_id=self.account.id,
                 resource_type=service_type,
+                absent_since=None,
             )
 
             if region:

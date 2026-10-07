@@ -1,7 +1,7 @@
 """Kubernetes provider — one provider type for EKS/AKS/GKE/k3s/OpenShift.
 
 Credential schema (CloudAccount.credentials):
-    {kubeconfig_path?: ~/.kube/config, context?: <name>, namespace?: default}
+    {kubeconfig_path: <path, required — no ~/.kube/config default>, context?: <name>, namespace?: default}
 
 Auth deltas between clouds are absorbed by kubeconfig exec plugins
 (aws eks get-token / kubelogin / gke-gcloud-auth-plugin / client certs),
@@ -38,7 +38,12 @@ class KubernetesProvider(CloudProvider):
 
     def resolve_credentials(self) -> bool:
         creds = self.account.credentials or {}
-        kubeconfig = os.path.expanduser(creds.get("kubeconfig_path") or "~/.kube/config")
+        # No default: an unset path is a credential failure, never the ambient ~/.kube/config (铁律 #2).
+        # An explicitly configured path is the owner's declaration and is used as given.
+        if not creds.get("kubeconfig_path"):
+            logger.error("kubernetes account %s: 'kubeconfig_path' is required", self.account.name)
+            return False
+        kubeconfig = os.path.expanduser(creds["kubeconfig_path"])
         if not os.path.exists(kubeconfig):
             logger.error(
                 "kubernetes account %s: kubeconfig not found at %s",

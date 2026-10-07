@@ -1,5 +1,7 @@
 import React from "react";
+import { useLocale } from "@/i18n/LocaleContext";
 import { cn } from "@/lib/cn";
+import { severityLabel } from "@/lib/issueDetail";
 
 const SEV: Record<string, { dot: string; text: string }> = {
   critical: { dot: "bg-red-500", text: "text-red-500 dark:text-red-400" },
@@ -15,12 +17,13 @@ interface SeverityBadgeProps {
 export const SeverityBadge = React.memo(function SeverityBadge({
   severity,
 }: SeverityBadgeProps) {
+  const { t } = useLocale();
   const s = SEV[severity] ?? SEV.low;
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={cn("h-2 w-2 rounded-full", s.dot)} />
       <span className={cn("text-xs font-medium uppercase tracking-wider", s.text)}>
-        {severity}
+        {severityLabel(severity, t)}
       </span>
     </span>
   );

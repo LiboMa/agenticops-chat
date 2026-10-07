@@ -79,7 +79,7 @@ describe("chatStream", () => {
 
     await chatStream.send("sess-E", "hi");
 
-    expect(chatStream.getSnapshot("sess-E").error).toBe("boom");
+    expect(chatStream.getSnapshot("sess-E").error).toEqual({ code: "internal", message: "boom" });
     expect(done).toHaveLength(0);
   });
 
@@ -93,5 +93,91 @@ describe("chatStream", () => {
     await chatStream.send("sess-ACT", "hi");
     expect(activeDuringStream).toContain("sess-ACT");
     expect(chatStream.activeSessions()).not.toContain("sess-ACT"); // cleared after done
+  });
+});
+
+/** A Response whose body streams raw byte chunks (a UTF-8 character can be split across two). */
+function byteResponse(chunks: Uint8Array[], status = 200): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { for (const c of chunks) controller.enqueue(c); controller.close(); },
+  });
+  return new Response(stream, { status, headers: { "Content-Type": "text/event-stream" } });
+}
+
+describe("chatStream — S5 stream client", () => {
+  it("a UTF-8 character split across two chunks arrives whole", async () => {
+    const done: string[] = [];
+    chatStream.setCallbacks({ onDone: (_s, p) => done.push(p.content) });
+    const bytes = new TextEncoder().encode('event: text\ndata: {"token":"你好"}\n\nevent: done\ndata: {}\n\n');
+    const cut = bytes.indexOf(0xe4) + 1;  // inside 你
+    vi.stubGlobal("fetch", vi.fn(async () => byteResponse([bytes.slice(0, cut), bytes.slice(cut)])));
+    await chatStream.send("s5-utf8", "hi");
+    expect(done).toEqual(["你好"]);
+  });
+
+  it("every send carries a client_message_id (a UUID)", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return sseResponse(['event: done\ndata: {}\n\n']);
+    }));
+    await chatStream.send("s5-id", "hi");
+    expect(bodies[0].client_message_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    await chatStream.send("s5-id", "hi", undefined, "11111111-2222-3333-4444-555555555555");
+    expect(bodies[1].client_message_id).toBe("11111111-2222-3333-4444-555555555555");
+  });
+
+  it("a 409 says its code, and the history is reloaded", async () => {
+    const settled: string[] = [];
+    chatStream.setCallbacks({ onSettled: (sid) => settled.push(sid) });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: { detail: "busy", code: "session_busy" } }), { status: 409 })));
+    await chatStream.send("s5-busy", "hi");
+    expect(chatStream.getSnapshot("s5-busy").error?.code).toBe("session_busy");
+    expect(settled).toEqual(["s5-busy"]);
+  });
+
+  it("an error frame keeps its code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(['event: error\ndata: {"code":"throttled","message":"m"}\n\n'])));
+    await chatStream.send("s5-err", "hi");
+    expect(chatStream.getSnapshot("s5-err").error).toEqual({ code: "throttled", message: "m" });
+  });
+
+  it("a network failure is 'network', and the history is reloaded", async () => {
+    const settled: string[] = [];
+    chatStream.setCallbacks({ onSettled: (sid) => settled.push(sid) });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await chatStream.send("s5-net", "hi");
+    expect(chatStream.getSnapshot("s5-net").error?.code).toBe("network");
+    expect(settled).toEqual(["s5-net"]);
+  });
+
+  it("an abort is no error, and the history is reloaded (the server stored what it had)", async () => {
+    const settled: string[] = [];
+    chatStream.setCallbacks({ onSettled: (sid) => settled.push(sid) });
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => new Promise((_res, rej) => {
+      init.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    })));
+    const p = chatStream.send("s5-abort", "hi");
+    chatStream.cancel("s5-abort");
+    await p;
+    expect(chatStream.getSnapshot("s5-abort").error).toBeNull();
+    expect(settled).toEqual(["s5-abort"]);
+  });
+});
+
+describe("chatStream.send says whether the server took the message (S5 review I6)", () => {
+  it("true once the accepted frame arrives", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: accepted\ndata: {"client_message_id":"x","user_message_id":1}\n\n', 'event: done\ndata: {}\n\n'])));
+    expect(await chatStream.send("s5-acc", "hi")).toBe(true);
+  });
+  it("false on a 409, a network failure, or a stream that never accepted it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "session_busy" } }), { status: 409 })));
+    expect(await chatStream.send("s5-acc2", "hi")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    expect(await chatStream.send("s5-acc3", "hi")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(['event: error\ndata: {"code":"internal"}\n\n'])));
+    expect(await chatStream.send("s5-acc4", "hi")).toBe(false);
   });
 });

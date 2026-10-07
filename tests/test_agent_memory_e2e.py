@@ -125,7 +125,7 @@ class TestFalsePositiveFeedbackFlow:
         # Step 6: Verify issue was dismissed
         with get_db_session() as session:
             issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-            assert issue.status == "resolved"
+            assert issue.status == "dismissed"
 
     def test_false_positive_default_confidence(self, client, tmp_memory_dir, seed_issue):
         """Confidence defaults to 3 when not provided."""

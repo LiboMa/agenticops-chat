@@ -9,14 +9,15 @@ import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatShortDate } from "@/lib/formatDate";
-import type { Anomaly, FixPlanWithExecutions, RelatedResourceItem } from "@/api/types";
+import { LocalGraph } from "@/components/graph/LocalGraph";
+import type { FixPlanWithExecutions, HealthIssue, RelatedResourceItem } from "@/api/types";
 
 const INFRA_TYPES = new Set([
   "VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "TGW",
   "InternetGateway", "NATGateway", "TransitGateway",
 ]);
 
-type Tab = "overview" | "issues" | "fix-plans" | "network" | "tags";
+type Tab = "overview" | "issues" | "fix-plans" | "network" | "graph" | "tags";
 
 export default function ResourceDetail() {
   const { id } = useParams<{ id: string }>();
@@ -42,19 +43,23 @@ export default function ResourceDetail() {
     { key: "issues", label: "Issues" },
     { key: "fix-plans", label: "Fix Plans" },
     { key: "network", label: networkTabLabel },
+    { key: "graph", label: t("graph.title") },
     { key: "tags", label: "Tags" },
   ];
 
   return (
     <div className="space-y-4">
-      <Link to="/app/issues?view=resources" className="text-muted-foreground hover:text-foreground text-sm">
+      <Link to="/app/resources" className="text-muted-foreground hover:text-foreground text-sm">
         &larr; {t("resources.back")}
       </Link>
       <Card>
         <div className="px-5 py-4 border-b">
           <div className="flex items-center gap-3 mb-2">
             <Badge className="bg-primary-100 text-primary-700">{r.resource_type}</Badge>
-            <h1 className="text-lg font-semibold">{r.resource_name || r.resource_id}</h1>
+            <h1 className={`text-lg font-semibold${r.absent_since ? " line-through opacity-60" : ""}`}>
+              {r.resource_name || r.resource_id}
+            </h1>
+            {r.absent_since && <Badge className="bg-secondary text-muted-foreground">{t("resources.absent")}</Badge>}
           </div>
           <div className="flex items-center gap-6 text-sm text-muted-foreground">
             <span className="font-mono text-xs">{r.resource_id}</span>
@@ -84,6 +89,7 @@ export default function ResourceDetail() {
           {tab === "issues" && <IssuesTab data={issues.data} isLoading={issues.isLoading} />}
           {tab === "fix-plans" && <FixPlansTab data={fixPlans.data} isLoading={fixPlans.isLoading} />}
           {tab === "network" && <NetworkTab data={related.data} isLoading={related.isLoading} isInfra={isInfra} />}
+          {tab === "graph" && <LocalGraph subject={{ resourceId }} />}
           {tab === "tags" && <TagsTab tags={r.tags} />}
         </CardBody>
       </Card>
@@ -108,7 +114,7 @@ function OverviewTab({ metadata }: { metadata: Record<string, unknown> }) {
   );
 }
 
-function IssuesTab({ data, isLoading }: { data?: Anomaly[]; isLoading: boolean }) {
+function IssuesTab({ data, isLoading }: { data?: HealthIssue[]; isLoading: boolean }) {
   if (isLoading) return <Spinner />;
   if (!data?.length) return <p className="text-sm text-muted-foreground">No issues found.</p>;
   return (

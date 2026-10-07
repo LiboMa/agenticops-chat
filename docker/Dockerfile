@@ -97,6 +97,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -sf http://localhost:8000/api/health || exit 1
 
+# ONE process (MVP-2.7.0): chat/IM agents, the connector/Galaxy/intake locks and runtime settings live in
+# this process's memory — more workers silently break them (a second process logs an ERROR at startup).
 CMD ["python", "-m", "uvicorn", "agenticops.web.app:app", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "4", "--timeout-keep-alive", "30"]
+     "--workers", "1", "--timeout-keep-alive", "30"]

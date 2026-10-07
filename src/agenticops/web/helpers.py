@@ -103,3 +103,15 @@ def _enrich_report(report: Report) -> dict:
         except Exception:
             pass
     return data
+
+
+SECURITY_SOURCE_PREFIX = "security_"
+
+
+def issue_scope_filter(query, scope: str):
+    """Split ops events from security findings by the `security_` source prefix (`_` is a LIKE wildcard, so the
+    prefix is escaped). `all` leaves the query as it is. Shared by /api/anomalies and /api/health-issues."""
+    if scope == "all":
+        return query
+    is_security = HealthIssue.source.like(SECURITY_SOURCE_PREFIX.replace("_", "\\_") + "%", escape="\\")
+    return query.filter(is_security if scope == "security" else ~is_security)

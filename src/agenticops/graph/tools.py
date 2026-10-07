@@ -22,45 +22,62 @@ from agenticops.graph.algorithms import (
     network_segments,
     simulate_change,
 )
+from agenticops.credentials.resolver import find_vpc_account
 from agenticops.graph.engine import InfraGraph
 from agenticops.graph.serializers import to_agent_summary
 
 logger = logging.getLogger(__name__)
 
 
-def _build_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
+def _vpc_account(vpc_id: str, account: str) -> str:
+    """Account for a VPC-scoped call (credential rule 3): explicit → the VPC's inventory
+    account → "" (the provider layer then takes the single enabled account or fails
+    closed naming them). A VPC in several accounts' inventory raises, naming them."""
+    if account:
+        return account
+    snap = find_vpc_account(vpc_id)
+    return snap.name if snap else ""
+
+
+def _build_vpc_graph(region: str, vpc_id: str, account: str = "") -> InfraGraph:
     """Build graph from VPC topology (calls existing network tool)."""
     from agenticops.tools.network_tools import analyze_vpc_topology
 
-    raw = analyze_vpc_topology(region=region, vpc_id=vpc_id)
+    raw = analyze_vpc_topology(region=region, vpc_id=vpc_id, account=_vpc_account(vpc_id, account))
     topo = json.loads(raw)
+    if "error" in topo:  # an empty graph would read as "no anomalies"
+        raise RuntimeError(topo["error"])
     return InfraGraph().build_from_vpc_topology(topo)
 
 
-def _build_enriched_vpc_graph(region: str, vpc_id: str) -> InfraGraph:
+def _build_enriched_vpc_graph(region: str, vpc_id: str, account: str = "") -> InfraGraph:
     """Build VPC graph enriched with compute resources."""
-    graph = _build_vpc_graph(region, vpc_id)
+    account = _vpc_account(vpc_id, account)
+    graph = _build_vpc_graph(region, vpc_id, account)
     from agenticops.graph.collectors import collect_vpc_compute
 
-    compute_data = collect_vpc_compute(region, vpc_id)
+    compute_data = collect_vpc_compute(region, vpc_id, account)
     graph.enrich_with_compute(compute_data)
     return graph
 
 
-def _build_region_graph(region: str) -> InfraGraph:
+def _build_region_graph(region: str, account: str = "") -> InfraGraph:
     """Build graph from region topology (calls existing network tool)."""
     from agenticops.tools.network_tools import describe_region_topology
 
-    raw = describe_region_topology(region=region)
-    topo = json.loads(raw)
+    raw = describe_region_topology(region=region, account=account)
+    try:
+        topo = json.loads(raw)
+    except ValueError:  # that tool reports failures as plain text
+        raise RuntimeError(raw) from None
     return InfraGraph().build_from_region_topology(topo)
 
 
-def _build_multi_region_graph(regions: str) -> InfraGraph:
+def _build_multi_region_graph(regions: str, account: str = "") -> InfraGraph:
     """Build graph from cross-region topology (calls existing network tool)."""
     from agenticops.tools.network_tools import describe_cross_region_topology
 
-    raw = describe_cross_region_topology(regions=regions)
+    raw = describe_cross_region_topology(regions=regions, account=account)
     topo = json.loads(raw)
     if "error" in topo:
         raise RuntimeError(topo["error"])
@@ -68,7 +85,7 @@ def _build_multi_region_graph(regions: str) -> InfraGraph:
 
 
 @tool
-def analyze_cross_region_topology(regions: str = "") -> str:
+def analyze_cross_region_topology(regions: str = "", account: str = "") -> str:
     """Analyze network topology across multiple AWS regions.
 
     Builds a merged multi-region graph and runs anomaly detection and
@@ -78,13 +95,14 @@ def analyze_cross_region_topology(regions: str = "") -> str:
     Args:
         regions: Comma-separated region codes (e.g. 'us-east-1,eu-west-1').
                  If empty, discovers all enabled regions.
+        account: Registered account name. Empty = the single enabled account.
 
     Returns:
         JSON with per-region summaries, cross-region connections,
         anomalies, and network segments.
     """
     try:
-        graph = _build_multi_region_graph(regions)
+        graph = _build_multi_region_graph(regions, account)
         g = graph.graph
 
         # Per-region summaries
@@ -146,7 +164,7 @@ def analyze_cross_region_topology(regions: str = "") -> str:
 
 
 @tool
-def query_reachability(region: str, vpc_id: str, subnet_id: str) -> str:
+def query_reachability(region: str, vpc_id: str, subnet_id: str, account: str = "") -> str:
     """Check if a subnet can reach the Internet, returning the exact path or blocking reason.
 
     Builds a topology graph for the VPC and traces the path from the subnet
@@ -157,13 +175,15 @@ def query_reachability(region: str, vpc_id: str, subnet_id: str) -> str:
         region: AWS region (e.g., 'us-east-1')
         vpc_id: VPC ID to analyze
         subnet_id: Subnet ID to check reachability for
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with can_reach_internet (bool), path (list of node IDs),
         path_details (per-hop type and label), and blocking_reason if unreachable.
     """
     try:
-        graph = _build_vpc_graph(region, vpc_id)
+        graph = _build_vpc_graph(region, vpc_id, account)
         result = can_reach_internet(graph, subnet_id)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -172,7 +192,7 @@ def query_reachability(region: str, vpc_id: str, subnet_id: str) -> str:
 
 
 @tool
-def query_impact_radius(region: str, vpc_id: str, resource_id: str) -> str:
+def query_impact_radius(region: str, vpc_id: str, resource_id: str, account: str = "") -> str:
     """Simulate a resource failure and return the blast radius.
 
     Removes the specified node from the topology graph and computes
@@ -182,12 +202,14 @@ def query_impact_radius(region: str, vpc_id: str, resource_id: str) -> str:
         region: AWS region (e.g., 'us-east-1')
         vpc_id: VPC ID to analyze
         resource_id: Resource ID to simulate failure for (e.g., nat-xxx, igw-xxx, tgw-att-xxx)
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with affected_nodes, lost_connections, isolated_subnets, and severity.
     """
     try:
-        graph = _build_vpc_graph(region, vpc_id)
+        graph = _build_vpc_graph(region, vpc_id, account)
         result = impact_analysis(graph, resource_id)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -196,7 +218,7 @@ def query_impact_radius(region: str, vpc_id: str, resource_id: str) -> str:
 
 
 @tool
-def find_network_path(region: str, vpc_id: str, source: str, target: str) -> str:
+def find_network_path(region: str, vpc_id: str, source: str, target: str, account: str = "") -> str:
     """Find the network path between two resources in a VPC.
 
     Traces traffic flow through route tables, gateways, and subnets.
@@ -207,12 +229,14 @@ def find_network_path(region: str, vpc_id: str, source: str, target: str) -> str
         vpc_id: VPC ID to analyze
         source: Source resource ID (e.g., subnet-xxx)
         target: Target resource ID (e.g., igw-xxx, nat-xxx, subnet-yyy)
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with paths (list of node ID lists) and path_details (per-hop info).
     """
     try:
-        graph = _build_vpc_graph(region, vpc_id)
+        graph = _build_vpc_graph(region, vpc_id, account)
         result = find_traffic_path(graph, source, target)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -221,7 +245,7 @@ def find_network_path(region: str, vpc_id: str, source: str, target: str) -> str
 
 
 @tool
-def detect_network_anomalies(region: str, vpc_id: str) -> str:
+def detect_network_anomalies(region: str, vpc_id: str, account: str = "") -> str:
     """Detect structural anomalies in a VPC's network topology.
 
     Checks for orphan nodes (no connections), blackhole routes,
@@ -230,13 +254,15 @@ def detect_network_anomalies(region: str, vpc_id: str) -> str:
     Args:
         region: AWS region (e.g., 'us-east-1')
         vpc_id: VPC ID to analyze
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with total_anomalies count, anomaly list (each with type, severity,
         node_id, description), and summary string.
     """
     try:
-        graph = _build_vpc_graph(region, vpc_id)
+        graph = _build_vpc_graph(region, vpc_id, account)
         result = detect_anomalies(graph)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -245,7 +271,7 @@ def detect_network_anomalies(region: str, vpc_id: str) -> str:
 
 
 @tool
-def analyze_network_segments(region: str) -> str:
+def analyze_network_segments(region: str, account: str = "") -> str:
     """Analyze network segmentation across all VPCs in a region.
 
     Builds a region-level topology graph and identifies connected components
@@ -254,13 +280,14 @@ def analyze_network_segments(region: str) -> str:
 
     Args:
         region: AWS region (e.g., 'us-east-1')
+        account: Registered account name. Empty = the single enabled account.
 
     Returns:
         JSON with total_segments, segment details (node counts, VPC IDs,
         internet access), and isolated_vpcs list.
     """
     try:
-        graph = _build_region_graph(region)
+        graph = _build_region_graph(region, account)
         result = network_segments(graph)
 
         # Also include a text summary for the agent
@@ -277,7 +304,7 @@ def analyze_network_segments(region: str) -> str:
 
 
 @tool
-def analyze_dependency_chain(region: str, vpc_id: str, fault_node_id: str) -> str:
+def analyze_dependency_chain(region: str, vpc_id: str, fault_node_id: str, account: str = "") -> str:
     """Analyze the dependency chain from a fault node to find all affected services.
 
     Performs reverse BFS from the fault node, following incoming CONNECTS_TO,
@@ -289,13 +316,15 @@ def analyze_dependency_chain(region: str, vpc_id: str, fault_node_id: str) -> st
         vpc_id: VPC ID to analyze
         fault_node_id: The node ID to simulate failure for (e.g., an RDS instance ID,
                        Lambda function name, or EC2 instance ID)
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with fault_node_id, affected_nodes (with depth), depth_levels,
         total_affected count, and severity.
     """
     try:
-        graph = _build_enriched_vpc_graph(region, vpc_id)
+        graph = _build_enriched_vpc_graph(region, vpc_id, account)
         result = dependency_chain_analysis(graph, fault_node_id)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -304,7 +333,7 @@ def analyze_dependency_chain(region: str, vpc_id: str, fault_node_id: str) -> st
 
 
 @tool
-def detect_single_points_of_failure(region: str, vpc_id: str) -> str:
+def detect_single_points_of_failure(region: str, vpc_id: str, account: str = "") -> str:
     """Detect single points of failure (SPOFs) in a VPC's topology.
 
     Uses graph articulation points and bridges to find nodes whose removal
@@ -314,13 +343,15 @@ def detect_single_points_of_failure(region: str, vpc_id: str) -> str:
     Args:
         region: AWS region (e.g., 'us-east-1')
         vpc_id: VPC ID to analyze
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with total_spofs count, articulation_points (with impact description),
         bridges (critical edges), and summary.
     """
     try:
-        graph = _build_enriched_vpc_graph(region, vpc_id)
+        graph = _build_enriched_vpc_graph(region, vpc_id, account)
         result = detect_spof(graph)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -329,7 +360,7 @@ def detect_single_points_of_failure(region: str, vpc_id: str) -> str:
 
 
 @tool
-def analyze_capacity_risk(region: str, vpc_id: str, threshold: float = 0.8) -> str:
+def analyze_capacity_risk(region: str, vpc_id: str, threshold: float = 0.8, account: str = "") -> str:
     """Analyze capacity risks in a VPC — subnet IP exhaustion and EKS pod limits.
 
     Checks all subnets for IP address utilization and EKS node groups for
@@ -339,13 +370,15 @@ def analyze_capacity_risk(region: str, vpc_id: str, threshold: float = 0.8) -> s
         region: AWS region (e.g., 'us-east-1')
         vpc_id: VPC ID to analyze
         threshold: Utilization threshold (0.0-1.0, default 0.8 = 80%)
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with total_risks count, items (each with utilization_pct and risk_level),
         and summary.
     """
     try:
-        graph = _build_enriched_vpc_graph(region, vpc_id)
+        graph = _build_enriched_vpc_graph(region, vpc_id, account)
         result = capacity_risk_analysis(graph, threshold)
         return result.model_dump_json(indent=2)
     except Exception as e:
@@ -355,7 +388,7 @@ def analyze_capacity_risk(region: str, vpc_id: str, threshold: float = 0.8) -> s
 
 @tool
 def simulate_edge_removal(
-    region: str, vpc_id: str, edge_source: str, edge_target: str
+    region: str, vpc_id: str, edge_source: str, edge_target: str, account: str = ""
 ) -> str:
     """Simulate removing a network edge and report which connections break.
 
@@ -368,13 +401,15 @@ def simulate_edge_removal(
         vpc_id: VPC ID to analyze
         edge_source: Source node ID of the edge to remove
         edge_target: Target node ID of the edge to remove
+        account: Registered account name. Empty = the account whose inventory holds
+                 this VPC, else the single enabled account.
 
     Returns:
         JSON with edge_existed, lost_reachability (per-subnet diff),
         total_connections_lost, and impact_summary.
     """
     try:
-        graph = _build_enriched_vpc_graph(region, vpc_id)
+        graph = _build_enriched_vpc_graph(region, vpc_id, account)
         result = simulate_change(graph, edge_source, edge_target)
         return result.model_dump_json(indent=2)
     except Exception as e:

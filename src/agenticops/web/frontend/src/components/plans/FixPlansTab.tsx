@@ -1,125 +1,71 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { useApproveFixPlan, useExecuteFixPlan, useFixPlans, useRejectFixPlan } from "@/hooks/useFixPlans";
-import { useAccounts } from "@/hooks/useAccounts";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { useFixPlans } from "@/hooks/useFixPlans";
+import { useAccounts } from "@/hooks/useAccounts";
+import { useScopedAccountId } from "@/components/layout/AccountScope";
+import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
-import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { ReasonDialog } from "@/components/plans/ReasonDialog";
-import { useConfirm } from "@/components/ui/ConfirmDialog";
-import { formatShortDate } from "@/lib/formatDate";
-import { PLAN_STATUSES } from "@/lib/plans";
-import type { FixPlan, FixPlanStatus, RiskLevel } from "@/api/types";
+import type { RiskLevel } from "@/api/types";
+import { PLAN_STATUS_GROUPS, fixPlanFilters } from "@/lib/plans";
+import { fixPlanRow } from "@/lib/workItems";
 
-// The newest slice we render; the limit note tells the operator to narrow the filters for older rows.
-const LIST_LIMIT = 200;
-const RISKS: ("" | RiskLevel)[] = ["", "L0", "L1", "L2", "L3"];
-const selectClass = "border border-border bg-background text-sm rounded-lg px-3 py-1.5";
-
+/** The hub's Fix plans tab: every filter lives in the URL, so a link or a refresh shows the same list. */
 export function FixPlansTab() {
   const { t } = useLocale();
-  const [status, setStatus] = useState<"" | FixPlanStatus>("");
-  const [risk, setRisk] = useState<"" | RiskLevel>("");
-  const [account, setAccount] = useState("");
-  const plans = useFixPlans({
-    kind: "fix",
-    status: status || undefined,
-    risk_level: risk || undefined,
-    account_id: account ? Number(account) : undefined,
-    limit: LIST_LIMIT,
-  });
+  const [params, setParams] = useSearchParams();
+  const filters = fixPlanFilters(params);
+  const accountId = useScopedAccountId();  // the top bar's account scope (S4)
+  const plans = useFixPlans({ kind: "fix", limit: 200, ...filters, account_id: accountId });
   const accounts = useAccounts();
-  const approve = useApproveFixPlan();
-  const reject = useRejectFixPlan();
-  const execute = useExecuteFixPlan();
-  const { confirm, dialog } = useConfirm();
-  const [pending, setPending] = useState<{ plan: FixPlan; action: "approve" | "reject" } | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  // Reset both mutations before opening, or a previous plan's error would surface in the new dialog.
-  const openReason = (plan: FixPlan, action: "approve" | "reject") => {
-    approve.reset();
-    reject.reset();
-    setPending({ plan, action });
+  const [q, setQ] = useState(filters.q ?? "");
+  useEffect(() => setQ(filters.q ?? ""), [filters.q]);  // back / forward changes the URL: the box follows
+  const set = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    setParams(next, { replace: true });
   };
-
-  const onExecute = async (plan: FixPlan) => {
-    if (!(await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") }))) return;
-    setActionError(null);
-    execute.mutate(plan.id, { onError: (e) => setActionError((e as Error).message) });
-  };
-
-  const columns: Column<FixPlan>[] = [
-    { key: "id", header: "#", render: (p) => <span className="font-mono text-xs">#{p.id}</span>, sortable: true, sortValue: (p) => p.id },
-    { key: "issue", header: t("plans.issue"), render: (p) => p.health_issue_id ? <Link className="text-primary font-mono text-xs" to={`/app/issues/${p.health_issue_id}`}>I#{p.health_issue_id}</Link> : "-" },
-    { key: "title", header: t("plans.planTitle"), render: (p) => <span className="text-sm text-foreground">{p.title}</span> },
-    { key: "risk", header: t("plans.risk"), render: (p) => <RiskLevelBadge level={p.risk_level} />, sortable: true, sortValue: (p) => p.risk_level },
-    { key: "status", header: t("plans.status"), render: (p) => <FixPlanStatusBadge status={p.status} />, sortable: true, sortValue: (p) => p.status },
-    { key: "approved", header: t("plans.approvedBy"), render: (p) => <span className="text-xs text-muted-foreground">{p.approved_by ?? "-"}{p.approved_at ? ` · ${formatShortDate(p.approved_at)}` : ""}</span> },
-    { key: "actions", header: t("plans.actions"), render: (p) => (
-      <div className="flex gap-2">
-        {(p.status === "draft" || p.status === "pending_approval") && (
-          <>
-            <button onClick={(e) => { e.stopPropagation(); openReason(p, "approve"); }} className="px-2 py-1 text-xs rounded bg-emerald-600 text-white">{t("issues.approve")}</button>
-            <button onClick={(e) => { e.stopPropagation(); openReason(p, "reject"); }} className="px-2 py-1 text-xs rounded border border-red-500/40 text-red-500">{t("issues.reject")}</button>
-          </>
-        )}
-        {p.status === "approved" && (
-          <button onClick={(e) => { e.stopPropagation(); onExecute(p); }} disabled={execute.isPending}
-            className="px-2 py-1 text-xs rounded bg-primary text-primary-foreground disabled:opacity-50">{t("issues.execute")}</button>
-        )}
-      </div>
-    ) },
-  ];
-
+  const accountName = (id: number | null | undefined) => accounts.data?.find((a) => a.id === id)?.name ?? null;
+  const filtered = !!(filters.status || filters.risk_level || accountId || filters.q);
+  const select = "rounded-md border border-border bg-card px-2.5 py-1.5 text-sm";
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <select value={status} onChange={(e) => setStatus(e.target.value as "" | FixPlanStatus)} className={selectClass}>
-          <option value="">{t("plans.allStatuses")}</option>
-          {PLAN_STATUSES.map((s) => <option key={s} value={s}>{t(`plans.planStatus.${s}`)}</option>)}
+      <div className="flex flex-wrap items-center gap-2">
+        <select aria-label={t("plans.filter.status")} className={select} value={params.get("status") ?? ""} onChange={(e) => set("status", e.target.value)}>
+          <option value="">{t("plans.filter.allStatuses")}</option>
+          {Object.keys(PLAN_STATUS_GROUPS).map((g) => <option key={g} value={g}>{t(`plans.group.${g}`)}</option>)}
         </select>
-        <select value={risk} onChange={(e) => setRisk(e.target.value as "" | RiskLevel)} className={selectClass}>
-          {RISKS.map((r) => <option key={r} value={r}>{r || t("plans.allRisks")}</option>)}
+        <select aria-label={t("plans.risk")} className={select} value={params.get("risk") ?? ""} onChange={(e) => set("risk", e.target.value)}>
+          <option value="">{t("plans.filter.allRisks")}</option>
+          {["L0", "L1", "L2", "L3"].map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
-        <select value={account} onChange={(e) => setAccount(e.target.value)} className={selectClass}>
-          <option value="">{t("plans.allAccounts")}</option>
-          {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.provider})</option>)}
-        </select>
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100}
+               onKeyDown={(e) => { if (e.key === "Enter") set("q", q.trim()); }} onBlur={() => set("q", q.trim())}
+               placeholder={t("plans.filter.search")} aria-label={t("plans.filter.search")}
+               className="min-w-[220px] flex-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm" />
+        {filtered && (
+          <button type="button" className="text-sm text-primary hover:underline" onClick={() => { setQ(""); setParams({}, { replace: true }); }}>
+            {t("plans.filter.clear")}
+          </button>
+        )}
       </div>
-      {actionError && <ErrorBanner message={actionError} onRetry={() => setActionError(null)} actionLabel={t("common.close")} />}
-      {plans.isLoading ? (
-        <Spinner label={t("common.loading")} />
-      ) : plans.error ? (
-        <ErrorBanner message={(plans.error as Error).message} onRetry={() => plans.refetch()} actionLabel={t("common.retry")} />
-      ) : (
-        <>
-          <DataTable columns={columns} data={plans.data ?? []} rowKey={(p) => p.id} emptyMessage={t("plans.noPlans")} />
-          {(plans.data?.length ?? 0) >= LIST_LIMIT && (
-            <p className="text-xs text-muted-foreground">{t("plans.limitNote").replace("{n}", String(LIST_LIMIT))}</p>
-          )}
-        </>
-      )}
-      {pending && (
-        <ReasonDialog
-          title={`${pending.action === "approve" ? t("plans.approveTitle") : t("plans.rejectTitle")} #${pending.plan.id}`}
-          description={pending.plan.title}
-          confirmText={pending.action === "approve" ? t("issues.approve") : t("issues.reject")}
-          variant={pending.action === "reject" ? "destructive" : "default"}
-          required={pending.action === "reject"}
-          busy={approve.isPending || reject.isPending}
-          error={(pending.action === "approve" ? approve.error : reject.error)?.message ?? null}
-          onConfirm={(reason) => {
-            if (pending.action === "approve") approve.mutate({ id: pending.plan.id, reason: reason || undefined }, { onSuccess: () => setPending(null) });
-            else reject.mutate({ id: pending.plan.id, reason }, { onSuccess: () => setPending(null) });
-          }}
-          onClose={() => setPending(null)}
-        />
-      )}
-      {dialog}
+      {plans.isLoading ? <Spinner label={t("common.loading")} />
+        : plans.error ? <ErrorBanner message={plans.error.message} onRetry={() => plans.refetch()} actionLabel={t("common.retry")} />
+        : (
+          <>
+          {(plans.data?.length ?? 0) >= 200 && <p className="text-xs text-muted-foreground">{t("plans.fixCapped")}</p>}
+          <WorkItemTable
+            rows={(plans.data ?? []).map((p) => fixPlanRow(p, accountName(p.account_id)))}
+            levelHeader={t("plans.risk")}
+            renderLevel={(r) => (r.level ? <RiskLevelBadge level={r.level as RiskLevel} /> : <span className="text-xs text-muted-foreground">{t("workitem.unrated")}</span>)}
+            timeHeader={t("workitem.col.updated")}
+            emptyMessage={filtered ? t("plans.fixEmptyFiltered") : t("plans.fixEmpty")}
+            t={t}
+          />
+          </>
+        )}
     </div>
   );
 }

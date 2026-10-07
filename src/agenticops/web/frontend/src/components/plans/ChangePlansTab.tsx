@@ -1,32 +1,42 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useChanges } from "@/hooks/useChanges";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { useLocale } from "@/i18n/LocaleContext";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
-import { ChangeStepper } from "@/components/plans/ChangeStepper";
 import { PeriodButtons } from "@/components/plans/PeriodButtons";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { formatShortDate } from "@/lib/formatDate";
-import { CHANGE_STATUSES, type Period } from "@/lib/plans";
-import type { ChangeRequest, ChangeStatus } from "@/api/types";
+import { CHANGE_STATUSES, changeFilters, type Period } from "@/lib/plans";
+import { changeRow } from "@/lib/workItems";
+import type { ChangeStatus, RiskLevel } from "@/api/types";
 
 const LIST_LIMIT = 200;
 const selectClass = "border border-border bg-background text-sm rounded-lg px-3 py-1.5";
 
 export function ChangePlansTab() {
   const { t } = useLocale();
-  const navigate = useNavigate();
-  const [status, setStatus] = useState<"" | ChangeStatus>("");
-  const [account, setAccount] = useState("");
-  const [requester, setRequester] = useState("");
+  // The filters live in the URL (hub tab ?tab=changes&status=…), so a link or a refresh shows the same list.
   // Default: all periods (M22) — an open change older than 30 days must not vanish from the list.
-  const [period, setPeriod] = useState<Period | undefined>(undefined);
+  const [params, setParams] = useSearchParams();
+  const f = changeFilters(params);
+  const status = f.status ?? "";
+  const accountId = useScopedAccountId();  // the top bar's account scope (S4)
+  const requester = f.requested_by ?? "";
+  const period = f.period;
+  const set = (key: string, value: string | undefined) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    setParams(next, { replace: true });
+  };
+  const setStatus = (v: "" | ChangeStatus) => set("status", v);
+  const setRequester = (v: string) => set("requested_by", v);
+  const setPeriod = (v: Period | undefined) => set("period", v);
   const changes = useChanges({
     status: status || undefined,
-    account_id: account ? Number(account) : undefined,
+    account_id: accountId,
     period,
     limit: LIST_LIMIT,
   });
@@ -40,15 +50,8 @@ export function ChangePlansTab() {
   }, [changes.data, requester]);
   const rows = requester ? (changes.data ?? []).filter((c) => c.requested_by === requester) : (changes.data ?? []);
 
-  const columns: Column<ChangeRequest>[] = [
-    { key: "id", header: "C#", render: (c) => <span className="font-mono text-xs text-primary">C#{c.id}</span>, sortable: true, sortValue: (c) => c.id },
-    { key: "title", header: t("plans.planTitle"), render: (c) => <span className="text-sm text-foreground">{c.title}</span> },
-    { key: "status", header: t("plans.status"), render: (c) => <ChangeStepper cr={c} compact />, sortable: true, sortValue: (c) => c.status },
-    { key: "risk", header: t("plans.risk"), render: (c) => c.risk_level ? <RiskLevelBadge level={c.risk_level} /> : <span className="text-xs text-muted-foreground">-</span> },
-    { key: "type", header: t("plans.type"), render: (c) => <span className="text-xs">{t(`plans.changeType.${c.effective_change_type ?? c.requested_change_type}`)}</span> },
-    { key: "by", header: t("plans.requestedBy"), render: (c) => <span className="text-xs font-mono text-muted-foreground">{c.requested_by}</span> },
-    { key: "updated", header: t("plans.updated"), render: (c) => <span className="text-xs text-muted-foreground">{formatShortDate(c.updated_at ?? c.created_at)}</span>, sortable: true, sortValue: (c) => c.updated_at ?? c.created_at ?? "" },
-  ];
+  const accountNames = useMemo(() => new Map((accounts.data ?? []).map((a) => [a.id, a.name])), [accounts.data]);
+  const accountName = (id: number | null) => (id == null ? null : accountNames.get(id) ?? null);
 
   return (
     <div className="space-y-4">
@@ -56,10 +59,6 @@ export function ChangePlansTab() {
         <select value={status} onChange={(e) => setStatus(e.target.value as "" | ChangeStatus)} className={selectClass}>
           <option value="">{t("plans.allStatuses")}</option>
           {CHANGE_STATUSES.map((s) => <option key={s} value={s}>{t(`changes.status.${s}`)}</option>)}
-        </select>
-        <select value={account} onChange={(e) => setAccount(e.target.value)} className={selectClass}>
-          <option value="">{t("plans.allAccounts")}</option>
-          {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.provider})</option>)}
         </select>
         <select value={requester} onChange={(e) => setRequester(e.target.value)} className={selectClass}>
           <option value="">{t("plans.allRequesters")}</option>
@@ -73,7 +72,19 @@ export function ChangePlansTab() {
         <ErrorBanner message={(changes.error as Error).message} onRetry={() => changes.refetch()} actionLabel={t("common.retry")} />
       ) : (
         <>
-          <DataTable columns={columns} data={rows} rowKey={(c) => c.id} onRowClick={(c) => navigate(`/app/changes/${c.id}`)} emptyMessage={t("plans.noChanges")} />
+          <WorkItemTable
+            rows={rows.map((c) => changeRow(c, accountName(c.account_id)))}
+            levelHeader={t("plans.risk")}
+            renderLevel={(r) => (
+              <span className="inline-flex items-center gap-1.5">
+                {r.level ? <RiskLevelBadge level={r.level as RiskLevel} /> : <span className="text-xs text-muted-foreground">{t("workitem.unrated")}</span>}
+                {r.typeKey && <span className="text-xs text-muted-foreground">{t(r.typeKey)}</span>}
+              </span>
+            )}
+            timeHeader={t("workitem.col.updated")}
+            emptyMessage={t("plans.noChanges")}
+            t={t}
+          />
           {(changes.data?.length ?? 0) >= LIST_LIMIT && (
             <p className="text-xs text-muted-foreground">{t("plans.limitNote").replace("{n}", String(LIST_LIMIT))}</p>
           )}

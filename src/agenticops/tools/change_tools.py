@@ -34,23 +34,28 @@ def _actor_from_context() -> Actor:
     return actor_from_run_context(ctx)
 
 
-def _plan_summary(cr_id: int) -> dict | None:
+def _plan_and_latest_run(cr_id: int) -> tuple[dict | None, dict | None]:
+    """The request's current plan in full (the active one, else the newest) and its latest run's verdict."""
+    from agenticops.models import FixExecution, FixPlan
+    from agenticops.tools.metadata_tools import plan_dict
     with cs._session() as s:
         plan = cs.active_plan_for(s, cr_id)
         if plan is None:
-            from agenticops.models import FixPlan
             plan = (s.query(FixPlan).filter_by(change_request_id=cr_id, plan_kind="change")
                     .order_by(FixPlan.created_at.desc()).first())
-        if plan is None:
-            return None
-        return {"id": plan.id, "status": plan.status, "risk_level": plan.risk_level, "title": plan.title,
-                "steps": len(plan.steps or []), "has_rollback": bool(plan.rollback_plan),
-                "post_checks": len(plan.post_checks or [])}
+        run = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
+               .filter(FixPlan.change_request_id == cr_id).order_by(FixExecution.id.desc()).first())
+        latest = None if run is None else {
+            "execution_id": run.id, "fix_plan_id": run.fix_plan_id, "status": run.status,
+            "verification_status": run.verification_status, "verification_reason": run.verification_reason,
+            "accepted_by": run.accepted_by, "accepted_at": run.accepted_at}
+        return (plan_dict(plan) if plan is not None else None), latest
 
 
 @tool
 def request_change(title: str, description: str, account: str = "", targets: str = "",
-                   change_type: str = "normal", justification: str = "") -> str:
+                   change_type: str = "normal", justification: str = "", proposed_steps: str = "",
+                   external_ref: str = "") -> str:
     """Open a CHANGE REQUEST (ITSM change) for a modification the user asks for — tagging, scaling,
     configuration, network or IAM changes that are NOT fixing an incident.
 
@@ -65,6 +70,11 @@ def request_change(title: str, description: str, account: str = "", targets: str
         targets: Comma-separated resource ids / ARNs / names the change touches.
         change_type: normal (default) or emergency.
         justification: Business reason, if the user gave one.
+        proposed_steps: Only when the user gave the exact commands to run: a JSON array of
+            {"action": "...", "command": "..."} in their order. The review then validates these commands
+            instead of writing its own. Omit when the user only described the outcome.
+        external_ref: Only when the request comes from a ticket in another system: a JSON object
+            {"system": "...", "ticket_id": "...", "url": "..."}.
 
     Returns:
         Confirmation with the change reference C#N, or the reason it could not be opened.
@@ -73,28 +83,39 @@ def request_change(title: str, description: str, account: str = "", targets: str
     ctx = get_run_context()
     hints = [t.strip() for t in (targets or "").split(",") if t.strip()]
     try:
+        steps = json.loads(proposed_steps) if (proposed_steps or "").strip() else None
+        ref = json.loads(external_ref) if (external_ref or "").strip() else None
+    except json.JSONDecodeError as e:
+        return f"Change request could not be opened: proposed_steps / external_ref must be valid JSON ({e})"
+    try:
         cr = cs.create_change_request(
             source=_SOURCE_BY_KIND.get(actor.kind, "api"), actor=actor, title=title, description=description,
             account_name=account or None, targets=hints, requested_change_type=(change_type or "normal").lower(),
             justification=justification or "", chat_session_id=ctx.chat_session_id, start_review=False,
+            proposed_steps=steps, external_ref=ref,
         )
     except cs.ChangeError as e:
         return f"Change request could not be opened: {e}"
     # The review is NOT started here: in chat the Main agent calls review_change (sync) right after this,
     # which would otherwise race an async review. Web/CLI intakes start their own review.
+    steps_note = f", {len(cr['proposed_steps'])} proposed steps" if cr["proposed_steps"] else ""
     return (f"Change request C#{cr['id']} opened ({cr['requested_change_type']}, requested by {cr['requested_by']}, "
-            f"targets: {', '.join(hints) or 'none given'}). Next: call review_change({cr['id']}) to run the SRE review.")
+            f"targets: {', '.join(hints) or 'none given'}{steps_note}). "
+            f"Next: call review_change({cr['id']}) to run the SRE review.")
 
 
 @tool
 def get_change_request(change_request_id: int) -> str:
-    """Get a change request (C#N) with its current plan summary. Args: change_request_id: The C# number."""
+    """Get a change request (C#N): the request with its proposed steps, the steps diff and why it needs
+    review, its current plan in full, and the verdict of its latest execution (details: get_execution_result).
+
+    Args: change_request_id: The C# number."""
     try:
         data = cs.get_change(change_request_id)
     except cs.ChangeError as e:
         return str(e)
-    data["plan"] = _plan_summary(change_request_id)
-    return json.dumps(data, default=str)[:6000]
+    data["plan"], data["latest_execution"] = _plan_and_latest_run(change_request_id)
+    return json.dumps(data, default=str)
 
 
 @tool
@@ -107,7 +128,8 @@ def list_change_requests(status: str = "", limit: int = 20) -> str:
 
 @tool
 def execute_change(change_request_id: int) -> str:
-    """Queue execution of an APPROVED change request (C#N). Confirm with the user first.
+    """Retry queuing an APPROVED change request (C#N) whose run could not be queued. Approving a change already
+    runs it, so this is only for a change still at 'approved'. Confirm with the user first.
     SAFETY: only approved changes run; the Executor works from the approved plan. Args: change_request_id: The C# number."""
     try:
         out = cs.request_execution(change_request_id, actor=_actor_from_context())

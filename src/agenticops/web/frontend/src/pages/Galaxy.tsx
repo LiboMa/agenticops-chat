@@ -6,26 +6,27 @@ import {
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
+import { useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useGalaxyStatus, useGalaxyGraph, useGalaxyRebuild } from "@/hooks/useGalaxy";
 import type { GalaxyGraphNode } from "@/api/types";
 import { GalaxyNodePanel } from "@/components/galaxy/GalaxyNodePanel";
+import { healthCounts, isHot, normalizeHealth } from "@/lib/galaxyHealth";
+import { focusNodeId } from "@/lib/galaxy";
 
 // ── palette (Nebula Violet — the single Galaxy theme, validated via dataviz) ──
 interface Palette {
   surface: string; acct: string; group: string;
-  healthy: string; warning: string; critical: string;
+  unknown: string; notice: string; warning: string; critical: string;
   ruleEdge: string; llmEdge: string; label: string;
 }
 const NEBULA: Palette = {
   // violet-black canvas, aqua cores, richer violet llm edge — fixed (no theme switch)
   surface: "#0b0b12", acct: "#5b8def", group: "#22c39a",
-  healthy: "#6b7280", warning: "#f5b53d", critical: "#f0555a",
+  // resource stars by health; notice is deliberately low-saturation
+  unknown: "#6b7280", notice: "#8fa6c4", warning: "#f5b53d", critical: "#f0555a",
   ruleEdge: "rgba(140,140,170,0.18)", llmEdge: "#b18bf0", label: "#eae6f5",
 };
-function starColor(p: Palette, health?: string) {
-  return health === "critical" ? p.critical : health === "warning" ? p.warning : p.healthy;
-}
 
 // simulation node/link types (d3 mutates x/y/vx/vy in place)
 interface SimNode extends GalaxyGraphNode {
@@ -39,12 +40,16 @@ function hexA(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 function shortGrp(s: string) { return s.length > 18 ? s.slice(0, 18) + "…" : s; }
+const FOCUS_SCALE = 1.6; // camera zoom on a ?focus= deep link
 
 export default function Galaxy() {
   const { t } = useLocale();
   const status = useGalaxyStatus();
   const graph = useGalaxyGraph();
   const rebuild = useGalaxyRebuild();
+  const [params, setParams] = useSearchParams();
+  const focusRef = params.get("focus");
+  const focusId = focusNodeId(focusRef);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -59,6 +64,7 @@ export default function Galaxy() {
     adj: new Map<string, Set<string>>(), byId: new Map<string, SimNode>(),
     hover: null as SimNode | null, selectedId: null as string | null,
     focusSet: null as Set<string> | null,
+    followId: null as string | null, // the camera tracks this node until the layout settles or the user zooms
     tx: 0, ty: 0, scale: 0.85, t: 0,
   });
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
@@ -67,16 +73,8 @@ export default function Galaxy() {
   const data = graph.data;
 
   // node health tallies shown in the legend box
-  const counts = useMemo(() => {
-    let critical = 0, warning = 0, healthy = 0;
-    for (const n of data?.nodes ?? []) {
-      if (n.kind !== "resource") continue;
-      if (n.health === "critical") critical++;
-      else if (n.health === "warning") warning++;
-      else healthy++;
-    }
-    return { critical, warning, healthy };
-  }, [data]);
+  const counts = useMemo(() => healthCounts(data?.nodes ?? []), [data]);
+  const focusMissing = !!focusRef && !!data && !data.nodes.some((n) => n.id === focusId);
 
   // ── build sim + render loop when graph data arrives ──────────────────
   useEffect(() => {
@@ -93,7 +91,7 @@ export default function Galaxy() {
       const o: SimNode = { ...n, r: 0 };
       o.r = n.kind === "account" ? 16
           : n.kind === "group" ? 7 + Math.min(9, Math.sqrt((n.members || 1)) * 1.6)
-          : (n.health && n.health !== "healthy") ? 3.6 : 2.4;
+          : normalizeHealth(n.health) !== "unknown" ? 3.6 : 2.4;
       byId.set(o.id, o);
       return o;
     });
@@ -133,7 +131,10 @@ export default function Galaxy() {
     // zoom / pan
     const zoomB: ZoomBehavior<HTMLCanvasElement, unknown> = d3zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.15, 6])
-      .on("zoom", (ev) => { S.tx = ev.transform.x; S.ty = ev.transform.y; S.scale = ev.transform.k; });
+      .on("zoom", (ev) => {
+        if (ev.sourceEvent) S.followId = null; // the user took the camera
+        S.tx = ev.transform.x; S.ty = ev.transform.y; S.scale = ev.transform.k;
+      });
     select(canvas).call(zoomB).call(zoomB.transform, zoomIdentity.translate(W / 2, H / 2).scale(0.85));
 
     // drag to pin
@@ -162,6 +163,12 @@ export default function Galaxy() {
     function draw() {
       const P = NEBULA;
       S.t += 0.05;
+      if (S.followId) {
+        const f = byId.get(S.followId);
+        if (f) select(canvas).call(zoomB.transform,
+          zoomIdentity.translate(W / 2 - f.x! * FOCUS_SCALE, H / 2 - f.y! * FOCUS_SCALE).scale(FOCUS_SCALE));
+        if (!f || sim.alpha() < sim.alphaMin()) S.followId = null;
+      }
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.fillStyle = P.surface; ctx.fillRect(0, 0, W, H);
       ctx.save(); ctx.translate(S.tx, S.ty); ctx.scale(S.scale, S.scale);
@@ -198,16 +205,18 @@ export default function Galaxy() {
       // nodes
       for (const n of nodes) {
         if (focusSet && !focusSet.has(n.id)) continue;
-        const isHot = n.kind === "resource" && n.health !== "healthy";
+        const h = normalizeHealth(n.health);
+        const hot = n.kind === "resource" && isHot(h);
         const faded = dim && !(S.hover && (n === S.hover || (litSet && litSet.has(n.id))));
-        const col = n.kind === "account" ? P.acct : n.kind === "group" ? P.group : starColor(P, n.health);
+        const col = n.kind === "account" ? P.acct : n.kind === "group" ? P.group : P[h];
         let r = n.r;
-        if (isHot) {
-          const pulse = 0.5 + 0.5 * Math.sin(S.t * (n.health === "critical" ? 2.2 : 1.4));
+        if (hot) {
+          const pulse = 0.5 + 0.5 * Math.sin(S.t * (h === "critical" ? 2.2 : 1.4));
           r = n.r * (1 + pulse * 0.5); ctx.shadowColor = col; ctx.shadowBlur = 10 + pulse * 14;
         } else if (n.kind !== "resource") { ctx.shadowColor = col; ctx.shadowBlur = 12; }
-        else { ctx.shadowColor = col; ctx.shadowBlur = n.health === "healthy" ? 4 : 8; }
-        ctx.globalAlpha = faded ? 0.12 : 1;
+        else { ctx.shadowColor = col; ctx.shadowBlur = h === "unknown" ? 4 : 8; }
+        // an absent resource keeps its health colour (its issue may be the point) but is greyed
+        ctx.globalAlpha = faded ? 0.12 : n.absent ? 0.4 : 1;
         ctx.fillStyle = col; ctx.beginPath(); ctx.arc(n.x!, n.y!, r, 0, 7); ctx.fill();
         ctx.shadowBlur = 0; ctx.globalAlpha = 1;
         if (n.id === S.selectedId) {
@@ -216,9 +225,16 @@ export default function Galaxy() {
         }
         if ((n.kind !== "resource" && S.scale > 0.5) || n === S.hover) {
           ctx.globalAlpha = faded ? 0.2 : 0.92; ctx.fillStyle = P.label;
-          ctx.font = `${(n.kind === "resource" ? 10 : 12) / S.scale}px system-ui`; ctx.textAlign = "center";
+          const fontPx = (n.kind === "resource" ? 10 : 12) / S.scale;
+          ctx.font = `${fontPx}px system-ui`; ctx.textAlign = "center";
           const lbl = n.kind === "group" ? `${shortGrp(n.name)} (${n.members})` : n.name;
-          ctx.fillText(lbl, n.x!, n.y! - r - 4 / S.scale); ctx.globalAlpha = 1;
+          const ly = n.y! - r - 4 / S.scale;
+          ctx.fillText(lbl, n.x!, ly);
+          if (n.absent) {  // strike-through: canvas text has no text-decoration
+            const w = ctx.measureText(lbl).width;
+            ctx.fillRect(n.x! - w / 2, ly - fontPx * 0.32, w, 1 / S.scale);
+          }
+          ctx.globalAlpha = 1;
         }
       }
       ctx.restore();
@@ -267,7 +283,22 @@ export default function Galaxy() {
     };
   }, [data]);
 
-  const exitFocus = useCallback(() => { stateRef.current.focusSet = null; setFocusLabel(null); }, []);
+  // ?focus=<ref>: select the resource, focus it with its neighbours and bring the camera to it (after the
+  // effect above, so the node map is this data's)
+  useEffect(() => {
+    const S = stateRef.current;
+    const n = data && focusId ? S.byId.get(focusId) : undefined;
+    if (!n) return;
+    S.selectedId = n.id; setSelected({ ...n });
+    const fs = new Set<string>([n.id]); S.adj.get(n.id)?.forEach((id) => fs.add(id));
+    S.focusSet = fs; setFocusLabel(shortGrp(n.name));
+    S.followId = n.id;
+  }, [data, focusId]);
+
+  const exitFocus = useCallback(() => {
+    stateRef.current.focusSet = null; stateRef.current.followId = null; setFocusLabel(null);
+    setParams((p) => { p.delete("focus"); return p; }, { replace: true });
+  }, [setParams]);
   const closePanel = useCallback(() => { stateRef.current.selectedId = null; setSelected(null); }, []);
 
   useEffect(() => {
@@ -284,7 +315,7 @@ export default function Galaxy() {
     // escape AppShell <main> p-6 auto-height box; Canvas needs an explicit-height parent.
     // Galaxy is a fixed Nebula-Violet starfield — chrome uses fixed dark values
     // (not theme tokens) so it stays consistent whether the app is light or dark.
-    <div className="relative h-[calc(100vh-2.25rem)] -m-6 w-auto" style={{ background: P.surface }}>
+    <div className="relative h-[calc(100vh-var(--topbar-h))] -m-6 w-auto" style={{ background: P.surface }}>
       {/* status bar */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 px-4 py-2
                       bg-black/40 backdrop-blur border-b border-white/10 text-xs text-[#c9c6d6]">
@@ -300,6 +331,9 @@ export default function Galaxy() {
           </span>
         ) : <span className="text-[#9691a8]">{t("galaxy.noBuild")}</span>}
         {b?.status === "failed" && <span className="text-red-400">{b.error}</span>}
+        {focusMissing && (
+          <span className="text-amber-300">{t("galaxy.focusMissing").replace("{ref}", focusRef ?? "")}</span>
+        )}
 
         <span className="ml-auto text-[#9691a8]">{t("galaxy.nextCheck")}: {status.data?.next_check_minutes}m</span>
         {focusLabel && (
@@ -329,9 +363,11 @@ export default function Galaxy() {
       {/* legend + live health tallies (co-located) */}
       <div className="absolute left-4 bottom-4 z-10 text-[11px] leading-relaxed text-[#c9c6d6]
                       bg-black/40 backdrop-blur border border-white/10 rounded-lg px-3 py-2 min-w-[168px]">
-        <LegendRow c={P.healthy} label={t("galaxy.legendHealthy")} count={counts.healthy} />
+        <LegendRow c={P.unknown} label={t("galaxy.legendUnknown")} count={counts.unknown} />
+        <LegendRow c={P.notice} label={t("galaxy.legendNotice")} count={counts.notice} emphasize={counts.notice > 0} />
         <LegendRow c={P.warning} label={t("galaxy.legendWarning")} count={counts.warning} emphasize={counts.warning > 0} />
         <LegendRow c={P.critical} label={t("galaxy.legendCritical")} count={counts.critical} emphasize={counts.critical > 0} />
+        <div className="text-[#9691a8]">{t("galaxy.legendNoAlert")}</div>
         <div className="flex items-center gap-2 mt-1 pt-1 border-t border-white/15">
           <Dot c={P.acct} /> {t("galaxy.legendAccount")} <Dot c={P.group} /> {t("galaxy.legendGroup")}
         </div>

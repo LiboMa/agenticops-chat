@@ -1,0 +1,130 @@
+"""FixPlan status writes are compare-and-set (MVP-2.7.0 S3): two approvals of one plan cannot both win, and
+withdrawing an approved plan returns its issue to root_cause_identified (the 2.6.1 back-edge)."""
+from unittest.mock import patch
+
+import pytest
+from starlette.testclient import TestClient
+
+from agenticops.models import (Base, FixPlan, HealthIssue, PlanStatusConflict, RCAResult, get_session,
+                               transition_plan)
+
+
+@pytest.fixture
+def client(tmp_path):
+    import agenticops.models as models_mod
+    import agenticops.audit.models  # noqa: F401
+    from agenticops.config import settings
+    from agenticops.web.app import app
+    models_mod._engine = None
+    settings.database_url = f"sqlite:///{tmp_path}/cas.db"
+    Base.metadata.create_all(models_mod.get_engine())
+    yield TestClient(app)
+    models_mod._engine = None
+
+
+def _plan(plan_status="pending_approval", issue_status="fix_planned"):
+    s = get_session()
+    try:
+        issue = HealthIssue(title="t", description="d", severity="low", source="test", status=issue_status, resource_id="r")
+        s.add(issue); s.flush()
+        rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+        s.add(rca); s.flush()
+        plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s",
+                       status=plan_status, approved_by="user:alice" if plan_status == "approved" else None)
+        s.add(plan); s.commit()
+        return plan.id, issue.id
+    finally:
+        s.close()
+
+
+def test_two_sessions_cannot_both_move_the_plan(client):
+    pid, _ = _plan()
+    a, b = get_session(), get_session()
+    try:
+        pa, pb = a.get(FixPlan, pid), b.get(FixPlan, pid)       # both read pending_approval
+        transition_plan(pa, "approved"); a.commit()
+        with pytest.raises(PlanStatusConflict):
+            transition_plan(pb, "approved")
+        b.rollback()
+    finally:
+        a.close(); b.close()
+    s = get_session()
+    assert s.get(FixPlan, pid).status == "approved"
+    s.close()
+
+
+def test_a_plan_not_in_a_session_is_still_validated_and_assigned():
+    plan = FixPlan(status="draft")
+    transition_plan(plan, "approved")
+    assert plan.status == "approved"
+
+
+def test_withdrawing_an_approved_plan_returns_the_issue(client):
+    pid, iid = _plan(plan_status="approved", issue_status="fix_approved")
+    r = client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "wrong target"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    s = get_session()
+    assert s.get(HealthIssue, iid).status == "root_cause_identified"
+    s.close()
+
+
+def test_rejecting_a_pending_plan_leaves_the_issue_planned(client):
+    pid, iid = _plan()
+    assert client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "no"}).status_code == 200
+    s = get_session()
+    assert s.get(HealthIssue, iid).status == "fix_planned"
+    s.close()
+
+
+def test_a_second_approval_of_the_same_plan_is_409_and_runs_once(client):
+    from agenticops.services.plan_content import current_hash
+    pid, _ = _plan()
+    s = get_session(); h = current_hash(s, s.get(FixPlan, pid)); s.close()
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute") as run:
+        assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": h}).status_code == 200
+        assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": h}).status_code == 409
+    assert run.call_count == 1
+
+
+def test_cli_execute_reports_a_lost_cas_instead_of_crashing(client):
+    """Final review I1: someone withdraws the plan while the CLI waits at «Confirm execution?» — /execute must answer
+    with a message, never raise out of the REPL, and create no run."""
+    from agenticops.cli import main as cli
+    from agenticops.models import FixExecution
+    pid, _ = _plan(plan_status="approved", issue_status="fix_approved")
+
+    def withdraw_then_confirm(*_a, **_k):
+        s = get_session()
+        try:
+            s.query(FixPlan).filter_by(id=pid).update({"status": "rejected"}); s.commit()
+        finally:
+            s.close()
+        return True
+
+    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
+         patch("rich.prompt.Confirm.ask", side_effect=withdraw_then_confirm), \
+         patch("agenticops.config.settings.executor_enabled", True):
+        out = cli._slash_execute(None, [str(pid)])
+    assert "no longer" in out.lower()
+    s = get_session()
+    assert s.get(FixPlan, pid).status == "rejected" and s.query(FixExecution).filter_by(fix_plan_id=pid).count() == 0
+    s.close()
+
+
+def test_an_approved_plan_cannot_be_withdrawn_while_its_auto_run_is_under_way(client):
+    """Final review I5: withdrawing mid-run would leave the executor mutating resources while the issue invites a new
+    plan. The route refuses (409) and the action says why (run_in_flight) — no button that the route then refuses."""
+    import json
+    from datetime import datetime, timezone
+    from agenticops.models import PipelineEvent
+    pid, iid = _plan(plan_status="approved", issue_status="fix_approved")
+    s = get_session()
+    s.add(PipelineEvent(health_issue_id=iid, event_type="execution_started", stage="execution", status="started",
+                        detail=json.dumps({"plan_id": pid}), created_at=datetime.now(timezone.utc)))
+    s.commit(); s.close()
+    reject = {a["action"]: a for a in client.get(f"/api/fix-plans/{pid}").json()["available_actions"]}["reject"]
+    assert (reject["allowed"], reject["reason_code"]) == (False, "run_in_flight")
+    assert client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "stop"}).status_code == 409
+    s = get_session()
+    assert s.get(FixPlan, pid).status == "approved" and s.get(HealthIssue, iid).status == "fix_approved"
+    s.close()

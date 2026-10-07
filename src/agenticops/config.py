@@ -563,6 +563,77 @@ class Settings(BaseSettings):
         "0 = keep all (AIOPS_GALAXY_BUILDS_KEEP)",
     )
 
+    # ── Graph facts layer (MVP-2.6.1 Plan A) ───────────────────────
+    identity_alarm_name_patterns: list[str] = Field(
+        default_factory=lambda: [r"^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$"],
+        description="Alarm-name regexes for issue anchoring; named group `cluster` required, `namespace` optional "
+        "(AIOPS_IDENTITY_ALARM_NAME_PATTERNS)",
+    )
+    identity_type_families: dict[str, list[str]] = Field(
+        default_factory=lambda: {"EKS": ["EKS", "EKS_Cluster"]},
+        description="Resource types counted as one physical resource when account, region and short id match "
+        "(AIOPS_IDENTITY_TYPE_FAMILIES)",
+    )
+    graph_query_node_cap: int = Field(
+        default=200,
+        description="Default node cap of GraphQueryService.neighborhood (AIOPS_GRAPH_QUERY_NODE_CAP)",
+    )
+    graph_query_edge_cap: int = Field(
+        default=500,
+        description="Default edge cap of GraphQueryService.neighborhood (AIOPS_GRAPH_QUERY_EDGE_CAP)",
+    )
+    graph_query_max_depth: int = Field(
+        default=2,
+        description="Max neighborhood depth; potential_impact is fixed at 3 (AIOPS_GRAPH_QUERY_MAX_DEPTH)",
+    )
+    rca_topology_window_before_minutes: int = Field(
+        default=30,
+        description="Evidence window start, minutes before observed_at/first_seen "
+        "(AIOPS_RCA_TOPOLOGY_WINDOW_BEFORE_MINUTES)",
+    )
+    rca_topology_window_after_minutes: int = Field(
+        default=10,
+        description="Evidence window end, minutes after observed_at/first_seen "
+        "(AIOPS_RCA_TOPOLOGY_WINDOW_AFTER_MINUTES)",
+    )
+    rca_k8s_recollect_min_age_seconds: int = Field(
+        default=120,
+        description="get_topology_evidence recollects a K8s-side anchor's cluster when its last successful "
+        "collection is older than this or older than the issue's onset; also rate-limits RCAs on one cluster "
+        "(AIOPS_RCA_K8S_RECOLLECT_MIN_AGE_SECONDS)",
+    )
+    rca_k8s_recollect_timeout_seconds: int = Field(
+        default=60,
+        description="Time budget of that recollect; past it the evidence is stale and the RCA goes on "
+        "(AIOPS_RCA_K8S_RECOLLECT_TIMEOUT_SECONDS)",
+    )
+    policy_graph_impact_enforce: bool = Field(
+        default=False,
+        description="Feed the graph's potential-impact count to blast_radius_gte policy rules; false = shadow "
+        "mode, the count is only recorded as shadow_blast_radius (AIOPS_POLICY_GRAPH_IMPACT_ENFORCE)",
+    )
+
+    # ── Pull connectors (MVP-2.6.1 Plan B) ─────────────────────────
+    k8s_kubeconfig_max_age_seconds: int = Field(
+        default=3600,
+        description="Reuse a generated private kubeconfig (<data_dir>/kube/...) younger than this; older is "
+        "regenerated (AIOPS_K8S_KUBECONFIG_MAX_AGE_SECONDS)",
+    )
+    k8s_connector_max_output_bytes: int = Field(
+        default=20000000,
+        description="Byte cap on one kubectl call of the K8s connector; a kind whose output exceeds it is partial "
+        "(AIOPS_K8S_CONNECTOR_MAX_OUTPUT_BYTES)",
+    )
+    k8s_connector_enabled: bool = Field(
+        default=True,
+        description="K8s pull connector: seeds the k8s-discovery schedule; off makes CLI / API runs return "
+        "'disabled' (AIOPS_K8S_CONNECTOR_ENABLED)",
+    )
+    k8s_discovery_interval_minutes: int = Field(
+        default=10,
+        description="Interval of the seeded k8s-discovery schedule (AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES)",
+    )
+
     # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
     security_review_enabled: bool = Field(
         default=True,
@@ -662,6 +733,10 @@ class Settings(BaseSettings):
         default="all",
         description="Default resource focus for scan/detect: computing,networking,databases,storage,security,billing,all (AIOPS_SCAN_FOCUS)",
     )
+    resource_scan_interval_minutes: int = Field(
+        default=60,
+        description="Interval of the seeded resource-scan schedule (AIOPS_RESOURCE_SCAN_INTERVAL_MINUTES)",
+    )
 
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
@@ -721,8 +796,8 @@ class Settings(BaseSettings):
     )
     rca_topology_context_enabled: bool = Field(
         default=True,
-        description="Inject topology context (neighbors, blast radius, recent graph "
-        "changes) into RCA invocations (AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED)",
+        description="Gate for the RCA get_topology_evidence tool (MVP-2.6.1 Plan C); the pre-fetched "
+        "topology prompt block was retired in 2.6.1 (AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED)",
     )
 
     # Auto-Fix Pipeline (RCA → SRE → Approve → Execute)
@@ -754,6 +829,11 @@ class Settings(BaseSettings):
     change_review_timeout_seconds: int = Field(
         default=600,
         description="SRE change-review watchdog; on timeout the request returns to draft with a review_failed event (AIOPS_CHANGE_REVIEW_TIMEOUT_SECONDS)",
+    )
+    change_intake_secret: str = Field(
+        default="",
+        description="HMAC secret for POST /api/changes/intake (external systems); empty = the endpoint is 404 "
+                    "(AIOPS_CHANGE_INTAKE_SECRET)",
     )
 
     # ── ITSM Bridge (MVP-2.0.0) ─────────────────────────────────────
@@ -922,7 +1002,13 @@ class Settings(BaseSettings):
     # Webhooks
     webhook_secret: str = Field(
         default="",
-        description="HMAC secret for webhook signature verification (empty = disabled)",
+        description="Alert-webhook shared token (Bearer / X-AIOps-Token / ?token=, or X-AIOps-Signature HMAC); "
+                    "empty = unchecked (AIOPS_WEBHOOK_SECRET)",
+    )
+    intake_signature_window_seconds: int = Field(
+        default=300,
+        description="Accepted X-AIOps-Timestamp skew for HMAC-signed intake, alert webhooks and change intake "
+                    "(AIOPS_INTAKE_SIGNATURE_WINDOW_SECONDS)",
     )
     webhook_auto_create_issue: bool = Field(
         default=True,
@@ -979,6 +1065,13 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = Field(
         default=30,
         description="Agent instance TTL in minutes before cleanup",
+    )
+
+    # The one process's default thread pool (MVP-2.7.0): asyncio.to_thread / run_in_executor share it with every
+    # Strands model stream and sync tool, which hold a thread for their whole run
+    event_loop_executor_threads: int = Field(
+        default=64,
+        description="Size of the event loop's default ThreadPoolExecutor (min 4)",
     )
 
     # Session history restoration

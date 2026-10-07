@@ -1,0 +1,317 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/ui/bootstrap",
+    "status": "new",
+    "phase": "P1",
+    "description": "Read authenticated UI capabilities and effective upload policy."
+  },
+  {
+    "method": "GET",
+    "path": "/api/users/me/preferences",
+    "status": "new",
+    "phase": "P1",
+    "description": "Read per-user navigation/locale preferences."
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/users/me/preferences",
+    "status": "new",
+    "phase": "P1",
+    "description": "Update allow-listed navigation/locale preferences."
+  },
+  {
+    "method": "GET",
+    "path": "/api/ui/attention",
+    "status": "new",
+    "phase": "P4",
+    "description": "Read actionable work for this actor; no model calls or cloud scans."
+  },
+  {
+    "method": "GET",
+    "path": "/api/content/{entity_type}/{entity_id}/rendering",
+    "status": "new",
+    "phase": "P5",
+    "description": "Read a source-version-bound language rendering; GET never invokes a model."
+  },
+  {
+    "method": "POST",
+    "path": "/api/content/{entity_type}/{entity_id}/translations",
+    "status": "new",
+    "phase": "P5",
+    "description": "Ensure language renderings for this source revision; deduplicate by entity/version/language."
+  },
+  {
+    "method": "POST",
+    "path": "/api/health-issues/{issue_id}/notes",
+    "status": "new",
+    "phase": "P3",
+    "description": "Append an attributed note to the existing issue timeline."
+  },
+  {
+    "method": "GET",
+    "path": "/api/reports/{report_id}/export",
+    "status": "new",
+    "phase": "P5",
+    "description": "Download an already-rendered report revision in one or both languages; no publication."
+  },
+  {
+    "method": "POST",
+    "path": "/api/chat/sessions",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "GET",
+    "path": "/api/chat/sessions",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "GET",
+    "path": "/api/chat/sessions/{session_id}",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/chat/sessions/{session_id}",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/chat/sessions/{session_id}",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "GET",
+    "path": "/api/chat/sessions/{session_id}/messages",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Server-validated object context and scope, visibility/ownership checks, per-session response language. Shared legacy sessions are explicitly classified; no arbitrary owner assignment."
+  },
+  {
+    "method": "POST",
+    "path": "/api/chat/sessions/{session_id}/messages",
+    "status": "extend",
+    "phase": "P2",
+    "description": "Document existing POST SSE and multipart behavior. Add per-session client_message_id deduplication and dispatch state. No resumable stream is promised; reconnect reads persisted history."
+  },
+  {
+    "method": "GET",
+    "path": "/api/health-issues",
+    "status": "extend",
+    "phase": "P3",
+    "description": "Use the canonical HealthIssue representation. Add batched workflow summary and scoped search without per-row requests."
+  },
+  {
+    "method": "PUT",
+    "path": "/api/health-issues/{issue_id}",
+    "status": "extend",
+    "phase": "P3",
+    "description": "Align dismissed with the model state machine; route lifecycle changes through the shared transition/authorisation service. Content editing must not become a status bypass."
+  },
+  {
+    "method": "GET",
+    "path": "/api/health-issues/{issue_id}",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/health-issues/{issue_id}/timeline",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/fix-plans",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/fix-plans/{plan_id}",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/changes",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/changes/{cr_id}",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "GET",
+    "path": "/api/fix-executions/{execution_id}",
+    "status": "extend",
+    "phase": "P3/P4",
+    "description": "Add validated read metadata, content revision and available actions; preserve raw lifecycle status and independently describe recovery verification."
+  },
+  {
+    "method": "PUT",
+    "path": "/api/fix-plans/{plan_id}",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "PUT",
+    "path": "/api/fix-plans/{plan_id}/approve",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/fix-plans/{plan_id}/reject",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/fix-plans/{plan_id}/execute",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/approve",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/reject",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/cancel",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/clarify",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/review",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/execute",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "POST",
+    "path": "/api/changes/{cr_id}/resolve-review",
+    "status": "extend",
+    "phase": "P4",
+    "description": "Atomic revision/scope/policy check in the shared service. If-Match is checked in the same transaction as the state transition. Idempotency keys bind actor, route and canonical body; duplicate requests must not enqueue another execution. Fix-plan approval may auto-queue execution: show available_actions.effect before confirmation."
+  },
+  {
+    "method": "GET",
+    "path": "/api/resources",
+    "status": "extend",
+    "phase": "P3",
+    "description": "Document the existing {total,items} response; bound pagination. Resource health, inventory lifecycle and observation freshness remain distinct."
+  },
+  {
+    "method": "GET",
+    "path": "/api/reports",
+    "status": "extend",
+    "phase": "P5",
+    "description": "Document current ReportResponse shape and expose source revision. Related-object IDs and account are explicit metadata; never guess a report by title similarity."
+  },
+  {
+    "method": "GET",
+    "path": "/api/reports/{report_id}",
+    "status": "extend",
+    "phase": "P5",
+    "description": "Document current ReportResponse shape and expose source revision. Related-object IDs and account are explicit metadata; never guess a report by title similarity."
+  },
+  {
+    "method": "POST",
+    "path": "/api/reports/generate",
+    "status": "extend",
+    "phase": "P5",
+    "description": "Store a source revision and enqueue paired renderings after source generation. Align allowed report_type values with the actual generator; locale changes never restart RCA."
+  },
+  {
+    "method": "POST",
+    "path": "/api/reports/from-session",
+    "status": "extend",
+    "phase": "P5",
+    "description": "Store a source revision and enqueue paired renderings after source generation. Align allowed report_type values with the actual generator; locale changes never restart RCA."
+  },
+  {
+    "method": "POST",
+    "path": "/api/reports/{report_id}/publish",
+    "status": "extend",
+    "phase": "P5",
+    "description": "Publish exactly the selected report version and ready language renderings; preserve channel restrictions. Show destination, format and language before sending; do not substitute generic /api/share for versioned publication."
+  },
+  {
+    "method": "GET",
+    "path": "/api/im/wecom/callback",
+    "status": "extend",
+    "phase": "P0",
+    "description": "Documentation-only repair: give GET and POST distinct operationId values. Preserve callback behavior and authentication."
+  },
+  {
+    "method": "POST",
+    "path": "/api/im/wecom/callback",
+    "status": "extend",
+    "phase": "P0",
+    "description": "Documentation-only repair: give GET and POST distinct operationId values. Preserve callback behavior and authentication."
+  },
+  {
+    "method": "POST",
+    "path": "/api/health-issues/{issue_id}/rca",
+    "status": "extend",
+    "phase": "P0",
+    "description": "Documentation-only repair: actual 202 response is {message,health_issue_id}, not a completed RCA/Plan. Read the result/timeline endpoints after acceptance."
+  },
+  {
+    "method": "POST",
+    "path": "/api/health-issues/{issue_id}/generate-fix-plan",
+    "status": "extend",
+    "phase": "P0",
+    "description": "Documentation-only repair: actual 202 response is {message,health_issue_id}, not a completed RCA/Plan. Read the result/timeline endpoints after acceptance."
+  }
+]

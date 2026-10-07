@@ -362,7 +362,7 @@ class AnomalyDetector:
         all_results = {}
 
         try:
-            query = session.query(CloudResource).filter_by(account_id=self.account.id)
+            query = session.query(CloudResource).filter_by(account_id=self.account.id, absent_since=None)
 
             if service_types:
                 query = query.filter(CloudResource.resource_type.in_(service_types))

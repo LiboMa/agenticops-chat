@@ -1,4 +1,4 @@
-"""Plans & Changes statistics (MVP-2.6.0) — real-time aggregation, no rollup tables.
+"""Plan statistics (MVP-2.6.0) — real-time aggregation, no rollup tables.
 
 Sources: fix_plans (both kinds), change_requests, fix_executions, audit_logs, command_audits.
 Percentiles and the series buckets are computed in Python (tables are small at MVP scale), so no

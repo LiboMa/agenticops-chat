@@ -14,6 +14,7 @@ Non-blocking: Agent stages (SRE, Executor) run in daemon threads.
 Follows the same pattern as rca_service.py.
 """
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -132,6 +133,12 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            from agenticops.services.issue_state import closed_issue_refusal
+            closed = closed_issue_refusal(session, plan.health_issue_id)
+            if closed:
+                logger.info("Auto-approve: FixPlan #%d skipped — %s", fix_plan_id, closed)
+                return
+
             if settings.policy_engine_enabled:
                 decision = _evaluate_policy_for_plan(session, plan)
                 if decision.action != "auto_approve":
@@ -164,6 +171,8 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
             transition_plan(plan, "approved")
             plan.approved_by = "agent:auto-pipeline"
             plan.approved_at = datetime.now(timezone.utc)
+            from agenticops.services.plan_content import stamp_approval
+            stamp_approval(session, plan)
 
             # Audit row in the SAME transaction as the status change (decision + state together)
             from agenticops.audit.service import Actions, AuditService, EntityTypes
@@ -187,9 +196,10 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                     resolved_tid = issue.trace_id
 
             # Update HealthIssue status
-            issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
-            if issue:
-                issue.status = "fix_approved"
+            from agenticops.services.issue_state import advance_issue
+            if health_issue_id:
+                advance_issue(session, health_issue_id, "fix_approved", actor="agent:auto-pipeline",
+                              reason=f"FixPlan #{fix_plan_id} auto-approved")
 
             # get_db_session auto-commits on exit
 
@@ -219,24 +229,30 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
 def _evaluate_policy_for_plan(session, plan):
     """Build policy-engine inputs from the plan's issue context and evaluate.
 
-    Runs an account-scoped blast-radius estimate AND a pre-execution impact
-    simulation (graph engine, zero AWS calls) so policies can gate on what
-    the fix would break, not just how risky the change class is. Both are
-    fail-soft: no graph data → None → simulation rules simply don't match.
+    Runs an account-scoped blast-radius estimate (the published relationship
+    graph's potential impact of the issue's anchor; shadow mode by default,
+    see policy_blast_radius) AND a pre-execution impact simulation (graph
+    engine, zero AWS calls) so policies can gate on what the fix would break,
+    not just how risky the change class is. Both are fail-soft: no graph
+    data → None → those rules simply don't match.
     """
     from agenticops.models import CloudAccount, HealthIssue
     from agenticops.services.policy_engine import (
-        estimate_blast_radius,
         get_policy_engine,
+        policy_blast_radius,
         simulate_fix_impact,
     )
 
     severity = provider = resource_id = native_account_id = None
+    blast_radius = shadow_blast_radius = None
     issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first()
     if issue:
         severity = issue.severity
         provider = issue.provider
         resource_id = issue.resource_id
+        # Own session: a failed graph read must not poison the caller's transaction (PostgreSQL aborts it);
+        # shadow mode stays zero-impact.
+        blast_radius, shadow_blast_radius = policy_blast_radius([issue.resource_ref], issue.account_id)
         # Graph nodes are keyed by the cloud-native account number, not our FK
         if issue.account_id:
             account = session.query(CloudAccount).filter_by(id=issue.account_id).first()
@@ -249,9 +265,10 @@ def _evaluate_policy_for_plan(session, plan):
         severity=severity,
         provider=provider,
         resource_id=resource_id,
-        blast_radius=estimate_blast_radius(resource_id, native_account_id),
+        blast_radius=blast_radius,
         impact_severity=impact["severity"] if impact else None,
     )
+    decision.shadow_blast_radius = shadow_blast_radius
     if impact:
         decision.reasons.append(
             f"pre-execution simulation: {impact['affected_nodes']} nodes affected, "
@@ -303,6 +320,40 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     )
     thread.start()
     logger.info("Auto-execute spawned for FixPlan #%d", fix_plan_id)
+
+
+def runs_in_flight(session, plans) -> set[int]:
+    """The ids of these fix plans whose approval auto-run is under way — one events query for all of them
+    (2026-10-05 final review C1 rule, ported to services/work_phases.in_flight_auto_run)."""
+    from agenticops.models import PipelineEvent
+    from agenticops.services.work_phases import in_flight_auto_run
+    by_issue: dict[int, list[int]] = {}
+    for p in plans:
+        if p.health_issue_id:
+            by_issue.setdefault(p.health_issue_id, []).append(p.id)
+    if not by_issue:
+        return set()
+    events = (session.query(PipelineEvent)
+              .filter(PipelineEvent.health_issue_id.in_(list(by_issue)),
+                      PipelineEvent.event_type.in_(("execution_started", "execution_completed")))
+              .all())
+    grouped: dict[int, list] = {}
+    for e in events:
+        grouped.setdefault(e.health_issue_id, []).append(e)
+    now = datetime.now(timezone.utc)
+    return {pid for iid, pids in by_issue.items() for pid in pids
+            if in_flight_auto_run(grouped.get(iid, []), pid, timeout_seconds=settings.executor_total_timeout,
+                                  now=now) is not None}
+
+
+def plan_run_in_flight(session, plan_id: int) -> bool:
+    """Whether an auto-run of this fix plan is in progress (2026-10-05 final review C1).
+
+    _run_auto_execute writes no FixExecution row until the run ends, so the plan stays 'approved' throughout;
+    its timeline events are the signal (services/work_phases.in_flight_auto_run — the page's own rule)."""
+    from agenticops.models import FixPlan
+    plan = session.get(FixPlan, plan_id)
+    return plan is not None and bool(plan.health_issue_id) and plan_id in runs_in_flight(session, [plan])
 
 
 def _run_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:

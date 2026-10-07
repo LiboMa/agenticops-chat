@@ -27,15 +27,15 @@ def _snap(name, account_id, regions=("us-east-1",)):
 def test_get_session_resolves_explicit_account(monkeypatch):
     sess_a = object()
     sess_b = object()
-    # Seed cache the way resolve_account_session writes it (account_id:region).
-    _session_cache["111111111111:us-east-1"] = sess_a
-    _session_cache["222222222222:us-east-1"] = sess_b
+    # Seed cache the way resolve_account_session writes it (account_id:region:fp).
+    _session_cache[resolver.session_cache_keys(_snap("acct-a", "111111111111"), "us-east-1")[1]] = sess_a
+    _session_cache[resolver.session_cache_keys(_snap("acct-b", "222222222222"), "us-east-1")[1]] = sess_b
     monkeypatch.setattr(
         resolver, "get_account_snapshot",
         lambda ref, provider="": _snap("acct-b", "222222222222"),
     )
 
-    # cache lookup uses provider:name:region then account_id:region
+    # cache lookup uses provider:name:region:fp then account_id:region:fp
     assert aws_tools._get_session("us-east-1", account="acct-b") is sess_b
 
 
@@ -57,8 +57,8 @@ def test_get_session_unknown_account_raises(monkeypatch):
 
 def test_get_session_single_account_default(monkeypatch):
     sess = object()
-    _session_cache["111111111111:us-east-1"] = sess
     snap = _snap("only", "111111111111")
+    _session_cache[resolver.session_cache_keys(snap, "us-east-1")[1]] = sess
     monkeypatch.setattr(resolver, "list_enabled_accounts", lambda provider="aws": [snap])
     # default account resolves to the single enabled account; cache hit returns it
     assert aws_tools._get_session("us-east-1") is sess

@@ -1,15 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateReportFromSession } from "@/hooks/useReports";
+import { useLocale } from "@/i18n/LocaleContext";
 import type { Report } from "@/api/types";
 
 interface Props {
   sessionId: string;
   sessionName: string;
+  /** A private conversation becomes a report everyone in the workspace can read — say so before saving. */
+  isPrivate?: boolean;
   onClose: () => void;
 }
 
-export default function SaveReportDialog({ sessionId, sessionName, onClose }: Props) {
+export default function SaveReportDialog({ sessionId, sessionName, isPrivate = false, onClose }: Props) {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const mutation = useCreateReportFromSession();
 
@@ -74,6 +78,11 @@ export default function SaveReportDialog({ sessionId, sessionName, onClose }: Pr
             </>
           ) : (
             <form onSubmit={handleSubmit} id="save-report-form" className="space-y-4">
+              {isPrivate && (
+                <p role="note" className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                  {t("chat.saveReportPrivateWarning")}
+                </p>
+              )}
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Title</label>
                 <input

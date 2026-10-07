@@ -6,11 +6,12 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Optional
 
 from agenticops.scanner.commands import PROVIDER_COMMANDS, AWS_GLOBAL_COMMANDS
-from agenticops.scanner.parsers import parse_cli_output
+from agenticops.scanner.parsers import PARSER_RESOURCE_TYPE, parse_cli_output_checked
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,9 @@ class AccountScanResult:
     resources_updated: int = 0
     regions_scanned: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # (resource_type, region) units whose listing was complete; only these may mark rows absent
+    complete_units: list[tuple[str, str]] = field(default_factory=list)
+    resources_absent: int = 0
 
 
 @dataclass
@@ -70,6 +74,8 @@ def _save_resources(account_id: int, provider: str, resources: list[dict]) -> tu
         return 0, 0
     from agenticops.tools.metadata_tools import save_resources
     result = save_resources(json.dumps(resources), account_id=account_id, provider=provider)
+    if not result.startswith("Saved "):
+        raise RuntimeError(result)  # the caller must not mark anything absent after a failed save
     created = updated = 0
     if "Saved" in result:
         m = re.search(r"Saved (\d+) new.*updated (\d+)", result)
@@ -119,8 +125,10 @@ def scan_one_account(
                 global_done.add(parser_key)
                 try:
                     raw = cli_tool(command=cmd_template)
-                    parsed = parse_cli_output(parser_key, raw, "global")
+                    parsed, complete = parse_cli_output_checked(parser_key, raw, "global")
                     all_resources.extend(parsed)
+                    if complete:
+                        result.complete_units.append((PARSER_RESOURCE_TYPE[parser_key], "global"))
                 except Exception as e:
                     result.errors.append(f"{parser_key}: {e}")
                 continue
@@ -129,13 +137,40 @@ def scan_one_account(
                 cmd = cmd_template.format(region=region)
                 try:
                     raw = cli_tool(command=cmd)
-                    parsed = parse_cli_output(parser_key, raw, region)
+                    parsed, complete = parse_cli_output_checked(parser_key, raw, region)
                     all_resources.extend(parsed)
+                    if complete:
+                        result.complete_units.append((PARSER_RESOURCE_TYPE[parser_key], region))
                 except Exception as e:
                     result.errors.append(f"{parser_key}/{region}: {e}")
 
     result.resources_found = len(all_resources)
     return result, all_resources
+
+
+def _mark_absent(account_pk: int, complete_units: list[tuple[str, str]], seen: set[str], now: datetime,
+                 started: datetime) -> int:
+    """Mark absent the aws rows of each complete (resource_type, region) unit that this scan did not see.
+
+    seen is the whole account's scan: the unique key ignores type and region, so a same-named resource in
+    another region shares one row. ARN rows are never marked: no W2 parser emits an ARN, so they were
+    written by another path and this listing proves nothing about them. Never deletes. A row some writer
+    touched after this listing started (scanned_at >= started) is left alone: this scan's seen set is stale
+    for it."""
+    from sqlalchemy import func, or_
+
+    from agenticops.models import CloudResource, get_db_session
+    from agenticops.services.inventory import mark_unseen_absent
+
+    marked = 0
+    with get_db_session() as s:
+        for resource_type, region in complete_units:
+            marked += mark_unseen_absent(
+                s, account_id=account_pk, provider="aws", resource_type=resource_type, seen=seen, now=now,
+                criteria=(CloudResource.region == region, func.substr(CloudResource.resource_id, 1, 4) != "arn:",
+                          or_(CloudResource.scanned_at.is_(None), CloudResource.scanned_at < started)),
+            )
+    return marked
 
 
 async def scan_accounts_parallel(
@@ -163,14 +198,29 @@ async def scan_accounts_parallel(
         return ScanResult(duration_s=time.time() - start)
 
     async def _scan_and_save(acct, cli_tool):
+        started = datetime.now(timezone.utc)
         acct_result, resources = await asyncio.to_thread(
             scan_one_account, acct, cli_tool, focus, regions
         )
         if resources:
-            created, updated = await asyncio.to_thread(
-                _save_resources, acct.id, acct.provider, resources
-            )
+            try:
+                created, updated = await asyncio.to_thread(
+                    _save_resources, acct.id, acct.provider, resources
+                )
+            except RuntimeError as e:
+                acct_result.errors.append(f"save: {e}")
+                return acct_result  # nothing is marked absent after a failed save
             acct_result.resources_updated = updated
+        if acct_result.complete_units:
+            now = datetime.now(timezone.utc)
+            seen = {r["resource_id"] for r in resources}
+            try:
+                acct_result.resources_absent = await asyncio.to_thread(
+                    _mark_absent, acct.id, acct_result.complete_units, seen, now, started
+                )
+            except Exception as e:
+                logger.warning("scan %s: absent marking failed: %s", acct.name, e)
+                acct_result.errors.append(f"absent: {e}")
         return acct_result
 
     results = await asyncio.gather(*[

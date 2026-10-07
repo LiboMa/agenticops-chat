@@ -82,7 +82,7 @@ class TestResolveReferences:
         enriched, warnings = resolve_references("fix I#5")
         assert '<referenced_issue id="5">' in enriched
         assert warnings == []
-        mock_resolve.assert_called_once_with(5)
+        mock_resolve.assert_called_once_with(5, None)
 
     @patch("agenticops.chat.preprocessor._resolve_issue_ref")
     def test_issue_not_found(self, mock_resolve):
@@ -276,3 +276,36 @@ def test_reference_resolver_module_exists_and_resolves(monkeypatch):
     monkeypatch.setattr(rr, "get_db_session", lambda: _DB())
     out = rr.fetch_issue(7)
     assert out is not None and out["id"] == 7 and out["title"] == "Disk full"
+
+
+class TestBoundAccountRefs:
+    """MVP-2.7.0 S5: in a chat bound to an account, an I#/R#/C# of another account is withheld, not loaded."""
+
+    @staticmethod
+    def _fake(monkeypatch, account_id):
+        import agenticops.chat.reference_resolver as rr
+        rec = {"id": 7, "title": "SECRET-TITLE", "severity": "high", "status": "open", "resource_id": "i-1",
+               "source": "manual", "description": "d", "detected_at": "2026-10-07", "account_id": account_id}
+        monkeypatch.setattr(rr, "fetch_issue", lambda _i: rec)
+
+    def test_ref_outside_the_bound_account_is_withheld(self, monkeypatch):
+        from agenticops.chat.preprocessor import resolve_references
+        self._fake(monkeypatch, 2)
+        text, _ = resolve_references("look at I#7", bound_account_id=1)
+        assert "not in this chat's account" in text and "SECRET-TITLE" not in text
+
+    def test_ref_inside_the_bound_account_resolves(self, monkeypatch):
+        from agenticops.chat.preprocessor import resolve_references
+        self._fake(monkeypatch, 1)
+        assert "SECRET-TITLE" in resolve_references("look at I#7", bound_account_id=1)[0]
+
+    def test_unbound_chat_resolves_any_ref(self, monkeypatch):
+        from agenticops.chat.preprocessor import resolve_references
+        self._fake(monkeypatch, 2)
+        assert "SECRET-TITLE" in resolve_references("look at I#7")[0]
+
+    def test_preprocess_message_passes_the_binding_through(self, monkeypatch):
+        from agenticops.chat.preprocessor import preprocess_message
+        self._fake(monkeypatch, 2)
+        out, _ = preprocess_message("look at I#7", bound_account_id=1)
+        assert "SECRET-TITLE" not in out

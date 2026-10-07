@@ -63,7 +63,7 @@ def test_api_approve_executed_plan_is_409(db):
     from agenticops.web.app import app
     plan = _plan(db, status="executed")
     client = TestClient(app)
-    r = client.put(f"/api/fix-plans/{plan.id}/approve", json={"approved_by": "tester"})
+    r = client.put(f"/api/fix-plans/{plan.id}/approve", json={"approved_by": "tester", "content_hash": "any"})
     assert r.status_code == 409
 
 

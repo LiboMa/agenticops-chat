@@ -134,13 +134,23 @@ class TestAccountResponse:
 
 
 class TestChatMessageCreate:
+    CMID = "11111111-2222-3333-4444-555555555555"
+
     def test_basic(self):
-        m = ChatMessageCreate(content="hello")
-        assert m.content == "hello"
+        m = ChatMessageCreate(content="hello", client_message_id=self.CMID)
+        assert m.content == "hello" and m.client_message_id == self.CMID
 
     def test_with_scan_focus(self):
-        m = ChatMessageCreate(content="check", scan_focus="security")
+        m = ChatMessageCreate(content="check", scan_focus="security", client_message_id=self.CMID)
         assert m.scan_focus == "security"
+
+    def test_client_message_id_is_required_and_a_uuid(self):  # MVP-2.7.0 S5
+        import pytest
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            ChatMessageCreate(content="hello")
+        with pytest.raises(ValidationError):
+            ChatMessageCreate(content="hello", client_message_id="not-a-uuid")
 
 
 # ---------- ChatSessionCreate / Update ----------
@@ -201,8 +211,11 @@ class TestFixPlanUpdate:
 
 
 class TestFixPlanBodies:
-    def test_approve_body_is_fully_optional(self):
-        b = FixPlanApproveBody()
+    def test_approve_body_requires_only_the_content_hash(self):
+        with pytest.raises(ValidationError):
+            FixPlanApproveBody()
+        assert FixPlanApproveBody(content_hash="").content_hash == ""  # a stale hash: the service's 409, not a 422
+        b = FixPlanApproveBody(content_hash="ab12")
         assert b.approved_by is None and b.reason is None
 
     def test_reject_body_requires_non_empty_reason(self):

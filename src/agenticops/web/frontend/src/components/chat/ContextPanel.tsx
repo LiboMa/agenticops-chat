@@ -1,9 +1,14 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useAnomaly } from "@/hooks/useAnomaly";
+import { approvalBlockedReason, canApprovePlan, issueFacts, newestFirst } from "@/lib/issueDetail";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useFixPlans, useApproveFixPlan, useRejectFixPlan, useExecuteFixPlan } from "@/hooks/useFixPlans";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
+import { useChange } from "@/hooks/useChanges";
+import { useChangeTimeline } from "@/hooks/useChangeTimeline";
+import { useSettings } from "@/hooks/useSettings";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
 import { PipelineStepper } from "@/components/ui/PipelineStepper";
@@ -11,15 +16,22 @@ import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { approvalCopy, findAction } from "@/lib/approval";
+import { useConfirm } from "@/components/ui/ConfirmDialog";
+import { ChangeStatusBadge } from "@/components/plans/ChangeStatusBadge";
+import { ChangeStepper } from "@/components/plans/ChangeStepper";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/hooks/useAuth";
 import { formatFullDate, formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useLocale } from "@/i18n/LocaleContext";
+import { refLabel, type ContextRef } from "@/lib/contextRef";
+import { activeChangePlan, changeHeadline, isHintResolved, toPipelineEvents } from "@/lib/changeDetail";
+import { planLabel, shortHash } from "@/lib/plans";
 import type { PipelineEvent, FixPlan } from "@/api/types";
 
 interface Props {
-  issueId: number | null;
+  subject: ContextRef | null; // an issue or a change request (spec §3.E.5)
   onClose: () => void;
   onAgentCheck?: () => void;
   agentCheckDisabled?: boolean;
@@ -44,33 +56,36 @@ const STATUS_ICONS: Record<string, string> = {
   skipped: "minus",
 };
 
-export function ContextPanel({ issueId, onClose, onAgentCheck, agentCheckDisabled }: Props) {
+export function ContextPanel({ subject, onClose, onAgentCheck, agentCheckDisabled }: Props) {
   const { t } = useLocale();
+  // with change management off Main has no change tools, so a change check prompt could not be answered
+  const settings = useSettings();
+  const canCheck = subject?.kind !== "change" || settings.data?.change_management_enabled === true;
 
   // House rule: side panels close on ESC (and slide in from the right).
   useEffect(() => {
-    if (!issueId) return;
+    if (!subject) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [issueId, onClose]);
+  }, [subject, onClose]);
 
-  if (!issueId) return null;
+  if (!subject) return null;
 
   return (
     <div
-      key={issueId}
+      key={refLabel(subject)}
       className="h-full flex flex-col bg-card border-l border-border animate-[slideInRight_0.2s_ease-out]"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          I#{issueId}
+          {refLabel(subject)}
         </span>
         <div className="flex items-center gap-1">
-          {onAgentCheck && (
+          {onAgentCheck && canCheck && (
             <button
               onClick={onAgentCheck}
               disabled={agentCheckDisabled}
@@ -96,13 +111,36 @@ export function ContextPanel({ issueId, onClose, onAgentCheck, agentCheckDisable
       </div>
 
       {/* Tabs content */}
-      <ContextPanelBody issueId={issueId} />
+      {subject.kind === "issue" ? <IssueBody issueId={subject.id} /> : <ChangeBody changeId={subject.id} />}
     </div>
   );
 }
 
+/** The panel's tab bar: [tab value, label key] pairs. */
+function PanelTabs({ tabs }: { tabs: readonly (readonly [string, string])[] }) {
+  const { t } = useLocale();
+  return (
+    <Tabs.List className="flex border-b border-border px-2 shrink-0">
+      {tabs.map(([tab, label]) => (
+        <Tabs.Trigger
+          key={tab}
+          value={tab}
+          className="px-3 py-2 text-xs font-medium text-muted-foreground transition-colors
+            data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary
+            hover:text-foreground"
+        >
+          {t(label)}
+        </Tabs.Trigger>
+      ))}
+    </Tabs.List>
+  );
+}
+
+const ISSUE_TABS = [["issue", "issues.tab.issue"], ["fixPlan", "issues.tab.fixPlan"], ["timeline", "issues.tab.timeline"]] as const;
+const CHANGE_TABS = [["change", "changes.tab.change"], ["plan", "changes.plan"], ["timeline", "issues.tab.timeline"]] as const;
+
 /** Inner body component that always receives a valid issueId */
-function ContextPanelBody({ issueId }: { issueId: number }) {
+function IssueBody({ issueId }: { issueId: number }) {
   const { t } = useLocale();
 
   const anomaly = useAnomaly(issueId);
@@ -159,19 +197,7 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
 
   return (
     <Tabs.Root defaultValue="issue" className="flex-1 flex flex-col min-h-0">
-      <Tabs.List className="flex border-b border-border px-2 shrink-0">
-        {(["issue", "fixPlan", "timeline"] as const).map((tab) => (
-          <Tabs.Trigger
-            key={tab}
-            value={tab}
-            className="px-3 py-2 text-xs font-medium text-muted-foreground transition-colors
-              data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary
-              hover:text-foreground"
-          >
-            {t(`issues.tab.${tab}`)}
-          </Tabs.Trigger>
-        ))}
-      </Tabs.List>
+      <PanelTabs tabs={ISSUE_TABS} />
 
       {/* Action message */}
       {actionMsg && (
@@ -205,7 +231,7 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
         {/* Metadata grid */}
         <div className="grid grid-cols-2 gap-3 text-xs">
           <MetaField label={t("issues.resource")} value={a.resource_id} mono />
-          <MetaField label={t("issues.region")} value={a.region} />
+          <MetaField label={t("issues.region")} value={issueFacts(a).region ?? "-"} />
           <MetaField label={t("issues.account")} value={a.account_name ?? "-"} />
           <MetaField label={t("issues.detected")} value={formatShortDate(a.detected_at)} />
         </div>
@@ -271,13 +297,7 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
           </div>
         ) : (
           fixPlans.data.map((fp) => (
-            <FixPlanCard
-              key={fp.id}
-              fp={fp}
-              approveMut={approveMut}
-              rejectMut={rejectMut}
-              executeMut={executeMut}
-            />
+            <FixPlanCard key={fp.id} fp={fp} issueStatus={a.status} actions={{ approveMut, rejectMut, executeMut }} />
           ))
         )}
       </Tabs.Content>
@@ -292,6 +312,100 @@ function ContextPanelBody({ issueId }: { issueId: number }) {
           </div>
         ) : (
           <MiniTimeline events={timeline.data} />
+        )}
+      </Tabs.Content>
+    </Tabs.Root>
+  );
+}
+
+/** A change request: where it stands, its implementation plan (read-only here — approving and accepting happen on
+ *  the change page, which names the plan content they act on) and its timeline. */
+function ChangeBody({ changeId }: { changeId: number }) {
+  const { t } = useLocale();
+  const settings = useSettings();
+  const on = settings.data?.change_management_enabled === true;
+  // 0 keeps both queries disabled while change management is off (the API would 404)
+  const change = useChange(on ? changeId : 0);
+  const timeline = useChangeTimeline(on ? changeId : 0, change.data?.status);
+
+  if (settings.isLoading || (on && change.isLoading)) return <Spinner label={t("common.loading")} />;
+  if (!on) return <p className="p-4 text-xs text-muted-foreground">{t("changes.disabled")}</p>;
+  if (change.error) return <div className="p-4 text-sm text-destructive">{change.error.message}</div>;
+  if (!change.data) return null;
+
+  const cr = change.data;
+  const plan = activeChangePlan(cr.plans); // the plan ChangeDetail shows and approves
+  const head = changeHeadline(cr, newestFirst(cr.executions)[0] ?? null);
+
+  return (
+    <Tabs.Root defaultValue="change" className="flex-1 flex flex-col min-h-0">
+      <PanelTabs tabs={CHANGE_TABS} />
+
+      <Tabs.Content value="change" className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <ChangeStatusBadge status={cr.status} />
+            {cr.risk_level && <RiskLevelBadge level={cr.risk_level} />}
+          </div>
+          <h2 className="text-sm font-semibold text-foreground leading-snug">{cr.title}</h2>
+        </div>
+        {head.reason && <p className="text-xs text-foreground break-words">{head.reason}</p>}
+        <p className="text-xs">
+          <span className="text-muted-foreground">{t("changes.todoLabel")}: </span>
+          {t(`changes.todo.${head.todo ?? "none"}`)}
+        </p>
+        <ChangeStepper cr={cr} compact />
+        <div
+          className="text-xs text-muted-foreground report-content"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(cr.description) }}
+        />
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <MetaField label={t("plans.requestedBy")} value={cr.requested_by} mono />
+          <MetaField label={t("plans.type")} value={t(`plans.changeType.${cr.effective_change_type ?? cr.requested_change_type}`)} />
+          <MetaField
+            label={t("changes.targets")}
+            // resolved targets, then the requester's hints review has not resolved yet (as ChangeDetail's "hint?" chips)
+            value={[
+              ...cr.target_resources.map((x) => x.resource_id),
+              ...cr.target_hints.filter((h) => !isHintResolved(h, cr.target_resources)).map((h) => `${h}?`),
+            ].join(", ") || "-"}
+            mono
+          />
+          <MetaField label={t("issues.created")} value={formatShortDate(cr.requested_at ?? cr.created_at)} />
+        </div>
+        <Link
+          to={`/app/changes/${cr.id}`}
+          className="block text-center px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          {t("changes.openChange")}
+        </Link>
+      </Tabs.Content>
+
+      <Tabs.Content value="plan" className="flex-1 overflow-y-auto p-4 space-y-4">
+        {plan ? (
+          <>
+            <FixPlanCard fp={plan} />
+            {/* read-only here: approval and execution happen on the change page */}
+            <Link to={`/app/changes/${cr.id}`} className="block text-center text-xs text-primary hover:underline">
+              {t("changes.openChange")}
+            </Link>
+          </>
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-xs text-muted-foreground">{t("changes.noPlanYet")}</p>
+          </div>
+        )}
+      </Tabs.Content>
+
+      <Tabs.Content value="timeline" className="flex-1 overflow-y-auto p-4">
+        {timeline.isLoading ? (
+          <Spinner label={t("common.loading")} />
+        ) : !timeline.data || timeline.data.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-xs text-muted-foreground">{t("changes.noEvents")}</p>
+          </div>
+        ) : (
+          <MiniTimeline events={toPipelineEvents(timeline.data)} />
         )}
       </Tabs.Content>
     </Tabs.Root>
@@ -323,26 +437,23 @@ function MetaField({
 
 /* ── Fix Plan card ──────────────────────────────────────────────── */
 
-function FixPlanCard({
-  fp,
-  approveMut,
-  rejectMut,
-  executeMut,
-}: {
-  fp: FixPlan;
+type PlanActions = {
   approveMut: ReturnType<typeof useApproveFixPlan>;
   rejectMut: ReturnType<typeof useRejectFixPlan>;
   executeMut: ReturnType<typeof useExecuteFixPlan>;
-}) {
+};
+
+/** A plan, titled as the child of its I# or C# ("I#12 fix plan v2"). Without `actions` it is read-only; `issueStatus`
+ *  is its issue's, undefined for a change plan. */
+function FixPlanCard({ fp, issueStatus, actions }: { fp: FixPlan; issueStatus?: string; actions?: PlanActions }) {
   const { t } = useLocale();
-  const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
-  const [claimedName, setClaimedName] = useState("");
-  const { isAuthenticated } = useAuth();
 
   return (
     <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
       {/* Header */}
       <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-semibold text-foreground">{planLabel(fp, t)}</span>
+        <span className="text-[10px] font-mono text-muted-foreground">{shortHash(fp.content_hash)}</span>
         <RiskLevelBadge level={fp.risk_level} />
         <FixPlanStatusBadge status={fp.status} />
       </div>
@@ -374,34 +485,61 @@ function FixPlanCard({
       {/* Approval info */}
       {fp.approved_by && (
         <p className="text-[10px] text-muted-foreground">
-          Approved by {fp.approved_by}
-          {fp.approved_at ? ` on ${formatShortDate(fp.approved_at)}` : ""}
+          {t("plans.approvedBy")}: {fp.approved_by}
+          {fp.approved_at ? ` · ${formatShortDate(fp.approved_at)}` : ""}
         </p>
       )}
 
       {/* Action buttons */}
+      {actions && <PlanActionButtons fp={fp} issueStatus={issueStatus} {...actions} />}
+    </div>
+  );
+}
+
+/** Only an issue's fix plans get actions (a change plan is approved on its change page), so this is the fix branch. */
+function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut }:
+  { fp: FixPlan; issueStatus?: string } & PlanActions) {
+  const { t } = useLocale();
+  const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
+  const [pinnedHash, setPinnedHash] = useState(""); // what the dialog shows is what it approves (final review I6)
+  const [claimedName, setClaimedName] = useState("");
+  const { isAuthenticated } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const canApprove = canApprovePlan(fp, issueStatus);
+  // a plan of a resolved / dismissed issue can still be rejected, not approved
+  const blocked = approvalBlockedReason(fp, issueStatus);
+  // what approving really does, and whether a run can be queued now (in flight / executor off: no) — the server says
+  const approveCopy = approvalCopy(findAction(fp.available_actions, "approve")?.effect);
+  const execute = findAction(fp.available_actions, "execute");
+
+  return (
+    <>
+      {blocked && <p className="text-[11px] text-muted-foreground">{t(`issues.approvalBlocked.${blocked}`)}</p>}
       <div className="flex gap-2">
-        {fp.status === "pending_approval" && (
-          <>
-            <button
-              onClick={() => { approveMut.reset(); setDialog("approve"); }}
-              disabled={approveMut.isPending}
-              className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-            >
-              {t("issues.approve")}
-            </button>
-            <button
-              onClick={() => { rejectMut.reset(); setDialog("reject"); }}
-              disabled={rejectMut.isPending}
-              className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
-            >
-              {t("issues.reject")}
-            </button>
-          </>
-        )}
-        {fp.status === "approved" && (
+        {canApprove && (
           <button
-            onClick={() => executeMut.mutate(fp.id)}
+            onClick={() => { approveMut.reset(); setPinnedHash(fp.content_hash ?? ""); setDialog("approve"); }}
+            disabled={approveMut.isPending}
+            className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          >
+            {t(approveCopy.buttonKey)}
+          </button>
+        )}
+        {(canApprove || blocked) && (
+          <button
+            onClick={() => { rejectMut.reset(); setDialog("reject"); }}
+            disabled={rejectMut.isPending}
+            className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
+          >
+            {t("issues.reject")}
+          </button>
+        )}
+        {execute?.allowed && (
+          <button
+            onClick={async () => {
+              if (!(await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") }))) return;
+              executeMut.mutate(fp.id);
+            }}
             disabled={executeMut.isPending}
             className="flex-1 px-2 py-1 text-[11px] font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
@@ -409,12 +547,18 @@ function FixPlanCard({
           </button>
         )}
       </div>
+      {/* one execute mutation serves every card of the issue: show its error on the plan it ran for */}
+      {executeMut.error && executeMut.variables === fp.id && (
+        <p role="alert" className="text-[11px] text-red-500">{executeMut.error.message}</p>
+      )}
+      {confirmDialog}
 
       {dialog && (
         <ReasonDialog
-          title={`${t(dialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} #${fp.id}`}
-          description={fp.title}
-          confirmText={dialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          title={dialog === "approve" ? t(approveCopy.titleKey).replace("{label}", planLabel(fp, t)) : `${t("plans.rejectTitle")} ${planLabel(fp, t)}`}
+          description={`${dialog === "approve" ? `${t(approveCopy.noteKey)} ` : ""}${fp.title} · ${t("plans.hash")} ${shortHash(dialog === "approve" ? pinnedHash : fp.content_hash)}`}
+          confirmText={dialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
+          ack={dialog === "approve" ? t("approval.ack") : undefined}
           variant={dialog === "reject" ? "destructive" : "default"}
           required={dialog === "reject"}
           busy={approveMut.isPending || rejectMut.isPending}
@@ -423,7 +567,7 @@ function FixPlanCard({
             const done = { onSuccess: () => setDialog(null) };
             if (dialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
+              approveMut.mutate({ id: fp.id, content_hash: pinnedHash, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
             } else rejectMut.mutate({ id: fp.id, reason }, done);
           }}
           onClose={() => setDialog(null)}
@@ -435,7 +579,7 @@ function FixPlanCard({
           )}
         </ReasonDialog>
       )}
-    </div>
+    </>
   );
 }
 

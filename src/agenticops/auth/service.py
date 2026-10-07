@@ -121,6 +121,9 @@ class AuthService:
             )
             session.add(user)
             session.flush()
+            # Detached before the commit expires it: /api/auth/register reads it after the session closes
+            # (it answered every registration with a DetachedInstanceError until MVP-2.7.0).
+            session.expunge(user)
             return user
 
     @staticmethod
@@ -295,6 +298,11 @@ class AuthService:
                 ).first()
 
                 if user:
+                    # Detach both loaded, before the commit expires them (as validate_session does): callers
+                    # read user.permissions / api_key.permissions after this session is closed (PARK-S5).
+                    session.flush()
+                    session.expunge(user)
+                    session.expunge(api_key)
                     return user, api_key
 
         return None

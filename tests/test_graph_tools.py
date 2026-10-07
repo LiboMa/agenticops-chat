@@ -46,7 +46,7 @@ class TestQueryReachability:
         from agenticops.graph.tools import query_reachability
         result = json.loads(query_reachability(region="r", vpc_id="v", subnet_id="s"))
         assert result["can_reach"] is True
-        mock_build.assert_called_once_with("r", "v")
+        mock_build.assert_called_once_with("r", "v", "")
 
     @patch("agenticops.graph.tools._build_vpc_graph", side_effect=Exception("VPC not found"))
     def test_error_format(self, mock_build):

@@ -216,9 +216,37 @@ class CloudResource(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1: set by connectors/ingest or scanner/engine when a complete listing no longer sees the row;
+    # cleared when a writer sees it again (services/inventory.mark_seen). Rows are never deleted.
+    absent_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1: set by connectors/ingest when an existing row's content hash moves (never on create); read by
+    # graph/evidence as "changed in the RCA window". Rows written only by the scan path stay NULL.
+    content_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     account: Mapped["CloudAccount"] = relationship(back_populates="resources")
+
+
+class ConnectorRun(Base):
+    """One pull-connector run over one target (MVP-2.6.1 spec §3.B.2), written by connectors.ingest.
+
+    status: complete (every kind listed completely) | partial (some kind failed or hit the byte cap) |
+    failed (nothing collected). per_kind: {resource_type: {"complete": bool, "count": int}}."""
+
+    __tablename__ = "connector_runs"
+    __table_args__ = (Index("idx_connector_run_target", "connector", "account_id", "scope", "finished_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    connector: Mapped[str] = mapped_column(String(50))
+    account_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # cloud_accounts.id
+    scope: Mapped[str] = mapped_column(String(200), default="")      # e.g. the cluster name
+    trigger: Mapped[str] = mapped_column(String(20))                 # schedule | manual | rca
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[str] = mapped_column(String(10))
+    counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    per_kind: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 # ============================================================================
@@ -357,6 +385,13 @@ class RCAResult(Base):
     human_verdict: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # correct|incorrect
     human_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # ── Root-cause location (MVP-2.6.1) — observed only: the critic, the gate and auto-fix never read it ──
+    location: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # validated candidates + inline path
+    location_status: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="absent")  # valid|partial|invalid|absent
+    location_build_id: Mapped[Optional[int]] = mapped_column(nullable=True)  # the graph build the path was checked against
+    location_verdict: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # correct|partial|incorrect
+    location_verdict_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    location_verdict_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     health_issue: Mapped["HealthIssue"] = relationship(back_populates="rca_results")
@@ -383,9 +418,11 @@ _ISSUE_TRANSITIONS: dict[str, set[str]] = {
     # investigating back-edge: legal RCA re-run on an already-analyzed issue
     "root_cause_identified":  {"investigating", "fix_planned", "resolved", "dismissed"},
     "fix_planned":            {"fix_approved", "resolved", "dismissed"},
-    "fix_approved":           {"fix_executing", "resolved", "dismissed"},
-    "fix_executing":          {"fix_executed", "resolved", "dismissed"},
-    "fix_executed":           {"resolved", "dismissed"},
+    # root_cause_identified back-edges (MVP-2.6.1): the fix never ran (content changed after approval), the run
+    # failed, or verification failed / acceptance was rejected — the issue can get a new fix plan
+    "fix_approved":           {"fix_executing", "root_cause_identified", "resolved", "dismissed"},
+    "fix_executing":          {"fix_executed", "root_cause_identified", "resolved", "dismissed"},
+    "fix_executed":           {"root_cause_identified", "resolved", "dismissed"},
     "resolved":               set(),  # terminal state
     "dismissed":              {"open"},  # can reopen
 }
@@ -427,6 +464,8 @@ class HealthIssue(Base):
         Index("idx_health_issue_fingerprint", "fingerprint"),
         Index("idx_health_issue_resource_status", "resource_id", "status"),
         Index("idx_health_issue_type", "issue_type"),
+        Index("idx_health_issue_resource_ref", "resource_ref"),
+        Index("idx_health_issue_anchor_status", "anchor_status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -460,6 +499,13 @@ class HealthIssue(Base):
     account_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("cloud_accounts.id"), nullable=True
     )
+    # MVP-2.6.1 graph anchoring (services/identity_resolver): the one physical resource this issue is about
+    resource_ref: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cloud_resources.id", ondelete="SET NULL"), nullable=True
+    )
+    anchor_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # anchored|ambiguous|account_level|unanchored
+    anchor_candidates: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {"rule": ..., "candidates": [...]}
+    observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # fault time reported by the source
 
     # Relationships
     rca_results: Mapped[list["RCAResult"]] = relationship(back_populates="health_issue")
@@ -481,6 +527,7 @@ class ChangeRequest(Base):
         Index("idx_change_request_requested_by", "requested_by"),
         Index("idx_change_request_account", "account_id"),
         Index("idx_change_request_created", "created_at"),
+        Index("idx_change_request_external", "external_system", "external_ticket_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -518,6 +565,14 @@ class ChangeRequest(Base):
     chat_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.6.1 (spec §3.D.2): the requester's own steps (fix_plans.steps shape) and where the request came from.
+    # external_system / external_ticket_id are external_ref split out for the dedup lookup (indexed together).
+    proposed_steps: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    external_ref: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # {system, ticket_id, url?, requested_by?}
+    external_system: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    external_ticket_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    steps_diff: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # code-computed at review, never by an LLM
+    needs_review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # why it waits for a human verdict
 
     # Relationships
     plans: Mapped[list["FixPlan"]] = relationship(back_populates="change_request")
@@ -566,6 +621,12 @@ class FixPlan(Base):
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Content identity (MVP-2.6.1, services/plan_content): the version moves when the executable content changes;
+    # an approval records the hash and version it approved, and a plan that no longer matches them is not run
+    plan_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    approved_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    approved_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Relationships
     health_issue: Mapped[Optional["HealthIssue"]] = relationship(back_populates="fix_plans")
@@ -614,11 +675,35 @@ def validate_plan_transition(current: str, new: str) -> None:
         )
 
 
+class PlanStatusConflict(InvalidStatusTransition):
+    """The plan is no longer in the status the caller read — another request moved it first (409)."""
+
+
+def _persistent_session(obj):
+    """The session `obj` is persistent in, or None (a new / detached / unmapped object: nothing to guard)."""
+    from sqlalchemy import inspect as sa_inspect
+    if not isinstance(obj, Base):  # a stand-in (tests' mocks) has no row to guard; inspect() does not refuse those
+        return None
+    state = sa_inspect(obj)
+    return state.session if state.persistent else None
+
+
 def transition_plan(plan, new_status: str) -> None:
-    """Validate and apply a FixPlan status change; stamps updated_at."""
+    """Validate and apply a FixPlan status change; stamps updated_at. A persistent plan moves with
+    UPDATE … WHERE status=<the status it was read in> (MVP-2.7.0 S3): 0 rows = a concurrent writer won →
+    PlanStatusConflict, so two approvals (or an approve racing a reject) cannot both land."""
     validate_plan_transition(plan.status, new_status)
+    now = datetime.now(timezone.utc)
+    old = plan.status
+    session = _persistent_session(plan) if old != new_status else None
+    if session is not None:
+        moved = (session.query(type(plan))
+                 .filter(type(plan).id == plan.id, type(plan).status == old)
+                 .update({"status": new_status, "updated_at": now}, synchronize_session=False))
+        if not moved:
+            raise PlanStatusConflict(f"Plan #{plan.id} is no longer '{old}' (concurrent transition)")
     plan.status = new_status
-    plan.updated_at = datetime.now(timezone.utc)
+    plan.updated_at = now
 
 
 # ── ChangeRequest (MVP-2.6.0 Change Management) ───────────────────────
@@ -697,6 +782,14 @@ class FixExecution(Base):
     rollback_results: Mapped[list] = mapped_column(JSON, default=list)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(default=0)
+    # MVP-2.6.1 verification (services/verification.py): passed | failed | pending_acceptance, and why.
+    # NULL = no verdict (a run closed without a result: cancel / watchdog / crash, or a pre-2.6.1 row).
+    verification_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    verification_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The human acceptance of a pending_acceptance run (the identity-bound actor key, when, and why)
+    accepted_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    acceptance_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -1056,10 +1149,35 @@ class ChatSession(Base):
     # Per-session effort (thinking) override: off|standard|deep; NULL = Auto
     effort: Mapped[Optional[str]] = mapped_column(String(20), default=None)
 
+    # Who may see it (MVP-2.7.0, services/chat_access): `private` = its owner and admins, `workspace` = everyone.
+    # NULL owner = no single owner — pre-2.7.0 rows, and sessions made with auth off, from IM or from the CLI.
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
+
+    # What the chat is about and which account it is bound to (MVP-2.7.0 S5, services/chat_context). All NULL = an
+    # independent, unbound chat (every pre-S5 row). Locked at the first sent message: a new context = a new chat.
+    context_entity_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)   # health_issue|change_request
+    context_entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    context_account_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)        # cloud_accounts.id
+    context_region: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    context_locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class Installation(Base):
+    """This installation's non-secret identity (MVP-2.7.0, `deployment_id` in GET /api/ui/bootstrap): one row,
+    random, kept in the database so it survives a container whose data_dir is ephemeral."""
+    __tablename__ = "installation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    deployment_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 class ChatMessage(Base):
     """Individual message in a chat session."""
     __tablename__ = "chat_messages"
+    # One user message = one dispatch (MVP-2.7.0 S5, services/chat_dispatch): a client id is unique in its session
+    __table_args__ = (Index("uq_chat_message_client_id", "session_id", "client_message_id", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"))
@@ -1072,6 +1190,10 @@ class ChatMessage(Base):
     # Suggestion chips extracted from the reply tail (MVP-2.0.1); NULL = none
     suggestions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # MVP-2.7.0 S5: the sender's id for this message (user rows from the Web API) and where its dispatch stands —
+    # accepted|running|completed|failed|interrupted; NULL on older rows = completed
+    client_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    dispatch_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 class SessionSummary(Base):
@@ -1365,6 +1487,217 @@ def _run_migrate_2_6_0(engine) -> None:
                 )).fetchall()}
             for stmt in _pg_migration_statements(insp, engine.dialect, existing_constraints):
                 conn.execute(text(stmt))
+
+
+# ── MVP-2.6.1 migration: graph anchoring columns + relation-build marker ──────────────────────────────
+# New tables (resource_relations) are already made by init_db's create_all; on an existing table create_all
+# skips both the table and its indexes, so this pass only adds columns and indexes, then runs backfills.
+# Plans B/C/D append their own columns/indexes to these two tables instead of adding migration functions.
+_ADD_COLUMNS_2_6_1: dict[str, dict[str, Optional[str]]] = {
+    "health_issues": {
+        "resource_ref": "REFERENCES cloud_resources(id) ON DELETE SET NULL",
+        "anchor_status": None,
+        "anchor_candidates": None,
+        "observed_at": None,
+    },
+    "cloud_resources": {"absent_since": None, "content_changed_at": None},
+    "galaxy_builds": {"rules_published_at": None},
+    "rca_results": {"location": None, "location_status": None, "location_build_id": None, "location_verdict": None,
+                    "location_verdict_by": None, "location_verdict_at": None},
+    "fix_plans": {"plan_version": "NOT NULL DEFAULT 1", "content_hash": None, "approved_hash": None,
+                  "approved_version": None},
+    "change_requests": {"proposed_steps": None, "external_ref": None, "external_system": None,
+                        "external_ticket_id": None, "steps_diff": None, "needs_review_reason": None},
+    "fix_executions": {"verification_status": None, "verification_reason": None, "accepted_by": None,
+                       "accepted_at": None, "acceptance_note": None},
+}
+
+_INDEXES_2_6_1: tuple[tuple[str, str, str], ...] = (  # (table, index, columns)
+    ("health_issues", "idx_health_issue_resource_ref", "resource_ref"),
+    ("health_issues", "idx_health_issue_anchor_status", "anchor_status"),
+    ("change_requests", "idx_change_request_external", "external_system, external_ticket_id"),
+)
+
+_migrated_2_6_1_urls: set[str] = set()
+_migrate_2_6_1_lock = threading.Lock()
+
+
+def _statements_2_6_1(insp, dialect) -> list[str]:
+    """DDL still needed to bring an existing database to the 2.6.1 shape. Pure (inspector + dialect in,
+    statements out) so the PostgreSQL branch is testable without a server; empty once migrated."""
+    guard = " IF NOT EXISTS" if dialect.name == "postgresql" else ""
+    stmts: list[str] = []
+    for tbl, cols in _ADD_COLUMNS_2_6_1.items():
+        if not insp.has_table(tbl):
+            continue
+        existing = {c["name"] for c in insp.get_columns(tbl)}
+        for col, extra in cols.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {tbl} ADD COLUMN{guard} {_add_column_ddl(dialect, tbl, col, extra)}")
+    for tbl, index, cols in _INDEXES_2_6_1:
+        if insp.has_table(tbl) and index not in {ix["name"] for ix in insp.get_indexes(tbl)}:
+            stmts.append(f"CREATE INDEX IF NOT EXISTS {index} ON {tbl}({cols})")
+    return stmts
+
+
+def _backfill_anchors_2_6_1(engine) -> None:
+    """Spec §4 backfill 2: anchor every issue that has never been through the resolver. Column-level query and
+    UPDATE, so a later release's HealthIssue columns (added after this runs) cannot break it. A NULL account
+    stays inside the account the issue's signal stated (issue_account_claim, as reanchor_open_issues does).
+    Fail-soft: an anchor is an enrichment — a failure logs and leaves anchor_status NULL for
+    reanchor_open_issues."""
+    try:
+        from agenticops.services.identity_resolver import issue_account_claim, resolve
+
+        with Session(engine) as session:
+            rows = session.query(
+                HealthIssue.id, HealthIssue.resource_id, HealthIssue.account_id, HealthIssue.provider,
+                HealthIssue.alarm_name, HealthIssue.metric_data, HealthIssue.anchor_candidates,
+            ).filter(HealthIssue.anchor_status.is_(None)).all()
+            for row in rows:
+                md = row.metric_data if isinstance(row.metric_data, dict) else {}
+                claim, search_all = issue_account_claim(session, row.id, row.account_id, row.anchor_candidates)
+                anchor = resolve(session, account_id=claim, provider=row.provider, resource_id=row.resource_id,
+                                 hints=md.get("hints"), alarm_name=row.alarm_name, search_all_accounts=search_all)
+                values = {"resource_ref": anchor.resource_ref, "anchor_status": anchor.status,
+                          "anchor_candidates": anchor.audit()}
+                if row.account_id is None and anchor.account_id is not None:
+                    values["account_id"] = anchor.account_id
+                session.query(HealthIssue).filter(HealthIssue.id == row.id).update(values, synchronize_session=False)
+                if "account_id" in values:
+                    _restamp_hashed_plans_2_6_1(session, row.id, anchor.account_id)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 anchor backfill skipped: %s", exc)
+
+
+def _restamp_hashed_plans_2_6_1(session, issue_id: int, account_id: int) -> None:
+    """plan_content.restamp_issue_plans, column-level like the backfills: the account is plan content, so a live
+    plan hashed before its issue had one gets the next version. An unhashed plan is left to
+    _backfill_plan_hashes_2_6_1 (it hashes with this account, and gives an approved plan its approved hash)."""
+    from agenticops.services.plan_content import content_hash
+
+    rows = session.query(FixPlan.id, FixPlan.plan_version, FixPlan.content_hash, FixPlan.steps, FixPlan.rollback_plan,
+                         FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level).filter(
+        FixPlan.health_issue_id == issue_id, FixPlan.content_hash.isnot(None),
+        FixPlan.status.notin_(FIXPLAN_TERMINAL_STATUSES)).all()
+    for row in rows:
+        digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                              post_checks=row.post_checks, account_id=account_id, risk_level=row.risk_level)
+        if digest != row.content_hash:
+            session.query(FixPlan).filter(FixPlan.id == row.id).update(
+                {"content_hash": digest, "plan_version": (row.plan_version or 1) + 1}, synchronize_session=False)
+
+
+def _backfill_location_status_2_6_1(engine) -> None:
+    """Spec §4 backfill 3: an RCA saved before 2.6.1 gave no location. Fail-soft like the anchor backfill."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE rca_results SET location_status = 'absent' WHERE location_status IS NULL"))
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 location_status backfill skipped: %s", exc)
+
+
+def _backfill_plan_hashes_2_6_1(engine) -> None:
+    """Spec §4 / §3.D.1: hash every plan saved before 2.6.1; an approved or executing one also gets that hash as
+    its approved hash, so it can still run. Fail-soft like the backfills above — a plan left without an approved
+    hash is refused at the execution gate (fail-closed) and needs a new approval."""
+    try:
+        from agenticops.services.plan_content import content_hash
+
+        with Session(engine) as session:
+            rows = (
+                session.query(FixPlan.id, FixPlan.status, FixPlan.plan_version, FixPlan.steps, FixPlan.rollback_plan,
+                              FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level,
+                              HealthIssue.account_id.label("issue_account"),
+                              ChangeRequest.account_id.label("change_account"))
+                .outerjoin(HealthIssue, HealthIssue.id == FixPlan.health_issue_id)
+                .outerjoin(ChangeRequest, ChangeRequest.id == FixPlan.change_request_id)
+                .filter(FixPlan.content_hash.is_(None)).all()
+            )
+            for row in rows:
+                digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                                      post_checks=row.post_checks, risk_level=row.risk_level,
+                                      account_id=row.change_account if row.change_account is not None else row.issue_account)
+                values = {"content_hash": digest}
+                if row.status in ("approved", "executing"):
+                    values.update(approved_hash=digest, approved_version=row.plan_version or 1)
+                session.query(FixPlan).filter(FixPlan.id == row.id).update(values, synchronize_session=False)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.6.1 plan hash backfill skipped: %s", exc)
+
+
+# MVP-2.7.0: chat session ownership. Existing rows become workspace sessions with no owner (unchanged reach).
+_ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
+    "chat_sessions": {"owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'",
+                      # S5: the chat's context — all NULL on existing rows (independent, unbound)
+                      "context_entity_type": None, "context_entity_id": None, "context_account_id": None,
+                      "context_region": None, "context_locked_at": None},
+    # S5: one dispatch per user message; NULL on existing rows (= completed)
+    "chat_messages": {"client_message_id": None, "dispatch_state": None},
+}
+_migrated_2_7_0_urls: set[str] = set()
+_migrate_2_7_0_lock = threading.Lock()
+
+
+def _statements_2_7_0(insp, dialect) -> list[str]:
+    """DDL still needed for the 2.7.0 shape; pure like _statements_2_6_1, empty once migrated."""
+    guard = " IF NOT EXISTS" if dialect.name == "postgresql" else ""
+    stmts: list[str] = []
+    for tbl, cols in _ADD_COLUMNS_2_7_0.items():
+        if not insp.has_table(tbl):
+            continue
+        existing = {c["name"] for c in insp.get_columns(tbl)}
+        for col, extra in cols.items():
+            if col not in existing:
+                stmts.append(f"ALTER TABLE {tbl} ADD COLUMN{guard} {_add_column_ddl(dialect, tbl, col, extra)}")
+    if insp.has_table("chat_messages") and \
+            "uq_chat_message_client_id" not in {i["name"] for i in insp.get_indexes("chat_messages")}:
+        stmts.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_message_client_id "
+                     "ON chat_messages (session_id, client_message_id)")
+    return stmts
+
+
+def _run_migrate_2_7_0(engine) -> None:
+    stmts = _statements_2_7_0(inspect(engine), engine.dialect)
+    if stmts:
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.execute(text(stmt))
+
+
+def _migrate_2_7_0(engine) -> None:
+    """Idempotent MVP-2.7.0 migration — once per process per database URL; a DDL failure raises."""
+    key = str(engine.url)
+    with _migrate_2_7_0_lock:
+        if key in _migrated_2_7_0_urls:
+            return
+        _run_migrate_2_7_0(engine)
+        _migrated_2_7_0_urls.add(key)
+
+
+def _run_migrate_2_6_1(engine) -> None:
+    stmts = _statements_2_6_1(inspect(engine), engine.dialect)
+    if stmts:
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.execute(text(stmt))
+    # Backfills (spec §4), each fail-soft. Plans B/C/D append theirs after this line.
+    _backfill_anchors_2_6_1(engine)
+    _backfill_location_status_2_6_1(engine)
+    _backfill_plan_hashes_2_6_1(engine)
+
+
+def _migrate_2_6_1(engine) -> None:
+    """Idempotent MVP-2.6.1 migration — once per process per database URL. DDL failures raise (init_db never
+    starts on a half-migrated schema) and retry on the next call."""
+    key = str(engine.url)
+    with _migrate_2_6_1_lock:
+        if key in _migrated_2_6_1_urls:
+            return
+        _run_migrate_2_6_1(engine)
+        _migrated_2_6_1_urls.add(key)
 
 
 def init_db(engine=None):
@@ -1838,7 +2171,37 @@ def init_db(engine=None):
         """))
         conn.commit()
 
+    # MVP-2.6.1: graph anchoring columns + relation-build marker; runs last so every legacy column it reads exists.
+    _migrate_2_6_1(engine)
+    # MVP-2.7.0: chat session owner + visibility; this installation's id.
+    _migrate_2_7_0(engine)
+    _ensure_installation(engine)
+
     return engine
+
+
+def _ensure_installation(engine) -> None:
+    """Create the one Installation row if it is missing; a concurrent first start loses the insert, not the id."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+    s = Session(bind=engine)
+    try:
+        if s.get(Installation, 1) is None:
+            s.add(Installation(id=1, deployment_id=secrets.token_hex(12)))
+            s.commit()
+    except IntegrityError:
+        s.rollback()
+    finally:
+        s.close()
+
+
+def deployment_id() -> str:
+    s = get_session()
+    try:
+        row = s.get(Installation, 1)
+        return row.deployment_id if row else ""
+    finally:
+        s.close()
 
 
 def get_session() -> Session:

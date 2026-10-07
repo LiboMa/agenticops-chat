@@ -150,3 +150,99 @@ def test_prune_keep_zero_disables(db):
         B._prune_old_builds(s, keep=0)
     with get_db_session() as s:
         assert s.query(GalaxyBuild).count() == 3
+
+
+# ── MVP-2.6.1: K8s rows in the build (spec §3.A.3 ③⑥) ──
+
+
+def _k8s_row(account_id, kind, name, namespace=None, **raw):
+    from agenticops.galaxy.rules import K8S_KIND_TYPES, k8s_resource_id
+
+    body = {"cluster": "shop-eks", "namespace": namespace, "labels": {}}
+    body.update(raw)
+    return CloudResource(account_id=account_id, provider="kubernetes", region="us-east-1",
+                         resource_type=K8S_KIND_TYPES[kind], name=name, tags={}, raw_data=body,
+                         resource_id=k8s_resource_id("shop-eks", kind, name, namespace))
+
+
+def test_k8s_rows_are_rule_derived_and_never_reach_the_llm(db, seeded, monkeypatch):
+    ns = _k8s_row(seeded, "Namespace", "shop")
+    dep = _k8s_row(seeded, "Deployment", "checkout", "shop", template_labels={"app": "checkout"})
+    db.add_all([ns, dep])
+    db.commit()
+    ns_id, dep_id = ns.id, dep.id
+    prompts = []
+
+    def fake_call(prompt, model_id, max_tokens):
+        prompts.append(prompt)
+        # Grounded ("checkout" is in the Deployment's raw_data), yet it must be dropped: K8s is rule-only.
+        return json.dumps({"edges": [{"source": "res:2", "target": f"res:{dep_id}", "relation_type": "references",
+                                      "evidence": "app=checkout", "confidence": 0.9}]}), {"input": 1, "output": 1}
+
+    monkeypatch.setattr(B, "_call_bedrock", fake_call)
+    bid = B.build_graph(trigger="manual", full=True)
+    with get_db_session() as s:
+        b = s.query(GalaxyBuild).filter_by(id=bid).one()
+        assert b.status == "completed"
+        assert any((e["source"], e["target"], e["relation_type"]) == (f"res:{ns_id}", f"res:{dep_id}", "contains")
+                   for e in b.rule_graph["edges"])
+        assert b.llm_graph["edges"] == [] and b.dropped_edge_count == 1
+    assert prompts and not any("K8s_" in p or "shop-eks" in p for p in prompts)
+
+
+def test_build_passes_type_families_so_eks_duplicate_rows_are_one_cluster(db, seeded, monkeypatch):
+    db.add_all([
+        CloudResource(account_id=seeded, provider="aws", region="us-east-1", resource_type="EKS",
+                      resource_id="shop-eks", name="shop-eks", tags={}, raw_data={}),
+        CloudResource(account_id=seeded, provider="aws", region="us-east-1", resource_type="EKS_Cluster",
+                      resource_id="arn:aws:eks:us-east-1:111122223333:cluster/shop-eks", name="shop-eks",
+                      tags={}, raw_data={}),
+    ])
+    ns = _k8s_row(seeded, "Namespace", "shop")
+    db.add(ns)
+    db.commit()
+    ns_id = ns.id
+    monkeypatch.setattr(B, "_call_bedrock", lambda p, m, t: (json.dumps({"edges": []}), {"input": 1, "output": 1}))
+    bid = B.build_graph(trigger="manual", full=True)
+    with get_db_session() as s:
+        edges = s.query(GalaxyBuild).filter_by(id=bid).one().rule_graph["edges"]
+    parents = [e["source"] for e in edges if e["target"] == f"res:{ns_id}" and e["relation_type"] == "contains"]
+    assert len(parents) == 1 and parents[0].startswith("res:")
+
+
+def test_unresolved_refs_are_written_back_only_when_they_change(db, seeded):
+    from agenticops.galaxy import rules
+
+    dep = _k8s_row(seeded, "Deployment", "checkout", "shop", refs={"configmap": ["app-config"]})
+    db.add(dep)
+    db.commit()
+    dep_id = dep.id
+
+    def write_back():
+        with get_db_session() as s:
+            resources = B._load_resources(s)
+        graph = rules.derive_rule_graph(resources)
+        with get_db_session() as s:
+            return B._write_unresolved_refs(s, resources, graph["unresolved_refs"])
+
+    assert write_back() == 1
+    with get_db_session() as s:
+        raw = s.get(CloudResource, dep_id).raw_data
+    assert raw["unresolved_refs"] == [{"kind": "ConfigMap", "name": "app-config"}]
+    assert raw["refs"] == {"configmap": ["app-config"]}          # the rest of raw_data is untouched
+    assert write_back() == 0                                       # unchanged → no write
+    with get_db_session() as s:
+        s.add(_k8s_row(seeded, "ConfigMap", "app-config", "shop", keys=["LOG_LEVEL"], data_sha256="ab"))
+    assert write_back() == 1
+    with get_db_session() as s:
+        assert s.get(CloudResource, dep_id).raw_data["unresolved_refs"] == []
+
+
+def test_load_resources_carries_scan_and_absence_times(db, seeded):
+    from datetime import datetime
+
+    row = db.query(CloudResource).filter_by(resource_id="i-1").one()
+    row.scanned_at, row.absent_since = datetime(2026, 9, 27, 8), datetime(2026, 9, 28, 8)
+    db.commit()
+    got = next(r for r in B._load_resources(db) if r["resource_id"] == "i-1")
+    assert (got["scanned_at"], got["absent_since"]) == (datetime(2026, 9, 27, 8), datetime(2026, 9, 28, 8))

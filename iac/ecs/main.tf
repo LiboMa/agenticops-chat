@@ -154,6 +154,10 @@ resource "aws_ecs_service" "this" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
+  # Replace the task instead of overlapping two: AgenticOps runs as ONE process (MVP-2.7.0)
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
   network_configuration {
     subnets          = module.vpc.private_subnet_ids
     security_groups  = [aws_security_group.ecs.id]

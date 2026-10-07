@@ -1,5 +1,6 @@
 import { useStats } from "@/hooks/useStats";
-import { useAnomalies } from "@/hooks/useAnomalies";
+import { useHealthIssues } from "@/hooks/useHealthIssues";
+import { issueFacts } from "@/lib/issueDetail";
 import { useSchedules } from "@/hooks/useSchedules";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useSettings } from "@/hooks/useSettings";
@@ -29,7 +30,7 @@ const CLOSED_STATUSES = new Set(["resolved", "dismissed"]);
 export default function Dashboard() {
   const { t } = useLocale();
   const stats = useStats();
-  const anomalies = useAnomalies();
+  const anomalies = useHealthIssues();
   const schedules = useSchedules();
   const fixPlans = useFixPlans();
   const settings = useSettings();
@@ -58,7 +59,7 @@ export default function Dashboard() {
 
   const s = stats.data!;
   const kpis = [
-    { label: t("dashboard.resources"), value: s.total_resources, hot: false, link: "/app/issues?view=resources" },
+    { label: t("dashboard.resources"), value: s.total_resources, hot: false, link: "/app/resources" },
     { label: t("dashboard.openIssues"), value: s.open_anomalies, hot: s.open_anomalies > 0 },
     { label: t("dashboard.critical"), value: s.critical_anomalies, hot: s.critical_anomalies > 0 },
     { label: t("dashboard.accounts"), value: s.total_accounts, hot: false },
@@ -153,7 +154,7 @@ export default function Dashboard() {
                         {a.account_name ?? "-"}
                       </td>
                       <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground hidden md:table-cell">
-                        <span className="line-clamp-1">{a.resource_type}/{a.resource_id}</span>
+                        <span className="line-clamp-1">{[issueFacts(a).resourceType, a.resource_id].filter(Boolean).join("/")}</span>
                       </td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground text-right whitespace-nowrap">
                         {formatShortDate(a.detected_at)}

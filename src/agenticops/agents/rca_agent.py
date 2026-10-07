@@ -46,6 +46,7 @@ from agenticops.graph.tools import (
     find_network_path,
     detect_network_anomalies,
 )
+from agenticops.graph.evidence import get_topology_evidence
 from agenticops.tools.aws_cli_tool import run_aws_cli_readonly  # fallback
 from agenticops.providers.base import get_cli_tool_for_issue
 from agenticops.skills.tools import activate_skill, read_skill_reference
@@ -137,6 +138,14 @@ INVESTIGATION PROTOCOL — follow this order strictly:
    NOTE: Do NOT create a fix plan — remediation planning is the SRE agent's job;
    your recommendations feed it.
 8. SAVE: Call save_rca_result with all findings, including the evidence parameter.
+   When you can say where the root cause sits, also pass location: up to 3
+   inventory resources (their db ids) ranked by likelihood, each with the labels
+   of the evidence items that support or refute it ("E<n>" = item n of your
+   evidence list), and the causal path from the root cause to the issue's
+   resource — only edges given to you as topology evidence (src_ref/dst_ref =
+   the edge's src/dst), else leave it empty.
+   The location is checked against the inventory and the graph; what fails is
+   dropped, so never guess an id.
    An INCIDENT MEMORY block may be present in your task prompt (prior conclusions
    for this same problem) — treat it as a prior to confirm or refute with fresh
    evidence, never as the answer.
@@ -189,55 +198,36 @@ TOOL SELECTION — accuracy first:
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _RCA_SKILLS_BLOCK)
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
 
+# MVP-2.6.1: appended only while get_topology_evidence is in the tool list (same gate, rca_topology_context_enabled).
+TOPOLOGY_EVIDENCE_PROMPT = """
+TOPOLOGY EVIDENCE (the published relation graph around the issue's resource):
+- After step 2 (READ ISSUE), call get_topology_evidence(issue_id). It returns the anchored
+  resource, the edges around it (upstream = the far end is something the near end (the end
+  closer to the anchor) depends on; downstream = the far end depends on or is contained by
+  the near end; for a container anchor — a cluster, namespace or network — the cause is
+  usually a contained, downstream member), each neighbor's own issues, signals and changes
+  inside the time window, and ranked root-cause candidates with their reasons.
+- Candidates are leads, not conclusions: confirm or rule out each one with your other tools.
+- Cite an edge or a candidate you rely on as evidence type "graph" with its evidence_ref as
+  the ref. In save_rca_result's location, set build_id to the returned build_id and build the
+  path only from the returned edges.
+- freshness "stale" means the graph may lag reality: say so, and check the live state.
+- truncated=true means the neighborhood was cut at the node cap: a missing neighbor proves nothing.
+- available=false says why the graph cannot speak for this issue. It NEVER means "no problem
+  found" — investigate with the other tools as usual.
+"""
 
-def _build_topology_context(resource_id: str, max_chars: int = 2000) -> str:
-    """Build a TOPOLOGY CONTEXT block from the persisted graph (zero AWS, zero LLM).
 
-    Combines the resource's graph neighborhood (get_alert_context) with recent
-    topology-change snapshots so the RCA agent sees "what changed" without
-    extra tool calls. Fail-soft: any error returns "" and never blocks RCA.
-    """
-    if not settings.rca_topology_context_enabled or not resource_id or resource_id == "unknown":
-        return ""
-    try:
-        lines: list[str] = []
+def topology_evidence_prompt() -> str:
+    """The topology-evidence prompt section — empty when the tool is off (same gate as
+    topology_evidence_tools())."""
+    return TOPOLOGY_EVIDENCE_PROMPT if settings.rca_topology_context_enabled else ""
 
-        from agenticops.graph.context import get_alert_context
-        ctx = get_alert_context(resource_id)
-        if ctx:
-            lines.append(f"Resource position: {ctx['topology_summary']}")
-            deps = ctx.get("dependencies", {})
-            downstream = deps.get("downstream", [])[:5]
-            if downstream:
-                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in downstream]
-                lines.append(f"Downstream dependents: {', '.join(dep_strs)}")
-            upstream = deps.get("upstream", [])[:5]
-            if upstream:
-                dep_strs = [f"{d['label'] or d['id']} ({d['node_type']})" for d in upstream]
-                lines.append(f"Upstream dependencies: {', '.join(dep_strs)}")
 
-        from agenticops.graph.store import GraphStore
-        snapshots = GraphStore().get_recent_snapshots(limit=5)
-        changed = [
-            s for s in snapshots
-            if (s.get("nodes_added") or 0) + (s.get("nodes_removed") or 0) + (s.get("nodes_updated") or 0) > 0
-        ]
-        if changed:
-            lines.append("Recent topology changes (graph sync history):")
-            for s in changed:
-                lines.append(
-                    f"  {s['snapshot_at']}: +{s['nodes_added']} added, "
-                    f"~{s['nodes_updated']} updated, -{s['nodes_removed']} removed"
-                    f" (scope={s['scope'] or 'all'})"
-                )
-
-        if not lines:
-            return ""
-        block = "TOPOLOGY CONTEXT (from infrastructure graph — pre-fetched, no tool call needed):\n" + "\n".join(lines)
-        return block[:max_chars]
-    except Exception:
-        logger.debug("Topology context unavailable for %s", resource_id, exc_info=True)
-        return ""
+def topology_evidence_tools() -> list:
+    """get_topology_evidence for the RCA agent — absent entirely when rca_topology_context_enabled is off
+    (an agent must never see a tool it cannot use)."""
+    return [get_topology_evidence] if settings.rca_topology_context_enabled else []
 
 
 def _build_incident_memory(issue, max_chars: int = 2000) -> str:
@@ -412,14 +402,12 @@ def rca_agent(issue_id: int) -> str:
         with batch_mode():
             # Resolve provider CLI tool from issue's account (+ incident memory)
             cli_tool = None
-            issue_resource_id = ""
             incident_memory_block = ""
             try:
                 from agenticops.models import HealthIssue, get_db_session
                 with get_db_session() as db:
                     issue = db.query(HealthIssue).filter_by(id=issue_id).first()
                     if issue:
-                        issue_resource_id = issue.resource_id or ""
                         if issue.account_id:
                             cli_tool = get_cli_tool_for_issue(issue.account_id)
                         incident_memory_block = _build_incident_memory(issue)
@@ -444,7 +432,8 @@ def rca_agent(issue_id: int) -> str:
             )
 
             agent = Agent(
-                system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT, include_account=False, agent_type="rca", agent_name="rca"),
+                system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT + topology_evidence_prompt(), include_account=False,
+                                                  agent_type="rca", agent_name="rca"),
                 model=model,
                 callback_handler=None,
                 conversation_manager=get_agent_conversation_manager("rca"),
@@ -481,6 +470,7 @@ def rca_agent(issue_id: int) -> str:
                     query_impact_radius,
                     find_network_path,
                     detect_network_anomalies,
+                    *topology_evidence_tools(),
                     # Cloud CLI (provider-resolved, fallback to AWS read-only)
                     cli_tool or run_aws_cli_readonly,
                     # Agent Skills (domain knowledge + host/kubectl execution + dynamic tools)
@@ -497,9 +487,6 @@ def rca_agent(issue_id: int) -> str:
             )
 
             prompt = f"Analyze HealthIssue #{issue_id}. Follow the investigation protocol."
-            topology_block = _build_topology_context(issue_resource_id)
-            if topology_block:
-                prompt = f"{prompt}\n\n{topology_block}"
             if incident_memory_block:
                 prompt = f"{prompt}\n\n{incident_memory_block}"
 

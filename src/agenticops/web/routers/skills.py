@@ -110,7 +110,7 @@ async def api_get_skill(name: str):
 
 
 @router.post("/api/skills/generate")
-async def api_generate_skill(req: dict):
+def api_generate_skill(req: dict):
     """Generate a skill from a natural language description (LLM call)."""
     description = req.get("description", "").strip()
     if not description:

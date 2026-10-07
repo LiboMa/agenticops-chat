@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "@/i18n/LocaleContext";
+import { canConfirm } from "@/lib/approval";
 
 interface Props {
   title: string;
@@ -14,6 +15,8 @@ interface Props {
   maxLength?: number;
   /** Rendered in the body above the reason label (Task 6's claimed-approver input). */
   children?: ReactNode;
+  /** An acknowledgement the confirm waits for (approvals, MVP-2.7.0 S3). */
+  ack?: string;
   onConfirm: (reason: string) => void;
   onClose: () => void;
 }
@@ -29,11 +32,13 @@ export function ReasonDialog({
   error = null,
   maxLength = 2000,
   children,
+  ack,
   onConfirm,
   onClose,
 }: Props) {
   const { t } = useLocale();
   const [reason, setReason] = useState("");
+  const [acked, setAcked] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -52,7 +57,7 @@ export function ReasonDialog({
   const close = () => {
     if (!busy) onClose();
   };
-  const disabled = busy || (required && !reason.trim());
+  const disabled = !canConfirm({ busy, required, reason, ack: !!ack, acked });
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={close} />
@@ -70,6 +75,12 @@ export function ReasonDialog({
             placeholder={t("plans.reasonPlaceholder")}
             className="w-full border border-border bg-background text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
           {error && <p role="alert" className="text-sm text-red-500 mt-2">{error}</p>}
+          {ack && (
+            <label className="mt-3 flex items-start gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} className="mt-0.5" />
+              <span>{ack}</span>
+            </label>
+          )}
         </div>
         <div className="px-6 py-4 border-t border-border flex justify-end gap-2">
           <button onClick={close} disabled={busy} className="px-4 py-2 text-sm font-medium rounded-lg border border-border text-muted-foreground hover:bg-secondary transition-colors disabled:opacity-50">{t("common.cancel")}</button>

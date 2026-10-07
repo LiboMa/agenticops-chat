@@ -216,31 +216,31 @@ def notify_rca_completed(
 
 
 def notify_fix_planned(
-    issue_id: int, plan_id: int, risk_level: str, title: str
+    issue_id: int, label: str, risk_level: str, title: str
 ) -> None:
-    """Notify: fix plan generated."""
+    """Notify: fix plan generated. `label` is the plan as people read it — "I#12 fix plan v2" (plan_label)."""
     _buffer_or_send(
         issue_id=issue_id,
         event_type="fix_planned",
-        subject=f"Fix Plan #{plan_id} ({risk_level}) for Issue #{issue_id}",
+        subject=f"{label} generated ({risk_level})",
         body=(
             f"Fix plan generated for HealthIssue #{issue_id}.\n\n"
-            f"Plan #{plan_id}: {title}\n"
+            f"{label}: {title}\n"
             f"Risk Level: {risk_level}"
         ),
     )
 
 
 def notify_fix_approved(
-    plan_id: int, approved_by: str, risk_level: str, issue_id: int | None = None
+    label: str, approved_by: str, risk_level: str, issue_id: int | None = None
 ) -> None:
     """Notify: fix plan approved."""
     _buffer_or_send(
         issue_id=issue_id,
         event_type="fix_approved",
-        subject=f"Fix Plan #{plan_id} Approved ({risk_level})",
+        subject=f"{label} approved ({risk_level})",
         body=(
-            f"FixPlan #{plan_id} has been approved.\n\n"
+            f"{label} has been approved.\n\n"
             f"Approved by: {approved_by}\n"
             f"Risk Level: {risk_level}"
         ),
@@ -248,12 +248,12 @@ def notify_fix_approved(
 
 
 def notify_execution_result(
-    plan_id: int, issue_id: int, status: str, error: str = ""
+    label: str, issue_id: int, status: str, error: str = ""
 ) -> None:
     """Notify: fix execution completed (success or failure)."""
     severity = "high" if status != "succeeded" else None
     body = (
-        f"Execution result for FixPlan #{plan_id} (Issue #{issue_id}).\n\n"
+        f"Execution result for {label}.\n\n"
         f"Status: {status.upper()}"
     )
     if error:
@@ -261,7 +261,7 @@ def notify_execution_result(
     _buffer_or_send(
         issue_id=issue_id,
         event_type="execution_result",
-        subject=f"Execution {status.upper()}: Plan #{plan_id}",
+        subject=f"Execution {status.upper()}: {label}",
         body=body,
         severity=severity,
     )
@@ -305,21 +305,42 @@ def notify_change_pending_approval(cr: dict, plan: dict) -> None:
         "change_pending_approval",
         f"[CHANGE] Change #{cr['id']} awaits approval ({cr.get('risk_level') or '?'}, {cr.get('effective_change_type') or 'normal'})",
         (f"Change request #{cr['id']} '{cr['title']}' was reviewed by the SRE agent and needs approval.\n\n"
-         f"Plan #{plan.get('id')}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
+         f"{plan['label']}: {plan.get('title')}\n{summary_line}Risk: {cr.get('risk_level')}\n"
          f"Requested by: {cr['requested_by']}\n\nApprove or reject: {_change_link(cr['id'])}"),
         _change_severity(cr.get("risk_level")),
     )
 
 
-def notify_change_result(cr: dict, outcome: str) -> None:
+def notify_change_result(cr: dict, outcome: str, *, reason: str = "") -> None:
     """Notify: terminal or attention-needing outcome (completed / failed / rolled_back / needs_review /
-    rejected / needs_clarification / review_failed / execution_not_queued)."""
+    rejected / needs_clarification / review_failed / execution_not_queued). A needs_review result says why;
+    another outcome says the `reason` given (execution_not_queued: the refusal)."""
+    reason = " ".join(str((cr.get("needs_review_reason") if outcome == "needs_review" else reason) or "").split())[:500]
+    reason_line = f"Reason: {reason}\n" if reason else ""
     notify_event(
         "change_result",
         f"[CHANGE] Change #{cr['id']} {outcome.upper()}: {cr['title']}",
-        (f"Change request #{cr['id']} is now {outcome}.\n\nRequested by: {cr['requested_by']}\n"
+        (f"Change request #{cr['id']} is now {outcome}.\n\n{reason_line}Requested by: {cr['requested_by']}\n"
          f"Risk: {cr.get('risk_level') or '?'}\n{_change_link(cr['id'])}"),
         _change_severity(cr.get("risk_level"), outcome),
+    )
+
+
+def notify_execution_pending_acceptance(execution_id: int, reason: str, *, issue_id: Optional[int] = None,
+                                        cr: Optional[dict] = None) -> None:
+    """Notify: a run succeeded but its verification could not pass it — a human accepts or rejects it
+    (MVP-2.6.1). One of `issue_id` (a fix) / `cr` (a change snapshot) names what the run belongs to."""
+    reason = " ".join(str(reason or "").split())[:500]
+    if cr is not None:
+        owner, link = f"Change #{cr['id']}", _change_link(cr["id"])
+    else:
+        owner, link = f"Issue #{issue_id}", f"{settings.web_base_url.rstrip('/')}/app/issues/{issue_id}"
+    notify_event(
+        "execution_pending_acceptance",
+        f"[ACCEPTANCE] {owner}: execution #{execution_id} needs acceptance",
+        (f"Execution #{execution_id} of {owner} succeeded, but its verification is pending.\n\n"
+         f"Reason: {reason}\nAccept or reject: {link}"),
+        "high",
     )
 
 

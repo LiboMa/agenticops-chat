@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet } from "react-router-dom";
-import { IconSidebar } from "./IconSidebar";
-import { MinimalTopBar } from "./MinimalTopBar";
+import { Sidebar } from "./Sidebar";
+import { TopBar } from "./TopBar";
 import { CommandPalette } from "../CommandPalette";
-import { usePersistedState } from "@/hooks/usePersistedState";
+import { RestoreNotice, ShellEffects } from "./ShellEffects";
+import { AccountScopeProvider, ScopeNotice } from "./AccountScope";
 
+/** The blue/white workspace frame: a 200px white sidebar (166px ≤1100px, hidden ≤800px — the top bar then
+ *  carries a menu), the top bar, and the page on the canvas. ⌘K / Ctrl+K opens search. */
 export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
-  // Nav expanded state lives here (not in IconSidebar) so the content
-  // padding follows in the same tab — storage events only fire cross-tab.
-  const [navExpanded, setNavExpanded] = usePersistedState<boolean>("aiops-nav-expanded", false);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -24,15 +24,20 @@ export function AppShell() {
   }, [handleKeyDown]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <IconSidebar expanded={navExpanded} onToggle={() => setNavExpanded(!navExpanded)} />
-      <div className={`transition-[padding] duration-200 ${navExpanded ? "pl-[200px]" : "pl-[52px]"}`}>
-        <MinimalTopBar />
+    <AccountScopeProvider>
+    <div className="min-h-screen bg-canvas text-foreground">
+      <Sidebar />
+      <div className="min-[801px]:pl-[166px] min-[1101px]:pl-[200px]">
+        <TopBar onSearch={() => setPaletteOpen(true)} />
         <main className="p-6">
+          <RestoreNotice />
+          <ScopeNotice />
           <Outlet />
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ShellEffects />
     </div>
+    </AccountScopeProvider>
   );
 }

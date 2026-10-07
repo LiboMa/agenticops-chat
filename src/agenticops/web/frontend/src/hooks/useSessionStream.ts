@@ -33,6 +33,11 @@ export function useSessionStream(sessionId: string | null) {
         // newest page in the background (keeps markdown-memo/React keys correct).
         qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
       },
+      // after every send: the server's history is the truth (an interrupted or failed reply shows as stored)
+      onSettled: (sid) => {
+        qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
+        qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      },
       onRenamed: (sid, name) => {
         qc.setQueryData<ChatSession[]>(["chat-sessions"], (old) =>
           old?.map((s) => (s.session_id === sid ? { ...s, name } : s)));
@@ -48,8 +53,8 @@ export function useSessionStream(sessionId: string | null) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const send = useCallback(
-    (content: string, files?: File[]) => {
-      if (!sessionId) return;
+    (content: string, files?: File[]): Promise<boolean> => {
+      if (!sessionId) return Promise.resolve(false);
       // Optimistically append the user's message so it shows immediately.
       const userMsg: ChatMessage = {
         id: nextTempId(),
@@ -61,7 +66,7 @@ export function useSessionStream(sessionId: string | null) {
         created_at: new Date().toISOString(),
       };
       appendMessageToCache(qc, sessionId, userMsg);
-      void chatStream.send(sessionId, content, files);
+      return chatStream.send(sessionId, content, files);  // → accepted (false: the composer gives the text back)
     },
     [sessionId, qc],
   );

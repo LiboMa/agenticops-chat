@@ -10,6 +10,7 @@ from sqlalchemy import func
 
 from agenticops.config import settings
 from agenticops.models import ChangeRequest, CloudResource, FixPlan, HealthIssue, Report, get_db_session
+from agenticops.services.inventory import PRESENT
 from agenticops.web.schemas import SearchResponse, SearchResultItem
 
 router = APIRouter()
@@ -106,6 +107,7 @@ async def api_search(
             rows = (
                 db.query(CloudResource)
                 .filter(
+                    PRESENT,
                     func.lower(CloudResource.resource_id).like(search_term)
                     | func.lower(CloudResource.name).like(search_term)
                     | func.lower(CloudResource.resource_type).like(search_term)

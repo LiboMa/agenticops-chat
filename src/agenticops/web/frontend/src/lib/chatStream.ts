@@ -1,17 +1,29 @@
 import { getAuthToken } from "@/api/client";
+import { SseParser } from "@/lib/sseParser";
 
 export interface ToolCall {
   name: string;
   status: "running" | "done";
+  call_id?: string;
+  outcome?: "ok" | "error" | "unknown"; // S5: from the tool's result, never assumed from its name
 }
+
+/** Why a send did not finish (MVP-2.7.0 S5): the server's error codes, its 409 codes, or the client's own. */
+export type StreamErrorCode = "throttled" | "model_unavailable" | "context_too_long" | "internal"
+  | "session_busy" | "duplicate_in_flight" | "network" | "http";
 
 export interface StreamState {
   streaming: boolean;
   content: string;
   toolCalls: ToolCall[];
   tokenMetrics: { input: number; output: number } | null;
-  error: string | null;
+  error: { code: StreamErrorCode; message: string } | null;
 }
+
+const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "internal",
+  "session_busy", "duplicate_in_flight"]);
+const asCode = (c: unknown, fallback: StreamErrorCode): StreamErrorCode =>
+  typeof c === "string" && SERVER_CODES.has(c) ? (c as StreamErrorCode) : fallback;
 
 /** Callbacks the store fires on lifecycle events (wired to TanStack cache by hooks). */
 export interface StreamCallbacks {
@@ -22,6 +34,9 @@ export interface StreamCallbacks {
   ) => void;
   /** Fired when the backend auto-renames the session. */
   onRenamed?: (sessionId: string, name: string) => void;
+  /** Fired after every send, however it ended: the history is reloaded from the server, so an interrupted or
+   *  failed reply shows as the server stored it (no automatic retry — S5). */
+  onSettled?: (sessionId: string) => void;
 }
 
 const EMPTY: StreamState = {
@@ -89,8 +104,11 @@ class ChatStreamStore {
     this.controllers.get(sessionId)?.abort();
   }
 
-  async send(sessionId: string, content: string, files?: File[]) {
-    if (this.isStreaming(sessionId)) return;
+  /** → whether the server accepted the message (its `accepted` frame arrived): false = nothing was stored, so the
+   *  composer gives the text and files back (S5). */
+  async send(sessionId: string, content: string, files?: File[], clientMessageId: string = crypto.randomUUID()): Promise<boolean> {
+    if (this.isStreaming(sessionId)) return false;
+    let accepted = false;
 
     this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null });
 
@@ -124,12 +142,13 @@ class ChatStreamStore {
       if (files && files.length > 0) {
         const formData = new FormData();
         formData.append("content", content);
+        formData.append("client_message_id", clientMessageId);
         files.forEach((f) => formData.append("file", f));
         res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: "POST", headers: authHeaders, body: formData, signal: controller.signal,
         });
       } else {
-        const body: Record<string, string> = { content };
+        const body: Record<string, string> = { content, client_message_id: clientMessageId };
         res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
@@ -140,36 +159,26 @@ class ChatStreamStore {
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(errBody.detail ?? res.statusText);
+        const d = errBody?.detail;
+        const message = typeof d === "string" ? d : typeof d?.detail === "string" ? d.detail : res.statusText;
+        this.set(sessionId, { error: { code: asCode(d?.code, "http"), message } });
+        return false;
       }
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No response body");
 
       const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-            continue;
-          }
-          if (!line.startsWith("data:")) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-
+      const parser = new SseParser();
+      const handle = (frames: { event: string; data: string }[]) => {
+        for (const frame of frames) {
+          if (!frame.data) continue;
           try {
-            const data = JSON.parse(raw);
-            switch (currentEvent) {
+            const data = JSON.parse(frame.data);
+            switch (frame.event) {
+              case "accepted":
+                accepted = true;
+                break;
               case "text":
                 if (data.token) {
                   pendingText += data.token;
@@ -179,15 +188,18 @@ class ChatStreamStore {
               case "tool_start":
                 if (data.name) {
                   const cur = this.states.get(sessionId) ?? EMPTY;
-                  this.set(sessionId, { toolCalls: [...cur.toolCalls, { name: data.name, status: "running" }] });
+                  this.set(sessionId, { toolCalls: [...cur.toolCalls,
+                    { name: data.name, status: "running", call_id: data.call_id ?? undefined }] });
                 }
                 break;
               case "tool_end":
                 if (data.name) {
                   const cur = this.states.get(sessionId) ?? EMPTY;
+                  // by call id when the server sent one (two calls of one tool are two rows), else by name
+                  const same = (t: ToolCall) => (data.call_id ? t.call_id === data.call_id : t.name === data.name);
                   this.set(sessionId, {
                     toolCalls: cur.toolCalls.map((t) =>
-                      t.name === data.name ? { ...t, status: "done" as const } : t),
+                      same(t) ? { ...t, status: "done" as const, outcome: data.outcome ?? t.outcome } : t),
                   });
                 }
                 break;
@@ -201,14 +213,22 @@ class ChatStreamStore {
                 doneSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
                 break;
               case "error":
-                this.set(sessionId, { error: data.message ?? "Unknown error" });
+                this.set(sessionId, { error: { code: asCode(data.code, "internal"), message: data.message ?? "" } });
                 break;
             }
           } catch {
             // ignore malformed JSON
           }
         }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        handle(parser.push(decoder.decode(value, { stream: true })));
       }
+      handle(parser.push(decoder.decode()));
+      handle(parser.flush());
 
       if (flushTimer) clearTimeout(flushTimer);
       flush();
@@ -225,7 +245,7 @@ class ChatStreamStore {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") {
-        this.set(sessionId, { error: err.message });
+        this.set(sessionId, { error: { code: "network", message: err.message } });
       }
     } finally {
       if (flushTimer) clearTimeout(flushTimer);
@@ -234,7 +254,9 @@ class ChatStreamStore {
       // hand the completed turn to the cache layer (no double-render flash).
       this.set(sessionId, { streaming: false, content: "", toolCalls: [], tokenMetrics: null });
       if (donePayload) this.callbacks.onDone?.(sessionId, donePayload);
+      this.callbacks.onSettled?.(sessionId);
     }
+    return accepted;
   }
 }
 

@@ -96,7 +96,7 @@ def scan_resources(account_ids: str = "", focus: str = "all", regions: str = "")
 
     lines = [f"Scan complete in {result.duration_s}s — {result.total_found} resources found."]
     for a in result.accounts:
-        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, regions={a.regions_scanned}")
+        lines.append(f"  {a.account_name} ({a.provider}): {a.resources_found} found, {a.resources_updated} updated, {a.resources_absent} absent, regions={a.regions_scanned}")
         for err in a.errors[:3]:
             lines.append(f"    ⚠ {err}")
     return "\n".join(lines)
@@ -120,6 +120,7 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
     """
     import asyncio
     import concurrent.futures
+    import contextvars
     from agenticops.checker import check_accounts_parallel
 
     ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
@@ -130,7 +131,7 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
         asyncio.get_running_loop()
         # Already inside an async event loop (e.g. scheduler) — run in a thread
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(asyncio.run, coro).result()
+            result = pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()  # the run context (binding) goes too
     except RuntimeError:
         # No running loop — safe to use asyncio.run()
         result = asyncio.run(coro)

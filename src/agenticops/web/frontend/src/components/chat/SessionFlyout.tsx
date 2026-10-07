@@ -7,10 +7,13 @@ import {
   useUpdateChatSession,
 } from "@/hooks/useChatSessions";
 import { useLocale } from "@/i18n/LocaleContext";
+import { sessionRowLabel } from "@/lib/chatMessageStatus";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { sortSessions, filterArchived } from "@/lib/sortSessions";
 import { groupSessions } from "@/lib/groupSessions";
 import { useActiveStreamingSessions } from "@/hooks/useSessionStream";
+import { useAuth } from "@/hooks/useAuth";
+import { canChangeVisibility, canManage, otherVisibility, visibilityTag } from "@/lib/sessionVisibility";
 
 interface Props {
   open: boolean;
@@ -26,6 +29,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
   const deleteMut = useDeleteChatSession();
   const renameMut = useRenameChatSession();
   const updateMut = useUpdateChatSession();
+  const { isAuthenticated } = useAuth();
   const { confirm, dialog } = useConfirm();
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -101,6 +105,11 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
   const handleToggleArchive = (sessionId: string, currentArchived: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     updateMut.mutate({ sessionId, archived: !currentArchived });
+  };
+
+  const handleToggleVisibility = (s: { session_id: string; visibility?: "private" | "workspace" }, e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateMut.mutate({ sessionId: s.session_id, visibility: otherVisibility(s) });
   };
 
   return (
@@ -208,9 +217,18 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                             )}
                             {s.pinned && <span className="text-[10px] flex-shrink-0" title={t("chat.pinned")}>📌</span>}
                             {s.starred && <span className="text-[10px] flex-shrink-0" title={t("chat.starred")}>⭐</span>}
+                            {(() => {
+                              const tag = visibilityTag(s, isAuthenticated);
+                              return tag && (
+                                <span className="flex-shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
+                                  {t(`chat.visibility.${tag}`)}
+                                </span>
+                              );
+                            })()}
                             <p
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
+                                if (!canManage(s)) return;
                                 setRenamingId(s.session_id);
                                 setRenameValue(s.name);
                               }}
@@ -218,11 +236,16 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                             >
                               {s.name}
                             </p>
+                            {/* S5: what the chat is about — its linked object, or an independent request */}
+                            {(() => { const l = sessionRowLabel(s); return (
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {l.text ? <span className="font-mono">{l.text}</span> : t(l.key!)}
+                              </p>); })()}
                           </div>
                         )}
 
-                        {/* Hover action menu */}
-                        <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
+                        {/* Hover action menu — only for whoever may manage the session (owner / admin / ownerless) */}
+                        {canManage(s) && <div className="absolute top-1/2 -translate-y-1/2 right-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 bg-muted rounded-md px-0.5 transition-opacity">
                           <button
                             onClick={(e) => handleTogglePin(s.session_id, s.pinned, e)}
                             className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -237,6 +260,16 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                           >
                             <span className="text-[10px]">{s.starred ? "⭐" : "☆"}</span>
                           </button>
+                          {canChangeVisibility(s, isAuthenticated) && (
+                            <button
+                              onClick={(e) => handleToggleVisibility(s, e)}
+                              className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title={s.visibility === "private" ? t("chat.makeWorkspace") : t("chat.makePrivate")}
+                              aria-label={s.visibility === "private" ? t("chat.makeWorkspace") : t("chat.makePrivate")}
+                            >
+                              <span className="text-[10px]">{s.visibility === "private" ? "🔒" : "👥"}</span>
+                            </button>
+                          )}
                           <button
                             onClick={(e) => handleToggleArchive(s.session_id, s.archived, e)}
                             className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -253,7 +286,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
-                        </div>
+                        </div>}
                       </div>
                     );
                   })}

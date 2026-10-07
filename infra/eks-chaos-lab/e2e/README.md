@@ -15,9 +15,11 @@ Proves the AgenticOps 感知→分析→解决→记录 loop against injected fa
 ## Run
 ```bash
 export AIOPS_ADMIN_PASSWORD=...        # matches deploy-app.sh --admin-password
+export AIOPS_WEBHOOK_SECRET=...        # matches deploy-app.sh --webhook-secret (alert posts send it as X-AIOps-Token)
 bash run-e2e.sh                        # all scenarios
 bash run-e2e.sh --assert-only          # deterministic pass/fail only
 bash run-e2e.sh --evidence-only        # chat + report capture only
+LOCATION_BATCH=off bash run-e2e.sh --location-only   # root-cause location eval, one batch (see below)
 ```
 `run-e2e.sh` opens a `kubectl port-forward` tunnel, runs pytest, writes
 `results/junit.xml` + per-scenario evidence, and always runs `restore-all.sh`.
@@ -34,6 +36,41 @@ bash run-e2e.sh --evidence-only        # chat + report capture only
 6 assert (scale-to-zero, bad-image, crashloop-config, node-drained,
 resource-stress, netpol-block) + 2 evidence (coredns-down, service-deleted).
 Add more by appending to `scenarios.yaml`.
+
+## Root-cause location eval (MVP-2.6.1)
+Scores where the RCA says the root cause is, not whether the loop closes. 13 cases
+(`ground_truth.yaml`: the 8 scenarios above + the 5 L2 faults of `../faults-l2/`),
+each naming the objects that count as the root cause. Two batches, one per
+invocation — `off` is the baseline without topology context in the RCA prompt, `on` is
+with it:
+
+```bash
+LOCATION_BATCH=off bash run-e2e.sh --location-only
+LOCATION_BATCH=on  bash run-e2e.sh --location-only
+python location_eval.py results/location-<off>.json results/location-<on>.json
+```
+
+- **The eval environment.** `run-e2e.sh` sets it on the app with `kubectl set env` and
+  waits for the rollout: `AIOPS_RCA_TOPOLOGY_CONTEXT_ENABLED` from the batch, auto-fix and
+  the RAG pipeline off (nothing touches the cluster or the KB), resolved-cooldown 0 and
+  the flapping threshold out of reach (every alert may open a new issue). The exit
+  cleanup unsets the variables, which restarts the app once more.
+- **Each restart empties the app's database** (an emptyDir), so the module preflight
+  onboards the cluster again: resource scan → K8s connector run → graph build. The
+  results JSON is the only record that survives.
+- **Per case:** inject → settle (`settle_s`, 60 s for L2) → alert → the alert must open a
+  NEW issue, else the attempt is invalid (retried once) → wait for the RCA (≤ 960 s) →
+  score the stored location → refresh the graph with a manual connector run and measure
+  graph recall → resolve the issue (resolved, not dismissed: a dismissal would teach the
+  detect agent the fault was a false positive) → restore. An invalid run is recorded,
+  excluded from the rates, and fails its test.
+- **Metrics** (`location_eval.py`, pure): AC@1, AC@3 and MRR over the rank of the best
+  root-cause candidate, and graph recall — a root cause within 2 hops of the issue
+  anchor, rule relations only, both directions. Results land in
+  `results/location-<utc>.json` (gitignored) after every case; the tables go into
+  `docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`.
+- **Budget:** about 1¾ h per batch (13 RCAs), about 3½ h for both. Cleanup also restores
+  the L2 faults, CoreDNS and the deleted Service.
 
 ## Safety
 - App is ClusterIP-only; the sole ingress is the port-forward tunnel.

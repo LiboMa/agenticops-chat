@@ -208,13 +208,13 @@ if [ ! -f /usr/local/bin/uvx ] || ! /usr/local/bin/uvx --version &>/dev/null; th
   sudo -u agenticops bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' 2>/dev/null
   cp /home/agenticops/.local/bin/uvx /usr/local/bin/uvx 2>/dev/null || true
 fi
-# Update systemd unit (workers/timeout may have changed)
-sed -i 's/--workers [0-9]*/--workers 4/' /etc/systemd/system/agenticops.service
+# Update systemd unit: ONE process (MVP-2.7.0 — per-process agent/lock/settings state), keep-alive 30s
+sed -i 's/--workers [0-9]*/--workers 1/' /etc/systemd/system/agenticops.service
 grep -q -- '--timeout-keep-alive' /etc/systemd/system/agenticops.service || \
-  sed -i 's/--workers 4/--workers 4 --timeout-keep-alive 30/' /etc/systemd/system/agenticops.service
+  sed -i 's/--workers 1/--workers 1 --timeout-keep-alive 30/' /etc/systemd/system/agenticops.service
 systemctl daemon-reload
 systemctl restart agenticops
-# Wait for 4 workers to start (each ~2s)
+# Wait for the service to start
 for i in 1 2 3 4 5 6; do
   sleep 3
   if curl -sf http://localhost:8000/api/health; then

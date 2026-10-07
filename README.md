@@ -43,9 +43,9 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Scan** | 20+ AWS service types (EC2, Lambda, RDS, S3, ECS, EKS, DynamoDB, SQS/SNS, VPC/subnets/SGs, NAT/TGW, Load Balancers) |
 | **Monitor & Detect** | CloudWatch alarms/metrics, Z-score anomaly detection, Prometheus/CloudWatch/Datadog webhook intake |
 | **Signal Gate** | Every issue-creation path (webhook, agent, REST) passes one gate: deterministic dedup (fingerprint-v2, flapping, cooldown, resource+type merge) plus a cheap-LLM gray-zone judge that may only *merge* — never discard. One auditable Signal row per event, promotable by hand |
-| **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, infrastructure graph, and Knowledge Base search; a post-RCA quality gate (evidence check → adversarial critic → confidence threshold) sends weak or refuted conclusions to `needs_review` instead of auto-fix |
-| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Resolve — autonomous for low-risk fixes |
-| **Change Management** *(ITSM)* | Routine changes (tag edits, scaling, config) flow **Main → SRE legitimacy review → approval → Executor** with **no HealthIssue** — the ITSM counterpart to the incident pipeline. One Plan table, two origins (`plan_kind` = fix \| change) + a `change_requests` ticket; a 12-state change state machine; RBAC **shadow mode** (identity-bound approvers + SoD, off by default); two ledgers (`audit_logs` decisions + `command_audits` write commands). `/app/plans`, `/api/changes/*`, CLI `/change` |
+| **Root Cause Analysis** | LLM-powered RCA with CloudTrail correlation, infrastructure graph, and Knowledge Base search; a post-RCA quality gate (evidence check → adversarial critic → confidence threshold) sends weak or refuted conclusions to `needs_review` instead of auto-fix. RCA pulls topology evidence from the published relation graph on demand and names a root-cause location (≤ 3 ranked resources + a causal path), validated fail-closed against inventory and the graph and judged by humans separately (observed only — never drives a fix) |
+| **Auto-Fix Pipeline** | HealthIssue → RCA → SRE → Approve(L0/L1) → Execute → Verify → Resolve — autonomous for low-risk fixes; a run whose post-checks do not prove success waits for a human acceptance |
+| **Change Management** *(ITSM)* | Routine changes (tag edits, scaling, config) flow **Main → SRE legitimacy review → approval → Executor** with **no HealthIssue** — the ITSM counterpart to the incident pipeline. One Plan table, two origins (`plan_kind` = fix \| change) + a `change_requests` ticket; a 12-state change state machine; RBAC **shadow mode** (identity-bound approvers + SoD, off by default); two ledgers (`audit_logs` decisions + `command_audits` write commands). A request may carry its own steps and an external ticket (ITSM systems open one via HMAC-signed `POST /api/changes/intake`); approval is bound to the plan's content hash. `/app/changes`, `/app/audit`, `/api/changes/*`, CLI `/change` |
 | **Cloud Security Review** | Dual-frequency posture engine: hourly deterministic snapshots (IAM, S3, logging, VPC/EC2, EBS) scored against CIS by a **pure, reproducible** scorer; NACL-aware **three-state** ingress reachability (`reachable` / `not_reachable` / `undetermined` — never a false "safe"); 10-minute incremental polls of GuardDuty / Security Hub / CloudTrail; an evidence-grounded LLM advisor that is **fail-closed** (ungrounded or refuted → dropped). `/app/security`, `/api/security/*`, `security-review` report |
 | **Self-Optimizing Memory** | File-based agent memory that learns from each operation; agent self-curation, never-delete archival, prompt-cache-safe injection |
 | **Autonomous Skills** | 16 domain skills the agents can create, improve, and merge — published only through a security-gated, human-auditable workflow. **Wide loading**: import skill packages from a URL, a git repo or a zip/tar.gz — via CLI, API, or the Skills page's «URL / Git repo» importer with a per-package result manifest and an *Imported* badge. Everything lands as a draft; the whole bundle (`.sh`/`.py` included) is scanned before promotion; packaged scripts run only in a restricted **sandbox** (no credentials, no network; off by default) |
@@ -56,7 +56,7 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Messaging** | Unified Settings → Messaging tab: bot apps (Feishu/Slack/DingTalk/WeCom credentials), channels (Slack/Email/SES/SNS/Feishu/DingTalk/WeCom/Webhook), and delivery logs — schema-driven config with masked secrets, via `/api/messaging/*` |
 | **MCP Servers** | Claude-Desktop-compatible MCP integration — manage via Chat/CLI/Web, hot-reload |
 | **Graph Engine** | NetworkX infrastructure graph: SPOF detection, capacity risk, dependency chains, change simulation (agent tools) |
-| **Galaxy** *(Experimental)* | `/galaxy` whole-inventory relationship graph — Canvas starfield of every resource, health-colored with pulsing anomalies. Mechanical edges derived by code (`provenance=rule`); semantic edges proposed by an LLM but **fail-closed verified** (endpoints must exist + evidence grounded in `raw_data`) so hallucinations never enter as fact. Content-hash incremental builds ($0 when unchanged) |
+| **Galaxy** *(Experimental)* | `/galaxy` whole-inventory relationship graph — Canvas starfield of every resource, health-colored with pulsing anomalies. Mechanical edges derived by code (`provenance=rule`); semantic edges proposed by an LLM but **fail-closed verified** (endpoints must exist + evidence grounded in `raw_data`) so hallucinations never enter as fact. Content-hash incremental builds ($0 when unchanged). `/app/galaxy?focus=<resource id>` opens it centred on one resource |
 
 ---
 
@@ -85,9 +85,9 @@ Models are per-agent overrides in `config/settings.yaml` (`agent_*_model_id`), w
 | Agent | Model | Responsibility |
 |-------|-------|----------------|
 | **Main** | Opus 5 | **Router / orchestrator.** The only agent that talks to the user; classifies each request and dispatches to the right specialist(s) as tools, then composes their outputs. Holds no ops tools of its own — pure control flow, so routing stays cheap and auditable. |
-| **Scan** | Sonnet 4.6 | **Inventory discovery.** Enumerates resources across accounts/regions via provider CLIs (20+ AWS service types), normalizes them, and upserts into the metadata DB. Feeds every downstream agent + the graph/Galaxy builders. High-throughput, read-only. |
+| **Scan** | Sonnet 4.6 | **Inventory discovery.** Enumerates resources across accounts/regions via provider CLIs (20+ AWS service types), normalizes them, and upserts into the metadata DB. Feeds every downstream agent + the graph/Galaxy builders. High-throughput, read-only. A complete listing marks vanished rows absent (never deleted); every count shows present rows only. The resource-scan schedule (seeded once at startup, every resource_scan_interval_minutes, default 60) runs this scan on a timer, so a resource gone from a completely listed type and region is marked absent within one interval plus one scan's duration even when nobody starts a scan. A run where any account's credentials failed is recorded as failed and names the account. |
 | **Detect** | Sonnet 4.6 | **Health monitoring & anomaly detection.** Pulls CloudWatch alarms/metrics, runs Z-score anomaly detection, ingests Prometheus/CloudWatch/Datadog webhooks, and opens deduped `HealthIssue`s (SHA-256 fingerprint). Also runs the proactive patrol (SPOF + capacity-risk graph checks). Read-only. |
-| **RCA** | Opus 4.6 | **Root cause analysis.** For an open issue, correlates CloudTrail change events, the infrastructure graph (neighbors + blast radius), Knowledge Base cases, and domain Skills to produce a grounded root cause + confidence. Read-only investigation; writes an `RCAResult`, never touches infra. |
+| **RCA** | Opus 4.6 | **Root cause analysis.** For an open issue, correlates CloudTrail change events, topology evidence from the published relation graph (`get_topology_evidence`: neighbors, direction, ranked candidates), Knowledge Base cases, and domain Skills to produce a grounded root cause + confidence + a validated root-cause location. Read-only investigation; writes an `RCAResult`, never touches infra. |
 | **SRE** | Fable 5.1 | **Fix-plan generation — plans, never acts.** Turns an RCA into a concrete, risk-tiered (L0–L3) remediation plan with exact steps + rollback. Strictly **read-only**: it proposes; only the Executor can act, and only after the approval gate. Enforces one-issue→one-active-plan. |
 | **Executor** | Opus 4.6 | **The only agent that changes infrastructure.** Executes an *approved* fix plan across backends — AWS CLI, SSM (→SSH fallback), `kubectl` — with account-addressed credential resolution (fail-closed, never ambient). Auto-runs L0/L1 after approval; L2/L3 require a human. Drives the 9-state issue lifecycle to `resolved`. |
 | **Reporter** | Sonnet 4.6 | **Reporting & knowledge capture.** Generates daily/weekly/incident/inventory reports (Markdown/HTML/PDF, local or S3) and distills resolved incidents into reusable Knowledge Base SOPs so future RCAs get faster. Read-only over ops data. |
@@ -107,12 +107,13 @@ Alert ─► HealthIssue ─► RCA ─► SRE ─► Auto-Approve (L0/L1) ─�
 - **One issue → one active fix plan**: draft = update-in-place, locked = reject, terminal = allow new
 - **9-state HealthIssue lifecycle**, enforced by a state machine (invalid transitions → 409):
   `open → investigating → acknowledged → root_cause_identified → fix_planned → fix_approved → fix_executing → fix_executed → resolved`
+  — one write path (`transition_issue`, compare-and-set); a failed run or a rejected acceptance sends the issue back to `root_cause_identified` for a new plan
 
 ### Dual Alert Intake
 
 | Pipeline | Flow | LLM Cost |
 |----------|------|----------|
-| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` → HealthIssue → RCA pipeline | None |
+| **Webhook** | Prometheus/CloudWatch/Datadog → `alert_processor` (shared-token / HMAC check when `AIOPS_WEBHOOK_SECRET` is set; parsers fill identity hints + source fault time) → HealthIssue → RCA pipeline | None |
 | **IM Agent** | IM message → Main Agent (verification) → `create_health_issue` → same pipeline | Yes |
 
 A SHA-256 fingerprint dedups issues across both pipelines.
@@ -176,18 +177,19 @@ aiops run report --type daily
 | `aiops issues` / `aiops issue <id>` | List / show health issues |
 | `aiops get\|describe\|create\|update\|delete <entity>` | CRUD over accounts, resources, schedules, channels |
 | `aiops run scan\|detect\|analyze\|report\|schedule\|notify` | Run a pipeline step |
+| `aiops connectors list` / `aiops connectors run <name>` | Pull connectors (K8s discovery): recent runs, run now |
 
-In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, and more — type `/help`.
+In-chat slash commands (30+) cover scan/detect/analyze/fix/approve/execute, `/model`, `/skill`, `/workflow`, `/channel`, `/send_to`, `/tokens`, `/accept` (a human verdict on a run pending acceptance), and more — type `/help`.
 
 ### Web Dashboard
 
-React 18 + TypeScript + Tailwind + TanStack Query, served by FastAPI at `http://localhost:8000`. 15 pages (+ Login): Dashboard, Chat, Issues & Plans, Issue Detail, Resource Detail, Schedules, Schedule Detail, Reports, Report Detail, Agent Metrics, Skills, Skill Detail, **Security** *(posture scores, findings, exposure paths)*, Settings, **Galaxy** *(experimental relationship graph)*.
+React 18 + TypeScript + Tailwind + TanStack Query, served by FastAPI at `http://localhost:8000`. 20 pages (+ Login): Dashboard, Chat, **Issues** *(ops events / security findings / all)*, Issue Detail *(one status line whose single button is the next step, then phase cards diagnose · plan · approve & run · accept, with a local relation graph and «Your verdict»)*, **Changes**, Change Detail *(the same template: request · review · plan · approve & run · accept)*, **Resources**, Resource Detail, Signals, **Audit**, Schedules, Schedule Detail, Reports, Report Detail, Agent Metrics, Skills, Skill Detail, **Security** *(posture scores, findings, exposure paths)*, Settings, **Galaxy** *(experimental relationship graph)*. Issues, Changes, Resources and Audit are sidebar entries; signals open from the issue list (`/app/signals`); the old `/app/plans` redirects to `/app/changes`, and an old `/app/issues/:id?tab=` link opens the matching phase card.
 
 The **Chat** page streams multiple concurrent sessions (background streaming, instant open) — see [v1.1.1 notes](docs/MVP-1.1.1-RELEASE.md).
 
 ### API
 
-220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/settings`, `/api/auth`.
+220+ REST endpoints (FastAPI routers under `web/routers/`); full OpenAPI at `http://localhost:8000/docs`. Key groups: `/api/health-issues`, `/api/fix-plans`, `/api/fix-executions` (+ `/{id}/accept`), `/api/changes` (+ `/api/changes/intake`), `/api/signals`, `/api/chat/sessions` (SSE), `/api/resources`, `/api/schedules`, `/api/skills` (+ `/api/skills/import-source`), `/api/security`, `/api/graph`, `/api/galaxy`, `/api/messaging`, `/api/cost`, `/api/connectors`, `/api/settings`, `/api/auth`.
 
 ---
 
@@ -208,10 +210,14 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 | `AIOPS_SKILLS_IMPORT_ENABLED` | `true` | Allow importing skill packages from URL / git / zip (CLI, API, Skills page) |
 | `AIOPS_SKILLS_SANDBOX_ENABLED` | `false` | Let the executor run a published skill's own scripts in the no-credential, no-network sandbox |
 | `AIOPS_SECURITY_REVIEW_ENABLED` | `true` | Cloud Security Review engine (dual-frequency collection + CIS scoring + reachability) |
-| `AIOPS_CHANGE_MANAGEMENT_ENABLED` | `true` | ITSM change flow: change tools on Main, `/api/changes`, CLI `/change`, the Web `/app/plans` Changes tab |
+| `AIOPS_CHANGE_MANAGEMENT_ENABLED` | `true` | ITSM change flow: change tools on Main, `/api/changes`, CLI `/change`, the Web `/app/changes` pages |
 | `AIOPS_CHANGE_AUTO_APPROVE_STANDARD` | `false` | Let a policy `auto_approve` decision approve a standard change without a human — the yaml rule and this flag must both agree |
 | `AIOPS_RBAC_ENFORCE` | `false` | `false` = shadow mode (denials audited as `authz.denied_shadow`, request allowed); `true` = 403 + SoD |
 | `AIOPS_COMMAND_AUDIT_ENABLED` | `true` | Tool-layer ledger of write-tier command attempts (`command_audits`); read-only commands are not recorded |
+| `AIOPS_K8S_CONNECTOR_ENABLED` | `true` | K8s pull connector (read-only `kubectl get`, account-scoped private kubeconfig) + the `k8s-discovery` schedule (`AIOPS_K8S_DISCOVERY_INTERVAL_MINUTES`, default 10) |
+| `AIOPS_WEBHOOK_SECRET` | *(empty)* | Alert-webhook shared token: `POST /api/webhooks/alert*` then needs it (Bearer / `X-AIOps-Token` / `?token=`) or an `X-AIOps-Signature` HMAC, else 401. Empty = unchecked (startup warning). Never put it in `settings.yaml` |
+| `AIOPS_CHANGE_INTAKE_SECRET` | *(empty)* | HMAC secret for external change intake `POST /api/changes/intake` (`X-AIOps-Signature` over timestamp + body, else 401). Empty = the endpoint is 404. Never put it in `settings.yaml` |
+| `AIOPS_POLICY_GRAPH_IMPACT_ENFORCE` | `false` | Policy blast radius from the published graph: `false` = shadow (recorded on the decision as `shadow_blast_radius`, rules never see it); `true` = it feeds `blast-radius-escalation` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` (SQLite/files) or `cloud` (Postgres/S3) |
 
 ---
@@ -229,6 +235,8 @@ Pick by intent. Every method runs the *same* app; they differ in infra + maturit
 | **`infra/cloud-deploy`** (CloudFormation) | Alt full-stack provision | ⚠️ Older (2026-03); prefer Terraform | RDS or SQLite-on-EFS |
 
 > **Dev vs Production:** `deploy-sg` is a **single-box dev sandbox** (one EC2, broad IAM, SQLite) — do **not** run production on it. Production is the `ec2/ecs/eks` Terraform stacks (RDS + S3, two-layer IAM), which currently need validation before you rely on them.
+
+> **One process:** AgenticOps runs as exactly one process (`uvicorn --workers 1`, one replica). Chat and IM agents, the connector / Galaxy / intake locks and runtime settings live in its memory; every method below is set up that way, and a second process on the same data dir logs an ERROR at startup.
 
 Each method below follows the same shape: **prereqs → deploy → access → rollback**.
 
@@ -281,7 +289,7 @@ terraform apply -auto-approve
 Per-stack details: [`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md).
 
 ### Auth (all AWS deployments)
-On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`.
+On first start an `admin` user is seeded with the password from **`AIOPS_ADMIN_PASSWORD`** — **always set this** before exposing the app (if unset it falls back to a well-known default; never rely on it in any reachable deployment). Login via `POST /api/auth/login`; 24h session tokens; API keys for long-lived access; all `/api/*` protected except `/api/health` and `/api/auth/login`. Alert-webhook intake (`POST /api/webhooks/alert*`) instead takes the shared `AIOPS_WEBHOOK_SECRET` token or an HMAC signature — senders like Alertmanager or SNS cannot log in; unset, intake is unchecked and a startup warning says so. Change intake (`POST /api/changes/intake`) takes only an HMAC signature by `AIOPS_CHANGE_INTAKE_SECRET` and is 404 while that is unset; its requester is `webhook:<system>`, which can never approve or execute.
 
 More: [`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md).
 
@@ -310,7 +318,7 @@ src/agenticops/
 ├── memory/       # Self-optimizing file-based agent memory + Curator
 ├── skills/       # Skill loader, bundle security scan, wide-source import (sources), script sandbox, Curator, promote/rollback
 ├── security/     # Cloud Security Review: collectors, pure CIS scoring, NACL-aware reachability, fail-closed advisor
-├── graph/        # Infrastructure graph engine + SRE algorithms
+├── graph/        # Infrastructure graph engine + SRE algorithms, relation queries, RCA topology evidence
 ├── galaxy/       # Galaxy relationship graph (LLM-hybrid, fail-closed): rules + builder + api
 ├── kb/           # Knowledge Base (vector store: SQLite/pgvector/S3)
 ├── cli/          # CLI entry + chat + init wizard
@@ -318,6 +326,7 @@ src/agenticops/
 ├── chat/         # Message preprocessing, file reader, /send_to, /channel
 ├── notify/  im/  # Multi-channel notifications + IM bots (Feishu/Slack)
 ├── integrations/ # Alert processor, source parsers
+├── connectors/   # Pull connectors (K8s discovery), deterministic ingest
 ├── pipeline/ scheduler/ monitor/ scanner/ scan/   # Pipelines, cron, metrics, scanning
 ├── auth/ audit/  # JWT/API-key auth, audit trail
 ├── models.py     # SQLAlchemy ORM models
@@ -338,7 +347,9 @@ Most recent first. Each links to detailed notes.
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **[2.6.0](docs/MVP-2.6.0-RELEASE.md)** | 2026-09-26 | **Change Management (ITSM)** — routine changes flow Main → SRE legitimacy review → approval → Executor with **no HealthIssue**; one Plan table two origins (`plan_kind` fix \| change) + `change_requests` ticket; 12-state change state machine; **RBAC shadow mode** (identity-bound approvers + SoD); two audit ledgers (`audit_logs` + `command_audits`) + `/api/plans/stats`; `/app/plans` (Fix Plans / Change Plans / Audit) + `/app/changes/:id`; CLI `/change` `/changes`. Backend + frontend implemented; **live E2E pending owner-joint run** |
+| **[2.7.0](docs/MVP-2.7.0-RELEASE.md)** | 2026-10-05 → | **Blue-white workspace + core trust hardening**, in seven owner-accepted stages ([roadmap](docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md)). **S1 accepted 2026-10-05**: a post-check result counts only for the declared check its `check_id` names (a repeated result can no longer pass a run) and the executor gets the untruncated plan; chat sessions belong to their creator (private / workspace; invisible = 404); one process (`--workers 1`) with no blocking call on the event loop. **S2 accepted 2026-10-06**: the blue/white shell — grouped sidebar, new top bar, `/app` home resolution (pinned / resume / Chat), login return, bundled Outfit, revisioned preferences API. **S3 accepted 2026-10-07**: a Plans & changes hub (fix plans finally have a list and a page, `/app/plans/:id`), a top-bar «Needs your attention» that agrees with the issue and change pages, approvals that say whether they also run the plan (and ask for a review acknowledgement), race-safe plan status writes. **S4 accepted 2026-10-07**: Cases — a URL-driven issue queue beside the reading pane (full screen on narrow screens, back restores where you were), one top-bar account scope the lists and «Needs your attention» follow, append-only issue notes, «Ask Agent» (a new chat with the issue as its context), a Resources table whose health never claims "healthy". **S5 implemented, awaiting acceptance**: Chat — a chat linked to an issue or change, or bound to an account, runs every turn bound to that account (tools refuse any other, on every path) and starts with the issue's newest notes as information; `client_message_id` makes a send safe to repeat (replayed or 409, never a second run); a cut-off reply is stored as interrupted; stream errors say their kind; drafts survive navigation and refresh; the blue/white Chat page. S6–S7 not started |
+| **[2.6.1](docs/MVP-2.6.1-RELEASE.md)** | 2026-09-29 | **Graph facts + RCA location loop** — open issues anchored to the published relation graph (`resource_ref`, fail-closed, cross-account safe); K8s **pull connector** (read-only, account-scoped kubeconfig); RCA names ≤ 3 ranked root-cause resources + a causal path whose edges are each checked fail-closed against the graph, judged by a human (observe-only); one issue-status write path with CAS + back-edges; content-hash-bound approvals, execution **acceptance**, HMAC change **intake**; Web IA split into **Issues / Changes / Audit** with a local relation graph and Galaxy `?focus=`. Implemented; final gates green (pytest 6350 passed at `fe7e9fd`, vitest 279 passed, `tsc` + build clean); **live E2E on the chaos-lab cluster in progress** — location eval AC@1 0.00 → 0.77, graph recall 13/13 ([eval report](docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md)), intake and webhook token verified live ([E2E report](docs/MVP-2.6.1-E2E-REPORT.md)); owner walkthrough pending |
+| **[2.6.0](docs/MVP-2.6.0-RELEASE.md)** | 2026-09-26 | **Change Management (ITSM)** — routine changes flow Main → SRE legitimacy review → approval → Executor with **no HealthIssue**; one Plan table two origins (`plan_kind` fix \| change) + `change_requests` ticket; 12-state change state machine; **RBAC shadow mode** (identity-bound approvers + SoD); two audit ledgers (`audit_logs` + `command_audits`) + `/api/plans/stats`; `/app/plans` (Fix Plans / Change Plans / Audit) + `/app/changes/:id`; CLI `/change` `/changes`. Live E2E run on dev 2026-09-26 ([report](docs/MVP-2.6.0-E2E-REPORT.md)): all seven steps pass; the 3 UI/API bugs it found are fixed (dev redeploy + re-verify pending) |
 | **[2.5.0](docs/MVP-2.5.0-RELEASE.md)** | 2026-08-31 | **Cloud Security Review** — dual-frequency posture engine (hourly deterministic snapshots + 10-min GuardDuty / Security Hub / CloudTrail polls), **pure reproducible CIS scoring**, NACL-aware **three-state reachability**, evidence-grounded **fail-closed advisor**, `/app/security` — validated read-only on two real accounts ([E2E](docs/MVP-2.5.0-E2E-REPORT.md)) · *2026-09-08 addendum:* **skill wide loading** (URL / git / zip → draft, whole-bundle security scan), **script sandbox** (no credentials, no network, off by default), Skills-page **importer** with provenance, `web/routers/` extraction |
 | **[2.2.1](docs/MVP-2.2.1-RELEASE.md)** | 2026-07-27 | **Effort / thinking policy** — backend auto-escalation of the extended-thinking budget for critical-severity and re-run RCAs; per-session chat effort override (`off … max`, NULL = Auto) |
 | **[2.2.0](docs/MVP-2.2.0-RELEASE.md)** | 2026-07-21 | **Signal Gate** noise reduction — one auditable gate for every issue-creation path (fingerprint-v2, flapping, cooldown, merge; the LLM gray-zone judge is merge-only) · **RCA quality quintet** (evidence check → critic → confidence gate → incident memory → watchdog) · validated live in the [L1](docs/MVP-2.2.0-CHAOS-E2E-REPORT.md) / [L2](docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md) chaos reports |

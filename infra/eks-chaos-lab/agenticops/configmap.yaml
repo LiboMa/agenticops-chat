@@ -11,6 +11,6 @@ data:
   AIOPS_EXECUTOR_HITL_ENABLED: "false"
   AIOPS_NOTIFICATIONS_ENABLED: "false"
   AIOPS_API_AUTH_ENABLED: "true"
-  AIOPS_EKS_CLUSTER_NAME: "agenticops-chaos-lab"
   AIOPS_DATABASE_URL: "sqlite:////data/agenticops.db"
-  KUBECONFIG: "/var/run/agenticops/kubeconfig"
+  # No KUBECONFIG here: kubectl never uses an ambient kubeconfig (MVP-2.6.1). The in-cluster file the
+  # init container writes is registered on the chaos-lab account as credentials.kubeconfigs by e2e/conftest.py.

@@ -60,6 +60,7 @@ def assume_role(
                         id=acct.id, name=acct.name, provider=acct.provider,
                         credentials=dict(creds), regions=list(acct.regions or []),
                         labels=dict(acct.labels or {}),
+                        credential_source_type=getattr(acct, "credential_source_type", "") or "",
                     )
                     break
     except Exception as e:

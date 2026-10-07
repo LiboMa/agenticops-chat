@@ -193,6 +193,70 @@ class TestEvidenceGate:
         assert rca.evidence_verified is False
         assert rca.confidence == pytest.approx(0.54)  # 0.9 * 0.6
 
+    def test_save_rca_result_input_does_not_ground_itself(self, db_session, rca_settings):
+        """The evidence list rides in save_rca_result's own input; it must not count as a tool trace."""
+        issue_id = _seed_issue(db_session)
+        evidence = [{"type": "graph", "ref": "graph:edge:9>8:routes_to", "summary": "made up"}]
+        _save_rca(db_session, issue_id, confidence=0.9, evidence=evidence)
+        messages = _messages_with_tool_trace("No events found in the window.") + [
+            {"role": "assistant", "content": [
+                {"toolUse": {"toolUseId": "t2", "name": "save_rca_result",
+                             "input": {"health_issue_id": issue_id, "evidence": json.dumps(evidence)}}},
+            ]},
+        ]
+        _run_pipeline(issue_id, messages)
+        rca = db_session.query(RCAResult).one()
+        db_session.refresh(rca)
+        assert rca.evidence_verified is False
+
+    def test_save_rca_result_reply_does_not_ground_itself(self, db_session, rca_settings):
+        """The reply echoes the root cause back; it must not count as a tool trace either."""
+        from agenticops.tools import metadata_tools
+
+        issue_id = _seed_issue(db_session)
+        args = dict(health_issue_id=issue_id, root_cause="DeleteBucketPolicy by admin-x removed the policy",
+                    confidence=0.9, contributing_factors="[]", recommendations="[]",
+                    evidence=json.dumps([{"type": "cloudtrail", "ref": "DeleteBucketPolicy by admin-x",
+                                          "summary": "made up"}]))
+        reply = metadata_tools.save_rca_result(**args)
+        assert "DeleteBucketPolicy by admin-x" in reply
+        messages = _messages_with_tool_trace("No events found in the window.") + [
+            {"role": "assistant", "content": [
+                {"toolUse": {"toolUseId": "t2", "name": "save_rca_result", "input": args}}]},
+            {"role": "user", "content": [
+                {"toolResult": {"toolUseId": "t2", "content": [{"text": reply}]}}]},
+        ]
+        _run_pipeline(issue_id, messages)
+        rca = db_session.query(RCAResult).one()
+        db_session.refresh(rca)
+        assert rca.evidence_verified is False
+
+    @pytest.mark.parametrize("ref,grounded", [
+        ("graph:node:3", False),               # a prefix of graph:node:31
+        ("graph:edge:3>4:routes_to", False),   # each token is in the trace, but from other edges
+        ("graph:edge:3>5:contains", True),
+    ])
+    def test_a_graph_ref_grounds_only_on_its_exact_id(self, ref, grounded):
+        from agenticops.services import rca_quality
+
+        pack = json.dumps({"neighbors": [{"evidence_ref": "graph:node:31"}],
+                           "edges": [{"evidence_ref": "graph:edge:3>5:contains"},
+                                     {"evidence_ref": "graph:edge:7>4:routes_to"}]})
+        trace = rca_quality._tool_trace_text(_messages_with_tool_trace(pack))
+        assert rca_quality._ref_in_trace(ref, trace) is grounded
+
+    def test_a_malformed_tool_use_block_is_skipped_not_fatal(self, db_session, rca_settings):
+        issue_id = _seed_issue(db_session)
+        _save_rca(db_session, issue_id, confidence=0.9,
+                  evidence=[{"type": "cloudtrail", "ref": "DeleteBucket by admin-x", "summary": "fabricated"}])
+        messages = [{"role": "assistant", "content": [{"toolUse": "garbage"}]}] + \
+            _messages_with_tool_trace("No events found in the window.")
+        _run_pipeline(issue_id, messages)
+        rca = db_session.query(RCAResult).one()
+        db_session.refresh(rca)
+        assert rca.evidence_verified is False
+        assert rca.confidence == pytest.approx(0.54)
+
 
 class TestConfidenceGateAndCritic:
     def test_low_confidence_no_autofix(self, db_session, rca_settings):

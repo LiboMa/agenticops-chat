@@ -163,8 +163,13 @@ def run_post_rca_pipeline(issue_id: int, messages: list, started_at: datetime) -
 
 
 def _tool_trace_text(messages: list) -> str:
-    """Flatten every toolUse input and toolResult content in the run to text."""
+    """Flatten every toolUse input and toolResult content in the run to text.
+
+    save_rca_result's own input and its reply are left out: the input carries the evidence list being
+    checked and the reply echoes the agent's own text, so either would ground the refs it cites
+    (MVP-2.6.1). A malformed block is skipped, never fatal to the gate."""
     chunks: list[str] = []
+    save_ids: set = set()
     for message in messages or []:
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, list):
@@ -172,13 +177,18 @@ def _tool_trace_text(messages: list) -> str:
         for block in content:
             if not isinstance(block, dict):
                 continue
-            if "toolUse" in block:
-                try:
-                    chunks.append(json.dumps(block["toolUse"].get("input", {}), default=str))
-                except Exception:
-                    pass
-            if "toolResult" in block:
-                for part in block["toolResult"].get("content", []) or []:
+            use = block.get("toolUse")
+            if isinstance(use, dict):
+                if use.get("name") == "save_rca_result":
+                    save_ids.add(str(use.get("toolUseId")))
+                else:
+                    try:
+                        chunks.append(json.dumps(use.get("input", {}), default=str))
+                    except Exception:
+                        pass
+            result = block.get("toolResult")
+            if isinstance(result, dict) and str(result.get("toolUseId")) not in save_ids:
+                for part in result.get("content", []) or []:
                     if isinstance(part, dict):
                         text = part.get("text") or ""
                         if text:
@@ -196,6 +206,10 @@ def _ref_in_trace(ref: str, trace_text: str) -> bool:
     needle = ref.strip().lower()
     if not needle:
         return True
+    if needle.startswith("graph:"):
+        # A graph ref is a machine id that get_topology_evidence emits as a JSON string: only the exact,
+        # quoted id counts (graph:node:3 must not ride on graph:node:31).
+        return f'"{needle}"' in trace_text
     if needle in trace_text:
         return True
     # Token fallback: every alphanumeric token ≥4 chars must appear —

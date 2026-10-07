@@ -19,9 +19,12 @@ def test_log_agent_call_accepts_actor_params():
 
 
 def test_web_sse_passes_user_actor():
+    """The chat turn logs the request's actor (user:<email> when signed in, web:anonymous otherwise) — its kind
+    and key, never request.state.user (a User object; MVP-2.7.0). Behaviour: test_chat_session_access."""
     import agenticops.web.app as appmod
     src = inspect.getsource(appmod)
-    assert 'actor_type="user"' in src
+    assert "actor_type=actor.kind" in src and "actor_id=actor.key" in src
+    assert 'actor_id=getattr(getattr(request, "state", None), "user", None)' not in src
 
 
 def test_cli_passes_cli_actor():

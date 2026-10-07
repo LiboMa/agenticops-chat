@@ -382,3 +382,18 @@ class TestRequesterOrAdmin:
         assert policy.decide(im, "change.cancel", self._cr())[0] is False   # denied at the matrix (no write)
         allowed, _, rule, _ = policy.decide(im, "change.clarify", self._cr())
         assert allowed is False and rule == "requester-or-admin"            # [read] reaches the rule, no bypass
+
+
+class TestIssueNotePermission:
+    """MVP-2.7.0 S4: writing a note on an issue needs the write flag, in the shipped file and the built-in defaults."""
+
+    def test_issue_note_is_a_write_permission(self):
+        reader, writer = Actor("user", "r", 1, ("read",)), Actor("user", "w", 2, ("read", "write"))
+        for policy in (get_rbac_policy(), RbacPolicy.from_dict(DEFAULT_POLICY)):
+            assert policy.decide(reader, "issue.note", None)[0] is False
+            assert policy.decide(writer, "issue.note", None)[0] is True
+
+    def test_the_shipped_file_lists_it(self):
+        from agenticops.config import PROJECT_ROOT
+        data = yaml.safe_load((PROJECT_ROOT / "config" / "rbac.yaml").read_text(encoding="utf-8"))
+        assert data["permissions"]["issue.note"] == ["write"] and validate_rbac(data) == []

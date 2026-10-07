@@ -23,24 +23,38 @@ describe("fixPlanMutationKeys (I2)", () => {
     expect(keys).toContainEqual(["fix-plan", 7]);
     expect(keys).toContainEqual(["plan-stats"]);
   });
+  it("also invalidates the issue, the issues list and the issue's runs, which approve and execute move", () => {
+    const keys = fixPlanMutationKeys(1);
+    for (const key of [["fix-plans"], ["fix-plan", 1], ["plan-stats"], ["anomaly"], ["anomalies"], ["issue-executions"]]) {
+      expect(keys).toContainEqual(key);
+    }
+  });
+  it("also invalidates the issue timeline: an approval's move and its auto-run's start are read there (C1(c))", () => {
+    expect(fixPlanMutationKeys(1)).toContainEqual(["issue-timeline"]);
+  });
 });
 
 // M1 — the change-action args are a discriminated union: each action carries the body the backend expects.
 describe("ChangeActionArgs is a discriminated union (M1)", () => {
   it("rejects an approve with no body at compile time", () => {
-    // @ts-expect-error M1: approve requires { reason }
+    // @ts-expect-error M1: approve requires { reason, content_hash }
     const noBody: ChangeActionArgs = { id: 1, action: "approve" };
     expect(noBody).toBeDefined();
   });
   it("rejects an approve carrying the wrong body at compile time", () => {
-    // @ts-expect-error M1: approve's body is { reason }, not { message }
+    // @ts-expect-error M1: approve's body is { reason, content_hash }, not { message }
     const wrongBody: ChangeActionArgs = { id: 1, action: "approve", body: { message: "x" } };
     expect(wrongBody).toBeDefined();
   });
+  it("rejects an approve that does not name the plan content at compile time", () => {
+    // @ts-expect-error MVP-2.6.1: approve binds to the plan content it was shown
+    const noHash: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok" } };
+    expect(noHash).toBeDefined();
+  });
   it("accepts the body each action expects", () => {
-    const approve: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok" } };
+    const approve: ChangeActionArgs = { id: 1, action: "approve", body: { reason: "ok", content_hash: "ab12" } };
     const clarify: ChangeActionArgs = { id: 1, action: "clarify", body: { message: "why?" } };
-    const resolve: ChangeActionArgs = { id: 1, action: "resolve-review", body: { outcome: "completed" } };
+    const resolve: ChangeActionArgs = { id: 1, action: "resolve-review", body: { outcome: "completed", reason: "verified" } };
     const execute: ChangeActionArgs = { id: 1, action: "execute" };
     expect([approve, clarify, resolve, execute]).toHaveLength(4);
   });

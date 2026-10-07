@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/Badge";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAgentLogs, useAgentTimeline, useAgentLogSummary } from "@/hooks/useAgentLogs";
 import { useCostSummary } from "@/hooks/useCostSummary";
+import { useRcaLocationStats } from "@/hooks/useRcaLocationStats";
+import { ANCHOR_STATUSES, LOCATION_STATUSES, ratePct } from "@/lib/locationStats";
 import type { AgentLogEntry } from "@/api/types";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis,
@@ -38,6 +40,67 @@ function formatTokens(n: number): string {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+/* ── RCA Location (GET /api/rca/location-stats) ─────────────────── */
+
+const LOCATION_DAYS = [7, 30, 90];
+
+function LocationStatsCard() {
+  const { t } = useLocale();
+  const [days, setDays] = useState(30);
+  const q = useRcaLocationStats(days);
+  const s = q.data;
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-foreground">{t("locationStats.title")}</h2>
+        <div className="flex gap-1 bg-secondary rounded-lg p-1">
+          {LOCATION_DAYS.map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+                    className={`px-2 py-1 text-xs rounded ${days === d ? "bg-background shadow text-foreground" : "text-muted-foreground"}`}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardBody>
+        {q.isLoading ? <Spinner />
+          : q.error ? <ErrorBanner message={(q.error as Error).message} onRetry={() => q.refetch()} />
+          : s && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-lg bg-secondary">
+                  <div className="text-xs text-muted-foreground">{t("locationStats.top1")}</div>
+                  <div className="text-xl font-bold text-foreground">{ratePct(s.top1)}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary">
+                  <div className="text-xs text-muted-foreground">{t("locationStats.judged")}</div>
+                  <div className="text-xl font-bold text-foreground">{s.judged}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary">
+                  <div className="text-xs text-muted-foreground">{t("locationStats.anchoringRate")}</div>
+                  <div className="text-xl font-bold text-foreground">{ratePct(s.anchoring_rate)}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {t("locationStats.anchoringOf").replace("{n}", String(s.issues_with_resource_id))}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("locationStats.byLocation")}:{" "}
+                {LOCATION_STATUSES.map((k) => `${t(`location.status.${k}`)} ${s.location_status_counts[k] ?? 0}`).join(" · ")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("locationStats.byAnchor")}:{" "}
+                {ANCHOR_STATUSES.map((k) => `${t(`anchor.${k}`)} ${s.anchor_status_counts[k] ?? 0}`).join(" · ")}
+              </p>
+              <p className="text-[11px] text-muted-foreground">{t("locationStats.hint")}</p>
+            </div>
+          )}
+      </CardBody>
+    </Card>
+  );
 }
 
 /* ── Token Summary Section ──────────────────────────────────────── */
@@ -545,6 +608,7 @@ export default function AgentMetrics() {
 
       <div className="space-y-6">
         <CostDashboard />
+        <LocationStatsCard />
         <TokenSummary hours={hours} onHoursChange={setHours} />
         <ModelSummary hours={hours} />
         <AgentCallLog onSelectTrace={setSelectedTrace} />

@@ -308,7 +308,8 @@ class TestDependencyCheck:
     def test_check_dependencies_returns_dict(self):
         from agenticops.cli.init_helpers import check_dependencies
 
-        results = check_dependencies(verbose=False)
+        with patch("agenticops.cli.init_helpers._check_aws_credentials", return_value=(False, "not in tests")):
+            results = check_dependencies(verbose=False)
         assert isinstance(results, dict)
         assert "python" in results
         assert "pip_packages" in results

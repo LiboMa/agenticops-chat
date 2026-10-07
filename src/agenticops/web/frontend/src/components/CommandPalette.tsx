@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSearch } from "@/hooks/useSearch";
+import { useLocale } from "@/i18n/LocaleContext";
 import type { SearchResultItem } from "@/api/types";
 
 interface CommandPaletteProps {
@@ -8,13 +9,14 @@ interface CommandPaletteProps {
   onClose: () => void;
 }
 
+// label = a locale key (palette.group.*)
 const ENTITY_STYLES: Record<string, { label: string; badge: string }> = {
-  issue: { label: "Issues", badge: "text-red-700 bg-red-100" },
-  fix_plan: { label: "Plans", badge: "text-blue-700 bg-blue-100" },
-  report: { label: "Reports", badge: "text-emerald-700 bg-emerald-100" },
-  resource: { label: "Resources", badge: "text-cyan-700 bg-cyan-100" },
-  change_plan: { label: "Change Plans", badge: "text-violet-700 bg-violet-100" },
-  change_request: { label: "Change Requests", badge: "text-violet-700 bg-violet-100" },
+  issue: { label: "palette.group.issue", badge: "text-red-700 bg-red-100" },
+  fix_plan: { label: "palette.group.fix_plan", badge: "text-blue-700 bg-blue-100" },
+  report: { label: "palette.group.report", badge: "text-emerald-700 bg-emerald-100" },
+  resource: { label: "palette.group.resource", badge: "text-cyan-700 bg-cyan-100" },
+  change_plan: { label: "palette.group.change_plan", badge: "text-violet-700 bg-violet-100" },
+  change_request: { label: "palette.group.change_request", badge: "text-violet-700 bg-violet-100" },
 };
 
 function entityRoute(item: SearchResultItem): string {
@@ -22,7 +24,7 @@ function entityRoute(item: SearchResultItem): string {
     case "issue":
       return `/app/issues/${item.id}`;
     case "fix_plan":
-      return `/app/issues/${item.parent_id ?? item.id}`;
+      return `/app/plans/${item.id}`;
     case "report":
       return `/app/reports/${item.id}`;
     case "resource":
@@ -30,7 +32,7 @@ function entityRoute(item: SearchResultItem): string {
     case "change_request":
       return `/app/changes/${item.id}`;
     case "change_plan":
-      return item.parent_id != null ? `/app/changes/${item.parent_id}` : "/app/plans?tab=changes";
+      return item.parent_id != null ? `/app/changes/${item.parent_id}` : "/app/changes";
   }
 }
 
@@ -39,6 +41,7 @@ function badgeText(item: SearchResultItem): string {
 }
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -163,7 +166,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search issues, fix plans, reports, resources..."
+              placeholder={t("palette.placeholder")}
               className="flex-1 bg-transparent py-3 px-3 text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono border border-border">
@@ -174,7 +177,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           <div className="max-h-[60vh] overflow-y-auto">
             {!debouncedQuery && (
               <div className="py-12 text-center text-sm text-muted-foreground">
-                Type to search...
+                {t("palette.typeToSearch")}
               </div>
             )}
 
@@ -186,17 +189,17 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
             {debouncedQuery && !isLoading && flatResults.length === 0 && (
               <div className="py-12 text-center text-sm text-muted-foreground">
-                No results for &apos;{debouncedQuery}&apos;
+                {t("palette.noResults").replace("{q}", () => debouncedQuery)}
               </div>
             )}
 
             {debouncedQuery && !isLoading && flatResults.length > 0 && (
               <div className="py-1">
-                {renderSection(ENTITY_STYLES.issue.label, issues, "issue")}
-                {renderSection(ENTITY_STYLES.fix_plan.label, fixPlans, "fix_plan")}
-                {renderSection(ENTITY_STYLES.change_request.label, changeRequests, "change_request")}
-                {renderSection(ENTITY_STYLES.report.label, reports, "report")}
-                {renderSection(ENTITY_STYLES.resource.label, resources, "resource")}
+                {renderSection(t(ENTITY_STYLES.issue.label), issues, "issue")}
+                {renderSection(t(ENTITY_STYLES.fix_plan.label), fixPlans, "fix_plan")}
+                {renderSection(t(ENTITY_STYLES.change_request.label), changeRequests, "change_request")}
+                {renderSection(t(ENTITY_STYLES.report.label), reports, "report")}
+                {renderSection(t(ENTITY_STYLES.resource.label), resources, "resource")}
               </div>
             )}
           </div>

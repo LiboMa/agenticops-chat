@@ -262,10 +262,13 @@ class TestL4Lifecycle:
         plan = seed_data["plan"]
         issue = seed_data["issue"]
 
-        # Approve
+        # Approve — binding the reviewed content, as every approval route does (an unstamped plan never runs)
+        from agenticops.services.plan_content import stamp_approval, stamp_content
         plan.status = "approved"
         plan.approved_by = "test"
         plan.approved_at = utc_now()
+        stamp_content(session, plan)
+        stamp_approval(session, plan)
         issue.status = "fix_approved"
         session.commit()
 
@@ -286,8 +289,8 @@ class TestL4Lifecycle:
             ]),
             pre_check_results=json.dumps([{"check": "Instance running", "status": "pass"}]),
             post_check_results=json.dumps([
-                {"check": "CPU below 80%", "status": "pass"},
-                {"check": "Response time OK", "status": "pass"},
+                {"check_id": "pc-1", "check": "CPU below 80%", "status": "pass"},
+                {"check_id": "pc-2", "check": "Response time OK", "status": "pass"},
             ]),
             duration_ms=180000,
         )
@@ -306,8 +309,9 @@ class TestL4Lifecycle:
         session.refresh(plan)
         assert plan.status == "executed"
 
-    def test_execution_failure_keeps_retry(self, seed_data):
-        """Test that failed execution keeps issue in fix_approved for retry."""
+    def test_execution_failure_sends_the_issue_back_for_a_new_plan(self, seed_data):
+        """A failed run fails verification and sends the issue back to root_cause_identified, where a new fix
+        plan can be made; the executor's mark_fix_failed afterwards is a no-op (MVP-2.6.1)."""
         session = seed_data["session"]
         plan = seed_data["plan"]
         issue = seed_data["issue"]
@@ -334,11 +338,19 @@ class TestL4Lifecycle:
         assert "failed" in result.lower()
 
         session.refresh(issue)
-        # Issue should NOT be auto-resolved on failure
-        assert issue.status == "fix_approved"
+        # Issue should NOT be auto-resolved on failure: verification failed sends it back for a new plan
+        assert issue.status == "root_cause_identified"
 
         session.refresh(plan)
         assert plan.status == "failed"
+
+        from agenticops.tools.metadata_tools import mark_fix_failed
+
+        execution = session.query(FixExecution).filter_by(fix_plan_id=plan.id).one()
+        result = mark_fix_failed(issue.id, execution.id, reason="instance not found")
+        assert "back at 'root_cause_identified'" in result
+        session.refresh(issue)
+        assert issue.status == "root_cause_identified"
 
 
 class TestRAGPipeline:

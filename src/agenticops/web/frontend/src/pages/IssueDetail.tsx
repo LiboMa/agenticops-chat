@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAnomaly } from "@/hooks/useAnomaly";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
-import { useRcaFeedback } from "@/hooks/useSignals";
 import {
   useFixPlans,
   useApproveFixPlan,
@@ -12,45 +12,62 @@ import {
 import { useUpdateIssueStatus } from "@/hooks/useIssueActions";
 import { useIssueExecutions } from "@/hooks/useIssueExecutions";
 import { useIssueTimeline } from "@/hooks/useIssueTimeline";
-import { useCancelExecution } from "@/hooks/useFixExecutions";
+import { useAcceptExecution, useCancelExecution } from "@/hooks/useFixExecutions";
+import { useSettings } from "@/hooks/useSettings";
+import { usePhaseCards } from "@/hooks/usePhaseCards";
+import { useRecheckAt } from "@/hooks/useRecheckAt";
+import { useResource } from "@/hooks/useResourceDetail";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ReasonDialog } from "@/components/plans/ReasonDialog";
+import { approvalCopy, findAction, runHintKey } from "@/lib/approval";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
-import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
-import { IssueStatusStepper } from "@/components/ui/IssueStatusStepper";
-import { IssueActionBar } from "@/components/ui/IssueActionBar";
-import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { FixPlanStatusBadge } from "@/components/ui/FixPlanStatusBadge";
-import { PipelineStepper } from "@/components/ui/PipelineStepper";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { PipelineTimeline } from "@/components/plans/PipelineTimeline";
-import { RunbookStep } from "@/components/plans/RunbookStep";
-import { CheckItem } from "@/components/plans/CheckItem";
-import { RollbackPlan } from "@/components/plans/RollbackPlan";
-import { ExecutionsTable } from "@/components/plans/ExecutionsTable";
-import { formatFullDate, formatShortDate } from "@/lib/formatDate";
+import { PlanView } from "@/components/plans/PlanView";
+import { StatusLine, type StatusLineAction } from "@/components/workitem/StatusLine";
+import { PhaseCard } from "@/components/workitem/PhaseCard";
+import { FactsRail } from "@/components/workitem/FactsRail";
+import { ActivityList } from "@/components/workitem/ActivityList";
+import { NoteBox } from "@/components/issue/NoteBox";
+import { contextRefQuery } from "@/lib/contextRef";
+import { isSecurityIssue } from "@/lib/issueScope";
+import { DiagnoseBody, diagnoseSummary } from "@/components/issue/DiagnoseCard";
+import { RunBody } from "@/components/issue/RunCard";
+import { AcceptBody } from "@/components/issue/AcceptCard";
+import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { planLabel, shortHash } from "@/lib/plans";
+import { fillPlaceholders } from "@/lib/placeholders";
+import {
+  anchorBadge, approvalBlockedReason, canApprovePlan, executionStatusLabel, factRows, issueFacts, isBlank,
+} from "@/lib/issueDetail";
+import { issueDetailModel, newestFirst, type Reason } from "@/lib/issueDetailModel";
+import { ISSUE_PHASES, type IssuePhaseId, type IssuePrimary } from "@/lib/issuePhases";
+import { ISSUE_HASHES, legacyIssueTabHash } from "@/lib/workitemRoutes";
+import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
-import type { IssueStatus, MergedAlert, FixPlan } from "@/api/types";
-
-/* ================================================================== */
-/*  Tab type                                                           */
-/* ================================================================== */
-
-type Tab = "issue" | "fixPlan" | "timeline";
+import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
 
 /* ================================================================== */
 /*  Main component                                                     */
 /* ================================================================== */
 
-export default function IssueDetail() {
+/** `embedded`: the Cases split view's reading pane (one column, no way back — the queue is beside it). `back`: how
+ *  a full-screen case returns to the queue (history back, or a link to the list under the same query). */
+export default function IssueDetail({ embedded = false, back }: {
+  embedded?: boolean; back?: { onBack?: () => void; to?: string };
+} = {}) {
   const { id } = useParams<{ id: string }>();
   const issueId = Number(id);
   const { t } = useLocale();
+  const { isAuthenticated } = useAuth();
+  const { confirm, dialog } = useConfirm();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   /* -- Data hooks -------------------------------------------------- */
   const anomaly = useAnomaly(issueId);
@@ -58,28 +75,95 @@ export default function IssueDetail() {
   const fixPlans = useFixPlans({ health_issue_id: issueId });
   const executions = useIssueExecutions(issueId);
   const timeline = useIssueTimeline(issueId);
+  const settings = useSettings();
+  // The anchored resource, so the facts name it rather than the alarm's raw resource_id
+  const anchorRes = useResource(anomaly.data?.resource_ref ?? 0);
   const updateStatusMut = useUpdateIssueStatus();
   const cancelExecMut = useCancelExecution();
   const approveMut = useApproveFixPlan();
   const rejectMut = useRejectFixPlan();
   const executeMut = useExecuteFixPlan();
 
+  // The issue poll can land on fix_executed after the runs poll has stopped; the banner needs the verdict the
+  // backend wrote to the run in the same transaction, so a status move refetches the runs (and the plan, whose
+  // badge moves with them, and the timeline, where an approval's auto-run shows before it has a row). Keyed by
+  // issue id: following a link to another issue reuses this page and is not a move.
+  const qc = useQueryClient();
+  const issueStatus = anomaly.data?.status;
+  const lastStatus = useRef({ id: issueId, status: issueStatus });
+  useEffect(() => {
+    const prev = lastStatus.current;
+    if (prev.id === issueId && prev.status !== undefined && issueStatus !== undefined && prev.status !== issueStatus) {
+      qc.invalidateQueries({ queryKey: ["issue-executions", issueId] });
+      qc.invalidateQueries({ queryKey: ["fix-plans"] });
+      qc.invalidateQueries({ queryKey: ["issue-timeline", issueId] });
+    }
+    lastStatus.current = { id: issueId, status: issueStatus };
+  }, [issueStatus, issueId, qc]);
+
+  // Inputs not loaded stay undefined — still loading, or the fetch failed, never "none": the RCA → list mode (no
+  // flash of "rerun RCA"; null is a stored "no RCA"), the threshold → no gate yet, the runs and the timeline (where
+  // an approval's auto-run shows before it has a row) → not known. The status line says which instead of inventing
+  // a state. A failed refetch keeps the data already loaded.
+  const model = anomaly.data ? issueDetailModel({
+    issue: anomaly.data,
+    rca: rca.data,
+    rcaFailed: !!rca.error,
+    threshold: settings.data?.rca_min_confidence_for_autofix,
+    plans: fixPlans.data,
+    plansFailed: !!fixPlans.error,
+    executions: executions.data,
+    runsFailed: !!executions.error,
+    timeline: timeline.data,
+    timelineFetchedAt: timeline.dataUpdatedAt,
+    timelineFailed: !!timeline.error,
+    executorTimeout: settings.data?.executor_total_timeout,
+    autoFixEnabled: settings.data?.auto_fix_enabled,
+    now: Date.now(),
+  }) : null;
+  // "checking whether the run has started" ends with the grace: look again then, on a fresh timeline
+  useRecheckAt(model?.recheckAt ?? null, () => { void timeline.refetch(); });
+
+  /* -- URL: an old ?tab= maps once onto its hash; the hash opens a card -- */
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const tab = q.get("tab");
+    if (tab === null) return;
+    q.delete("tab");
+    const hash = legacyIssueTabHash(tab);
+    const rest = q.toString();
+    navigate({ search: rest ? `?${rest}` : "", hash: hash ? `#${hash}` : location.hash }, { replace: true, state: location.state });
+  }, [location.search, location.hash, navigate]);
+
+  // Every card is controlled: re-seeded whenever the current phase moves (a poll landing on fix_executed opens ④)
+  const cards = usePhaseCards<IssuePhaseId>({
+    ids: ISSUE_PHASES, hashes: ISSUE_HASHES, phases: model?.phase.phases ?? null,
+    seedKey: model ? `${issueId}:${model.phase.current ?? "-"}` : null,
+  });
+  const [showMerged, setShowMerged] = useState(false);
+
   /* -- Local state ------------------------------------------------- */
-  const [tab, setTab] = useState<Tab>("issue");
   const [rcaLoading, setRcaLoading] = useState(false);
   const [fixPlanLoading, setFixPlanLoading] = useState(false);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
+  // the hash the approve dialog shows is the hash it sends, even if a refresh lands under it (final review I6)
+  const [pinnedHash, setPinnedHash] = useState("");
+  const [claimedName, setClaimedName] = useState("");
+  const [acceptDecision, setAcceptDecision] = useState<"accepted" | "rejected" | null>(null);
 
   /* -- Handlers ---------------------------------------------------- */
   const triggerRca = async () => {
     setRcaLoading(true);
-    setActionMsg(null);
+    setActionInfo(null);
+    setActionError(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/rca`, { method: "POST" });
-      setActionMsg(t("issues.rcaTriggered"));
+      setActionInfo(t("issues.rcaTriggered"));
       setTimeout(() => rca.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`${t("issues.rcaFailed")}: ${e.message}`);
+      setActionError(`${t("issues.rcaFailed")}: ${e.message}`);
     } finally {
       setRcaLoading(false);
     }
@@ -87,20 +171,21 @@ export default function IssueDetail() {
 
   const triggerFixPlan = async () => {
     setFixPlanLoading(true);
-    setActionMsg(null);
+    setActionInfo(null);
+    setActionError(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/generate-fix-plan`, { method: "POST" });
-      setActionMsg(t("issues.fixPlanTriggered"));
+      setActionInfo(t("issues.fixPlanTriggered"));
       setTimeout(() => fixPlans.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`${t("issues.fixPlanFailed")}: ${e.message}`);
+      setActionError(`${t("issues.fixPlanFailed")}: ${e.message}`);
     } finally {
       setFixPlanLoading(false);
     }
   };
 
   const updateStatus = (status: IssueStatus) => {
-    setActionMsg(null);
+    setActionError(null);
     updateStatusMut.mutate(
       { id: issueId, status },
       {
@@ -109,9 +194,14 @@ export default function IssueDetail() {
           executions.refetch();
           timeline.refetch();
         },
-        onError: (err) => setActionMsg(`Status update failed: ${err.message}`),
+        onError: (err) => setActionError(err.message),
       },
     );
+  };
+
+  // a confirmation in the page's language, then the action
+  const ask = async (message: string, confirmText: string, run: () => void, variant?: "destructive") => {
+    if (await confirm(message, { confirmText, cancelText: t("common.cancel"), variant })) run();
   };
 
   /* -- Loading / error states -------------------------------------- */
@@ -121,597 +211,280 @@ export default function IssueDetail() {
       <ErrorBanner
         message={anomaly.error.message}
         onRetry={() => anomaly.refetch()}
+        actionLabel={t("common.retry")}
       />
     );
 
   const a = anomaly.data!;
-  const latestPlan = fixPlans.data?.length ? fixPlans.data[0] : null;
+  const m = model!;
+  const plan = m.plan;
+  // what approving really does (the server's effect): "Approve" or "Approve & run" (MVP-2.7.0 S3)
+  const approveCopy = approvalCopy(findAction(plan?.available_actions, "approve")?.effect);
+  const runs = newestFirst(executions.data);
+  const closed = a.status === "resolved" || a.status === "dismissed";
+  const canApprove = !!plan && canApprovePlan(plan, a.status);
+  const blocked = plan ? approvalBlockedReason(plan, a.status) : null;
+  // the latest run's sentence is the status line's: ③ / ④ do not repeat that exact text (P3)
+  const quietErrorRunId = m.quietRunError ? m.latestRun?.id ?? null : null;
+  const quietReasonRunId = m.quietAcceptReason ? m.latestRun?.id ?? null : null;
+  // a failed fetch the status line depends on is said where the reader is — under it — with a retry; an action
+  // error wins. The cards show what is already loaded; only with nothing loaded do they say the fetch failed.
+  const fetchError = actionError ? null
+    : executions.error ? { message: executions.error.message, retry: () => executions.refetch() }
+    : rca.error && rca.data === undefined ? { message: rca.error.message, retry: () => rca.refetch() }
+    // the timeline's error also when a failed poll left only a copy that cannot tell whether the run started
+    : timeline.error && (timeline.data === undefined || m.phase.sub === "runStateUnavailable")
+      ? { message: timeline.error.message, retry: () => timeline.refetch() }
+    : fixPlans.error && fixPlans.data === undefined ? { message: fixPlans.error.message, retry: () => fixPlans.refetch() }
+    : null;
+  const runsFetchError = executions.data === undefined ? executions.error : null;
+  const rcaFetchError = rca.data === undefined ? rca.error : null;
+
+  const openApproval = (kind: "approve" | "reject") => {
+    (kind === "approve" ? approveMut : rejectMut).reset();
+    setPinnedHash(plan?.content_hash ?? "");
+    setApprovalDialog(kind);
+  };
+  const openAccept = (decision: "accepted" | "rejected") => setAcceptDecision(decision);
+
+  /* -- Status line ------------------------------------------------- */
+  const fill = (r: Reason) => ("text" in r ? r.text : fillPlaceholders(t(r.key), r.params));
+  const reason = closed
+    ? (a.status === "resolved" && a.resolved_at ? t("workitem.reason.resolvedAt").replace("{at}", formatFullDate(a.resolved_at)) : null)
+    : m.reason && fill(m.reason);
+
+  // queue the approved plan again; while its auto-run looks under way (⋯ only) the confirm says so — the server
+  // refuses a second run (409) until that one ends or goes stale
+  const retry = (confirmKey: string) => plan
+    ? () => ask(t(confirmKey), t("workitem.primary.retryExecution"),
+                () => executeMut.mutate(plan.id, { onError: (err) => setActionError(err.message) }))
+    : null;
+  const primaryRun: Record<NonNullable<IssuePrimary>, (() => void) | null> = {
+    reviewRca: () => { cards.openCard("diagnose"); cards.scrollTo("verdict"); },
+    rerunRca: triggerRca,
+    generatePlan: triggerFixPlan,
+    approveAndRun: canApprove ? () => openApproval("approve") : null,
+    retryExecution: retry("workitem.confirm.retry"),
+    acceptResult: m.pendingRun ? () => openAccept("accepted") : null,
+    markResolved: () => ask(t("workitem.confirm.resolve"), t("workitem.primary.markResolved"), () => updateStatus("resolved")),
+  };
+  const primaryBusy: Partial<Record<NonNullable<IssuePrimary>, boolean>> = {
+    rerunRca: rcaLoading, generatePlan: fixPlanLoading, approveAndRun: approveMut.isPending,
+    retryExecution: executeMut.isPending, markResolved: updateStatusMut.isPending,
+  };
+  const p = m.phase.primary;
+  const primary: StatusLineAction | null = p && m.primaryKey && primaryRun[p]
+    ? { key: p, label: p === "approveAndRun" ? t(approveCopy.buttonKey) : t(m.primaryKey), run: primaryRun[p]!, disabled: primaryBusy[p] ?? false }
+    : null;
+
+  const latestRun = m.latestRun;
+  const menu: StatusLineAction[] = m.menu.map((item) => {
+    const label = t(`workitem.menu.${item}`);
+    switch (item) {
+      case "runRca": return { key: item, label, run: triggerRca, disabled: rcaLoading };
+      case "skipReviewGeneratePlan": return { key: item, label, run: triggerFixPlan, disabled: fixPlanLoading };
+      case "markResolved":
+        return { key: item, label, disabled: updateStatusMut.isPending,
+                 run: () => ask(t("workitem.confirm.resolve"), t("workitem.primary.markResolved"), () => updateStatus("resolved")) };
+      case "dismiss":
+        return { key: item, label, variant: "destructive", disabled: updateStatusMut.isPending,
+                 run: () => ask(t("workitem.confirm.dismiss"), label, () => updateStatus("dismissed"), "destructive") };
+      case "reopen":
+        return { key: item, label, disabled: updateStatusMut.isPending,
+                 run: () => ask(t("workitem.confirm.reopen"), label, () => updateStatus("open")) };
+      case "cancelRun":
+        return { key: item, label, variant: "destructive", disabled: cancelExecMut.isPending,
+                 run: () => latestRun && ask(t("workitem.confirm.cancelRun"), label,
+                   () => cancelExecMut.mutate(latestRun.id, { onError: (err) => setActionError(err.message) }), "destructive") };
+      case "askAgent":
+        return { key: item, label, run: () => navigate(`/app/chat${contextRefQuery({ kind: "issue", id: a.id })}`) };
+      case "retryExecution":
+        return { key: item, label, disabled: executeMut.isPending,
+                 run: () => retry(m.phase.sub === "executing" ? "workitem.confirm.retryWhileRunning" : "workitem.confirm.retryWhileChecking")?.() };
+    }
+  });
+
+  /* -- Phase cards ------------------------------------------------- */
+  const state = (id: IssuePhaseId) => m.phase.phases.find((x) => x.id === id)!.state;
+  const runSummary = latestRun && [t("issues.executionN").replace("{n}", String(latestRun.id)),
+    latestRun.verification_status ? t(`verification.${latestRun.verification_status}`) : executionStatusLabel(latestRun.status, t)]
+    .join(" · ");
+  const badge = anchorBadge(a, anchorRes.data?.resource_name);
 
   /* -- Render ------------------------------------------------------ */
   return (
-    <div className="space-y-6">
-      {/* Back link */}
-      <Link
-        to="/app/issues"
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        {t("common.back")}
-      </Link>
-
-      {/* Pipeline stepper (full-width, large) */}
-      <Card>
-        <CardBody>
-          <IssueStatusStepper status={a.status} />
-        </CardBody>
-      </Card>
-
-      {/* Action message banner */}
-      {actionMsg && (
-        <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">
-          {actionMsg}
-        </div>
-      )}
-
-      {/* Issue header */}
-      <Card>
-        <CardBody>
-          <div className="flex items-center gap-3 mb-4 flex-wrap">
-            <span className="font-mono text-sm bg-secondary text-muted-foreground px-2 py-0.5 rounded">
-              I#{a.id}
-            </span>
-            <SeverityBadge severity={a.severity} />
-            <IssueStatusBadge status={a.status} />
-            {a.trace_id && (
-              <button
-                onClick={() => navigator.clipboard.writeText(a.trace_id!)}
-                title="Click to copy trace ID"
-                className="font-mono text-xs bg-secondary text-muted-foreground px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors cursor-pointer"
-              >
-                {a.trace_id}
-              </button>
-            )}
+    <div className={embedded ? "grid gap-4" : "grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]"}>
+      <div className="space-y-4 min-w-0">
+        <StatusLine
+          refLabel={`I#${a.id}`}
+          title={a.title}
+          badges={<SeverityBadge severity={a.severity} />}
+          statusLabel={closed ? t(`issues.status.${a.status}`) : t(m.statusKey)}
+          tone={m.tone}
+          reason={reason}
+          waiting={m.waitingKey && t(m.waitingKey)}
+          primary={primary}
+          menu={menu}
+          error={actionError ?? fetchError?.message ?? null}
+          onDismissError={() => (actionError ? setActionError(null) : fetchError?.retry())}
+          errorActionLabel={actionError ? undefined : t("common.retry")}
+          backTo={embedded ? undefined : back?.to ?? (back?.onBack ? undefined : "/app/issues")}
+          onBack={embedded ? undefined : back?.onBack}
+          backLabel={t("nav.issues")}
+        />
+        {actionInfo && (
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">
+            <span className="flex-1">{actionInfo}</span>
+            <button onClick={() => setActionInfo(null)} aria-label={t("common.close")} title={t("common.close")}
+                    className="shrink-0 leading-none hover:opacity-70">×</button>
           </div>
-          <h1 className="text-2xl font-semibold text-foreground mb-2">{a.title}</h1>
-          {a.resolved_at && (
-            <div className="text-xs text-green-500 mb-2">
-              Resolved {formatFullDate(a.resolved_at)}
+        )}
+
+        {cards.openable.length > 0 && (
+          <div className="flex justify-end">
+            <button onClick={cards.toggleAll} className="text-xs text-primary hover:underline">
+              {t(cards.allOpen ? "workitem.collapseAll" : "workitem.expandAll")}
+            </button>
+          </div>
+        )}
+
+        <PhaseCard id="diagnose" index={1} title={t("workitem.phase.diagnose")} state={state("diagnose")}
+                   summary={diagnoseSummary(rca.data, t)}
+                   open={cards.isOpen("diagnose")} onToggle={(o) => cards.toggleCard("diagnose", o)}>
+          <DiagnoseBody issueId={a.id} rca={rca.data} loading={rca.isLoading} error={rcaFetchError} onRetryFetch={() => rca.refetch()}
+                        threshold={settings.data?.rca_min_confidence_for_autofix} timelineEvents={timeline.data}
+                        closed={closed} onVerdictDone={() => { anomaly.refetch(); rca.refetch(); }} t={t} />
+        </PhaseCard>
+
+        <PhaseCard id="plan" index={2} title={t("workitem.phase.plan")} state={state("plan")}
+                   summary={plan && `${planLabel(plan, t)} · ${plan.title}`} futureHint={t("workitem.future.issue.plan")}
+                   open={cards.isOpen("plan")} onToggle={(o) => cards.toggleCard("plan", o)}>
+          {fixPlans.isLoading ? <Spinner label={t("common.loading")} /> : plan ? (
+            <div className="space-y-4">
+              <PlanView plan={plan} t={t} />
+              {m.otherPlans.length > 0 && (
+                <details className="border-t border-border pt-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                    {t("workitem.otherPlans").replace("{n}", String(m.otherPlans.length))}
+                  </summary>
+                  <ul className="mt-2 space-y-2">
+                    {m.otherPlans.map((op) => (
+                      <li key={op.id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0">
+                          <span className="text-xs text-muted-foreground mr-2">{planLabel(op, t)}</span>
+                          <span className="text-foreground">{op.title}</span>
+                        </span>
+                        <FixPlanStatusBadge status={op.status} />
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("workitem.future.issue.plan")}</p>
           )}
-          <PipelineStepper status={a.status} className="w-40 mb-4" />
-        </CardBody>
-      </Card>
+        </PhaseCard>
 
-      {/* Smart Action Bar */}
-      <IssueActionBar
-        issue={a}
-        rca={rca.data}
-        fixPlans={fixPlans.data}
-        rcaLoading={rcaLoading}
-        fixPlanLoading={fixPlanLoading}
-        statusUpdating={updateStatusMut.isPending}
-        onRunRca={triggerRca}
-        onGenerateFixPlan={triggerFixPlan}
-        onUpdateStatus={updateStatus}
-        onViewFixPlan={() => setTab("fixPlan")}
-      />
+        <PhaseCard id="run" index={3} title={t("workitem.phase.run")} state={state("run")} summary={runSummary}
+                   futureHint={t(runHintKey(settings.data))}
+                   open={cards.isOpen("run")} onToggle={(o) => cards.toggleCard("run", o)}>
+          <RunBody plan={plan} issueStatus={a.status} runs={runs} loading={executions.isLoading}
+                   error={runsFetchError} onRetryFetch={() => executions.refetch()} quietRunId={quietErrorRunId}
+                   autoRunSince={m.autoRun?.startedAt ?? null}
+                   onApprove={() => openApproval("approve")} onReject={() => openApproval("reject")} approveLabel={t(approveCopy.buttonKey)} runHint={t(runHintKey(settings.data))}
+                   approving={approveMut.isPending} rejecting={rejectMut.isPending} t={t} />
+        </PhaseCard>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border">
-        {(
-          [
-            { key: "issue" as Tab, label: t("issues.tab.issue") },
-            { key: "fixPlan" as Tab, label: t("issues.tab.fixPlan") },
-            { key: "timeline" as Tab, label: t("issues.tab.timeline") },
-          ] as const
-        ).map((item) => (
-          <button
-            key={item.key}
-            onClick={() => setTab(item.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === item.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
+        <PhaseCard id="accept" index={4} title={t("workitem.phase.accept")} state={state("accept")}
+                   summary={latestRun?.verification_status ? t(`verification.${latestRun.verification_status}`) : null}
+                   futureHint={t("workitem.future.issue.accept")}
+                   open={cards.isOpen("accept")} onToggle={(o) => cards.toggleCard("accept", o)}>
+          <AcceptBody runs={runs} loading={executions.isLoading} error={runsFetchError} onRetryFetch={() => executions.refetch()}
+                      pendingRun={m.pendingRun} quietRunId={quietReasonRunId}
+                      onAccept={() => openAccept("accepted")} onReject={() => openAccept("rejected")} t={t} />
+        </PhaseCard>
       </div>
 
-      {/* Tab content */}
-      {tab === "issue" && (
-        <IssueTab
-          issue={a}
-          rca={rca}
-          rcaLoading={rcaLoading}
-          onRunRca={triggerRca}
+      {/* -- Right rail: key facts + activity -- */}
+      <aside className="space-y-4 min-w-0">
+        <FactsRail
+          title={t("workitem.facts")}
+          rows={factRows(a, { name: anchorRes.data?.resource_name ?? null, type: anchorRes.data?.resource_type ?? null }, t, rca.data)}
           t={t}
-        />
-      )}
-      {tab === "fixPlan" && (
-        <FixPlanTab
-          fixPlans={fixPlans}
-          executions={executions}
-          fixPlanLoading={fixPlanLoading}
-          onGenerateFixPlan={triggerFixPlan}
-          hasRca={!!rca.data}
-          latestPlan={latestPlan}
-          approveMut={approveMut}
-          rejectMut={rejectMut}
-          executeMut={executeMut}
-          cancelExecMut={cancelExecMut}
-          setActionMsg={setActionMsg}
-          t={t}
-        />
-      )}
-      {tab === "timeline" && (
-        <TimelineTab
-          timeline={timeline}
-          alerts={a.merged_alerts}
-          occurrenceCount={a.occurrence_count}
-          t={t}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ================================================================== */
-/*  Issue Tab                                                          */
-/* ================================================================== */
-
-function IssueTab({
-  issue: a,
-  rca,
-  rcaLoading,
-  onRunRca,
-  t,
-}: {
-  issue: NonNullable<ReturnType<typeof useAnomaly>["data"]>;
-  rca: ReturnType<typeof useAnomalyRca>;
-  rcaLoading: boolean;
-  onRunRca: () => void;
-  t: (key: string) => string;
-}) {
-  return (
-    <div className="space-y-6">
-      {/* Description + metadata */}
-      <Card>
-        <CardBody>
-          <div
-            className="text-muted-foreground mb-6 report-content"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(a.description) }}
-          />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground block">{t("issues.resource")}</span>
-              <span className="font-mono text-foreground">{a.resource_id}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.type")}</span>
-              <span className="text-foreground">{a.resource_type}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.region")}</span>
-              <span className="text-foreground">{a.region}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.detected")}</span>
-              <span className="text-foreground">{formatFullDate(a.detected_at)}</span>
-            </div>
-            {a.account_name && (
-              <div>
-                <span className="text-muted-foreground block">{t("issues.account")}</span>
-                <span className="text-foreground">{a.account_name}</span>
-              </div>
-            )}
-          </div>
-
-          {a.metric_name && (
-            <div className="mt-6 p-4 bg-secondary rounded-lg border border-border/50">
-              <h3 className="font-semibold text-foreground mb-2">{t("issues.metricDetails")}</h3>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">{t("issues.metric")}:</span>{" "}
-                  <span className="text-foreground">{a.metric_name}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">{t("issues.expected")}:</span>{" "}
-                  <span className="text-foreground">{a.expected_value}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">{t("issues.actual")}:</span>{" "}
-                  <span className="text-foreground">{a.actual_value}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* RCA Section */}
-      <RcaSection issueId={a.id} rca={rca} rcaLoading={rcaLoading} onRunRca={onRunRca} t={t} />
-    </div>
-  );
-}
-
-/* ================================================================== */
-/*  RCA Section                                                        */
-/* ================================================================== */
-
-function RcaSection({
-  issueId,
-  rca,
-  rcaLoading,
-  onRunRca,
-  t,
-}: {
-  issueId: number;
-  rca: ReturnType<typeof useAnomalyRca>;
-  rcaLoading: boolean;
-  onRunRca: () => void;
-  t: (key: string) => string;
-}) {
-  const feedback = useRcaFeedback(issueId);
-  if (rca.isLoading) return <Spinner label="Loading RCA..." />;
-
-  if (!rca.data) {
-    return (
-      <Card>
-        <CardBody>
-          <div className="text-center py-8">
-            <h2 className="text-lg font-semibold text-foreground mb-2">
-              {t("issues.noRca")}
-            </h2>
-            <p className="text-muted-foreground mb-4">
-              {t("issues.rcaHint")}
-            </p>
-            <button
-              onClick={onRunRca}
-              disabled={rcaLoading}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {rcaLoading ? t("issues.analyzing") : t("issues.runRca")}
-            </button>
-          </div>
-        </CardBody>
-      </Card>
-    );
-  }
-
-  const r = rca.data;
-  return (
-    <Card>
-      <CardBody>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-            {t("issues.rcaResults")}
-            {r.evidence_verified === true && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" title={t("issues.rcaEvidenceVerifiedHint")}>
-                {t("issues.rcaEvidenceVerified")}
-              </span>
-            )}
-            {r.evidence_verified === false && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" title={t("issues.rcaEvidenceUnverifiedHint")}>
-                {t("issues.rcaEvidenceUnverified")}
-              </span>
-            )}
-            {r.critic_verdict && (
-              <span
-                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  r.critic_verdict === "supported"
-                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                }`}
-                title={r.critic_notes ?? ""}
-              >
-                critic: {r.critic_verdict}
-              </span>
-            )}
-          </h2>
-          {/* Human verdict (ground-truth capture) */}
-          <div className="flex items-center gap-1">
-            {r.human_verdict ? (
-              <span className="text-xs text-muted-foreground">
-                {t("issues.rcaHumanVerdict")}: {r.human_verdict === "correct" ? "👍" : "👎"}
-              </span>
-            ) : (
-              <>
-                <button
-                  onClick={() => feedback.mutate({ verdict: "correct" })}
-                  disabled={feedback.isPending}
-                  title={t("issues.rcaMarkCorrect")}
-                  className="px-2 py-1 text-sm rounded-md bg-secondary hover:bg-accent transition-colors disabled:opacity-50"
-                >
-                  👍
+          extra={
+            <div className="space-y-2 border-t border-border pt-3 text-sm">
+              {badge && badge.kind !== "resource" && (
+                <span className="inline-block text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  {t(`anchor.${badge.kind}`)}
+                  {badge.kind === "ambiguous" && ` (${t("anchor.candidatesN").replace("{n}", String(badge.candidates))})`}
+                </span>
+              )}
+              {(a.merged_alerts ?? []).length > 0 && (
+                <button onClick={() => setShowMerged(!showMerged)} aria-expanded={showMerged}
+                        className="block text-left text-primary hover:underline">
+                  {t("workitem.mergedSignals").replace("{n}", String(a.merged_alerts.length))}
                 </button>
-                <button
-                  onClick={() => feedback.mutate({ verdict: "incorrect" })}
-                  disabled={feedback.isPending}
-                  title={t("issues.rcaMarkIncorrect")}
-                  className="px-2 py-1 text-sm rounded-md bg-secondary hover:bg-accent transition-colors disabled:opacity-50"
-                >
-                  👎
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Confidence bar */}
-        <div className="mb-6">
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-muted-foreground">{t("issues.confidence")}</span>
-            <span className="font-medium text-foreground">
-              {Math.round((r.confidence ?? 0) * 100)}%
-            </span>
-          </div>
-          <div className="w-full bg-secondary rounded-full h-2">
-            <div
-              className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${(r.confidence ?? 0) * 100}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Root Cause */}
-        <div className="mb-6">
-          <h3 className="font-semibold text-foreground mb-2">{t("issues.rootCause")}</h3>
-          <div
-            className="text-foreground report-content"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(r.root_cause) }}
-          />
-        </div>
-
-        {/* Contributing Factors */}
-        {r.contributing_factors.length > 0 && (
-          <div className="mb-6">
-            <h3 className="font-semibold text-foreground mb-2">{t("issues.contributingFactors")}</h3>
-            <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              {r.contributing_factors.map((f, i) => (
-                <li key={i}>{f}</li>
-              ))}
-            </ul>
-          </div>
+              )}
+              <Link to="/app/signals" className="block text-primary hover:underline">{t("workitem.rawSignals")}</Link>
+              {/* a security finding's posture lives on the Security page (the old list row's link, S4 review m3) */}
+              {isSecurityIssue(a.source) && (
+                <Link to="/app/security" className="block text-primary hover:underline">{t("issues.openSecurity")} →</Link>
+              )}
+              <IssueDescription issue={a} t={t} />
+            </div>
+          }
+        />
+        {showMerged && (a.merged_alerts ?? []).length > 0 && (
+          <MergedAlertsSection alerts={a.merged_alerts} occurrenceCount={a.occurrence_count} />
         )}
 
-        {/* Recommendations */}
-        {r.recommendations.length > 0 && (
-          <div>
-            <h3 className="font-semibold text-foreground mb-2">{t("issues.recommendations")}</h3>
-            <ol className="list-decimal list-inside text-muted-foreground space-y-1">
-              {r.recommendations.map((rec, i) => (
-                <li key={i}>{rec}</li>
-              ))}
-            </ol>
-          </div>
-        )}
-
-        <div className="mt-4 text-xs text-muted-foreground">
-          {t("issues.rcaModel")}: {r.llm_model} | {t("issues.rcaAnalyzed")} {formatFullDate(r.created_at)}
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-/* ================================================================== */
-/*  Fix Plan Tab                                                       */
-/* ================================================================== */
-
-function FixPlanTab({
-  fixPlans,
-  executions,
-  fixPlanLoading,
-  onGenerateFixPlan,
-  hasRca,
-  latestPlan,
-  approveMut,
-  rejectMut,
-  executeMut,
-  cancelExecMut,
-  setActionMsg,
-  t,
-}: {
-  fixPlans: ReturnType<typeof useFixPlans>;
-  executions: ReturnType<typeof useIssueExecutions>;
-  fixPlanLoading: boolean;
-  onGenerateFixPlan: () => void;
-  hasRca: boolean;
-  latestPlan: FixPlan | null;
-  approveMut: ReturnType<typeof useApproveFixPlan>;
-  rejectMut: ReturnType<typeof useRejectFixPlan>;
-  executeMut: ReturnType<typeof useExecuteFixPlan>;
-  cancelExecMut: ReturnType<typeof useCancelExecution>;
-  setActionMsg: (v: string | null) => void;
-  t: (key: string) => string;
-}) {
-  const { confirm, dialog } = useConfirm();
-  const [approvalDialog, setApprovalDialog] = useState<"approve" | "reject" | null>(null);
-  const [claimedName, setClaimedName] = useState("");
-  const { isAuthenticated } = useAuth();
-
-  if (fixPlans.isLoading) return <Spinner label="Loading fix plans..." />;
-
-  const plans = fixPlans.data ?? [];
-
-  /* No plans yet */
-  if (plans.length === 0) {
-    return (
-      <Card>
-        <CardBody>
-          <div className="text-center py-8">
-            <h2 className="text-lg font-semibold text-foreground mb-2">
-              {t("issues.noFixPlan")}
-            </h2>
-            <p className="text-muted-foreground mb-4">
-              {hasRca ? t("issues.fixPlanHint") : t("issues.fixPlanHintNoRca")}
-            </p>
-            <button
-              onClick={onGenerateFixPlan}
-              disabled={fixPlanLoading || !hasRca}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-            >
-              {fixPlanLoading ? t("issues.generating") : t("issues.createFixPlan")}
-            </button>
-          </div>
-        </CardBody>
-      </Card>
-    );
-  }
-
-  /* Show the latest (most relevant) plan inline */
-  const fp = latestPlan ?? plans[0];
-  const needsApproval = fp.status === "draft" || fp.status === "pending_approval";
-  const canExecute = fp.status === "approved";
-
-  async function handleExecute() {
-    if (!(await confirm("Execute this fix plan now?", { confirmText: "Execute" }))) return;
-    executeMut.mutate(fp.id, {
-      onSuccess: () => {
-        fixPlans.refetch();
-        executions.refetch();
-      },
-      onError: (err) => setActionMsg(`Execute failed: ${err.message}`),
-    });
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Plan header */}
-      <Card>
-        <CardBody>
-          <div className="flex items-center gap-3 mb-4 flex-wrap">
-            <RiskLevelBadge level={fp.risk_level} />
-            <FixPlanStatusBadge status={fp.status} />
-            <h2 className="text-xl font-semibold text-foreground">{fp.title}</h2>
-          </div>
-          <div
-            className="text-muted-foreground mb-6 report-content"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(fp.summary) }}
-          />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground block">{t("issues.riskLevel")}</span>
-              <span className="font-medium text-foreground">{fp.risk_level}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.impact")}</span>
-              <span className="text-foreground">{fp.estimated_impact || "-"}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">{t("issues.created")}</span>
-              <span className="text-foreground">{formatShortDate(fp.created_at)}</span>
-            </div>
-            {fp.approved_by && (
-              <div>
-                <span className="text-muted-foreground block">{t("issues.approvedBy")}</span>
-                <span className="font-medium text-foreground">{fp.approved_by}</span>
-              </div>
-            )}
-            {fp.approved_at && (
-              <div>
-                <span className="text-muted-foreground block">{t("issues.approvedAt")}</span>
-                <span className="text-foreground">{formatFullDate(fp.approved_at)}</span>
-              </div>
-            )}
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* Steps */}
-      {fp.steps.length > 0 && (
-        <Card>
-          <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.steps")}</h3>
-            <ol className="space-y-4">
-              {fp.steps.map((step, i) => (
-                <RunbookStep key={i} index={i + 1} step={step} />
-              ))}
-            </ol>
-
-            {fp.pre_checks.length > 0 && (
-              <div className="mt-6">
-                <h4 className="font-semibold text-foreground mb-2">{t("issues.preChecks")}</h4>
-                <ul className="space-y-1.5">
-                  {fp.pre_checks.map((c, i) => (
-                    <CheckItem key={i} item={c} />
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {fp.post_checks.length > 0 && (
-              <div className="mt-6">
-                <h4 className="font-semibold text-foreground mb-2">{t("issues.postChecks")}</h4>
-                <ul className="space-y-1.5">
-                  {fp.post_checks.map((c, i) => (
-                    <CheckItem key={i} item={c} />
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {Object.keys(fp.rollback_plan).length > 0 && (
-              <RollbackPlan plan={fp.rollback_plan} />
-            )}
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Approval workflow */}
-      {needsApproval && (
-        <Card>
-          <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.approval")}</h3>
-
-            {(fp.risk_level === "L2" || fp.risk_level === "L3") && (
-              <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-500">
-                <strong>{fp.risk_level} {t("issues.approvalWarning")}</strong>
-              </div>
-            )}
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { approveMut.reset(); setApprovalDialog("approve"); }}
-                disabled={approveMut.isPending}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-              >
-                {t("issues.approve")}
+        <section id="activity" className="scroll-mt-4">
+          <Card>
+            <CardBody className="space-y-3">
+              <button onClick={() => cards.setActivityOpen(!cards.activityOpen)} aria-expanded={cards.activityOpen}
+                      className="flex w-full items-center justify-between text-left">
+                <h3 className="text-sm font-semibold text-foreground">{t("workitem.activity")}</h3>
+                <svg className={`h-4 w-4 text-muted-foreground transition-transform ${cards.activityOpen ? "rotate-90" : ""}`}
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
               </button>
-              <button
-                onClick={() => { rejectMut.reset(); setApprovalDialog("reject"); }}
-                disabled={rejectMut.isPending}
-                className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors"
-              >
-                {rejectMut.isPending ? t("issues.rejecting") : t("issues.reject")}
-              </button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
+              {cards.activityOpen && findAction(a.available_actions, "note")?.allowed && <NoteBox issueId={a.id} t={t} />}
+              {cards.activityOpen && (timeline.isLoading
+                ? <Spinner label={t("common.loading")} />
+                : <ActivityList entries={toActivity(timeline.data, { hideText: m.reason && "text" in m.reason ? m.reason.text : null })}
+                                t={t} emptyKey="activity.empty" />)}
+            </CardBody>
+          </Card>
+        </section>
+      </aside>
 
-      {needsApproval && approvalDialog && (
+      {plan && approvalDialog && (canApprove || blocked) && (
         <ReasonDialog
-          title={`${t(approvalDialog === "approve" ? "plans.approveTitle" : "plans.rejectTitle")} #${fp.id}`}
-          description={fp.title}
-          confirmText={approvalDialog === "approve" ? t("issues.approve") : t("issues.reject")}
+          title={approvalDialog === "approve"
+            ? t(approveCopy.titleKey).replace("{label}", planLabel(plan, t))
+            : `${t("plans.rejectTitle")} ${planLabel(plan, t)}`}
+          description={approvalDialog === "approve"
+            ? `${t(approveCopy.noteKey)} ${plan.title} · ${t("plans.hash")} ${shortHash(pinnedHash)}`
+            : `${plan.title} · ${t("plans.hash")} ${shortHash(plan.content_hash)}`}
+          confirmText={approvalDialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
+          ack={approvalDialog === "approve" ? t("approval.ack") : undefined}
           variant={approvalDialog === "reject" ? "destructive" : "default"}
           required={approvalDialog === "reject"}
           busy={approveMut.isPending || rejectMut.isPending}
           error={(approvalDialog === "approve" ? approveMut.error : rejectMut.error)?.message ?? null}
-          onConfirm={(reason) => {
+          onConfirm={(r) => {
             const done = { onSuccess: () => setApprovalDialog(null) };
             if (approvalDialog === "approve") {
               const name = claimedName.trim();
-              approveMut.mutate({ id: fp.id, reason: reason || undefined, approved_by: !isAuthenticated && name ? name : undefined }, done);
-            } else rejectMut.mutate({ id: fp.id, reason }, done);
+              approveMut.mutate({ id: plan.id, content_hash: pinnedHash, reason: r || undefined,
+                                  approved_by: !isAuthenticated && name ? name : undefined }, done);
+            } else rejectMut.mutate({ id: plan.id, reason: r }, done);
           }}
           onClose={() => setApprovalDialog(null)}
         >
+          {/* unauthenticated: the legacy claimed name, audited by the backend but never trusted */}
           {approvalDialog === "approve" && !isAuthenticated && (
             <input type="text" value={claimedName} onChange={(e) => setClaimedName(e.target.value)} maxLength={100}
               placeholder={t("issues.approverPlaceholder")}
@@ -719,72 +492,8 @@ function FixPlanTab({
           )}
         </ReasonDialog>
       )}
-
-      {/* Execute action */}
-      {canExecute && (
-        <Card>
-          <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.executePlan")}</h3>
-            <button
-              onClick={handleExecute}
-              disabled={executeMut.isPending}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {executeMut.isPending ? t("issues.executing") : t("issues.execute")}
-            </button>
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Execution history */}
-      {executions.data && executions.data.length > 0 && (
-        <Card>
-          <CardBody>
-            <h3 className="text-lg font-semibold text-foreground mb-4">{t("issues.executionHistory")}</h3>
-            <ExecutionsTable
-              executions={executions.data}
-              onCancel={async (id) => {
-                if (!(await confirm("Cancel this execution?", { variant: "destructive", confirmText: "Cancel Execution" }))) return;
-                cancelExecMut.mutate(id, {
-                  onError: (err) => setActionMsg(`Cancel failed: ${err.message}`),
-                });
-              }}
-              cancelPending={cancelExecMut.isPending}
-            />
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Other plans for this issue */}
-      {plans.length > 1 && (
-        <Card>
-          <CardBody>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wider">
-              {t("issues.allFixPlans")}
-            </h3>
-            <div className="space-y-2">
-              {plans.map((p) => (
-                <div
-                  key={p.id}
-                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                    p.id === fp.id
-                      ? "border-primary/50 bg-primary/5"
-                      : "border-border"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <RiskLevelBadge level={p.risk_level} />
-                    <span className="text-sm font-medium text-foreground">{p.title}</span>
-                    {p.id === fp.id && (
-                      <span className="text-[10px] text-primary font-medium uppercase">{t("issues.currentPlan")}</span>
-                    )}
-                  </div>
-                  <FixPlanStatusBadge status={p.status} />
-                </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
+      {m.pendingRun && acceptDecision && (
+        <AcceptanceDialog execution={m.pendingRun} decision={acceptDecision} onClose={() => setAcceptDecision(null)} />
       )}
       {dialog}
     </div>
@@ -792,49 +501,54 @@ function FixPlanTab({
 }
 
 /* ================================================================== */
-/*  Timeline Tab                                                       */
+/*  Acceptance                                                         */
 /* ================================================================== */
 
-function TimelineTab({
-  timeline,
-  alerts,
-  occurrenceCount,
-  t,
-}: {
-  timeline: ReturnType<typeof useIssueTimeline>;
-  alerts: MergedAlert[] | undefined;
-  occurrenceCount: number | undefined;
-  t: (key: string) => string;
+/** Accept / reject a run pending acceptance; both need a reason, and the identity is the session's. */
+function AcceptanceDialog({ execution, decision, onClose }: {
+  execution: FixExecution;
+  decision: "accepted" | "rejected";
+  onClose: () => void;
 }) {
-  if (timeline.isLoading) return <Spinner label="Loading timeline..." />;
-
-  const events = timeline.data ?? [];
-
+  const { t } = useLocale();
+  const accept = useAcceptExecution();
   return (
-    <div className="space-y-6">
-      {events.length === 0 ? (
-        <Card>
-          <CardBody>
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              {t("issues.noTimeline")}
-            </div>
-          </CardBody>
-        </Card>
-      ) : (
-        <Card>
-          <CardBody>
-            <h3 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">
-              {t("issues.pipelineTimeline")}
-            </h3>
-            <PipelineTimeline events={events} />
-          </CardBody>
-        </Card>
-      )}
+    <ReasonDialog
+      title={`${t(decision === "accepted" ? "verification.acceptTitle" : "verification.rejectTitle")} #${execution.id}`}
+      description={t(decision === "accepted" ? "verification.acceptHint" : "verification.rejectHint")}
+      confirmText={t(decision === "accepted" ? "workitem.primary.acceptResult" : "verification.reject")}
+      variant={decision === "rejected" ? "destructive" : "default"}
+      required
+      busy={accept.isPending}
+      error={accept.error?.message ?? null}
+      onConfirm={(reason) => accept.mutate({ id: execution.id, decision, reason }, { onSuccess: onClose })}
+      onClose={onClose}
+    />
+  );
+}
 
-      {alerts && alerts.length > 0 && (
-        <MergedAlertsSection alerts={alerts} occurrenceCount={occurrenceCount} />
+/* ================================================================== */
+/*  Description (the alarm's own text) + metric                        */
+/* ================================================================== */
+
+function IssueDescription({ issue: a, t }: { issue: HealthIssue; t: (key: string) => string }) {
+  const f = issueFacts(a);
+  if (isBlank(a.description) && !f.metricName) return null;
+  return (
+    <details>
+      <summary className="cursor-pointer text-muted-foreground">{t("workitem.description")}</summary>
+      {!isBlank(a.description) && (
+        <div className="mt-2 text-xs text-muted-foreground report-content break-words"
+             dangerouslySetInnerHTML={{ __html: renderMarkdown(a.description) }} />
       )}
-    </div>
+      {f.metricName && (
+        <dl className="mt-2 grid grid-cols-[5rem_1fr] gap-1 text-xs">
+          <dt className="text-muted-foreground">{t("issues.metric")}</dt><dd className="text-foreground break-all">{f.metricName}</dd>
+          {f.expected != null && <><dt className="text-muted-foreground">{t("issues.expected")}</dt><dd className="text-foreground">{String(f.expected)}</dd></>}
+          {f.actual != null && <><dt className="text-muted-foreground">{t("issues.actual")}</dt><dd className="text-foreground">{String(f.actual)}</dd></>}
+        </dl>
+      )}
+    </details>
   );
 }
 
@@ -881,7 +595,7 @@ function MergedAlertsSection({
         </button>
         <div className="mt-3 space-y-2">
           {displayed.map((alert, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded bg-secondary">
+            <div key={i} className="flex flex-wrap items-center gap-2 text-sm py-1.5 px-2 rounded bg-secondary">
               <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">
                 {new Date(alert.timestamp).toLocaleString()}
               </span>
@@ -891,7 +605,7 @@ function MergedAlertsSection({
               <span className={`text-xs px-1.5 py-0.5 rounded ${SEV_CHIP[alert.severity] || SEV_CHIP.low}`}>
                 {alert.severity}
               </span>
-              <span className="text-foreground flex-1">{alert.title}</span>
+              <span className="text-foreground flex-1 min-w-0 break-words">{alert.title}</span>
             </div>
           ))}
           {!expanded && alerts.length > 5 && (

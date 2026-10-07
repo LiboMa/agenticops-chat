@@ -19,6 +19,8 @@ to use the local default chain — and that path is still identity-validated by
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import threading
@@ -56,6 +58,10 @@ ERR_AMBIGUOUS = (
 )
 ERR_UNKNOWN_ACCOUNT = (
     "No enabled account matches '{ref}'. Enabled {provider} accounts: {names}."
+)
+ERR_VPC_AMBIGUOUS = (
+    "VPC {vpc_id} is in the inventory of several enabled accounts: {names}. "
+    "Specify which one with account='<name>'."
 )
 ERR_RESOLVE_FAILED = (
     "Credential resolution failed for registered account '{name}' ({provider}): "
@@ -140,14 +146,37 @@ def _coerce_snapshot(account_ref: str | SimpleNamespace, provider: str = "aws") 
     return snap
 
 
+def credential_fingerprint(snap: SimpleNamespace) -> str:
+    """16 hex chars over the credential source type and credentials. kubeconfigs is left out: registering a
+    kubeconfig for one cluster does not change whose credentials a session carries. credentials/kube keys its
+    private kubeconfig paths with this same function."""
+    material = {"source": snap.credential_source_type,
+                "credentials": {k: v for k, v in snap.credentials.items() if k != "kubeconfigs"}}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def session_cache_keys(snap: SimpleNamespace, region: str | None) -> tuple[str, str]:
+    """(name_key, id_key) for an account's cached session: ``{provider}:{name}:{region}:{fp}`` and
+    ``{account_id}:{region}:{fp}`` (id_key is "" without an account_id), fp = credential_fingerprint(snap)."""
+    fp = credential_fingerprint(snap)
+    account_id = str(snap.credentials.get("account_id") or "")
+    region_key = region or (snap.regions[0] if snap.regions else "")
+    name_key = f"{snap.provider}:{snap.name}:{region_key}:{fp}"
+    id_key = f"{account_id}:{region_key}:{fp}" if account_id else ""
+    return name_key, id_key
+
+
 def resolve_account_session(account_ref: str | SimpleNamespace, region: str | None = None) -> Any:
     """Return an authenticated boto3 Session for a registered account.
 
     Fail-closed: a missing account or a provider that fails credential
     resolution raises AccountResolutionError — NEVER ambient credentials.
-    Caches under both ``{provider}:{name}:{region}`` and
-    ``{account_id}:{region}`` so every reader (CLI/exec/graph) shares one
-    auto-refreshing session.
+    Caches under both ``{provider}:{name}:{region}:{fp}`` and
+    ``{account_id}:{region}:{fp}`` so every reader (CLI/exec/graph) shares one
+    auto-refreshing session. ``fp`` is ``credential_fingerprint``: the snapshot
+    is re-read on every call, so an account whose credentials were re-pointed
+    (role ARN, keys, profile, source type) is a different key and never reuses
+    the old session — no invalidation hook, in any process.
     """
     snap = _coerce_snapshot(account_ref)
 
@@ -164,11 +193,7 @@ def resolve_account_session(account_ref: str | SimpleNamespace, region: str | No
         )
 
     provider = snap.provider
-    account_id = str(snap.credentials.get("account_id") or "")
-    region_key = region or (snap.regions[0] if snap.regions else "")
-
-    name_key = f"{provider}:{snap.name}:{region_key}"
-    id_key = f"{account_id}:{region_key}" if account_id else ""
+    name_key, id_key = session_cache_keys(snap, region)
 
     cached = get_cached_session(name_key)
     if cached is None and id_key:
@@ -355,6 +380,36 @@ def find_cluster_account(
                 )
                 continue
     return None
+
+
+def find_vpc_account(vpc_id: str) -> SimpleNamespace | None:
+    """Locate the enabled AWS account owning a VPC, from inventory only (no probe).
+
+    One account → it; none → None (the caller falls back to resolve_default_account);
+    several — a shared VPC is in the owner's inventory and in every participant's —
+    → AccountResolutionError naming them, since guessing would query the wrong account.
+    """
+    from agenticops.models import CloudAccount, CloudResource, get_db_session
+
+    with get_db_session() as db:
+        accounts = [
+            _snapshot(acct)
+            for acct in (
+                db.query(CloudAccount)
+                .join(CloudResource, CloudResource.account_id == CloudAccount.id)
+                .filter(
+                    CloudAccount.is_enabled == True,  # noqa: E712
+                    CloudResource.provider == "aws",
+                    CloudResource.resource_type == "VPC",
+                    CloudResource.resource_id == vpc_id,
+                )
+                .all()
+            )
+        ]
+    if len(accounts) > 1:
+        names = ", ".join(sorted(a.name for a in accounts))
+        raise AccountResolutionError(ERR_VPC_AMBIGUOUS.format(vpc_id=vpc_id, names=names))
+    return accounts[0] if accounts else None
 
 
 def get_instance_ips(instance_id: str) -> dict | None:

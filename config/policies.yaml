@@ -42,7 +42,10 @@ rules:
     action: block
 
   # Wide-impact fixes get bumped a tier even when nominally low-risk
-  # (graph-engine blast radius: number of downstream-affected nodes).
+  # (blast radius: resources downstream of the target in the published
+  # relationship graph, rule relations, <= 3 hops). Asleep while
+  # settings.policy_graph_impact_enforce is false (shadow mode: the count is
+  # only recorded on the decision as shadow_blast_radius).
   - name: blast-radius-escalation
     match: { blast_radius_gte: 3 }
     action: escalate

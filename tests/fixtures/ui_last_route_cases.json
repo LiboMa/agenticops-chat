@@ -1,0 +1,43 @@
+{
+  "_comment": "One source of truth for the last-route allow-list (MVP-2.7.0 S2). Read by tests/test_ui_bootstrap.py (server) and frontend src/__tests__/home.test.ts (client): both implementations must accept and reject exactly these.",
+  "accept": [
+    "/app/chat",
+    "/app/chat/3f2a9c1e-5b7d-4c2a-9e1f-1a2b3c4d5e6f",
+    "/app/issues",
+    "/app/issues/42",
+    "/app/reports/7",
+    "/app/changes/3",
+    "/app/resources/12",
+    "/app/schedules/5",
+    "/app/skills/linux-admin",
+    "/app/audit",
+    "/app/overview",
+    "/app/agent-metrics",
+    "/app/galaxy",
+    "/app/security",
+    "/app/settings",
+    "/app/signals",
+    "/app/plans",
+    "/app/plans/12"
+  ],
+  "reject": [
+    "",
+    "/",
+    "/app",
+    "/app/",
+    "/app/login",
+    "/app/issues?scope=security",
+    "/app/issues#plan",
+    "/app/issues/42/extra",
+    "/app/unknown",
+    "//evil.example/app/chat",
+    "https://evil.example/app/chat",
+    "javascript:alert(1)",
+    "/app/../api/settings",
+    "/app/chat/..",
+    "/app/issues/%2e%2e",
+    "/app\\issues",
+    "/APP/issues",
+    "/app/plans?tab=audit"
+  ]
+}

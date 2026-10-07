@@ -14,6 +14,18 @@ ALICE = Actor("user", "alice", 1, ("read", "write"))
 BOB = Actor("user", "bob", 2, ("read", "write"))
 
 
+def _seen(cr_id):
+    """The content hash of the change's implementation plan, as the approver is shown it (spec §3.D.1)."""
+    from agenticops.services.plan_content import current_hash
+    s = get_session()
+    try:
+        plan = (s.query(FixPlan).filter_by(change_request_id=cr_id, plan_kind="change")
+                .order_by(FixPlan.id.desc()).first())
+        return current_hash(s, plan)
+    finally:
+        s.close()
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     import agenticops.models as models_mod
@@ -54,9 +66,13 @@ def make_fake_executor(post_results, status="succeeded"):
         from agenticops.tools.metadata_tools import get_approved_fix_plan, save_execution_result
         plan = json.loads(get_approved_fix_plan(fix_plan_id))
         assert plan["plan_kind"] == "change", plan["plan_kind"]
-        return save_execution_result(fix_plan_id=fix_plan_id, health_issue_id=None, status=status,
-                                     step_results=json.dumps([{"step_index": 0, "command": plan["steps"][0]["command"], "status": "ok"}]),
-                                     post_check_results=json.dumps(post_results))
+
+        def save():
+            return save_execution_result(fix_plan_id=fix_plan_id, health_issue_id=None, status=status,
+                                         step_results=json.dumps([{"step_index": 0, "command": plan["steps"][0]["command"], "status": "ok"}]),
+                                         post_check_results=json.dumps(post_results))
+        out = save()
+        return save() if out.startswith("INVALID:") else out  # the executor resubmits once, as the INVALID asks
     return fake_executor
 
 
@@ -107,10 +123,10 @@ def test_main_path_request_review_approve_execute_complete(db, quiet):
     c = cs.get_change(cr["id"])
     assert c["status"] == "planned" and c["risk_level"] == "L1" and c["effective_change_type"] == "standard", out
     assert c["review_verdict"] == "approved_for_planning", out
-    cs.approve(cr["id"], actor=BOB, reason="reviewed")
+    cs.approve(cr["id"], actor=BOB, reason="reviewed", content_hash=_seen(cr["id"]))
     with patch.object(settings, "executor_enabled", True):
         cs.request_execution(cr["id"], actor=BOB)
-    with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([{"check": "tag present", "status": "pass"}])):
+    with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([{"check_id": "pc-1", "check": "tag present", "status": "pass"}])):
         _run_executor_for(cr["id"])
     # 9b/9c contract: the queued ticket is closed IN PLACE (no second row), and the plan reaches `executed`
     plan, tickets = _plan_and_tickets(db, cr["id"])
@@ -151,7 +167,7 @@ def test_needs_review_when_post_checks_missing(db, quiet):
     with patch("agenticops.agents.sre_agent.sre_agent_review_change", side_effect=fake_sre_review):
         out = cs.start_review(cr["id"], sync=True)
     assert cs.get_change(cr["id"])["status"] == "planned", out
-    cs.approve(cr["id"], actor=BOB, reason="ok")
+    cs.approve(cr["id"], actor=BOB, reason="ok", content_hash=_seen(cr["id"]))
     with patch.object(settings, "executor_enabled", True):
         cs.request_execution(cr["id"], actor=BOB)
     with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([])):
@@ -172,7 +188,7 @@ def test_failed_and_rolled_back_executions_close_the_change(db, quiet, status):
     with patch("agenticops.agents.sre_agent.sre_agent_review_change", side_effect=fake_sre_review):
         out = cs.start_review(cr["id"], sync=True)
     assert cs.get_change(cr["id"])["status"] == "planned", out
-    cs.approve(cr["id"], actor=BOB, reason="ok")
+    cs.approve(cr["id"], actor=BOB, reason="ok", content_hash=_seen(cr["id"]))
     with patch.object(settings, "executor_enabled", True):
         cs.request_execution(cr["id"], actor=BOB)
     with patch("agenticops.agents.executor_agent.executor_agent", side_effect=make_fake_executor([], status=status)):

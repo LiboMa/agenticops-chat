@@ -140,6 +140,9 @@ policy_file: config/policies.yaml
 change_management_enabled: true
 change_auto_approve_standard: false   # standard changes still wait for a human until you flip this
 change_review_timeout_seconds: 600
+# Change intake (MVP-2.6.1): HMAC secret for POST /api/changes/intake. Set the real value via AIOPS_CHANGE_INTAKE_SECRET —
+# never commit one here. Empty = the endpoint is 404 (off). The signature window is intake_signature_window_seconds.
+change_intake_secret: ''
 itsm_enabled: false
 itsm_dry_run: true
 itsm_servicenow_url: ''
@@ -151,7 +154,15 @@ notifications_enabled: true
 notifications_consolidated: false
 issue_exclude_patterns: []
 scan_focus: all
+# The resource-scan schedule (seeded once at startup) runs the POST /api/scan scan this often, so a resource gone
+# from a completely listed type and region is marked absent within one interval. Edit or disable the row in
+# Schedules; a changed value here only applies to a fresh seed.
+resource_scan_interval_minutes: 60
 alert_pipeline_mode: both
+# Alert-webhook token (MVP-2.6.1). Set the real value via AIOPS_WEBHOOK_SECRET — never commit one here.
+# Empty = POST /api/webhooks/alert* is not token-checked (startup WARNING).
+webhook_secret: ''
+intake_signature_window_seconds: 300
 im_alert_detection_enabled: true
 im_alert_cooldown_seconds: 60
 dedup_resolved_cooldown_minutes: 60
@@ -198,6 +209,7 @@ rbac_file: config/rbac.yaml
 audit_retention_days: 365
 command_audit_enabled: true
 session_ttl_minutes: 30
+event_loop_executor_threads: 64   # AgenticOps runs as ONE process; this pool serves to_thread + every agent stream
 session_history_depth: 20
 default_regions:
   aws:
@@ -264,7 +276,52 @@ galaxy_llm_exclude_types:
 - KMS
 - S3
 - ECR_Repository
+# K8s relations are rule-derived (MVP-2.6.1); the builder also keeps K8s rows out of the LLM in code.
+- K8s_Namespace
+- K8s_Deployment
+- K8s_StatefulSet
+- K8s_DaemonSet
+- K8s_Service
+- K8s_Ingress
+- K8s_Node
+- K8s_ConfigMap
+- K8s_Secret
+- K8s_PVC
+- K8s_PDB
+- K8s_NetworkPolicy
+- K8s_Pod
 galaxy_builds_keep: 24
+
+# ── Graph facts layer (MVP-2.6.1) ──────────────────────────────
+identity_alarm_name_patterns:
+- '^EKS-(?P<cluster>.+)-[A-Za-z0-9]+-[A-Za-z0-9]+$'
+identity_type_families:
+  EKS:
+  - EKS
+  - EKS_Cluster
+graph_query_node_cap: 200
+graph_query_edge_cap: 500
+graph_query_max_depth: 2
+rca_topology_window_before_minutes: 30
+rca_topology_window_after_minutes: 10
+# RCA evidence recollect (MVP-2.6.1 Plan C): a K8s-side anchor's cluster is re-collected before the evidence
+# is assembled when its last successful collection is older than this or than the issue's onset (a collection
+# from before the fault cannot show it, however recent); the recollect has this time budget.
+rca_k8s_recollect_min_age_seconds: 120
+rca_k8s_recollect_timeout_seconds: 60
+# Policy blast radius (MVP-2.6.1 Plan C): the published graph's potential-impact count. false = shadow mode —
+# recorded on the policy decision as shadow_blast_radius, never fed to blast_radius_gte rules.
+policy_graph_impact_enforce: false
+
+# ── Pull connectors (MVP-2.6.1) ────────────────────────────────
+# kubectl runs with a private per-account/region/cluster kubeconfig under <data_dir>/kube/, never ~/.kube/config.
+k8s_kubeconfig_max_age_seconds: 3600
+# One kubectl call of the K8s connector may return at most this many bytes; above it the kind is partial.
+k8s_connector_max_output_bytes: 20000000
+# The k8s-discovery schedule (seeded once at startup) collects every cluster target this often. Off: no seed, and
+# `aiops connectors run k8s` / POST /api/connectors/k8s/run answer "disabled".
+k8s_connector_enabled: true
+k8s_discovery_interval_minutes: 10
 
 # ── Cloud Security Review (MVP-2.5.0) ──────────────────────────
 security_review_enabled: true

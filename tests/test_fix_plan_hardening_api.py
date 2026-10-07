@@ -33,6 +33,16 @@ def _plan(status="pending_approval", risk="L1", **fields) -> int:
         s.close()
 
 
+def _hash(plan_id):
+    """The plan's content hash as an approver is shown it (spec §3.D.1)."""
+    from agenticops.services.plan_content import current_hash
+    s = get_session()
+    try:
+        return current_hash(s, s.get(FixPlan, plan_id))
+    finally:
+        s.close()
+
+
 def _audit_rows(action=None):
     from agenticops.audit.models import AuditLog
     s = get_session()
@@ -77,7 +87,8 @@ def test_approve_binds_identity_not_body(client, monkeypatch):
     from unittest.mock import patch
     pid = _plan()
     with patch("agenticops.services.pipeline_service.trigger_auto_execute"):
-        r = client.put(f"/api/fix-plans/{pid}/approve", json={"approved_by": "Mallory", "reason": "looks fine"})
+        r = client.put(f"/api/fix-plans/{pid}/approve", json={"approved_by": "Mallory", "reason": "looks fine",
+                                                              "content_hash": _hash(pid)})
     assert r.status_code == 200
     body = r.json()
     assert body["approved_by"] == "web:anonymous"      # auth disabled → anonymous actor, never the client string
@@ -88,14 +99,51 @@ def test_approve_binds_identity_not_body(client, monkeypatch):
     assert rows[0].old_values == {"status": "pending_approval"} and rows[0].new_values == {"status": "approved"}
 
 
-def test_approve_without_body_uses_actor(client):
+def test_approve_with_only_the_content_hash_uses_actor(client):
     from unittest.mock import patch
     pid = _plan()
     with patch("agenticops.services.pipeline_service.trigger_auto_execute"):
-        r = client.put(f"/api/fix-plans/{pid}/approve")          # no body at all (curl / CLI style)
+        r = client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": _hash(pid)})
     assert r.status_code == 200 and r.json()["approved_by"] == "web:anonymous"
     rows = _audit_rows("plan.approved")
     assert len(rows) == 1 and "claimed_name" not in rows[0].details and rows[0].details["reason"] is None
+
+
+def test_approve_without_body_is_422(client):
+    """MVP-2.6.1: an approval must name the plan content it approves — a bare PUT no longer approves. An empty
+    hash is a stale one (FR-D8): the 409 that says reload, not a 422."""
+    from unittest.mock import patch
+    pid = _plan()
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+        assert client.put(f"/api/fix-plans/{pid}/approve").status_code == 422
+        assert client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": ""}).status_code == 409
+    trigger.assert_not_called()
+    assert _plan_state(pid)[0] == "pending_approval" and _audit_rows("plan.approved") == []
+
+
+def test_an_unauthorized_approver_is_403_before_any_state_or_hash_conflict(client):
+    """FR-D6: load → 404 → authz 403 → state / hash 409 — a caller who may not approve learns nothing about the
+    plan's state or content; a missing plan is still 404."""
+    from unittest.mock import patch
+    from agenticops.auth.actor import Actor
+    from agenticops.config import settings
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    reader = Actor("user", "reader", 9, ("read",))
+    approved = _plan(status="approved", approved_by="user:alice")
+    pending = _plan()
+    app.dependency_overrides[deps.current_actor] = lambda: reader
+    try:
+        with patch.object(settings, "rbac_enforce", True), \
+             patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
+            assert client.put(f"/api/fix-plans/{approved}/approve", json={"content_hash": "any"}).status_code == 403
+            assert client.put(f"/api/fix-plans/{pending}/approve", json={"content_hash": "stale"}).status_code == 403
+            assert client.put("/api/fix-plans/999/approve", json={"content_hash": "any"}).status_code == 404
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    trigger.assert_not_called()
+    assert (_plan_state(approved)[0], _plan_state(pending)[0]) == ("approved", "pending_approval")
+    assert _audit_rows("plan.approved") == []
 
 
 def test_reject_endpoint_requires_reason(client):
@@ -116,8 +164,8 @@ def test_approve_already_decided_plan_is_409(client):
     approved = _plan(status="approved", approved_by="user:alice")
     rejected = _plan(status="rejected", rejected_by="user:alice", rejection_reason="no")
     with patch("agenticops.services.pipeline_service.trigger_auto_execute") as trigger:
-        assert client.put(f"/api/fix-plans/{approved}/approve", json={}).status_code == 409
-        assert client.put(f"/api/fix-plans/{rejected}/approve", json={}).status_code == 409
+        assert client.put(f"/api/fix-plans/{approved}/approve", json={"content_hash": "any"}).status_code == 409
+        assert client.put(f"/api/fix-plans/{rejected}/approve", json={"content_hash": "any"}).status_code == 409
     trigger.assert_not_called()
     row = client.get(f"/api/fix-plans/{rejected}").json()
     assert row["status"] == "rejected" and row["rejected_by"] == "user:alice" and row["approved_by"] is None
@@ -160,7 +208,7 @@ def test_put_no_longer_accepts_status_or_approver(client):
     assert r.status_code == 422
     r = client.put(f"/api/fix-plans/{pid}", json={"status": "approved"})
     assert r.status_code == 400
-    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed"})
+    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed", "content_hash": _hash(pid)})
     assert r.status_code == 200 and r.json()["title"] == "renamed"
 
 
@@ -263,7 +311,7 @@ def test_editable_plan_content_edit_audited_once(client):
     one plan.edited row records only the changed field old→new."""
     pid = _plan(status="draft")
     before = _plan_state(pid)
-    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed"})
+    r = client.put(f"/api/fix-plans/{pid}", json={"title": "renamed", "content_hash": _hash(pid)})
     assert r.status_code == 200 and r.json()["title"] == "renamed"
     status, title, summary, updated_at = _plan_state(pid)
     assert title == "renamed" and summary == "s"
@@ -310,7 +358,7 @@ def test_content_edit_requires_plan_edit_permission(client):
     app.dependency_overrides[deps.current_actor] = lambda: writer
     try:
         with patch.object(settings, "rbac_enforce", True):
-            assert client.put(f"/api/fix-plans/{pid}", json={"title": "ok"}).status_code == 200
+            assert client.put(f"/api/fix-plans/{pid}", json={"title": "ok", "content_hash": _hash(pid)}).status_code == 200
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
 

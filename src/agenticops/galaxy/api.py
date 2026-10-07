@@ -1,5 +1,5 @@
 """Galaxy read/rebuild API. Reads the latest completed build's stored graph and
-overlays live HealthIssue status. Mounted at /api/galaxy."""
+overlays live HealthIssue status (by anchored resource_ref, four values). Mounted at /api/galaxy."""
 
 import asyncio
 from typing import Optional
@@ -7,32 +7,30 @@ from typing import Optional
 from fastapi import APIRouter, Query, Response
 
 from agenticops.config import settings
-from agenticops.models import get_db_session, CloudResource, HealthIssue
+from agenticops.models import get_db_session, CloudResource
 from agenticops.galaxy.models import GalaxyBuild
 from agenticops.galaxy import builder
+from agenticops.graph.query_service import HEALTH_RANK, health_overlay
 
 router = APIRouter(prefix="/api/galaxy", tags=["galaxy"])
 
-_SEVERITY_HEALTH = {"critical": "critical", "high": "warning", "medium": "warning", "low": "healthy"}
-_HEALTH_RANK = {"healthy": 0, "warning": 1, "critical": 2}
+
+def _health_by_node(s) -> dict:
+    """Resource node id -> worst health among its open issues. A node missing here is `unknown`:
+    no open issue is not the same as healthy (spec §3.A.6)."""
+    return {f"res:{ref}": v["health"] for ref, v in health_overlay(s).items()}
 
 
-def _health_by_resource_id() -> dict:
-    """resource_id (cloud string) -> worst health among open issues."""
-    out: dict = {}
-    with get_db_session() as s:
-        rows = s.query(HealthIssue.resource_id, HealthIssue.severity).filter(
-            HealthIssue.status != "resolved").all()
-    for rid, sev in rows:
-        h = _SEVERITY_HEALTH.get((sev or "").lower(), "healthy")
-        if _HEALTH_RANK[h] > _HEALTH_RANK.get(out.get(rid, "healthy"), 0):
-            out[rid] = h
-    return out
+def _absent_nodes(s) -> set:
+    """Resource node ids the latest scan no longer saw. Read live, so a scan after the build shows."""
+    return {f"res:{rid}" for (rid,) in
+            s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None)).all()}
 
 
 def _latest_completed(s) -> Optional[GalaxyBuild]:
+    # By finish time, not id: a rule-only refresh opened during a normal build's LLM phase finishes first.
     return (s.query(GalaxyBuild).filter_by(status="completed")
-            .order_by(GalaxyBuild.id.desc()).first())
+            .order_by(GalaxyBuild.finished_at.desc().nulls_last(), GalaxyBuild.id.desc()).first())
 
 
 def _build_dict(b: GalaxyBuild) -> dict:
@@ -59,7 +57,7 @@ async def rebuild(response: Response, full: bool = Query(False)):
     # (matches the codebase pattern, e.g. app.py `await asyncio.to_thread(...)`).
     # Awaiting the result keeps the returned id = the actual completed build, which the
     # tests rely on; the single 'running' row guards against overlap.
-    build_id = await asyncio.to_thread(builder.build_graph, "manual", full)
+    build_id = await asyncio.to_thread(builder.build_graph, "manual", full, True)
     response.status_code = 202
     return {"build_id": build_id}
 
@@ -67,14 +65,12 @@ async def rebuild(response: Response, full: bool = Query(False)):
 @router.get("/status")
 async def status():
     with get_db_session() as s:
-        latest = (s.query(GalaxyBuild).order_by(GalaxyBuild.id.desc()).first())
+        # A running normal build wins over a refresh that finished meanwhile, so the page keeps showing it.
+        latest = (s.query(GalaxyBuild).filter_by(status="running").order_by(GalaxyBuild.id.desc()).first()
+                  or s.query(GalaxyBuild).order_by(GalaxyBuild.finished_at.desc().nulls_last(),
+                                                   GalaxyBuild.id.desc()).first())
         build = _build_dict(latest) if latest else None
     return {"build": build, "next_check_minutes": settings.galaxy_build_interval_minutes}
-
-
-def _resource_ids_by_node(s) -> dict:
-    """node_id -> cloud resource_id string (for health join)."""
-    return {f"res:{r.id}": r.resource_id for r in s.query(CloudResource.id, CloudResource.resource_id).all()}
 
 
 @router.get("/overview")
@@ -87,8 +83,7 @@ async def overview():
         nodes = rule.get("nodes", [])
         edges = rule.get("edges", [])
         build_id = latest.id  # capture inside session (avoid DetachedInstanceError after close)
-        node_res_id = _resource_ids_by_node(s)
-    health = _health_by_resource_id()
+        health = _health_by_node(s)
 
     # Each resource counts toward its ACCOUNT (exactly one, from the node's own
     # account_id) AND every GROUP it is a member_of (zero or more). Do NOT use a
@@ -100,7 +95,7 @@ async def overview():
             groups_of.setdefault(e["source"], set()).add(e["target"])
 
     top_nodes = [n for n in nodes if n["kind"] in ("account", "group")]
-    counts: dict = {n["id"]: {"resource_count": 0, "open_issues": 0, "health": "healthy",
+    counts: dict = {n["id"]: {"resource_count": 0, "open_issues": 0, "health": "unknown",
                               "types": {}} for n in top_nodes}
 
     def _bump(container_id: str, node: dict, h: str) -> None:
@@ -109,15 +104,15 @@ async def overview():
             return
         c["resource_count"] += 1
         c["types"][node["resource_type"]] = c["types"].get(node["resource_type"], 0) + 1
-        if h != "healthy":
-            c["open_issues"] += 1
-        if _HEALTH_RANK[h] > _HEALTH_RANK[c["health"]]:
+        if h != "unknown":
+            c["open_issues"] += 1  # resources with an open issue, not issues
+        if HEALTH_RANK[h] > HEALTH_RANK[c["health"]]:
             c["health"] = h
 
     for n in nodes:
         if n["kind"] != "resource":
             continue
-        h = health.get(node_res_id.get(n["id"]), "healthy")
+        h = health.get(n["id"], "unknown")
         if n.get("account_id") is not None:
             _bump(f"acct:{n['account_id']}", n, h)
         for gnode in groups_of.get(n["id"], ()):
@@ -143,8 +138,7 @@ async def expand(group: str = Query(...), types: Optional[str] = None, health: s
         llm_edges = (latest.llm_graph or {}).get("edges", [])
         nodes = rule.get("nodes", [])
         rule_edges = rule.get("edges", [])
-        node_res_id = _resource_ids_by_node(s)
-    health_map = _health_by_resource_id()
+        health_map = _health_by_node(s)
 
     # Members of the requested group/account.
     member_ids = set()
@@ -162,16 +156,15 @@ async def expand(group: str = Query(...), types: Optional[str] = None, health: s
             continue
         if type_filter and n["resource_type"] not in type_filter:
             continue
-        rid = node_res_id.get(nid)
-        h = health_map.get(rid, "healthy")
-        if health == "worst" and h == "healthy":
+        h = health_map.get(nid, "unknown")
+        if health == "worst" and h == "unknown":
             continue
         members.append({**n, "health": h})
 
-    # Truncate by open-issue priority (unhealthy first), then name.
+    # Truncate by open-issue priority (worst first), then name.
     cap = settings.galaxy_expand_node_cap
     truncated = len(members) > cap
-    members.sort(key=lambda m: (-_HEALTH_RANK[m["health"]], m["name"]))
+    members.sort(key=lambda m: (-HEALTH_RANK[m["health"]], m["name"]))
     members = members[:cap]
     kept_ids = {m["id"] for m in members}
 
@@ -197,8 +190,8 @@ async def graph():
         rule_edges = rule.get("edges", [])
         llm_edges = llm.get("edges", [])
         build_id = latest.id
-        node_res_id = _resource_ids_by_node(s)
-    health = _health_by_resource_id()
+        health = _health_by_node(s)
+        absent = _absent_nodes(s)
 
     nodes = []
     for n in raw_nodes:
@@ -206,7 +199,8 @@ async def graph():
                 "type": n.get("resource_type") or n.get("group_kind") or "",
                 "acct": n.get("account_id")}
         if n["kind"] == "resource":
-            slim["health"] = health.get(node_res_id.get(n["id"], ""), "healthy")
+            slim["health"] = health.get(n["id"], "unknown")
+            slim["absent"] = n["id"] in absent
         elif n["kind"] == "group":
             slim["members"] = n.get("member_count", 0)
         nodes.append(slim)

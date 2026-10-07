@@ -45,6 +45,7 @@ from agenticops.models import (
     get_session,
     get_db_session,
 )
+from agenticops.services.inventory import PRESENT
 
 # Import from new modular CLI components
 from agenticops.cli.formatters import (
@@ -235,6 +236,7 @@ run_app = typer.Typer(help="Run operations (scan, detect, analyze)")
 logs_app = typer.Typer(help="View logs and audit trail")
 service_app = typer.Typer(help="Manage background services (web dashboard + IM WebSocket)")
 skills_app = typer.Typer(help="Manage Agent Skills (import from URL / git repo / zip)")
+connectors_app = typer.Typer(help="Pull connectors (K8s discovery): recent runs, run now")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -245,6 +247,7 @@ app.add_typer(run_app, name="run")
 app.add_typer(logs_app, name="logs")
 app.add_typer(service_app, name="service")
 app.add_typer(skills_app, name="skills")
+app.add_typer(connectors_app, name="connectors")
 
 
 # ============================================================================
@@ -376,7 +379,7 @@ def get_resources(
     session = get_session()
 
     try:
-        query = session.query(CloudResource)
+        query = session.query(CloudResource).filter(PRESENT)
         if type:
             query = query.filter_by(resource_type=type)
         if region:
@@ -969,25 +972,26 @@ def update_issue(
             console.print(f"[red]Health issue #{issue_id} not found.[/red]")
             raise typer.Exit(1)
 
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services.issue_state import transition_issue
+        actor = cli_actor().key
+
         if investigate:
             if item.status != "open":
                 console.print(f"[yellow]Issue is already {item.status}.[/yellow]")
                 return
-            item.status = "investigating"
+            transition_issue(session, item.id, "investigating", actor=actor, reason="aiops issue update --investigate")
             console.print(f"[green]issue/{issue_id} investigating[/green]")
 
         if resolve:
             if item.status == "resolved":
                 console.print("[yellow]Issue is already resolved.[/yellow]")
                 return
-            item.status = "resolved"
-            item.resolved_at = datetime.now(timezone.utc)
+            transition_issue(session, item.id, "resolved", actor=actor, reason="aiops issue update --resolve")
             console.print(f"[green]issue/{issue_id} resolved[/green]")
 
         if status:
-            item.status = status
-            if status == "resolved":
-                item.resolved_at = datetime.now(timezone.utc)
+            transition_issue(session, item.id, status, actor=actor, reason="aiops issue update --status")
             console.print(f"[green]issue/{issue_id} status set to {status}[/green]")
 
         session.commit()
@@ -1322,6 +1326,22 @@ def init(
 
 
 @app.command()
+def _trigger_quickstart_scan(host: str, port: int, post=None) -> tuple[bool, str | None]:
+    """Open a "quickstart" chat and send it the scan command → (accepted, session id). Every send carries a
+    client_message_id (MVP-2.7.0 S5); a refused send is reported as such, never as triggered."""
+    import uuid as _uuid
+    if post is None:
+        import httpx
+        post = httpx.post
+    resp = post(f"http://{host}:{port}/api/chat/sessions", json={"name": "quickstart"}, timeout=10)
+    if resp.status_code not in (200, 201):
+        return False, None
+    session_id = resp.json().get("session_id") or resp.json().get("id")
+    sent = post(f"http://{host}:{port}/api/chat/sessions/{session_id}/messages",
+                json={"content": "scan all resources", "client_message_id": str(_uuid.uuid4())}, timeout=10)
+    return sent.status_code == 200, session_id
+
+
 def quickstart(
     yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
     profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
@@ -1409,26 +1429,13 @@ def quickstart(
         console.print(Rule("[bold]Initial Resource Scan[/bold]"))
         console.print()
         try:
-            import httpx
-
-            # Create a quickstart chat session
-            resp = httpx.post(
-                f"http://{host}:{port}/api/chat/sessions",
-                json={"name": "quickstart"},
-                timeout=10,
-            )
-            if resp.status_code in (200, 201):
-                session_id = resp.json().get("session_id") or resp.json().get("id")
-                console.print(f"  Created chat session: {session_id}")
-                console.print("  Sending scan command... (check web dashboard for results)")
-                httpx.post(
-                    f"http://{host}:{port}/api/chat/sessions/{session_id}/messages",
-                    json={"content": "scan all resources"},
-                    timeout=10,
-                )
-                console.print("  [green]Scan triggered.[/green]")
+            ok, session_id = _trigger_quickstart_scan(host, port)
+            if session_id is None:
+                console.print("  [yellow]Could not create a chat session for the scan.[/yellow]")
             else:
-                console.print(f"  [yellow]Could not create session: {resp.status_code}[/yellow]")
+                console.print(f"  Created chat session: {session_id}")
+                console.print("  [green]Scan triggered.[/green] (check the web dashboard for results)" if ok
+                              else "  [yellow]The scan message was not accepted.[/yellow]")
         except Exception as e:
             console.print(f"  [yellow]Scan trigger failed: {e}[/yellow]")
 
@@ -1436,7 +1443,7 @@ def quickstart(
     console.print()
     console.print(Rule("[bold green]Quickstart Complete[/bold green]"))
     console.print()
-    console.print(f"  Dashboard : http://{host}:{port}/app/")
+    console.print(f"  Web       : http://{host}:{port}/app/")
     console.print(f"  API       : http://{host}:{port}/api/health")
     console.print(f"  CLI chat  : [cyan]aiops chat[/cyan]")
     console.print()
@@ -1649,8 +1656,9 @@ def _slash_help(ctx: ChatContext, args: list) -> str:
 [cyan]Fix Plans:[/cyan]
   /fix list \\[issue_id] [--status S] [--risk L]   List fix plans
   /fix show <plan_id>              Show fix plan details
-  /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user>
-  /execute <plan_id|C<id>>         Execute an approved fix plan or change
+  /approve <plan_id|C<id>> \\[reason...]  Approve a fix plan (L2/L3 human gate) or a change as cli:<user> — approving runs it
+  /execute <plan_id|C<id>>         Execute an approved fix plan, or retry a change whose run was not queued
+  /accept <I<id>|C<id>> yes|no <reason...>  Accept or reject a run pending acceptance as cli:<user>
 
 [cyan]Changes:[/cyan]
   /change <description> [--account NAME] [--emergency]  Open a change request; SRE reviews it now
@@ -1809,7 +1817,7 @@ def _slash_resource(ctx: ChatContext, args: list) -> str:
 
     try:
         if not args or args[0] == "list":
-            query = session.query(CloudResource)
+            query = session.query(CloudResource).filter(PRESENT)
             limit = settings.default_list_limit
 
             # Parse --type flag
@@ -2102,7 +2110,9 @@ def _slash_acknowledge(ctx: ChatContext, args: list) -> str:
         if item.status != "open":
             return f"[yellow]Issue is already {item.status}.[/yellow]"
 
-        item.status = "investigating"
+        from agenticops.auth.actor import cli_actor
+        from agenticops.services.issue_state import transition_issue
+        transition_issue(session, item.id, "investigating", actor=cli_actor().key, reason="/investigate")
         session.commit()
 
         return f"[green]Issue #{issue_id} is now investigating.[/green]"
@@ -2131,8 +2141,13 @@ def _slash_resolve(ctx: ChatContext, args: list) -> str:
         if item.status == "resolved":
             return "[yellow]Issue is already resolved.[/yellow]"
 
-        item.status = "resolved"
-        item.resolved_at = datetime.now(timezone.utc)
+        from agenticops.auth.actor import cli_actor
+        from agenticops.models import InvalidStatusTransition
+        from agenticops.services.issue_state import transition_issue
+        try:
+            transition_issue(session, item.id, "resolved", actor=cli_actor().key, reason="/resolve")
+        except InvalidStatusTransition as e:
+            return f"[red]{e}[/red]"
         session.commit()
 
         return f"[green]Issue #{issue_id} resolved.[/green]"
@@ -2224,6 +2239,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
         except ValueError:
             return "[red]Invalid plan ID.[/red]"
 
+        from agenticops.services.plan_content import plan_label
         init_db()
         session = get_session()
         try:
@@ -2235,7 +2251,7 @@ def _slash_fix(ctx: ChatContext, args: list) -> str:
             rc = risk_colors.get(plan.risk_level, "white")
 
             lines = [
-                f"[bold]Fix Plan #{plan.id}[/bold]",
+                f"[bold]{plan_label(plan)}[/bold] (plan #{plan.id})",
                 f"  Title:    {plan.title}",
                 f"  Risk:     [{rc}]{plan.risk_level}[/{rc}]",
                 f"  Status:   {plan.status.replace('_', ' ')}",
@@ -2444,6 +2460,46 @@ def _slash_reject(ctx: ChatContext, args: list) -> str:
     return f"[green]Change C#{cr_id} rejected ({out['status']}).[/green]"
 
 
+def _slash_accept(ctx: ChatContext, args: list) -> str:
+    """Handle /accept <I<id>|C<id>> yes|no <reason...> — a human verdict on a run pending acceptance.
+
+    I<id>: the issue's latest execution pending acceptance (the issue → resolved | root_cause_identified).
+    C<id>: the change's needs_review verdict (→ completed | failed), the same path as resolve-review.
+    The actor is the OS user (cli:<user>); the reason is required and audited.
+    """
+    from agenticops.auth.actor import cli_actor
+    ref = args[0].strip().upper() if args else ""
+    decision = {"yes": "accepted", "no": "rejected"}.get(args[1].lower()) if len(args) > 1 else None
+    reason = " ".join(args[2:]).strip()
+    usage = "[yellow]Usage: /accept <I<id>|C<id>> yes|no <reason...>[/yellow]"
+    if not re.fullmatch(r"[IC]#?\d+", ref, re.ASCII) or decision is None or not reason:
+        return usage
+    ref_id = int(ref.lstrip("IC#"))
+    init_db()
+    if ref.startswith("C"):
+        if not settings.change_management_enabled:
+            return _CHANGE_DISABLED
+        from agenticops.services import change_service as cs
+        try:
+            out = cs.resolve_review(ref_id, actor=cli_actor(), reason=reason,
+                                    outcome="completed" if decision == "accepted" else "failed")
+        except cs.ChangeError as e:
+            return f"[red]{_safe_text(e)}[/red]"
+        return f"[green]Change C#{ref_id} {decision} ({out['status']}).[/green]"
+    from agenticops.services.verification import PENDING, AcceptanceError, accept_execution
+    with get_db_session() as s:
+        execution_id = (s.query(FixExecution.id)
+                        .filter_by(health_issue_id=ref_id, verification_status=PENDING)
+                        .order_by(FixExecution.id.desc()).limit(1).scalar())
+    if execution_id is None:
+        return f"[yellow]Issue I#{ref_id} has no execution pending acceptance.[/yellow]"
+    try:
+        out = accept_execution(execution_id, actor=cli_actor(), decision=decision, reason=reason)
+    except AcceptanceError as e:
+        return f"[red]{_safe_text(e)}[/red]"
+    return f"[green]Execution #{execution_id} {decision}; issue I#{ref_id} is {out['status']}.[/green]"
+
+
 def _slash_approve(ctx: ChatContext, args: list) -> str:
     """Handle /approve <plan_id|C<id>> [reason...] — approve a fix plan or a change request as the CLI user.
 
@@ -2465,22 +2521,34 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return f"[red]{_safe_text(e)}[/red]"
         if cr["status"] != "planned":
             return f"[yellow]Change C#{cr_id} is '{cr['status']}' — only a planned change can be approved.[/yellow]"
+        from agenticops.services.plan_content import current_hash, plan_label
+        with get_db_session() as s:  # the approval is bound to the implementation plan shown here
+            plan = cs.active_plan_for(s, cr_id)
+            seen = (plan_label(plan), current_hash(s, plan)) if plan is not None else ("no active plan", "")
         console.print(f"[bold]Approve change C#{cr_id}?[/bold]\n  Title: {_safe_text(_one_line(cr['title']))}\n"
                       f"  Status: {cr['status']}\n  Risk: {cr.get('risk_level') or '-'}\n"
-                      f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}")
+                      f"  Type: {cr.get('effective_change_type') or cr.get('requested_change_type') or '-'}\n"
+                      f"  Plan: {seen[0]} (content {(seen[1] or '-')[:12]})")
         reason = " ".join(args[1:]).strip()
         if not reason:
             reason = Prompt.ask("Approval reason (required)").strip()
             if not reason:
                 return "[red]A reason is required to approve a change.[/red]"
-        if not Confirm.ask("Approve this change?"):
+        if not Confirm.ask("Approve and run this change?"):
             return "[dim]Approval cancelled.[/dim]"
         actor = cli_actor()
-        try:
-            out = cs.approve(cr_id, actor=actor, reason=reason)
+        try:  # approving a change runs it (as approving a fix plan does); /execute is only the retry
+            out = cs.approve_and_execute(cr_id, actor=actor, reason=reason, content_hash=seen[1] or "")
         except cs.ChangeError as e:
             return f"[red]{_safe_text(e)}[/red]"
-        return f"[green]Change C#{cr_id} approved by {actor.key} ({out['status']}). Execute with: /execute C{cr_id}[/green]"
+        if out["status"] == "executing":
+            return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution.[/green]"
+        if out["status"] == "approved":
+            why = " (the executor is disabled)" if not settings.executor_enabled else ""
+            return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued{why}. "
+                    f"Retry with: /execute C{cr_id}[/yellow]")
+        return (f"[yellow]Change C#{cr_id} approved by {actor.key}; another request moved it to "
+                f"'{out['status']}' before this approval queued a run.[/yellow]")
 
     if not args:
         return "[yellow]Usage: /approve <plan_id|C<id>> \\[reason...][/yellow]"
@@ -2495,6 +2563,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
     from agenticops.auth import authz
     from agenticops.auth.actor import cli_actor
     from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.plan_content import plan_label, stamp_approval
 
     actor = cli_actor()
     init_db()
@@ -2516,6 +2585,10 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return "[yellow]Fix plan was rejected. Create a new plan instead.[/yellow]"
         if plan.status not in ("draft", "pending_approval"):
             return f"[yellow]Fix plan status is '{plan.status}', cannot approve.[/yellow]"
+        from agenticops.services.issue_state import closed_issue_refusal
+        closed = closed_issue_refusal(session, plan.health_issue_id)
+        if closed:
+            return f"[yellow]{_safe_text(closed)}[/yellow]"
 
         try:
             authz.check(actor, "plan.approve", subject=plan)
@@ -2527,6 +2600,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             console.print(
                 f"[bold yellow]Warning:[/bold yellow] This is a [bold]{plan.risk_level}[/bold] fix plan "
                 f"— requires human approval.\n"
+                f"  Plan: {plan_label(plan)}\n"
                 f"  Title: {plan.title}\n"
                 f"  Impact: {plan.estimated_impact or 'N/A'}"
             )
@@ -2540,11 +2614,13 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
             return f"[red]{e}[/red]"
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
+        stamp_approval(session, plan)
 
         # Sync HealthIssue status (change plans have no issue)
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
-        if issue:
-            issue.status = "fix_approved"
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_approved", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} approved")
 
         AuditService.log(Actions.PLAN_APPROVED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
                          details={"reason": reason or None, "risk_level": plan.risk_level,
@@ -2553,14 +2629,15 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         session.commit()  # decision + state + audit row in one transaction
 
         # No auto-chain into execution from the CLI: the operator runs /execute explicitly
-        return f"[green]Fix plan #{plan_id} approved by {actor.key}.[/green] Execute with: /execute {plan_id}"
+        return (f"[green]{plan_label(plan)} (plan #{plan_id}, content {plan.approved_hash[:12]}) approved by "
+                f"{actor.key}.[/green] Execute with: /execute {plan_id}")
     finally:
         session.close()
 
 
 def _slash_execute(ctx: ChatContext, args: list) -> str:
-    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or queue an approved
-    change request (C<id>) for the executor, as the CLI user."""
+    """Handle /execute <plan_id|C<id>> command — execute an approved fix plan, or re-queue an approved
+    change request (C<id>) whose run could not be queued at approval, as the CLI user."""
     from rich.prompt import Confirm
 
     cr_id = _parse_change_ref(args[0]) if args else None
@@ -2597,7 +2674,7 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.auth.actor import cli_actor
-    from agenticops.models import transition_plan
+    from agenticops.models import InvalidStatusTransition, transition_plan
 
     actor = cli_actor()
     init_db()
@@ -2633,7 +2710,8 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
 
-        # Create FixExecution record (status verified 'approved' above — transition cannot raise)
+        # Create FixExecution record. The plan moves only if it is still 'approved' (compare-and-set, MVP-2.7.0 S3):
+        # someone may have withdrawn or queued it while the confirmation prompt waited.
         execution = FixExecution(
             fix_plan_id=plan.id,
             health_issue_id=plan.health_issue_id,
@@ -2641,7 +2719,15 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
             executed_by=actor.key,
             started_at=datetime.now(timezone.utc),
         )
-        transition_plan(plan, "executing")
+        try:
+            transition_plan(plan, "executing")
+        except InvalidStatusTransition as e:
+            session.rollback()
+            return f"[yellow]{_safe_text(str(e))} — reload it and try again.[/yellow]"
+        if plan.health_issue_id:  # the issue moves with its plan
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} executing")
         session.add(execution)
         session.flush()
         AuditService.log(Actions.PLAN_EXECUTE_REQUESTED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
@@ -2863,7 +2949,7 @@ Usage: /workflow <name> [options]"""
         session = get_session()
         try:
             issue_count = session.query(HealthIssue).filter_by(status="open").count()
-            resource_count = session.query(CloudResource).count()
+            resource_count = session.query(CloudResource).filter(PRESENT).count()
             results.append(f"  Resources: {resource_count}, Open issues: {issue_count}")
         finally:
             session.close()
@@ -2889,7 +2975,7 @@ Usage: /workflow <name> [options]"""
         session = get_session()
         try:
             accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
-            resources = session.query(CloudResource).count()
+            resources = session.query(CloudResource).filter(PRESENT).count()
             open_issues = session.query(HealthIssue).filter_by(status="open").count()
             critical = session.query(HealthIssue).filter_by(status="open", severity="critical").count()
             high = session.query(HealthIssue).filter_by(status="open", severity="high").count()
@@ -2960,9 +3046,11 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
         try:
             init_db()
             with get_db_session() as db:
+                # Private sessions are their owner's (MVP-2.7.0): the CLI lists and picks only workspace
+                # sessions; an exact id still resumes one (the CLI is a local operator with DB access).
                 sessions = (
                     db.query(ChatSession)
-                    .filter(ChatSession.archived == False)
+                    .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                     .order_by(
                         ChatSession.pinned.desc(),
                         ChatSession.starred.desc(),
@@ -3016,15 +3104,15 @@ def _slash_session(ctx: ChatContext, args: list) -> str:
                         ).first()
                     if row is None:
                         row = db.query(ChatSession).filter(
-                            ChatSession.name.ilike(f"%{identifier}%")
+                            ChatSession.name.ilike(f"%{identifier}%"), ChatSession.visibility == "workspace"
                         ).first()
                     if row is None:
                         return f"[red]Session '{identifier}' not found.[/red]"
                 else:
-                    # No argument: most recent non-archived session
+                    # No argument: most recent non-archived workspace session
                     row = (
                         db.query(ChatSession)
-                        .filter(ChatSession.archived == False)
+                        .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                         .order_by(ChatSession.last_activity_at.desc())
                         .first()
                     )
@@ -3190,7 +3278,7 @@ def _slash_status(ctx: ChatContext, args: list) -> str:
 
     try:
         accounts = session.query(CloudAccount).filter_by(is_enabled=True).count()
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         open_issues = session.query(HealthIssue).filter_by(status="open").count()
         investigating_issues = session.query(HealthIssue).filter_by(status="investigating").count()
 
@@ -3565,7 +3653,7 @@ Options:
 
     try:
         if entity == "resources":
-            resources = session.query(CloudResource).limit(100).all()
+            resources = session.query(CloudResource).filter(PRESENT).limit(100).all()
             data = [{"type": r.resource_type, "id": r.resource_id, "name": r.name,
                     "region": r.region, "status": r.status} for r in resources]
         elif entity in ("issues", "anomalies"):
@@ -3605,7 +3693,7 @@ def _slash_arch(ctx: ChatContext, args: list) -> str:
         accounts = session.query(CloudAccount).count()
         active_list = session.query(CloudAccount).filter_by(is_enabled=True).all()
         active_names = ", ".join(a.name for a in active_list) if active_list else "none"
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         anomalies = session.query(HealthIssue).filter_by(status="open").count()
 
         fmt = args[0] if args else "tree"
@@ -3715,6 +3803,7 @@ SLASH_COMMANDS = {
     "fixplan": _slash_fix,
     "fixplans": _slash_fix,
     "approve": _slash_approve,
+    "accept": _slash_accept,
     "execute": _slash_execute,
     "exec": _slash_execute,
 
@@ -4243,7 +4332,7 @@ def _cli_setup_db_session(
                 # List recent sessions as a hint
                 recent = (
                     db.query(ChatSession)
-                    .filter(ChatSession.archived == False)
+                    .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                     .order_by(ChatSession.last_activity_at.desc())
                     .limit(5)
                     .all()
@@ -4276,11 +4365,11 @@ def _cli_setup_db_session(
         )
 
     elif resume:
-        # --resume: find the most recent non-archived session
+        # --resume: find the most recent non-archived workspace session (a private one is its owner's)
         with get_db_session() as db:
             row = (
                 db.query(ChatSession)
-                .filter(ChatSession.archived == False)
+                .filter(ChatSession.archived == False, ChatSession.visibility == "workspace")
                 .order_by(ChatSession.last_activity_at.desc())
                 .first()
             )
@@ -4788,7 +4877,7 @@ def _print_service_info(host: str, port: int, *, frontend: bool = False) -> None
     if frontend:
         console.print(f"  Vite dev      : http://localhost:5173/app/  (hot-reload)")
     else:
-        console.print(f"  Web dashboard : http://{host}:{port}/app/")
+        console.print(f"  Web           : http://{host}:{port}/app/")
     console.print(f"  Feishu WS     : {'enabled' if _feishu_active else 'disabled'}")
     console.print(f"  Slack WS      : {'enabled' if _slack_active else 'disabled'}")
     console.print(f"  PID file      : {_SERVICE_PID_FILE}")
@@ -4999,7 +5088,7 @@ def export(
 
     try:
         if entity == "resources":
-            query = session.query(CloudResource)
+            query = session.query(CloudResource).filter(PRESENT)
             if type:
                 query = query.filter_by(resource_type=type)
             if region:
@@ -5078,7 +5167,7 @@ def arch(
         accounts = session.query(CloudAccount).count()
         active_accounts = session.query(CloudAccount).filter_by(is_enabled=True).all()
         active_names = ", ".join(a.name for a in active_accounts) if active_accounts else "none"
-        resources = session.query(CloudResource).count()
+        resources = session.query(CloudResource).filter(PRESENT).count()
         anomalies_open = session.query(HealthIssue).filter_by(status="open").count()
         anomalies_total = session.query(HealthIssue).count()
         reports = session.query(Report).count()
@@ -5280,6 +5369,80 @@ def skills_import(
             )
 
     if not res.installed:
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Connectors
+# ============================================================================
+
+
+def _print_connector_run(status: str, where: str, run_id: int, counts: dict, error: str, extra: str = ""):
+    """One run line; `where` and `error` carry account names and kubectl stderr, so they are shown literally."""
+    color = {"complete": "green", "partial": "yellow"}.get(status, "red")
+    console.print(f"  [{color}]{status}[/{color}]  {_safe_text(where)}  run {run_id}  "
+                  f"[dim]{extra + '  ' if extra else ''}created {counts.get('created', 0)}, "
+                  f"updated {counts.get('updated', 0)}, absent {counts.get('absent', 0)}[/dim]")
+    if error:
+        console.print(f"    [dim]{_safe_text(error)}[/dim]")
+
+
+@connectors_app.command("list")
+def connectors_list(
+    limit: int = typer.Option(5, "--limit", "-l", help="Recent runs shown per connector"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw status as JSON"),
+):
+    """Show each connector's switch, discovery schedule and most recent runs."""
+    from agenticops.connectors import runner
+
+    data = [runner.connector_status(name, limit=limit) for name in sorted(runner.CONNECTORS)]
+    if as_json:
+        console.print_json(data=data)
+        return
+    for c in data:
+        state = "[green]enabled[/green]" if c["enabled"] else "[yellow]disabled[/yellow]"
+        sched = c["schedule"]
+        where = (f"schedule {sched['name']} ({sched['cron_expression']}{'' if sched['is_enabled'] else ', paused'})"
+                 if sched else "no schedule")
+        console.print(f"[bold]{c['name']}[/bold]  {state}  [dim]{where}{'  · running' if c['running'] else ''}[/dim]")
+        if not c["recent_runs"]:
+            console.print("  [dim]no runs yet[/dim]")
+        for r in c["recent_runs"]:
+            finished = (r["finished_at"] or "-")[:16].replace("T", " ")
+            _print_connector_run(r["status"], f"{r['account'] or '-'}/{r['scope']}", r["id"], r["counts"],
+                                 r["error"], f"{r['trigger']} · {finished} UTC")
+
+
+@connectors_app.command("run")
+def connectors_run(
+    name: str = typer.Argument(..., help="Connector name, e.g. k8s"),
+    account: str = typer.Option("", "--account", "-a", help="Only this account (name or cloud account id)"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw result as JSON"),
+):
+    """Run a connector now (trigger=manual) and print one line per target. Exit 1 when nothing was collected."""
+    from dataclasses import asdict
+
+    from agenticops.connectors import runner
+
+    try:
+        res = runner.run_connector(name, account=account, trigger="manual")
+    except runner.UnknownConnector as e:
+        console.print(f"[red]{_safe_text(e)}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        console.print_json(data=asdict(res))
+    elif res.status == "disabled":
+        console.print(f"[yellow]{runner.disabled_message(name)}[/yellow]")
+    elif res.status == "busy":
+        console.print(f"[yellow]connector {name} is already running[/yellow]")
+    elif res.status == "no_targets":
+        console.print(f"[yellow]no targets{_safe_text(f' for account {account!r}') if account else ''}[/yellow]")
+    else:
+        for t in res.targets:
+            _print_connector_run(t.status, f"{t.account}/{t.scope}", t.run_id, t.counts, t.error)
+        if res.graph_build_id:
+            console.print(f"[dim]graph refreshed (build {res.graph_build_id})[/dim]")
+    if res.status not in ("complete", "partial"):
         raise typer.Exit(1)
 
 

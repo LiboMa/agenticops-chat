@@ -319,3 +319,27 @@ class TestSessionUsage:
     def test_unknown_subcommand(self, ctx):
         result = _slash_session(ctx, ["foobar"])
         assert "Usage" in result
+
+
+# ---------------------------------------------------------------------------
+# MVP-2.7.0: a private session is its owner's
+# ---------------------------------------------------------------------------
+
+class TestPrivateSessionsAreNotPicked:
+    """The CLI lists and picks only workspace sessions; an exact id still resumes a private one."""
+
+    def test_list_resume_and_name_lookup_skip_a_private_session(self, ctx, _seed_sessions):
+        uid = f"test-private-{uuid.uuid4().hex[:8]}"
+        with get_db_session() as db:
+            db.add(ChatSession(session_id=uid, name="Private Secret Session", owner_user_id=7, visibility="private",
+                               last_activity_at=datetime.now(timezone.utc) + timedelta(minutes=5)))
+        try:
+            assert "Private Secret Session" not in _slash_session(ctx, ["list"])
+            _slash_session(ctx, ["resume"])
+            assert ctx.db_session_uuid == _seed_sessions["uuids"]["normal"]  # the newest workspace session
+            assert "not found" in _slash_session(ctx, ["resume", "Private Secret"])
+            assert "Resumed session" in _slash_session(ctx, ["resume", uid])
+            assert ctx.db_session_uuid == uid
+        finally:
+            with get_db_session() as db:
+                db.query(ChatSession).filter(ChatSession.session_id == uid).delete()

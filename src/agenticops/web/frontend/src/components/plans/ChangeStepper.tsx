@@ -1,6 +1,8 @@
 import React from "react";
 import { useLocale } from "@/i18n/LocaleContext";
-import { changeStepState, CHANGE_STEP_KEYS, type ChangeStepInput } from "@/lib/changeStepper";
+import {
+  changeStepState, CHANGE_STEP_KEYS, stepLabelKey, visibleStepCount, type ChangeStepInput,
+} from "@/lib/changeStepper";
 
 export const ChangeStepper = React.memo(function ChangeStepper({
   cr,
@@ -11,6 +13,7 @@ export const ChangeStepper = React.memo(function ChangeStepper({
 }) {
   const { t } = useLocale();
   const { index, tone } = changeStepState(cr);
+  const steps = CHANGE_STEP_KEYS.slice(0, visibleStepCount(cr)); // a bad ending is the last step drawn
 
   // Circle/dot colour for step i — shared by the full stepper and the compact dots.
   const colorFor = (i: number): string => {
@@ -24,13 +27,11 @@ export const ChangeStepper = React.memo(function ChangeStepper({
     return "bg-secondary text-muted-foreground";
   };
   const showCheck = (i: number) => i < index || (i === index && tone === "done");
-  // Current step reads the human status when it needs attention; otherwise the step name.
-  const currentLabel = tone === "warn" || tone === "bad" ? t(`changes.status.${cr.status}`) : t(CHANGE_STEP_KEYS[index]);
 
   if (compact) {
     return (
       <div className="flex items-center gap-1" title={t(CHANGE_STEP_KEYS[index])}>
-        {CHANGE_STEP_KEYS.map((key, i) => (
+        {steps.map((key, i) => (
           <span key={key} className={`h-2 w-2 rounded-full ${colorFor(i)}`} />
         ))}
         <span className="text-xs text-foreground">{t(`changes.status.${cr.status}`)}</span>
@@ -40,13 +41,13 @@ export const ChangeStepper = React.memo(function ChangeStepper({
 
   return (
     <ol className="flex items-center gap-2 text-xs">
-      {CHANGE_STEP_KEYS.map((key, i) => (
+      {steps.map((key, i) => (
         <li key={key} className="flex items-center gap-2">
           <span className={`w-6 h-6 rounded-full flex items-center justify-center font-semibold ${colorFor(i)}`}>{showCheck(i) ? "✓" : i + 1}</span>
           <span className={i <= index ? "text-foreground font-medium" : "text-muted-foreground"}>
-            {i === index ? currentLabel : t(key)}
+            {t(stepLabelKey(cr, i))}
           </span>
-          {i < CHANGE_STEP_KEYS.length - 1 && <span className="w-6 h-px bg-border" />}
+          {i < steps.length - 1 && <span className="w-6 h-px bg-border" />}
         </li>
       ))}
     </ol>

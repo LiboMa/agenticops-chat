@@ -343,3 +343,87 @@ _PARSERS: dict[str, callable] = {
     "aws_efs_file_systems": _parse_efs_file_systems,
     "aws_kms_keys": _parse_kms_keys,
 }
+
+
+# ── Completeness (MVP-2.6.1 Plan B Task 10) ────────────────────────
+# A listing may mark vanished rows absent only when it is provably the whole list. parse_cli_output
+# cannot tell "no resources" from "the call failed" (both give []), so the scan engine uses
+# parse_cli_output_checked, which also says whether the listing was complete.
+
+EXPECTED_KEY: dict[str, str] = {
+    "aws_ec2_instances": "Reservations",
+    "aws_lambda_functions": "Functions",
+    "aws_ecs_clusters": "clusterArns",
+    "aws_eks_clusters": "clusters",
+    "aws_rds_instances": "DBInstances",
+    "aws_dynamodb_tables": "TableNames",
+    "aws_elasticache": "CacheClusters",
+    "aws_s3_buckets": "Buckets",
+    "aws_ebs_volumes": "Volumes",
+    "aws_vpcs": "Vpcs",
+    "aws_security_groups": "SecurityGroups",
+    "aws_load_balancers": "LoadBalancers",
+    "aws_subnets": "Subnets",
+    "aws_iam_roles": "Roles",
+    "aws_autoscaling_groups": "AutoScalingGroups",
+    "aws_nat_gateways": "NatGateways",
+    "aws_route53_zones": "HostedZones",
+    "aws_opensearch_domains": "DomainNames",
+    "aws_efs_file_systems": "FileSystems",
+    "aws_kms_keys": "Keys",
+}
+
+PARSER_RESOURCE_TYPE: dict[str, str] = {
+    "aws_ec2_instances": "EC2",
+    "aws_lambda_functions": "Lambda",
+    "aws_ecs_clusters": "ECS",
+    "aws_eks_clusters": "EKS",
+    "aws_rds_instances": "RDS",
+    "aws_dynamodb_tables": "DynamoDB",
+    "aws_elasticache": "ElastiCache",
+    "aws_s3_buckets": "S3",
+    "aws_ebs_volumes": "EBS",
+    "aws_vpcs": "VPC",
+    "aws_security_groups": "SecurityGroup",
+    "aws_load_balancers": "ELB",
+    "aws_subnets": "Subnet",
+    "aws_iam_roles": "IAMRole",
+    "aws_autoscaling_groups": "AutoScaling",
+    "aws_nat_gateways": "NATGateway",
+    "aws_route53_zones": "Route53",
+    "aws_opensearch_domains": "OpenSearch",
+    "aws_efs_file_systems": "EFS",
+    "aws_kms_keys": "KMS",
+}
+
+_PAGE_TOKENS = ("NextToken", "NextMarker")
+_TRUNCATED_FLAGS = ("IsTruncated", "Truncated")
+
+
+def parse_cli_output_checked(parser_key: str, raw: str, region: str) -> tuple[list[dict], bool]:
+    """parse_cli_output plus a completeness verdict: (resources, complete).
+
+    complete is True only when the output is not an error or truncated, is a JSON object whose expected
+    top-level key holds a list, carries no page token, and the parser did not raise. "(no output)" and an
+    unknown parser_key are incomplete. The resources are always what parse_cli_output returns."""
+    parser, key = _PARSERS.get(parser_key), EXPECTED_KEY.get(parser_key)
+    if not parser or not key or not isinstance(raw, str) or raw.startswith("Error"):
+        return [], False
+    if raw.rstrip().endswith("(truncated)"):
+        logger.warning("scan %s/%s: CLI output was truncated; its rows are not marked absent", parser_key, region)
+        return [], False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return [], False
+    if not isinstance(data, dict) or not isinstance(data.get(key), list):
+        return parse_cli_output(parser_key, raw, region), False  # the old best-effort result, never complete
+    try:
+        resources = parser(data, region)
+    except Exception as e:
+        logger.warning("Parser %s failed: %s", parser_key, e)
+        return [], False
+    if any(t in data for t in _PAGE_TOKENS) or any(data.get(f) for f in _TRUNCATED_FLAGS):
+        logger.warning("scan %s/%s: listing carries a page token; its rows are not marked absent", parser_key, region)
+        return resources, False
+    return resources, True

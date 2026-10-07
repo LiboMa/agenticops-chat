@@ -1,18 +1,27 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  acceptAttr,
+  FALLBACK_POLICY,
+  attachmentErrorText,
+  attachmentRules,
   filesFromPaste,
   filesFromDrop,
   validateFiles,
 } from "@/lib/attachments";
+import { useBootstrap } from "@/hooks/useBootstrap";
+import { useLocale } from "@/i18n/LocaleContext";
+import { draftKey, loadDraft, saveDraft, sessionFiles } from "@/lib/chatDrafts";
+import { currentUserId } from "@/lib/home";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
-  onSend: (message: string, files: File[]) => void;
+  /** → whether the message was taken (S5): false gives the text and files back to the composer */
+  onSend: (message: string, files: File[]) => void | Promise<boolean>;
   onCancel?: () => void;
   disabled?: boolean;
   streaming?: boolean;
   sessionId?: string | null;
+  /** S5: put this text in the composer (a starter prompt); a new nonce applies it again. Never sends. */
+  prefill?: { text: string; nonce: number } | null;
 }
 
 // Attachment carries a stable id so removal + React keys never use the array index
@@ -29,10 +38,47 @@ function nextAttachId(): string {
   return `att-${_attachSeq}`;
 }
 
-export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: Props) {
-  const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, prefill }: Props) {
+  const { t } = useLocale();
+  // S5: what the server accepts (bootstrap upload_policy), so the composer and the server agree
+  const boot = useBootstrap();
+  const policy = boot.data?.upload_policy ?? FALLBACK_POLICY;
+  const rules = useMemo(() => attachmentRules(policy), [policy]);
+  // S5: the draft belongs to this installation, user and chat ("new" = the welcome composer)
+  const filesKey = sessionId ?? "new";
+  const key = draftKey(boot.data?.deployment_id, currentUserId(), filesKey);
+  const [input, setInput] = useState(() => loadDraft(localStorage, key).text);
+  const [attachments, setAttachments] = useState<Attachment[]>(
+    () => sessionFiles.get(filesKey).map((f) => ({ id: nextAttachId(), file: f })));
+  const [reselect, setReselect] = useState<string[]>([]);  // names of files a refresh dropped
   const [attachError, setAttachError] = useState<string | null>(null);
+  const loadedKey = useRef<string | null>(null);
+
+  // Switching chats (or the bootstrap arriving with the installation id) loads that chat's draft and files
+  useEffect(() => {
+    if (loadedKey.current === key) return;
+    loadedKey.current = key;
+    const d = loadDraft(localStorage, key);
+    const kept = sessionFiles.get(filesKey);
+    setInput(d.text);
+    setAttachments(kept.map((f) => ({ id: nextAttachId(), file: f })));
+    const keptNames = new Set(kept.map((f) => f.name));
+    setReselect(d.unsentFiles.filter((n) => !keptNames.has(n)));
+  }, [key, filesKey]);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInput(prefill.text);
+    textareaRef.current?.focus();
+  }, [prefill]);
+
+  // Every edit is kept: the text (and the names of attached files) in localStorage, the files in memory
+  useEffect(() => {
+    if (loadedKey.current !== key) return;
+    const files = attachments.map((a) => a.file);
+    sessionFiles.set(filesKey, files);
+    saveDraft(localStorage, key, { text: input, unsentFiles: [...files.map((f) => f.name), ...reselect] });
+  }, [input, attachments, reselect, key, filesKey]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,12 +88,12 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     if (incoming.length === 0) return;
     setAttachments((prev) => {
       const existing = prev.map((a) => a.file);
-      const { accepted, errors } = validateFiles(existing, incoming);
-      setAttachError(errors.length > 0 ? errors.join("; ") : null);
+      const { accepted, errors } = validateFiles(existing, incoming, rules);
+      setAttachError(errors.length > 0 ? errors.map((e) => attachmentErrorText(e, t)).join("; ") : null);
       if (accepted.length === 0) return prev;
       return [...prev, ...accepted.map((f) => ({ id: nextAttachId(), file: f }))];
     });
-  }, []);
+  }, [rules, t]);
 
   // Auto-grow the textarea up to its max height (open-webui-style), then scroll.
   useEffect(() => {
@@ -61,10 +107,22 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     const trimmed = input.trim();
     if ((!trimmed && attachments.length === 0) || disabled) return;
     const fallback = attachments.length > 0 ? "Please analyze the attached file(s)" : "";
-    onSend(trimmed || fallback, attachments.map((a) => a.file));
+    const sentText = input, sentAttachments = attachments;
+    const result = onSend(trimmed || fallback, attachments.map((a) => a.file));
     setInput("");
     setAttachments([]);
+    setReselect([]);
     setAttachError(null);
+    sessionFiles.clear(filesKey);
+    saveDraft(localStorage, key, { text: "", unsentFiles: [] });
+    // S5: the draft is gone only once the server took the message — a refused send gives it back
+    if (result instanceof Promise) {
+      void result.then((ok) => {
+        if (ok || loadedKey.current !== key) return;
+        setInput((cur) => cur || sentText);
+        setAttachments((cur) => (cur.length ? cur : sentAttachments));
+      });
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,7 +194,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     >
       {/* Attachment badges (keyed by stable id, removable by id) */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-2 max-w-4xl mx-auto">
+        <div className="flex flex-wrap items-center gap-2 mb-2 max-w-[760px] mx-auto">
           {attachments.map((a) => (
             <span key={a.id} className="inline-flex items-center gap-1.5 text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg border border-primary-200">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,11 +215,17 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
       )}
 
       {/* Validation error */}
+      {reselect.length > 0 && (
+        <div role="status" className="max-w-[760px] mx-auto mb-2 flex items-start justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+          <span>{t("chat.draft.reselect").replace("{n}", String(reselect.length)).replace("{names}", reselect.join(", "))}</span>
+          <button type="button" onClick={() => setReselect([])} className="shrink-0 underline">{t("home.dismiss")}</button>
+        </div>
+      )}
       {attachError && (
-        <div className="max-w-4xl mx-auto mb-2 text-xs text-red-500">{attachError}</div>
+        <div className="max-w-[760px] mx-auto mb-2 text-xs text-red-500">{attachError}</div>
       )}
 
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-[760px] mx-auto">
         <div className="flex items-center gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
           {/* Hidden file input (multiple) */}
           <input
@@ -169,7 +233,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
             type="file"
             multiple
             className="hidden"
-            accept={acceptAttr}
+            accept={rules.accept}
             onChange={handleFileSelect}
           />
 
@@ -181,7 +245,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
             className="self-center w-8 h-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-primary-600 hover:bg-muted disabled:opacity-50 transition-colors"
-            title="Attach file"
+            title={t("chat.attach.button")} aria-label={t("chat.attach.button")}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -199,7 +263,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
                 handleSend();
               }
             }}
-            placeholder="Ask about AWS resources… (paste/drag files, Cmd+Enter to send)"
+            placeholder={t("chat.input.placeholder")}
             disabled={disabled}
             rows={1}
             className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40 overflow-y-auto"
@@ -208,7 +272,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
             <button
               onClick={onCancel}
               className="self-center w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors flex-shrink-0"
-              title="Stop"
+              title={t("chat.stop")} aria-label={t("chat.stop")}
             >
               <span className="w-3 h-3 bg-white rounded-sm" />
             </button>
@@ -217,7 +281,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
               onClick={handleSend}
               disabled={(!input.trim() && attachments.length === 0) || disabled}
               className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
-              title="Send"
+              title={t("chat.send")} aria-label={t("chat.send")}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />

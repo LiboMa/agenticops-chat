@@ -366,6 +366,55 @@ class Scheduler:
                         execution.error = str(e)
             return
 
+        # K8sDiscovery: every K8s connector target (only the schedule's account's when it names one) —
+        # account-addressed inside the connector, run once.
+        if pipeline_name == "K8sDiscovery":
+            from agenticops.connectors import runner as connector_runner
+            try:
+                res = connector_runner.run_connector("k8s", account=account_name or "", trigger="schedule")
+                errors = "; ".join(t.error for t in res.targets if t.error)
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed" if res.status == "failed" else "completed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.result = {"pipeline": "K8sDiscovery", "status": res.status,
+                                            "targets": len(res.targets), "changed": res.changed,
+                                            "graph_build_id": res.graph_build_id}
+                        execution.error = errors[:4000] if res.status == "failed" else None
+            except Exception as e:
+                logger.error(f"K8sDiscovery schedule '{schedule_name}' failed: {e}")
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.error = str(e)
+            return
+
+        # ResourceScan: the W2 scan of POST /api/scan on a timer — account-addressed inside the engine.
+        if pipeline_name == "ResourceScan":
+            from agenticops.scanner.scheduled import run_scheduled_scan
+            try:
+                res = run_scheduled_scan(account_name)
+                skipped = res["skipped_accounts"]
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed" if skipped else "completed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.result = res
+                        execution.error = "credentials failed: " + ", ".join(skipped) if skipped else None
+            except Exception as e:
+                logger.error(f"ResourceScan schedule '{schedule_name}' failed: {e}")
+                with get_db_session() as session:
+                    execution = session.query(ScheduleExecution).filter_by(id=execution_id).first()
+                    if execution:
+                        execution.status = "failed"
+                        execution.completed_at = datetime.now(timezone.utc)
+                        execution.error = str(e)
+            return
+
         # SecurityPostureSnapshot / SecurityIncrementalPoll: account-agnostic
         # system jobs (like GalaxyBuild) — resolve accounts internally.
         if pipeline_name in ("SecurityPostureSnapshot", "SecurityIncrementalPoll"):

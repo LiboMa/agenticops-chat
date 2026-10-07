@@ -19,17 +19,22 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 from agenticops.auth import authz
-from agenticops.auth.actor import Actor, agent_actor
+from agenticops.auth.actor import Actor, agent_actor, webhook_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
-    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixPlan, InvalidStatusTransition,
-    get_db_session, transition_change, transition_plan,
+    CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixExecution, FixPlan,
+    InvalidStatusTransition, get_db_session, transition_change, transition_plan,
 )
+from agenticops.services.inventory import PRESENT
 from agenticops.services.notification_service import (  # noqa: F401  (pending_approval: approval stage)
     notify_change_pending_approval, notify_change_requested, notify_change_result,
+    notify_execution_pending_acceptance,
 )
+from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
+from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
 from agenticops.services.pipeline_events import log_event
+from agenticops.services.plan_content import approval_conflict, plan_label, stamp_approval, stamp_content
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +163,8 @@ def to_dict(cr: ChangeRequest) -> dict:
         "approval_reason": cr.approval_reason, "rejected_by": cr.rejected_by, "rejected_at": _iso(cr.rejected_at),
         "rejection_reason": cr.rejection_reason, "closed_at": _iso(cr.closed_at), "trace_id": cr.trace_id,
         "chat_session_id": cr.chat_session_id, "created_at": _iso(cr.created_at), "updated_at": _iso(cr.updated_at),
+        "proposed_steps": cr.proposed_steps, "external_ref": cr.external_ref, "steps_diff": cr.steps_diff,
+        "needs_review_reason": cr.needs_review_reason,
     }
 
 
@@ -235,9 +242,13 @@ def change_execution_refusal(plan: Optional[FixPlan]) -> Optional[str]:
 def create_change_request(
     *, source: str, actor: Actor, title: str, description: str, account_name: Optional[str] = None,
     targets: Optional[list[str]] = None, requested_change_type: str = "normal", justification: str = "",
-    chat_session_id: Optional[str] = None, start_review: bool = True,
+    chat_session_id: Optional[str] = None, start_review: bool = True, proposed_steps: Optional[list] = None,
+    external_ref: Optional[dict] = None,
 ) -> dict:
-    """Unified intake for chat / web / cli / im / (P2 webhook). Returns the CR snapshot."""
+    """Unified intake for chat / web / cli / im / webhook. Returns the CR snapshot.
+
+    `proposed_steps` are the requester's own commands (the review validates them instead of authoring new
+    ones); `external_ref` is the ticket in the system the request came from (spec §3.D.2)."""
     _require_enabled()
     _check(actor, "change.request")
     if source not in CHANGE_SOURCES:
@@ -260,6 +271,11 @@ def create_change_request(
         raise ChangeValidationError("too many targets (max 20)")
     if any(len(h) > 200 for h in hints):
         raise ChangeValidationError("target too long (max 200 characters each)")
+    try:
+        steps = normalize_steps(proposed_steps)
+    except ValueError as exc:
+        raise ChangeValidationError(str(exc)) from exc
+    ref = _external_ref(external_ref)
 
     trace_id = get_trace_id() or generate_trace_id()
     with _session() as s:
@@ -273,12 +289,14 @@ def create_change_request(
             title=title[:300], description=description, justification=justification or "", source=source,
             requested_by=actor.key, requester_user_id=actor.user_id, account_id=account_id, target_hints=hints,
             target_resources=[], requested_change_type=requested_change_type, status="draft", trace_id=trace_id,
-            chat_session_id=chat_session_id,
+            chat_session_id=chat_session_id, proposed_steps=steps, external_ref=ref,
+            external_system=ref["system"] if ref else None, external_ticket_id=ref["ticket_id"] if ref else None,
         )
         s.add(cr)
         s.flush()
         _audit(s, Actions.CHANGE_REQUESTED, cr, actor,
-               details={"source": source, "requested_change_type": requested_change_type, "targets": hints},
+               details={"source": source, "requested_change_type": requested_change_type, "targets": hints,
+                        "proposed_steps": len(steps or []), "external_ref": ref},
                new_status="draft")
         snap = to_dict(cr)
     _event(snap["id"], "change_requested", "intake", detail={"source": source, "targets": hints}, actor=actor.key, trace_id=trace_id)
@@ -295,6 +313,66 @@ def create_change_request(
             logger.warning("start_review failed for new ChangeRequest #%s — it stays a draft",
                            snap["id"], exc_info=True)
     return snap
+
+
+_EXTERNAL_SYSTEM = re.compile(r"[a-z0-9_-]{1,50}")
+
+
+def _external_ref(raw) -> Optional[dict]:
+    """The external ticket a request came from, as stored: {system, ticket_id, url?, requested_by?}."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ChangeValidationError("external_ref must be an object {system, ticket_id, url?, requested_by?}")
+    system = str(raw.get("system") or "").strip()
+    ticket = str(raw.get("ticket_id") or "").strip()
+    url = str(raw.get("url") or "").strip()
+    requested_by = str(raw.get("requested_by") or "").strip()
+    if not _EXTERNAL_SYSTEM.fullmatch(system):
+        raise ChangeValidationError("external_ref.system must be 1-50 of a-z, 0-9, '_' or '-'")
+    if not ticket or len(ticket) > 200:
+        raise ChangeValidationError("external_ref.ticket_id is required (max 200 characters)")
+    if url and (len(url) > 1000 or not re.match(r"https?://", url, re.IGNORECASE)):
+        raise ChangeValidationError("external_ref.url must be an http(s) URL (max 1000 characters)")
+    if len(requested_by) > 255:
+        raise ChangeValidationError("external_ref.requested_by too long (max 255 characters)")
+    ref = {"system": system, "ticket_id": ticket}
+    if url:
+        ref["url"] = url
+    if requested_by:
+        ref["requested_by"] = requested_by
+    return ref
+
+
+_intake_lock = threading.Lock()
+
+
+def intake_change(*, title: str, description: str, external_ref: dict, account_name: Optional[str] = None,
+                  targets: Optional[list[str]] = None, justification: str = "", proposed_steps: Optional[list] = None,
+                  requested_by: Optional[str] = None) -> tuple[dict, bool]:
+    """An external system's change request (spec §3.D.3), opened as the actor webhook:<external_ref.system>; its
+    review starts in the background. `requested_by` is who the external system says asked — a claimed name, never
+    an identity — and is kept as external_ref.requested_by.
+
+    Returns (snapshot, created). A still-open request for the same external ticket is returned instead of a second
+    one (created=False)."""
+    _require_enabled()
+    if not external_ref:
+        raise ChangeValidationError("external_ref is required for intake")
+    ref = _external_ref({**external_ref, **({"requested_by": requested_by} if requested_by else {})})
+    with _intake_lock:  # a redelivery racing the first delivery in this process waits for it, then finds it
+        with _session() as s:
+            open_cr = (s.query(ChangeRequest)
+                       .filter(ChangeRequest.external_system == ref["system"],
+                               ChangeRequest.external_ticket_id == ref["ticket_id"],
+                               ChangeRequest.status.notin_(CHANGE_TERMINAL_STATUSES))
+                       .order_by(ChangeRequest.id).first())
+            if open_cr is not None:
+                return to_dict(open_cr), False
+        return create_change_request(source="webhook", actor=webhook_actor(ref["system"]), title=title,
+                                     description=description, account_name=account_name, targets=targets,
+                                     justification=justification, start_review=True, proposed_steps=proposed_steps,
+                                     external_ref=ref), True
 
 
 # ── Review lifecycle ──────────────────────────────────────────────────
@@ -591,7 +669,7 @@ def ground_targets(cr_id: int) -> dict:
     with _session() as s:
         cr = _load(s, cr_id)
         require_live_review(cr, "targets can only be grounded during review")
-        q = s.query(CloudResource)
+        q = s.query(CloudResource).filter(PRESENT)  # an absent row is no evidence the target exists today
         if cr.account_id:
             q = q.filter(CloudResource.account_id == cr.account_id)
         rows = q.all()
@@ -689,26 +767,39 @@ def attach_target(cr_id: int, resource_id: str, resource_type: str, *, actor: Ac
 
 def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
     """Deterministic policy decision for a change (plan_kind=change, emergency, freeze, blast radius).
-    Only during THIS review (require_live_review): a stale run is refused before its policy_decision event."""
-    from agenticops.services.policy_engine import estimate_blast_radius, get_policy_engine
+    Only during THIS review (require_live_review): a stale run is refused before its policy_decision event.
+    A requested or planned command its execution tool refuses outright blocks the change before any rule
+    is consulted (spec §3.D.2) — no risk reading can pass it."""
+    from agenticops.services.policy_engine import PolicyDecision, get_policy_engine, policy_blast_radius
     with _session() as s:
         cr = _load(s, cr_id)
         require_live_review(cr, "policy is evaluated only during review")
-        provider = native_account = None
+        provider = None
         if cr.account_id:
             acct = s.get(CloudAccount, cr.account_id)
             if acct:
                 provider = acct.provider
-                native_account = (acct.credentials or {}).get("account_id") or None
         targets = list(cr.target_resources or [])
         emergency = cr.requested_change_type == "emergency"
         trace_id = cr.trace_id
+        # The widest target sets the blast radius, so one small first target cannot hide a wide change.
+        # Own session: a failed graph read must not poison the caller's transaction (PostgreSQL aborts it);
+        # shadow mode stays zero-impact.
+        blast_radius, shadow_blast_radius = policy_blast_radius(
+            [t.get("db_id") for t in targets], cr.account_id)
+        plan = active_plan_for(s, cr_id)
+        blocked = blocked_commands(cr.proposed_steps, plan.steps if plan else None)
     first = targets[0]["resource_id"] if targets else None
-    decision = get_policy_engine().evaluate(
-        risk_level=risk_level, provider=provider, resource_id=first,
-        blast_radius=estimate_blast_radius(first, native_account), plan_kind="change",
-        emergency=emergency, action_type=action_type,
-    )
+    if blocked:
+        decision = PolicyDecision(action="block", rule_name="blocked_command",
+                                  reasons=[f"blocked command: {c[:200]}" for c in blocked][:5])
+    else:
+        decision = get_policy_engine().evaluate(
+            risk_level=risk_level, provider=provider, resource_id=first,
+            blast_radius=blast_radius, plan_kind="change",
+            emergency=emergency, action_type=action_type,
+        )
+    decision.shadow_blast_radius = shadow_blast_radius
     _event(cr_id, "policy_decision", "approval", decision.action,
            detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},
            actor="policy-engine", trace_id=trace_id)
@@ -801,6 +892,8 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             raise ChangeStateError("the change plan must have a non-empty rollback_plan and non-empty post_checks")
         plan_id = plan.id
         plan_dict = {"id": plan.id, "title": plan.title, "risk_level": risk_level, "summary": plan.summary}
+        # what the plan changed relative to the request, by code (spec §3.D.2) — None when nothing was proposed
+        steps_diff = diff_steps(cr.proposed_steps, plan.steps) if cr.proposed_steps else None
 
     decision = evaluate_policy(cr_id, risk_level, action_type)
     with _session() as s:
@@ -813,7 +906,11 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         cr.review_verdict = verdict
         cr.risk_level = risk_level
         cr.action_type = action_type
+        cr.steps_diff = steps_diff
         plan.risk_level = risk_level
+        stamp_content(s, plan)  # the reviewed risk is part of the content an approval approves
+        plan_dict["content_hash"] = plan.content_hash
+        plan_dict["label"] = plan_label(plan)  # "C#3 implementation plan v1" — how the approval notice names it
         cr.policy_rule = decision.rule_name
         cr.policy_action = decision.action
         cr.effective_change_type = _effective_change_type(decision, cr.requested_change_type)
@@ -853,9 +950,12 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
         return snap
 
     if decision.action == "auto_approve" and settings.change_auto_approve_standard:
+        # approve_and_execute's two steps, with only the approval inside the fallback: once it committed, a
+        # later exception must never ask a human to approve a change that is already approved
         auto = agent_actor("auto-pipeline")
         try:
-            globals()["approve"](cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)")
+            approve(cr_id, actor=auto, reason=f"policy rule {decision.rule_name} (standard change, auto-approved)",
+                    content_hash=plan_dict["content_hash"])
         except Exception:
             # The auto-approve() itself failed (a lost claim, an audit-write error): the CR is still 'planned'.
             # Do not propagate — a review must not 500 because auto-approval could not fire. Fall back to the
@@ -865,32 +965,19 @@ def submit_review(cr_id: int, *, verdict: str, risk_level: Optional[str] = None,
             try:
                 notify_change_pending_approval(snap, plan_dict)
             except Exception:
-                logger.debug("notify_change_pending_approval failed", exc_info=True)
+                logger.warning("notify_change_pending_approval failed", exc_info=True)
             return get_change(cr_id)
-        try:
-            globals()["request_execution"](cr_id, actor=auto)
-        except Exception:
-            # Approved but not enqueued (executor disabled, a lost claim): the APPROVAL is durable — never roll
-            # it back. The change waits at 'approved' for an enabled executor / a human execute, and we surface
-            # the gap as an attention-needing notification rather than losing the approval to an exception.
-            logger.warning("auto-approved ChangeRequest #%s but could not enqueue execution — it waits at approved",
-                           cr_id, exc_info=True)
-            try:
-                notify_change_result(get_change(cr_id), "execution_not_queued")
-            except Exception:
-                logger.debug("notify_change_result failed", exc_info=True)
-            return get_change(cr_id)
-        return get_change(cr_id)
+        return globals()["_queue_approved"](cr_id, auto)
 
     try:
         notify_change_pending_approval(snap, plan_dict)
     except Exception:
-        logger.debug("notify_change_pending_approval failed", exc_info=True)
+        logger.warning("notify_change_pending_approval failed", exc_info=True)
     return snap
 
 
 # ── Approval + execution handoff ──────────────────────────────────────
-# submit_review's auto-approve branch reaches approve()/request_execution() via globals()[...] (deferred
+# submit_review's auto-approve branch reaches _queue_approved() via globals()[...] (deferred
 # lookup). Every HUMAN CR transition here is a conditional claim (_claim) then _transition, in ONE session,
 # exactly the submit_review pattern: a lost claim rolls back every field write so a concurrent transition
 # can never leave the row in a state neither transaction validated. Terminal states are written only by
@@ -907,9 +994,11 @@ def _require_reason(reason: Optional[str]) -> str:
     return reason[:2000]
 
 
-def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
+def approve(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) -> dict:
     """planned → approved (human gate). The claim + every field write share one transaction, so a
-    concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak."""
+    concurrent transition off 'planned' loses the claim and rolls the whole approval back — no leak.
+    `content_hash` is the hash of the implementation plan the approver reviewed; a plan that has changed
+    since is refused (409) and the approval records the hash and version it approved (spec §3.D.1)."""
     _require_enabled()
     reason = _require_reason(reason)
     with _session() as s:
@@ -920,6 +1009,12 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
         plan = active_plan_for(s, cr_id)
         if plan is None:
             raise ChangeStateError("no active change plan to approve")
+        conflict = approval_conflict(s, plan, content_hash)
+        if conflict:
+            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                stamp_content(s, plan)
+                s.commit()
+            raise ChangeStateError(conflict)
         if not _claim(s, cr_id, "planned", "approved"):
             raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
         _transition(cr, "approved")
@@ -927,6 +1022,7 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "") -> dict:
         cr.approved_by, cr.approver_user_id, cr.approved_at, cr.approval_reason = actor.key, actor.user_id, now, reason
         _transition_plan(plan, "approved")
         plan.approved_by, plan.approved_at = actor.key, now
+        stamp_approval(s, plan)
         _audit(s, Actions.CHANGE_APPROVED, cr, actor,
                details={"reason": reason, "risk_level": cr.risk_level, "policy_rule": cr.policy_rule, "plan_id": plan.id},
                old_status="planned", new_status="approved")
@@ -1046,29 +1142,46 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
     return {"execution_id": execution_id, "fix_plan_id": plan_id, "change": snap}
 
 
-_PASS_VALUES = {"pass", "passed", "ok", "succeeded", "success", "true"}
+def approve_and_execute(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) -> dict:
+    """approve() then request_execution() as the same actor — approving a change runs it, as approving a fix
+    plan does (owner ruling 2026-10-03). The one approve-then-queue path: Web API, CLI and the policy
+    auto-approve (which calls the two steps itself, so only the approval falls back to the human gate). A
+    refused approval raises unchanged and queues nothing; a run that cannot be queued never undoes it."""
+    approve(cr_id, actor=actor, reason=reason, content_hash=content_hash)
+    return _queue_approved(cr_id, actor)
 
 
-def _post_checks_passed(post_checks: list, results: Optional[list]) -> Optional[bool]:
-    """True = all pass, False = a failure, None = results missing/incomplete (→ needs_review)."""
-    if not post_checks:
-        return None
-    results = results or []
-    if len(results) < len(post_checks):
-        return None
-    for item in results:
-        if isinstance(item, dict):
-            status = item.get("status", item.get("result", item.get("passed")))
-        else:
-            status = item
-        if str(status).lower() not in _PASS_VALUES:
-            return False
-    return True
+def _queue_approved(cr_id: int, actor: Actor) -> dict:
+    """request_execution() right after an approval. When it is refused and the change still waits at
+    'approved' (executor disabled, no approved plan, an authz denial), that gap is notified as
+    execution_not_queued with the refusal, for the manual retry. A change no longer at 'approved' was moved
+    by another request meanwhile (a concurrent /execute queued it, a cancel withdrew it): nothing to notify."""
+    try:
+        request_execution(cr_id, actor=actor)
+    except Exception as e:
+        cr = get_change(cr_id)
+        if cr["status"] != "approved":
+            logger.info("approved ChangeRequest #%s was moved to '%s' by another request before its run was "
+                        "queued: %s", cr_id, cr["status"], e)
+            return cr
+        logger.warning("approved ChangeRequest #%s but could not enqueue execution — it waits at approved",
+                       cr_id, exc_info=True)
+        try:
+            notify_change_result(cr, "execution_not_queued", reason=str(e))
+        except Exception:
+            logger.debug("notify_change_result failed", exc_info=True)
+        return cr
+    return get_change(cr_id)
 
 
 def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_results: Optional[list] = None,
-                        error: str = "") -> Optional[dict]:
+                        step_results: Optional[list] = None, error: str = "",
+                        judged: Optional[tuple] = None) -> Optional[dict]:
     """The ONLY writer of completed / needs_review / failed / rolled_back. Deterministic; no LLM input.
+
+    The verdict is verification.evaluate's (`judged` when the caller already computed and stored it): passed → completed; a run that did not succeed keeps its 2.6.0
+    mapping (rolled_back / failed); a succeeded run with a failed post-check, or one pending acceptance, →
+    needs_review with the verification reason (the latter notifies execution_pending_acceptance).
 
     An IDEMPOTENT executor callback, not a human action: no _check, but a _claim of executing → the terminal.
     The `!= executing` guard returns the current snapshot (never raises) so a re-delivered callback is a safe
@@ -1082,36 +1195,45 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
         if cr.status != "executing":
             logger.warning("on_execution_result: CR #%d is '%s', ignoring result %s", cr.id, cr.status, execution_status)
             return to_dict(cr)
-        if execution_status == "succeeded":
-            verdict = _post_checks_passed(list(plan.post_checks or []), post_check_results)
-            new_status = "completed" if verdict is True else "needs_review"
-            reason = "all post-checks passed" if verdict is True else (
-                "post-check failed" if verdict is False else "post-check results missing or incomplete")
-        elif execution_status == "rolled_back":
-            new_status, reason = "rolled_back", error or "execution rolled back"
-        else:  # failed | aborted | anything else
-            new_status, reason = "failed", error or f"execution {execution_status}"
+        # One verdict per run: save_execution_result passes the one it stored on the execution (judged), so
+        # the request and its run can never disagree; callers with no results (an abort, a closed ticket) don't.
+        verdict, reason = judged or evaluate(execution_status, plan.post_checks, post_check_results, step_results,
+                                             error)
+        if verdict == PASSED:
+            new_status = "completed"
+        elif execution_status == "succeeded":  # a failed post-check or pending acceptance: a human decides
+            new_status = "needs_review"
+        else:  # rolled_back | failed | aborted | anything else
+            new_status = "rolled_back" if execution_status == "rolled_back" else "failed"
         if not _claim(s, cr.id, "executing", new_status):
             logger.warning("on_execution_result: CR #%d lost the executing claim to a concurrent result, "
                            "ignoring result %s", cr.id, execution_status)
             s.refresh(cr)
             return to_dict(cr)
         _transition(cr, new_status)
+        if new_status == "needs_review":
+            cr.needs_review_reason = reason  # what the human verdict is about, read at the top of the page
         from agenticops.run_context import get_run_context
         actor_key = get_run_context().actor if get_run_context().actor != "system" else "agent:executor"
         action = {"completed": Actions.CHANGE_COMPLETED, "needs_review": Actions.CHANGE_NEEDS_REVIEW,
                   "failed": Actions.CHANGE_FAILED, "rolled_back": Actions.CHANGE_ROLLED_BACK}[new_status]
         AuditService.log(action, EntityTypes.CHANGE_REQUEST, str(cr.id), entity_name=cr.title, actor=actor_key,
                          details={"execution_status": execution_status, "reason": reason, "plan_id": fix_plan_id,
-                                  "post_check_results": (post_check_results or [])[:20]},
+                                  "post_check_results": as_results(post_check_results)[:20]},
                          old_values={"status": "executing"}, new_values={"status": new_status}, session=s)
         snap = to_dict(cr)
+        execution_id = (s.query(FixExecution.id).filter_by(fix_plan_id=fix_plan_id)
+                        .order_by(FixExecution.id.desc()).limit(1).scalar())
     _event(snap["id"], "execution_completed", "execution", new_status,
-           detail={"plan_id": fix_plan_id, "execution_status": execution_status, "reason": reason}, actor=actor_key, trace_id=snap["trace_id"])
+           detail={"plan_id": fix_plan_id, "execution_status": execution_status, "reason": reason,
+                   "verification": verdict}, actor=actor_key, trace_id=snap["trace_id"])
     try:
-        notify_change_result(snap, new_status)
+        if verdict == PENDING and execution_id is not None:
+            notify_execution_pending_acceptance(execution_id, reason, cr=snap)
+        else:
+            notify_change_result(snap, new_status)
     except Exception:
-        logger.debug("notify_change_result failed", exc_info=True)
+        logger.debug("change result notification failed", exc_info=True)
     return snap
 
 
@@ -1129,8 +1251,17 @@ def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> di
         if not _claim(s, cr_id, "needs_review", outcome):
             raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
         _transition(cr, outcome)
+        # The human verdict is also the acceptance of the run it reviewed (one transaction with the terminal)
+        pending = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
+                   .filter(FixPlan.change_request_id == cr_id, FixExecution.verification_status == PENDING)
+                   .order_by(FixExecution.id.desc()).first())
+        if pending is not None:
+            pending.verification_status = PASSED if outcome == "completed" else FAILED
+            pending.accepted_by, pending.accepted_at, pending.acceptance_note = (
+                actor.key, datetime.now(timezone.utc), reason)
         action = Actions.CHANGE_COMPLETED if outcome == "completed" else Actions.CHANGE_FAILED
-        _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True},
+        _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True,
+                                              "execution_id": pending.id if pending is not None else None},
                old_status="needs_review", new_status=outcome)
         snap = to_dict(cr)
     _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])

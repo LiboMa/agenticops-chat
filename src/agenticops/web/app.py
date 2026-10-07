@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTask
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import joinedload
@@ -42,6 +42,7 @@ from agenticops.config import settings
 import asyncio
 import json
 import logging
+import re
 import time
 import urllib.request
 import uuid
@@ -49,6 +50,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
 from agenticops.services.executor_service import ExecutorService
+from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
+from agenticops.services.inventory import PRESENT
 from agenticops.web.session_manager import ChatSessionManager
 
 logger = logging.getLogger(__name__)
@@ -61,7 +64,7 @@ from agenticops.web.schemas import *  # noqa: F401,F403  (API request/response m
 from agenticops.web import schemas as _schemas  # explicit module handle
 from agenticops.web.helpers import (  # cross-router helpers (extracted)
     _infra_ref_key, _guess_type, _build_account_name_map,
-    _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report,
+    _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report, issue_scope_filter,
 )
 from agenticops.auth.actor import Actor
 from agenticops.web.deps import current_actor, require_authenticated_user
@@ -72,11 +75,41 @@ from agenticops.web.deps import current_actor, require_authenticated_user
 # Application Lifespan (startup + shutdown in async context manager)
 # ============================================================================
 
+def _acquire_instance_lock():
+    """Take <data_dir>/.scheduler.lock without waiting. The holder is THE AgenticOps process: it runs the cron
+    scheduler. Any other process on the same data_dir logs an ERROR and serves requests without the scheduler
+    — chat and IM agents, the connector / Galaxy / intake locks and runtime settings are per-process, so a
+    second process (uvicorn --workers N>1, a second replica) silently breaks them (MVP-2.7.0)."""
+    import fcntl
+    path = Path(settings.data_dir) / ".scheduler.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(path, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except OSError:
+        fd.close()
+        logger.error(
+            "Another AgenticOps process already holds %s — run ONE process (uvicorn --workers 1, one replica): "
+            "chat/IM agents, connector/Galaxy/intake locks and runtime settings live in one process's memory. "
+            "This process serves requests but does not run the scheduler.", path)
+        return None
+
+
+def _size_default_executor(loop) -> None:
+    """asyncio.to_thread / run_in_executor share the loop's default pool with every Strands model stream and
+    sync tool, which hold a thread for their whole run; its stock size (CPUs + 4) starves under a few chats."""
+    from concurrent.futures import ThreadPoolExecutor
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=max(4, settings.event_loop_executor_threads),
+                                                 thread_name_prefix="aiops-loop"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown in a single async context manager."""
     # --- Startup ---
     _setup_service_logging()
+    _size_default_executor(asyncio.get_running_loop())
     init_db()
 
     # Surface model-ID config drift early (unmatched IDs lose window tuning
@@ -86,6 +119,17 @@ async def lifespan(app: FastAPI):
         validate_agent_model_ids()
     except Exception:
         pass
+
+    _webhooks_router.warn_if_unauthenticated()
+
+    # MVP-2.7.0 S5: a chat reply an earlier process was writing was cut off — mark it interrupted, never complete
+    try:
+        from agenticops.services.chat_dispatch import interrupt_stale
+        _n = interrupt_stale()
+        if _n:
+            logger.warning("Chat: %d reply dispatch(es) left open by an earlier process marked interrupted", _n)
+    except Exception as e:
+        logger.warning("Chat: interrupt_stale failed: %s", e)
 
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
@@ -126,22 +170,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("MCP config load failed: %s", e)
 
-    # Start background cron scheduler — only in ONE worker to avoid duplicate runs.
-    # uvicorn multiprocessing: first spawned worker gets the lowest PID after master.
-    import os
-    _is_scheduler_worker = os.environ.get("AIOPS_SCHEDULER_WORKER") == "1"
-    if not _is_scheduler_worker:
-        # Auto-elect: only first worker to acquire the file lock runs scheduler
-        import fcntl
-        _lock_path = Path(settings.data_dir) / ".scheduler.lock"
-        _lock_path.parent.mkdir(parents=True, exist_ok=True)
-        _lock_fd = open(_lock_path, "w")
-        try:
-            fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _is_scheduler_worker = True
-        except (IOError, OSError):
-            _lock_fd.close()
-            _lock_fd = None
+    # One AgenticOps process per data_dir: the instance lock elects the scheduler and reports a second process.
+    _lock_fd = _acquire_instance_lock()
+    _is_scheduler_worker = _lock_fd is not None
 
     scheduler_instance = None
     if _is_scheduler_worker:
@@ -173,6 +204,16 @@ async def lifespan(app: FastAPI):
                     logger.info("galaxy: seeded auto-build schedule (cron=%s, interval=%d min)", _cron, _mins)
             except Exception:
                 logger.debug("galaxy: auto schedule seed skipped", exc_info=True)
+        try:
+            from agenticops.connectors.runner import seed_discovery_schedule
+            seed_discovery_schedule()   # no-op while k8s_connector_enabled is false or the row exists
+        except Exception:
+            logger.debug("k8s: discovery schedule seed skipped", exc_info=True)
+        try:
+            from agenticops.scanner.scheduled import seed_scan_schedule
+            seed_scan_schedule()   # no-op when the row exists
+        except Exception:
+            logger.debug("scan: resource-scan schedule seed skipped", exc_info=True)
         if settings.security_review_enabled:
             try:
                 from agenticops.scheduler.scheduler import Scheduler as _SSched, Schedule as _SSchedule
@@ -193,7 +234,7 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.debug("security: auto schedule seed skipped", exc_info=True)
     else:
-        logger.info("Cron scheduler skipped (another worker owns it)")
+        logger.info("Cron scheduler skipped (another process owns it)")
 
     # Auto-detect IM WS from channels.yaml (fallback to config override)
     _startup_log = logging.getLogger(__name__)
@@ -324,6 +365,10 @@ from agenticops.web.routers import changes as _changes_router
 app.include_router(_changes_router.router)
 from agenticops.web.routers import plans as _plans_router
 app.include_router(_plans_router.router)
+from agenticops.web.routers import connectors as _connectors_router
+app.include_router(_connectors_router.router)
+from agenticops.web.routers import ui as _ui_router  # MVP-2.7.0: workspace bootstrap + preferences
+app.include_router(_ui_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -332,6 +377,18 @@ _executor_service = ExecutorService(poll_interval=settings.executor_poll_interva
 # Sessions with an SSE response currently streaming — used to reject
 # mid-stream model switches (409). Entries removed in the generator's finally.
 _streaming_sessions: set[str] = set()
+# MVP-2.7.0 S5: sessions whose dispatch was claimed but whose stream has not started yet → monotonic claim time.
+# With _streaming_sessions this is the one authority on "busy" (one process, S1); a claim whose stream never starts
+# within _CLAIM_START_GRACE_S is dead, and the next send closes it as interrupted instead of waiting on it forever.
+_claimed_dispatches: dict[str, float] = {}
+_CLAIM_START_GRACE_S = 60.0
+
+
+def _chat_dispatch_live(session_id: str) -> bool:
+    if session_id in _streaming_sessions:
+        return True
+    at = _claimed_dispatches.get(session_id)
+    return at is not None and time.monotonic() - at < _CLAIM_START_GRACE_S
 
 from agenticops.services.model_service import get_model_presets  # noqa: E402
 
@@ -420,12 +477,13 @@ async def resources_redirect():
 
 @app.get("/anomalies")
 async def anomalies_redirect():
-    return RedirectResponse(url="/app/anomalies", status_code=302)
+    # the SPA has no /app/anomalies: old links land on Cases (an anomaly id is a HealthIssue id)
+    return RedirectResponse(url="/app/issues", status_code=302)
 
 
 @app.get("/anomaly/{anomaly_id}")
 async def anomaly_redirect(anomaly_id: int):
-    return RedirectResponse(url=f"/app/anomalies/{anomaly_id}", status_code=302)
+    return RedirectResponse(url=f"/app/issues/{anomaly_id}", status_code=302)
 
 
 @app.get("/reports")
@@ -564,7 +622,7 @@ def _acp_available_backends() -> list[str]:
 
 
 @app.get("/api/settings")
-async def api_get_settings():
+def api_get_settings():  # plain def: model presets may list Bedrock models synchronously (one process — S1c)
     """Return all toggleable runtime settings."""
     from agenticops.config import AGENT_NAMES, MODEL_ALIASES, get_agent_model_config, FULL_CONTEXT, get_agent_window_size
 
@@ -633,6 +691,12 @@ async def api_get_settings():
         "change_management_enabled": settings.change_management_enabled,
         "change_auto_approve_standard": settings.change_auto_approve_standard,
         "rbac_enforce": settings.rbac_enforce,
+        # Read-only: whether the graph's potential impact feeds the change policy or is shadow-recorded (MVP-2.6.1)
+        "policy_graph_impact_enforce": settings.policy_graph_impact_enforce,
+        # Read-only: the post-RCA gate's threshold, so IssueDetail can say why auto-fix paused (2026-10-04 spec §8)
+        "rca_min_confidence_for_autofix": settings.rca_min_confidence_for_autofix,
+        # Read-only: how long a fix plan's auto-run counts as in flight, so IssueDetail and POST /execute agree
+        "executor_total_timeout": settings.executor_total_timeout,
     }
 
 
@@ -764,7 +828,7 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     # A non-empty value must be a known preset (same guard as agent model_id would get).
     if "galaxy_model_id" in body:
         val = str(body["galaxy_model_id"] or "")
-        if val and val not in _allowed_model_ids():
+        if val and val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
             raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
         settings.galaxy_model_id = val
         save_to_yaml({"galaxy_model_id": val})
@@ -796,7 +860,7 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         for key, new in changed.items():
             setattr(settings, key, new)
 
-    return await api_get_settings()
+    return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models
 
 
 # ============================================================================
@@ -1299,7 +1363,7 @@ async def api_update_exclude_patterns(body: dict):
 
 
 @app.get("/api/health", response_model=HealthResponse)
-async def api_health():
+def api_health():
     """Health check endpoint."""
     import time
     import shutil
@@ -1392,7 +1456,7 @@ async def api_stats():
     """API endpoint for dashboard stats."""
     with get_db_session() as session:
         return {
-            "total_resources": session.query(CloudResource).count(),
+            "total_resources": session.query(CloudResource).filter(PRESENT).count(),
             "open_anomalies": session.query(HealthIssue).filter_by(status="open").count(),
             "critical_anomalies": session.query(HealthIssue).filter_by(severity="critical", status="open").count(),
             "total_accounts": session.query(CloudAccount).count(),
@@ -1572,7 +1636,7 @@ async def api_detect_environment():
 
 
 @app.get("/api/resources")
-async def api_list_resources(
+def api_list_resources(
     resource_type: Optional[str] = Query(None, alias="type"),
     region: Optional[str] = None,
     account_id: Optional[int] = None,
@@ -1580,10 +1644,13 @@ async def api_list_resources(
     q: Optional[str] = Query(None, description="Search by resource ID, name, or type"),
     limit: Optional[int] = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
+    include_absent: bool = False,
 ):
     """List resources with filtering and optional pagination."""
     with get_db_session() as session:
         query = session.query(CloudResource)
+        if not include_absent:
+            query = query.filter(PRESENT)
 
         if resource_type:
             query = query.filter_by(resource_type=resource_type)
@@ -1602,22 +1669,33 @@ async def api_list_resources(
             )
 
         total = query.count()
-        q_paged = query.offset(offset)
+        # A total order, so paging never repeats or skips a row (MVP-2.7.0 S4)
+        q_paged = query.order_by(CloudResource.resource_type, CloudResource.id).offset(offset)
         if limit is not None:
             q_paged = q_paged.limit(limit)
         resources = q_paged.all()
-        return {
-            "total": total,
-            "items": [ResourceResponse.from_resource(r) for r in resources],
-        }
+        # Health is the Galaxy definition: open, same-account issues anchored to the row; none = unknown, never healthy
+        from agenticops.graph.query_service import health_overlay
+        overlay = health_overlay(session, [r.id for r in resources])
+        items = []
+        for r in resources:
+            item = ResourceResponse.from_resource(r)
+            h = overlay.get(r.id)
+            item.open_issues = len(h["issue_ids"]) if h else 0
+            item.health = h["health"] if h else "unknown"
+            items.append(item)
+        return {"total": total, "items": items}
 
 
 @app.get("/api/resources/type-counts")
-async def api_resource_type_counts():
+async def api_resource_type_counts(include_absent: bool = False):
     """Resource counts grouped by type."""
     with get_db_session() as session:
+        query = session.query(CloudResource.resource_type, func.count())
+        if not include_absent:
+            query = query.filter(PRESENT)
         rows = (
-            session.query(CloudResource.resource_type, func.count())
+            query
             .group_by(CloudResource.resource_type)
             .order_by(func.count().desc())
             .all()
@@ -1669,6 +1747,7 @@ async def api_trigger_scan(req: ScanRequest, background_tasks: BackgroundTasks):
                 "provider": a.provider,
                 "resources_found": a.resources_found,
                 "resources_updated": a.resources_updated,
+                "resources_absent": a.resources_absent,
                 "regions_scanned": a.regions_scanned,
                 "errors": a.errors,
             }
@@ -1772,7 +1851,7 @@ _INFRA_TYPES = {"VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "T
 
 
 @app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
-async def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
+def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
     """List health issues for a resource."""
     with get_db_session() as session:
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
@@ -1832,6 +1911,7 @@ async def api_resource_related(resource_id: int):
                     session.query(CloudResource)
                     .filter(
                         CloudResource.id != resource.id,
+                        PRESENT,
                         func.json_extract(CloudResource.raw_data, f"$.{ref_key}") == resource.resource_id,
                     )
                     .limit(100)
@@ -1871,6 +1951,9 @@ async def api_resource_related(resource_id: int):
 # Anomaly API Endpoints (Legacy — backed by HealthIssue)
 # ============================================================================
 
+# Issues the security review engine creates carry a `security_*` source (security_poll / security_posture); the
+# issue list's `scope` splits them from ops events on the server, because the list is paged.
+
 
 
 
@@ -1882,8 +1965,9 @@ async def api_list_anomalies(
     account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
 ):
-    """List anomalies (backed by HealthIssue)."""
+    """List anomalies (backed by HealthIssue). `scope` splits ops events from security findings."""
     with get_db_session() as session:
         query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
 
@@ -1897,6 +1981,7 @@ async def api_list_anomalies(
             query = query.filter(
                 HealthIssue.metric_data["resource_type"].as_string() == resource_type
             )
+        query = issue_scope_filter(query, scope)
 
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
@@ -1920,9 +2005,11 @@ async def api_get_anomaly(anomaly_id: int):
 
 
 @app.put("/api/anomalies/{anomaly_id}/status", response_model=AnomalyResponse)
-async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate):
+async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate,
+                                    actor: Actor = Depends(current_actor)):
     """Update anomaly status (backed by HealthIssue) with state machine enforcement."""
-    from agenticops.models import InvalidStatusTransition, validate_status_transition
+    from agenticops.models import InvalidStatusTransition
+    from agenticops.services.issue_state import transition_issue
 
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=anomaly_id).first()
@@ -1930,15 +2017,11 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
             raise HTTPException(status_code=404, detail="Anomaly not found")
 
         try:
-            validate_status_transition(issue.status, update.status)
+            transition_issue(session, issue.id, update.status, actor=actor.key, reason="anomaly status update")
         except InvalidStatusTransition as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-
-        issue.status = update.status
-        if update.status == "resolved" and issue.resolved_at is None:
-            issue.resolved_at = datetime.now(timezone.utc)
 
         # Auto-learn: dismissed issues create detect agent memory
         if update.status == "dismissed":
@@ -1973,15 +2056,15 @@ async def api_get_anomaly_rca(issue_id: int):
 
 
 @app.post("/api/anomalies/{issue_id}/rca", status_code=202)
-async def api_trigger_anomaly_rca(issue_id: int):
-    """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint)."""
-    return await api_trigger_rca(issue_id)
+async def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/anomalies/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_anomaly_fix_plan(issue_id: int):
-    """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint)."""
-    return await api_trigger_fix_plan(issue_id)
+async def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -1996,9 +2079,10 @@ async def api_list_issues(
     account_id: Optional[int] = Query(None),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
 ):
     """List issues."""
-    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset)
+    return await api_list_anomalies(severity, status, resource_type, account_id, limit, offset, scope)
 
 
 @app.get("/api/issues/{issue_id}", response_model=AnomalyResponse)
@@ -2008,9 +2092,9 @@ async def api_get_issue(issue_id: int):
 
 
 @app.put("/api/issues/{issue_id}/status", response_model=AnomalyResponse)
-async def api_update_issue_status(issue_id: int, update: AnomalyStatusUpdate):
-    """Update issue status."""
-    return await api_update_anomaly_status(issue_id, update)
+async def api_update_issue_status(issue_id: int, update: AnomalyStatusUpdate, actor: Actor = Depends(current_actor)):
+    """Update issue status (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_update_anomaly_status(issue_id, update, actor)
 
 
 @app.get("/api/issues/{issue_id}/rca", response_model=Optional[RCAResponse])
@@ -2020,15 +2104,15 @@ async def api_get_issue_rca(issue_id: int):
 
 
 @app.post("/api/issues/{issue_id}/rca", status_code=202)
-async def api_trigger_issue_rca(issue_id: int):
-    """Trigger RCA analysis for an issue."""
-    return await api_trigger_rca(issue_id)
+async def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA analysis for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_issue_fix_plan(issue_id: int):
-    """Trigger fix plan generation for an issue."""
-    return await api_trigger_fix_plan(issue_id)
+async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger fix plan generation for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
+    return await api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2037,24 +2121,41 @@ async def api_trigger_issue_fix_plan(issue_id: int):
 
 
 @app.get("/api/health-issues", response_model=List[HealthIssueResponse])
-async def api_list_health_issues(
+def api_list_health_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
     trace_id: Optional[str] = None,
     account_id: Optional[int] = Query(None),
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
+    q: Optional[str] = Query(None, max_length=200),
+    sort: str = Query("newest", pattern="^(newest|oldest|severity)$"),
+    limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
-    """List health issues with filtering."""
-    with get_db_session() as session:
-        query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
+    """List health issues (the Cases queue, MVP-2.7.0 S4): `scope` ops|security|all, `status` / `severity` one or a
+    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity."""
+    import re
+    from sqlalchemy import case
+    from agenticops.models import VALID_ISSUE_STATUSES
+    severities = {"critical", "high", "medium", "low"}
 
-        if severity:
-            query = query.filter_by(severity=severity)
-        if status:
-            query = query.filter_by(status=status)
+    def _list(raw: Optional[str], valid: set, name: str) -> list:
+        values = [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+        bad = [x for x in values if x not in valid]
+        if bad:
+            raise HTTPException(status_code=422, detail=f"invalid {name} {bad}; expected one of {sorted(valid)}")
+        return values
+
+    statuses = _list(status, VALID_ISSUE_STATUSES, "status")
+    severity_list = _list(severity, severities, "severity")
+    with get_db_session() as session:
+        query = session.query(HealthIssue)
+        if severity_list:
+            query = query.filter(HealthIssue.severity.in_(severity_list))
+        if statuses:
+            query = query.filter(HealthIssue.status.in_(statuses))
         if resource_id:
             query = query.filter_by(resource_id=resource_id)
         if source:
@@ -2063,6 +2164,22 @@ async def api_list_health_issues(
             query = query.filter_by(trace_id=trace_id)
         if account_id is not None:
             query = query.filter_by(account_id=account_id)
+        query = issue_scope_filter(query, scope)
+        term = (q or "").strip()
+        if term:
+            like = _like(term)
+            conds = [HealthIssue.title.ilike(like, escape="\\"), HealthIssue.resource_id.ilike(like, escape="\\")]
+            num = re.fullmatch(r"[Ii]?#?(\d{1,9})", term)
+            if num:
+                conds.append(HealthIssue.id == int(num.group(1)))
+            query = query.filter(or_(*conds))
+        if sort == "oldest":
+            query = query.order_by(HealthIssue.detected_at.asc(), HealthIssue.id.asc())
+        elif sort == "severity":
+            rank = case({"critical": 0, "high": 1, "medium": 2, "low": 3}, value=HealthIssue.severity, else_=4)
+            query = query.order_by(rank, HealthIssue.detected_at.desc(), HealthIssue.id.desc())
+        else:
+            query = query.order_by(HealthIssue.detected_at.desc(), HealthIssue.id.desc())
 
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
@@ -2070,8 +2187,10 @@ async def api_list_health_issues(
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
-async def api_get_health_issue(issue_id: int):
-    """Get health issue by ID."""
+def api_get_health_issue(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Get health issue by ID, with what the viewer may do on it (MVP-2.7.0 S4: add a note)."""
+    from agenticops.services.ui_actions import route_allows
+
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -2079,11 +2198,14 @@ async def api_get_health_issue(issue_id: int):
         acct_name = None
         if issue.account_id:
             acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
-        return HealthIssueResponse.from_issue(issue, acct_name)
+        resp = HealthIssueResponse.from_issue(issue, acct_name)
+        allowed, code = route_allows(actor, "issue.note", issue)
+        resp.available_actions = [{"action": "note", "allowed": allowed, "reason_code": code, "effect": "update"}]
+        return resp
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
-async def api_create_health_issue(data: HealthIssueCreate):
+def api_create_health_issue(data: HealthIssueCreate):
     """Create a new health issue via the Signal Gate (dedup applies; MVP-2.2.0).
 
     A duplicate of an active issue returns THAT issue (merged) instead of
@@ -2122,9 +2244,10 @@ async def api_create_health_issue(data: HealthIssueCreate):
 
 
 @app.put("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
-async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
+async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate, actor: Actor = Depends(current_actor)):
     """Update a health issue with state machine enforcement on status transitions."""
-    from agenticops.models import InvalidStatusTransition, validate_status_transition
+    from agenticops.models import InvalidStatusTransition
+    from agenticops.services.issue_state import transition_issue
 
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
@@ -2132,23 +2255,17 @@ async def api_update_health_issue(issue_id: int, data: HealthIssueUpdate):
             raise HTTPException(status_code=404, detail="Health issue not found")
 
         update_data = data.model_dump(exclude_unset=True)
-
-        # Validate status transition if status is being changed
-        new_status = update_data.get("status")
-        if new_status and new_status != issue.status:
+        new_status = update_data.pop("status", None)  # the status goes through transition_issue, never setattr
+        transitioning_to_resolved = False
+        if new_status:
             try:
-                validate_status_transition(issue.status, new_status)
+                old_status = transition_issue(session, issue.id, new_status, actor=actor.key,
+                                              reason="edited via the API")
             except InvalidStatusTransition as e:
                 raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-
-        # Auto-set resolved_at when status transitions to resolved
-        transitioning_to_resolved = (
-            new_status == "resolved" and issue.status != "resolved"
-        )
-        if transitioning_to_resolved:
-            update_data["resolved_at"] = datetime.now(timezone.utc)
+            transitioning_to_resolved = new_status == "resolved" and old_status != "resolved"
 
         for key, value in update_data.items():
             setattr(issue, key, value)
@@ -2336,13 +2453,48 @@ async def api_list_providers():
 # ============================================================================
 
 
-def _fix_plan_response(session, plan) -> FixPlanResponse:
-    resp = FixPlanResponse.model_validate(plan)
-    if plan.health_issue_id:
-        resp.account_id = session.query(HealthIssue.account_id).filter_by(id=plan.health_issue_id).scalar()
-    elif plan.change_request_id:
-        resp.account_id = session.query(ChangeRequest.account_id).filter_by(id=plan.change_request_id).scalar()
-    return resp
+def _issue_target(issue) -> dict:
+    md = issue.metric_data if isinstance(issue.metric_data, dict) else {}
+    return {"resource_id": issue.resource_id or None, "resource_ref": issue.resource_ref,
+            "anchor_status": issue.anchor_status, "resource_type": md.get("resource_type") or None,
+            "region": md.get("region") or None}
+
+
+def _fix_plan_rows(session, plans, actor: Optional[Actor]) -> list:
+    """Responses for these plans with their issue's context and the actor's actions — a fixed number of queries
+    whatever the count (MVP-2.7.0 S3)."""
+    from agenticops.services.pipeline_service import runs_in_flight
+    from agenticops.services.ui_actions import plan_actions
+    issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
+    issues = ({i.id: i for i in session.query(HealthIssue).filter(HealthIssue.id.in_(issue_ids)).all()}
+              if issue_ids else {})
+    cr_ids = {p.change_request_id for p in plans if p.change_request_id}
+    cr_accounts = (dict(session.query(ChangeRequest.id, ChangeRequest.account_id)
+                        .filter(ChangeRequest.id.in_(cr_ids)).all()) if cr_ids else {})
+    approved = [p for p in plans if p.status == "approved"]
+    flying = runs_in_flight(session, approved) if approved and actor is not None else set()
+    out = []
+    for p in plans:
+        resp = FixPlanResponse.model_validate(p)
+        issue = issues.get(p.health_issue_id)
+        if issue is not None:
+            resp.account_id, resp.issue_title, resp.issue_status = issue.account_id, issue.title, issue.status
+            resp.target = _issue_target(issue)
+        elif p.change_request_id:
+            resp.account_id = cr_accounts.get(p.change_request_id)
+        if actor is not None:
+            resp.available_actions = plan_actions(p, actor, issue_status=issue.status if issue else None,
+                                                  run_in_flight=p.id in flying)
+        out.append(resp)
+    return out
+
+
+def _fix_plan_response(session, plan, actor: Optional[Actor] = None) -> FixPlanResponse:
+    return _fix_plan_rows(session, [plan], actor)[0]
+
+
+def _like(term: str) -> str:
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
@@ -2364,11 +2516,28 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
         authz.check(actor, "plan.reject", subject=plan)
     except authz.AuthzDenied as e:
         raise HTTPException(status_code=403, detail=str(e))
+    if plan.status == "approved":
+        # an approval's auto-run writes no row until it ends: withdrawing now would leave the executor running while
+        # the issue invites a new plan (final review I5)
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        if plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is in progress; it cannot be withdrawn now")
     old = plan.status
     try:
         transition_plan(plan, "rejected")
     except InvalidStatusTransition as e:
         raise HTTPException(status_code=409, detail=str(e))
+    if old == "approved" and plan.health_issue_id:
+        # withdrawn before it ran: the issue goes back to root_cause_identified (the 2.6.1 back-edge) so its page
+        # offers a new plan instead of a retry the execute endpoint would refuse
+        from agenticops.services.issue_state import IssueStatusConflict, transition_issue
+        issue = session.get(HealthIssue, plan.health_issue_id)
+        if issue is not None and issue.status == "fix_approved":
+            try:
+                transition_issue(session, issue.id, "root_cause_identified", actor=actor.key,
+                                 reason=f"FixPlan #{plan.id} withdrawn before it ran", expected="fix_approved")
+            except IssueStatusConflict as e:
+                raise HTTPException(status_code=409, detail=str(e))
     plan.rejected_by = actor.key
     plan.rejected_at = datetime.now(timezone.utc)
     plan.rejection_reason = reason
@@ -2378,62 +2547,68 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
 
 
 @app.get("/api/fix-plans", response_model=List[FixPlanResponse])
-async def api_list_fix_plans(
+def api_list_fix_plans(
     status: Optional[str] = None,
     risk_level: Optional[str] = None,
     health_issue_id: Optional[int] = None,
     account_id: Optional[int] = Query(None),
     kind: Optional[str] = Query(None, pattern="^(fix|change)$"),
+    q: Optional[str] = Query(None, max_length=100),
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
+    actor: Actor = Depends(current_actor),
 ):
-    """List fix plans with filtering (`kind` = fix | change)."""
+    """List fix plans (`kind` = fix | change; `status` = one or a comma list; `q` = id / title / target)."""
+    import re
+    from agenticops.models import VALID_PLAN_STATUSES
+    statuses = [x.strip() for x in status.split(",") if x.strip()] if status else []
+    bad = [x for x in statuses if x not in VALID_PLAN_STATUSES]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"invalid status {bad}; expected one of {sorted(VALID_PLAN_STATUSES)}")
     with get_db_session() as session:
-        query = session.query(FixPlan).order_by(FixPlan.created_at.desc())
-
+        query = session.query(FixPlan).order_by(FixPlan.created_at.desc(), FixPlan.id.desc())
         if kind:
             query = query.filter_by(plan_kind=kind)
-        if status:
-            query = query.filter_by(status=status)
+        if statuses:
+            query = query.filter(FixPlan.status.in_(statuses))
         if risk_level:
             query = query.filter_by(risk_level=risk_level)
         if health_issue_id:
             query = query.filter_by(health_issue_id=health_issue_id)
-        if account_id is not None:
-            # a fix plan's account is its HealthIssue's, a change plan's is its ChangeRequest's
+        term = (q or "").strip()
+        if account_id is not None or term:
+            # a fix plan's account / target is its HealthIssue's, a change plan's account its ChangeRequest's
             query = (query.outerjoin(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
-                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id)
-                          .filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id)))
-
+                          .outerjoin(ChangeRequest, FixPlan.change_request_id == ChangeRequest.id))
+        if account_id is not None:
+            query = query.filter(or_(HealthIssue.account_id == account_id, ChangeRequest.account_id == account_id))
+        if term:
+            like = _like(term)
+            conds = [FixPlan.title.ilike(like, escape="\\"), HealthIssue.title.ilike(like, escape="\\"),
+                     HealthIssue.resource_id.ilike(like, escape="\\")]
+            # I#n is an issue, P#n / #n a plan, a bare number either
+            num = re.fullmatch(r"([IiPp]?)(#?)(\d{1,9})", term)
+            if num:
+                n = int(num.group(3))
+                is_issue = num.group(1).lower() == "i"
+                is_plan = num.group(1).lower() == "p" or (not num.group(1) and num.group(2) == "#")
+                if not is_plan:
+                    conds.append(FixPlan.health_issue_id == n)
+                if not is_issue:
+                    conds.append(FixPlan.id == n)
+            query = query.filter(or_(*conds))
         plans = query.offset(offset).limit(limit).all()
-        # Resolve account_id from the plan's parent: its HealthIssue (fix) or its ChangeRequest (change)
-        issue_ids = {p.health_issue_id for p in plans if p.health_issue_id}
-        issue_accounts: dict[int, Optional[int]] = {}
-        if issue_ids:
-            rows = session.query(HealthIssue.id, HealthIssue.account_id).filter(HealthIssue.id.in_(issue_ids)).all()
-            issue_accounts = {iid: aid for iid, aid in rows}
-        cr_ids = {p.change_request_id for p in plans if p.change_request_id}
-        cr_accounts: dict[int, Optional[int]] = {}
-        if cr_ids:
-            rows = session.query(ChangeRequest.id, ChangeRequest.account_id).filter(ChangeRequest.id.in_(cr_ids)).all()
-            cr_accounts = {cid: aid for cid, aid in rows}
-        results = []
-        for p in plans:
-            resp = FixPlanResponse.model_validate(p)
-            resp.account_id = (issue_accounts.get(p.health_issue_id) if p.health_issue_id
-                               else cr_accounts.get(p.change_request_id))
-            results.append(resp)
-        return results
+        return _fix_plan_rows(session, plans, actor)
 
 
 @app.get("/api/fix-plans/{plan_id}", response_model=FixPlanResponse)
-async def api_get_fix_plan(plan_id: int):
-    """Get fix plan by ID."""
+def api_get_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Get fix plan by ID, with its issue's context and the actor's actions."""
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.post("/api/fix-plans", response_model=FixPlanResponse, status_code=201)
@@ -2480,6 +2655,7 @@ async def api_create_fix_plan(data: FixPlanCreate):
             post_checks=data.post_checks,
         )
         session.add(plan)
+        stamp_content(session, plan)
         session.flush()
         return FixPlanResponse.model_validate(plan)
 
@@ -2512,6 +2688,7 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
             raise HTTPException(status_code=409, detail=refusal)
         update_data = data.model_dump(exclude_unset=True)
         status_alias = update_data.pop("status", None)
+        update_data.pop("content_hash", None)
         if status_alias is not None and status_alias != "rejected":
             raise HTTPException(status_code=400, detail="Status changes must use /approve, /reject or /execute")
         content_present = any(k in update_data for k in _FIXPLAN_CONTENT_FIELDS)
@@ -2523,6 +2700,15 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 authz.check(actor, "plan.edit", subject=plan)
             except authz.AuthzDenied as e:
                 raise HTTPException(status_code=403, detail=str(e))
+            # MVP-2.7.0 S3: an edit names the content it was made against — a plan changed since is refused
+            if not data.content_hash:
+                raise HTTPException(status_code=422, detail="content_hash is required to edit a plan's content")
+            conflict = approval_conflict(session, plan, data.content_hash)
+            if conflict:
+                if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                    stamp_content(session, plan)
+                    session.commit()
+                raise HTTPException(status_code=409, detail=conflict)
         changed_old, changed_new = {}, {}
         for key, value in update_data.items():
             current = getattr(plan, key)
@@ -2537,23 +2723,31 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                              user_id=actor.user_id, details={"fields": sorted(changed_new)},
                              old_values=changed_old, new_values=changed_new, session=session)
             plan.updated_at = datetime.now(timezone.utc)  # bump only when content actually changed
+            stamp_content(session, plan)
         session.flush()
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.put("/api/fix-plans/{plan_id}/approve", response_model=FixPlanResponse)
-async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(default=FixPlanApproveBody()),
-                               actor: Actor = Depends(current_actor)):
+async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Actor = Depends(current_actor)):
     """Approve a plan as the authenticated actor. The body's approved_by is a legacy claimed name:
     it is audited (details.claimed_name) but never stored as the approver. The L2/L3 agent ceiling
-    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor."""
+    is enforced by rbac (no-agent-approval-above-l1, enforce: always) on the resolved actor.
+    content_hash is required (422 without it): it is the plan the approver reviewed, and a plan whose
+    content has changed since is refused (409). The approval records the hash and version it approved.
+    Checks run 404 → 403 → state 409 → hash 409: a caller who may not approve learns nothing about the plan."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     from agenticops.models import InvalidStatusTransition, transition_plan
+    from agenticops.services.issue_state import closed_issue_refusal
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        try:
+            authz.check(actor, "plan.approve", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "approved")
         if refusal:
@@ -2563,10 +2757,15 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
             raise HTTPException(status_code=409, detail="Fix plan is already approved")
         if plan.status == "rejected":
             raise HTTPException(status_code=409, detail="Fix plan was rejected. Create a new plan instead")
-        try:
-            authz.check(actor, "plan.approve", subject=plan)
-        except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+        closed = closed_issue_refusal(session, plan.health_issue_id)
+        if closed:
+            raise HTTPException(status_code=409, detail=closed)
+        conflict = approval_conflict(session, plan, data.content_hash)
+        if conflict:
+            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
+                stamp_content(session, plan)
+                session.commit()
+            raise HTTPException(status_code=409, detail=conflict)
         old = plan.status
         try:
             transition_plan(plan, "approved")
@@ -2574,10 +2773,12 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
             raise HTTPException(status_code=409, detail=str(e))
         plan.approved_by = actor.key
         plan.approved_at = datetime.now(timezone.utc)
+        stamp_approval(session, plan)
         # Sync HealthIssue status (change plans have no issue)
-        issue = session.query(HealthIssue).filter_by(id=plan.health_issue_id).first() if plan.health_issue_id else None
-        if issue:
-            issue.status = "fix_approved"
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_approved", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} approved")
         details = {"reason": data.reason, "risk_level": plan.risk_level, "plan_kind": plan.plan_kind}
         if data.approved_by and actor.kind == "web":
             details["claimed_name"] = data.approved_by
@@ -2587,7 +2788,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody = Body(def
         # Capture plan_id before session closes
         approved_plan_id = plan.id
         session.flush()
-        response = _fix_plan_response(session, plan)
+        response = _fix_plan_response(session, plan, actor)
 
     # Chain to auto-execute (outside DB session)
     try:
@@ -2608,7 +2809,7 @@ async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Acto
             raise HTTPException(status_code=404, detail="Fix plan not found")
         _reject_plan(session, plan, actor, data.reason)
         session.flush()
-        return _fix_plan_response(session, plan)
+        return _fix_plan_response(session, plan, actor)
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)
@@ -2639,7 +2840,7 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
     """
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
-    from agenticops.models import transition_plan
+    from agenticops.models import InvalidStatusTransition, transition_plan
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
@@ -2667,8 +2868,21 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
 
-        # Mark plan as executing (status verified 'approved' above — cannot raise)
-        transition_plan(plan, "executing")
+        # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
+        # must not run the same plan alongside it (2026-10-05 final review C1)
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        if plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is already in progress")
+
+        # Mark plan as executing; the issue moves with it
+        try:
+            transition_plan(plan, "executing")
+        except InvalidStatusTransition as e:  # a concurrent execute / withdraw moved it first (CAS)
+            raise HTTPException(status_code=409, detail=str(e))
+        if plan.health_issue_id:
+            from agenticops.services.issue_state import advance_issue
+            advance_issue(session, plan.health_issue_id, "fix_executing", actor=actor.key,
+                          reason=f"FixPlan #{plan.id} executing")
 
         execution = FixExecution(
             fix_plan_id=plan_id,
@@ -2734,7 +2948,7 @@ async def api_list_issue_executions(issue_id: int):
 
 
 @app.get("/api/health-issues/{issue_id}/timeline")
-async def api_get_issue_timeline(issue_id: int):
+def api_get_issue_timeline(issue_id: int):
     """Get the pipeline event timeline for a health issue."""
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
@@ -2743,6 +2957,30 @@ async def api_get_issue_timeline(issue_id: int):
 
     from agenticops.services.pipeline_events import get_timeline
     return get_timeline(issue_id)
+
+
+@app.post("/api/health-issues/{issue_id}/notes", response_model=IssueNote, status_code=201)
+def api_add_issue_note(issue_id: int, data: IssueNoteRequest, actor: Actor = Depends(current_actor)):
+    """Append a note to an issue's activity (MVP-2.7.0 S4) as the session actor — never edited, never deleted, and it
+    does not move the issue. 404 → authz 403 → content 422; stored in this request's transaction or refused."""
+    from agenticops.auth import authz
+    from agenticops.services.issue_notes import NoteRejected, add_note
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+        try:
+            authz.check(actor, "issue.note", subject=issue)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        try:
+            ev, text = add_note(session, issue, data.content, actor)
+        except NoteRejected as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        session.commit()
+        return IssueNote(event_id=ev.id, health_issue_id=issue.id, content=text, actor=ev.actor,
+                         created_at=ev.created_at)
 
 
 @app.get("/api/trace/{trace_id}")
@@ -2829,6 +3067,20 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
 
+@app.post("/api/fix-executions/{execution_id}/accept", response_model=FixExecutionResponse)
+async def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Actor = Depends(current_actor)):
+    """Accept or reject an execution pending acceptance (MVP-2.6.1): a fix moves its issue (fix_executed →
+    resolved | root_cause_identified), a change goes through the change's resolve-review. The identity is the
+    session's actor; authorized as the plan kind's approval, so a webhook actor is 403 even in shadow mode."""
+    from agenticops.services.verification import AcceptanceError, accept_execution
+    try:
+        accept_execution(execution_id, actor=actor, decision=data.decision, reason=data.reason)
+    except AcceptanceError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    with get_db_session() as session:
+        return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
+
+
 @app.get("/api/executor/status")
 async def api_executor_status():
     """Get executor service status."""
@@ -2847,7 +3099,7 @@ async def api_executor_status():
 
 
 @app.post("/api/rag/pipeline/{health_issue_id}")
-async def api_run_rag_pipeline(health_issue_id: int):
+def api_run_rag_pipeline(health_issue_id: int):
     """Manually trigger RAG pipeline for a health issue."""
     if not settings.rag_pipeline_enabled:
         raise HTTPException(status_code=400, detail="RAG pipeline is disabled")
@@ -3191,7 +3443,7 @@ async def api_get_report(report_id: int):
 
 
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
-async def api_generate_report(request: ReportGenerateRequest):
+def api_generate_report(request: ReportGenerateRequest):
     """Generate a new report."""
     from agenticops.report import ReportGenerator
 
@@ -3232,12 +3484,11 @@ async def api_generate_report(request: ReportGenerateRequest):
 
 
 @app.post("/api/reports/from-session", response_model=ReportResponse, status_code=201)
-async def api_report_from_session(request: ReportFromSessionRequest):
+async def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
     """Create a report from a chat session's messages."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        chat_session = db.query(ChatSession).filter_by(session_id=request.session_id).first()
-        if not chat_session:
-            raise HTTPException(status_code=404, detail=f"Chat session {request.session_id} not found")
+        chat_session = chat_access.get_visible_session(db, request.session_id, actor)
 
         query = (
             db.query(ChatMessage)
@@ -3705,29 +3956,56 @@ async def api_list_im_apps():
 # ============================================================================
 
 
+def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, cls=ChatSessionResponse,
+                           context: Optional[dict] = None, **extra):
+    """One session as the caller sees it (owned_by_me is relative to the caller); `context` from
+    services/chat_context.context_views (S5)."""
+    from agenticops.services import chat_access
+    return cls(
+        context=context,
+        id=row.id, session_id=row.session_id, name=row.name,
+        created_at=row.created_at, updated_at=row.updated_at,
+        last_activity_at=row.last_activity_at, message_count=message_count,
+        pinned=bool(row.pinned), starred=bool(row.starred), archived=bool(row.archived),
+        model_id=row.model_id, effort=row.effort,
+        visibility=row.visibility or chat_access.WORKSPACE, owned_by_me=chat_access.owned_by(row, actor),
+        can_manage=chat_access.can_manage(row, actor),
+        **extra,
+    )
+
+
+def _context_http_error(e) -> HTTPException:
+    """A services/chat_context.ContextError as the contract's UiError body."""
+    return HTTPException(status_code=e.status, detail={"detail": str(e), "code": e.code})
+
+
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
-async def api_create_chat_session(payload: ChatSessionCreate):
+def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(current_actor)):
+    from agenticops.services import chat_access, chat_context
     sid = str(uuid.uuid4())
     name = payload.name or f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+    owner, visibility = chat_access.new_session_owner(actor)
     with get_db_session() as db:
-        row = ChatSession(session_id=sid, name=name)
+        row = ChatSession(session_id=sid, name=name, owner_user_id=owner, visibility=visibility)
+        try:
+            chat_context.apply_context(row, chat_context.resolve_context(
+                db, payload.context.model_dump() if payload.context else None))
+        except chat_context.ContextError as e:
+            raise _context_http_error(e)
         db.add(row)
         db.flush()
-        return ChatSessionResponse(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at, message_count=0,
-            model_id=row.model_id, effort=row.effort,
-        )
+        return _chat_session_response(row, 0, actor, context=chat_context.context_views(db, [row])[row.id])
 
 
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
 async def api_list_chat_sessions(
     limit: int = Query(default=50, le=100),
     include_archived: bool = Query(default=False),
+    actor: Actor = Depends(current_actor),
 ):
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        query = db.query(ChatSession)
+        query = chat_access.visible_filter(db.query(ChatSession), actor)
         if not include_archived:
             query = query.filter(ChatSession.archived == False)
         rows = (
@@ -3736,40 +4014,31 @@ async def api_list_chat_sessions(
             .limit(limit)
             .all()
         )
-        result = []
-        for r in rows:
-            cnt = db.query(func.count(ChatMessage.id)).filter(
-                ChatMessage.session_id == r.id
-            ).scalar()
-            result.append(ChatSessionResponse(
-                id=r.id, session_id=r.session_id, name=r.name,
-                created_at=r.created_at, updated_at=r.updated_at,
-                last_activity_at=r.last_activity_at, message_count=cnt,
-                pinned=r.pinned, starred=r.starred, archived=r.archived,
-                model_id=r.model_id, effort=r.effort,
-            ))
-        return result
+        # One grouped count for the page, not one COUNT per session
+        counts = dict(
+            db.query(ChatMessage.session_id, func.count(ChatMessage.id))
+            .filter(ChatMessage.session_id.in_([r.id for r in rows]))
+            .group_by(ChatMessage.session_id)
+            .all()
+        ) if rows else {}
+        from agenticops.services.chat_context import context_views
+        views = context_views(db, rows)
+        return [_chat_session_response(r, counts.get(r.id, 0), actor, context=views[r.id]) for r in rows]
 
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
-async def api_get_chat_session(session_id: str):
+async def api_get_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
     """Session metadata only. History is fetched via the paginated
     /sessions/{id}/messages endpoint. `messages` is always [] (deprecated)."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
         cnt = db.query(func.count(ChatMessage.id)).filter(
             ChatMessage.session_id == row.id
         ).scalar()
-        return ChatSessionDetail(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at,
-            message_count=cnt,
-            pinned=row.pinned, starred=row.starred, archived=row.archived,
-            messages=[],
-        )
+        from agenticops.services.chat_context import context_views
+        return _chat_session_response(row, cnt, actor, cls=ChatSessionDetail, messages=[],
+                                      context=context_views(db, [row])[row.id])
 
 
 @app.get("/api/chat/sessions/{session_id}/messages", response_model=ChatMessagesPage)
@@ -3777,13 +4046,13 @@ async def api_get_chat_messages(
     session_id: str,
     limit: int = Query(default=50, ge=1, le=100),
     before: Optional[int] = Query(default=None, description="Return messages with id < before (older page)"),
+    actor: Actor = Depends(current_actor),
 ):
     """Cursor-paginated chat history, newest-first window returned in
     chronological (oldest→newest) order. Cursor = ChatMessage.id."""
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
 
         q = db.query(ChatMessage).filter(ChatMessage.session_id == row.id)
         if before is not None:
@@ -3804,6 +4073,7 @@ async def api_get_chat_messages(
                 cost_usd=(m.token_usage or {}).get("cost_usd"),
                 attachments=m.attachments, suggestions=m.suggestions,
                 created_at=m.created_at,
+                client_message_id=m.client_message_id, dispatch_state=m.dispatch_state,
             ) for m in page_chrono],
             has_more=has_more,
             next_cursor=next_cursor,
@@ -3811,13 +4081,17 @@ async def api_get_chat_messages(
 
 
 @app.patch("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks):
+async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, background_tasks: BackgroundTasks,
+                                  actor: Actor = Depends(current_actor)):
+    from agenticops.services import chat_access
+    with get_db_session() as db:  # first: a session the caller cannot see is a 404 before anything else answers
+        chat_access.get_visible_session(db, session_id, actor)
     model_field_set = "model_id" in payload.model_fields_set
     effort_field_set = "effort" in payload.model_fields_set
     if (model_field_set or effort_field_set) and session_id in _streaming_sessions:
         raise HTTPException(409, "A response is still streaming — stop it before switching model or effort")
     if model_field_set and payload.model_id:
-        allowed = _allowed_model_ids()
+        allowed = await asyncio.to_thread(_allowed_model_ids)  # may list Bedrock models: off the event loop
         if payload.model_id not in allowed:
             raise HTTPException(400, f"Unknown model id. Allowed: {sorted(allowed)[:10]} ...")
     if effort_field_set and payload.effort:
@@ -3826,9 +4100,22 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
             raise HTTPException(400, f"Unknown effort level. Allowed: {sorted(allowed_effort)}")
 
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
+        chat_access.check_manage(row, actor)
+        from agenticops.services import chat_context
+        if "context" in payload.model_fields_set:  # S5: until the first message is sent
+            if row.context_locked_at is not None:
+                raise HTTPException(409, detail={"detail": "The chat's context is locked once a message is sent; "
+                                                           "start a new chat for another context",
+                                                 "code": "context_locked"})
+            try:
+                chat_context.apply_context(row, chat_context.resolve_context(
+                    db, payload.context.model_dump() if payload.context else None))
+            except chat_context.ContextError as e:
+                raise _context_http_error(e)
+        if payload.visibility is not None:
+            chat_access.check_visibility_change(row, actor, payload.visibility)
+            row.visibility = payload.visibility
         if payload.name is not None:
             row.name = payload.name
         if payload.pinned is not None:
@@ -3851,13 +4138,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
-        response = ChatSessionResponse(
-            id=row.id, session_id=row.session_id, name=row.name,
-            created_at=row.created_at, updated_at=row.updated_at,
-            last_activity_at=row.last_activity_at, message_count=cnt,
-            pinned=row.pinned, starred=row.starred, archived=row.archived,
-            model_id=row.model_id, effort=row.effort,
-        )
+        response = _chat_session_response(row, cnt, actor, context=chat_context.context_views(db, [row])[row.id])
 
     # Rebuild this session's agent with the new model/effort on next message
     if agent_changed:
@@ -3900,12 +4181,16 @@ def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
 
 
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
-async def api_delete_chat_session(session_id: str):
+async def api_delete_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
+    from agenticops.models import SessionSummary
+    from agenticops.services import chat_access
     with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
+        row = chat_access.get_visible_session(db, session_id, actor)
+        chat_access.check_manage(row, actor)
         db.query(ChatMessage).filter(ChatMessage.session_id == row.id).delete()
+        # FK cascades are not enforced on SQLite: a summary left behind could be injected into a later
+        # session that reuses this primary key.
+        db.query(SessionSummary).filter(SessionSummary.session_id == row.id).delete()
         db.delete(row)
     _chat_sessions.remove(session_id)
 
@@ -3927,7 +4212,7 @@ async def api_delete_chat_session(session_id: str):
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
-async def api_send_chat_message(session_id: str, request: Request):
+async def api_send_chat_message(session_id: str, request: Request, actor: Actor = Depends(current_actor)):
     """Send a message, optionally with a file attachment.
 
     Accepts:
@@ -3935,6 +4220,14 @@ async def api_send_chat_message(session_id: str, request: Request):
     - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
     """
     from agenticops.chat.preprocessor import preprocess_message
+    from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
+    from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
+    from agenticops.services import chat_access, chat_dispatch
+
+    # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
+    # no upload is read, no /channel or /send_to command executes, and the 404 reveals nothing.
+    with get_db_session() as db:
+        chat_access.get_visible_session(db, session_id, actor)
 
     content_type = request.headers.get("content-type", "")
     file_contents: list[tuple[str, str]] = []
@@ -3944,17 +4237,20 @@ async def api_send_chat_message(session_id: str, request: Request):
 
     scan_focus_req: Optional[str] = None
 
-    if "multipart/form-data" in content_type:
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
+        client_message_id = str(form.get("client_message_id", "")).strip()
+        if not re.fullmatch(chat_dispatch.UUID_RE, client_message_id):
+            raise HTTPException(422, "client_message_id (a UUID) is required")
         uploads = form.getlist("file")
         valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
 
         # Server-side cap (defense-in-depth): client enforces 5, but client
         # validation is bypassable (curl/Postman). Each file is read fully into
         # memory below, so bound the batch independent of the client.
-        MAX_UPLOAD_FILES = 5
+        from agenticops.chat.file_reader import MAX_UPLOAD_FILES
         if len(valid_uploads) > MAX_UPLOAD_FILES:
             raise HTTPException(400, f"Too many files ({len(valid_uploads)}); max {MAX_UPLOAD_FILES}")
 
@@ -3997,19 +4293,25 @@ async def api_send_chat_message(session_id: str, request: Request):
             text_content = f"Please analyze the attached file(s): {_names}"
         user_content = text_content
     else:
-        payload = ChatMessageCreate(**(await request.json()))
+        try:
+            payload = ChatMessageCreate(**(await request.json()))
+        except ValidationError as e:  # raised in the body, so FastAPI would answer 500, not 422
+            raise HTTPException(422, json.loads(e.json()))
+        except (ValueError, TypeError):  # not JSON, or not an object
+            raise HTTPException(422, "Expected a JSON object with content and client_message_id")
         user_content = payload.content
         scan_focus_req = payload.scan_focus
+        client_message_id = payload.client_message_id
 
     # Intercept /channel command before agent dispatch
     if user_content.strip().lower().startswith(("/channel", "/channels")):
         from agenticops.chat.channel import execute_channel
 
-        ch_result = execute_channel(user_content.strip())
+        ch_result = await asyncio.to_thread(execute_channel, user_content.strip())  # `/channel test` sends
 
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            if row:
+            if row and chat_access.can_see(row, actor):  # still the caller's to write (it may have gone private)
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=ch_result.message))
                 row.last_activity_at = datetime.now(timezone.utc)
@@ -4024,12 +4326,12 @@ async def api_send_chat_message(session_id: str, request: Request):
     if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
 
-        send_result = execute_send_to(user_content.strip())
+        send_result = await asyncio.to_thread(execute_send_to, user_content.strip())
 
         # Persist user message + result
         with get_db_session() as db:
             row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            if row:
+            if row and chat_access.can_see(row, actor):  # still the caller's to write (it may have gone private)
                 db.add(ChatMessage(session_id=row.id, role="user", content=user_content))
                 db.add(ChatMessage(session_id=row.id, role="assistant", content=send_result.message))
                 row.last_activity_at = datetime.now(timezone.utc)
@@ -4040,24 +4342,64 @@ async def api_send_chat_message(session_id: str, request: Request):
 
         return EventSourceResponse(_send_to_stream())
 
-    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock])
+    # Validate session & claim the dispatch (checked again: it may have gone private since the first check).
+    # MVP-2.7.0 S5: one user message = one dispatch — a repeat is replayed or refused, never run twice.
+    from agenticops.chat.context_block import build_context_block
+    from agenticops.services import chat_context
+    with get_db_session() as db:
+        row = chat_access.get_visible_session(db, session_id, actor)
+        _private_session = (row.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE
+        claimed = chat_dispatch.claim(db, row, client_message_id, user_content, attachments,
+                                      busy=_chat_dispatch_live(session_id))
+        if claimed.kind == "busy":
+            raise HTTPException(409, detail={"detail": "This chat already has a reply running",
+                                             "code": "session_busy", "trace_id": None})
+        if claimed.kind == "in_flight":
+            raise HTTPException(409, detail={"detail": "This message is already being answered",
+                                             "code": "duplicate_in_flight", "trace_id": None})
+        if claimed.kind == "replay":
+            # the state is the original message's own; the reply only the one that answered it
+            _prior = db.get(ChatMessage, claimed.user_message_id)
+            replay = {"user_message_id": claimed.user_message_id,
+                      "assistant_message_id": claimed.reply.id if claimed.reply else None,
+                      "content": claimed.reply.content if claimed.reply else "",
+                      "state": (_prior.dispatch_state if _prior else None) or "completed",
+                      "trace_id": claimed.reply.trace_id if claimed.reply else None}
+        else:
+            _claimed_dispatches[session_id] = time.monotonic()
+            chat_context.lock(row)
+            row.last_activity_at = datetime.now(timezone.utc)
+            bound_account_id = row.context_account_id
+            context_block = build_context_block(db, row)
+            user_message_id = claimed.user_message_id
+        db_session_pk = row.id
+
+    if claimed.kind == "replay":
+        async def _replay_stream():
+            yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
+                                                            "user_message_id": replay["user_message_id"],
+                                                            "trace_id": replay["trace_id"]})}
+            if replay["content"]:
+                yield {"event": "text", "data": json.dumps({"token": replay["content"]})}
+            yield {"event": "done", "data": json.dumps({
+                "input_tokens": 0, "output_tokens": 0, "replayed": True,
+                "terminal_status": replay["state"],
+                "user_message_id": replay["user_message_id"],
+                "assistant_message_id": replay["assistant_message_id"]})}
+        return EventSourceResponse(_replay_stream())
+
+    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock]); refs outside the
+    # chat's bound account are withheld, and a linked / bound chat's turn starts with its context block (S5)
     enriched_content, _ = preprocess_message(
         user_content, file_contents=file_contents,
         file_images=file_images, file_documents=file_documents,
+        bound_account_id=bound_account_id,
     )
-
-    # Validate session & persist user message
-    with get_db_session() as db:
-        row = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        if not row:
-            raise HTTPException(404, "Session not found")
-        msg = ChatMessage(
-            session_id=row.id, role="user", content=user_content,
-            attachments=attachments,
-        )
-        db.add(msg)
-        row.last_activity_at = datetime.now(timezone.utc)
-        db_session_pk = row.id
+    if context_block:
+        if isinstance(enriched_content, str):
+            enriched_content = context_block + "\n\n" + enriched_content
+        else:
+            enriched_content = [{"text": context_block}, *enriched_content]
 
     async def _generate():
         # Set scan focus for this request if provided
@@ -4066,19 +4408,19 @@ async def api_send_chat_message(session_id: str, request: Request):
             parts = [p.strip().lower() for p in scan_focus_req.split(",") if p.strip()]
             if all(p in VALID_SCAN_FOCUS for p in parts):
                 set_scan_focus(scan_focus_req)
-        agent = _chat_sessions.get_or_create(session_id)
         # Set trace_id for this chat turn so sub-agent logs are correlated
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
         set_trace_id(_chat_trace_id)
-        # Run Context for this chat turn — tools/services read it for audit attribution
-        # (the REST dependency current_actor does not run for this SSE handler).
-        from agenticops.auth.actor import actor_from_request
+        # Run Context for this chat turn — tools/services read it for audit attribution. The stream runs in
+        # its own task, so the context current_actor stamped on the request is set again here.
         from agenticops.run_context import RunContext, set_run_context
-        _actor = actor_from_request(request)
+        _actor = actor
+        # S5: a chat bound to an account runs bound to it — every credentialed tool fails closed on any other
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
-                                   agent_name="main", chat_session_id=session_id))
+                                   agent_name="main", chat_session_id=session_id,
+                                   bound_account_id=bound_account_id))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
@@ -4086,11 +4428,22 @@ async def api_send_chat_message(session_id: str, request: Request):
         output_tokens = 0
         cache_read_tokens = 0
         cache_write_tokens = 0
+        interrupted = False
+        closed = False  # set once this dispatch has its terminal state
         _streaming_sessions.add(session_id)
+        _claimed_dispatches.pop(session_id, None)
         try:
+            yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
+                                                            "user_message_id": user_message_id,
+                                                            "trace_id": _chat_trace_id})}
+            await asyncio.to_thread(chat_dispatch.set_state, user_message_id, "running")
+            # Building a session's agent (MCP clients included) is slow, blocking work: off the loop — and inside the
+            # try, so a build that fails closes the dispatch as failed instead of leaving the chat busy (S5 review)
+            agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
+                    interrupted = True  # S5: the partial reply is stored as interrupted, never as complete
                     break
                 ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
                 # Enhanced backend (enhanced_task async-gen) sub-events streamed
@@ -4118,12 +4471,27 @@ async def api_send_chat_message(session_id: str, request: Request):
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
                     accumulated += ev["data"]
                     yield {"event": "text", "data": json.dumps({"token": ev["data"]})}
-                # Tool use
+                # Tool use — one entry per call (S5: keyed by the model's toolUseId; by name when there is none)
                 if "current_tool_use" in ev:
                     tool_name = ev["current_tool_use"].get("name", "")
-                    if tool_name and tool_name not in [t["name"] for t in tool_calls]:
-                        tool_calls.append({"name": tool_name, "status": "running"})
-                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name})}
+                    call_id = ev["current_tool_use"].get("toolUseId") or tool_name
+                    if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
+                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id})
+                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name, "call_id": call_id})}
+                # A tool's result: its outcome comes from the result's status, never from its name (S5)
+                _msg = ev.get("message")
+                if isinstance(_msg, dict):
+                    for _block in _msg.get("content") or []:
+                        _res = _block.get("toolResult") if isinstance(_block, dict) else None
+                        if not isinstance(_res, dict):
+                            continue
+                        for t in tool_calls:
+                            if t.get("call_id") == _res.get("toolUseId") and t["status"] != "done":
+                                _txt = " ".join(c.get("text", "") for c in (_res.get("content") or [])
+                                                if isinstance(c, dict) and isinstance(c.get("text"), str))
+                                t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"), _txt)
+                                yield {"event": "tool_end", "data": json.dumps(
+                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"]})}
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
@@ -4143,13 +4511,16 @@ async def api_send_chat_message(session_id: str, request: Request):
             for t in tool_calls:
                 if t["status"] == "done":
                     continue
-                t["status"] = "done"
-                yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
+                t["status"], t["outcome"] = "done", "unknown"  # no result seen: unknown, never assumed ok
+                yield {"event": "tool_end", "data": json.dumps(
+                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown"})}
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)
             from agenticops.chat.suggestions import extract_suggestions
             _clean_text, _suggestions = extract_suggestions(accumulated)
+            _terminal = "interrupted" if interrupted else "completed"
+            assistant_message_id = None
             with get_db_session() as db:
                 if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
                     logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
@@ -4165,7 +4536,7 @@ async def api_send_chat_message(session_id: str, request: Request):
                             "model": _msg_model,
                         }
                         _tu["cost_usd"] = compute_cost(_msg_model, _tu)
-                    db.add(ChatMessage(
+                    _reply = ChatMessage(
                         session_id=db_session_pk,
                         role="assistant",
                         content=_clean_text,
@@ -4173,7 +4544,14 @@ async def api_send_chat_message(session_id: str, request: Request):
                         tool_calls=tool_calls if tool_calls else None,
                         token_usage=_tu,
                         trace_id=_chat_trace_id,
-                    ))
+                        dispatch_state=_terminal,
+                    )
+                    db.add(_reply)
+                    db.flush()
+                    assistant_message_id = _reply.id
+                db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
+                    {"dispatch_state": _terminal}, synchronize_session=False)
+            closed = True
 
             # Auto-name session after first exchange
             import re as _re
@@ -4199,16 +4577,19 @@ async def api_send_chat_message(session_id: str, request: Request):
                 log_agent_call(
                     agent_name="main",
                     action="chat",
-                    input_summary=user_content[:500],
-                    output_summary=accumulated[:500],
+                    # GET /api/agent-logs shows these to everyone: a private session's text stays out of it
+                    input_summary="" if _private_session else user_content[:500],
+                    output_summary="" if _private_session else accumulated[:500],
                     tool_calls=len(tool_calls),
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     duration_ms=int((time.monotonic() - _chat_start_time) * 1000),
                     trace_id=_chat_trace_id,
                     model_id=_main_model_id,
-                    actor_type="user",
-                    actor_id=getattr(getattr(request, "state", None), "user", None),
+                    # the actor's key, not request.state.user (a User object in a String column: with auth on
+                    # every chat-turn log row failed to insert and was silently dropped)
+                    actor_type=actor.kind,
+                    actor_id=actor.key,
                 )
             except Exception:
                 logger.debug("Failed to log main agent call", exc_info=True)
@@ -4219,6 +4600,9 @@ async def api_send_chat_message(session_id: str, request: Request):
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "suggestions": _suggestions,
+                    "terminal_status": _terminal,
+                    "user_message_id": user_message_id,
+                    "assistant_message_id": assistant_message_id,
                 }),
             }
         except Exception as e:
@@ -4227,7 +4611,8 @@ async def api_send_chat_message(session_id: str, request: Request):
             # UI can distinguish a failed turn from a completed one, and the user
             # message stays for retry. ChatMessage has no status column, so the
             # marker rides in the token_usage JSON.
-            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500]}
+            _code = classify_stream_error(e)
+            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500], "error_code": _code}
             with get_db_session() as db:
                 db.add(ChatMessage(
                     session_id=db_session_pk,
@@ -4235,9 +4620,22 @@ async def api_send_chat_message(session_id: str, request: Request):
                     content=accumulated or "",
                     tool_calls=tool_calls if tool_calls else None,
                     token_usage=err_meta,
+                    dispatch_state="failed",
                 ))
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+                db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
+                    {"dispatch_state": "failed"}, synchronize_session=False)
+            closed = True
+            yield {"event": "error", "data": json.dumps({"code": _code, "message": STREAM_ERROR_MESSAGES[_code],
+                                                         "trace_id": _chat_trace_id})}
         finally:
+            # A cancelled stream (the client went away; sse-starlette cancels the generator) skips the code above:
+            # the dispatch is still closed, as interrupted — a chat is never left busy (S5)
+            if not closed:
+                try:
+                    chat_dispatch.close_interrupted(db_session_pk, user_message_id, accumulated,
+                                                    tool_calls or None, _chat_trace_id)
+                except Exception:
+                    logger.warning("Could not close chat dispatch %s", user_message_id, exc_info=True)
             _streaming_sessions.discard(session_id)
 
     return EventSourceResponse(_generate())
@@ -4288,8 +4686,9 @@ if _cors_origins:
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "If-Match"],
+        expose_headers=["ETag"],
         max_age=settings.cors_max_age,
     )
 
@@ -4302,58 +4701,66 @@ if _cors_origins:
 _PUBLIC_PATHS = {"/api/health", "/api/auth/login", "/api/auth/register"}
 _PUBLIC_PREFIXES = ("/app/", "/static/", "/docs", "/openapi.json", "/redoc")
 
-if settings.api_auth_enabled:
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
-    class APIAuthMiddleware(BaseHTTPMiddleware):
-        """Enforce Bearer token auth on /api/* endpoints when enabled."""
 
-        async def dispatch(self, request, call_next):
-            path = request.url.path
+class APIAuthMiddleware(BaseHTTPMiddleware):
+    """Enforce Bearer token auth on /api/* endpoints when enabled."""
 
-            # Skip non-API and public paths
-            if not path.startswith("/api/") or path in _PUBLIC_PATHS:
-                return await call_next(request)
-            if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
-                return await call_next(request)
-            # Allow OPTIONS for CORS preflight
-            if request.method == "OPTIONS":
-                return await call_next(request)
+    async def dispatch(self, request, call_next):
+        # The routed path: request.url is rebuilt from the client's Host header, so `Host: x/?` would make it '/'
+        path = request.scope["path"]
 
-            auth_header = request.headers.get("authorization", "")
-            if not auth_header.startswith("Bearer "):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Authentication required. Use 'Authorization: Bearer <token>' header."},
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            token = auth_header[7:]
-            from agenticops.auth import AuthService
-
-            # Try API key (aiops_*) or session token
-            user = None
-            if token.startswith("aiops_"):
-                result = AuthService.validate_api_key(token)
-                if result:
-                    user, api_key = result
-                    # The key's scoped permissions cap the owner's: actor_from_request intersects them.
-                    request.state.api_key = api_key
-            else:
-                user = AuthService.validate_session(token)
-
-            if not user:
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Invalid or expired token."},
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            # Attach user to request state for downstream use
-            request.state.user = user
+        # Skip non-API and public paths
+        if not path.startswith("/api/") or path in _PUBLIC_PATHS:
+            return await call_next(request)
+        if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+        # Allow OPTIONS for CORS preflight
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        # Alert intake carries its own shared-token / HMAC check once webhook_secret is set
+        if settings.webhook_secret and _webhooks_router.is_webhook_intake(request.method, path):
+            return await call_next(request)
+        # Change intake's HMAC is its authentication once change_intake_secret is set (unset, it is a 404)
+        if settings.change_intake_secret and _changes_router.is_change_intake(request.method, path):
             return await call_next(request)
 
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required. Use 'Authorization: Bearer <token>' header."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token = auth_header[7:]
+        from agenticops.auth import AuthService
+
+        # Try API key (aiops_*) or session token
+        user = None
+        if token.startswith("aiops_"):
+            result = AuthService.validate_api_key(token)
+            if result:
+                user, api_key = result
+                # The key's scoped permissions cap the owner's: actor_from_request intersects them.
+                request.state.api_key = api_key
+        else:
+            user = AuthService.validate_session(token)
+
+        if not user:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired token."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Attach user to request state for downstream use
+        request.state.user = user
+        return await call_next(request)
+
+
+if settings.api_auth_enabled:
     app.add_middleware(APIAuthMiddleware)
     logger.info("API authentication enabled — all /api/* endpoints require Bearer token")
 
@@ -4628,8 +5035,19 @@ def _get_im_sessions():
 
 
 async def _handle_im_message(platform: str, msg) -> None:
-    """Process an inbound IM message: run agent → reply via notifier."""
-    from agenticops.im.gateway import IMInboundMessage
+    """Process an inbound IM message: run agent → reply via notifier. The turn (a command, or a whole agent
+    run) and its persistence run in a worker thread — inline they froze every other request, SSE included."""
+    response_text = await asyncio.to_thread(_run_im_turn, platform, msg)
+    notifier = _get_im_sessions().get_notifier(platform, msg.chat_id, msg.app_name)
+    if notifier:
+        try:
+            await notifier.send(subject="", body=response_text, severity=None)
+        except Exception as e:
+            logger.error("IM reply failed (%s:%s): %s", platform, msg.chat_id, e)
+
+
+def _run_im_turn(platform: str, msg) -> str:
+    """The blocking part of one IM message: the reply text, with both messages persisted."""
 
     # Intercept /channel command before agent dispatch
     content_stripped = msg.content.strip()
@@ -4683,8 +5101,6 @@ async def _handle_im_message(platform: str, msg) -> None:
             logger.error("IM agent error (%s:%s): %s", platform, msg.chat_id, e)
             response_text = f"Agent error: {e}"
 
-    notifier = _get_im_sessions().get_notifier(platform, msg.chat_id, msg.app_name)
-
     # Persist messages
     from agenticops.models import ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel
     with get_db_session() as db:
@@ -4707,13 +5123,7 @@ async def _handle_im_message(platform: str, msg) -> None:
         # Save assistant response
         db.add(ChatMessageModel(session_id=row.id, role="assistant", content=response_text))
         row.last_activity_at = datetime.now(timezone.utc)
-
-    # Reply to IM
-    if notifier:
-        try:
-            await notifier.send(subject="", body=response_text, severity=None)
-        except Exception as e:
-            logger.error("IM reply failed (%s:%s): %s", platform, msg.chat_id, e)
+    return response_text
 
 
 @app.post("/api/im/feishu/callback")
@@ -4856,20 +5266,28 @@ class IssueFeedbackRequest(BaseModel):
 
 
 class RcaFeedbackRequest(BaseModel):
-    """Schema for RCA-level human verdict (MVP-2.2.0 ground-truth capture)."""
-    verdict: str = Field(..., pattern="^(correct|incorrect)$")
+    """Schema for RCA-level human verdict (MVP-2.2.0 ground-truth capture).
+
+    location_verdict (MVP-2.6.1) judges the root-cause location on its own; at least one of the two is given.
+    """
+    verdict: Optional[str] = Field(None, pattern="^(correct|incorrect)$")
     note: str = ""
+    location_verdict: Optional[str] = Field(None, pattern="^(correct|partial|incorrect)$")
 
 
 @app.post("/api/health-issues/{issue_id}/rca-feedback", status_code=201)
-async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest):
+async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor = Depends(current_actor)):
     """Record a human verdict on the latest RCA result for an issue.
 
     'incorrect' also writes an rca agent-memory entry so future runs on the
-    same pattern see the correction (ground-truth flywheel start).
+    same pattern see the correction (ground-truth flywheel start). A location
+    verdict needs a location with a candidate left (valid or partial); its
+    judge is the session actor, never the request body.
     """
     from datetime import timezone as _tz
 
+    if data.verdict is None and data.location_verdict is None:
+        raise HTTPException(status_code=422, detail="Give verdict, location_verdict, or both")
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -4882,9 +5300,17 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest):
         )
         if not rca:
             raise HTTPException(status_code=404, detail="No RCA result for this issue")
-        rca.human_verdict = data.verdict
-        rca.human_note = data.note or None
-        rca.verified_at = datetime.now(_tz.utc)
+        if data.location_verdict is not None:
+            if rca.location_status not in ("valid", "partial"):
+                raise HTTPException(status_code=409, detail=(
+                    f"RCA #{rca.id} has no root-cause location to judge (location {rca.location_status or 'absent'})"))
+            rca.location_verdict = data.location_verdict
+            rca.location_verdict_by = actor.key
+            rca.location_verdict_at = datetime.now(_tz.utc)
+        if data.verdict is not None:
+            rca.human_verdict = data.verdict
+            rca.human_note = data.note or None
+            rca.verified_at = datetime.now(_tz.utc)
         rca_id = rca.id
         root_cause = rca.root_cause or ""
         issue_type = getattr(issue, "issue_type", "other")
@@ -4893,8 +5319,8 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest):
     try:
         from agenticops.services.pipeline_events import log_event
         log_event(issue_id, "rca_human_feedback", "rca",
-                  detail={"rca_id": rca_id, "verdict": data.verdict,
-                          "note": (data.note or "")[:200]})
+                  detail={"rca_id": rca_id, "verdict": data.verdict, "location_verdict": data.location_verdict,
+                          "by": actor.key, "note": (data.note or "")[:200]})
     except Exception:
         pass
 
@@ -4918,8 +5344,19 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest):
         except Exception:
             logger.debug("rca feedback memory write failed", exc_info=True)
 
-    return {"rca_id": rca_id, "verdict": data.verdict,
-            "message": f"Human verdict '{data.verdict}' recorded on RCA #{rca_id}"}
+    recorded = " and ".join(f"{what} '{v}'" for what, v in (("verdict", data.verdict),
+                                                           ("location verdict", data.location_verdict)) if v)
+    return {"rca_id": rca_id, "verdict": data.verdict, "location_verdict": data.location_verdict,
+            "message": f"Human {recorded} recorded on RCA #{rca_id}"}
+
+
+@app.get("/api/rca/location-stats")
+async def api_rca_location_stats(days: int = Query(30, ge=1, le=365)):
+    """Root-cause location quality over the last `days` days (what each figure counts: services/rca_location)."""
+    from agenticops.services.rca_location import location_stats
+
+    with get_db_session() as session:
+        return location_stats(session, days)
 
 
 class AgentMemoryResponse(BaseModel):
@@ -4945,7 +5382,7 @@ class AgentMemoryUpdateRequest(BaseModel):
 
 
 @app.post("/api/health-issues/{issue_id}/feedback", status_code=201)
-async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
+async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest, actor: Actor = Depends(current_actor)):
     """Record user feedback on a health issue (false positive / confirmed).
 
     For false_positive: creates agent memory for detect agent + dismisses issue.
@@ -4994,11 +5431,14 @@ async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest):
             related_issue_id=issue_id,
         )
 
-        # Dismiss the issue
+        # Dismiss the issue (an already resolved one keeps its status)
+        from agenticops.models import InvalidStatusTransition
+        from agenticops.services.issue_state import IssueNotFound, transition_issue
         with get_db_session() as session:
-            issue = session.query(HealthIssue).filter_by(id=issue_id).first()
-            if issue and issue.status not in ("resolved",):
-                issue.status = "resolved"
+            try:
+                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive")
+            except (IssueNotFound, InvalidStatusTransition):
+                logger.info("false-positive feedback: HealthIssue #%d keeps its status", issue_id)
 
         return {
             "status": "recorded",

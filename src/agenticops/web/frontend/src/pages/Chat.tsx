@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useLocation, useParams, useNavigate } from "react-router-dom";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useSessionStream } from "@/hooks/useSessionStream";
@@ -11,18 +11,34 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
+import { contextRefFromQuery, contextRefQuery, type ContextRef } from "@/lib/contextRef";
+import { contextForNewChat, contextLineKey } from "@/lib/chatContext";
+import { STARTERS } from "@/lib/chatMessageStatus";
+import { fillPlaceholders } from "@/lib/placeholders";
+import { refLabel } from "@/lib/contextRef";
+import { useBootstrap } from "@/hooks/useBootstrap";
+import { FALLBACK_POLICY } from "@/lib/attachments";
+import type { ChatContextView } from "@/api/types";
+import { useAccountScope } from "@/components/layout/AccountScope";
+import { useAnomaly } from "@/hooks/useAnomaly";
+import { useChange } from "@/hooks/useChanges";
 import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import { apiFetch } from "@/api/client";
+import { currentUserId, userKey } from "@/lib/home";
 
-const LAST_SESSION_KEY = "aiops-last-session-id";
+// Per signed-in user: a shared browser must never reopen someone else's last conversation
+const lastSessionKey = () => userKey("aiops-last-session-id", currentUserId());
 
 export default function Chat() {
   const { t } = useLocale();
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: sessions } = useChatSessions();
+  // «Ask Agent» (MVP-2.7.0 S4): /app/chat?ref=I12 opens a new chat with that record as its context, sends nothing
+  const [initialRef] = useState(() => contextRefFromQuery(location.search));
 
   // Whether we're in "welcome" mode (no active session)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -30,7 +46,8 @@ export default function Chat() {
   const restorationAttempted = useRef(false);
 
   // Lazy session creation hook
-  const { sendFirstMessage, creating } = useLazySessionCreate();
+  const { sendFirstMessage, creating, createError } = useLazySessionCreate();
+  const scope = useAccountScope();
 
   // Determine selected session from URL parameter
   const selectedId = urlSessionId || null;
@@ -41,8 +58,12 @@ export default function Chat() {
   useEffect(() => {
     if (urlSessionId || restorationAttempted.current) return;
     restorationAttempted.current = true;
+    if (initialRef) {  // a new conversation about that record: never resume the last session
+      setShowWelcome(true);
+      return;
+    }
 
-    const lastSessionId = localStorage.getItem(LAST_SESSION_KEY);
+    const lastSessionId = localStorage.getItem(lastSessionKey());
     if (!lastSessionId) {
       setShowWelcome(true);
       return;
@@ -56,7 +77,7 @@ export default function Chat() {
       .catch((err: unknown) => {
         // Session deleted or not found — clear localStorage and show welcome (Req 1.5)
         if (err instanceof ApiError && err.status === 404) {
-          localStorage.removeItem(LAST_SESSION_KEY);
+          localStorage.removeItem(lastSessionKey());
         }
         setShowWelcome(true);
       });
@@ -68,10 +89,10 @@ export default function Chat() {
     if (!selectedId) return;
 
     // Persist on every navigation to a valid session
-    localStorage.setItem(LAST_SESSION_KEY, selectedId);
+    localStorage.setItem(lastSessionKey(), selectedId);
 
     const handleBeforeUnload = () => {
-      localStorage.setItem(LAST_SESSION_KEY, selectedId);
+      localStorage.setItem(lastSessionKey(), selectedId);
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -84,16 +105,52 @@ export default function Chat() {
     }
   }, [urlSessionId]);
 
-  useChatSession(selectedId); // metadata only — primes session existence/validation
+  // Metadata of the open session: also its name when it is not among the 50 listed (e.g. a shared link)
+  const { data: sessionDetail } = useChatSession(selectedId);
   const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, sendMessage, cancel } =
     useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
-  const currentSession = sessions?.find((s) => s.session_id === selectedId);
+  const currentSession = sessions?.find((s) => s.session_id === selectedId)
+    ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
 
   // Three-zone layout state
   const [flyoutOpen, setFlyoutOpen] = useState(false);
-  const [contextIssueId, setContextIssueId] = useState<number | null>(null);
+  const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
+  // S5: the top bar shows the account this chat is bound to, locked — an open chat's own, or (before the first
+  // message) the account of the issue / change it was asked about; a new free chat leaves the scope usable
+  const refIssue = useAnomaly(!selectedId && contextRef?.kind === "issue" ? contextRef.id : 0);
+  const refChange = useChange(!selectedId && contextRef?.kind === "change" ? contextRef.id : 0);
+  const lockValue = selectedId ? (currentSession ? currentSession.context?.account_id ?? null : undefined)
+    : contextRef ? (contextRef.kind === "issue" ? refIssue.data?.account_id ?? null : refChange.data?.account_id ?? null)
+    : undefined;
+  const { lockTo } = scope;
+  const maxFiles = (useBootstrap().data?.upload_policy ?? FALLBACK_POLICY).max_files;
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  const [stopped, setStopped] = useState(false);  // S5: stopping the reply is not cancelling any execution
+  // What the welcome composer will start the chat with (the server confirms it on creation)
+  const welcomeCtx: ChatContextView | null = contextRef
+    ? { primary: { entity_type: contextRef.kind === "issue" ? "health_issue" : "change_request", entity_id: contextRef.id,
+                   ref: refLabel(contextRef), title: (contextRef.kind === "issue" ? refIssue.data?.title : refChange.data?.title) ?? null },
+        account_id: lockValue ?? null, account_name: contextRef.kind === "issue" ? refIssue.data?.account_name ?? null : null,
+        region: null, scope_locked: false }
+    : scope.accountId != null
+      ? { primary: null, account_id: scope.accountId, account_name: scope.accountName, region: null, scope_locked: false }
+      : null;
+  useEffect(() => { lockTo(lockValue); }, [lockValue, lockTo]);
+  useEffect(() => () => lockTo(undefined), [lockTo]);
+  // the ref has done its job once read: it leaves the URL (a reload is an ordinary Chat visit). Keyed on the URL,
+  // not on mount: the first message moves /app/chat?ref= to /app/chat/:id?ref= on the same Chat instance (S5).
+  useEffect(() => {
+    const ref = contextRefFromQuery(location.search);
+    if (!ref) return;
+    setContextRef(ref);
+    const params = new URLSearchParams(location.search);
+    params.delete("ref");
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
   // Flyout resizable width (px), persisted
@@ -139,12 +196,11 @@ export default function Chat() {
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
-  const handleWelcomeSend = (content: string, files: File[]) => {
-    sendFirstMessage(content, files);
-  };
+  const handleWelcomeSend = (content: string, files: File[]) =>
+    sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "", contextForNewChat(contextRef, scope.accountId));
 
   return (
-    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-2.25rem)] -m-6">
+    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
       {/* Left: Session Flyout (resizable) */}
       <div
         style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}
@@ -180,7 +236,7 @@ export default function Chat() {
 
       {/* Center: Chat area */}
       <div
-        style={{ flex: contextIssueId ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
+        style={{ flex: contextRef ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
         className="flex flex-col min-w-0"
       >
         {showWelcome && !selectedId ? (
@@ -203,22 +259,40 @@ export default function Chat() {
                 </svg>
               </button>
 
-              <div className="text-center">
-                <h2 className="text-lg font-semibold text-foreground mb-2">
+              <div className="w-full max-w-[760px] text-center">
+                <h2 className="text-xl font-semibold text-foreground mb-2">
                   {t("chat.welcome")}
                 </h2>
-                <p className="text-sm text-muted-foreground max-w-md">
+                <p className="mx-auto text-sm text-muted-foreground max-w-md">
                   {t("chat.welcomeHint")}
                 </p>
+                {/* Starters fill the composer — they never send */}
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {STARTERS.map((id) => (
+                    <button key={id} type="button"
+                            onClick={() => setPrefill({ text: t(`chat.starter.${id}.prompt`), nonce: Date.now() })}
+                            className="rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-foreground hover:border-primary/40 hover:bg-selected">
+                      {t(`chat.starter.${id}.label`)}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">{t("chat.attach.count").replace("{limit}", String(maxFiles))}</p>
               </div>
             </div>
 
+            {createError && (
+              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                {t("chat.createFailed").replace("{error}", createError)}
+              </div>
+            )}
+            <ContextLine ctx={welcomeCtx} t={t} />
             {/* Chat input in welcome mode — triggers lazy session creation (Req 1.3) */}
             <ChatInput
               onSend={handleWelcomeSend}
               disabled={creating}
               streaming={false}
               sessionId={null}
+              prefill={prefill}
             />
           </>
         ) : !selectedId ? (
@@ -245,10 +319,25 @@ export default function Chat() {
                 </svg>
               </button>
 
-              {/* Session name */}
-              <h3 className="text-sm font-medium text-foreground truncate flex-1 text-center">
-                {currentSession?.name ?? "Chat"}
-              </h3>
+              {/* Session name; a linked chat names its object and links to it (S5) */}
+              <div className="min-w-0 flex-1 text-center">
+                <h3 className="text-sm font-medium text-foreground truncate">
+                  {currentSession?.name ?? "Chat"}
+                </h3>
+                {currentSession?.context?.primary && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    <span className="font-mono">{currentSession.context.primary.ref}</span>
+                    {currentSession.context.primary.title && ` · ${currentSession.context.primary.title}`}
+                    {" · "}
+                    <Link className="text-primary hover:underline"
+                          to={currentSession.context.primary.entity_type === "health_issue"
+                            ? `/app/issues/${currentSession.context.primary.entity_id}`
+                            : `/app/changes/${currentSession.context.primary.entity_id}`}>
+                      {t(currentSession.context.primary.entity_type === "health_issue" ? "chat.viewIssue" : "chat.viewChange")}
+                    </Link>
+                  </p>
+                )}
+              </div>
 
               {/* Save as Report button */}
               <button
@@ -278,20 +367,27 @@ export default function Chat() {
               isFetchingOlder={isFetchingOlder}
               onLoadOlder={fetchOlder}
               onSuggestionPick={(text) => sendMessage(text)}
-              onIssueRefClick={setContextIssueId}
+              onContextRefClick={setContextRef}
             />
 
             {/* Error banner */}
             {error && (
-              <div className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-                {error}
+              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                {t(`chat.error.${error.code}`)}
               </div>
             )}
 
             {/* Chat input */}
+            {stopped && !streaming && (
+              <div role="status" className="mx-auto mb-2 flex w-full max-w-[760px] items-start justify-between gap-3 px-4 text-xs text-muted-foreground">
+                <span>{t("chat.stopNotice")}</span>
+                <button type="button" onClick={() => setStopped(false)} className="shrink-0 underline">{t("home.dismiss")}</button>
+              </div>
+            )}
+            <ContextLine ctx={currentSession?.context} t={t} />
             <ChatInput
-              onSend={(msg, files) => sendMessage(msg, files)}
-              onCancel={cancel}
+              onSend={(msg, files) => { setStopped(false); return sendMessage(msg, files); }}
+              onCancel={() => { cancel(); setStopped(true); }}
               disabled={streaming}
               streaming={streaming}
               sessionId={selectedId}
@@ -301,7 +397,7 @@ export default function Chat() {
       </div>
 
       {/* Right: Context Panel (drag handle + panel) */}
-      {contextIssueId && (
+      {contextRef && (
         <>
           <DragHandle onResize={setSplitRatio} />
           <div
@@ -309,11 +405,14 @@ export default function Chat() {
             className="min-w-0"
           >
             <ContextPanel
-              issueId={contextIssueId}
-              onClose={() => setContextIssueId(null)}
+              subject={contextRef}
+              onClose={() => setContextRef(null)}
               onAgentCheck={() => {
-                if (contextIssueId == null) return;
-                sendMessage(t("chat.contextPanel.checkPrompt").replace("{id}", String(contextIssueId)));
+                const key = contextRef.kind === "issue" ? "chat.contextPanel.checkPrompt" : "chat.contextPanel.checkChangePrompt";
+                const prompt = t(key).replace("{id}", String(contextRef.id));
+                // no session yet (welcome): create one, and keep the panel open across the new session's page
+                if (selectedId) sendMessage(prompt);
+                else void sendFirstMessage(prompt, undefined, contextRefQuery(contextRef), contextForNewChat(contextRef, null));
               }}
               agentCheckDisabled={streaming}
             />
@@ -326,9 +425,20 @@ export default function Chat() {
         <SaveReportDialog
           sessionId={selectedId}
           sessionName={currentSession.name}
+          isPrivate={currentSession.visibility === "private"}
           onClose={() => setShowSaveReport(false)}
         />
       )}
     </div>
+  );
+}
+
+/** The conversation's context in one line, above the composer (S5): linked, bound to an account, or all accounts. */
+function ContextLine({ ctx, t }: { ctx: ChatContextView | null | undefined; t: (k: string) => string }) {
+  const line = contextLineKey(ctx);
+  return (
+    <p className="mx-auto mb-1.5 w-full max-w-[760px] truncate px-4 text-xs text-muted-foreground">
+      {fillPlaceholders(t(line.key), line.params).replace(/ · $/, "")}
+    </p>
   );
 }

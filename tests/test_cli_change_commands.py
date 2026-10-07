@@ -105,7 +105,7 @@ def test_slash_approve_reject_execute_changes(db):
     with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"):
         with patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
              patch("rich.prompt.Confirm.ask", return_value=True), \
-             patch.object(cs, "approve", return_value={"id": 4, "status": "approved"}) as ap:
+             patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "executing"}) as ap:
             out = cli._slash_approve(None, ["C4", "looks", "good"])
         assert "approved" in out and ap.call_args.kwargs["reason"] == "looks good" and ap.call_args.kwargs["actor"].key == "cli:malibo"
         with patch.object(cs, "reject", return_value={"id": 4, "status": "rejected"}) as rj:
@@ -119,8 +119,29 @@ def test_slash_approve_reject_execute_changes(db):
         assert "Execution #9" in out and ex.called
         with patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
              patch("rich.prompt.Confirm.ask", return_value=True), \
-             patch.object(cs, "approve", side_effect=cs.ChangeStateError("is 'approved'")):
+             patch.object(cs, "approve_and_execute", side_effect=cs.ChangeStateError("is 'approved'")):
             assert "approved" in cli._slash_approve(None, ["C4", "again"])
+
+
+def test_slash_approve_change_runs_it(db):
+    """Owner ruling 2026-10-03: /approve C<id> approves AND queues the run; /execute C<id> is only the retry."""
+    from agenticops.cli import main as cli
+    from agenticops.services import change_service as cs
+    with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
+         patch.object(cs, "get_change", return_value=_cr("planned", title="t")), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "executing"}) as ae:
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert ae.call_args.kwargs["actor"].key == "cli:malibo" and ae.call_args.kwargs["reason"] == "looks good"
+        assert "approved" in out and "queued for execution" in out and "/execute" not in out
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "approved"}):
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert "could not be queued" in out and "/execute C4" in out
+        # another request moved it before this approval's run was queued (2026-10-05 final review Minor 1)
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "cancelled"}):
+            out = cli._slash_approve(None, ["C4", "looks", "good"])
+        assert "queued for execution" not in out and "could not be queued" not in out
+        assert "approved" in out and "'cancelled'" in out
 
 
 def test_slash_changes_lists(db):
@@ -157,13 +178,13 @@ def test_slash_approve_change_prompts_for_a_missing_reason(db):
     from agenticops.services import change_service as cs
     with patch("agenticops.cli.main.init_db"), patch("getpass.getuser", return_value="malibo"), \
          patch.object(cs, "get_change", return_value=_cr("planned", title="t")):
-        with patch.object(cs, "approve") as ap, patch("rich.prompt.Prompt.ask", return_value=""), \
+        with patch.object(cs, "approve_and_execute") as ap, patch("rich.prompt.Prompt.ask", return_value=""), \
              patch("rich.prompt.Confirm.ask") as ca:
             out = cli._slash_approve(None, ["C4"])
         assert "A reason is required" in out
         ap.assert_not_called()
         ca.assert_not_called()
-        with patch.object(cs, "approve", return_value={"id": 4, "status": "approved"}) as ap, \
+        with patch.object(cs, "approve_and_execute", return_value={"id": 4, "status": "executing"}) as ap, \
              patch("rich.prompt.Prompt.ask", return_value="ok"), patch("rich.prompt.Confirm.ask", return_value=True):
             cli._slash_approve(None, ["C4"])
         assert ap.call_args.kwargs["reason"] == "ok"

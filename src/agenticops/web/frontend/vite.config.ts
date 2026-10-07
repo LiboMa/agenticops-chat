@@ -8,6 +8,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // e2e/ holds the optional Playwright walkthrough (needs @playwright/test + a live backend); vitest must not collect it.
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
   },
   base: "/app/",
   resolve: {

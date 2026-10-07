@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isHintResolved, toPipelineEvents, policySummary } from "@/lib/changeDetail";
-import type { ChangeTarget, ChangeTimelineEntry } from "@/api/types";
+import {
+  activeChangePlan, changeHeadline, externalRefLink, isHintResolved, planStepMarks, policyActionLabel, policySummary,
+  requestSummary, reviewSummary, runSummary, sourceLabel, toPipelineEvents, unresolvedHints, verdictLabel,
+} from "@/lib/changeDetail";
+import { formatShortDate } from "@/lib/formatDate";
+import en from "@/locales/en.json";
+import zh from "@/locales/zh.json";
+import type { ChangeRequest, ChangeTarget, ChangeTimelineEntry, FixExecution, FixPlan } from "@/api/types";
 
 type Tgt = Pick<ChangeTarget, "resource_id" | "hint">;
 
@@ -94,5 +100,167 @@ describe("policySummary (R2)", () => {
 
   it("escalated_from empty string → null", () => {
     expect(policySummary({ escalated_from: "" }).escalatedFrom).toBeNull();
+  });
+
+  it("drops reasons already shown in review_reasons (no duplicated list)", () => {
+    expect(policySummary({ reasons: ["risk_level=L1", "extra"] }, ["sre note", "risk_level=L1"]).reasons).toEqual([
+      "extra",
+    ]);
+  });
+});
+
+type HeadlineInput = Parameters<typeof changeHeadline>[0];
+function cr(extra: Partial<ChangeRequest>): HeadlineInput {
+  return { status: "draft", needs_review_reason: null, review_reasons: [], rejection_reason: null, ...extra };
+}
+function run(extra: Partial<FixExecution>): FixExecution {
+  return {
+    id: 5, fix_plan_id: 3, health_issue_id: null, status: "succeeded", started_at: null, completed_at: null,
+    executed_by: "web:anonymous", pre_check_results: [], step_results: [], post_check_results: [],
+    rollback_results: [], error_message: null, duration_ms: 0, verification_status: null,
+    verification_reason: null, accepted_by: null, accepted_at: null, acceptance_note: null,
+    created_at: "2026-09-28T02:00:00", ...extra,
+  };
+}
+
+describe("changeHeadline", () => {
+  it("an executed change waiting for acceptance reads its needs_review_reason, the acceptor, and Accept", () => {
+    const pending = run({ verification_status: "pending_acceptance", verification_reason: "no post-checks declared" });
+    expect(changeHeadline(cr({ status: "needs_review", needs_review_reason: "no post-checks declared" }), pending))
+      .toEqual({ reason: "no post-checks declared", todo: "accept", action: "accept" });
+  });
+
+  it("falls back to the pending run's verification reason — the one IssueDetail shows — on an older row", () => {
+    const pending = run({ verification_status: "pending_acceptance", verification_reason: "post-check 2 failed" });
+    expect(changeHeadline(cr({ status: "needs_review" }), pending).reason).toBe("post-check 2 failed");
+  });
+
+  it("names the next actor and the primary action for each open status", () => {
+    expect(changeHeadline(cr({ status: "draft" }), null)).toEqual({ reason: null, todo: "startReview", action: "review" });
+    expect(changeHeadline(cr({ status: "under_review" }), null)).toEqual({ reason: null, todo: "review", action: null });
+    expect(changeHeadline(cr({ status: "planned" }), null)).toEqual({ reason: null, todo: "approve", action: "approve" });
+    // approving runs the change (owner ruling 2026-10-03): a change still at approved is one whose run could
+    // not be queued, and the header offers the retry
+    expect(changeHeadline(cr({ status: "approved" }), null)).toEqual({ reason: null, todo: "notQueued", action: "execute" });
+    expect(changeHeadline(cr({ status: "executing" }), null)).toEqual({ reason: null, todo: "executing", action: null });
+  });
+
+  it("a clarification request reads the reviewer's questions", () => {
+    expect(changeHeadline(cr({ status: "needs_clarification", review_reasons: ["which cluster?", "when?"] }), null))
+      .toEqual({ reason: "which cluster? · when?", todo: "clarify", action: "clarify" });
+  });
+
+  it("rejected / cancelled read the rejection reason; completed has no to-do", () => {
+    expect(changeHeadline(cr({ status: "rejected", rejection_reason: "too risky" }), null))
+      .toEqual({ reason: "too risky", todo: "copyAsNew", action: "copy" });
+    expect(changeHeadline(cr({ status: "cancelled", rejection_reason: "not needed" }), null).reason).toBe("not needed");
+    expect(changeHeadline(cr({ status: "completed" }), run({ verification_status: "passed" })))
+      .toEqual({ reason: null, todo: null, action: null });
+  });
+
+  it("a closed change that did not complete offers copy-as-new; completed has nothing to do (P13)", () => {
+    for (const status of ["failed", "rolled_back", "cancelled"] as const) {
+      const h = changeHeadline(cr({ status }), null);
+      expect([h.todo, h.action], status).toEqual(["copyAsNew", "copy"]);
+    }
+    expect(changeHeadline(cr({ status: "completed" }), run({ verification_status: "passed" })))
+      .toEqual({ reason: null, todo: null, action: null });
+  });
+
+  it("a failed change reads the human verdict's note, else the verification reason, else the run's error", () => {
+    expect(changeHeadline(cr({ status: "failed" }), run({ acceptance_note: "pods still crash", verification_reason: "x" })).reason)
+      .toBe("pods still crash");
+    expect(changeHeadline(cr({ status: "rolled_back" }), run({ status: "rolled_back", verification_reason: "rolled back" })).reason)
+      .toBe("rolled back");
+    expect(changeHeadline(cr({ status: "failed" }), run({ status: "failed", error_message: "timeout" })).reason).toBe("timeout");
+    expect(changeHeadline(cr({ status: "failed" }), null).reason).toBeNull();
+  });
+});
+
+describe("planStepMarks", () => {
+  it("marks each plan step the plan added or changed, and lists the requested steps it dropped", () => {
+    const m = planStepMarks({
+      added: [{ plan_step: 3, command: "kubectl rollout status deploy/web" }],
+      removed: [{ proposed_step: 4, command: "rm -rf /tmp/cache" }],
+      modified: [{ proposed_step: 1, plan_step: 1, proposed: "kubectl scale --replicas=5", plan: "kubectl scale --replicas=3" }],
+      unchanged: 1,
+    })!;
+    expect(m.byPlanStep.get(1)).toEqual({ kind: "modified", proposed: "kubectl scale --replicas=5" });
+    expect(m.byPlanStep.get(2)).toBeUndefined();
+    expect(m.byPlanStep.get(3)).toEqual({ kind: "added" });
+    expect(m.removed).toEqual([{ proposed_step: 4, command: "rm -rf /tmp/cache" }]);
+    expect(m).toMatchObject({ added: 1, modified: 1, unchanged: 1, identical: false });
+  });
+
+  it("an identical plan is identical; a request with no steps of its own has no diff", () => {
+    expect(planStepMarks({ added: [], removed: [], modified: [], unchanged: 2 }))
+      .toMatchObject({ identical: true, removed: [], unchanged: 2 });
+    expect(planStepMarks(null)).toBeNull();
+  });
+});
+
+describe("externalRefLink", () => {
+  it("labels the ticket by system and id, with its link and the external requester", () => {
+    expect(externalRefLink({ system: "jira", ticket_id: "OPS-12", url: "https://jira.example/OPS-12", requested_by: "alice" }))
+      .toEqual({ label: "jira OPS-12", url: "https://jira.example/OPS-12", requestedBy: "alice" });
+  });
+
+  it("links only an http(s) URL; no ref, no link", () => {
+    expect(externalRefLink({ system: "sn", ticket_id: "CHG1", url: "javascript:alert(1)" }))
+      .toEqual({ label: "sn CHG1", url: null, requestedBy: null });
+    expect(externalRefLink({ system: "sn", ticket_id: "CHG1" })?.url).toBeNull();
+    expect(externalRefLink(null)).toBeNull();
+  });
+});
+
+describe("activeChangePlan", () => {
+  it("is the plan an approve acts on: the newest not executed/failed/rejected, as the backend's active_plan_for", () => {
+    const plan = (id: number, status: FixPlan["status"]) => ({ id, status }) as FixPlan;
+    // plans come newest first: a newer rejected plan above the older one still awaiting approval
+    expect(activeChangePlan([plan(9, "rejected"), plan(7, "pending_approval")])?.id).toBe(7);
+    // all terminal: the newest, for display only
+    expect(activeChangePlan([plan(9, "rejected"), plan(7, "executed")])?.id).toBe(9);
+    expect(activeChangePlan([])).toBeNull();
+  });
+});
+
+describe("ChangeDetail's one-line summaries and enum labels (pure; components/change render them)", () => {
+  const tEn = (k: string) => (en as Record<string, string>)[k] ?? k;
+  const tZh = (k: string) => (zh as Record<string, string>)[k] ?? k;
+  type Summ = Parameters<typeof reviewSummary>[0];
+  it("verdict / policy action / source: a known value in words, an unknown one as it came, none → null", () => {
+    expect(verdictLabel("approved_for_planning", tEn)).toBe("Approved for planning");
+    expect(verdictLabel("brand_new", tEn)).toBe("brand_new");
+    expect(verdictLabel(null, tEn)).toBeNull();
+    expect(policyActionLabel("block", tZh)).toBe("拦截");
+    expect(policyActionLabel("require_itsm_change", tEn)).toBe("Needs an external ITSM change");
+    expect(policyActionLabel("later_action", tEn)).toBe("later_action");
+    expect(policyActionLabel(null, tEn)).toBeNull();
+    expect(sourceLabel("webhook", tEn)).toBe("External system (webhook)");
+    expect(sourceLabel("smoke-signal", tEn)).toBe("smoke-signal");
+    for (const v of ["approved_for_planning", "needs_clarification", "rejected"]) expect(en).toHaveProperty(`changes.reviewVerdict.${v}`);
+    for (const v of ["auto_approve", "require_human", "require_itsm_change", "block", "escalate"]) expect(en).toHaveProperty(`changes.policyAction.${v}`);
+    for (const v of ["chat", "web", "cli", "im", "webhook", "api"]) expect(en).toHaveProperty(`changes.source.${v}`);
+  });
+  it("reviewSummary: verdict · risk · action, a missing part dropped with its separator, nothing → null", () => {
+    const r = (x: Partial<Summ>) => ({ review_verdict: null, risk_level: null, action_type: null, ...x }) as Summ;
+    expect(reviewSummary(r({ review_verdict: "approved_for_planning", risk_level: "L1", action_type: "tag" }), tEn))
+      .toBe("Approved for planning · L1 · tag");
+    expect(reviewSummary(r({ review_verdict: "approved_for_planning", action_type: "tag" }), tEn)).toBe("Approved for planning · tag");
+    expect(reviewSummary(r({ risk_level: "L2" }), tZh)).toBe("L2");
+    expect(reviewSummary(r({}), tEn)).toBeNull();
+  });
+  it("requestSummary counts the structured targets plus the hints none of them matched", () => {
+    const cr = { requested_by: "webhook:e2e-itsm", requested_at: "2026-10-03T03:37:32", created_at: null,
+                 target_hints: ["frontend", "ghost"],
+                 target_resources: [{ resource_id: "chaos-lab/frontend", hint: "frontend" }] } as Parameters<typeof requestSummary>[0];
+    expect(unresolvedHints(cr)).toEqual(["ghost"]);
+    expect(requestSummary(cr, tEn)).toBe(`webhook:e2e-itsm · ${formatShortDate("2026-10-03T03:37:32")} · 2 targets`);
+  });
+  it("runSummary: who approved it, then the latest run and its verdict (else its status in words)", () => {
+    const run = { id: 4, status: "aborted", verification_status: null } as FixExecution;
+    expect(runSummary({ approved_by: "user:admin" }, run, tEn)).toBe("Approved by: user:admin · Execution #4 · Aborted");
+    expect(runSummary({ approved_by: null }, { ...run, verification_status: "failed" }, tEn)).toBe("Execution #4 · Failed");
+    expect(runSummary({ approved_by: null }, null, tEn)).toBeNull();
   });
 });

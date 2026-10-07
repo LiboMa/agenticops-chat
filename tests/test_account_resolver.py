@@ -110,8 +110,9 @@ def test_resolve_session_by_name(db_session, monkeypatch):
     out = resolver.resolve_account_session("prod", "us-east-1")
     assert out is sess
     # cached under both key shapes
-    assert _session_cache.get("aws:prod:us-east-1") is sess
-    assert _session_cache.get("111:us-east-1") is sess
+    name_key, id_key = resolver.session_cache_keys(resolver.get_account_snapshot("prod"), "us-east-1")
+    assert _session_cache.get(name_key) is sess
+    assert _session_cache.get(id_key) is sess
 
 
 def test_resolve_session_by_account_id(db_session, monkeypatch):
@@ -147,7 +148,7 @@ def test_resolve_session_fail_closed_when_provider_false(db_session, monkeypatch
 def test_resolve_session_cache_hit_skips_provider(db_session, monkeypatch):
     _add_account(db_session, "prod", "111")
     sess = _fake_session()
-    _session_cache["aws:prod:us-east-1"] = sess
+    _session_cache[resolver.session_cache_keys(resolver.get_account_snapshot("prod"), "us-east-1")[0]] = sess
     prov = MagicMock()
     monkeypatch.setattr("agenticops.providers.get_provider", lambda snap: prov)
 
@@ -241,6 +242,35 @@ def test_find_cluster_inventory_hit(db_session):
     _add_resource(db_session, a, "my-cluster", rtype="EKS", region="us-east-1")
     found = resolver.find_cluster_account("my-cluster")
     assert found is not None and found[0].name == "prod"
+
+
+# ── find_vpc_account ─────────────────────────────────────────────────────
+
+
+def test_find_vpc_inventory_hit(db_session):
+    a = _add_account(db_session, "prod", "111")
+    b = _add_account(db_session, "staging", "222")
+    _add_resource(db_session, a, "vpc-1", rtype="VPC")
+    _add_resource(db_session, b, "vpc-1", rtype="Subnet")  # same id, other type: not a VPC row
+    assert resolver.find_vpc_account("vpc-1").name == "prod"
+
+
+def test_find_vpc_miss_skips_disabled_accounts(db_session):
+    off = _add_account(db_session, "old", "333", enabled=False)
+    _add_resource(db_session, off, "vpc-1", rtype="VPC")
+    assert resolver.find_vpc_account("vpc-1") is None
+    assert resolver.find_vpc_account("vpc-2") is None
+
+
+def test_find_vpc_in_two_accounts_lists_names(db_session):
+    # a shared VPC is in the owner's inventory and in every participant's
+    a = _add_account(db_session, "prod", "111")
+    b = _add_account(db_session, "staging", "222")
+    _add_resource(db_session, a, "vpc-1", rtype="VPC")
+    _add_resource(db_session, b, "vpc-1", rtype="VPC")
+    with pytest.raises(resolver.AccountResolutionError) as e:
+        resolver.find_vpc_account("vpc-1")
+    assert "prod" in str(e.value) and "staging" in str(e.value)
 
 
 # ── get_instance_ips ─────────────────────────────────────────────────────

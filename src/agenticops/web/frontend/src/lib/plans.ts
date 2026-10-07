@@ -1,7 +1,7 @@
 import type { ChangeStatus, FixPlan, FixPlanStatus } from "@/api/types";
 
 // Status sets mirror src/agenticops/models.py: VALID_CHANGE_STATUSES / CHANGE_TERMINAL_STATUSES
-// and VALID_PLAN_STATUSES / FIXPLAN_TERMINAL_STATUSES.
+// and FIXPLAN_TERMINAL_STATUSES.
 export const CHANGE_STATUSES = ["draft", "under_review", "needs_clarification", "planned", "approved", "executing",
   "needs_review", "completed", "failed", "rolled_back", "rejected", "cancelled"] as const satisfies readonly ChangeStatus[];
 // Built from the element type so a misspelt member fails to compile; widen only at the .has call for plain strings.
@@ -13,17 +13,17 @@ export const isTerminalChange = (s: string | undefined | null) =>
 export const becameTerminalChange = (prev: string | undefined, next: string | undefined) =>
   isTerminalChange(next) && !isTerminalChange(prev);
 
-export const PLAN_STATUSES = ["draft", "pending_approval", "approved", "executing", "executed", "failed", "rejected"] as const satisfies readonly FixPlanStatus[];
 export const PLAN_TERMINAL_STATUSES: ReadonlySet<FixPlanStatus> =
   new Set<FixPlanStatus>(["executed", "failed", "rejected"]);
 
 type PlanLink = Pick<FixPlan, "plan_kind" | "change_request_id" | "health_issue_id">;
-/** A plan's detail route: its change request or its issue; the Plans tab when the link is missing. */
-export function planRoute(fp: PlanLink): string {
+type PlanRouteLink = Pick<FixPlan, "id" | "plan_kind" | "change_request_id">;
+/** A plan's page: a fix plan its own (/app/plans/:id), a change plan its change request (MVP-2.7.0 S3). */
+export function planRoute(fp: PlanRouteLink): string {
   if (fp.plan_kind === "change") {
     return fp.change_request_id != null ? `/app/changes/${fp.change_request_id}` : "/app/plans?tab=changes";
   }
-  return fp.health_issue_id != null ? `/app/issues/${fp.health_issue_id}` : "/app/plans?tab=fix";
+  return `/app/plans/${fp.id}`;
 }
 /** `C#N` for a change plan, `I#N` for a fix plan, `-` when the link is missing. */
 export function planRef(fp: PlanLink): string {
@@ -31,16 +31,84 @@ export function planRef(fp: PlanLink): string {
   return fp.health_issue_id != null ? `I#${fp.health_issue_id}` : "-";
 }
 
+/** How a plan is named to people — "I#12 fix plan v2" / "C#3 implementation plan v1"; mirrors
+ *  services/plan_content.plan_label, with the words from the locale. */
+export function planLabel(fp: PlanLink & { plan_version?: number | null }, t: (key: string) => string): string {
+  const noun = t(fp.plan_kind === "change" ? "plans.implementationPlan" : "plans.fixPlan");
+  return `${planRef(fp)} ${noun} v${fp.plan_version || 1}`;
+}
+/** The first 8 characters of a content hash, "—" when there is none. */
+export const shortHash = (h: string | null | undefined) => (h ? h.slice(0, 8) : "—");
+
+/** The four counts PlanView's header shows ("1 step · 3 pre-checks · 3 post-checks · rollback 1"). */
+export function planCounts(plan: Pick<FixPlan, "steps" | "pre_checks" | "post_checks" | "rollback_plan">) {
+  const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  const rb = plan.rollback_plan && typeof plan.rollback_plan === "object" ? plan.rollback_plan : {};
+  const rollback = Array.isArray((rb as Record<string, unknown>).steps) ? len((rb as Record<string, unknown>).steps)
+    : Object.keys(rb).length > 0 ? 1 : 0;
+  return { steps: len(plan.steps), preChecks: len(plan.pre_checks), postChecks: len(plan.post_checks), rollback };
+}
+
 export type Period = "7d" | "30d" | "90d";
 export const PERIODS: readonly Period[] = ["7d", "30d", "90d"];
 
-export type PlansTab = "fix" | "changes" | "audit";
-/** The tab to show for a `?tab=` value. The Changes tab exists only while change management is enabled:
- *  "changes" (or no/unknown value) → "changes" when on, "fix" when off; "fix" and "audit" always stand. */
-export function resolvePlansTab(requested: string | null, changesOn: boolean): PlansTab {
-  if (requested === "fix") return "fix";
-  if (requested === "audit") return "audit";
-  return changesOn ? "changes" : "fix";
+export type HubTab = "fix" | "changes" | "audit";
+export function hubTab(raw: string | null): HubTab {
+  return raw === "changes" || raw === "audit" ? raw : "fix";
+}
+/** The hub tablist's keyboard: ←/→ move and wrap, Home/End jump; null for any other key (WAI-ARIA tabs pattern). */
+export function nextTab<T extends string>(ids: readonly T[], current: T, key: string): T | null {
+  const i = ids.indexOf(current);
+  if (key === "ArrowRight") return ids[(i + 1) % ids.length];
+  if (key === "ArrowLeft") return ids[(i - 1 + ids.length) % ids.length];
+  if (key === "Home") return ids[0];
+  if (key === "End") return ids[ids.length - 1];
+  return null;
+}
+
+/** The Audit tab needs `audit.read` (admin when sign-in is on). Not offered until bootstrap says so — never flashed. */
+export function auditTabVisible(boot: { auth_enabled?: boolean; user?: { is_admin?: boolean } | null } | undefined): boolean {
+  if (!boot) return false;
+  return !boot.auth_enabled || !!boot.user?.is_admin;
+}
+
+/** An old /app/changes or /app/audit link (bookmarks, notifications) → its hub tab, with its query kept. */
+export function hubRedirect(tab: Exclude<HubTab, "fix">, search: string): string {
+  const qs = new URLSearchParams(search);
+  qs.delete("tab");
+  const rest = qs.toString();
+  return `/app/plans?tab=${tab}${rest ? `&${rest}` : ""}`;
+}
+
+/** The hub's status choices → the API's status list (draft and pending both wait for an approver). */
+export const PLAN_STATUS_GROUPS = { awaiting: "draft,pending_approval", approved: "approved", executing: "executing",
+  executed: "executed", failed: "failed", rejected: "rejected" } as const;
+export type PlanStatusGroup = keyof typeof PLAN_STATUS_GROUPS;
+
+/** The Fix tab's filters from the URL. The account is the top bar's scope (MVP-2.7.0 S4), not a URL filter: an old
+ *  `?account=` link is adopted into the scope by lib/accountScope.adoptAccountParam. */
+export function fixPlanFilters(params: URLSearchParams): { status?: string; risk_level?: string; q?: string } {
+  const group = params.get("status");
+  const risk = params.get("risk");
+  const q = params.get("q")?.trim();
+  return {
+    status: group && group in PLAN_STATUS_GROUPS ? PLAN_STATUS_GROUPS[group as PlanStatusGroup] : undefined,
+    risk_level: risk && /^L[0-3]$/.test(risk) ? risk : undefined,
+    q: q ? q.slice(0, 100) : undefined,
+  };
+}
+
+/** The Changes tab's filters from the URL, under the API's own names — so an old /app/changes?status=planned link
+ *  (bookmark, notification) still filters the list after its redirect (final review I2). The account is the top bar's
+ *  scope (MVP-2.7.0 S4); an old `?account_id=` is adopted into it. */
+export function changeFilters(params: URLSearchParams): { status?: ChangeStatus; requested_by?: string; period?: Period } {
+  const status = params.get("status");
+  const period = params.get("period");
+  return {
+    status: status && (CHANGE_STATUSES as readonly string[]).includes(status) ? (status as ChangeStatus) : undefined,
+    requested_by: params.get("requested_by") || undefined,
+    period: period && (PERIODS as readonly string[]).includes(period) ? (period as Period) : undefined,
+  };
 }
 
 /** `?a=1&b=x` from the defined, non-empty values (numbers stringified); "" when there are none. */

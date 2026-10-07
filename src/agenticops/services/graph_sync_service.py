@@ -129,39 +129,3 @@ def sync_vpc(region: str, vpc_id: str, account_id: str = "") -> dict[str, int]:
     graph = _build_enriched_vpc_graph(region, vpc_id)
     store = GraphStore()
     return store.save_graph(graph, scope=vpc_id, region=region, account_id=account_id)
-
-
-def trigger_sync_for_resource(resource_hint: str) -> None:
-    """Fire-and-forget: sync the VPC containing the given resource.
-
-    resource_hint can be a VPC ID, instance ID, etc. Best-effort.
-    """
-    thread = threading.Thread(
-        target=_sync_for_resource,
-        args=(resource_hint,),
-        daemon=True,
-        name=f"graph-sync-{resource_hint[:20]}",
-    )
-    thread.start()
-    logger.info("On-demand graph sync triggered for %s", resource_hint)
-
-
-def _sync_for_resource(resource_hint: str) -> None:
-    """Resolve resource_hint to a VPC and sync it."""
-    try:
-        if resource_hint.startswith("vpc-"):
-            sync_vpc(settings.bedrock_region, resource_hint)
-            return
-
-        # Try to find the VPC by looking up the resource in the graph store
-        from agenticops.graph.store import GraphStore
-        store = GraphStore()
-        nodes = store.search_nodes(query=resource_hint, limit=1)
-        if nodes and nodes[0].get("vpc_id"):
-            vpc_id = nodes[0]["vpc_id"]
-            region = nodes[0].get("region", settings.bedrock_region)
-            sync_vpc(region, vpc_id)
-        else:
-            logger.info("Could not resolve resource %s to a VPC for sync", resource_hint)
-    except Exception:
-        logger.exception("On-demand graph sync failed for %s", resource_hint)

@@ -14,10 +14,10 @@ import pytest
 # Base prompt size goldens (chars), ±25% tolerance. Re-baseline deliberately
 # when a prompt is intentionally changed — never widen the tolerance.
 BASE_PROMPT_GOLDENS = {
-    "main": 12_100,
-    "sre": 11_900,
+    "main": 12_850,  # MVP-2.6.1: + get_plan / get_execution_result and the human-acceptance rule
+    "sre": 12_600,  # MVP-2.6.1: + Mode C validation mode for a request's own proposed_steps
     "detect": 8_900,
-    "rca": 8_000,
+    "rca": 10_800,  # MVP-2.6.1: + save_rca_result location + topology evidence + final-review path/direction wording
     "executor": 5_000,
     "reporter": 3_800,
     "scan": 2_000,
@@ -32,7 +32,7 @@ def _base_prompts() -> dict[str, str]:
     from agenticops.agents.main_agent import CHANGE_MANAGEMENT_PROMPT, MAIN_SYSTEM_PROMPT
     from agenticops.agents.sre_agent import SRE_SYSTEM_PROMPT
     from agenticops.agents.detect_agent import DETECT_SYSTEM_PROMPT
-    from agenticops.agents.rca_agent import RCA_SYSTEM_PROMPT
+    from agenticops.agents.rca_agent import RCA_SYSTEM_PROMPT, TOPOLOGY_EVIDENCE_PROMPT
     from agenticops.agents.executor_agent import EXECUTOR_SYSTEM_PROMPT
     from agenticops.agents.reporter_agent import REPORTER_SYSTEM_PROMPT
     from agenticops.agents.scan_agent import SCAN_SYSTEM_PROMPT
@@ -42,7 +42,8 @@ def _base_prompts() -> dict[str, str]:
         "main": MAIN_SYSTEM_PROMPT + CHANGE_MANAGEMENT_PROMPT,
         "sre": SRE_SYSTEM_PROMPT,
         "detect": DETECT_SYSTEM_PROMPT,
-        "rca": RCA_SYSTEM_PROMPT,
+        # Measured with the topology-evidence tool on — the largest prompt RCA can get.
+        "rca": RCA_SYSTEM_PROMPT + TOPOLOGY_EVIDENCE_PROMPT,
         "executor": EXECUTOR_SYSTEM_PROMPT,
         "reporter": REPORTER_SYSTEM_PROMPT,
         "scan": SCAN_SYSTEM_PROMPT,

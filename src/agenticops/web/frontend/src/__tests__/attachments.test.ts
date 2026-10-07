@@ -7,6 +7,10 @@ import {
   acceptAttr,
   fileKey,
   MAX_ATTACHMENTS,
+  FALLBACK_POLICY,
+  attachmentRules,
+  attachmentErrorText,
+  type UploadPolicy,
 } from "@/lib/attachments";
 
 function file(name: string, size: number): File {
@@ -48,13 +52,13 @@ describe("attachments", () => {
   it("validateFiles rejects unsupported extension", () => {
     const r = validateFiles([], [file("bad.exe", 10)]);
     expect(r.accepted).toEqual([]);
-    expect(r.errors[0]).toContain("type not supported");
+    expect(r.errors[0]).toEqual({ kind: "type", name: "bad.exe" });
   });
 
   it("validateFiles rejects oversize per-type (text 512KB, image 5MB)", () => {
     const bigLog = validateFiles([], [file("big.log", 600 * 1024)]); // > 512KB text cap
     expect(bigLog.accepted).toEqual([]);
-    expect(bigLog.errors[0]).toContain("too large");
+    expect(bigLog.errors[0]).toEqual({ kind: "size", name: "big.log", limit: 512 * 1024 });
 
     const okImg = validateFiles([], [file("pic.png", 600 * 1024)]); // fine under 5MB
     expect(okImg.accepted).toHaveLength(1);
@@ -65,7 +69,7 @@ describe("attachments", () => {
     const incoming = [file("4.png", 10), file("5.png", 10), file("6.png", 10)];
     const r = validateFiles(existing, incoming);
     expect(r.accepted).toHaveLength(MAX_ATTACHMENTS - existing.length); // 2
-    expect(r.errors.some((e) => e.includes("too many"))).toBe(true);
+    expect(r.errors.some((e) => e.kind === "count" && e.limit === MAX_ATTACHMENTS)).toBe(true);
   });
 
   it("maxSizeForFile classifies by extension (matches backend routing)", () => {
@@ -103,5 +107,41 @@ describe("attachments", () => {
 
   it("fileKey combines name and size", () => {
     expect(fileKey(file("x.png", 42))).toBe("x.png:42");
+  });
+});
+
+
+describe("attachments follow the server's upload policy (MVP-2.7.0 S5)", () => {
+  const policy: UploadPolicy = { ...FALLBACK_POLICY, document_extensions: [...FALLBACK_POLICY.document_extensions, "html", "xlsx"],
+    text_extensions: [...FALLBACK_POLICY.text_extensions, "toml"], max_files: 5 };
+  const rules = attachmentRules(policy);
+
+  it("accepts what the server accepts", () => {
+    expect(rules.accepted("a.html") && rules.accepted("b.toml") && rules.accepted("c.XLSX")).toBe(true);
+    expect(rules.accepted("d.exe")).toBe(false);
+    expect(rules.accept).toContain(".html");
+  });
+  it("sizes come from the policy, per type class", () => {
+    expect(rules.maxSizeFor("b.xlsx")).toBe(policy.document_max_bytes);
+    expect(rules.maxSizeFor("c.log")).toBe(policy.text_fallback_max_bytes);
+    expect(rules.maxSizeFor("p.png")).toBe(policy.image_max_bytes);
+    expect(rules.max).toBe(5);
+  });
+  it("validateFiles takes the rules", () => {
+    const r = validateFiles([], [file("page.html", 10), file("x.exe", 10)], rules);
+    expect(r.accepted.map((f) => f.name)).toEqual(["page.html"]);
+    expect(r.errors).toEqual([{ kind: "type", name: "x.exe" }]);
+  });
+  it("a smaller max from the server is honoured", () => {
+    const two = attachmentRules({ ...policy, max_files: 2 });
+    const r = validateFiles([], [file("1.png", 1), file("2.png", 1), file("3.png", 1)], two);
+    expect(r.accepted).toHaveLength(2);
+    expect(r.errors).toEqual([{ kind: "count", limit: 2 }]);
+  });
+  it("error text goes through the locale", () => {
+    const t = (k: string) => ({ "chat.attach.type": "{name}: type", "chat.attach.size": "{name}: max {limit}",
+                                "chat.attach.count": "max {limit}" } as Record<string, string>)[k] ?? k;
+    expect(attachmentErrorText({ kind: "size", name: "a.log", limit: 512 * 1024 }, t)).toBe("a.log: max 512 KB");
+    expect(attachmentErrorText({ kind: "count", limit: 5 }, t)).toBe("max 5");
   });
 });

@@ -52,6 +52,13 @@ class AlertPayload:
     raw: dict = field(default_factory=dict)
     kind: str = "alert"  # alert | resolution (firing vs recovered/OK notification)
     issue_type: str = "other"  # Signal Gate taxonomy (classify_issue_type)
+    hints: dict[str, str] = field(default_factory=dict)  # HINT_KEYS subset the source itself carries
+    observed_at: Optional[datetime] = None  # when the source says the fault happened (aware UTC)
+    alarm_name: str = ""  # CloudWatch alarm name (identity_alarm_name_patterns input)
+
+
+# Identity hints a parser may fill (MVP-2.6.1 spec §3.B.5); the identity resolver reads them.
+HINT_KEYS = ("account", "region", "cluster", "namespace", "workload", "pod", "service")
 
 
 class MonitoringProvider(ABC):

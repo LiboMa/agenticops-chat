@@ -52,3 +52,12 @@ export function formatFullDate(date: string | Date | null | undefined): string {
 export function formatUtcClock(date: Date): string {
   return clockFormatter.format(date) + " UTC";
 }
+
+/** A duration as "42s", "3m 05s" or "1h 02m"; a negative or non-finite one reads "0s". */
+export function formatElapsed(ms: number): string {
+  const s = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${pad(Math.floor((s % 3600) / 60))}m`;
+}

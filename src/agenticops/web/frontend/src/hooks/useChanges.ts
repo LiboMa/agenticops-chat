@@ -7,7 +7,7 @@ export type ChangeFilters = { status?: ChangeStatus; account_id?: number; reques
 
 /** Every query a change mutation must refresh — including plan-stats, which the Audit tab's KPIs read. */
 export const changeMutationKeys = (id: number): QueryKey[] =>
-  [["changes"], ["change", id], ["change-timeline", id], ["fix-plans"], ["plan-stats"]];
+  [["changes"], ["change", id], ["change-timeline", id], ["fix-plans"], ["plan-stats"], ["ui-attention"]];
 
 export function useChanges(filters: ChangeFilters = {}) {
   return useQuery({
@@ -33,15 +33,18 @@ export function useCreateChange() {
   return useMutation({
     mutationFn: (body: ChangeRequestCreate) => apiFetch<ChangeRequest>("/changes", { method: "POST", body: JSON.stringify(body) }),
     // a create changes the list and the counts
-    onSuccess: () => [["changes"], ["plan-stats"]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+    onSuccess: () => [["changes"], ["plan-stats"], ["ui-attention"]].forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 
 // Each action carries exactly the body the backend expects; review/execute take none.
+// An approve names the implementation plan content it approves (409 if that plan changed since); a
+// resolve-review is the change's acceptance, and the API requires its reason.
 export type ChangeActionArgs =
-  | { id: number; action: "approve" | "reject" | "cancel"; body: { reason: string } }
+  | { id: number; action: "approve"; body: { reason: string; content_hash: string } }
+  | { id: number; action: "reject" | "cancel"; body: { reason: string } }
   | { id: number; action: "clarify"; body: { message: string } }
-  | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason?: string } }
+  | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason: string } }
   | { id: number; action: "review" }
   | { id: number; action: "execute" };
 

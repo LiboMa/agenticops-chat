@@ -30,12 +30,23 @@ CHANGE_REF_PATTERN = re.compile(r"\bC#(\d+)\b")
 FILE_REF_PATTERN = re.compile(r"@((?:/|\.\.?/)[^\s]+)")
 
 
-def _resolve_issue_ref(issue_id: int) -> str | None:
+def _outside(d: dict, bound_account_id: int | None) -> bool:
+    """MVP-2.7.0 S5: a record of another account than the chat's bound one is withheld (unbound chats see all)."""
+    return bound_account_id is not None and d.get("account_id") is not None and d["account_id"] != bound_account_id
+
+
+def _withheld(tag: str, ref: str, pk: int) -> str:
+    return f'<{tag} id="{pk}">{ref} is not in this chat\'s account; it was not loaded.</{tag}>'
+
+
+def _resolve_issue_ref(issue_id: int, bound_account_id: int | None = None) -> str | None:
     """Fetch HealthIssue by ID and return context block."""
     from agenticops.chat.reference_resolver import fetch_issue
     d = fetch_issue(issue_id)
     if not d:
         return None
+    if _outside(d, bound_account_id):
+        return _withheld("referenced_issue", f"I#{issue_id}", issue_id)
     return (
         f'<referenced_issue id="{d["id"]}">\n'
         f"Title: {d['title']}\n"
@@ -49,12 +60,14 @@ def _resolve_issue_ref(issue_id: int) -> str | None:
     )
 
 
-def _resolve_resource_ref(resource_id: int) -> str | None:
+def _resolve_resource_ref(resource_id: int, bound_account_id: int | None = None) -> str | None:
     """Fetch CloudResource by int PK and return context block."""
     from agenticops.chat.reference_resolver import fetch_resource
     d = fetch_resource(resource_id)
     if not d:
         return None
+    if _outside(d, bound_account_id):
+        return _withheld("referenced_resource", f"R#{resource_id}", resource_id)
     return (
         f'<referenced_resource id="{d["id"]}">\n'
         f"Resource ID: {d['resource_id']}\n"
@@ -67,11 +80,13 @@ def _resolve_resource_ref(resource_id: int) -> str | None:
     )
 
 
-def _resolve_change_ref(cr_id: int) -> str | None:
+def _resolve_change_ref(cr_id: int, bound_account_id: int | None = None) -> str | None:
     from agenticops.chat.reference_resolver import fetch_change
     d = fetch_change(cr_id)
     if not d:
         return None
+    if _outside(d, bound_account_id):
+        return _withheld("referenced_change", f"C#{cr_id}", cr_id)
     return (
         f'<referenced_change id="{d["id"]}">\n'
         f"Title: {d['title']}\nStatus: {d['status']}\nRisk: {d['risk_level'] or 'unassessed'}\n"
@@ -81,7 +96,8 @@ def _resolve_change_ref(cr_id: int) -> str | None:
     )
 
 
-def resolve_references(text: str, *, change_ref_text: str | None = None) -> tuple[str, list[str]]:
+def resolve_references(text: str, *, change_ref_text: str | None = None,
+                       bound_account_id: int | None = None) -> tuple[str, list[str]]:
     """Find I#N, R#N and C#N references, resolve them, return (enriched_text, warnings).
 
     The original text is preserved. Resolved context blocks are appended at the end.
@@ -92,7 +108,7 @@ def resolve_references(text: str, *, change_ref_text: str | None = None) -> tupl
 
     for match in ISSUE_REF_PATTERN.finditer(text):
         issue_id = int(match.group(1))
-        block = _resolve_issue_ref(issue_id)
+        block = _resolve_issue_ref(issue_id, bound_account_id)
         if block:
             context_blocks.append(block)
         else:
@@ -100,7 +116,7 @@ def resolve_references(text: str, *, change_ref_text: str | None = None) -> tupl
 
     for match in RESOURCE_REF_PATTERN.finditer(text):
         resource_id = int(match.group(1))
-        block = _resolve_resource_ref(resource_id)
+        block = _resolve_resource_ref(resource_id, bound_account_id)
         if block:
             context_blocks.append(block)
         else:
@@ -110,7 +126,7 @@ def resolve_references(text: str, *, change_ref_text: str | None = None) -> tupl
     if settings.change_management_enabled:
         change_refs = CHANGE_REF_PATTERN.findall(text if change_ref_text is None else change_ref_text)
         for cr_id in dict.fromkeys(int(m) for m in change_refs):
-            block = _resolve_change_ref(cr_id)
+            block = _resolve_change_ref(cr_id, bound_account_id)
             if block:
                 context_blocks.append(block)
             else:
@@ -145,6 +161,7 @@ def preprocess_message(
     file_images: Optional[list[tuple[str, bytes, str]]] = None,
     file_documents: Optional[list[tuple[str, bytes, str, str]]] = None,
     resolve_file_refs: bool = False,
+    bound_account_id: int | None = None,
 ) -> tuple[str | list[dict], list[str]]:
     """Full preprocessing pipeline: file injection + reference resolution.
 
@@ -206,7 +223,7 @@ def preprocess_message(
     combined = "\n\n".join(text_parts)
 
     # 4. Resolve I#/R#/C# references (C# only from what the user typed, never from an attached file)
-    enriched_text, ref_warnings = resolve_references(combined, change_ref_text=text)
+    enriched_text, ref_warnings = resolve_references(combined, change_ref_text=text, bound_account_id=bound_account_id)
     warnings.extend(ref_warnings)
 
     # 5. If no media blocks, return plain string (100% backward compatible)

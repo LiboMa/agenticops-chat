@@ -34,6 +34,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "rbac_enforce", False)
     # _planned() must stop at 'planned' whatever the local settings.yaml says
     monkeypatch.setattr(settings, "change_auto_approve_standard", False)
+    # approving a change queues its run: pin the executor on so that does not depend on the local settings.yaml
+    monkeypatch.setattr(settings, "executor_enabled", True)
     Base.metadata.create_all(models_mod.get_engine())
     s = get_session()
     acct = CloudAccount(name="dev", provider="aws", is_enabled=True, credentials={}, regions=["ap-southeast-1"]); s.add(acct); s.flush()
@@ -48,6 +50,18 @@ def settings_io():
     with patch("agenticops.config.save_to_yaml") as save, \
          patch("agenticops.services.model_service.get_model_presets", return_value=[]):
         yield save
+
+
+def _seen(cr_id):
+    """The content hash of the change's implementation plan, as the approver is shown it (spec §3.D.1)."""
+    from agenticops.services.plan_content import current_hash
+    s = get_session()
+    try:
+        plan = (s.query(FixPlan).filter_by(change_request_id=cr_id, plan_kind="change")
+                .order_by(FixPlan.id.desc()).first())
+        return current_hash(s, plan)
+    finally:
+        s.close()
 
 
 def _account_id(name):
@@ -195,9 +209,9 @@ def test_disabled_returns_404(client):
 def test_approve_requires_reason_and_binds_identity(client):
     cr_id = _planned()
     assert client.post(f"/api/changes/{cr_id}/approve", json={}).status_code == 422
-    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed"})
-    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "web:anonymous"
-    assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again"}).status_code == 409
+    r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "reviewed", "content_hash": _seen(cr_id)})
+    assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "web:anonymous"
+    assert client.post(f"/api/changes/{cr_id}/approve", json={"reason": "again", "content_hash": _seen(cr_id)}).status_code == 409
 
 
 def test_sod_403_when_enforced(client):
@@ -222,15 +236,15 @@ def test_sod_403_when_enforced(client):
     app.dependency_overrides[deps.current_actor] = lambda: ALICE
     try:
         with patch.object(settings, "rbac_enforce", True):
-            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self"})
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self", "content_hash": _seen(cr2['id'])})
         assert r.status_code == 403
         with patch.object(settings, "rbac_enforce", False):
-            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)"})
+            r = client.post(f"/api/changes/{cr2['id']}/approve", json={"reason": "self (shadow)", "content_hash": _seen(cr2['id'])})
         assert r.status_code == 200 and r.json()["approved_by"] == "user:alice"  # shadow mode: allowed, audited
         app.dependency_overrides[deps.current_actor] = lambda: bob
         with patch.object(settings, "rbac_enforce", True):
-            r = client.post(f"/api/changes/{control}/approve", json={"reason": "four eyes"})
-        assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["approved_by"] == "user:bob"
+            r = client.post(f"/api/changes/{control}/approve", json={"reason": "four eyes", "content_hash": _seen(control)})
+        assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "user:bob"
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
     s = get_session()
@@ -263,9 +277,11 @@ def test_reject_cancel_clarify_review(client):
 
 
 def test_execute_and_timeline(client):
+    """/execute is the retry for an approved change whose run could not be queued (here: executor off at approval)."""
     from agenticops.config import settings
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
+    with patch.object(settings, "executor_enabled", False), patch("agenticops.services.change_service.notify_change_result"):
+        client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
     with patch.object(settings, "executor_enabled", True):
         r = client.post(f"/api/changes/{cr_id}/execute")
     assert r.status_code == 202 and r.json()["status"] == "pending" and r.json()["executed_by"] == "web:anonymous"
@@ -275,6 +291,32 @@ def test_execute_and_timeline(client):
     tl = client.get(f"/api/changes/{cr_id}/timeline").json()
     assert {e["kind"] for e in tl} == {"event", "audit"} and any(e["type"] == "change.approved" for e in tl)
     assert client.get("/api/changes/9999/timeline").status_code == 404
+
+
+def test_approve_runs_the_change(client):
+    """Owner ruling 2026-10-03: approving a change runs it (a fix plan already does); /execute is only the retry."""
+    from agenticops.config import settings
+    cr_id = _planned()
+    with patch.object(settings, "executor_enabled", True):
+        r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
+    assert r.status_code == 200 and r.json()["status"] == "executing" and r.json()["approved_by"] == "web:anonymous"
+    d = client.get(f"/api/changes/{cr_id}").json()
+    assert len(d["executions"]) == 1 and d["executions"][0]["executed_by"] == "web:anonymous"
+    with patch.object(settings, "executor_enabled", True):
+        assert client.post(f"/api/changes/{cr_id}/execute").status_code == 409   # already running
+
+
+def test_approve_with_the_executor_off_waits_for_the_retry(client):
+    from agenticops.config import settings
+    cr_id = _planned()
+    with patch.object(settings, "executor_enabled", False), \
+         patch("agenticops.services.change_service.notify_change_result") as result:
+        r = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    assert [c.args[1] for c in result.call_args_list] == ["execution_not_queued"]
+    with patch.object(settings, "executor_enabled", True):
+        r = client.post(f"/api/changes/{cr_id}/execute")
+    assert r.status_code == 202 and r.json()["executed_by"] == "web:anonymous"
 
 
 def test_detail_carries_the_last_policy_decision(client):
@@ -292,9 +334,8 @@ def test_resolve_review(client):
     from agenticops.config import settings
     from agenticops.services import change_service as cs
     cr_id = _planned()
-    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok"})
-    with patch.object(settings, "executor_enabled", True):
-        plan_id = client.post(f"/api/changes/{cr_id}/execute").json()["fix_plan_id"]
+    client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": _seen(cr_id)})  # runs it
+    plan_id = client.get(f"/api/changes/{cr_id}").json()["plans"][0]["id"]
     with patch.object(cs, "notify_change_result"):
         cs.on_execution_result(plan_id, "succeeded", post_check_results=[])
     assert client.post(f"/api/changes/{cr_id}/resolve-review", json={"outcome": "maybe", "reason": "x"}).status_code == 422
@@ -385,6 +426,37 @@ def test_settings_security_toggle_applies_persists_and_audits(client, settings_i
     assert body["change_management_enabled"] is True
     settings_io.assert_called_once_with({"rbac_enforce": True})
     assert _settings_audits() == [("update", "rbac_enforce", "web:anonymous", {"rbac_enforce": False}, {"rbac_enforce": True})]
+
+
+def test_settings_expose_graph_impact_enforce_read_only(client, settings_io):
+    """The ChangeDetail approval card labels the impact graph "for reference only" while it is shadow-recorded."""
+    from agenticops.config import settings
+    with patch.object(settings, "policy_graph_impact_enforce", False):
+        assert client.get("/api/settings").json()["policy_graph_impact_enforce"] is False
+        r = client.patch("/api/settings", json={"policy_graph_impact_enforce": True})
+        assert r.status_code == 400 and settings.policy_graph_impact_enforce is False
+    settings_io.assert_not_called()
+
+
+def test_settings_expose_rca_autofix_threshold_read_only(client, settings_io):
+    """IssueDetail explains a paused auto-fix with the same threshold the post-RCA gate uses."""
+    from agenticops.config import settings
+    with patch.object(settings, "rca_min_confidence_for_autofix", 0.6):
+        assert client.get("/api/settings").json()["rca_min_confidence_for_autofix"] == 0.6
+        r = client.patch("/api/settings", json={"rca_min_confidence_for_autofix": 0.1})
+        assert r.status_code == 400 and settings.rca_min_confidence_for_autofix == 0.6
+    settings_io.assert_not_called()
+
+
+def test_settings_expose_the_executor_timeout_read_only(client, settings_io):
+    """IssueDetail bounds a fix plan's auto-run signal by the same timeout the backend uses (2026-10-05 final
+    review C1), so it never claims a run long dead is still running."""
+    from agenticops.config import settings
+    with patch.object(settings, "executor_total_timeout", 1234):
+        assert client.get("/api/settings").json()["executor_total_timeout"] == 1234
+        r = client.patch("/api/settings", json={"executor_total_timeout": 1})
+        assert r.status_code == 400 and settings.executor_total_timeout == 1234
+    settings_io.assert_not_called()
 
 
 def test_settings_toggle_yaml_failure_applies_nothing_and_a_retry_heals(client, settings_io):
@@ -550,6 +622,40 @@ def test_fix_plan_lists_place_change_plans_in_their_request_account(client):
     assert [p["id"] for p in client.get(f"/api/fix-plans?kind=change&account_id={dev}").json()] == [change_plan_id]
     assert client.get(f"/api/fix-plans?account_id={prod}").json() == []
     assert client.get(f"/api/fix-plans/{change_plan_id}").json()["account_id"] == dev
+
+
+def test_fix_plan_reads_decode_legacy_string_encoded_json(client):
+    """Legacy rows (dev box #74/#80) hold their JSON columns as JSON *strings*; the strict response
+    schema turned every fix-plan list containing one into a 500 (Fix Plans tab stuck on Loading)."""
+    plan_id, issue_id = _fix_plan_in(_account_id("dev"))
+    s = get_session()
+    try:
+        p = s.get(FixPlan, plan_id)
+        p.steps = '[{"step": 0, "action": "decommission"}]'
+        p.rollback_plan = '{"path_a": "restore"}'
+        p.post_checks = '["alb gone"]'
+        p.pre_checks = "not json"
+        s.commit()
+    finally:
+        s.close()
+    listed = client.get("/api/fix-plans?kind=fix")
+    assert listed.status_code == 200
+    (row,) = listed.json()
+    assert row["steps"] == [{"step": 0, "action": "decommission"}]
+    assert row["rollback_plan"] == {"path_a": "restore"}
+    assert row["post_checks"] == ["alb gone"]
+    assert row["pre_checks"] == ["not json"]
+    assert client.get(f"/api/fix-plans/{plan_id}").json()["steps"] == [{"step": 0, "action": "decommission"}]
+    assert client.get(f"/api/health-issues/{issue_id}/fix-plans").status_code == 200
+
+
+def test_fix_plan_response_wraps_undecodable_or_missing_json_columns():
+    from agenticops.web.schemas import FixPlanResponse
+    base = dict(id=1, risk_level="L1", title="t", summary="s", estimated_impact="", status="draft",
+                approved_by=None, approved_at=None, created_at=datetime.now(timezone.utc))
+    r = FixPlanResponse.model_validate({**base, "steps": None, "pre_checks": '"[\\"a\\"]"',
+                                        "post_checks": {"k": 1}, "rollback_plan": "undo by hand"})
+    assert (r.steps, r.pre_checks, r.post_checks, r.rollback_plan) == ([], ["a"], [{"k": 1}], {"raw": "undo by hand"})
 
 
 def test_cancel_change_execution_authorizes_on_change_execute(client):

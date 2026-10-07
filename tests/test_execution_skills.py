@@ -261,71 +261,85 @@ class TestRunKubectl:
 
 
 class TestExecuteKubectl:
+    """kubectl runs ONLY with the resolved account's env + private kubeconfig (MVP-2.6.1 spec §3.B.4)."""
+
+    ENV = {"PATH": "/usr/bin", "AWS_ACCESS_KEY_ID": "target-access-key-id", "KUBECONFIG": "/data/kube/1/us-east-1/c1.kubeconfig"}
+
+    def _run(self, mock_run, command="get pods", namespace="default"):
+        with patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1")), \
+             patch("agenticops.credentials.kube.kubectl_env_for_cluster", return_value=dict(self.ENV)) as env_for:
+            result = _execute_kubectl("c1", command, "", namespace)
+        return result, env_for
+
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake-kubeconfig"})
-    @patch("os.path.isfile", return_value=True)
-    def test_with_kubeconfig_env(self, mock_isfile, mock_run):
+    def test_kubectl_gets_the_account_env_and_private_kubeconfig(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="pod/nginx Running", stderr="")
-        result = _execute_kubectl("", "get pods", "", "default")
+        result, env_for = self._run(mock_run)
         assert "nginx" in result
-        # Should NOT call aws eks update-kubeconfig
-        assert mock_run.call_count == 1  # only the kubectl call
+        env_for.assert_called_once_with(_SNAP, "c1", "us-east-1")
+        (args,), kwargs = mock_run.call_args
+        assert args == ["kubectl", "-n", "default", "get", "pods"]
+        assert kwargs["env"] == self.ENV and kwargs["shell"] is False
+        assert mock_run.call_count == 1  # kubeconfig generation is kubectl_env_for_cluster's job
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {}, clear=True)
-    def test_no_kubeconfig_no_cluster(self, mock_run):
-        result = _execute_kubectl("", "get pods", "", "default")
+    def test_ambient_kubeconfig_is_no_shortcut(self, mock_run, tmp_path):
+        ambient = tmp_path / "ambient.kubeconfig"
+        ambient.write_text("apiVersion: v1\n")
+        with patch.dict("os.environ", {"KUBECONFIG": str(ambient)}):
+            result = _execute_kubectl("", "get pods", "", "default")
         assert "No cluster_name" in result
+        assert not mock_run.called
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch("agenticops.credentials.resolver.get_subprocess_env_for_account", return_value={})
-    @patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1"))
-    @patch.dict("os.environ", {}, clear=True)
-    def test_update_kubeconfig_fails(self, mock_find, mock_env, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stderr="aws error", stdout="")
-        result = _execute_kubectl("bad-cluster", "get pods", "us-east-1", "default")
-        assert "Failed to update kubeconfig" in result
+    def test_kubeconfig_failure_is_reported_not_bypassed(self, mock_run):
+        from agenticops.credentials.kube import KubeconfigError
+        with patch("agenticops.credentials.resolver.find_cluster_account", return_value=(_SNAP, "us-east-1")), \
+             patch("agenticops.credentials.kube.kubectl_env_for_cluster", side_effect=KubeconfigError("aws error")):
+            result = _execute_kubectl("bad-cluster", "get pods", "us-east-1", "default")
+        assert result == "Failed to update kubeconfig: aws error"
+        assert not mock_run.called
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake"})
-    @patch("os.path.isfile", return_value=True)
-    def test_kubectl_error(self, mock_isfile, mock_run):
+    def test_account_resolution_failure_is_reported(self, mock_run):
+        from agenticops.credentials.resolver import AccountResolutionError
+        with patch("agenticops.credentials.resolver.find_cluster_account", return_value=None), \
+             patch("agenticops.credentials.resolver.resolve_default_account",
+                   side_effect=AccountResolutionError("Multiple enabled aws accounts")):
+            result = _execute_kubectl("c1", "get pods", "", "default")
+        assert result == "Error: Multiple enabled aws accounts"
+        assert not mock_run.called
+
+    @patch("agenticops.skills.execution.subprocess.run")
+    def test_kubectl_error(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="error: the server doesn't have resource type"
         )
-        result = _execute_kubectl("", "get widgets", "", "default")
+        result, _ = self._run(mock_run, command="get widgets")
         assert "kubectl error" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake"})
-    @patch("os.path.isfile", return_value=True)
-    def test_kubectl_timeout(self, mock_isfile, mock_run):
+    def test_kubectl_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="kubectl", timeout=30)
-        result = _execute_kubectl("", "get pods", "", "default")
+        result, _ = self._run(mock_run)
         assert "timed out" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake"})
-    @patch("os.path.isfile", return_value=True)
-    def test_kubectl_not_found(self, mock_isfile, mock_run):
+    def test_kubectl_not_found(self, mock_run):
         mock_run.side_effect = FileNotFoundError()
-        result = _execute_kubectl("", "get pods", "", "default")
+        result, _ = self._run(mock_run)
         assert "kubectl not found" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake"})
-    @patch("os.path.isfile", return_value=True)
-    def test_empty_output(self, mock_isfile, mock_run):
+    def test_empty_output(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        result = _execute_kubectl("", "get pods", "", "empty-ns")
+        result, _ = self._run(mock_run, namespace="empty-ns")
         assert "(no output)" in result
 
     @patch("agenticops.skills.execution.subprocess.run")
-    @patch.dict("os.environ", {"KUBECONFIG": "/tmp/fake"})
-    @patch("os.path.isfile", return_value=True)
-    def test_output_truncation(self, mock_isfile, mock_run):
+    def test_output_truncation(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="z" * (MAX_OUTPUT_CHARS + 200), stderr=""
         )
-        result = _execute_kubectl("", "get pods", "", "default")
+        result, _ = self._run(mock_run)
         assert "truncated" in result
