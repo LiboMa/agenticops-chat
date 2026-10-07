@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ACTIVE_STATUSES, QUEUE_CAP, backTarget, capped, caseHref, queueFilters, queueParams, scrollKey, SPLIT_MIN_WIDTH,
+  ACTIVE_STATUSES, QUEUE_CAP, backTarget, capped, caseHref, queueFilters, queueParams, rowState, scrollKey, SPLIT_MIN_WIDTH,
 } from "@/lib/caseQueue";
 
 const q = (s: string) => queueFilters(new URLSearchParams(s));
@@ -55,5 +55,12 @@ describe("queue URL helpers", () => {
   });
   it("the split view starts at 1280px", () => {
     expect(SPLIT_MIN_WIDTH).toBe(1280);
+  });
+});
+
+describe("rowState (review I1)", () => {
+  it("only a narrow screen marks the navigation as from the queue — split-view selections never become a 'back' target", () => {
+    expect(rowState(false)).toEqual({ fromQueue: true });
+    expect(rowState(true)).toBeUndefined();
   });
 });

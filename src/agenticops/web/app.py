@@ -1829,7 +1829,7 @@ _INFRA_TYPES = {"VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "T
 
 
 @app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
-async def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
+def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
     """List health issues for a resource."""
     with get_db_session() as session:
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
@@ -2926,7 +2926,7 @@ async def api_list_issue_executions(issue_id: int):
 
 
 @app.get("/api/health-issues/{issue_id}/timeline")
-async def api_get_issue_timeline(issue_id: int):
+def api_get_issue_timeline(issue_id: int):
     """Get the pipeline event timeline for a health issue."""
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()

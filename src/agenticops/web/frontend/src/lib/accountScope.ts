@@ -17,9 +17,11 @@ const asId = (v: unknown): number | null => {
 };
 
 /** The stored scope if it is still an account; null (All) otherwise. While the list is loading a well-formed id
- *  is kept, so a reload does not flash All and reset the user's choice. */
-export function validScope(stored: unknown, accounts: { id: number }[] | undefined): number | null {
+ *  is kept, so a reload does not flash All and reset the user's choice; when the list failed to load the scope is
+ *  All — an id nobody can check must not filter (and empty) every list. */
+export function validScope(stored: unknown, accounts: { id: number }[] | undefined, failed = false): number | null {
   const id = asId(stored);
+  if (failed) return null;
   if (id == null || !accounts) return id;
   return accounts.some((a) => a.id === id) ? id : null;
 }

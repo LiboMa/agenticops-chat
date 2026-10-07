@@ -34,6 +34,7 @@ import { FactsRail } from "@/components/workitem/FactsRail";
 import { ActivityList } from "@/components/workitem/ActivityList";
 import { NoteBox } from "@/components/issue/NoteBox";
 import { contextRefQuery } from "@/lib/contextRef";
+import { isSecurityIssue } from "@/lib/issueScope";
 import { DiagnoseBody, diagnoseSummary } from "@/components/issue/DiagnoseCard";
 import { RunBody } from "@/components/issue/RunCard";
 import { AcceptBody } from "@/components/issue/AcceptCard";
@@ -131,7 +132,7 @@ export default function IssueDetail({ embedded = false, back }: {
     q.delete("tab");
     const hash = legacyIssueTabHash(tab);
     const rest = q.toString();
-    navigate({ search: rest ? `?${rest}` : "", hash: hash ? `#${hash}` : location.hash }, { replace: true });
+    navigate({ search: rest ? `?${rest}` : "", hash: hash ? `#${hash}` : location.hash }, { replace: true, state: location.state });
   }, [location.search, location.hash, navigate]);
 
   // Every card is controlled: re-seeded whenever the current phase moves (a poll landing on fix_executed opens ④)
@@ -426,6 +427,10 @@ export default function IssueDetail({ embedded = false, back }: {
                 </button>
               )}
               <Link to="/app/signals" className="block text-primary hover:underline">{t("workitem.rawSignals")}</Link>
+              {/* a security finding's posture lives on the Security page (the old list row's link, S4 review m3) */}
+              {isSecurityIssue(a.source) && (
+                <Link to="/app/security" className="block text-primary hover:underline">{t("issues.openSecurity")} →</Link>
+              )}
               <IssueDescription issue={a} t={t} />
             </div>
           }

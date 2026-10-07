@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from agenticops.models import PipelineEvent
 
 MAX_NOTE_CHARS = 8000
-# Control characters other than tab and newline (\r is allowed too: a pasted CRLF block is ordinary text)
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Control characters other than tab and newline (\r is allowed too: a pasted CRLF block is ordinary text), the C1
+# controls, and the bidi overrides / isolates — an append-only trail must read as written, never reordered on screen
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 class NoteRejected(ValueError):

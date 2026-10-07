@@ -63,3 +63,7 @@ export function backTarget(state: unknown, search: string): BackTarget {
 }
 
 export const capped = (rows: readonly unknown[]) => rows.length > QUEUE_CAP;
+
+/** The history state a queue row navigates with. Only the narrow list → full-screen hop is "from the queue": in the
+ *  split view a selection is not something back should return through (a resize would make back walk old cases). */
+export const rowState = (wide: boolean) => (wide ? undefined : { fromQueue: true });

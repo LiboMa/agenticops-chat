@@ -68,7 +68,8 @@ export function usePhaseCards<Id extends string>({ ids, hashes, phases, seedKey 
     const hash = toggledCardHash(location.hash, id, open);
     if (hash !== location.hash) {
       selfHash.current = hash;
-      navigate({ search: location.search, hash }, { replace: true });
+      // keep the entry's state: a case opened from the queue still goes back through history (S4 review m2)
+      navigate({ search: location.search, hash }, { replace: true, state: location.state });
     }
   };
 

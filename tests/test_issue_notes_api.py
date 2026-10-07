@@ -67,7 +67,8 @@ def test_the_body_cannot_claim_an_author(client):
     assert _notes(iid) == []
 
 
-@pytest.mark.parametrize("content", ["", "   ", "a" * 8001, "bad\x00byte", "bell\x07"])
+@pytest.mark.parametrize("content", ["", "   ", "a" * 8001, "bad\x00byte", "bell\x07", "c1\x85x",
+                                     "rlo\u202eflipped", "lri\u2066x"])
 def test_bad_content_is_refused(client, content):
     iid = _issue(); _as(WRITER)
     assert client.post(f"/api/health-issues/{iid}/notes", json={"content": content}).status_code == 422

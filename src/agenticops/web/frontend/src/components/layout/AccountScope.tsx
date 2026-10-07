@@ -41,18 +41,20 @@ export function AccountScopeProvider({ children }: { children: ReactNode }) {
     } catch { /* private mode: the scope lasts this tab */ }
   };
 
-  // An old link's own account filter sets the scope once and leaves the URL; the notice rides on that entry
+  // An old link's own account filter sets the scope once and leaves the URL; the notice rides on that entry. It waits
+  // for the account list: an id that is not an account sets nothing and says nothing (the parameter still goes).
   useEffect(() => {
-    if (mode !== "active") return;
+    if (mode !== "active" || (!accounts.data && !accounts.isError)) return;
     const adopted = adoptAccountParam(location.search);
     if (!adopted) return;
-    if (adopted.accountId != null) setAccountId(adopted.accountId);
+    const id = validScope(adopted.accountId, accounts.data, accounts.isError);
+    if (id != null) setAccountId(id);
     navigate({ pathname: location.pathname, search: adopted.search, hash: location.hash },
-             { replace: true, state: { ...(location.state as object | null), scopeNotice: adopted.accountId != null } });
+             { replace: true, state: { ...(location.state as object | null), scopeNotice: id != null } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, mode]);
+  }, [location.search, mode, accounts.data, accounts.isError]);
 
-  const accountId = validScope(stored, accounts.data);
+  const accountId = validScope(stored, accounts.data, accounts.isError);
   const accountName = accountId == null ? null : accounts.data?.find((a) => a.id === accountId)?.name ?? null;
   return <Ctx.Provider value={{ accountId, setAccountId, mode, accountName }}>{children}</Ctx.Provider>;
 }
@@ -85,14 +87,17 @@ export function AccountScopeSelect({ className = "" }: { className?: string }) {
 export function ScopeNotice() {
   const { t } = useLocale();
   const location = useLocation();
+  const navigate = useNavigate();
   const { accountName } = useAccountScope();
-  const [dismissed, setDismissed] = useState<string | null>(null);
   const carried = Boolean((location.state as { scopeNotice?: boolean } | null)?.scopeNotice);
-  if (!carried || dismissed === location.key) return null;
+  if (!carried) return null;
+  // dismissing clears the flag from the entry, so a reload does not bring the notice back
+  const dismiss = () => navigate({ pathname: location.pathname, search: location.search, hash: location.hash },
+                                 { replace: true, state: { ...(location.state as object), scopeNotice: false } });
   return (
     <div role="status" className="fixed left-1/2 top-[calc(var(--topbar-h)+12px)] z-40 flex w-[min(560px,calc(100vw-30px))] -translate-x-1/2 items-start justify-between gap-3 rounded-md border border-primary/30 bg-card px-3 py-2 text-sm text-foreground shadow-lg">
       <span>{t("scope.adopted").replace("{name}", accountName ?? "—")}</span>
-      <button type="button" onClick={() => setDismissed(location.key)} className="text-xs underline">{t("home.dismiss")}</button>
+      <button type="button" onClick={dismiss} className="text-xs underline">{t("home.dismiss")}</button>
     </div>
   );
 }

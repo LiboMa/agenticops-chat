@@ -46,3 +46,14 @@ describe("account scope (MVP-2.7.0 S4)", () => {
     expect(adoptAccountParam("?account=x&tab=fix")).toEqual({ accountId: null, search: "?tab=fix" });
   });
 });
+
+describe("review m4 / m5", () => {
+  it("when the account list failed to load, the scope is All — a stale id must not empty every list", () => {
+    expect(validScope("3", undefined, true)).toBeNull();
+    expect(validScope("3", accounts, true)).toBeNull();
+  });
+  it("an adopted id is checked like a stored one: an unknown account from an old link sets nothing", () => {
+    expect(validScope(adoptAccountParam("?account=999")!.accountId, accounts)).toBeNull();
+    expect(validScope(adoptAccountParam("?account=3")!.accountId, accounts)).toBe(3);
+  });
+});

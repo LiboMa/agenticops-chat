@@ -9,7 +9,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import {
-  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, scrollKey,
+  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, rowState, scrollKey,
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
 
@@ -139,7 +139,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
                 const current = id === selectedId;
                 return (
                   <li key={r.key}>
-                    <Link to={r.href} state={{ fromQueue: true }} data-case-id={id} onClick={() => remember(id)}
+                    <Link to={r.href} state={rowState(wide)} data-case-id={id} onClick={() => remember(id)}
                           aria-current={current ? "page" : undefined}
                           className={`block rounded-md border px-3 py-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/60 ${
                             current ? "border-primary/50 bg-selected" : "border-border bg-card hover:bg-accent"} ${
