@@ -25,8 +25,8 @@ export function useLazySessionCreate() {
   const sendFirstMessage = useCallback(
     // `search` rides along to the new session's URL (Chat keeps an open context panel through the remount);
     // `context` (S5) is what the chat is about and its account — the server resolves and checks it
-    async (content: string, files?: File[], search = "", context?: NewChatContext) => {
-      if (creatingRef.current) return;
+    async (content: string, files?: File[], search = "", context?: NewChatContext): Promise<boolean> => {
+      if (creatingRef.current) return false;
       creatingRef.current = true;
       setCreating(true);
       setCreateError(null);
@@ -53,9 +53,11 @@ export function useLazySessionCreate() {
         // to the in-flight stream for this session id on mount.
         void chatStream.send(session.session_id, content, files);
         navigate(`/app/chat/${session.session_id}${search}`, { replace: true });
+        return true;
       } catch (err) {
         // the chat was not created (the linked issue is gone, an account changed): nothing was sent
         setCreateError(err instanceof Error ? err.message : String(err));
+        return false;
       } finally {
         creatingRef.current = false;
         setCreating(false);

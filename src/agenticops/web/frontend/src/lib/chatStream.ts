@@ -104,8 +104,11 @@ class ChatStreamStore {
     this.controllers.get(sessionId)?.abort();
   }
 
-  async send(sessionId: string, content: string, files?: File[], clientMessageId: string = crypto.randomUUID()) {
-    if (this.isStreaming(sessionId)) return;
+  /** → whether the server accepted the message (its `accepted` frame arrived): false = nothing was stored, so the
+   *  composer gives the text and files back (S5). */
+  async send(sessionId: string, content: string, files?: File[], clientMessageId: string = crypto.randomUUID()): Promise<boolean> {
+    if (this.isStreaming(sessionId)) return false;
+    let accepted = false;
 
     this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null });
 
@@ -159,7 +162,7 @@ class ChatStreamStore {
         const d = errBody?.detail;
         const message = typeof d === "string" ? d : typeof d?.detail === "string" ? d.detail : res.statusText;
         this.set(sessionId, { error: { code: asCode(d?.code, "http"), message } });
-        return;
+        return false;
       }
 
       const reader = res.body?.getReader();
@@ -173,6 +176,9 @@ class ChatStreamStore {
           try {
             const data = JSON.parse(frame.data);
             switch (frame.event) {
+              case "accepted":
+                accepted = true;
+                break;
               case "text":
                 if (data.token) {
                   pendingText += data.token;
@@ -250,6 +256,7 @@ class ChatStreamStore {
       if (donePayload) this.callbacks.onDone?.(sessionId, donePayload);
       this.callbacks.onSettled?.(sessionId);
     }
+    return accepted;
   }
 }
 

@@ -53,8 +53,8 @@ export function useSessionStream(sessionId: string | null) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const send = useCallback(
-    (content: string, files?: File[]) => {
-      if (!sessionId) return;
+    (content: string, files?: File[]): Promise<boolean> => {
+      if (!sessionId) return Promise.resolve(false);
       // Optimistically append the user's message so it shows immediately.
       const userMsg: ChatMessage = {
         id: nextTempId(),
@@ -66,7 +66,7 @@ export function useSessionStream(sessionId: string | null) {
         created_at: new Date().toISOString(),
       };
       appendMessageToCache(qc, sessionId, userMsg);
-      void chatStream.send(sessionId, content, files);
+      return chatStream.send(sessionId, content, files);  // → accepted (false: the composer gives the text back)
     },
     [sessionId, qc],
   );

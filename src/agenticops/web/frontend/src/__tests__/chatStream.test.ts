@@ -165,3 +165,19 @@ describe("chatStream — S5 stream client", () => {
     expect(settled).toEqual(["s5-abort"]);
   });
 });
+
+describe("chatStream.send says whether the server took the message (S5 review I6)", () => {
+  it("true once the accepted frame arrives", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: accepted\ndata: {"client_message_id":"x","user_message_id":1}\n\n', 'event: done\ndata: {}\n\n'])));
+    expect(await chatStream.send("s5-acc", "hi")).toBe(true);
+  });
+  it("false on a 409, a network failure, or a stream that never accepted it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "session_busy" } }), { status: 409 })));
+    expect(await chatStream.send("s5-acc2", "hi")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    expect(await chatStream.send("s5-acc3", "hi")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(['event: error\ndata: {"code":"internal"}\n\n'])));
+    expect(await chatStream.send("s5-acc4", "hi")).toBe(false);
+  });
+});

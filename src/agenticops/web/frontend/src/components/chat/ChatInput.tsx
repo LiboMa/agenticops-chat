@@ -14,7 +14,8 @@ import { currentUserId } from "@/lib/home";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
-  onSend: (message: string, files: File[]) => void;
+  /** → whether the message was taken (S5): false gives the text and files back to the composer */
+  onSend: (message: string, files: File[]) => void | Promise<boolean>;
   onCancel?: () => void;
   disabled?: boolean;
   streaming?: boolean;
@@ -106,13 +107,22 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     const trimmed = input.trim();
     if ((!trimmed && attachments.length === 0) || disabled) return;
     const fallback = attachments.length > 0 ? "Please analyze the attached file(s)" : "";
-    onSend(trimmed || fallback, attachments.map((a) => a.file));
+    const sentText = input, sentAttachments = attachments;
+    const result = onSend(trimmed || fallback, attachments.map((a) => a.file));
     setInput("");
     setAttachments([]);
     setReselect([]);
     setAttachError(null);
     sessionFiles.clear(filesKey);
     saveDraft(localStorage, key, { text: "", unsentFiles: [] });
+    // S5: the draft is gone only once the server took the message — a refused send gives it back
+    if (result instanceof Promise) {
+      void result.then((ok) => {
+        if (ok || loadedKey.current !== key) return;
+        setInput((cur) => cur || sentText);
+        setAttachments((cur) => (cur.length ? cur : sentAttachments));
+      });
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

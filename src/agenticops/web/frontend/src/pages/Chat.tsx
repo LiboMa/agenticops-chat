@@ -196,9 +196,8 @@ export default function Chat() {
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
-  const handleWelcomeSend = (content: string, files: File[]) => {
+  const handleWelcomeSend = (content: string, files: File[]) =>
     sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "", contextForNewChat(contextRef, scope.accountId));
-  };
 
   return (
     <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
@@ -387,7 +386,7 @@ export default function Chat() {
             )}
             <ContextLine ctx={currentSession?.context} t={t} />
             <ChatInput
-              onSend={(msg, files) => { setStopped(false); sendMessage(msg, files); }}
+              onSend={(msg, files) => { setStopped(false); return sendMessage(msg, files); }}
               onCancel={() => { cancel(); setStopped(true); }}
               disabled={streaming}
               streaming={streaming}
