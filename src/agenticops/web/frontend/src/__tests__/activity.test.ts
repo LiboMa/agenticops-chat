@@ -69,3 +69,29 @@ describe("toActivity hideText (spec §1-3: the status line's sentence is said on
     expect(toActivity(events, { hideText: "  " }).map((x) => x.summary)).toEqual(["go for deployment.", sentence, sentence]);
   });
 });
+
+describe("notes (MVP-2.7.0 S4)", () => {
+  const note = (content: string, extra: Partial<PipelineEvent> = {}) =>
+    ev("note_added", { content }, { status: "recorded", actor: "user:alice", ...extra });
+  it("a note is its own entry: label, the text as written, who and when", () => {
+    const [a] = toActivity([note("checked the LB\n  then the pool")]);
+    expect(a.labelKey).toBe("activity.type.note_added");
+    expect(a.note).toBe("checked the LB\n  then the pool");
+    expect(a.summary).toBe("");
+    expect(a.actor).toBe("user:alice");
+    expect(a.ts).toBe("2026-10-03T03:39:00");
+  });
+  it("two identical notes in a row stay two entries (×N is for system events)", () => {
+    expect(toActivity([note("same", { id: 1 }), note("same", { id: 2 })])).toHaveLength(2);
+  });
+  it("a note equal to the status line's sentence is still shown", () => {
+    expect(toActivity([note("Waiting for an approver")], { hideText: "Waiting for an approver" })[0].note)
+      .toBe("Waiting for an approver");
+  });
+  it("markup is kept as a plain string — the list renders text nodes, never HTML", () => {
+    expect(toActivity([note("<script>alert(1)</script>")])[0].note).toBe("<script>alert(1)</script>");
+  });
+  it("a note whose detail is not an object reads as an empty note, never throws", () => {
+    expect(toActivity([ev("note_added", "not json")])[0].note).toBe("");
+  });
+});

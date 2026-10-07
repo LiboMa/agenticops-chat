@@ -1014,5 +1014,12 @@
   "cases.capped": "只显示前 {n} 条，缩小筛选范围可看到其余记录",
   "cases.empty": "没有匹配的记录",
   "cases.clear": "清除筛选",
-  "cases.selectPrompt": "请选择列表中的记录"
+  "cases.selectPrompt": "请选择列表中的记录",
+  "activity.type.note_added": "补充说明",
+  "notes.label": "添加补充说明",
+  "notes.placeholder": "添加补充说明：你查了什么、发现了什么",
+  "notes.hint": "按原文记入处理记录，署你的名字；不能修改或删除",
+  "notes.save": "保存说明",
+  "notes.saving": "保存中…",
+  "notes.failed": "说明未保存：{error}"
 }

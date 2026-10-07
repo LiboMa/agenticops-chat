@@ -32,6 +32,7 @@ import { StatusLine, type StatusLineAction } from "@/components/workitem/StatusL
 import { PhaseCard } from "@/components/workitem/PhaseCard";
 import { FactsRail } from "@/components/workitem/FactsRail";
 import { ActivityList } from "@/components/workitem/ActivityList";
+import { NoteBox } from "@/components/issue/NoteBox";
 import { DiagnoseBody, diagnoseSummary } from "@/components/issue/DiagnoseCard";
 import { RunBody } from "@/components/issue/RunCard";
 import { AcceptBody } from "@/components/issue/AcceptCard";
@@ -441,6 +442,7 @@ export default function IssueDetail({ embedded = false, back }: {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
+              {cards.activityOpen && findAction(a.available_actions, "note")?.allowed && <NoteBox issueId={a.id} t={t} />}
               {cards.activityOpen && (timeline.isLoading
                 ? <Spinner label={t("common.loading")} />
                 : <ActivityList entries={toActivity(timeline.data, { hideText: m.reason && "text" in m.reason ? m.reason.text : null })}

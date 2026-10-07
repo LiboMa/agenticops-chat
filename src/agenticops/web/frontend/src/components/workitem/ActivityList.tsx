@@ -21,6 +21,9 @@ export function ActivityList({ entries, t, emptyKey }: { entries: ActivityEntry[
               <span className="text-foreground">{fillPlaceholders(t(e.labelKey), e.labelParams)}</span>
               {e.count > 1 && <span className="ml-1 text-muted-foreground">×{e.count}</span>}
               {e.summary && <span className="block text-muted-foreground break-words">{e.summary}</span>}
+              {e.note != null && (
+                <span className="mt-0.5 block whitespace-pre-wrap break-words rounded bg-secondary px-2 py-1 text-foreground">{e.note}</span>
+              )}
               <span className="block text-[10px] text-muted-foreground/70">{e.actor}</span>
             </div>
           </li>

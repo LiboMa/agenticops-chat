@@ -10,7 +10,7 @@ const KNOWN = new Set([
   "change.requested", "change.reviewed", "change.clarified", "change.approved", "change.rejected", "change.cancelled",
   "change.execution_started", "change.completed", "change.failed", "change.rolled_back", "change.needs_review",
   "plan.approved", "plan.rejected", "plan.edited", "plan.execute_requested", "plan.execution_cancelled",
-  "authz.denied", "authz.denied_shadow",
+  "authz.denied", "authz.denied_shadow", "note_added",
 ]);
 const BAD = new Set(["authz.denied", "rca_disputed", "change.failed", "change.rolled_back", "change_rejected", "review_failed"]);
 const WARN = new Set(["rca_needs_review", "authz.denied_shadow", "change.needs_review", "change_cancelled"]);
@@ -26,6 +26,7 @@ export interface ActivityEntry {
   tone: "ok" | "warn" | "bad" | "info";
   count: number;
   raw: PipelineEvent[];
+  note?: string;  // a person's note (MVP-2.7.0 S4), exactly as written — rendered as text, never merged or hidden
 }
 
 function asObject(detail: unknown): Record<string, unknown> {
@@ -67,12 +68,19 @@ function entry(e: PipelineEvent, hide: string): ActivityEntry {
 const hideSummary = (summary: string, hide: string) => (hide && summary === hide ? "" : summary);
 
 /** The timeline as sentences, oldest first; a run of identical consecutive events is one entry ×N. `hideText`
- *  is the status line's sentence (spec §1-3: said once): a summary equal to it is left out, the raw view keeps it. */
+ *  is the status line's sentence (spec §1-3: said once): a summary equal to it is left out, the raw view keeps it.
+ *  A note is never merged and never hidden: it is what a person wrote. */
 export function toActivity(events: PipelineEvent[] | undefined, opts?: { hideText?: string | null }): ActivityEntry[] {
   const hide = opts?.hideText?.trim() ?? "";
   const sorted = [...(events ?? [])].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || a.id - b.id);
   const out: ActivityEntry[] = [];
   for (const e of sorted) {
+    if (e.event_type === "note_added") {
+      const content = asObject(e.detail).content;
+      out.push({ ts: e.created_at ?? "", labelKey: "activity.type.note_added", labelParams: {}, summary: "",
+                 actor: e.actor || "system", tone: "info", count: 1, raw: [e], note: typeof content === "string" ? content : "" });
+      continue;
+    }
     const next = entry(e, hide);
     const last = out[out.length - 1];
     if (last && last.labelKey === next.labelKey && last.summary === next.summary && last.actor === next.actor

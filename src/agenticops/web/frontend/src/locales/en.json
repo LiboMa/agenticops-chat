@@ -1014,5 +1014,12 @@
   "cases.capped": "Showing the first {n} — narrow the filters to see the rest",
   "cases.empty": "No matching records",
   "cases.clear": "Clear filters",
-  "cases.selectPrompt": "Select a record from the list"
+  "cases.selectPrompt": "Select a record from the list",
+  "activity.type.note_added": "Note",
+  "notes.label": "Add a note",
+  "notes.placeholder": "Add a note — what you checked, what you found",
+  "notes.hint": "Kept in the activity as written, under your name; cannot be edited or deleted",
+  "notes.save": "Save note",
+  "notes.saving": "Saving…",
+  "notes.failed": "The note was not saved: {error}"
 }
