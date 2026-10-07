@@ -85,6 +85,11 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const d = body.detail;
+    // the contract's UiError ({detail, code}) keeps its code (MVP-2.7.0 S6); anything else reads as before
+    if (d && typeof d === "object" && !Array.isArray(d) && typeof (d as { detail?: unknown }).detail === "string") {
+      throw new ApiError(res.status, (d as { detail: string }).detail, (d as { code?: string }).code);
+    }
     throw new ApiError(res.status, formatErrorDetail(body.detail ?? body.error ?? res.statusText));
   }
 

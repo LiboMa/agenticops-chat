@@ -38,3 +38,13 @@ describe("downloads (MVP-2.7.0 S6)", () => {
     expect(err.code).toBe("rendering_not_ready");
   });
 });
+
+describe("apiFetch keeps a UiError's code (S6)", () => {
+  it("a {detail, code} body gives the message and the code", async () => {
+    const { apiFetch } = await import("@/api/client");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: { detail: "still sending", code: "publish_in_flight" } }), { status: 409 })));
+    const err = (await apiFetch("/reports/1/publish", { method: "POST" }).catch((e) => e)) as { status: number; message: string; code?: string };
+    expect([err.status, err.message, err.code]).toEqual([409, "still sending", "publish_in_flight"]);
+  });
+});

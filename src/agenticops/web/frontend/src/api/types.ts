@@ -820,6 +820,9 @@ export interface PipelineEvent {
 export interface ReportPublishRequest {
   channel_name: string;
   formats?: string[];
+  /** MVP-2.7.0 S6: pinned to one version and language */
+  version: number;
+  language: "zh" | "en" | "zh-en";
 }
 
 export interface ReportPublishResponse {
