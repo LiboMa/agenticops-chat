@@ -10,6 +10,7 @@ import { NewChangeDialog } from "@/components/plans/NewChangeDialog";
 import { auditTabVisible, hubTab, nextTab, type HubTab } from "@/lib/plans";
 import { tabCounts } from "@/lib/attention";
 import { useAttention } from "@/hooks/useAttention";
+import { useAccountScope } from "@/components/layout/AccountScope";
 
 /** Plans & changes (MVP-2.7.0 S3): fix plans, change requests and the audit trail, one tab each (?tab=). */
 export default function PlansAndChanges() {
@@ -19,7 +20,7 @@ export default function PlansAndChanges() {
   const boot = useBootstrap();
   const settings = useSettings();
   const [showNew, setShowNew] = useState(false);
-  const attention = useAttention();
+  const attention = useAttention(useAccountScope().accountId);
   const changesOn = settings.data?.change_management_enabled === true;
   // /api/audit needs an admin when auth is on (rbac audit.read): the tab is not offered to anyone else
   const auditOn = auditTabVisible(boot.data);

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -16,7 +17,8 @@ export function FixPlansTab() {
   const { t } = useLocale();
   const [params, setParams] = useSearchParams();
   const filters = fixPlanFilters(params);
-  const plans = useFixPlans({ kind: "fix", limit: 200, ...filters });
+  const accountId = useScopedAccountId();  // the top bar's account scope (S4)
+  const plans = useFixPlans({ kind: "fix", limit: 200, ...filters, account_id: accountId });
   const accounts = useAccounts();
   const [q, setQ] = useState(filters.q ?? "");
   useEffect(() => setQ(filters.q ?? ""), [filters.q]);  // back / forward changes the URL: the box follows
@@ -26,7 +28,7 @@ export function FixPlansTab() {
     setParams(next, { replace: true });
   };
   const accountName = (id: number | null | undefined) => accounts.data?.find((a) => a.id === id)?.name ?? null;
-  const filtered = !!(filters.status || filters.risk_level || filters.account_id || filters.q);
+  const filtered = !!(filters.status || filters.risk_level || accountId || filters.q);
   const select = "rounded-md border border-border bg-card px-2.5 py-1.5 text-sm";
   return (
     <div className="space-y-4">
@@ -38,10 +40,6 @@ export function FixPlansTab() {
         <select aria-label={t("plans.risk")} className={select} value={params.get("risk") ?? ""} onChange={(e) => set("risk", e.target.value)}>
           <option value="">{t("plans.filter.allRisks")}</option>
           {["L0", "L1", "L2", "L3"].map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <select aria-label={t("plans.filter.account")} className={select} value={params.get("account") ?? ""} onChange={(e) => set("account", e.target.value)}>
-          <option value="">{t("plans.filter.allAccounts")}</option>
-          {(accounts.data ?? []).map((a) => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
         </select>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100}
                onKeyDown={(e) => { if (e.key === "Enter") set("q", q.trim()); }} onBlur={() => set("q", q.trim())}

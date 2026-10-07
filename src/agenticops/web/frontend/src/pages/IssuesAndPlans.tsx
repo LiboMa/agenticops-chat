@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react
 import { useHealthIssues } from "@/hooks/useHealthIssues";
 import { useResources } from "@/hooks/useResources";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { useResourceTypeCounts } from "@/hooks/useResourceTypeCounts";
 import { useLocale } from "@/i18n/LocaleContext";
 import { WorkItemTable } from "@/components/ui/WorkItemTable";
@@ -100,15 +101,13 @@ const selectClass =
 function IssuesView({ t }: { t: (key: string) => string }) {
   const [phase, setPhase] = useState<Phase>("all");
   const [severity, setSeverity] = useState<Severity>("all");
-  const [account, setAccount] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
   // The view lives in the URL (ops events by default) and filters on the server: the list is paged.
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = resolveIssueScope(searchParams.get("scope"));
   const setScope = (s: IssueScope) => setSearchParams(s === "ops" ? {} : { scope: s });
-  const { data, isLoading, error, refetch } = useHealthIssues({ scope, account_id: account ? Number(account) : undefined });
-  const accounts = useAccounts();
+  const { data, isLoading, error, refetch } = useHealthIssues({ scope, account_id: useScopedAccountId() });
 
   const allIssues = data ?? [];
 
@@ -205,12 +204,6 @@ function IssuesView({ t }: { t: (key: string) => string }) {
             <option key={s} value={s}>{named("workitem.filter.scope", t(`issues.scope.${s}`))}</option>
           ))}
         </select>
-        <select value={account} onChange={(e) => setAccount(e.target.value)} aria-label={t("workitem.filter.account")} className={selectClass}>
-          <option value="">{named("workitem.filter.account", t("issues.all"))}</option>
-          {(accounts.data ?? []).map((a) => (
-            <option key={a.id} value={a.id}>{named("workitem.filter.account", a.name)}</option>
-          ))}
-        </select>
         <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className={selectClass}>
           <option value="newest">{t("issues.sortNewest")}</option>
           <option value="oldest">{t("issues.sortOldest")}</option>
@@ -255,7 +248,6 @@ export function ResourcesView({
 }) {
   const [typeFilter, setTypeFilter] = useState(initialType);
   const [regionFilter, setRegionFilter] = useState("");
-  const [accountFilter, setAccountFilter] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -268,7 +260,7 @@ export function ResourcesView({
   const { data, isLoading, error, refetch } = useResources({
     type: typeFilter || undefined,
     region: regionFilter || undefined,
-    account_id: accountFilter ? Number(accountFilter) : undefined,
+    account_id: useScopedAccountId(),
     search: search || undefined,
     limit: pageSize,
     offset,
@@ -398,16 +390,6 @@ export function ResourcesView({
             <option value="">All Regions</option>
             {regions.map((r) => (
               <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
-          <select
-            value={accountFilter}
-            onChange={(e) => handleFilterChange(setAccountFilter, e.target.value)}
-            className="text-sm font-medium rounded-lg px-3 py-1.5 bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent border-none transition-colors"
-          >
-            <option value="">All Accounts</option>
-            {(accounts.data ?? []).map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground">

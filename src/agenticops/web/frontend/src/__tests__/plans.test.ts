@@ -107,22 +107,22 @@ describe("planCounts", () => {
 });
 
 describe("fixPlanFilters — the hub's URL", () => {
-  it("reads the groups, risk, account and search; drops junk", () => {
+  it("reads the groups, risk and search; drops junk; the account is the top bar's scope, never read here (S4)", () => {
     expect(fixPlanFilters(new URLSearchParams("status=awaiting&risk=L2&account=3&q=%20nginx%20"))).toEqual(
-      { status: "draft,pending_approval", risk_level: "L2", account_id: 3, q: "nginx" });
+      { status: "draft,pending_approval", risk_level: "L2", q: "nginx" });
     expect(fixPlanFilters(new URLSearchParams("status=bogus&risk=L9&account=-1&q="))).toEqual(
-      { status: undefined, risk_level: undefined, account_id: undefined, q: undefined });
+      { status: undefined, risk_level: undefined, q: undefined });
   });
 });
 
 describe("changeFilters — the Changes tab's URL (final review I2)", () => {
   it("an old /app/changes?status=planned link filters the tab, with the API's own names", () => {
     expect(changeFilters(new URLSearchParams("tab=changes&status=planned&account_id=3&requested_by=user%3Abob&period=30d"))).toEqual(
-      { status: "planned", account_id: 3, requested_by: "user:bob", period: "30d" });
+      { status: "planned", requested_by: "user:bob", period: "30d" });
   });
   it("drops what the API would refuse", () => {
     expect(changeFilters(new URLSearchParams("status=bogus&account_id=x&period=1y"))).toEqual(
-      { status: undefined, account_id: undefined, requested_by: undefined, period: undefined });
+      { status: undefined, requested_by: undefined, period: undefined });
   });
 });
 

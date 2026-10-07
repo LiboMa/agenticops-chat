@@ -85,28 +85,27 @@ export const PLAN_STATUS_GROUPS = { awaiting: "draft,pending_approval", approved
   executed: "executed", failed: "failed", rejected: "rejected" } as const;
 export type PlanStatusGroup = keyof typeof PLAN_STATUS_GROUPS;
 
-export function fixPlanFilters(params: URLSearchParams): { status?: string; risk_level?: string; account_id?: number; q?: string } {
+/** The Fix tab's filters from the URL. The account is the top bar's scope (MVP-2.7.0 S4), not a URL filter: an old
+ *  `?account=` link is adopted into the scope by lib/accountScope.adoptAccountParam. */
+export function fixPlanFilters(params: URLSearchParams): { status?: string; risk_level?: string; q?: string } {
   const group = params.get("status");
   const risk = params.get("risk");
-  const account = Number(params.get("account"));
   const q = params.get("q")?.trim();
   return {
     status: group && group in PLAN_STATUS_GROUPS ? PLAN_STATUS_GROUPS[group as PlanStatusGroup] : undefined,
     risk_level: risk && /^L[0-3]$/.test(risk) ? risk : undefined,
-    account_id: Number.isInteger(account) && account > 0 ? account : undefined,
     q: q ? q.slice(0, 100) : undefined,
   };
 }
 
 /** The Changes tab's filters from the URL, under the API's own names — so an old /app/changes?status=planned link
- *  (bookmark, notification) still filters the list after its redirect (final review I2). */
-export function changeFilters(params: URLSearchParams): { status?: ChangeStatus; account_id?: number; requested_by?: string; period?: Period } {
+ *  (bookmark, notification) still filters the list after its redirect (final review I2). The account is the top bar's
+ *  scope (MVP-2.7.0 S4); an old `?account_id=` is adopted into it. */
+export function changeFilters(params: URLSearchParams): { status?: ChangeStatus; requested_by?: string; period?: Period } {
   const status = params.get("status");
-  const account = Number(params.get("account_id"));
   const period = params.get("period");
   return {
     status: status && (CHANGE_STATUSES as readonly string[]).includes(status) ? (status as ChangeStatus) : undefined,
-    account_id: Number.isInteger(account) && account > 0 ? account : undefined,
     requested_by: params.get("requested_by") || undefined,
     period: period && (PERIODS as readonly string[]).includes(period) ? (period as Period) : undefined,
   };

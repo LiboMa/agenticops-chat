@@ -8,6 +8,8 @@ import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
 import { HomePrefsDialog, MobileNav } from "./Sidebar";
 import { AttentionDialog } from "./AttentionDialog";
+import { AccountScopeSelect, useAccountScope } from "./AccountScope";
+import { useAccounts } from "@/hooks/useAccounts";
 import { useBootstrap } from "@/hooks/useBootstrap";
 import { useAttention } from "@/hooks/useAttention";
 import { countLabel } from "@/lib/attention";
@@ -27,7 +29,8 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { pathname } = useLocation();
   const crumb = breadcrumbFor(pathname);
   const boot = useBootstrap();
-  const attention = useAttention();
+  const scope = useAccountScope();
+  const attention = useAttention(scope.accountId);
   const [attentionOpen, setAttentionOpen] = useState(false);
   const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
   const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
@@ -65,6 +68,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
             </b>
           </button>
         )}
+        <AccountScopeSelect className="max-[600px]:hidden" />
         <button type="button" onClick={onSearch} aria-label={t("topbar.search")}
                 className="flex w-[205px] items-center gap-2 rounded-[5px] border border-border bg-canvas px-2.5 py-1.5 text-xs text-muted-foreground hover:border-primary/40 max-[1350px]:w-[165px] max-[1100px]:w-auto max-[600px]:hidden">
           <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
@@ -132,6 +136,7 @@ function AvatarMenu() {
                 </DropdownMenu.RadioItem>
               ))}
             </DropdownMenu.RadioGroup>
+            <ScopeMenuItems item={item} />
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
@@ -143,5 +148,30 @@ function AvatarMenu() {
       </DropdownMenu.Root>
       <HomePrefsDialog open={homeOpen} onOpenChange={setHomeOpen} />
     </>
+  );
+}
+
+/** On a phone the top bar has no room for the scope select: the avatar menu carries it. */
+function ScopeMenuItems({ item }: { item: string }) {
+  const { t } = useLocale();
+  const accounts = useAccounts();
+  const { accountId, setAccountId, mode } = useAccountScope();
+  const why = mode === "notApplied" ? t("scope.notApplied") : mode === "locked" ? t("scope.locked") : null;
+  return (
+    <div className="min-[601px]:hidden">
+      <DropdownMenu.Separator className="my-1 h-px bg-border" />
+      <DropdownMenu.Label className="px-2.5 pt-1 text-[11px] text-muted-foreground">{t("scope.label")}</DropdownMenu.Label>
+      {why && <p className="px-2.5 pb-1 text-[11px] text-muted-foreground">{why}</p>}
+      <DropdownMenu.RadioGroup value={accountId == null ? "" : String(accountId)}
+                               onValueChange={(v) => setAccountId(v ? Number(v) : null)}>
+        {[{ id: "", name: t("scope.all") }, ...(accounts.data ?? []).map((a) => ({ id: String(a.id), name: a.name }))].map((a) => (
+          <DropdownMenu.RadioItem key={a.id} value={a.id} disabled={mode !== "active"} className={`${item} data-[disabled]:opacity-50`}
+                                  onSelect={(e) => e.preventDefault()}>
+            <span className="truncate">{a.name}</span>
+            <DropdownMenu.ItemIndicator className="text-primary">✓</DropdownMenu.ItemIndicator>
+          </DropdownMenu.RadioItem>
+        ))}
+      </DropdownMenu.RadioGroup>
+    </div>
   );
 }

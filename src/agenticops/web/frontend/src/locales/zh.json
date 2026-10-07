@@ -1000,5 +1000,11 @@
   "workitem.future.issue.runManual": "自动修复已关闭：方案批准后，需要有人点「执行」才会运行。",
   "workitem.future.issue.runNeutral": "方案批准后才会运行。",
   "plans.detail.withdrawnBy": "撤回人",
-  "plans.fixCapped": "只显示最新的 200 条，请用筛选缩小范围查看更早的方案。"
+  "plans.fixCapped": "只显示最新的 200 条，请用筛选缩小范围查看更早的方案。",
+  "scope.label": "账户范围",
+  "scope.all": "全部账户",
+  "scope.notApplied": "本页不按账户筛选",
+  "scope.locked": "详情页显示该记录自己的账户",
+  "scope.adopted": "已按链接设置账户范围：{name}",
+  "attention.scopedTo": "已按 {name} 筛选"
 }

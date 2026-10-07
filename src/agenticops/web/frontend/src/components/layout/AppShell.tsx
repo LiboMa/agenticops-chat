@@ -4,6 +4,7 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { CommandPalette } from "../CommandPalette";
 import { RestoreNotice, ShellEffects } from "./ShellEffects";
+import { AccountScopeProvider, ScopeNotice } from "./AccountScope";
 
 /** The blue/white workspace frame: a 200px white sidebar (166px ≤1100px, hidden ≤800px — the top bar then
  *  carries a menu), the top bar, and the page on the canvas. ⌘K / Ctrl+K opens search. */
@@ -23,17 +24,20 @@ export function AppShell() {
   }, [handleKeyDown]);
 
   return (
+    <AccountScopeProvider>
     <div className="min-h-screen bg-canvas text-foreground">
       <Sidebar />
       <div className="min-[801px]:pl-[166px] min-[1101px]:pl-[200px]">
         <TopBar onSearch={() => setPaletteOpen(true)} />
         <main className="p-6">
           <RestoreNotice />
+          <ScopeNotice />
           <Outlet />
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShellEffects />
     </div>
+    </AccountScopeProvider>
   );
 }

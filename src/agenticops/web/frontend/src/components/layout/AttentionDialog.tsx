@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAttention } from "@/hooks/useAttention";
+import { useAccountScope } from "@/components/layout/AccountScope";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { reasonKey, safeRoute } from "@/lib/attention";
@@ -11,7 +12,8 @@ import { reasonKey, safeRoute } from "@/lib/attention";
 export function AttentionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const q = useAttention();
+  const scope = useAccountScope();
+  const q = useAttention(scope.accountId);
   const items = q.data?.items ?? [];
   const go = (route: string) => {
     const to = safeRoute(route);
@@ -30,6 +32,11 @@ export function AttentionDialog({ open, onOpenChange }: { open: boolean; onOpenC
             <Dialog.Close aria-label={t("common.close")} className="rounded px-2 text-lg text-muted-foreground hover:text-foreground">×</Dialog.Close>
           </div>
           <Dialog.Description className="sr-only">{t("attention.hint")}</Dialog.Description>
+          {scope.accountId != null && (
+            <p className="mb-2 rounded bg-selected px-2.5 py-1.5 text-xs text-primary">
+              {t("attention.scopedTo").replace("{name}", scope.accountName ?? `#${scope.accountId}`)}
+            </p>
+          )}
           {q.isLoading ? <Spinner label={t("common.loading")} />
             : q.error ? <ErrorBanner message={q.error.message} onRetry={() => q.refetch()} actionLabel={t("common.retry")} />
             : items.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{t("attention.empty")}</p>

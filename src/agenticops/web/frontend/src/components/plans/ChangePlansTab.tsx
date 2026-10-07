@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useChanges } from "@/hooks/useChanges";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { useLocale } from "@/i18n/LocaleContext";
 import { WorkItemTable } from "@/components/ui/WorkItemTable";
 import { RiskLevelBadge } from "@/components/ui/RiskLevelBadge";
@@ -22,7 +23,7 @@ export function ChangePlansTab() {
   const [params, setParams] = useSearchParams();
   const f = changeFilters(params);
   const status = f.status ?? "";
-  const account = f.account_id ? String(f.account_id) : "";
+  const accountId = useScopedAccountId();  // the top bar's account scope (S4)
   const requester = f.requested_by ?? "";
   const period = f.period;
   const set = (key: string, value: string | undefined) => {
@@ -31,12 +32,11 @@ export function ChangePlansTab() {
     setParams(next, { replace: true });
   };
   const setStatus = (v: "" | ChangeStatus) => set("status", v);
-  const setAccount = (v: string) => set("account_id", v);
   const setRequester = (v: string) => set("requested_by", v);
   const setPeriod = (v: Period | undefined) => set("period", v);
   const changes = useChanges({
     status: status || undefined,
-    account_id: account ? Number(account) : undefined,
+    account_id: accountId,
     period,
     limit: LIST_LIMIT,
   });
@@ -59,10 +59,6 @@ export function ChangePlansTab() {
         <select value={status} onChange={(e) => setStatus(e.target.value as "" | ChangeStatus)} className={selectClass}>
           <option value="">{t("plans.allStatuses")}</option>
           {CHANGE_STATUSES.map((s) => <option key={s} value={s}>{t(`changes.status.${s}`)}</option>)}
-        </select>
-        <select value={account} onChange={(e) => setAccount(e.target.value)} className={selectClass}>
-          <option value="">{t("plans.allAccounts")}</option>
-          {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.provider})</option>)}
         </select>
         <select value={requester} onChange={(e) => setRequester(e.target.value)} className={selectClass}>
           <option value="">{t("plans.allRequesters")}</option>

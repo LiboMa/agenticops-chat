@@ -1000,5 +1000,11 @@
   "workitem.future.issue.runManual": "Auto-fix is off: an approved plan runs only when someone presses Execute.",
   "workitem.future.issue.runNeutral": "A plan runs once it is approved.",
   "plans.detail.withdrawnBy": "Withdrawn by",
-  "plans.fixCapped": "Showing the newest 200 — narrow the filters to see older plans."
+  "plans.fixCapped": "Showing the newest 200 — narrow the filters to see older plans.",
+  "scope.label": "Account scope",
+  "scope.all": "All accounts",
+  "scope.notApplied": "This page is not filtered by account",
+  "scope.locked": "A detail page shows its own record's account",
+  "scope.adopted": "Account scope set from the link: {name}",
+  "attention.scopedTo": "Filtered to {name}"
 }
