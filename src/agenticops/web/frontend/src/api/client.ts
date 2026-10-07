@@ -6,6 +6,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** the contract's UiError code when the server sent one (MVP-2.7.0 S6) */
+    public code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -89,4 +91,21 @@ export async function apiFetch<T>(
   if (res.status === 204) return undefined as T;
 
   return res.json();
+}
+
+/** Download a file the API answers with Content-Disposition (MVP-2.7.0 S6): the Bearer header, never a token in the
+ *  URL. A refusal throws ApiError with the server's code (rendering_not_ready, format_unavailable, …). */
+export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const d = body?.detail;
+    const message = typeof d === "object" && d !== null && "detail" in d ? String(d.detail) : formatErrorDetail(d ?? res.statusText);
+    throw new ApiError(res.status, message, typeof d === "object" && d !== null ? (d as { code?: string }).code : undefined);
+  }
+  const { filenameFromDisposition } = await import("@/lib/download");
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get("Content-Disposition")) };
 }
