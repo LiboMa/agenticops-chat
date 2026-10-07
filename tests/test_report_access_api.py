@@ -90,7 +90,6 @@ def test_every_report_route_hides_a_private_report(env):
     assert bob.post(f"/api/reports/{rid}/publish", json={"channel_name": "x", "formats": ["html"]}).status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason="rendering / translation routes arrive in Task 4")
 def test_rendering_routes_hide_a_private_report(env):
     rid = _private_report(env)["id"]
     assert env.as_(ALICE).get(f"/api/content/report/{rid}/rendering?version=1&language=en").status_code == 200

@@ -122,6 +122,13 @@ async def lifespan(app: FastAPI):
 
     _webhooks_router.warn_if_unauthenticated()
 
+    # MVP-2.7.0 S6: a report translation an earlier process was running was cut off — failed, so it can be retried
+    try:
+        from agenticops.services.content_rendering import interrupt_pending
+        interrupt_pending()
+    except Exception as e:
+        logger.warning("Reports: interrupt_pending failed: %s", e)
+
     # MVP-2.7.0 S5: a chat reply an earlier process was writing was cut off — mark it interrupted, never complete
     try:
         from agenticops.services.chat_dispatch import interrupt_stale
@@ -3442,6 +3449,31 @@ def api_get_report(report_id: int, actor: Actor = Depends(current_actor)):
         return _enrich_report(report_access.get_visible_report(session, report_id, actor), actor)
 
 
+@app.get("/api/content/report/{report_id}/rendering")
+def api_report_rendering(report_id: int, version: int = Query(..., ge=1),
+                         language: Literal["zh", "en"] = Query(...), actor: Actor = Depends(current_actor)):
+    """One language of one report version (MVP-2.7.0 S6) — read only: never calls a model."""
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import rendering_view
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+        return rendering_view(db, report, version, language)
+
+
+@app.post("/api/content/report/{report_id}/translations", status_code=202)
+def api_report_translations(report_id: int, payload: TranslationRequest, actor: Actor = Depends(current_actor)):
+    """Prepare zh / en renderings (MVP-2.7.0 S6): ready ones are returned, missing / failed / stale ones queued."""
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import request_translations
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if payload.source_version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+    return request_translations(report_id, payload.source_version, list(payload.languages))
+
+
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
 def api_generate_report(request: ReportGenerateRequest):
     """Generate a new report."""
@@ -3529,7 +3561,11 @@ def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = De
         )
         db.add(report)
         db.flush()
-        return _enrich_report(report, actor)
+        out = _enrich_report(report, actor)
+    # S6: the other language is prepared in the background (after the commit above, so the worker sees the row)
+    from agenticops.services.content_rendering import enqueue_other_language
+    enqueue_other_language(out["id"])
+    return out
 
 
 # ============================================================================

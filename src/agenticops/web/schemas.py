@@ -187,6 +187,13 @@ class ReportResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TranslationRequest(BaseModel):
+    """Prepare renderings of one content version (MVP-2.7.0 S6): ready ones are returned, the rest are queued."""
+    model_config = ConfigDict(extra="forbid")
+    source_version: int = Field(..., ge=1)
+    languages: List[Literal["zh", "en"]] = Field(..., min_length=1, max_length=2)
+
+
 class ReportGenerateRequest(BaseModel):
     """Schema for report generation request."""
     report_type: str = Field(default="daily", pattern="^(daily|inventory|anomaly|newsletter|conversation|incident|security-review)$")
