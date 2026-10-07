@@ -1056,5 +1056,7 @@
   "chat.attach.type": "{name}: this file type cannot be attached",
   "chat.attach.size": "{name}: too large (max {limit})",
   "chat.attach.count": "Up to {limit} attachments per message",
-  "chat.draft.reselect": "{n} attachment(s) were not sent and are gone after the reload — select them again: {names}"
+  "chat.draft.reselect": "{n} attachment(s) were not sent and are gone after the reload — select them again: {names}",
+  "scope.lockedChat": "A chat keeps the account it started with — start a new chat for another",
+  "chat.createFailed": "The chat could not be started: {error}"
 }

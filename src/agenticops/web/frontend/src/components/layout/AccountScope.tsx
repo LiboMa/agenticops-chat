@@ -8,13 +8,17 @@ import { adoptAccountParam, scopeKey, scopeMode, validScope, type ScopeMode } fr
 import { SPLIT_MEDIA } from "@/lib/caseQueue";
 
 interface AccountScopeValue {
-  accountId: number | null;          // null = All accounts
+  accountId: number | null;          // null = All accounts — the user's own choice, whatever a page shows
   setAccountId: (id: number | null) => void;
   mode: ScopeMode;
   accountName: string | null;
+  /** S5: a page that is bound to one account (an open chat) shows it in the locked select; undefined = no lock */
+  lockTo: (accountId: number | null | undefined) => void;
+  locked: number | null | undefined;
 }
 
-const Ctx = createContext<AccountScopeValue>({ accountId: null, setAccountId: () => {}, mode: "notApplied", accountName: null });
+const Ctx = createContext<AccountScopeValue>({ accountId: null, setAccountId: () => {}, mode: "notApplied",
+  accountName: null, lockTo: () => {}, locked: undefined });
 
 const read = (key: string): string | null => {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -28,7 +32,8 @@ export function AccountScopeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const wide = useMediaQuery(SPLIT_MEDIA);
-  const mode = scopeMode(location.pathname, wide);
+  const [locked, lockTo] = useState<number | null | undefined>(undefined);
+  const mode = locked !== undefined ? "locked" : scopeMode(location.pathname, wide);
   const [stored, setStored] = useState<number | null>(() => validScope(read(key), undefined));
 
   useEffect(() => { setStored(validScope(read(key), undefined)); }, [key]);  // another user signed in
@@ -56,7 +61,7 @@ export function AccountScopeProvider({ children }: { children: ReactNode }) {
 
   const accountId = validScope(stored, accounts.data, accounts.isError);
   const accountName = accountId == null ? null : accounts.data?.find((a) => a.id === accountId)?.name ?? null;
-  return <Ctx.Provider value={{ accountId, setAccountId, mode, accountName }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ accountId, setAccountId, mode, accountName, lockTo, locked }}>{children}</Ctx.Provider>;
 }
 
 export const useAccountScope = () => useContext(Ctx);
@@ -70,11 +75,13 @@ export function useScopedAccountId(): number | undefined {
 export function AccountScopeSelect({ className = "" }: { className?: string }) {
   const { t } = useLocale();
   const accounts = useAccounts();
-  const { accountId, setAccountId, mode } = useAccountScope();
-  const why = mode === "notApplied" ? t("scope.notApplied") : mode === "locked" ? t("scope.locked") : undefined;
+  const { accountId, setAccountId, mode, locked } = useAccountScope();
+  const why = locked !== undefined ? t("scope.lockedChat")
+    : mode === "notApplied" ? t("scope.notApplied") : mode === "locked" ? t("scope.locked") : undefined;
+  const shown = locked !== undefined ? locked : accountId;
   return (
     <select aria-label={t("scope.label")} title={why} disabled={mode !== "active"}
-            value={accountId == null ? "" : String(accountId)}
+            value={shown == null ? "" : String(shown)}
             onChange={(e) => setAccountId(e.target.value ? Number(e.target.value) : null)}
             className={`max-w-[170px] truncate rounded-[5px] border border-border bg-card px-2 py-1.5 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>
       <option value="">{t("scope.all")}</option>

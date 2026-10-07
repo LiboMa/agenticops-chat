@@ -12,6 +12,10 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
 import { contextRefFromQuery, contextRefQuery, type ContextRef } from "@/lib/contextRef";
+import { contextForNewChat } from "@/lib/chatContext";
+import { useAccountScope } from "@/components/layout/AccountScope";
+import { useAnomaly } from "@/hooks/useAnomaly";
+import { useChange } from "@/hooks/useChanges";
 import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
@@ -36,7 +40,8 @@ export default function Chat() {
   const restorationAttempted = useRef(false);
 
   // Lazy session creation hook
-  const { sendFirstMessage, creating } = useLazySessionCreate();
+  const { sendFirstMessage, creating, createError } = useLazySessionCreate();
+  const scope = useAccountScope();
 
   // Determine selected session from URL parameter
   const selectedId = urlSessionId || null;
@@ -106,6 +111,16 @@ export default function Chat() {
   // Three-zone layout state
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
+  // S5: the top bar shows the account this chat is bound to, locked — an open chat's own, or (before the first
+  // message) the account of the issue / change it was asked about; a new free chat leaves the scope usable
+  const refIssue = useAnomaly(!selectedId && contextRef?.kind === "issue" ? contextRef.id : 0);
+  const refChange = useChange(!selectedId && contextRef?.kind === "change" ? contextRef.id : 0);
+  const lockValue = selectedId ? (currentSession ? currentSession.context?.account_id ?? null : undefined)
+    : contextRef ? (contextRef.kind === "issue" ? refIssue.data?.account_id ?? null : refChange.data?.account_id ?? null)
+    : undefined;
+  const { lockTo } = scope;
+  useEffect(() => { lockTo(lockValue); }, [lockValue, lockTo]);
+  useEffect(() => () => lockTo(undefined), [lockTo]);
   // the ref has done its job once read: it leaves the URL (a reload is an ordinary Chat visit)
   useEffect(() => {
     if (!initialRef) return;
@@ -161,7 +176,7 @@ export default function Chat() {
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
   const handleWelcomeSend = (content: string, files: File[]) => {
-    sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "");
+    sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "", contextForNewChat(contextRef, scope.accountId));
   };
 
   return (
@@ -234,6 +249,11 @@ export default function Chat() {
               </div>
             </div>
 
+            {createError && (
+              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                {t("chat.createFailed").replace("{error}", createError)}
+              </div>
+            )}
             {/* Chat input in welcome mode — triggers lazy session creation (Req 1.3) */}
             <ChatInput
               onSend={handleWelcomeSend}
@@ -337,7 +357,7 @@ export default function Chat() {
                 const prompt = t(key).replace("{id}", String(contextRef.id));
                 // no session yet (welcome): create one, and keep the panel open across the new session's page
                 if (selectedId) sendMessage(prompt);
-                else void sendFirstMessage(prompt, undefined, contextRefQuery(contextRef));
+                else void sendFirstMessage(prompt, undefined, contextRefQuery(contextRef), contextForNewChat(contextRef, null));
               }}
               agentCheckDisabled={streaming}
             />

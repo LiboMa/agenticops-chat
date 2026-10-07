@@ -26,14 +26,15 @@ export function validScope(stored: unknown, accounts: { id: number }[] | undefin
   return accounts.some((a) => a.id === id) ? id : null;
 }
 
-const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources"]);
+// S5: a new chat (/app/chat) takes the scope as its account; an open chat (/app/chat/:id) shows its own, locked
+const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources", "/app/chat"]);
 
 /** active: the lists, and the Cases split view (its queue stays on screen); locked: a detail page — and a case
  *  opened full screen on a narrow screen; notApplied: everything else. */
 export function scopeMode(pathname: string, wide: boolean): ScopeMode {
   const path = pathname.replace(/\/+$/, "");
   if (LISTS.has(path)) return "active";
-  const m = /^\/app\/(issues|plans|changes|resources)\/[^/]+$/.exec(path);
+  const m = /^\/app\/(issues|plans|changes|resources|chat)\/[^/]+$/.exec(path);
   if (!m) return "notApplied";
   return m[1] === "issues" && wide ? "active" : "locked";
 }

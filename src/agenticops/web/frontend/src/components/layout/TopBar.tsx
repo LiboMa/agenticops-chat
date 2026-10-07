@@ -155,14 +155,16 @@ function AvatarMenu() {
 function ScopeMenuItems({ item }: { item: string }) {
   const { t } = useLocale();
   const accounts = useAccounts();
-  const { accountId, setAccountId, mode } = useAccountScope();
-  const why = mode === "notApplied" ? t("scope.notApplied") : mode === "locked" ? t("scope.locked") : null;
+  const { accountId, setAccountId, mode, locked } = useAccountScope();
+  const why = locked !== undefined ? t("scope.lockedChat")
+    : mode === "notApplied" ? t("scope.notApplied") : mode === "locked" ? t("scope.locked") : null;
+  const shown = locked !== undefined ? locked : accountId;
   return (
     <div className="min-[601px]:hidden">
       <DropdownMenu.Separator className="my-1 h-px bg-border" />
       <DropdownMenu.Label className="px-2.5 pt-1 text-[11px] text-muted-foreground">{t("scope.label")}</DropdownMenu.Label>
       {why && <p className="px-2.5 pb-1 text-[11px] text-muted-foreground">{why}</p>}
-      <DropdownMenu.RadioGroup value={accountId == null ? "" : String(accountId)}
+      <DropdownMenu.RadioGroup value={shown == null ? "" : String(shown)}
                                onValueChange={(v) => setAccountId(v ? Number(v) : null)}>
         {[{ id: "", name: t("scope.all") }, ...(accounts.data ?? []).map((a) => ({ id: String(a.id), name: a.name }))].map((a) => (
           <DropdownMenu.RadioItem key={a.id} value={a.id} disabled={mode !== "active"} className={`${item} data-[disabled]:opacity-50`}

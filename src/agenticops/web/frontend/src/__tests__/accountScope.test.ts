@@ -29,7 +29,7 @@ describe("account scope (MVP-2.7.0 S4)", () => {
     ["/app/plans", true, "active"], ["/app/resources", false, "active"], ["/app/changes", true, "active"],
     ["/app/plans/5", true, "locked"], ["/app/changes/3", true, "locked"], ["/app/resources/9", true, "locked"],
     ["/app/overview", true, "notApplied"], ["/app/security", true, "notApplied"], ["/app/galaxy", true, "notApplied"],
-    ["/app/chat", true, "notApplied"], ["/app/settings", true, "notApplied"], ["/app/issues/", true, "active"],
+    ["/app/chat", true, "active"], ["/app/chat/abc", true, "locked"], ["/app/settings", true, "notApplied"], ["/app/issues/", true, "active"],
   ] as const)("%s (wide=%s) → %s", (path, wide, mode) => {
     expect(scopeMode(path, wide)).toBe(mode);
   });

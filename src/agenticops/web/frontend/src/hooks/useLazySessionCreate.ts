@@ -6,6 +6,7 @@ import { chatStream } from "@/lib/chatStream";
 import { appendMessageToCache, nextTempId } from "@/hooks/useChatMessages";
 import type { ChatSession, ChatMessage } from "@/api/types";
 import { currentUserId, userKey } from "@/lib/home";
+import type { NewChatContext } from "@/lib/chatContext";
 
 /**
  * Lazy (deferred) session creation for the welcome flow:
@@ -18,18 +19,21 @@ export function useLazySessionCreate() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const creatingRef = useRef(false);
 
   const sendFirstMessage = useCallback(
-    // `search` rides along to the new session's URL (Chat keeps an open context panel through the remount)
-    async (content: string, files?: File[], search = "") => {
+    // `search` rides along to the new session's URL (Chat keeps an open context panel through the remount);
+    // `context` (S5) is what the chat is about and its account — the server resolves and checks it
+    async (content: string, files?: File[], search = "", context?: NewChatContext) => {
       if (creatingRef.current) return;
       creatingRef.current = true;
       setCreating(true);
+      setCreateError(null);
       try {
         const session = await apiFetch<ChatSession>("/chat/sessions", {
           method: "POST",
-          body: JSON.stringify({ name: undefined }),
+          body: JSON.stringify({ name: undefined, context }),
         });
         localStorage.setItem(userKey("aiops-last-session-id", currentUserId()), session.session_id);
         qc.invalidateQueries({ queryKey: ["chat-sessions"] });
@@ -49,6 +53,9 @@ export function useLazySessionCreate() {
         // to the in-flight stream for this session id on mount.
         void chatStream.send(session.session_id, content, files);
         navigate(`/app/chat/${session.session_id}${search}`, { replace: true });
+      } catch (err) {
+        // the chat was not created (the linked issue is gone, an account changed): nothing was sent
+        setCreateError(err instanceof Error ? err.message : String(err));
       } finally {
         creatingRef.current = false;
         setCreating(false);
@@ -57,5 +64,5 @@ export function useLazySessionCreate() {
     [navigate, qc],
   );
 
-  return { sendFirstMessage, creating };
+  return { sendFirstMessage, creating, createError };
 }

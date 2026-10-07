@@ -1056,5 +1056,7 @@
   "chat.attach.type": "{name}：不支持这种文件类型",
   "chat.attach.size": "{name}：文件过大（上限 {limit}）",
   "chat.attach.count": "每条消息最多 {limit} 个附件",
-  "chat.draft.reselect": "有 {n} 个附件未发送，刷新后已丢失，请重新选择：{names}"
+  "chat.draft.reselect": "有 {n} 个附件未发送，刷新后已丢失，请重新选择：{names}",
+  "scope.lockedChat": "对话沿用它开始时的账户；要换账户请新建对话",
+  "chat.createFailed": "未能开始对话：{error}"
 }

@@ -8,6 +8,7 @@ export function useAnomaly(id: number) {
   return useQuery({
     queryKey: ["anomaly", id],
     queryFn: () => apiFetch<HealthIssue>(`/health-issues/${id}`),
+    enabled: id > 0,
     staleTime: 5 * 60_000,
     // while a fix is in motion, so the page follows approve → execute → the run's verdict without a reload
     refetchInterval: (q) => (q.state.data && ISSUE_IN_FLIGHT.has(q.state.data.status) ? 5_000 : false),
