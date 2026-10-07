@@ -142,7 +142,9 @@ def list_reports(report_type: str = "", limit: int = 20) -> str:
     """
     session = get_session()
     try:
-        query = session.query(Report).order_by(Report.created_at.desc())
+        from agenticops.services.report_access import run_context_actor, visible_filter
+        # S6: the turn's user sees their private reports; nobody else's
+        query = visible_filter(session.query(Report), run_context_actor()).order_by(Report.created_at.desc())
 
         if report_type:
             query = query.filter_by(report_type=report_type.lower())

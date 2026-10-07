@@ -4457,7 +4457,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
 
-        send_result = await asyncio.to_thread(execute_send_to, user_content.strip())
+        send_result = await asyncio.to_thread(execute_send_to, user_content.strip(), actor)
 
         # Persist user message + result
         with get_db_session() as db:

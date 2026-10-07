@@ -49,3 +49,12 @@ def get_visible_report(db, report_id: int, actor: Actor) -> Report:
     if report is None or not can_see(report, actor):
         raise HTTPException(404, NOT_FOUND)
     return report
+
+
+def run_context_actor() -> Actor:
+    """The actor of the current run (a chat turn's user, the CLI, a schedule's system) — for code paths that have no
+    request, such as agent tools and /send_to, so a private report reaches them only for its owner or an admin."""
+    from agenticops.run_context import get_run_context
+    ctx = get_run_context()
+    kind, _, ident = (ctx.actor or "system").partition(":")
+    return Actor(kind, ident or kind, ctx.actor_user_id, tuple(ctx.actor_permissions or ()))

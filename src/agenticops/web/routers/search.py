@@ -5,7 +5,10 @@ searchable (`change_requests` group). Both only while change_management_enabled 
 with the flag off there is no change_requests group and no change plan in the fix_plans group.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from agenticops.auth.actor import Actor
+from agenticops.web.deps import current_actor
 from sqlalchemy import func
 
 from agenticops.config import settings
@@ -21,6 +24,7 @@ async def api_search(
     q: str = Query(..., min_length=1),
     types: str = Query(default="issues,fix_plans,reports,resources,change_requests"),
     limit: int = Query(default=5, le=10),
+    actor: Actor = Depends(current_actor),
 ):
     """Global search across issues, fix/change plans, reports, resources and change requests."""
     search_types = {t.strip() for t in types.split(",")}
@@ -84,8 +88,9 @@ async def api_search(
             ]
 
         if "reports" in search_types:
+            from agenticops.services.report_access import visible_filter
             rows = (
-                db.query(Report)
+                visible_filter(db.query(Report), actor)
                 .filter(
                     func.lower(Report.title).like(search_term)
                     | func.lower(Report.summary).like(search_term)
