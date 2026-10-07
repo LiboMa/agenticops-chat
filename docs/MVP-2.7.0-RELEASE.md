@@ -2,7 +2,7 @@
 
 > Version: 2.7.0 · Branch: `MVP-2.7.0`（从 `MVP-2.6.1` 的 `1ec53b3` 切出）· 起始日期：2026-10-05 · 主题：先把会「假通过」「串号」「多进程失效」的核心信任问题修掉，再按主人 10-05 交付的蓝白设计包分阶段改造界面
 >
-> **状态：S1（核心信任加固）已于 2026-10-05、S2（蓝白外壳与导航）已于 2026-10-06 由主人验收通过；S3（方案与变更枢纽 +「需要你处理」）、S4（Cases 与 Resources）与 S5（Chat：会话上下文 + 账户绑定 + 幂等发送，含真实模型 E2E）已于 2026-10-07 由主人验收通过；S1–S5 已经主人同意推送到 `origin/MVP-2.7.0`（`5d82aec`）。S6–S7 尚未开始：每个阶段开工前先交详细计划给主人批准。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
+> **状态：S1（核心信任加固）已于 2026-10-05、S2（蓝白外壳与导航）已于 2026-10-06 由主人验收通过；S3（方案与变更枢纽 +「需要你处理」）、S4（Cases 与 Resources）与 S5（Chat：会话上下文 + 账户绑定 + 幂等发送，含真实模型 E2E）已于 2026-10-07 由主人验收通过；S1–S5 已经主人同意推送到 `origin/MVP-2.7.0`（`5d82aec`）。S6（报告与双语：版本与归属、受保护的中英渲染、导出 / 打印、确认后幂等发布）已实现，等主人手动验收（未 push）。S7 尚未开始。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
 >
 > 全链规划（含 S1 详细计划）：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`
 > 设计输入：`docs/AgenticOps_BlueWhite_Review.zip`、`docs/superpowers/specs/2026-10-05-blue-white-sre-workspace-design.md`、`docs/ui-contracts/2026-10-05/`
@@ -20,7 +20,7 @@
 | **S3 方案枢纽 + 待办**（P4） | `/app/plans` 三标签 + `/app/plans/:id`、`GET /api/ui/attention` + 顶栏「需要你处理」、如实的批准措辞 + 核对勾选、方案状态 CAS、编辑防过期 | **已验收（2026-10-07）** |
 | **S4 Cases 与 Resources**（P3） | 队列 + 阅读区双栏（保留 2.6.1 阶段卡）、HealthIssue 读取、补充说明、顶栏账户范围、询问 Agent、Resources 表格 | **已验收（2026-10-07）** |
 | **S5 Chat**（P2） | 会话上下文与账户绑定、补充说明进上下文、`client_message_id` 幂等、派发状态与中断、流错误分类、草稿、附件规则、蓝白 Chat 页 | **已验收（2026-10-07）** |
-| S6 报告与双语（P5） | 渲染服务 + 翻译、导出、发布确认 | 未开始 |
+| **S6 报告与双语**（P5） | 报告版本与归属、中英渲染（保护值 fail-closed）、导出 / 打印、带版本 / 语言 / 幂等键的发布 | **已实现，待主人验收** |
 | S7 联合验收与发布（P6） | 文档、live E2E、版本串、`v2.7.0` tag | 未开始 |
 | **A1 账本与分钟级**（核心能力轨） | `change_events` 账本 + 感知度（资源属性）+ Sensing Worker（CloudTrail / K8s events 拉取、增量刷新）+ RCA 接入 + 三端点 / CLI / Settings 感知卡 / 资源与问题页 | **spec 已批准（10-06），详细计划待出** |
 | A2 live 级（核心能力轨） | live 探针、预算降级、`request_sensitivity`、两种端点采集、`VOLATILE_KEYS` 补齐 | 未开始 |
@@ -640,6 +640,139 @@
   - 流结束时的保存是事件循环上的同步 DB 调用（PostgreSQL 下是一次网络往返）；
   - 停止提示切换会话后不会消失；
   - 内存里的附件按会话、不按用户区分（同一标签页重新登录且未刷新时可能看到上一个用户「新会话」里未发送的附件）。
+
+---
+
+## S6 报告与双语
+
+设计：`docs/superpowers/specs/2026-10-07-mvp-2.7.0-s6-reports-bilingual-design.md`；实施计划：`docs/superpowers/plans/2026-10-07-mvp-2.7.0-s6-reports-bilingual.md`（主人 10-07 批准，Native 执行）。
+
+主人决定：
+- 只做报告。
+- 新报告自动准备另一种语言，旧报告用按钮准备。
+- 私有 chat 保存的报告保持私有。
+- 详情页用「当前 / 双语」切换。
+
+### 改了什么
+
+- **报告的身份与归属**
+  - 每份报告新增 `content_version`、`content_hash`、`source_language`、`owner_user_id`、`visibility`。每次写入都由 `services/report_content` 盖章；迁移时补齐已有报告。
+  - 从私有 chat 保存的报告属于创建者：只有创建者和管理员可见、可渲染、可导出、可发布，其他人得到 404。
+  - 所有报告路由都过 `services/report_access`。旁路也一样：全局搜索、`/send_to`（`#R` 引用和正文里的「Report #N」）、agent 工具 `list_reports` / `distribute_report`（按当前运行的用户判断）。
+- **中英渲染**
+  - 新表 `content_renderings`。源语言的渲染就是源本身。
+  - 读取 `GET /api/content/report/{id}/rendering` 从不调用模型。源变了，旧译文标为 `stale`。
+  - 每份新保存的报告，都在后台用便宜模型（`report_translation_model_id`，空 = cheap，temperature 0）准备另一种语言。按源哈希去重，每种语言一把锁。
+  - 旧报告用「准备翻译」（`POST /api/content/report/{id}/translations`）；失败了可以重试。
+  - 启动时把残留的「准备中」置为失败。工作线程里任何错误都落为失败，从不卡在「准备中」。
+- **保护值**（`services/content_protect`）
+  - 送进模型前，代码块、行内代码、`I#` / `R#` / `C#` / `P#` / `E-…` / `pc-…` 引用、ARN、资源 id、IP、区域、URL 和所有数字都换成编号占位符，模型看不到这些值。
+  - 译文里每个占位符必须恰好出现一次，还原后的保护值哈希必须与源一致；否则这条渲染失败（`protected_values_changed`），不展示任何部分译文。
+  - 中文紧贴的值（「问题I#12已修复」）也整体保护。
+  - 模型多包的一层代码围栏和开场白会被去掉。
+  - 回复被截断时失败为 `too_long`，不展示半截。
+  - 读超时 300 秒，最多重试一次。
+- **导出**：`GET /api/reports/{id}/export?version&language=zh|en|zh-en&format=html|pdf|docx`。
+  - 以附件下载（`AgenticOps_R{id}_v{n}_{lang}.{ext}`，带 ETag）；zh-en 是两份纸面分页排列。
+  - 正文和标题里的原始 HTML 一律转义。
+  - 请求的语言没就绪返回 409，不会换成另一种语言。
+  - html 始终可用，pdf / docx 取决于服务器上的库。
+  - 导出从不发布。
+- **打印**：报告页只打印纸面，A4、16mm 边距，双语时中英分页。
+- **发布** `POST /api/reports/{id}/publish`
+  - 必须带 `version`、`language` 和 `Idempotency-Key` 请求头。
+  - 只发送这个版本、这个语言的已就绪渲染；摘要也用这个语言。
+  - S3 对象名带 `_v{n}_{lang}`，换一种语言再发布不会覆盖前一次的文件。
+  - 同一个 key 重复发布只发一次，返回第一次的结果；同一个 key 还在发送时再发返回 409。
+- **页面**
+  - 列表：全部本地化，每行是真链接，显示版本、私有标记和每种语言的状态（就绪 / 准备中 / 失败 / 未准备 / 已过期）。
+  - 详情：「当前 / 双语」切换（双语时并排，≤1350px 时上下排列）。没就绪的语言显示原因，并给出「准备翻译 / 重试 / 以源语言阅读」，从不静默换成另一种语言。
+  - 导出对话框：语言即当前显示的语言，服务器不能生成的格式置灰，带认证下载，令牌不进 URL。
+  - 发布对话框：发送前先显示真实目的地（SNS topic 或 SES 收件人），每次打开用一个 key。
+  - 中英文文案齐全。
+
+### 接口与契约补充
+
+- 新接口：
+  - `GET /api/content/report/{id}/rendering?version&language`（契约 `ContentRendering`，`status` ∈ ready / pending / missing / failed / stale）。
+  - `POST /api/content/report/{id}/translations`（`TranslationRequest {source_version, languages}`，返回 202）。
+  - `GET /api/reports/{id}/export`。
+- `ReportResponse` 新增 `content_version`、`content_hash`、`source_language`、`visibility`、`owned_by_me`、`language_status`。
+- `ReportPublishRequest` 新增 `version`、`language`。
+- 错误体是 `UiError {detail, code}`，`code` 包括 `rendering_not_ready`、`format_unavailable`、`idempotency_key_required`、`publish_in_flight`。渲染上的 `error_code` 包括 `protected_values_changed`、`model_failed`、`too_long`、`interrupted`。
+- bootstrap：`features.content_rendering = true`、`features.report_export = true`，新增扩展字段 `report_export_formats`。
+- 新配置 `report_translation_model_id`（`settings.yaml`，空 = `bedrock_model_id_cheap`）。
+
+### S6 六个可达面
+
+- **CLI** — 非目标：报告没有 CLI 视图。`aiops report` 生成的报告照样自动入队翻译。CLI 的 `/send_to` 看不到别人的私有报告。
+- **Web API** — 做：见上节。
+- **Web UI** — 做：报告列表与详情的双语化、导出 / 打印 / 发布对话框。
+- **Agent tool** — 做（间接）：`save_report` 保存后自动入队翻译；`list_reports` / `distribute_report` 按当前运行的用户判断可见性。不新增工具。
+- **Schedule** — 做（间接）：定时报告经同一条保存路径自动入队翻译。
+- **Notification** — 做：发布（SNS / SES）只发送选定的版本和语言，并且幂等。
+
+### 升级注意
+
+1. `POST /api/reports/{id}/publish` 现在必须带 `version`、`language` 和 `Idempotency-Key` 请求头。仓库内的 Web 已更新，外部脚本需要补上。
+2. 启动时执行增量迁移：`reports` 加 5 列并补算哈希和语言，新建 `content_renderings` 表。
+3. 每份新报告会多一次便宜模型调用（准备另一种语言）。
+
+### 已知缺口
+
+- 只保证保护值不变，不评估译文质量；标题不翻译（契约只要求正文）。
+- 翻译用掉的 token 不进成本统计。
+- `~~~` 围栏和缩进代码块不在保护范围内；源里有落单的 `⟦` 或 `⟧` 时永远翻译不了。
+- DOCX 导出里 `<` / `>` 会以转义形式显示。
+- 发布重放：同一个 key 但换了渠道、版本或语言时，仍返回第一次的结果（应为 422）。并发的两个不同 key 记录发布结果时，可能丢一条。
+- 分享在显示的语言没就绪时，正文退回源语言，标题也不写语言。
+- `POST /api/reports/generate` 返回最新的一行报告，可能恰好是别人同时保存的私有报告。
+- 既有的发布格式化（`notify/report_formatter._to_html`）会把报告正文里的原始 HTML 原样放进发出的 HTML（S6 之前就存在；导出已用自己的转义）。
+- 私有报告只覆盖从私有 chat 保存的那一种；CLI / IM / 定时任务看不到任何私有报告。
+
+### S6 验收清单（主人手动）
+
+见设计文档 §5 的九条：
+1. 自动翻译
+2. 旧报告「准备翻译」
+3. 保护值
+4. 双语切换
+5. 导出
+6. 打印
+7. 发布确认
+8. 私有报告
+9. 中英文
+
+### S6 门禁结果
+
+2026-10-08，在 `MVP-2.7.0` 上（S6 全部提交、含审查修复之后）：
+
+| 门禁 | 结果 | S5 结束时 |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6891 passed / 85 skipped / 3 failed**，三条与之前相同、都与 S6 无关 | 6813 passed / 3 failed |
+| `npx tsc --noEmit` | 0 错误 | 0 |
+| `npm test`（vitest） | **58 个文件 / 709 个测试全过** | 55 / 698 |
+| `npm run build` | 成功 | 成功 |
+
+另做了：
+- **无头浏览器走查**：15 项全过。验收环境里翻译换成桩，不调模型；发布对话框只打开，不确认（验收环境读的是主人真实的 `config/channels.yaml`）。覆盖：
+  - 旧报告准备翻译到就绪；
+  - 1440px 双语并排、1000px 上下排列；
+  - 导出文件名为 `AgenticOps_R1_v1_zh-en.html`，内含两份纸面；
+  - 打印模拟下只剩纸面；
+  - 发布框先写明目的地；
+  - bob 的列表里没有 alice 的私有报告、直接访问 404，alice 能访问；
+  - 中文文案；
+  - 零页面报错、零外部请求。
+- **真实模型**：新保存的两份报告由便宜模型自动翻译，都变为就绪；其中一份 3.1 秒就绪，10 个保护值全在，保护值哈希一致。
+- **独立审查**（`3367b65..e634fe4`）：0 严重 / 4 重要 / 若干次要。重要的全部修复，每条先有失败测试；另有两条次要按实际影响升级后修复：
+  1. 私有报告经全局搜索、`/send_to`、agent 工具泄露（`fbe9692`）。
+  2. 换一种语言再发布会覆盖前一次的文件，摘要也总是源语言（`d776575`）。
+  3. 紧贴中文的值保护不完整，en→zh 会无端失败（`4ea0aef`）。
+  4. 长报告永远翻译不了：60 秒读超时、没有检查截断（`4819911`）。
+  - 升级修复：翻译可能卡在「准备中」，以及模型的开场白会混进正文（`4819911`）。
+  - 其余次要问题见上面的已知缺口。
+- 实施中发现：测试里调用真实 `save_report` 会碰到主人配置的 S3 桶（被测试的真实 AWS 拦截挡下）和真实通知渠道（卡住）。被终止的两次测试运行可能向某个渠道发出了「报告已保存」的测试通知。相关测试现已隔离。
 
 ---
 
