@@ -113,3 +113,25 @@ def test_linked_object_that_was_deleted_keeps_the_binding_sentence(db):
     from agenticops.chat.context_block import build_context_block
     block = build_context_block(db, _chat(db, "health_issue", 999, 1))
     assert "bound to account prod" in block and "linked_issue" not in block
+
+
+def test_a_newest_note_longer_than_the_cap_is_cut_not_dropped(db):
+    """S5 review: a note may be 8000 characters but the cap is 6000 — the newest one used to stop the loop with
+    nothing kept, and the whole notes section (its 'omitted' marker included) vanished."""
+    from agenticops.chat.context_block import NOTES_CHARS_MAX, build_context_block
+    i = _issue(db)
+    _note(db, i, "older note", 0)
+    _note(db, i, "x" * 7900, 1)
+    block = build_context_block(db, _chat(db, "health_issue", i.id, 1))
+    assert "<human_notes>" in block and "(older notes omitted)" in block
+    kept = [line for line in block.splitlines() if line.startswith("- ")]
+    assert len(kept) == 1 and "x" * 100 in kept[0] and "(cut)" in kept[0]
+    assert len(kept[0]) <= NOTES_CHARS_MAX + 200
+
+
+def test_issue_block_has_its_region(db):
+    from agenticops.chat.context_block import build_context_block
+    i = _issue(db)
+    i.metric_data = {"region": "ap-southeast-1"}
+    db.flush()
+    assert "Region: ap-southeast-1" in build_context_block(db, _chat(db, "health_issue", i.id, 1))
