@@ -50,7 +50,7 @@ def _upload_policy() -> dict:
 def _features() -> dict:
     """Only what is built and switched on. Later stages turn their flags on as they ship."""
     return {
-        "context_chat": False,
+        "context_chat": True,         # S5: chats carry a server-checked context (services/chat_context)
         "revision_guards": False,     # approvals are guarded by content_hash + 409 today, not If-Match
         "content_rendering": False,
         "report_export": False,

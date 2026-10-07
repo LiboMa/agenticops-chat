@@ -5,6 +5,7 @@ threads (auto-SRE / auto-execute) and the scheduler's AgentChain run. The thread
 are invoked directly here (no worker thread), so their set_run_context()/set_trace_id()
 writes land in the pytest main thread — the autouse fixture restores both afterwards.
 """
+import uuid
 
 import getpass
 import threading
@@ -195,7 +196,7 @@ def test_web_chat_sse_sets_context(db, monkeypatch):
             yield {"data": "ok"}
 
     monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda sid: _Agent())
-    resp = TestClient(webapp.app).post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi"})
+    resp = TestClient(webapp.app).post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi", "client_message_id": str(uuid.uuid4())})
     assert resp.status_code == 200
     assert seen["actor"] == "web:anonymous" and seen["actor_user_id"] is None and seen["actor_permissions"] == ()
     assert seen["agent_name"] == "main" and seen["chat_session_id"] == session_id

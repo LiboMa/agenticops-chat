@@ -2,6 +2,7 @@
 
 Validates Requirements: 3.1-3.6, 3.9, 3.10
 """
+import uuid
 
 from datetime import datetime, timedelta, timezone
 
@@ -217,7 +218,7 @@ def test_stream_failure_marks_assistant_message_with_error(client, monkeypatch):
     monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda sid: _BoomAgent())
 
     try:
-        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi"})
+        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi", "client_message_id": str(uuid.uuid4())})
         assert resp.status_code == 200  # SSE opens fine; error surfaces as an event
 
         with get_db_session() as db:
@@ -263,7 +264,7 @@ def test_disconnect_stops_stream(client, monkeypatch):
     monkeypatch.setattr("starlette.requests.Request.is_disconnected", _always_disconnected)
 
     try:
-        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi"})
+        resp = client.post(f"/api/chat/sessions/{session_id}/messages", json={"content": "hi", "client_message_id": str(uuid.uuid4())})
         assert resp.status_code == 200
         assert consumed["n"] < 100  # disconnect honored -> not all 100 consumed
     finally:

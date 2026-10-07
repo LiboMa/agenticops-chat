@@ -743,6 +743,9 @@ class ChatSessionUpdate(BaseModel):
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
+    # MVP-2.7.0 S5 (services/chat_dispatch): the sender's id for this message — a repeat is replayed or refused,
+    # never run twice. Multipart sends carry it as a form field of the same name.
+    client_message_id: str = Field(..., pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 class ChatMessageResponse(BaseModel):
@@ -756,6 +759,9 @@ class ChatMessageResponse(BaseModel):
     attachments: Optional[list] = None
     suggestions: Optional[list] = None
     created_at: datetime
+    # S5: accepted|running|completed|failed|interrupted (None on older rows = completed)
+    client_message_id: Optional[str] = None
+    dispatch_state: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

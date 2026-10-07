@@ -1,3 +1,4 @@
+import uuid
 # tests/test_chat_session_access.py
 """Who may see a chat session (MVP-2.7.0 S1b).
 
@@ -75,7 +76,7 @@ def test_a_private_session_is_a_404_on_every_route_for_someone_else(env):
     assert sid not in [x["session_id"] for x in bob.get("/api/chat/sessions").json()]
     assert bob.get(f"/api/chat/sessions/{sid}").status_code == 404
     assert bob.get(f"/api/chat/sessions/{sid}/messages").status_code == 404
-    assert bob.post(f"/api/chat/sessions/{sid}/messages", json={"content": "hi"}).status_code == 404
+    assert bob.post(f"/api/chat/sessions/{sid}/messages", json={"content": "hi", "client_message_id": str(uuid.uuid4())}).status_code == 404
     assert bob.patch(f"/api/chat/sessions/{sid}", json={"name": "mine now"}).status_code == 404
     assert bob.delete(f"/api/chat/sessions/{sid}").status_code == 404
     assert bob.post("/api/reports/from-session", json={"session_id": sid}).status_code == 404
@@ -163,11 +164,11 @@ def test_send_to_never_runs_for_a_session_the_caller_cannot_see(env):
     sent = SimpleNamespace(message="sent")
     with patch("agenticops.chat.send_to.execute_send_to", return_value=sent) as run:
         assert env.as_(BOB).post(f"/api/chat/sessions/{sid}/messages",
-                                 json={"content": "/send_to ops hello"}).status_code == 404
+                                 json={"content": "/send_to ops hello", "client_message_id": str(uuid.uuid4())}).status_code == 404
         assert env.as_(BOB).post("/api/chat/sessions/does-not-exist/messages",
-                                 json={"content": "/send_to ops hello"}).status_code == 404
+                                 json={"content": "/send_to ops hello", "client_message_id": str(uuid.uuid4())}).status_code == 404
         run.assert_not_called()
-        r = env.as_(ALICE).post(f"/api/chat/sessions/{sid}/messages", json={"content": "/send_to ops hello"})
+        r = env.as_(ALICE).post(f"/api/chat/sessions/{sid}/messages", json={"content": "/send_to ops hello", "client_message_id": str(uuid.uuid4())})
         assert r.status_code == 200
         run.assert_called_once()
 
@@ -286,7 +287,7 @@ def test_a_private_chat_turn_is_logged_with_its_actor_and_without_its_text(env):
         async def stream_async(self, _content):
             yield {"data": "the private answer"}
     with patch.object(app_mod._chat_sessions, "get_or_create", return_value=FakeAgent()):
-        r = env.as_(ALICE).post(f"/api/chat/sessions/{sid}/messages", json={"content": "a private question"})
+        r = env.as_(ALICE).post(f"/api/chat/sessions/{sid}/messages", json={"content": "a private question", "client_message_id": str(uuid.uuid4())})
         assert r.status_code == 200
     s = get_session()
     try:

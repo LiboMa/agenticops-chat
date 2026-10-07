@@ -1,4 +1,5 @@
 """Multi-attachment multipart upload: two files in one chat message reach the agent."""
+import uuid
 
 from datetime import datetime, timezone
 
@@ -49,7 +50,7 @@ def test_multipart_two_files_both_attached(client, monkeypatch):
     try:
         resp = client.post(
             f"/api/chat/sessions/{session_id}/messages",
-            data={"content": "analyze these"},
+            data={"content": "analyze these", "client_message_id": str(uuid.uuid4())},
             files=files,
         )
         assert resp.status_code == 200
@@ -82,7 +83,7 @@ def test_too_many_files_rejected(client):
     try:
         resp = client.post(
             f"/api/chat/sessions/{session_id}/messages",
-            data={"content": "x"},
+            data={"content": "x", "client_message_id": str(uuid.uuid4())},
             files=files,
         )
         assert resp.status_code == 400

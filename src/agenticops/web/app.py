@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTask
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import joinedload
@@ -42,6 +42,7 @@ from agenticops.config import settings
 import asyncio
 import json
 import logging
+import re
 import time
 import urllib.request
 import uuid
@@ -120,6 +121,15 @@ async def lifespan(app: FastAPI):
         pass
 
     _webhooks_router.warn_if_unauthenticated()
+
+    # MVP-2.7.0 S5: a chat reply an earlier process was writing was cut off — mark it interrupted, never complete
+    try:
+        from agenticops.services.chat_dispatch import interrupt_stale
+        _n = interrupt_stale()
+        if _n:
+            logger.warning("Chat: %d reply dispatch(es) left open by an earlier process marked interrupted", _n)
+    except Exception as e:
+        logger.warning("Chat: interrupt_stale failed: %s", e)
 
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
@@ -4051,6 +4061,7 @@ async def api_get_chat_messages(
                 cost_usd=(m.token_usage or {}).get("cost_usd"),
                 attachments=m.attachments, suggestions=m.suggestions,
                 created_at=m.created_at,
+                client_message_id=m.client_message_id, dispatch_state=m.dispatch_state,
             ) for m in page_chrono],
             has_more=has_more,
             next_cursor=next_cursor,
@@ -4197,7 +4208,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
     """
     from agenticops.chat.preprocessor import preprocess_message
-    from agenticops.services import chat_access
+    from agenticops.services import chat_access, chat_dispatch
 
     # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
     # no upload is read, no /channel or /send_to command executes, and the 404 reveals nothing.
@@ -4212,10 +4223,13 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
 
     scan_focus_req: Optional[str] = None
 
-    if "multipart/form-data" in content_type:
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
         form = await request.form()
         text_content = str(form.get("content", "")).strip()
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
+        client_message_id = str(form.get("client_message_id", "")).strip()
+        if not re.fullmatch(chat_dispatch.UUID_RE, client_message_id):
+            raise HTTPException(422, "client_message_id (a UUID) is required")
         uploads = form.getlist("file")
         valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
 
@@ -4265,9 +4279,15 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             text_content = f"Please analyze the attached file(s): {_names}"
         user_content = text_content
     else:
-        payload = ChatMessageCreate(**(await request.json()))
+        try:
+            payload = ChatMessageCreate(**(await request.json()))
+        except ValidationError as e:  # raised in the body, so FastAPI would answer 500, not 422
+            raise HTTPException(422, json.loads(e.json()))
+        except (ValueError, TypeError):  # not JSON, or not an object
+            raise HTTPException(422, "Expected a JSON object with content and client_message_id")
         user_content = payload.content
         scan_focus_req = payload.scan_focus
+        client_message_id = payload.client_message_id
 
     # Intercept /channel command before agent dispatch
     if user_content.strip().lower().startswith(("/channel", "/channels")):
@@ -4308,23 +4328,61 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
 
         return EventSourceResponse(_send_to_stream())
 
-    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock])
-    enriched_content, _ = preprocess_message(
-        user_content, file_contents=file_contents,
-        file_images=file_images, file_documents=file_documents,
-    )
-
-    # Validate session & persist user message (checked again: it may have gone private since the first check)
+    # Validate session & claim the dispatch (checked again: it may have gone private since the first check).
+    # MVP-2.7.0 S5: one user message = one dispatch — a repeat is replayed or refused, never run twice.
+    from agenticops.chat.context_block import build_context_block
+    from agenticops.services import chat_context
     with get_db_session() as db:
         row = chat_access.get_visible_session(db, session_id, actor)
         _private_session = (row.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE
-        msg = ChatMessage(
-            session_id=row.id, role="user", content=user_content,
-            attachments=attachments,
-        )
-        db.add(msg)
-        row.last_activity_at = datetime.now(timezone.utc)
+        claimed = chat_dispatch.claim(db, row, client_message_id, user_content, attachments,
+                                      busy=session_id in _streaming_sessions)
+        if claimed.kind == "busy":
+            raise HTTPException(409, detail={"detail": "This chat already has a reply running",
+                                             "code": "session_busy", "trace_id": None})
+        if claimed.kind == "in_flight":
+            raise HTTPException(409, detail={"detail": "This message is already being answered",
+                                             "code": "duplicate_in_flight", "trace_id": None})
+        if claimed.kind == "replay":
+            replay = {"user_message_id": claimed.user_message_id,
+                      "assistant_message_id": claimed.reply.id if claimed.reply else None,
+                      "content": claimed.reply.content if claimed.reply else "",
+                      "state": (claimed.reply.dispatch_state if claimed.reply else None) or "completed",
+                      "trace_id": claimed.reply.trace_id if claimed.reply else None}
+        else:
+            chat_context.lock(row)
+            row.last_activity_at = datetime.now(timezone.utc)
+            bound_account_id = row.context_account_id
+            context_block = build_context_block(db, row)
+            user_message_id = claimed.user_message_id
         db_session_pk = row.id
+
+    if claimed.kind == "replay":
+        async def _replay_stream():
+            yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
+                                                            "user_message_id": replay["user_message_id"],
+                                                            "trace_id": replay["trace_id"]})}
+            if replay["content"]:
+                yield {"event": "text", "data": json.dumps({"token": replay["content"]})}
+            yield {"event": "done", "data": json.dumps({
+                "input_tokens": 0, "output_tokens": 0, "replayed": True,
+                "terminal_status": "completed" if replay["state"] == "completed" else replay["state"],
+                "user_message_id": replay["user_message_id"],
+                "assistant_message_id": replay["assistant_message_id"]})}
+        return EventSourceResponse(_replay_stream())
+
+    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock]); refs outside the
+    # chat's bound account are withheld, and a linked / bound chat's turn starts with its context block (S5)
+    enriched_content, _ = preprocess_message(
+        user_content, file_contents=file_contents,
+        file_images=file_images, file_documents=file_documents,
+        bound_account_id=bound_account_id,
+    )
+    if context_block:
+        if isinstance(enriched_content, str):
+            enriched_content = context_block + "\n\n" + enriched_content
+        else:
+            enriched_content = [{"text": context_block}, *enriched_content]
 
     async def _generate():
         # Set scan focus for this request if provided
@@ -4343,9 +4401,11 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         # its own task, so the context current_actor stamped on the request is set again here.
         from agenticops.run_context import RunContext, set_run_context
         _actor = actor
+        # S5: a chat bound to an account runs bound to it — every credentialed tool fails closed on any other
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
-                                   agent_name="main", chat_session_id=session_id))
+                                   agent_name="main", chat_session_id=session_id,
+                                   bound_account_id=bound_account_id))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
@@ -4353,11 +4413,17 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         output_tokens = 0
         cache_read_tokens = 0
         cache_write_tokens = 0
+        interrupted = False
         _streaming_sessions.add(session_id)
         try:
+            yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
+                                                            "user_message_id": user_message_id,
+                                                            "trace_id": _chat_trace_id})}
+            await asyncio.to_thread(chat_dispatch.set_state, user_message_id, "running")
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
+                    interrupted = True  # S5: the partial reply is stored as interrupted, never as complete
                     break
                 ev = event if isinstance(event, dict) else event.as_dict() if hasattr(event, "as_dict") else {}
                 # Enhanced backend (enhanced_task async-gen) sub-events streamed
@@ -4417,6 +4483,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             # FK violation / orphan if it was deleted mid-stream)
             from agenticops.chat.suggestions import extract_suggestions
             _clean_text, _suggestions = extract_suggestions(accumulated)
+            _terminal = "interrupted" if interrupted else "completed"
+            assistant_message_id = None
             with get_db_session() as db:
                 if db.query(ChatSession).filter(ChatSession.id == db_session_pk).first() is None:
                     logger.info("Session %s deleted mid-stream; skipping assistant persist", session_id)
@@ -4432,7 +4500,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                             "model": _msg_model,
                         }
                         _tu["cost_usd"] = compute_cost(_msg_model, _tu)
-                    db.add(ChatMessage(
+                    _reply = ChatMessage(
                         session_id=db_session_pk,
                         role="assistant",
                         content=_clean_text,
@@ -4440,7 +4508,13 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                         tool_calls=tool_calls if tool_calls else None,
                         token_usage=_tu,
                         trace_id=_chat_trace_id,
-                    ))
+                        dispatch_state=_terminal,
+                    )
+                    db.add(_reply)
+                    db.flush()
+                    assistant_message_id = _reply.id
+                db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
+                    {"dispatch_state": _terminal}, synchronize_session=False)
 
             # Auto-name session after first exchange
             import re as _re
@@ -4489,6 +4563,9 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "suggestions": _suggestions,
+                    "terminal_status": _terminal,
+                    "user_message_id": user_message_id,
+                    "assistant_message_id": assistant_message_id,
                 }),
             }
         except Exception as e:
@@ -4505,7 +4582,10 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                     content=accumulated or "",
                     tool_calls=tool_calls if tool_calls else None,
                     token_usage=err_meta,
+                    dispatch_state="failed",
                 ))
+                db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
+                    {"dispatch_state": "failed"}, synchronize_session=False)
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
         finally:
             _streaming_sessions.discard(session_id)
