@@ -183,6 +183,7 @@ class ReportResponse(BaseModel):
     source_language: Optional[str] = None
     visibility: str = "workspace"
     owned_by_me: bool = False
+    language_status: dict = Field(default_factory=dict)   # {zh, en} → rendering status (S6)
 
     model_config = ConfigDict(from_attributes=True)
 

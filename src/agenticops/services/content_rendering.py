@@ -147,3 +147,24 @@ def interrupt_pending() -> int:
     with get_db_session() as db:
         return db.query(ContentRendering).filter(ContentRendering.status == "pending").update(
             {"status": "failed", "error_code": "interrupted"}, synchronize_session=False)
+
+
+def language_status(db, reports) -> dict[int, dict[str, str]]:
+    """{report id: {zh: status, en: status}} for a page of reports in one query — the list's language badges."""
+    ids = [r.id for r in reports]
+    rows = (db.query(ContentRendering.entity_id, ContentRendering.source_version, ContentRendering.language,
+                     ContentRendering.status, ContentRendering.source_hash)
+            .filter(ContentRendering.entity_type == "report", ContentRendering.entity_id.in_(ids)).all()) if ids else []
+    by = {(eid, ver, lang): (status, h) for eid, ver, lang, status, h in rows}
+    out = {}
+    for r in reports:
+        version, source = r.content_version or 1, r.source_language or "en"
+        st = {}
+        for lang in LANGUAGES:
+            if lang == source:
+                st[lang] = "ready"
+                continue
+            status, h = by.get((r.id, version, lang), ("missing", None))
+            st[lang] = "stale" if status == "ready" and h != r.content_hash else status
+        out[r.id] = st
+    return out

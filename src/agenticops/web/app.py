@@ -3438,15 +3438,19 @@ def api_list_reports(
             query = query.filter_by(report_type=report_type)
 
         reports = query.offset(offset).limit(limit).all()
-        return [_enrich_report(r, actor) for r in reports]
+        from agenticops.services.content_rendering import language_status
+        status = language_status(session, reports)
+        return [_enrich_report(r, actor, status[r.id]) for r in reports]
 
 
 @app.get("/api/reports/{report_id}")
 def api_get_report(report_id: int, actor: Actor = Depends(current_actor)):
     """Get report by ID — 404 when missing or not the caller's to see."""
     from agenticops.services import report_access
+    from agenticops.services.content_rendering import language_status
     with get_db_session() as session:
-        return _enrich_report(report_access.get_visible_report(session, report_id, actor), actor)
+        report = report_access.get_visible_report(session, report_id, actor)
+        return _enrich_report(report, actor, language_status(session, [report])[report.id])
 
 
 @app.get("/api/content/report/{report_id}/rendering")

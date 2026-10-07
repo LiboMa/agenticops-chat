@@ -1074,5 +1074,15 @@
   "chat.viewIssue": "View issue",
   "chat.viewChange": "View change",
   "chat.input.placeholder": "Ask about your resources… (paste or drop files, Cmd/Ctrl+Enter to send)",
-  "chat.attach.button": "Attach files"
+  "chat.attach.button": "Attach files",
+  "reports.intro": "Read versioned reports and choose the language you deliver them in.",
+  "reports.search": "Search reports…",
+  "reports.count": "{n} reports",
+  "reports.empty": "No reports found.",
+  "reports.private": "Private",
+  "reports.state.ready": "ready",
+  "reports.state.preparing": "preparing",
+  "reports.state.failed": "failed",
+  "reports.state.notPrepared": "not prepared",
+  "reports.state.stale": "outdated"
 }
