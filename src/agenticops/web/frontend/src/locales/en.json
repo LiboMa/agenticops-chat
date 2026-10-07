@@ -1055,5 +1055,6 @@
   "chat.error.http": "The message could not be sent.",
   "chat.attach.type": "{name}: this file type cannot be attached",
   "chat.attach.size": "{name}: too large (max {limit})",
-  "chat.attach.count": "Up to {limit} attachments per message"
+  "chat.attach.count": "Up to {limit} attachments per message",
+  "chat.draft.reselect": "{n} attachment(s) were not sent and are gone after the reload — select them again: {names}"
 }

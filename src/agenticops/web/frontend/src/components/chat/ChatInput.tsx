@@ -9,6 +9,8 @@ import {
 } from "@/lib/attachments";
 import { useBootstrap } from "@/hooks/useBootstrap";
 import { useLocale } from "@/i18n/LocaleContext";
+import { draftKey, loadDraft, saveDraft, sessionFiles } from "@/lib/chatDrafts";
+import { currentUserId } from "@/lib/home";
 import { ModelSelector } from "./ModelSelector";
 
 interface Props {
@@ -36,11 +38,38 @@ function nextAttachId(): string {
 export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: Props) {
   const { t } = useLocale();
   // S5: what the server accepts (bootstrap upload_policy), so the composer and the server agree
-  const policy = useBootstrap().data?.upload_policy ?? FALLBACK_POLICY;
+  const boot = useBootstrap();
+  const policy = boot.data?.upload_policy ?? FALLBACK_POLICY;
   const rules = useMemo(() => attachmentRules(policy), [policy]);
-  const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // S5: the draft belongs to this installation, user and chat ("new" = the welcome composer)
+  const filesKey = sessionId ?? "new";
+  const key = draftKey(boot.data?.deployment_id, currentUserId(), filesKey);
+  const [input, setInput] = useState(() => loadDraft(localStorage, key).text);
+  const [attachments, setAttachments] = useState<Attachment[]>(
+    () => sessionFiles.get(filesKey).map((f) => ({ id: nextAttachId(), file: f })));
+  const [reselect, setReselect] = useState<string[]>([]);  // names of files a refresh dropped
   const [attachError, setAttachError] = useState<string | null>(null);
+  const loadedKey = useRef<string | null>(null);
+
+  // Switching chats (or the bootstrap arriving with the installation id) loads that chat's draft and files
+  useEffect(() => {
+    if (loadedKey.current === key) return;
+    loadedKey.current = key;
+    const d = loadDraft(localStorage, key);
+    const kept = sessionFiles.get(filesKey);
+    setInput(d.text);
+    setAttachments(kept.map((f) => ({ id: nextAttachId(), file: f })));
+    const keptNames = new Set(kept.map((f) => f.name));
+    setReselect(d.unsentFiles.filter((n) => !keptNames.has(n)));
+  }, [key, filesKey]);
+
+  // Every edit is kept: the text (and the names of attached files) in localStorage, the files in memory
+  useEffect(() => {
+    if (loadedKey.current !== key) return;
+    const files = attachments.map((a) => a.file);
+    sessionFiles.set(filesKey, files);
+    saveDraft(localStorage, key, { text: input, unsentFiles: [...files.map((f) => f.name), ...reselect] });
+  }, [input, attachments, reselect, key, filesKey]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,7 +101,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
     onSend(trimmed || fallback, attachments.map((a) => a.file));
     setInput("");
     setAttachments([]);
+    setReselect([]);
     setAttachError(null);
+    sessionFiles.clear(filesKey);
+    saveDraft(localStorage, key, { text: "", unsentFiles: [] });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -165,6 +197,12 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId }: 
       )}
 
       {/* Validation error */}
+      {reselect.length > 0 && (
+        <div role="status" className="max-w-4xl mx-auto mb-2 flex items-start justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+          <span>{t("chat.draft.reselect").replace("{n}", String(reselect.length)).replace("{names}", reselect.join(", "))}</span>
+          <button type="button" onClick={() => setReselect([])} className="shrink-0 underline">{t("home.dismiss")}</button>
+        </div>
+      )}
       {attachError && (
         <div className="max-w-4xl mx-auto mb-2 text-xs text-red-500">{attachError}</div>
       )}
