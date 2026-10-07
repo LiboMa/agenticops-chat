@@ -135,15 +135,6 @@ def test_second_send_while_running_is_409(env):
     assert calls["n"] == 0
 
 
-def test_a_leftover_running_row_alone_also_means_busy(env):
-    client, calls, _ = env
-    sid, pk = _session()
-    s = get_session()
-    s.add(ChatMessage(session_id=pk, role="user", content="x", client_message_id=str(uuid.uuid4()), dispatch_state="accepted"))
-    s.commit(); s.close()
-    assert _send(client, sid).status_code == 409 and calls["n"] == 0
-
-
 def test_concurrent_claims_create_one_message(env):
     from agenticops.services import chat_dispatch
     _, _, _ = env
@@ -322,3 +313,77 @@ def test_tool_frames_carry_call_id_and_outcome(env, monkeypatch):
     reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
     s.close()
     assert {t["call_id"]: t["outcome"] for t in reply.tool_calls} == {"t1": "error", "t2": "unknown"}
+
+
+# ── S5 review fixes: a dispatch is always closed, a replay is its own ──────────────────────────────────────────
+
+def test_an_agent_that_fails_to_build_does_not_leave_the_chat_busy(env, monkeypatch):
+    client, _, webapp = env
+    sid, pk = _session()
+
+    def _boom(_sid):
+        raise RuntimeError("MCP server unreachable")
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", _boom)
+    fs = frames(_send(client, sid).text)
+    assert any(e == "error" for e, _ in fs)
+    assert _users(pk)[0].dispatch_state == "failed"
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: type("A", (), {
+        "stream_async": lambda self, c: _one()})())
+    assert _send(client, sid).status_code == 200
+
+
+def test_a_leftover_open_row_with_no_live_dispatch_is_closed_not_busy(env):
+    """A row left `accepted` by a stream that never started (this process) is dead: the next send closes it as
+    interrupted — with an interrupted reply the page can label — and runs."""
+    client, calls, _ = env
+    sid, pk = _session()
+    s = get_session()
+    s.add(ChatMessage(session_id=pk, role="user", content="lost", client_message_id=str(uuid.uuid4()), dispatch_state="accepted"))
+    s.commit(); s.close()
+    assert _send(client, sid).status_code == 200 and calls["n"] == 1
+    states = [m.dispatch_state for m in _users(pk)]
+    assert states == ["interrupted", "completed"]
+    s = get_session()
+    replies = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").order_by(ChatMessage.id).all()
+    s.close()
+    assert replies[0].dispatch_state == "interrupted"
+
+
+def test_a_repeat_of_a_dead_open_message_replays_it_as_interrupted(env):
+    client, calls, _ = env
+    sid, pk = _session()
+    cmid = str(uuid.uuid4())
+    s = get_session()
+    s.add(ChatMessage(session_id=pk, role="user", content="lost", client_message_id=cmid, dispatch_state="running"))
+    s.commit(); s.close()
+    fs = frames(_send(client, sid, cmid).text)
+    done = [d for e, d in fs if e == "done"][0]
+    assert done["replayed"] is True and done["terminal_status"] == "interrupted" and calls["n"] == 0
+
+
+def test_a_replay_never_borrows_a_later_messages_reply(env):
+    client, calls, _ = env
+    sid, pk = _session()
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    s = get_session()
+    s.add(ChatMessage(session_id=pk, role="user", content="A", client_message_id=a, dispatch_state="interrupted"))
+    s.add(ChatMessage(session_id=pk, role="user", content="B", client_message_id=b, dispatch_state="completed"))
+    s.add(ChatMessage(session_id=pk, role="assistant", content="answer to B", dispatch_state="completed"))
+    s.commit(); s.close()
+    fs = frames(_send(client, sid, a).text)
+    done = [d for e, d in fs if e == "done"][0]
+    assert done["terminal_status"] == "interrupted" and done["assistant_message_id"] is None
+    assert not any(e == "text" and "answer to B" in d.get("token", "") for e, d in fs)
+
+
+def test_the_startup_sweep_leaves_a_labelled_reply(env):
+    from agenticops.services import chat_dispatch
+    _, pk = _session()
+    s = get_session()
+    s.add(ChatMessage(session_id=pk, role="user", content="q", client_message_id=str(uuid.uuid4()), dispatch_state="running"))
+    s.commit(); s.close()
+    assert chat_dispatch.interrupt_stale() == 1
+    s = get_session()
+    reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
+    s.close()
+    assert reply.dispatch_state == "interrupted"

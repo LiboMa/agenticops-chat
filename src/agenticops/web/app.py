@@ -377,6 +377,18 @@ _executor_service = ExecutorService(poll_interval=settings.executor_poll_interva
 # Sessions with an SSE response currently streaming — used to reject
 # mid-stream model switches (409). Entries removed in the generator's finally.
 _streaming_sessions: set[str] = set()
+# MVP-2.7.0 S5: sessions whose dispatch was claimed but whose stream has not started yet → monotonic claim time.
+# With _streaming_sessions this is the one authority on "busy" (one process, S1); a claim whose stream never starts
+# within _CLAIM_START_GRACE_S is dead, and the next send closes it as interrupted instead of waiting on it forever.
+_claimed_dispatches: dict[str, float] = {}
+_CLAIM_START_GRACE_S = 60.0
+
+
+def _chat_dispatch_live(session_id: str) -> bool:
+    if session_id in _streaming_sessions:
+        return True
+    at = _claimed_dispatches.get(session_id)
+    return at is not None and time.monotonic() - at < _CLAIM_START_GRACE_S
 
 from agenticops.services.model_service import get_model_presets  # noqa: E402
 
@@ -4338,7 +4350,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         row = chat_access.get_visible_session(db, session_id, actor)
         _private_session = (row.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE
         claimed = chat_dispatch.claim(db, row, client_message_id, user_content, attachments,
-                                      busy=session_id in _streaming_sessions)
+                                      busy=_chat_dispatch_live(session_id))
         if claimed.kind == "busy":
             raise HTTPException(409, detail={"detail": "This chat already has a reply running",
                                              "code": "session_busy", "trace_id": None})
@@ -4346,12 +4358,15 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             raise HTTPException(409, detail={"detail": "This message is already being answered",
                                              "code": "duplicate_in_flight", "trace_id": None})
         if claimed.kind == "replay":
+            # the state is the original message's own; the reply only the one that answered it
+            _prior = db.get(ChatMessage, claimed.user_message_id)
             replay = {"user_message_id": claimed.user_message_id,
                       "assistant_message_id": claimed.reply.id if claimed.reply else None,
                       "content": claimed.reply.content if claimed.reply else "",
-                      "state": (claimed.reply.dispatch_state if claimed.reply else None) or "completed",
+                      "state": (_prior.dispatch_state if _prior else None) or "completed",
                       "trace_id": claimed.reply.trace_id if claimed.reply else None}
         else:
+            _claimed_dispatches[session_id] = time.monotonic()
             chat_context.lock(row)
             row.last_activity_at = datetime.now(timezone.utc)
             bound_account_id = row.context_account_id
@@ -4368,7 +4383,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 yield {"event": "text", "data": json.dumps({"token": replay["content"]})}
             yield {"event": "done", "data": json.dumps({
                 "input_tokens": 0, "output_tokens": 0, "replayed": True,
-                "terminal_status": "completed" if replay["state"] == "completed" else replay["state"],
+                "terminal_status": replay["state"],
                 "user_message_id": replay["user_message_id"],
                 "assistant_message_id": replay["assistant_message_id"]})}
         return EventSourceResponse(_replay_stream())
@@ -4393,8 +4408,6 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             parts = [p.strip().lower() for p in scan_focus_req.split(",") if p.strip()]
             if all(p in VALID_SCAN_FOCUS for p in parts):
                 set_scan_focus(scan_focus_req)
-        # Building a session's agent (MCP clients included) is slow, blocking work: off the loop
-        agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
         # Set trace_id for this chat turn so sub-agent logs are correlated
         from agenticops.config import generate_trace_id, set_trace_id
         _chat_trace_id = generate_trace_id()
@@ -4418,11 +4431,15 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         interrupted = False
         closed = False  # set once this dispatch has its terminal state
         _streaming_sessions.add(session_id)
+        _claimed_dispatches.pop(session_id, None)
         try:
             yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
                                                             "user_message_id": user_message_id,
                                                             "trace_id": _chat_trace_id})}
             await asyncio.to_thread(chat_dispatch.set_state, user_message_id, "running")
+            # Building a session's agent (MCP clients included) is slow, blocking work: off the loop — and inside the
+            # try, so a build that fails closes the dispatch as failed instead of leaving the chat busy (S5 review)
+            agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
