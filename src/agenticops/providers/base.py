@@ -223,6 +223,17 @@ def get_provider(account: Any) -> CloudProvider:
     Raises:
         ValueError: If the provider type is not supported.
     """
+    # Account binding (MVP-2.7.0 S5 review): a run bound to one account (a bound chat turn, a change run or review)
+    # never builds a provider — so never gets a CLI tool or credentials — for any other account. Every path that
+    # does not go through credentials/resolver (get_all_cli_tools, get_cli_tool_for_issue, the scanner engine)
+    # builds its provider here, so this is the one place they all meet. Fail closed.
+    from agenticops.run_context import get_run_context
+    bound = get_run_context().bound_account_id
+    if bound is not None and getattr(account, "id", None) != bound:
+        from agenticops.credentials.resolver import AccountResolutionError
+        raise AccountResolutionError(
+            f"this run is bound to account id={bound}; refusing account "
+            f"'{getattr(account, 'name', account)}' (id={getattr(account, 'id', None)})")
     _load_providers()
     provider_type = account.provider.lower()
     if provider_type not in PROVIDERS:

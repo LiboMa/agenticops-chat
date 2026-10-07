@@ -120,6 +120,7 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
     """
     import asyncio
     import concurrent.futures
+    import contextvars
     from agenticops.checker import check_accounts_parallel
 
     ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()] or None
@@ -130,7 +131,7 @@ def check_health(account_ids: str = "", scope: str = "all", deep: str = "false")
         asyncio.get_running_loop()
         # Already inside an async event loop (e.g. scheduler) — run in a thread
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(asyncio.run, coro).result()
+            result = pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()  # the run context (binding) goes too
     except RuntimeError:
         # No running loop — safe to use asyncio.run()
         result = asyncio.run(coro)
