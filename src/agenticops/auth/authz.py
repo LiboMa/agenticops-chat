@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 PERMISSIONS = (
     "change.request", "change.review", "change.approve", "change.reject", "change.cancel", "change.clarify",
     "change.execute", "plan.approve", "plan.reject", "plan.execute", "plan.edit", "audit.read",
+    "issue.note",  # MVP-2.7.0 S4: append a note to an issue
 )
 
 _RULE_TYPES = {"actor_must_differ_from_field", "actor_must_match_field_unless_admin", "deny_actor_kind_when_risk_in",
@@ -49,6 +50,7 @@ DEFAULT_POLICY: dict = {
         "change.reject": ["write"], "change.cancel": ["write"], "change.clarify": ["read"],
         "change.execute": ["write"], "plan.approve": ["write"], "plan.reject": ["write"],
         "plan.execute": ["write"], "plan.edit": ["write"], "audit.read": ["admin"],
+        "issue.note": ["write"],
     },
     "subjects": {
         "anonymous": ["read", "write", "admin"], "cli": ["read", "write", "admin"],

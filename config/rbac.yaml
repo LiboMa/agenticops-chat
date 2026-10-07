@@ -32,6 +32,7 @@ permissions:
   plan.execute:   [write]
   plan.edit:      [write]
   audit.read:     [admin]
+  issue.note:     [write]   # MVP-2.7.0 S4: append a note to an issue
 
 subjects:
   anonymous: [read, write, admin]
