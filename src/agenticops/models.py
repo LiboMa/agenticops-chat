@@ -1154,6 +1154,14 @@ class ChatSession(Base):
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
     visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
 
+    # What the chat is about and which account it is bound to (MVP-2.7.0 S5, services/chat_context). All NULL = an
+    # independent, unbound chat (every pre-S5 row). Locked at the first sent message: a new context = a new chat.
+    context_entity_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)   # health_issue|change_request
+    context_entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    context_account_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)        # cloud_accounts.id
+    context_region: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    context_locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
 
 class Installation(Base):
     """This installation's non-secret identity (MVP-2.7.0, `deployment_id` in GET /api/ui/bootstrap): one row,
@@ -1168,6 +1176,8 @@ class Installation(Base):
 class ChatMessage(Base):
     """Individual message in a chat session."""
     __tablename__ = "chat_messages"
+    # One user message = one dispatch (MVP-2.7.0 S5, services/chat_dispatch): a client id is unique in its session
+    __table_args__ = (Index("uq_chat_message_client_id", "session_id", "client_message_id", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"))
@@ -1180,6 +1190,10 @@ class ChatMessage(Base):
     # Suggestion chips extracted from the reply tail (MVP-2.0.1); NULL = none
     suggestions: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # MVP-2.7.0 S5: the sender's id for this message (user rows from the Web API) and where its dispatch stands —
+    # accepted|running|completed|failed|interrupted; NULL on older rows = completed
+    client_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    dispatch_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 class SessionSummary(Base):
@@ -1616,7 +1630,12 @@ def _backfill_plan_hashes_2_6_1(engine) -> None:
 
 # MVP-2.7.0: chat session ownership. Existing rows become workspace sessions with no owner (unchanged reach).
 _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
-    "chat_sessions": {"owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
+    "chat_sessions": {"owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'",
+                      # S5: the chat's context — all NULL on existing rows (independent, unbound)
+                      "context_entity_type": None, "context_entity_id": None, "context_account_id": None,
+                      "context_region": None, "context_locked_at": None},
+    # S5: one dispatch per user message; NULL on existing rows (= completed)
+    "chat_messages": {"client_message_id": None, "dispatch_state": None},
 }
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()
@@ -1633,6 +1652,10 @@ def _statements_2_7_0(insp, dialect) -> list[str]:
         for col, extra in cols.items():
             if col not in existing:
                 stmts.append(f"ALTER TABLE {tbl} ADD COLUMN{guard} {_add_column_ddl(dialect, tbl, col, extra)}")
+    if insp.has_table("chat_messages") and \
+            "uq_chat_message_client_id" not in {i["name"] for i in insp.get_indexes("chat_messages")}:
+        stmts.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_message_client_id "
+                     "ON chat_messages (session_id, client_message_id)")
     return stmts
 
 

@@ -252,6 +252,12 @@ def test_the_2_7_0_migration_ddl_on_postgresql():
     assert models_mod._statements_2_7_0(insp, postgresql.dialect()) == [
         "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS owner_user_id INTEGER",
         "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'workspace'",
+        # S5: the chat's context
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_entity_type VARCHAR(30)",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_entity_id INTEGER",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_account_id INTEGER",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_region VARCHAR(80)",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_locked_at TIMESTAMP WITHOUT TIME ZONE",
     ]
 
 
