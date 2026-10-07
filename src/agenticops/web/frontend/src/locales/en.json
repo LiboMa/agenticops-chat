@@ -1021,5 +1021,6 @@
   "notes.hint": "Kept in the activity as written, under your name; cannot be edited or deleted",
   "notes.save": "Save note",
   "notes.saving": "Saving…",
-  "notes.failed": "The note was not saved: {error}"
+  "notes.failed": "The note was not saved: {error}",
+  "workitem.menu.askAgent": "Ask Agent"
 }

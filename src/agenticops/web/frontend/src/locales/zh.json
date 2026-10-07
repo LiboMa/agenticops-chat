@@ -1021,5 +1021,6 @@
   "notes.hint": "按原文记入处理记录，署你的名字；不能修改或删除",
   "notes.save": "保存说明",
   "notes.saving": "保存中…",
-  "notes.failed": "说明未保存：{error}"
+  "notes.failed": "说明未保存：{error}",
+  "workitem.menu.askAgent": "询问 Agent"
 }

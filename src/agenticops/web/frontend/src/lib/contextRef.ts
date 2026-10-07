@@ -13,3 +13,12 @@ export function contextRefFromPath(pathname: string): ContextRef | null {
 
 /** `I#12` / `C#3`. */
 export const refLabel = (ref: ContextRef) => `${ref.kind === "issue" ? "I" : "C"}#${ref.id}`;
+
+/** `?ref=I12` / `?ref=C3` (or `I#12`) → the record «Ask Agent» opened Chat with (MVP-2.7.0 S4); anything else → null. */
+export function contextRefFromQuery(search: string): ContextRef | null {
+  const m = (new URLSearchParams(search).get("ref") ?? "").match(/^([IC])#?([1-9]\d*)$/);
+  if (!m) return null;
+  return { kind: m[1] === "I" ? "issue" : "change", id: Number(m[2]) };
+}
+
+export const contextRefQuery = (ref: ContextRef) => `?ref=${ref.kind === "issue" ? "I" : "C"}${ref.id}`;

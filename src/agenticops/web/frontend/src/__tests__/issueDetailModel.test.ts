@@ -12,7 +12,7 @@ describe("issueDetailModel", () => {
     expect(m.primaryKey).toBe("workitem.primary.reviewRca");
     expect(m.statusKey).toBe("workitem.sub.needsReview");
     expect(m.reason).toEqual({ key: "workitem.reason.rcaBelowGate", params: { conf: "57%", threshold: "60%" } });
-    expect(m.menu).toEqual(["runRca", "skipReviewGeneratePlan", "markResolved", "dismiss"]);
+    expect(m.menu).toEqual(["runRca", "skipReviewGeneratePlan", "markResolved", "dismiss", "askAgent"]);
     expect(m.tone).toBe("warn");
   });
   it("a failed run: the failure sentence is the status line's reason — the run's own text, once", () => {
@@ -47,7 +47,7 @@ describe("issueDetailModel", () => {
   });
   it("terminal: no primary; menu has reopen only", () => {
     const m = issueDetailModel({ issue: { status: "dismissed" }, rca: null, threshold: 0.6, plans: [], executions: [] });
-    expect([m.primaryKey, m.menu]).toEqual([null, ["reopen"]]);
+    expect([m.primaryKey, m.menu]).toEqual([null, ["reopen", "askAgent"]]);
   });
 
   it("runs still loading (executions undefined) at fix_approved / fix_executed: a neutral state, no reason, no primary", () => {
@@ -79,12 +79,12 @@ describe("issueDetailModel", () => {
   it("the menu never repeats the primary's Rerun RCA, and never offers plan generation without an RCA", () => {
     const none = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: null, threshold: 0.6, plans: [], executions: [] });
     expect(none.primaryKey).toBe("workitem.primary.rerunRca");
-    expect(none.menu).toEqual(["markResolved", "dismiss"]);
+    expect(none.menu).toEqual(["markResolved", "dismiss", "askAgent"]);
     const rejected = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: { ...rcaI1, human_verdict: "incorrect" } as RCAResult,
                                         threshold: 0.6, plans: [], executions: [] });
-    expect(rejected.menu).toEqual(["skipReviewGeneratePlan", "markResolved", "dismiss"]);
+    expect(rejected.menu).toEqual(["skipReviewGeneratePlan", "markResolved", "dismiss", "askAgent"]);
     const loading = issueDetailModel({ issue: { status: "root_cause_identified" }, rca: undefined, threshold: 0.6, plans: [], executions: [] });
-    expect(loading.menu).toEqual(["runRca", "markResolved", "dismiss"]);
+    expect(loading.menu).toEqual(["runRca", "markResolved", "dismiss", "askAgent"]);
   });
   it("quiet flags: the latest run's error / verdict reason is hidden only when it IS the status line's sentence", () => {
     const rcaOk = { ...rcaI1, confidence: 0.9, evidence_verified: true } as RCAResult;

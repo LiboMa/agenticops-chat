@@ -33,6 +33,7 @@ import { PhaseCard } from "@/components/workitem/PhaseCard";
 import { FactsRail } from "@/components/workitem/FactsRail";
 import { ActivityList } from "@/components/workitem/ActivityList";
 import { NoteBox } from "@/components/issue/NoteBox";
+import { contextRefQuery } from "@/lib/contextRef";
 import { DiagnoseBody, diagnoseSummary } from "@/components/issue/DiagnoseCard";
 import { RunBody } from "@/components/issue/RunCard";
 import { AcceptBody } from "@/components/issue/AcceptCard";
@@ -294,6 +295,8 @@ export default function IssueDetail({ embedded = false, back }: {
         return { key: item, label, variant: "destructive", disabled: cancelExecMut.isPending,
                  run: () => latestRun && ask(t("workitem.confirm.cancelRun"), label,
                    () => cancelExecMut.mutate(latestRun.id, { onError: (err) => setActionError(err.message) }), "destructive") };
+      case "askAgent":
+        return { key: item, label, run: () => navigate(`/app/chat${contextRefQuery({ kind: "issue", id: a.id })}`) };
       case "retryExecution":
         return { key: item, label, disabled: executeMut.isPending,
                  run: () => retry(m.phase.sub === "executing" ? "workitem.confirm.retryWhileRunning" : "workitem.confirm.retryWhileChecking")?.() };

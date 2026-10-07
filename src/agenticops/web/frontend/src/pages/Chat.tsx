@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useSessionStream } from "@/hooks/useSessionStream";
@@ -11,7 +11,7 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
-import type { ContextRef } from "@/lib/contextRef";
+import { contextRefFromQuery, contextRefQuery, type ContextRef } from "@/lib/contextRef";
 import SaveReportDialog from "@/components/chat/SaveReportDialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
@@ -25,7 +25,10 @@ export default function Chat() {
   const { t } = useLocale();
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: sessions } = useChatSessions();
+  // «Ask Agent» (MVP-2.7.0 S4): /app/chat?ref=I12 opens a new chat with that record as its context, sends nothing
+  const [initialRef] = useState(() => contextRefFromQuery(location.search));
 
   // Whether we're in "welcome" mode (no active session)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -44,6 +47,10 @@ export default function Chat() {
   useEffect(() => {
     if (urlSessionId || restorationAttempted.current) return;
     restorationAttempted.current = true;
+    if (initialRef) {  // a new conversation about that record: never resume the last session
+      setShowWelcome(true);
+      return;
+    }
 
     const lastSessionId = localStorage.getItem(lastSessionKey());
     if (!lastSessionId) {
@@ -98,7 +105,16 @@ export default function Chat() {
 
   // Three-zone layout state
   const [flyoutOpen, setFlyoutOpen] = useState(false);
-  const [contextRef, setContextRef] = useState<ContextRef | null>(null);
+  const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
+  // the ref has done its job once read: it leaves the URL (a reload is an ordinary Chat visit)
+  useEffect(() => {
+    if (!initialRef) return;
+    const params = new URLSearchParams(location.search);
+    params.delete("ref");
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
   // Flyout resizable width (px), persisted
@@ -145,7 +161,7 @@ export default function Chat() {
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
   const handleWelcomeSend = (content: string, files: File[]) => {
-    sendFirstMessage(content, files);
+    sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "");
   };
 
   return (
@@ -318,7 +334,10 @@ export default function Chat() {
               onClose={() => setContextRef(null)}
               onAgentCheck={() => {
                 const key = contextRef.kind === "issue" ? "chat.contextPanel.checkPrompt" : "chat.contextPanel.checkChangePrompt";
-                sendMessage(t(key).replace("{id}", String(contextRef.id)));
+                const prompt = t(key).replace("{id}", String(contextRef.id));
+                // no session yet (welcome): create one, and keep the panel open across the new session's page
+                if (selectedId) sendMessage(prompt);
+                else void sendFirstMessage(prompt, undefined, contextRefQuery(contextRef));
               }}
               agentCheckDisabled={streaming}
             />

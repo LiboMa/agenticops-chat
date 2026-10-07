@@ -21,7 +21,8 @@ export function useLazySessionCreate() {
   const creatingRef = useRef(false);
 
   const sendFirstMessage = useCallback(
-    async (content: string, files?: File[]) => {
+    // `search` rides along to the new session's URL (Chat keeps an open context panel through the remount)
+    async (content: string, files?: File[], search = "") => {
       if (creatingRef.current) return;
       creatingRef.current = true;
       setCreating(true);
@@ -47,7 +48,7 @@ export function useLazySessionCreate() {
         // Kick off the stream in the store, then navigate. The Chat page binds
         // to the in-flight stream for this session id on mount.
         void chatStream.send(session.session_id, content, files);
-        navigate(`/app/chat/${session.session_id}`, { replace: true });
+        navigate(`/app/chat/${session.session_id}${search}`, { replace: true });
       } finally {
         creatingRef.current = false;
         setCreating(false);

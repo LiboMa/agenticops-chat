@@ -6,7 +6,7 @@ import { confidenceBreakdown } from "@/lib/rcaQuality";
 export interface ReasonRef { key: string; params?: Record<string, string> }
 export type Reason = ReasonRef | { text: string };
 export type IssueMenuItem = "runRca" | "skipReviewGeneratePlan" | "markResolved" | "dismiss" | "reopen" | "cancelRun"
-  | "retryExecution";
+  | "retryExecution" | "askAgent";
 
 export interface IssueDetailModel {
   phase: IssuePhaseResult;
@@ -95,7 +95,8 @@ export function issueDetailModel(input: {
   }
 
   const terminal = issue.status === "resolved" || issue.status === "dismissed";
-  const menu: IssueMenuItem[] = terminal ? ["reopen"] : [
+  // «Ask Agent» (MVP-2.7.0 S4): open or closed, a case can always be talked over
+  const menu: IssueMenuItem[] = terminal ? ["reopen", "askAgent"] : [
     ...(phase.primary === "rerunRca" ? [] : ["runRca" as const]),
     // the backend generates a plan from an RCA: none (or not loaded yet) → not offered
     ...(issue.status === "root_cause_identified" && rca && phase.primary !== "generatePlan" ? ["skipReviewGeneratePlan" as const] : []),
@@ -107,6 +108,7 @@ export function issueDetailModel(input: {
       ? ["retryExecution" as const] : []),
     ...(phase.primary === "markResolved" ? [] : ["markResolved" as const]),
     "dismiss",
+    "askAgent",
   ];
 
   const tone = phase.sub === "needsNewPlan" ? "bad"
