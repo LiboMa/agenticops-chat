@@ -246,3 +246,30 @@ def test_messages_list_shows_dispatch_state(env):
 def test_bootstrap_says_context_chat(env):
     from agenticops.web.routers.ui import _features
     assert _features()["context_chat"] is True
+
+
+def test_a_cancelled_stream_never_leaves_the_chat_busy(env, monkeypatch):
+    """sse-starlette cancels the generator when the client goes away: the post-loop code never runs, so the
+    finally block must close the dispatch (interrupted) — otherwise the chat stays busy until a restart."""
+    import asyncio
+    client, _, webapp = env
+    sid, pk = _session()
+
+    class _Cancelled:
+        async def stream_async(self, _c):
+            yield {"data": "par"}
+            raise asyncio.CancelledError()
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _Cancelled())
+    try:
+        _send(client, sid)
+    except BaseException:
+        pass
+    assert _users(pk)[0].dispatch_state == "interrupted"
+    assert sid not in webapp._streaming_sessions
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: type("A", (), {
+        "stream_async": lambda self, c: _one()})())
+    assert _send(client, sid).status_code == 200
+
+
+async def _one():
+    yield {"data": "ok"}

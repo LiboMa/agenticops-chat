@@ -4414,6 +4414,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         cache_read_tokens = 0
         cache_write_tokens = 0
         interrupted = False
+        closed = False  # set once this dispatch has its terminal state
         _streaming_sessions.add(session_id)
         try:
             yield {"event": "accepted", "data": json.dumps({"client_message_id": client_message_id,
@@ -4515,6 +4516,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                     assistant_message_id = _reply.id
                 db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
                     {"dispatch_state": _terminal}, synchronize_session=False)
+            closed = True
 
             # Auto-name session after first exchange
             import re as _re
@@ -4586,8 +4588,16 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 ))
                 db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
                     {"dispatch_state": "failed"}, synchronize_session=False)
+            closed = True
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
         finally:
+            # A cancelled stream (the client went away; sse-starlette cancels the generator) skips the code above:
+            # the dispatch is still closed, as interrupted — a chat is never left busy (S5)
+            if not closed:
+                try:
+                    chat_dispatch.set_state(user_message_id, "interrupted")
+                except Exception:
+                    logger.warning("Could not close chat dispatch %s", user_message_id, exc_info=True)
             _streaming_sessions.discard(session_id)
 
     return EventSourceResponse(_generate())
