@@ -63,7 +63,7 @@ from agenticops.web.schemas import *  # noqa: F401,F403  (API request/response m
 from agenticops.web import schemas as _schemas  # explicit module handle
 from agenticops.web.helpers import (  # cross-router helpers (extracted)
     _infra_ref_key, _guess_type, _build_account_name_map,
-    _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report,
+    _health_issue_to_anomaly_response, _auto_learn_dismissed, _enrich_report, issue_scope_filter,
 )
 from agenticops.auth.actor import Actor
 from agenticops.web.deps import current_actor, require_authenticated_user
@@ -1923,7 +1923,6 @@ async def api_resource_related(resource_id: int):
 
 # Issues the security review engine creates carry a `security_*` source (security_poll / security_posture); the
 # issue list's `scope` splits them from ops events on the server, because the list is paged.
-SECURITY_SOURCE_PREFIX = "security_"
 
 
 
@@ -1952,9 +1951,7 @@ async def api_list_anomalies(
             query = query.filter(
                 HealthIssue.metric_data["resource_type"].as_string() == resource_type
             )
-        if scope != "all":  # `_` is a LIKE wildcard, so the prefix is escaped
-            is_security = HealthIssue.source.like(SECURITY_SOURCE_PREFIX.replace("_", "\\_") + "%", escape="\\")
-            query = query.filter(is_security if scope == "security" else ~is_security)
+        query = issue_scope_filter(query, scope)
 
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
@@ -2094,24 +2091,41 @@ async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(curre
 
 
 @app.get("/api/health-issues", response_model=List[HealthIssueResponse])
-async def api_list_health_issues(
+def api_list_health_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     resource_id: Optional[str] = None,
     source: Optional[str] = None,
     trace_id: Optional[str] = None,
     account_id: Optional[int] = Query(None),
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
+    q: Optional[str] = Query(None, max_length=200),
+    sort: str = Query("newest", pattern="^(newest|oldest|severity)$"),
+    limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
 ):
-    """List health issues with filtering."""
-    with get_db_session() as session:
-        query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
+    """List health issues (the Cases queue, MVP-2.7.0 S4): `scope` ops|security|all, `status` / `severity` one or a
+    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity."""
+    import re
+    from sqlalchemy import case
+    from agenticops.models import VALID_ISSUE_STATUSES
+    severities = {"critical", "high", "medium", "low"}
 
-        if severity:
-            query = query.filter_by(severity=severity)
-        if status:
-            query = query.filter_by(status=status)
+    def _list(raw: Optional[str], valid: set, name: str) -> list:
+        values = [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+        bad = [x for x in values if x not in valid]
+        if bad:
+            raise HTTPException(status_code=422, detail=f"invalid {name} {bad}; expected one of {sorted(valid)}")
+        return values
+
+    statuses = _list(status, VALID_ISSUE_STATUSES, "status")
+    severity_list = _list(severity, severities, "severity")
+    with get_db_session() as session:
+        query = session.query(HealthIssue)
+        if severity_list:
+            query = query.filter(HealthIssue.severity.in_(severity_list))
+        if statuses:
+            query = query.filter(HealthIssue.status.in_(statuses))
         if resource_id:
             query = query.filter_by(resource_id=resource_id)
         if source:
@@ -2120,6 +2134,22 @@ async def api_list_health_issues(
             query = query.filter_by(trace_id=trace_id)
         if account_id is not None:
             query = query.filter_by(account_id=account_id)
+        query = issue_scope_filter(query, scope)
+        term = (q or "").strip()
+        if term:
+            like = _like(term)
+            conds = [HealthIssue.title.ilike(like, escape="\\"), HealthIssue.resource_id.ilike(like, escape="\\")]
+            num = re.fullmatch(r"[Ii]?#?(\d{1,9})", term)
+            if num:
+                conds.append(HealthIssue.id == int(num.group(1)))
+            query = query.filter(or_(*conds))
+        if sort == "oldest":
+            query = query.order_by(HealthIssue.detected_at.asc(), HealthIssue.id.asc())
+        elif sort == "severity":
+            rank = case({"critical": 0, "high": 1, "medium": 2, "low": 3}, value=HealthIssue.severity, else_=4)
+            query = query.order_by(rank, HealthIssue.detected_at.desc(), HealthIssue.id.desc())
+        else:
+            query = query.order_by(HealthIssue.detected_at.desc(), HealthIssue.id.desc())
 
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
