@@ -1326,6 +1326,22 @@ def init(
 
 
 @app.command()
+def _trigger_quickstart_scan(host: str, port: int, post=None) -> tuple[bool, str | None]:
+    """Open a "quickstart" chat and send it the scan command → (accepted, session id). Every send carries a
+    client_message_id (MVP-2.7.0 S5); a refused send is reported as such, never as triggered."""
+    import uuid as _uuid
+    if post is None:
+        import httpx
+        post = httpx.post
+    resp = post(f"http://{host}:{port}/api/chat/sessions", json={"name": "quickstart"}, timeout=10)
+    if resp.status_code not in (200, 201):
+        return False, None
+    session_id = resp.json().get("session_id") or resp.json().get("id")
+    sent = post(f"http://{host}:{port}/api/chat/sessions/{session_id}/messages",
+                json={"content": "scan all resources", "client_message_id": str(_uuid.uuid4())}, timeout=10)
+    return sent.status_code == 200, session_id
+
+
 def quickstart(
     yes: bool = typer.Option(False, "--yes", "-y", help="Accept all defaults (non-interactive)"),
     profile: str = typer.Option("local", "--profile", "-P", help="Deployment profile: local or cloud"),
@@ -1413,26 +1429,13 @@ def quickstart(
         console.print(Rule("[bold]Initial Resource Scan[/bold]"))
         console.print()
         try:
-            import httpx
-
-            # Create a quickstart chat session
-            resp = httpx.post(
-                f"http://{host}:{port}/api/chat/sessions",
-                json={"name": "quickstart"},
-                timeout=10,
-            )
-            if resp.status_code in (200, 201):
-                session_id = resp.json().get("session_id") or resp.json().get("id")
-                console.print(f"  Created chat session: {session_id}")
-                console.print("  Sending scan command... (check web dashboard for results)")
-                httpx.post(
-                    f"http://{host}:{port}/api/chat/sessions/{session_id}/messages",
-                    json={"content": "scan all resources"},
-                    timeout=10,
-                )
-                console.print("  [green]Scan triggered.[/green]")
+            ok, session_id = _trigger_quickstart_scan(host, port)
+            if session_id is None:
+                console.print("  [yellow]Could not create a chat session for the scan.[/yellow]")
             else:
-                console.print(f"  [yellow]Could not create session: {resp.status_code}[/yellow]")
+                console.print(f"  Created chat session: {session_id}")
+                console.print("  [green]Scan triggered.[/green] (check the web dashboard for results)" if ok
+                              else "  [yellow]The scan message was not accepted.[/yellow]")
         except Exception as e:
             console.print(f"  [yellow]Scan trigger failed: {e}[/yellow]")
 
