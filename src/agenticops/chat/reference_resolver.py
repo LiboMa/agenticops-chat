@@ -22,7 +22,7 @@ def fetch_issue(issue_id: int) -> Optional[dict]:
             "id": issue.id, "title": issue.title, "severity": issue.severity,
             "status": issue.status, "resource_id": issue.resource_id,
             "source": issue.source, "description": issue.description,
-            "detected_at": issue.detected_at,
+            "detected_at": issue.detected_at, "account_id": getattr(issue, "account_id", None),
         }
 
 
@@ -36,7 +36,7 @@ def fetch_resource(resource_pk: int) -> Optional[dict]:
         return {
             "id": r.id, "resource_id": r.resource_id, "provider": r.provider,
             "resource_type": r.resource_type, "name": r.name, "region": r.region,
-            "status": r.status,
+            "status": r.status, "account_id": getattr(r, "account_id", None),
         }
 
 
@@ -50,4 +50,4 @@ def fetch_change(cr_id: int) -> Optional[dict]:
         return {"id": cr.id, "title": cr.title, "status": cr.status, "risk_level": cr.risk_level,
                 "requested_by": cr.requested_by, "requested_change_type": cr.requested_change_type,
                 "targets": [t.get("resource_id") for t in (cr.target_resources or [])],
-                "description": (cr.description or "")[:500]}
+                "description": (cr.description or "")[:500], "account_id": getattr(cr, "account_id", None)}

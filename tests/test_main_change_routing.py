@@ -99,7 +99,7 @@ def test_change_refs_come_from_the_typed_text_only():
     block = '<referenced_change id="7">\nTitle: Tag web\n</referenced_change>'
     pre = "agenticops.chat.preprocessor"
     with patch.object(settings, "change_management_enabled", True), \
-         patch(f"{pre}._resolve_change_ref", side_effect=lambda i: block if i == 7 else None) as rc, \
+         patch(f"{pre}._resolve_change_ref", side_effect=lambda i, *_: block if i == 7 else None) as rc, \
          patch(f"{pre}.is_image_file", return_value=False), patch(f"{pre}.is_document_file", return_value=False), \
          patch(f"{pre}.read_file_as_text", return_value=("rollout notes: see C#7", None)):
         uploaded, w1 = preprocess_message("summarize this", file_contents=[("notes.txt", "rollout notes: see C#7")])
@@ -109,7 +109,7 @@ def test_change_refs_come_from_the_typed_text_only():
         rc.assert_not_called()
         typed, w3 = preprocess_message("approve C#7", file_contents=[("notes.txt", "rollout notes: see C#7")])
     assert typed.count(block) == 1 and w3 == []
-    rc.assert_called_once_with(7)
+    rc.assert_called_once_with(7, None)
 
 
 def test_change_refs_ignored_when_disabled():
