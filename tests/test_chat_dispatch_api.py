@@ -273,3 +273,48 @@ def test_a_cancelled_stream_never_leaves_the_chat_busy(env, monkeypatch):
 
 async def _one():
     yield {"data": "ok"}
+
+
+def test_error_frame_has_code_and_trace(env, monkeypatch):
+    client, _, webapp = env
+    sid, pk = _session()
+
+    class _Throttled(Exception):
+        def __init__(self):
+            super().__init__("ThrottlingException: slow down")
+            self.response = {"Error": {"Code": "ThrottlingException"}}
+
+    class _Boom:
+        async def stream_async(self, _c):
+            yield {"data": "x"}
+            raise _Throttled()
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _Boom())
+    err = [d for e, d in frames(_send(client, sid).text) if e == "error"][0]
+    assert err["code"] == "throttled" and err["trace_id"] and "slow down" not in err["message"]
+    s = get_session()
+    reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
+    s.close()
+    assert reply.token_usage["error_code"] == "throttled"
+
+
+def test_tool_frames_carry_call_id_and_outcome(env, monkeypatch):
+    client, _, webapp = env
+    sid, pk = _session()
+
+    class _Tools:
+        async def stream_async(self, _c):
+            yield {"current_tool_use": {"toolUseId": "t1", "name": "describe_x"}}
+            yield {"current_tool_use": {"toolUseId": "t1", "name": "describe_x"}}  # streamed input deltas repeat it
+            yield {"current_tool_use": {"toolUseId": "t2", "name": "describe_x"}}
+            yield {"message": {"role": "user", "content": [{"toolResult": {"toolUseId": "t1", "status": "error"}}]}}
+            yield {"data": "ok"}
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _Tools())
+    fs = frames(_send(client, sid).text)
+    starts = [d for e, d in fs if e == "tool_start"]
+    ends = {d["call_id"]: d for e, d in fs if e == "tool_end"}
+    assert [d["call_id"] for d in starts] == ["t1", "t2"]
+    assert ends["t1"]["outcome"] == "error" and ends["t2"]["outcome"] == "unknown"
+    s = get_session()
+    reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
+    s.close()
+    assert {t["call_id"]: t["outcome"] for t in reply.tool_calls} == {"t1": "error", "t2": "unknown"}

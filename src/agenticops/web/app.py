@@ -4208,6 +4208,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
     """
     from agenticops.chat.preprocessor import preprocess_message
+    from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
+    from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
     from agenticops.services import chat_access, chat_dispatch
 
     # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
@@ -4452,12 +4454,25 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
                     accumulated += ev["data"]
                     yield {"event": "text", "data": json.dumps({"token": ev["data"]})}
-                # Tool use
+                # Tool use — one entry per call (S5: keyed by the model's toolUseId; by name when there is none)
                 if "current_tool_use" in ev:
                     tool_name = ev["current_tool_use"].get("name", "")
-                    if tool_name and tool_name not in [t["name"] for t in tool_calls]:
-                        tool_calls.append({"name": tool_name, "status": "running"})
-                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name})}
+                    call_id = ev["current_tool_use"].get("toolUseId") or tool_name
+                    if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
+                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id})
+                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name, "call_id": call_id})}
+                # A tool's result: its outcome comes from the result's status, never from its name (S5)
+                _msg = ev.get("message")
+                if isinstance(_msg, dict):
+                    for _block in _msg.get("content") or []:
+                        _res = _block.get("toolResult") if isinstance(_block, dict) else None
+                        if not isinstance(_res, dict):
+                            continue
+                        for t in tool_calls:
+                            if t.get("call_id") == _res.get("toolUseId") and t["status"] != "done":
+                                t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"))
+                                yield {"event": "tool_end", "data": json.dumps(
+                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"]})}
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
@@ -4477,8 +4492,9 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             for t in tool_calls:
                 if t["status"] == "done":
                     continue
-                t["status"] = "done"
-                yield {"event": "tool_end", "data": json.dumps({"name": t["name"]})}
+                t["status"], t["outcome"] = "done", "unknown"  # no result seen: unknown, never assumed ok
+                yield {"event": "tool_end", "data": json.dumps(
+                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown"})}
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)
@@ -4576,7 +4592,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             # UI can distinguish a failed turn from a completed one, and the user
             # message stays for retry. ChatMessage has no status column, so the
             # marker rides in the token_usage JSON.
-            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500]}
+            _code = classify_stream_error(e)
+            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500], "error_code": _code}
             with get_db_session() as db:
                 db.add(ChatMessage(
                     session_id=db_session_pk,
@@ -4589,7 +4606,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 db.query(ChatMessage).filter(ChatMessage.id == user_message_id).update(
                     {"dispatch_state": "failed"}, synchronize_session=False)
             closed = True
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+            yield {"event": "error", "data": json.dumps({"code": _code, "message": STREAM_ERROR_MESSAGES[_code],
+                                                         "trace_id": _chat_trace_id})}
         finally:
             # A cancelled stream (the client went away; sse-starlette cancels the generator) skips the code above:
             # the dispatch is still closed, as interrupted — a chat is never left busy (S5)
