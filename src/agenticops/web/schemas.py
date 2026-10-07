@@ -76,6 +76,9 @@ class ResourceResponse(BaseModel):
     updated_at: datetime
     scanned_at: Optional[datetime] = None
     absent_since: Optional[datetime] = None  # set when the latest complete scan no longer saw the row
+    # The list's health column (MVP-2.7.0 S4): open anchored issues + unknown|notice|warning|critical
+    open_issues: int = 0
+    health: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

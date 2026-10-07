@@ -1614,7 +1614,7 @@ async def api_detect_environment():
 
 
 @app.get("/api/resources")
-async def api_list_resources(
+def api_list_resources(
     resource_type: Optional[str] = Query(None, alias="type"),
     region: Optional[str] = None,
     account_id: Optional[int] = None,
@@ -1647,14 +1647,22 @@ async def api_list_resources(
             )
 
         total = query.count()
-        q_paged = query.offset(offset)
+        # A total order, so paging never repeats or skips a row (MVP-2.7.0 S4)
+        q_paged = query.order_by(CloudResource.resource_type, CloudResource.id).offset(offset)
         if limit is not None:
             q_paged = q_paged.limit(limit)
         resources = q_paged.all()
-        return {
-            "total": total,
-            "items": [ResourceResponse.from_resource(r) for r in resources],
-        }
+        # Health is the Galaxy definition: open, same-account issues anchored to the row; none = unknown, never healthy
+        from agenticops.graph.query_service import health_overlay
+        overlay = health_overlay(session, [r.id for r in resources])
+        items = []
+        for r in resources:
+            item = ResourceResponse.from_resource(r)
+            h = overlay.get(r.id)
+            item.open_issues = len(h["issue_ids"]) if h else 0
+            item.health = h["health"] if h else "unknown"
+            items.append(item)
+        return {"total": total, "items": items}
 
 
 @app.get("/api/resources/type-counts")
