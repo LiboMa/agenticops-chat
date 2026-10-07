@@ -3416,30 +3416,30 @@ async def api_kb_stats():
 
 
 @app.get("/api/reports")
-async def api_list_reports(
+def api_list_reports(
     report_type: Optional[str] = None,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    actor: Actor = Depends(current_actor),
 ):
-    """List reports with filtering."""
+    """List the reports the caller may see (S6: a private report is its creator's and admins')."""
+    from agenticops.services import report_access
     with get_db_session() as session:
-        query = session.query(Report).order_by(Report.created_at.desc())
+        query = report_access.visible_filter(session.query(Report), actor).order_by(Report.created_at.desc())
 
         if report_type:
             query = query.filter_by(report_type=report_type)
 
         reports = query.offset(offset).limit(limit).all()
-        return [_enrich_report(r) for r in reports]
+        return [_enrich_report(r, actor) for r in reports]
 
 
 @app.get("/api/reports/{report_id}")
-async def api_get_report(report_id: int):
-    """Get report by ID."""
+def api_get_report(report_id: int, actor: Actor = Depends(current_actor)):
+    """Get report by ID — 404 when missing or not the caller's to see."""
+    from agenticops.services import report_access
     with get_db_session() as session:
-        report = session.query(Report).filter_by(id=report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-        return _enrich_report(report)
+        return _enrich_report(report_access.get_visible_report(session, report_id, actor), actor)
 
 
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
@@ -3484,9 +3484,9 @@ def api_generate_report(request: ReportGenerateRequest):
 
 
 @app.post("/api/reports/from-session", response_model=ReportResponse, status_code=201)
-async def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
-    """Create a report from a chat session's messages."""
-    from agenticops.services import chat_access
+def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
+    """Create a report from a chat session's messages — private to its creator when the chat was private (S6)."""
+    from agenticops.services import chat_access, report_access
     with get_db_session() as db:
         chat_session = chat_access.get_visible_session(db, request.session_id, actor)
 
@@ -3512,11 +3512,15 @@ async def api_report_from_session(request: ReportFromSessionRequest, actor: Acto
         title = request.title or chat_session.name
         summary = request.summary or markdown_content[:200]
 
+        owner, visibility = report_access.owner_for_new_report(
+            actor, private=(chat_session.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE)
         report = Report(
             report_type="conversation",
             title=title,
             summary=summary,
             content_markdown=markdown_content,
+            owner_user_id=owner,
+            visibility=visibility,
             report_metadata={
                 "source_session_id": request.session_id,
                 "message_count": len(messages),
@@ -3525,7 +3529,7 @@ async def api_report_from_session(request: ReportFromSessionRequest, actor: Acto
         )
         db.add(report)
         db.flush()
-        return ReportResponse.model_validate(report)
+        return _enrich_report(report, actor)
 
 
 # ============================================================================
@@ -3591,10 +3595,18 @@ async def api_share_content(request: ShareContentRequest):
 
 
 @app.post("/api/reports/{report_id}/publish", response_model=ReportPublishResponse)
-async def api_publish_report(report_id: int, request: ReportPublishRequest):
+async def api_publish_report(report_id: int, request: ReportPublishRequest, actor: Actor = Depends(current_actor)):
     """Publish a report to an sns-report or ses channel (converts to PDF/HTML/DOCX, uploads to S3)."""
     from agenticops.notify.im_config import get_channel
     from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
+
+    # S6: a report the caller may not see is a missing one — checked before anything about the channel is said
+    from agenticops.services import report_access
+
+    def _visible() -> None:
+        with get_db_session() as db:
+            report_access.get_visible_report(db, report_id, actor)
+    await asyncio.to_thread(_visible)
 
     # Validate channel
     channel = get_channel(request.channel_name)

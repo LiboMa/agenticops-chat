@@ -177,6 +177,12 @@ class ReportResponse(BaseModel):
     download_url: Optional[str] = None
     report_metadata: dict
     created_at: datetime
+    # MVP-2.7.0 S6: the content a rendering is made from, and who may see it (services/report_access)
+    content_version: int = 1
+    content_hash: Optional[str] = None
+    source_language: Optional[str] = None
+    visibility: str = "workspace"
+    owned_by_me: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
