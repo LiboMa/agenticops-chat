@@ -387,3 +387,18 @@ def test_the_startup_sweep_leaves_a_labelled_reply(env):
     reply = s.query(ChatMessage).filter_by(session_id=pk, role="assistant").one()
     s.close()
     assert reply.dispatch_state == "interrupted"
+
+
+def test_a_tool_refused_by_the_binding_shows_as_failed(env, monkeypatch):
+    client, _, webapp = env
+    sid, _ = _session(account_id=1)
+
+    class _Refused:
+        async def stream_async(self, _c):
+            yield {"current_tool_use": {"toolUseId": "t9", "name": "sre_query"}}
+            yield {"message": {"role": "user", "content": [{"toolResult": {"toolUseId": "t9", "status": "success",
+                    "content": [{"text": "Error: this run is bound to account id=1; refusing account 'lab' (id=2)"}]}}]}}
+            yield {"data": "done"}
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _Refused())
+    ends = [d for e, d in frames(_send(client, sid).text) if e == "tool_end"]
+    assert ends == [{"name": "sre_query", "call_id": "t9", "outcome": "error"}]

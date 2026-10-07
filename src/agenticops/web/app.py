@@ -4487,7 +4487,9 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                             continue
                         for t in tool_calls:
                             if t.get("call_id") == _res.get("toolUseId") and t["status"] != "done":
-                                t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"))
+                                _txt = " ".join(c.get("text", "") for c in (_res.get("content") or [])
+                                                if isinstance(c, dict) and isinstance(c.get("text"), str))
+                                t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"), _txt)
                                 yield {"event": "tool_end", "data": json.dumps(
                                     {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"]})}
                 # Completion with result

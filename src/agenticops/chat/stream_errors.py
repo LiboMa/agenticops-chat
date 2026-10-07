@@ -30,6 +30,14 @@ def classify(exc: BaseException) -> str:
     return "internal"
 
 
-def tool_outcome(status) -> str:
-    """A tool result's status → ok | error | unknown (a tool's name alone never implies success)."""
-    return {"success": "ok", "error": "error"}.get(status or "", "unknown")
+_REFUSAL = "this run is bound to account"   # credentials/resolver + providers/base AccountResolutionError text
+
+
+def tool_outcome(status, text: str | None = None) -> str:
+    """A tool result's status → ok | error | unknown (a tool's name alone never implies success). CLI tools return a
+    failure as an "Error: …" string, which the SDK records as success — that, and an account-binding refusal
+    anywhere in the result, is an error (S5 review)."""
+    outcome = {"success": "ok", "error": "error"}.get(status or "", "unknown")
+    if outcome == "ok" and text and (text.lstrip().startswith("Error:") or _REFUSAL in text):
+        return "error"
+    return outcome
