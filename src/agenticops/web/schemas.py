@@ -297,6 +297,8 @@ class HealthIssueResponse(BaseModel):
     anchor_status: Optional[str] = None
     anchor_candidates: Optional[dict] = None
     observed_at: Optional[datetime] = None
+    # What the viewer may do here (MVP-2.7.0 S4: "note"), from ui_actions.route_allows — the detail route fills it
+    available_actions: List[dict] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -337,6 +339,21 @@ class HealthIssueResponse(BaseModel):
             anchor_candidates=issue.anchor_candidates,
             observed_at=issue.observed_at,
         )
+
+
+class IssueNoteRequest(BaseModel):
+    """A note on an issue (MVP-2.7.0 S4). The author is the session actor, never the body — extra fields are refused.
+    The 8000-character limit and the trim are services/issue_notes.clean_note's; this cap only bounds the body."""
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(..., max_length=8100)
+
+
+class IssueNote(BaseModel):
+    event_id: int
+    health_issue_id: int
+    content: str
+    actor: str
+    created_at: datetime
 
 
 # ============================================================================

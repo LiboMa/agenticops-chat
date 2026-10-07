@@ -2157,8 +2157,10 @@ def api_list_health_issues(
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
-async def api_get_health_issue(issue_id: int):
-    """Get health issue by ID."""
+def api_get_health_issue(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Get health issue by ID, with what the viewer may do on it (MVP-2.7.0 S4: add a note)."""
+    from agenticops.services.ui_actions import route_allows
+
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -2166,7 +2168,10 @@ async def api_get_health_issue(issue_id: int):
         acct_name = None
         if issue.account_id:
             acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
-        return HealthIssueResponse.from_issue(issue, acct_name)
+        resp = HealthIssueResponse.from_issue(issue, acct_name)
+        allowed, code = route_allows(actor, "issue.note", issue)
+        resp.available_actions = [{"action": "note", "allowed": allowed, "reason_code": code, "effect": "update"}]
+        return resp
 
 
 @app.post("/api/health-issues", response_model=HealthIssueResponse, status_code=201)
@@ -2922,6 +2927,30 @@ async def api_get_issue_timeline(issue_id: int):
 
     from agenticops.services.pipeline_events import get_timeline
     return get_timeline(issue_id)
+
+
+@app.post("/api/health-issues/{issue_id}/notes", response_model=IssueNote, status_code=201)
+def api_add_issue_note(issue_id: int, data: IssueNoteRequest, actor: Actor = Depends(current_actor)):
+    """Append a note to an issue's activity (MVP-2.7.0 S4) as the session actor — never edited, never deleted, and it
+    does not move the issue. 404 → authz 403 → content 422; stored in this request's transaction or refused."""
+    from agenticops.auth import authz
+    from agenticops.services.issue_notes import NoteRejected, add_note
+
+    with get_db_session() as session:
+        issue = session.query(HealthIssue).filter_by(id=issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=404, detail="Health issue not found")
+        try:
+            authz.check(actor, "issue.note", subject=issue)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        try:
+            ev, text = add_note(session, issue, data.content, actor)
+        except NoteRejected as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        session.commit()
+        return IssueNote(event_id=ev.id, health_issue_id=issue.id, content=text, actor=ev.actor,
+                         created_at=ev.created_at)
 
 
 @app.get("/api/trace/{trace_id}")
