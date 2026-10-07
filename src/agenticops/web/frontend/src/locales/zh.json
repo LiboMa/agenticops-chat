@@ -1044,5 +1044,13 @@
   "resources.firstPage": "第一页",
   "resources.prevPage": "上一页",
   "resources.nextPage": "下一页",
-  "resources.lastPage": "最后一页"
+  "resources.lastPage": "最后一页",
+  "chat.error.throttled": "模型限流中，请稍后再试。",
+  "chat.error.model_unavailable": "模型暂时不可用。",
+  "chat.error.context_too_long": "对话已超出模型长度，请新建对话。",
+  "chat.error.internal": "回复失败。",
+  "chat.error.session_busy": "这个对话还有一条回复在进行，请等待或停止它。",
+  "chat.error.duplicate_in_flight": "这条消息已经在回复中。",
+  "chat.error.network": "连接中断，回复可能仍在进行。已重新读取历史。",
+  "chat.error.http": "消息未能发送。"
 }

@@ -33,6 +33,11 @@ export function useSessionStream(sessionId: string | null) {
         // newest page in the background (keeps markdown-memo/React keys correct).
         qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
       },
+      // after every send: the server's history is the truth (an interrupted or failed reply shows as stored)
+      onSettled: (sid) => {
+        qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
+        qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      },
       onRenamed: (sid, name) => {
         qc.setQueryData<ChatSession[]>(["chat-sessions"], (old) =>
           old?.map((s) => (s.session_id === sid ? { ...s, name } : s)));

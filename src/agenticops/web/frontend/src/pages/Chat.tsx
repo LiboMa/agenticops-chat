@@ -304,8 +304,8 @@ export default function Chat() {
 
             {/* Error banner */}
             {error && (
-              <div className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-                {error}
+              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+                {t(`chat.error.${error.code}`)}
               </div>
             )}
 

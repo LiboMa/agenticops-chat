@@ -1044,5 +1044,13 @@
   "resources.firstPage": "First page",
   "resources.prevPage": "Previous page",
   "resources.nextPage": "Next page",
-  "resources.lastPage": "Last page"
+  "resources.lastPage": "Last page",
+  "chat.error.throttled": "The model is rate-limited — try again in a minute.",
+  "chat.error.model_unavailable": "The model is unavailable right now.",
+  "chat.error.context_too_long": "This conversation is too long for the model — start a new chat.",
+  "chat.error.internal": "The reply failed.",
+  "chat.error.session_busy": "This chat still has a reply running — wait for it or stop it.",
+  "chat.error.duplicate_in_flight": "This message is already being answered.",
+  "chat.error.network": "The connection dropped — the reply may still be running. The history has been reloaded.",
+  "chat.error.http": "The message could not be sent."
 }

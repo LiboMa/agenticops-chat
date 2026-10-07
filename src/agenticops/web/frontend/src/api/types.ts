@@ -721,7 +721,20 @@ export interface ChatSession {
   owned_by_me?: boolean;
   /** may rename / pin / archive / switch model / delete it (its owner or an admin; anyone if it has no owner) */
   can_manage?: boolean;
+  /** MVP-2.7.0 S5: what the chat is about and the account it is bound to (services/chat_context) */
+  context?: ChatContextView | null;
 }
+
+/** A chat's context as the server resolved it; locked at the first sent message. */
+export interface ChatContextView {
+  primary: { entity_type: "health_issue" | "change_request"; entity_id: number; ref: string; title: string | null } | null;
+  account_id: number | null;
+  account_name: string | null;
+  region: string | null;
+  scope_locked: boolean;
+}
+
+export type DispatchState = "accepted" | "running" | "completed" | "failed" | "interrupted";
 
 export interface ChatMessage {
   id: number;
@@ -743,6 +756,9 @@ export interface ChatMessage {
   suggestions?: string[];
   attachments?: Array<{ filename: string; size: number }>;
   created_at: string;
+  /** S5: the sender's id and where the dispatch stands; null/absent on older rows = completed */
+  client_message_id?: string | null;
+  dispatch_state?: DispatchState | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {
