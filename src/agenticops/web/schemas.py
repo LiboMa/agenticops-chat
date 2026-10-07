@@ -704,8 +704,25 @@ class ReportFromSessionRequest(BaseModel):
     format: str = Field(default="markdown", pattern="^(markdown|html|pdf|docx)$")
 
 
+class EntityRefIn(BaseModel):
+    """What a chat is about (MVP-2.7.0 S5): an issue or a change; the server reads the rest from the object."""
+    model_config = ConfigDict(extra="forbid")
+    entity_type: Literal["health_issue", "change_request"]
+    entity_id: int = Field(..., ge=1)
+
+
+class ChatContextIn(BaseModel):
+    """A chat's context (services/chat_context): a linked object, or none (an independent request), and an account.
+    A linked object's account is its own — a different account_id here is refused (409)."""
+    model_config = ConfigDict(extra="forbid")
+    primary: Optional[EntityRefIn] = None
+    account_id: Optional[int] = Field(None, ge=1)
+    region: Optional[str] = Field(None, max_length=80)
+
+
 class ChatSessionCreate(BaseModel):
     name: Optional[str] = None
+    context: Optional[ChatContextIn] = None
 
 
 class ChatSessionUpdate(BaseModel):
@@ -719,6 +736,8 @@ class ChatSessionUpdate(BaseModel):
     effort: Optional[str] = None
     # Who sees the session (MVP-2.7.0): only its owner or an admin may change it
     visibility: Optional[Literal["private", "workspace"]] = None
+    # The chat's context (S5): changeable until the first message is sent (409 context_locked after)
+    context: Optional[ChatContextIn] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -762,6 +781,8 @@ class ChatSessionResponse(BaseModel):
     # Whether the caller may rename / pin / archive / switch model / delete it (owner or admin; anyone for an
     # ownerless session) — reading and sending only need it to be visible
     can_manage: bool = True
+    # S5: {primary: {entity_type, entity_id, ref, title} | null, account_id, account_name, region, scope_locked}
+    context: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 

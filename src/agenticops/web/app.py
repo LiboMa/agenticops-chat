@@ -3934,10 +3934,13 @@ async def api_list_im_apps():
 # ============================================================================
 
 
-def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, cls=ChatSessionResponse, **extra):
-    """One session as the caller sees it (owned_by_me is relative to the caller)."""
+def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, cls=ChatSessionResponse,
+                           context: Optional[dict] = None, **extra):
+    """One session as the caller sees it (owned_by_me is relative to the caller); `context` from
+    services/chat_context.context_views (S5)."""
     from agenticops.services import chat_access
     return cls(
+        context=context,
         id=row.id, session_id=row.session_id, name=row.name,
         created_at=row.created_at, updated_at=row.updated_at,
         last_activity_at=row.last_activity_at, message_count=message_count,
@@ -3949,17 +3952,27 @@ def _chat_session_response(row: ChatSession, message_count: int, actor: Actor, c
     )
 
 
+def _context_http_error(e) -> HTTPException:
+    """A services/chat_context.ContextError as the contract's UiError body."""
+    return HTTPException(status_code=e.status, detail={"detail": str(e), "code": e.code})
+
+
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse, status_code=201)
-async def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(current_actor)):
-    from agenticops.services import chat_access
+def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(current_actor)):
+    from agenticops.services import chat_access, chat_context
     sid = str(uuid.uuid4())
     name = payload.name or f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     owner, visibility = chat_access.new_session_owner(actor)
     with get_db_session() as db:
         row = ChatSession(session_id=sid, name=name, owner_user_id=owner, visibility=visibility)
+        try:
+            chat_context.apply_context(row, chat_context.resolve_context(
+                db, payload.context.model_dump() if payload.context else None))
+        except chat_context.ContextError as e:
+            raise _context_http_error(e)
         db.add(row)
         db.flush()
-        return _chat_session_response(row, 0, actor)
+        return _chat_session_response(row, 0, actor, context=chat_context.context_views(db, [row])[row.id])
 
 
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
@@ -3986,7 +3999,9 @@ async def api_list_chat_sessions(
             .group_by(ChatMessage.session_id)
             .all()
         ) if rows else {}
-        return [_chat_session_response(r, counts.get(r.id, 0), actor) for r in rows]
+        from agenticops.services.chat_context import context_views
+        views = context_views(db, rows)
+        return [_chat_session_response(r, counts.get(r.id, 0), actor, context=views[r.id]) for r in rows]
 
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
@@ -3999,7 +4014,9 @@ async def api_get_chat_session(session_id: str, actor: Actor = Depends(current_a
         cnt = db.query(func.count(ChatMessage.id)).filter(
             ChatMessage.session_id == row.id
         ).scalar()
-        return _chat_session_response(row, cnt, actor, cls=ChatSessionDetail, messages=[])
+        from agenticops.services.chat_context import context_views
+        return _chat_session_response(row, cnt, actor, cls=ChatSessionDetail, messages=[],
+                                      context=context_views(db, [row])[row.id])
 
 
 @app.get("/api/chat/sessions/{session_id}/messages", response_model=ChatMessagesPage)
@@ -4062,6 +4079,17 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
     with get_db_session() as db:
         row = chat_access.get_visible_session(db, session_id, actor)
         chat_access.check_manage(row, actor)
+        from agenticops.services import chat_context
+        if "context" in payload.model_fields_set:  # S5: until the first message is sent
+            if row.context_locked_at is not None:
+                raise HTTPException(409, detail={"detail": "The chat's context is locked once a message is sent; "
+                                                           "start a new chat for another context",
+                                                 "code": "context_locked"})
+            try:
+                chat_context.apply_context(row, chat_context.resolve_context(
+                    db, payload.context.model_dump() if payload.context else None))
+            except chat_context.ContextError as e:
+                raise _context_http_error(e)
         if payload.visibility is not None:
             chat_access.check_visibility_change(row, actor, payload.visibility)
             row.visibility = payload.visibility
@@ -4087,7 +4115,7 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
         row.updated_at = datetime.now(timezone.utc)
         db.flush()
         cnt = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == row.id).scalar()
-        response = _chat_session_response(row, cnt, actor)
+        response = _chat_session_response(row, cnt, actor, context=chat_context.context_views(db, [row])[row.id])
 
     # Rebuild this session's agent with the new model/effort on next message
     if agent_changed:
