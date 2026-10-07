@@ -87,7 +87,8 @@ def test_every_report_route_hides_a_private_report(env):
     bob = env.as_(BOB)
     assert rid not in [r["id"] for r in bob.get("/api/reports").json()]
     assert bob.get(f"/api/reports/{rid}").status_code == 404
-    assert bob.post(f"/api/reports/{rid}/publish", json={"channel_name": "x", "formats": ["html"]}).status_code == 404
+    assert bob.post(f"/api/reports/{rid}/publish", json={"channel_name": "x", "formats": ["html"], "version": 1,
+                    "language": "en"}, headers={"Idempotency-Key": "k" * 20}).status_code == 404
 
 
 def test_rendering_routes_hide_a_private_report(env):

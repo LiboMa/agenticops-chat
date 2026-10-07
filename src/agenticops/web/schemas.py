@@ -653,9 +653,12 @@ class ShareContentResponse(BaseModel):
 
 
 class ReportPublishRequest(BaseModel):
-    """Request to publish a report via an sns-report or ses channel."""
+    """Request to publish a report via an sns-report or ses channel. MVP-2.7.0 S6: pinned to one version and
+    language (every language asked for must be ready); the Idempotency-Key header makes a repeat send nothing."""
     channel_name: str
     formats: Optional[List[str]] = None  # None = use channel defaults
+    version: int = Field(..., ge=1)
+    language: Literal["zh", "en", "zh-en"]
 
 
 class ReportPublishResponse(BaseModel):

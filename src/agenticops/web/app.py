@@ -3660,19 +3660,63 @@ async def api_share_content(request: ShareContentRequest):
     )
 
 
+# S6: (report id, Idempotency-Key) of publishes still sending — one process (S1), so a concurrent repeat is refused
+_publishing_keys: set[tuple[int, str]] = set()
+
+
 @app.post("/api/reports/{report_id}/publish", response_model=ReportPublishResponse)
-async def api_publish_report(report_id: int, request: ReportPublishRequest, actor: Actor = Depends(current_actor)):
+async def api_publish_report(report_id: int, request: ReportPublishRequest, http_request: Request,
+                             actor: Actor = Depends(current_actor)):
     """Publish a report to an sns-report or ses channel (converts to PDF/HTML/DOCX, uploads to S3)."""
     from agenticops.notify.im_config import get_channel
     from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
 
-    # S6: a report the caller may not see is a missing one — checked before anything about the channel is said
+    # S6: the Idempotency-Key (16–200 chars) makes a repeat return the first result and send nothing
+    idem_key = (http_request.headers.get("Idempotency-Key") or "").strip()
+    if not 16 <= len(idem_key) <= 200:
+        raise HTTPException(422, detail={"detail": "An Idempotency-Key header of 16–200 characters is required",
+                                         "code": "idempotency_key_required"})
+    # S6: a report the caller may not see is a missing one — checked before anything about the channel is said;
+    # then the version, then every language asked for must be ready (never replaced by the other)
     from agenticops.services import report_access
+    from agenticops.services.content_rendering import rendering_view
 
-    def _visible() -> None:
+    def _pinned():
         with get_db_session() as db:
-            report_access.get_visible_report(db, report_id, actor)
-    await asyncio.to_thread(_visible)
+            rep = report_access.get_visible_report(db, report_id, actor)
+            if request.version != (rep.content_version or 1):
+                raise HTTPException(404, "No such report version")
+            prior = ((rep.report_metadata or {}).get("publications") or {}).get(idem_key)
+            if prior is not None:
+                return None, prior
+            bodies = []
+            for lang in (["zh", "en"] if request.language == "zh-en" else [request.language]):
+                view = rendering_view(db, rep, request.version, lang)
+                if view["status"] != "ready":
+                    raise HTTPException(409, detail={"detail": f"The {lang} rendering is {view['status']}",
+                                                     "code": "rendering_not_ready"})
+                bodies.append(view["body_markdown"])
+            return {"title": f"{rep.title} (v{request.version} · {request.language})", "summary": rep.summary,
+                    "content": "\n\n---\n\n".join(bodies), "report_type": rep.report_type,
+                    "meta": dict(rep.report_metadata or {})}, None
+    if (report_id, idem_key) in _publishing_keys:
+        raise HTTPException(409, detail={"detail": "This publish is still being sent", "code": "publish_in_flight"})
+    pinned, prior = await asyncio.to_thread(_pinned)
+    if prior is not None:
+        return ReportPublishResponse(**prior["result"])
+    if (report_id, idem_key) in _publishing_keys:  # re-checked after the await: another request may have started
+        raise HTTPException(409, detail={"detail": "This publish is still being sent", "code": "publish_in_flight"})
+    _publishing_keys.add((report_id, idem_key))
+    try:
+        return await _publish_pinned(report_id, request, idem_key, pinned)
+    finally:
+        _publishing_keys.discard((report_id, idem_key))
+
+
+async def _publish_pinned(report_id: int, request: ReportPublishRequest, idem_key: str, pinned: dict):
+    """The send itself (S6): the pinned version and language to an sns-report / ses channel; recorded under its key."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
 
     # Validate channel
     channel = get_channel(request.channel_name)
@@ -3684,16 +3728,8 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest, acto
             detail=f"Channel '{request.channel_name}' is type '{channel.channel_type}', expected 'sns-report' or 'ses'",
         )
 
-    # Load report
-    with get_db_session() as session:
-        report = session.query(Report).filter_by(id=report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-        title = report.title
-        summary = report.summary
-        content_md = report.content_markdown
-        report_type = report.report_type
-        report_meta = report.report_metadata or {}
+    title, summary, content_md = pinned["title"], pinned["summary"], pinned["content"]
+    report_type, report_meta = pinned["report_type"], pinned["meta"]
 
     # Route to appropriate notifier
     if channel.channel_type == "ses":
@@ -3717,13 +3753,26 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest, acto
         logger.error("Report publish failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Publish failed: {e}")
 
-    return ReportPublishResponse(
+    response = ReportPublishResponse(
         report_id=report_id,
         channel_name=request.channel_name,
         formats_generated=result.get("formats", []),
         download_urls=result.get("urls", {}),
         sns_message_id=result.get("message_id"),
     )
+
+    def _record() -> None:  # under its key, so a repeat returns this result and sends nothing
+        with get_db_session() as db:
+            rep = db.get(Report, report_id)
+            meta = dict(rep.report_metadata or {})
+            pubs = dict(meta.get("publications") or {})
+            pubs[idem_key] = {"channel_name": request.channel_name, "version": request.version,
+                              "language": request.language, "formats": request.formats,
+                              "at": datetime.now(timezone.utc).isoformat(), "result": response.model_dump()}
+            meta["publications"] = pubs
+            rep.report_metadata = meta
+    await asyncio.to_thread(_record)
+    return response
 
 
 @app.post("/api/reports/subscriptions", response_model=ReportSubscriptionResponse)
