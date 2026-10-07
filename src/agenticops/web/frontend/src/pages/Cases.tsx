@@ -25,9 +25,9 @@ export default function Cases() {
     return selectedId == null ? <CaseQueue selectedId={null} wide={false} /> : <Outlet context={{ paneRef, wide } satisfies PaneContext} />;
   }
   return (
-    <div className="grid h-[calc(100vh-var(--topbar-h)-3rem)] grid-cols-[300px_minmax(0,960px)] gap-5 max-[1350px]:grid-cols-[280px_minmax(0,960px)]">
+    <div className="grid h-[calc(100vh-var(--topbar-h)-3rem)] grid-rows-[minmax(0,1fr)] grid-cols-[300px_minmax(0,960px)] gap-5 max-[1350px]:grid-cols-[280px_minmax(0,960px)]">
       <CaseQueue selectedId={selectedId} wide />
-      <div ref={paneRef} className="min-h-0 overflow-y-auto pr-1">
+      <div ref={paneRef} className="relative min-h-0 overflow-y-auto pr-1">
         <Outlet context={{ paneRef, wide } satisfies PaneContext} />
       </div>
     </div>

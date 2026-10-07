@@ -120,7 +120,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
       {issues.error && <ErrorBanner message={issues.error.message} onRetry={() => issues.refetch()} actionLabel={t("common.retry")} />}
       {capped(data) && <p className="text-xs text-amber-600 dark:text-amber-400">{t("cases.capped").replace("{n}", String(QUEUE_CAP))}</p>}
 
-      <nav aria-label={t("cases.queue")} className={wide ? "min-h-0 flex-1 overflow-y-auto pr-1" : ""}>
+      <nav aria-label={t("cases.queue")} className={wide ? "relative min-h-0 flex-1 overflow-y-auto pr-1" : ""}>
         {issues.isLoading ? <Spinner label={t("common.loading")} />
           : rows.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
