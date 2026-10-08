@@ -20,6 +20,8 @@ _PATTERNS = [
     _L + r"pc-\d+" + _R,                                     # post-check ids
     # resource ids — a real one always has a digit; «cluster-admin» / «nat-gateway» are prose (S7 live E2E)
     _L + r"(?:i|vol|sg|subnet|vpc|eni|ami|rtb|igw|nat|db|cluster|snap|lt|eipalloc|acl)-(?=[0-9a-z-]*\d)[0-9a-z][0-9a-z-]*" + _R,
+    # an ISO date / datetime is one value, so its parts can never trade places (S7 review)
+    _L + r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?" + _R,
     _L + r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?" + _R,        # IPv4 (and CIDR)
     _L + r"[a-z]{2}-[a-z]+-\d" + _R,                         # AWS regions (us-east-1)
     r"\d+(?:[.,:]\d+)*%?",                                  # every remaining number

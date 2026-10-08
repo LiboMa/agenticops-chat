@@ -109,3 +109,20 @@ def test_a_duplicated_or_dropped_value_still_changes_the_hash():
     src = "scale from 3 to 2 on I#1"
     assert protected_hash("从 3 扩到 3，I#1") != protected_hash(src)
     assert protected_hash("扩到 2，I#1") != protected_hash(src)
+
+
+@pytest.mark.parametrize("text, value", [("on 2026-10-08 at 08:42:59", "2026-10-08"),
+                                         ("(2026-10-08 08:57:32)", "2026-10-08 08:57:32"),
+                                         ("at 2026-10-08T08:57:32Z", "2026-10-08T08:57:32Z")])
+def test_a_date_or_datetime_is_one_value(text, value):
+    # S7 review: split into three numbers, a date's parts could be permuted (2026-10-08 → 2026-08-10) and the
+    # multiset would not notice; as one value it can only move whole
+    masked, values = protect(text)
+    assert value in values and value not in masked
+
+
+def test_a_swapped_pair_of_values_passes_by_design():
+    # S7 decision (owner yes/no pending): the values are compared as a multiset, so a translation may put them in
+    # another order — which also means two values may trade places; which value goes with which subject is the
+    # model's (a known gap in the S6 spec correction and the 2.7.0 release notes)
+    assert protected_hash("Restart i-0bbb222, keep i-0aaa111 running.") == protected_hash("Restart i-0aaa111, keep i-0bbb222 running.")
