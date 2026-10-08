@@ -37,6 +37,7 @@ from agenticops.models import (
     get_db_session,
     init_db,
 )
+from agenticops import __version__
 from agenticops.config import settings
 
 import asyncio
@@ -336,7 +337,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AgenticAIOps Dashboard",
     description="Agent-First Cloud Observability Platform",
-    version="0.9.0-beta",
+    version=__version__,
     lifespan=lifespan,
 )
 
