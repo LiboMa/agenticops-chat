@@ -10,7 +10,7 @@ const FORMATS = ["html", "pdf", "docx"] as const;
 /** Export one report version (MVP-2.7.0 S6): the language is what the page shows; formats the server cannot make
  *  are greyed out. An authenticated download — the token never goes in a URL. Never publishes. */
 export function ExportDialog({ open, onOpenChange, reportId, version, language }: {
-  open: boolean; onOpenChange: (o: boolean) => void; reportId: number; version: number; language: "zh" | "en" | "zh-en";
+  open: boolean; onOpenChange: (o: boolean) => void; reportId: number; version: number; language: "zh" | "en";
 }) {
   const { t } = useLocale();
   const available = useBootstrap().data?.report_export_formats ?? ["html"];

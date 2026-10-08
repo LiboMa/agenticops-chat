@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useReport } from "@/hooks/useReport";
 import { useNotificationChannels } from "@/hooks/useNotifications";
@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
-import { canExport, exportLanguage, paperState, papersFor, type Lang, type ViewMode } from "@/lib/reportView";
+import { LANGS, canExport, paperState, type Lang } from "@/lib/reportView";
 import { publishableChannels } from "@/lib/publish";
 import ShareDialog from "@/components/ShareDialog";
 import { ExportDialog } from "@/components/reportview/ExportDialog";
@@ -27,9 +27,10 @@ const TYPE_COLORS: Record<string, string> = {
   "security-review": "bg-rose-100 text-rose-700",
 };
 
-/** A report as its reader needs it (MVP-2.7.0 S6): one paper in your language or both side by side, each bound to
- *  the report's version — a language that is not ready says so (and offers the source language); it is never
- *  silently replaced by the other. Export, print and publish use exactly what is shown. */
+/** A report as its reader needs it (MVP-2.7.0 S6): one paper, bound to the report's version, in the language the
+ *  中文 / English toggle picks (your UI language first) — never the two side by side (owner, 2026-10-08). A language
+ *  that is not ready says so and offers the source language; it is never silently replaced by the other. Export,
+ *  print and publish use exactly what is shown. */
 export default function ReportDetail() {
   const { id } = useParams<{ id: string }>();
   const reportId = Number(id);
@@ -40,7 +41,8 @@ export default function ReportDetail() {
   const zh = useRendering(reportId, report ? version : undefined, "zh");
   const en = useRendering(reportId, report ? version : undefined, "en");
   const renderings: Partial<Record<Lang, ContentRendering>> = { zh: zh.data, en: en.data };
-  const [mode, setMode] = useState<ViewMode>("current");
+  const [lang, setLang] = useState<Lang>(uiLang);
+  useEffect(() => setLang(uiLang), [uiLang]);   // switching the interface language moves the paper too
   const [dialog, setDialog] = useState<"export" | "publish" | "share" | null>(null);
   const { data: channels } = useNotificationChannels();
   const publishable = publishableChannels(channels);
@@ -49,9 +51,8 @@ export default function ReportDetail() {
   if (error) return <ErrorBanner message={error.message} onRetry={() => refetch()} actionLabel={t("common.retry")} />;
   if (!report) return null;
 
-  const shown = papersFor(mode, uiLang);
-  const exportable = canExport(mode, uiLang, renderings);
-  const lang = exportLanguage(mode, uiLang);
+  const exportable = canExport(lang, renderings);
+  const source = (report.source_language ?? "en") as Lang;
   const sessionId = typeof report.report_metadata?.source_session_id === "string" ? report.report_metadata.source_session_id : null;
   const tool = "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50";
 
@@ -77,10 +78,10 @@ export default function ReportDetail() {
         {/* Toolbar: what is shown is what is exported, printed and published */}
         <div className="report-toolbar mt-4 flex flex-wrap items-center gap-2">
           <div role="group" aria-label={t("reports.view.label")} className="flex rounded-md border border-border p-0.5">
-            {(["current", "both"] as ViewMode[]).map((m) => (
-              <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
-                      className={`rounded px-2.5 py-1 text-xs ${mode === m ? "bg-selected font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-                {m === "current" ? t("reports.view.current") : t("reports.view.both")}
+            {LANGS.map((l) => (
+              <button key={l} type="button" lang={l} aria-pressed={lang === l} onClick={() => setLang(l)}
+                      className={`rounded px-2.5 py-1 text-xs ${lang === l ? "bg-selected font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                {t(`reports.view.${l}`)}
               </button>
             ))}
           </div>
@@ -100,11 +101,8 @@ export default function ReportDetail() {
         </div>
       </header>
 
-      <div className={`papers grid gap-4 ${mode === "both" ? "min-[1351px]:grid-cols-2" : ""}`}>
-        {shown.map((l) => (
-          <Paper key={l} report={report} lang={l} rendering={renderings[l]} version={version} t={t} />
-        ))}
-      </div>
+      <Paper key={lang} report={report} lang={lang} source={source} rendering={renderings[lang]} version={version} t={t}
+             onReadSource={() => setLang(source)} />
 
       <p className="report-chrome text-xs text-muted-foreground">{t("reports.note")}</p>
 
@@ -116,30 +114,26 @@ export default function ReportDetail() {
       )}
       {dialog === "share" && (
         <ShareDialog defaultSubject={`R#${report.id} v${version} · ${report.title}`}
-                     defaultBody={shown.map((l) => renderings[l]?.body_markdown).filter(Boolean).join("\n\n---\n\n") || report.content_markdown}
+                     defaultBody={renderings[lang]?.body_markdown || report.content_markdown}
                      onClose={() => setDialog(null)} />
       )}
     </div>
   );
 }
 
-function Paper({ report, lang, rendering, version, t }: {
-  report: Report; lang: Lang; rendering: ContentRendering | undefined; version: number; t: (k: string) => string;
+function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
+  report: Report; lang: Lang; source: Lang; rendering: ContentRendering | undefined; version: number;
+  t: (k: string) => string; onReadSource: () => void;
 }) {
   const state = paperState(rendering);
   const request = useRequestTranslation(report.id);
-  const [readSource, setReadSource] = useState(false);
-  const source = (report.source_language ?? "en") as Lang;
-  if (state === "ready" || readSource) {
-    const body = state === "ready" ? rendering!.body_markdown ?? "" : report.content_markdown;
-    const shownLang = state === "ready" ? lang : source;
+  if (state === "ready") {
     return (
-      <article className="paper rounded-lg border border-border bg-card p-6" lang={shownLang}>
+      <article className="paper rounded-lg border border-border bg-card p-6" lang={lang}>
         <div className="mb-3 text-[11px] text-muted-foreground">
-          AgenticOps · R#{report.id} · v{version} · {t(`reports.lang.${shownLang}`)}
-          {readSource && state !== "ready" && <> · {t("reports.readingSource")}</>}
+          AgenticOps · R#{report.id} · v{version} · {t(`reports.lang.${lang}`)}
         </div>
-        <div className="report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+        <div className="report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(rendering!.body_markdown ?? "") }} />
       </article>
     );
   }
@@ -157,9 +151,11 @@ function Paper({ report, lang, rendering, version, t }: {
             {state === "failed" ? t("reports.retry") : t("reports.prepare")}
           </button>
         )}
-        <button type="button" onClick={() => setReadSource(true)} className="rounded-md bg-secondary px-3 py-1.5 text-xs text-foreground hover:bg-muted">
-          {t("reports.readSource").replace("{language}", t(`reports.lang.${source}`))}
-        </button>
+        {lang !== source && (
+          <button type="button" onClick={onReadSource} className="rounded-md bg-secondary px-3 py-1.5 text-xs text-foreground hover:bg-muted">
+            {t("reports.readSource").replace("{language}", t(`reports.lang.${source}`))}
+          </button>
+        )}
       </div>
     </section>
   );

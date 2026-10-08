@@ -12,7 +12,7 @@ const FORMATS = ["html", "pdf", "docx", "markdown"] as const;
  *  and language are pinned, and one Idempotency-Key per opening means a repeated click sends once. */
 export function PublishDialog({ open, onOpenChange, reportId, version, language, channels }: {
   open: boolean; onOpenChange: (o: boolean) => void; reportId: number; version: number;
-  language: "zh" | "en" | "zh-en"; channels: NotificationChannel[];
+  language: "zh" | "en"; channels: NotificationChannel[];
 }) {
   const { t } = useLocale();
   const publish = usePublishReport(reportId);
