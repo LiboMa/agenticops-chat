@@ -82,3 +82,30 @@ def test_an_arn_or_url_ends_before_chinese_text():
     masked, values = protect("见arn:aws:iam::123456789012:role/ops，以及https://example.com/x。然后")
     assert "arn:aws:iam::123456789012:role/ops" in values and "https://example.com/x" in values
     assert "以及" in masked and "然后" in masked
+
+
+@pytest.mark.parametrize("word", ["cluster-admin", "cluster-wide", "db-admin", "nat-gateway", "lt-style", "snap-shot"])
+def test_a_hyphenated_word_is_prose_not_a_resource_id(word):
+    # S7 live E2E: «cluster-admin» was masked as a resource id, the model dropped the opaque placeholder in a
+    # parenthetical, and the whole report's translation failed (protected_values_changed)
+    masked, values = protect(f"user sa-malibo ({word} via EKS Access Policy) scaled it")
+    assert word not in values and word in masked
+
+
+@pytest.mark.parametrize("rid", ["i-0abc123def4567890", "vol-0a1b2c3d", "sg-12345", "subnet-0ab12", "i-0s4web01",
+                                 "cluster-7f3k2", "db-4x9"])
+def test_a_resource_id_with_a_digit_is_still_protected(rid):
+    masked, values = protect(f"restart {rid} now")
+    assert rid in values and rid not in masked
+
+
+def test_a_translation_may_reorder_the_values():
+    # S7 live E2E: zh puts the date before the time — the same values in another order are not a change
+    src = "the alarm fired at 08:42:59 UTC on 2026-10-08 on I#1"
+    assert protected_hash("告警于 2026-10-08 的 08:42:59 UTC 在 I#1 上触发") == protected_hash(src)
+
+
+def test_a_duplicated_or_dropped_value_still_changes_the_hash():
+    src = "scale from 3 to 2 on I#1"
+    assert protected_hash("从 3 扩到 3，I#1") != protected_hash(src)
+    assert protected_hash("扩到 2，I#1") != protected_hash(src)

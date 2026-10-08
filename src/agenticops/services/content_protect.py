@@ -18,7 +18,8 @@ _PATTERNS = [
     _L + r"[IRCP]#\d+" + _R,                                 # object refs: issue, resource, change, plan
     _L + r"E-?\d+" + _R,                                     # evidence refs
     _L + r"pc-\d+" + _R,                                     # post-check ids
-    _L + r"(?:i|vol|sg|subnet|vpc|eni|ami|rtb|igw|nat|db|cluster|snap|lt|eipalloc|acl)-[0-9a-z][0-9a-z-]*" + _R,
+    # resource ids — a real one always has a digit; «cluster-admin» / «nat-gateway» are prose (S7 live E2E)
+    _L + r"(?:i|vol|sg|subnet|vpc|eni|ami|rtb|igw|nat|db|cluster|snap|lt|eipalloc|acl)-(?=[0-9a-z-]*\d)[0-9a-z][0-9a-z-]*" + _R,
     _L + r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?" + _R,        # IPv4 (and CIDR)
     _L + r"[a-z]{2}-[a-z]+-\d" + _R,                         # AWS regions (us-east-1)
     r"\d+(?:[.,:]\d+)*%?",                                  # every remaining number
@@ -51,4 +52,6 @@ def restore(masked: str, values: list[str]) -> str:
 
 
 def protected_hash(text: str) -> str:
-    return hashlib.sha256("\x1f".join(protect(text)[1]).encode("utf-8")).hexdigest()
+    """The protected values as a multiset: a translation may put them in another order (zh writes the date before
+    the time), but never change, drop, add or merge one (S7 live E2E — an in-order hash refused real reports)."""
+    return hashlib.sha256("\x1f".join(sorted(protect(text)[1])).encode("utf-8")).hexdigest()
